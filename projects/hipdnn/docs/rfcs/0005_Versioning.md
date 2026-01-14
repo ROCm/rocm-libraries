@@ -91,12 +91,12 @@ API and features additions can be added within a minor version bump, but nothing
 
 Version bumps should be made with a dedicated PR on an approximately weekly schedule. During a minor version bump, the changelog should be updated with all of the changes that have been made since the last minor version increase. While this will not be in place to start, this process should be eventually automated, likely by parsing conventional commits. (Details to be included in a separate RFC).
 
-The exception to this is API and schema changes. If either of these are changed, the minor version must be updated in the same PR.
+The exception to this are API and schema changes. If either of these are changed, the minor version must be updated in the same PR.
 
 #### Patch version
 The patch is updated on backward compatible bug fixes.
 
-Version bumps should be handled automatically by the same process as minor versions
+Version bumps should be handled automatically by the same process and/or automation as minor versions
 #### Tweak version
 The patch version is determined by the short commit hash of rocm-libraries, and updates automatically as a result.
 
@@ -111,23 +111,23 @@ If something must be included in a user-facing header, but shouldn't be part of 
 ### 4.5 Versioned components
 In the proposed design, the following table lists the components of hipDNN, and the other internal components that they depend on
 
-| Target                        | Requirements                                                                                            |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------- |
-| schema [^1]                   |                                                                                                         |
-| data_sdk                      | - schema                                                                                                |
-| plugin_sdk                    | - data_sdk                                                                                              |
-| plugin_sdk_api                | - plugin_sdk<br>- data_sdk                                                                              |
-| plugin_sdk_engine_api         | - plugin_sdk_api<br>- data_sdk                                                                          |
-| plugin_sdk_heuristic_api [^2] | - plugin_sdk_api<br>- data_sdk                                                                          |
-| backend_private               | - data_sdk<br>- plugin_sdk<br>- plugin_sdk_api<br>- plugin_sdk_engine_api<br>- plugin_sdk_heuristic_api |
-| backend                       | - backend_private                                                                                       |
-| frontend                      | - backend<br>- backend_private (dynamic)<br>- data_sdk<br>- schema (static/dynamic) [^3]                |
+| Target | Requirements |
+| -- | -- |
+| schema [^1] | |
+| data_sdk | - schema |
+| plugin_sdk | - data_sdk |
+| plugin_sdk_api | - plugin_sdk<br>- data_sdk |
+| plugin_sdk_engine_api | - plugin_sdk_api<br>- data_sdk |
+| plugin_sdk_heuristic_api [^2] | - plugin_sdk_api<br>- data_sdk |
+| backend_private | - data_sdk<br>- plugin_sdk<br>- plugin_sdk_api<br>- plugin_sdk_engine_api<br>- plugin_sdk_heuristic_api |
+| backend | - backend_private |
+| frontend | - backend<br>- backend_private (dynamic)<br>- data_sdk<br>- schema (static/dynamic) [^3] |
 [^1]: Schema refers to both serialized formats of flatbuffers and json.
 [^2]: The heuristic API hasn't yet been implemented
 [^3]: Static schema version is determined by the data_sdk compiled with, dynamic schema version comes from the schema version used for a serialization being consumed. Described in more detail below
 ### 4.6 Individual component details
 #### 4.6.1 Schema
-The schema covers both the flatbuffer serialization and the json serialization. These two serializations should change in lockstep as new fields, enums and structs are added. The version should be encoded directly within the schema.
+The schema covers both the flatbuffer serialization and the json serialization. These two serializations should change in lockstep as new fields, enums and structs are added. The version should be encoded directly within the schema for every root_type. Currently that's `Graph`, `EngineConfig` and `EngineDetails`.
 
 Schemas should be backwards and forward compatible within a major release. To this aim, the following changes can be made within the same major version:
 - Adding new structs, tables, enums, unions
@@ -165,7 +165,7 @@ When a function is called that is not supported by one of the backends, the fron
 >Note: using a macro that handles the static and dynamic checks would likely be a good way to handle both at once without duplication
 
 #### 4.6.4 Plugins
-Plugins must have a function that reports the plugin API they were compiled with.
+Plugins must have a function that reports the plugin API versions they were compiled with.
 
 Plugins are responsible for failing gracefully on unsupported schemas. Typically this will involve logging a warning, and registering the plugin as not applicable.
 ## 5. Key Design Decisions
@@ -204,14 +204,18 @@ set(VERSION_PATCH ${CMAKE_MATCH_1})
 
 project(<component> VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH})
 ```
-
 **Drawbacks**:
 - Can't dynamically set tweak version
 ## 6. Risks
 ### 6.1 Flatbuffer and Json schema definitions getting out of sync
 **Risk**: The flatbuffer schema might be updated without also updating the json serialization
 **Mitigation**
-- Automate tests creating serializations for all flatbuffer Unions and ensure that json can properly serialize them as well
+- Create tests creating serializations for all flatbuffer Unions and ensure that json can properly serialize them as well
+- This test exists already for `NodeAttributes` 
+### 6.2 Backwards/Forwards compatibility breaking
+**Risk** Backwards or Forwards compatibility could become broken accidentally for some time before it's noticed. While this can often be remedied, it could lead to versions of library components that are not forward and backward compatible with each other.
+**Mitigation**
+- Have CI run backward/forward compatibility tests on PRs
 ## 7. Execution Plan
 
 ### 7.1 Phase 1 (Prerequisites)
@@ -256,27 +260,15 @@ project(<component> VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH})
 - Determine procedure for major version bumps
 - Create a requirements file where forward and backwards compatibility is not guaranteed and ensure that each component compiles and runs properly with the versions allowed for in their requirements
 ## 10. Glossary
-
 **Backward compatibility**: The ability of a newer version of a component to work correctly with older versions of its dependencies or consumers.
-
 **Conventional commits**: A specification guideline on commits that conveys whether a change requires a patch, minor, or major version update. Often useful for automating version updates.
-
 **Deprecated attribute**: A marker (e.g., `[[deprecated]]` in C++) applied to functions, classes, or fields to indicate they are obsolete and should no longer be used. Deprecated items may be removed in the next major version.
-
 **Flatbuffer**: A cross-platform serialization library developed by Google that enables efficient serialization of data with zero-copy deserialization. Used by hipDNN for graph and configuration serialization.
-
 **Forward compatibility**: The ability of an older version of a component to work correctly with newer versions of its dependencies or consumers.
-
 **Major version**: The first number in a semantic version (X.y.z). Incremented when backward-incompatible changes are made. In hipDNN, major version updates coincide with ROCm major releases.
-
 **Minor version**: The second number in a semantic version (x.Y.z). Incremented when new features or API additions are made in a backward-compatible manner.
-
 **Patch version**: The third number in a semantic version (x.y.Z). Incremented for backward-compatible bug fixes.
-
 **Public API**: The set of functions, classes, types, and interfaces that are officially supported for external use. Changes to the public API follow strict versioning rules.
-
 **Schema**: The flatbuffer schema files (`.fbs`) that are used by hipDNN to define graphs, engine configurations, and engine details. In this document, it also refers to the corresponding JSON serialization of the same information.
-
 **Semantic versioning (SemVer)**: A versioning specification that uses a three-part version number (MAJOR.MINOR.PATCH) with defined rules for when each part should be incremented based on the type of changes made.
-
 **Tweak version**: An optional fourth component of a version number, used in hipDNN to represent the git commit hash of the rocm-libraries repository for precise build identification.
