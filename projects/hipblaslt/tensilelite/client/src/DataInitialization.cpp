@@ -885,6 +885,17 @@ namespace TensileLite
             return paddedM_N * paddedK * b;
         }
 
+        size_t getSwizzledMXTensorNumAllocatedElements(const TensorDescriptor& desc,
+                                                       size_t                  dimk,
+                                                       bool                    unrollMajor)
+        {
+            const auto k    = unrollMajor ? desc.sizes()[0] : desc.sizes()[1];
+            const auto m_n  = unrollMajor ? desc.sizes()[1] : desc.sizes()[0];
+            const auto b    = desc.sizes()[2];
+            const auto padk = (k + dimk - 1) / dimk * dimk;
+            return padk * m_n * b;
+        }
+
         double DataInitialization::GetRepresentativeBetaValue(po::variables_map const& args)
         {
             auto argValue = args["init-beta"].as<int>();
@@ -990,6 +1001,20 @@ namespace TensileLite
                                 problem.tensors()[i], MiM_N, MiK, PackK);
                             numAllocatedBytes = multiplyElementSize(
                                 numAllocatedElements, rocisa::GetElementSize(dataType));
+                        }
+                        if (i == ContractionProblemGemm::TENSOR::MXSA && problem.mxBlockA() != 0)
+                        {
+                            bool unrollMajor = (problem.freeIndicesA()[0].i != 0);
+                            size_t MX = problem.mxBlockA();
+                            size_t dimk = 128 / MX;
+                            numAllocatedElements = getSwizzledMXTensorNumAllocatedElements(problem.tensors()[i], dimk, unrollMajor);
+                        }
+                        else if (i == ContractionProblemGemm::TENSOR::MXSB && problem.mxBlockB() != 0)
+                        {
+                            bool unrollMajor = (problem.freeIndicesB()[0].i != 0);
+                            size_t MX = problem.mxBlockB();
+                            size_t dimk = 128 / MX;
+                            numAllocatedElements = getSwizzledMXTensorNumAllocatedElements(problem.tensors()[i], dimk, unrollMajor);
                         }
 
                         pristine.maxElements = std::max(pristine.maxElements, numAllocatedElements);
@@ -2071,8 +2096,11 @@ namespace TensileLite
                 bool needSwizzle
                     = (problem.swizzleTensorA() && i == ContractionProblemGemm::TENSOR::A)
                       || (problem.swizzleTensorB() && i == ContractionProblemGemm::TENSOR::B);
+                bool needMXSwizzle
+                    = (problem.mxBlockA() && (i == ContractionProblemGemm::TENSOR::MXSA))
+                      || (problem.mxBlockB() && (i == ContractionProblemGemm::TENSOR::MXSB));
                 //Copy swizzle tensor would be in copySwizzledToGPUBuffer
-                if(needSwizzle)
+                if(needSwizzle || needMXSwizzle)
                     continue;
                 void* ptr  = nullptr;
                 auto& desc = problem.tensors()[i];
@@ -2107,6 +2135,22 @@ namespace TensileLite
                 bool needSwizzle
                     = (problem.swizzleTensorA() && i == ContractionProblemGemm::TENSOR::A)
                       || (problem.swizzleTensorB() && i == ContractionProblemGemm::TENSOR::B);
+
+                bool needMXSwizzle = false;
+                bool unrollMajor = false;
+                size_t MX = 0;
+                if (i == ContractionProblemGemm::TENSOR::MXSA && problem.mxBlockA())
+                {
+                    needMXSwizzle = true;
+                    unrollMajor = (problem.freeIndicesA()[0].i != 0);
+                    MX = problem.mxBlockA();
+                }
+                else if (i == ContractionProblemGemm::TENSOR::MXSB && problem.mxBlockB())
+                {
+                    needMXSwizzle = true;
+                    unrollMajor = (problem.freeIndicesB()[0].i != 0);
+                    MX = problem.mxBlockB();
+                }
 
                 void* ptr{};
 
@@ -2163,6 +2207,57 @@ namespace TensileLite
                                                permuted.getDesc().flattenSize(),
                                                hipMemcpyHostToDevice);
                         g_swizzleCache.emplace(swizzleKey, std::move(permuted));
+                    }
+                }
+                else if (needMXSwizzle)
+                {
+                    using Tensor = Tensor::Manipulation::Tensor;
+
+                    if (unrollMajor)
+                    {
+                        auto unrolledSize = desc.sizes()[0];
+                        auto tiledSize    = desc.sizes()[1];
+                        size_t dimk       = 128 / MX;
+                        auto tmpTensor    = Tensor({tiledSize, unrolledSize}, desc.elementBytes());
+                        ::Tensor::Manipulation::Shape paddedShape{tiledSize, (unrolledSize + dimk - 1) / dimk * dimk};
+
+                        memcpy(tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
+                        //Temporary hack
+                        uint64_t padVal{};
+                        auto     paddedTensor = ::Tensor::Manipulation::pad(
+                            tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
+                        paddedTensor.reshape({paddedShape[0],
+                                              paddedShape[1] / dimk,
+                                              dimk});
+                        Tensor permuted = permute(paddedTensor, {1,0,2});
+                        ptr             = copyInputBuffers(desc,
+                                               p.gpuInput.valid.get(),
+                                               permuted.as<void>(),
+                                               permuted.getDesc().flattenSize(),
+                                               hipMemcpyHostToDevice);
+                    }
+                    else
+                    {
+                        auto unrolledSize = desc.sizes()[1];
+                        auto tiledSize    = desc.sizes()[0];
+                        size_t dimk       = 128 / MX;
+                        auto tmpTensor    = Tensor({unrolledSize, tiledSize}, desc.elementBytes());
+                        ::Tensor::Manipulation::Shape paddedShape{(unrolledSize + dimk - 1) / dimk * dimk};
+
+                        memcpy(tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
+                        //Temporary hack
+                        uint64_t padVal{};
+                        auto     paddedTensor = ::Tensor::Manipulation::pad(
+                            tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
+                        paddedTensor.reshape({paddedShape[0] / dimk,
+                                              dimk,
+                                              paddedShape[1]});
+                        Tensor permuted = permute(paddedTensor, {0,2,1});
+                        ptr             = copyInputBuffers(desc,
+                                               p.gpuInput.valid.get(),
+                                               permuted.as<void>(),
+                                               permuted.getDesc().flattenSize(),
+                                               hipMemcpyHostToDevice);
                     }
                 }
                 else
