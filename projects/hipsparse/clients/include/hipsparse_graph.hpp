@@ -151,14 +151,18 @@ namespace testing
     TESTING_COMPUTE_TEMPLATE(gebsr2gebsc)
 
     // csr2csr_compress
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     TESTING_COMPUTE_TEMPLATE(nnz_compress)
+#endif
     TESTING_COMPUTE_TEMPLATE(csr2csr_compress)
 
     // dense to sparse
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     TESTING_COMPUTE_TEMPLATE(dense2csr)
     TESTING_COMPUTE_TEMPLATE(dense2csc)
     TESTING_COMPUTE_TEMPLATE(csr2dense)
     TESTING_COMPUTE_TEMPLATE(csc2dense)
+#endif
 
     // prune routines
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
