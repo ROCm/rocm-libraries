@@ -7,6 +7,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [BatchNorm] Added V3 batch normalization API with separate running statistics buffers (prevResultRunningMean/Variance and nextResultRunningMean/Variance)
 * New API entry-points `miopenBatchNormalizationForwardInferenceInvVariance` and
   `miopenBatchNormForwardInferenceActivationInvVariance` to support hipDNN.
+* Enabled CK wrw and bwd solvers with split-k disabled in deterministic mode.
 
 ### Optimized
 * Added `MIOPEN_SEARCH_CUTOFF` option which can reduce tuning times by skipping slow solvers and kernels
