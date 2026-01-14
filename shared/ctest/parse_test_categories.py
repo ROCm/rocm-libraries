@@ -96,10 +96,10 @@ def main():
 
         # Generate tests for GPU-specific exclusions
         # Taking miopen as an example, if it has got exclude_gpu_gfx90a for the quick category,
-        # a new test with excluded patterns will be added  with name miopen_gtest-quick-gfx90a-exclude 
+        # a new test with excluded patterns will be added  with name miopen_gtest-quick-gfx90a-exclude
         # and an additional label ex_gpu_gfx90a. These patterns will be removed from quick category.
         # The tests are run with 'ctest -L quick -LE ex_gpu_gfx90a' when run from gfx90a.
-        # For other platforms 'ctest -L quick' will be used, which will run tests from both 'quick' and 
+        # For other platforms 'ctest -L quick' will be used, which will run tests from both 'quick' and
         # 'exclude_gpu_gfx90a' categories (tests miopen_gtest-quick-suite and miopen_gtest-quick-gfx90a-exclude).
 
         for gpu_arch, gpu_patterns in gpu_excludes.items():
@@ -110,7 +110,7 @@ def main():
 
             # Create labels with category name and ex_gpu_<arch>
             # gpu_label_string = f'"{category_name};ex_gpu_{gpu_arch}"'
-            gpu_label_string = label_string[:-1] + f";ex_gpu_{gpu_arch}\""
+            gpu_label_string = label_string[:-1] + f';ex_gpu_{gpu_arch}"'
 
             print(f"# GPU-specific exclusion for {gpu_arch}")
             print("add_test(")
@@ -119,7 +119,9 @@ def main():
             print(f"  WORKING_DIRECTORY {working_dir}")
             print(")")
 
-            print(f"set_tests_properties({target_name}-{category_name}-{gpu_arch}-exclude PROPERTIES")
+            print(
+                f"set_tests_properties({target_name}-{category_name}-{gpu_arch}-exclude PROPERTIES"
+            )
             print(f"  LABELS {gpu_label_string}")
             print(f"  TIMEOUT {timeout}")
             # print(f"  DISABLED TRUE")
