@@ -108,12 +108,12 @@ struct rocfft_brick_t
     // contiguous.
     std::vector<size_t> contiguous_strides() const;
 
-    // return true if this brick is contiguous in the specified field
-    bool is_contiguous_in_field(const std::vector<size_t>& field_length,
-                                const std::vector<size_t>& field_stride) const;
+    // return true if this brick is contiguous in the specified brick
+    bool is_contiguous_in_brick(const std::vector<size_t>& brick_length,
+                                const std::vector<size_t>& brick_stride) const;
 
     // compute offset of this brick, given the field's stride
-    size_t offset_in_field(const std::vector<size_t>& fieldStride) const;
+    size_t offset_in_brick(const std::vector<size_t>& brickStride) const;
 
     bool operator==(const rocfft_brick_t& other) const
     {
@@ -313,27 +313,27 @@ private:
     // plan items can have void*'s that point to these buffers.
     std::multimap<rocfft_location_t, std::shared_ptr<InternalTempBuffer>> tempBuffers;
 
-    // gather a set of bricks to a field on the current device
-    std::vector<size_t> GatherBricksToField(rocfft_location_t                  destLocation,
-                                            const std::vector<rocfft_brick_t>& bricks,
-                                            rocfft_precision                   precision,
-                                            rocfft_array_type                  arrayType,
-                                            const std::vector<size_t>&         field_length,
-                                            const std::vector<size_t>&         field_stride,
-                                            BufferPtr                          output,
-                                            const std::vector<size_t>&         antecedents,
-                                            size_t                             elem_size);
+    // Gather a set of bricks to a single brick on the current device
+    std::vector<size_t> GatherBricks(rocfft_location_t                  destLocation,
+                                     const std::vector<rocfft_brick_t>& bricks,
+                                     rocfft_precision                   precision,
+                                     rocfft_array_type                  arrayType,
+                                     const std::vector<size_t>&         brick_length,
+                                     const std::vector<size_t>&         brick_stride,
+                                     BufferPtr                          output,
+                                     const std::vector<size_t>&         antecedents,
+                                     size_t                             elem_size);
 
-    // scatter a field on the current device to a set of bricks
-    std::vector<size_t> ScatterFieldToBricks(rocfft_location_t                  srcLocation,
-                                             BufferPtr                          input,
-                                             rocfft_precision                   precision,
-                                             rocfft_array_type                  arrayType,
-                                             const std::vector<size_t>&         field_length,
-                                             const std::vector<size_t>&         field_stride,
-                                             const std::vector<rocfft_brick_t>& bricks,
-                                             const std::vector<size_t>&         antecedents,
-                                             size_t                             elem_size);
+    // Scatter a single brick on the current device to a set of bricks
+    std::vector<size_t> ScatterBricks(rocfft_location_t                  srcLocation,
+                                      BufferPtr                          input,
+                                      rocfft_precision                   precision,
+                                      rocfft_array_type                  arrayType,
+                                      const std::vector<size_t>&         brick_length,
+                                      const std::vector<size_t>&         brick_stride,
+                                      const std::vector<rocfft_brick_t>& bricks,
+                                      const std::vector<size_t>&         antecedents,
+                                      size_t                             elem_size);
 
     // Transpose the input field to the output field by adding work items
     // to the plan.  Antecedents are provided as a vector of item

@@ -577,26 +577,27 @@ bool rocfft_brick_t::is_contiguous() const
     return true;
 }
 
-bool rocfft_brick_t::is_contiguous_in_field(const std::vector<size_t>& field_length,
-                                            const std::vector<size_t>& field_stride) const
+bool rocfft_brick_t::is_contiguous_in_brick(const std::vector<size_t>& brick_length,
+                                            const std::vector<size_t>& brick_stride) const
 {
     const auto brick_len = length();
 
-    // a contiguous brick in a field is shorter than field length
-    // only on the highest dimension, ignoring dimensions of
-    // length-1, and strides must match the field for all those
+    // FIXME: deal with brick_stride
+    
+    // A contiguous brick in a larger Brick is shorter than Brick length only on the highest
+    // dimension, ignoring dimensions of length-1, and strides must match the field for all those
     // dimensions.
     size_t shortDim       = std::numeric_limits<size_t>::max();
     size_t highestNot1Dim = std::numeric_limits<size_t>::max();
     for(size_t i = 0; i < brick_len.size(); ++i)
     {
-        if(field_length[i] == 1)
+        if(brick_length[i] == 1)
             continue;
 
         highestNot1Dim = i;
-        if(brick_len[i] < field_length[i])
+        if(brick_len[i] < brick_length[i])
         {
-            // another dim is already short?  this isn't contiguous
+            // Another dim is already short?  This isn't contiguous
             if(shortDim != std::numeric_limits<size_t>::max())
                 return false;
             shortDim = i;
@@ -624,9 +625,9 @@ bool rocfft_brick_t::equal_coords(const rocfft_brick_t& other) const
     return this->lower == other.lower && this->upper == other.upper;
 }
 
-size_t rocfft_brick_t::offset_in_field(const std::vector<size_t>& fieldStride) const
+size_t rocfft_brick_t::offset_in_brick(const std::vector<size_t>& brickStride) const
 {
-    return std::inner_product(lower.begin(), lower.end(), fieldStride.begin(), 0);
+    return std::inner_product(lower.begin(), lower.end(), brickStride.begin(), 0);
 }
 
 std::string rocfft_brick_t::str() const
@@ -1312,15 +1313,15 @@ static std::vector<BufferPtr> GatherUserBuffers(BufferPtrConstruct              
     return ret;
 }
 
-std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t currentLocation,
-                                                       const std::vector<rocfft_brick_t>& bricks,
-                                                       rocfft_precision                   precision,
-                                                       rocfft_array_type                  arrayType,
-                                                       const std::vector<size_t>& field_length,
-                                                       const std::vector<size_t>& field_stride,
-                                                       BufferPtr                  output,
-                                                       const std::vector<size_t>& antecedents,
-                                                       size_t                     elem_size)
+std::vector<size_t> rocfft_plan_t::GatherBricks(rocfft_location_t currentLocation,
+                                                const std::vector<rocfft_brick_t>& bricks,
+                                                rocfft_precision                   precision,
+                                                rocfft_array_type                  arrayType,
+                                                const std::vector<size_t>& brick_length,
+                                                const std::vector<size_t>& brick_stride,
+                                                BufferPtr                  output,
+                                                const std::vector<size_t>& antecedents,
+                                                size_t                     elem_size)
 {
     std::vector<size_t>            outputPlanItems;
     std::vector<TempBufferLease>   gatherPackBufs;
@@ -1331,19 +1332,22 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
     const auto local_comm_rank = get_local_comm_rank();
 
     BufferPtr  gatherDest;
+
+    // We can gather to the output buffer if the bricks are contiguous and contiguous in the output
+    // brick.  Otherwise, gather to a temp buffer.
     const bool gatherToTemp
         = std::any_of(bricks.begin(), bricks.end(), [&](const rocfft_brick_t& brick) {
               return !brick.is_contiguous()
-                     || !brick.is_contiguous_in_field(field_length, field_stride);
+                  || !brick.is_contiguous_in_brick(brick_length, brick_stride);
           });
     if(gatherToTemp)
     {
-        // this is from source-rank to source-rank, before MPI comm.
+        // This is from source-rank to source-rank, before inter-gpu communication.
         gatherDestBuf
             = std::make_optional<TempBufferLease>(tempBuffers,
                                                   local_comm_rank,
                                                   currentLocation,
-                                                  product(field_length.begin(), field_length.end()),
+                                                  product(brick_length.begin(), brick_length.end()),
                                                   elem_size);
         gatherDest = BufferPtr::temp(gatherDestBuf->data());
     }
@@ -1419,7 +1423,7 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
         // if brick is not contiguous in the field, it was packed to
         // be contiguous for communication.  unpack it so it's
         // contiguous in the field.
-        if(!brick.is_contiguous() || !brick.is_contiguous_in_field(field_length, field_stride))
+        if(!brick.is_contiguous() || !brick.is_contiguous_in_brick(brick_length, brick_stride))
         {
             std::string description = "unpack brick " + std::to_string(brickIdx) + " after gather";
 
@@ -1433,8 +1437,8 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
                                                  gatherOffset,
                                                  brick.contiguous_strides(),
                                                  output,
-                                                 brick.offset_in_field(field_stride),
-                                                 field_stride,
+                                                 brick.offset_in_brick(brick_stride),
+                                                 brick_stride,
                                                  std::move(description)),
                                  {gatherIdx}));
         }
@@ -1451,15 +1455,15 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
     return outputPlanItems;
 }
 
-std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t          currentLocation,
-                                                        BufferPtr                  input,
-                                                        rocfft_precision           precision,
-                                                        rocfft_array_type          arrayType,
-                                                        const std::vector<size_t>& field_length,
-                                                        const std::vector<size_t>& field_stride,
-                                                        const std::vector<rocfft_brick_t>& bricks,
-                                                        const std::vector<size_t>& antecedents,
-                                                        size_t                     elem_size)
+std::vector<size_t> rocfft_plan_t::ScatterBricks(rocfft_location_t          currentLocation,
+                                                 BufferPtr                  input,
+                                                 rocfft_precision           precision,
+                                                 rocfft_array_type          arrayType,
+                                                 const std::vector<size_t>& brick_length,
+                                                 const std::vector<size_t>& brick_stride,
+                                                 const std::vector<rocfft_brick_t>& bricks,
+                                                 const std::vector<size_t>& antecedents,
+                                                 size_t                     elem_size)
 {
     std::vector<size_t>            outputPlanItems;
     std::vector<TempBufferLease>   scatterPackBufs;
@@ -1472,7 +1476,7 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
     BufferPtr  scatterSrc;
     const bool scatterFromTemp
         = std::any_of(bricks.begin(), bricks.end(), [&](const rocfft_brick_t& b) {
-              return !b.is_contiguous_in_field(field_length, field_stride);
+            return !b.is_contiguous_in_brick(brick_length, brick_stride);
           });
     if(scatterFromTemp)
     {
@@ -1480,7 +1484,7 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
             = std::make_optional<TempBufferLease>(tempBuffers,
                                                   local_comm_rank,
                                                   currentLocation,
-                                                  product(field_length.begin(), field_length.end()),
+                                                  product(brick_length.begin(), brick_length.end()),
                                                   elem_size);
         scatterSrc = BufferPtr::temp(scatterSrcBuf->data());
     }
@@ -1506,7 +1510,7 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
     {
         const auto& brick = bricks[brickIdx];
 
-        if(brick.is_contiguous_in_field(field_length, field_stride))
+        if(brick.is_contiguous_in_brick(brick_length, brick_stride))
         {
             // contiguous brick, just copy the data
             scatter->AddOperation(
@@ -1525,8 +1529,8 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
                                                             precision,
                                                             arrayType,
                                                             input,
-                                                            brick.offset_in_field(field_stride),
-                                                            field_stride,
+                                                            brick.offset_in_brick(brick_stride),
+                                                            brick_stride,
                                                             BufferPtr::temp(scatterSrcBuf->data()),
                                                             scatterOffset,
                                                             brick.contiguous_strides(),
@@ -1678,15 +1682,15 @@ void rocfft_plan_t::GatherScatterSingleDevicePlan(std::unique_ptr<ExecPlan>&& ex
             auto fieldLengthWithBatch = lengths;
             fieldLengthWithBatch.push_back(batch);
 
-            auto curIndexes = GatherBricksToField(execPlan->location,
-                                                  inField.bricks,
-                                                  precision,
-                                                  desc.inArrayType,
-                                                  fieldLengthWithBatch,
-                                                  fieldStrideWithBatch,
-                                                  gatherBuf,
-                                                  {},
-                                                  element_size(precision, desc.inArrayType));
+            auto curIndexes = GatherBricks(execPlan->location,
+                                           inField.bricks,
+                                           precision,
+                                           desc.inArrayType,
+                                           fieldLengthWithBatch,
+                                           fieldStrideWithBatch,
+                                           gatherBuf,
+                                           {},
+                                           element_size(precision, desc.inArrayType));
             std::copy(curIndexes.begin(), curIndexes.end(), std::back_inserter(gatherIndexes));
         }
 
@@ -1712,20 +1716,20 @@ void rocfft_plan_t::GatherScatterSingleDevicePlan(std::unique_ptr<ExecPlan>&& ex
 
         auto fieldLengthWithBatch = lengths;
         fieldLengthWithBatch.push_back(batch);
-
+ 
         auto scatterSrcBuf = execPlan->rootPlan->placement == rocfft_placement_notinplace
-                                 ? fftOutBuf->data()
-                                 : fftBuf->data();
+            ? fftOutBuf->data()
+            : fftBuf->data();
 
-        ScatterFieldToBricks(execPlan->location,
-                             BufferPtr::temp(scatterSrcBuf),
-                             execPlan->rootPlan->precision,
-                             execPlan->rootPlan->outArrayType,
-                             fieldLengthWithBatch,
-                             fieldStrideWithBatch,
-                             outField.bricks,
-                             {fftIdx},
-                             element_size(precision, execPlan->rootPlan->outArrayType));
+        ScatterBricks(execPlan->location,
+                      BufferPtr::temp(scatterSrcBuf),
+                      execPlan->rootPlan->precision,
+                      execPlan->rootPlan->outArrayType,
+                      fieldLengthWithBatch,
+                      fieldStrideWithBatch,
+                      outField.bricks,
+                      {fftIdx},
+                      element_size(precision, execPlan->rootPlan->outArrayType));
     }
 }
 
@@ -2104,8 +2108,8 @@ void rocfft_plan_t::GlobalTransposeP2P(size_t                     elem_size,
                                                    precision,
                                                    desc.inArrayType,
                                                    input[inBrickIdx],
-                                                   intersection.offset_in_field(inBrick.stride)
-                                                       - inBrick.offset_in_field(inBrick.stride),
+                                                   intersection.offset_in_brick(inBrick.stride)
+                                                       - inBrick.offset_in_brick(inBrick.stride),
                                                    inBrick.stride,
                                                    BufferPtr::temp(pack.data()),
                                                    0,
@@ -2144,8 +2148,8 @@ void rocfft_plan_t::GlobalTransposeP2P(size_t                     elem_size,
                                                    0,
                                                    intersection.stride,
                                                    output[outBrickIdx],
-                                                   intersection.offset_in_field(outBrick.stride)
-                                                       - outBrick.offset_in_field(outBrick.stride),
+                                                   intersection.offset_in_brick(outBrick.stride)
+                                                       - outBrick.offset_in_brick(outBrick.stride),
                                                    outBrick.stride,
                                                    "unpack brick for global transpose"),
                                    {sendIdx});
@@ -2342,8 +2346,8 @@ void rocfft_plan_t::GlobalTransposeA2A(size_t                     elem_size,
                                     precision,
                                     desc.inArrayType,
                                     input[inBrickIdx],
-                                    intersection.offset_in_field(inBrick.stride)
-                                        - inBrick.offset_in_field(inBrick.stride),
+                                    intersection.offset_in_brick(inBrick.stride)
+                                        - inBrick.offset_in_brick(inBrick.stride),
                                     inBrick.stride,
                                     BufferPtr::temp(send_buf.data()),
                                     send_offsets[outRank],
@@ -2372,8 +2376,8 @@ void rocfft_plan_t::GlobalTransposeA2A(size_t                     elem_size,
                                     recv_offsets[inRank],
                                     intersection.stride,
                                     output[outBrickIdx],
-                                    intersection.offset_in_field(outBrick.stride)
-                                        - outBrick.offset_in_field(outBrick.stride),
+                                    intersection.offset_in_brick(outBrick.stride)
+                                        - outBrick.offset_in_brick(outBrick.stride),
                                     outBrick.stride,
                                     "unpack brick for global transpose"),
                     {});
@@ -3345,8 +3349,7 @@ void rocfft_plan_t::ValidateFields() const
         whole_field.upper = lengths;
         whole_field.upper.push_back(batch);
 
-        // ensure no bricks in the field overlap - check each brick
-        // against each other brick
+        // Ensure no bricks in the field overlap - check each brick against each other brick:
         for(auto brickI = field.bricks.begin(); brickI != field.bricks.end(); ++brickI)
         {
             for(auto brickJ = brickI + 1; brickJ != field.bricks.end(); ++brickJ)
@@ -3358,10 +3361,12 @@ void rocfft_plan_t::ValidateFields() const
                 }
             }
 
-            // ensure each brick is within the field
+            // Ensure each brick is within the field:
             if(!brickI->equal_coords(brickI->intersect(whole_field)))
+            {
                 throw std::runtime_error(std::string(type) + " brick " + brickI->str()
-                                         + " is not within field");
+                                         + " is not within field " + whole_field.str());
+            }
         }
 
         // check that the bricks cover the whole index space
