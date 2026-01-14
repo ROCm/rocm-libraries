@@ -12,6 +12,7 @@ hipdnn_add_dependency(spdlog VERSION ${HIPDNN_SPDLOG_VERSION})
 hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 
 find_package(fmt ${HIPDNN_FMTLIB_VERSION} QUIET)
+find_package(hip REQUIRED)
 
 # For dependencies we are going to check if they weren't imported, and then install it along with
 # the SDK headers to allow it to work for local builds that want to install. If the dependecy is
@@ -100,6 +101,9 @@ hipdnn_add_dependency_includes(hipdnn_data_sdk flatbuffers::flatbuffers)
 hipdnn_add_dependency_includes(hipdnn_data_sdk spdlog::spdlog_header_only)
 hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
 
+target_link_libraries(hipdnn_data_sdk INTERFACE hip::host)
+target_compile_definitions(hipdnn_data_sdk INTERFACE __HIP_PLATFORM_AMD__)
+
 if (fmt_FOUND)
     message(STATUS "Found fmt: using system fmt")
     hipdnn_add_dependency_includes(hipdnn_data_sdk fmt::fmt COMPILE_DEFINITIONS SPDLOG_FMT_EXTERNAL)
@@ -160,8 +164,8 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
     add_dependencies(hipdnn_data_sdk generate_hipdnn_data_sdk_headers)
 endif()
 
-# This is required to use hip/hip_fp16.h and hip/hip_bfloat16.h in any code that includes the sdk By
-# doing this, we don't need to link to hip::device
+# __HIPCC__ is required to use hip/hip_fp16.h and hip/hip_bfloat16.h
+# This allows non-hipcc compilers to use these HIP type headers
 target_compile_definitions(hipdnn_data_sdk INTERFACE __HIPCC__)
 
 export(TARGETS hipdnn_data_sdk ${_hipdnn_data_sdk_local_export_targets}
