@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include "../../shared/concurrency.h"
 #include "../../shared/environment.h"
 
 #include "library_path.h"
@@ -27,11 +28,13 @@
 #include "rtc_subprocess.h"
 #include "sqlite3.h"
 
+#include <atomic>
 #include <chrono>
 #include <hip/hip_version.h>
 #include <hip/hiprtc.h>
 #include <mutex>
 #include <optional>
+#include <semaphore>
 
 namespace fs = std::filesystem;
 
@@ -44,6 +47,74 @@ static const char* default_cache_filename = "rocfft_kernel_cache.db";
 // delegate to a subprocess.  But we should at least do one
 // in-process instead of making everything go to subprocess.
 static std::mutex compile_lock;
+
+// Limit concurrent subprocesses based on available CPU cores.
+// This prevents oversubscription when running under job managers
+// (SLURM, mpiexec) that pin processes to specific CPU sets.
+// Using counting_semaphore for efficient event-driven synchronization.
+static std::unique_ptr<std::counting_semaphore<>> subprocess_semaphore;
+static std::once_flag                             semaphore_init_flag;
+
+// RAII wrapper for semaphore acquire/release
+class semaphore_guard
+{
+public:
+    explicit semaphore_guard(std::counting_semaphore<>* sem)
+        : sem_(sem)
+    {
+        if(sem_)
+            sem_->acquire();
+    }
+
+    ~semaphore_guard()
+    {
+        if(sem_)
+            sem_->release();
+    }
+
+    semaphore_guard(const semaphore_guard&) = delete;
+    semaphore_guard& operator=(const semaphore_guard&) = delete;
+    semaphore_guard(semaphore_guard&&)                 = delete;
+    semaphore_guard& operator=(semaphore_guard&&) = delete;
+
+private:
+    std::counting_semaphore<>* sem_;
+};
+
+// Get max subprocess count and initialize semaphore
+static unsigned int get_max_subprocesses()
+{
+    unsigned int max_subprocesses = rocfft_concurrency();
+
+    // allow override via environment variable for testing/debugging
+    auto env_limit = rocfft_getenv("ROCFFT_RTC_MAX_SUBPROCESSES");
+    if(!env_limit.empty())
+    {
+        try
+        {
+            unsigned int user_limit = std::stoul(env_limit);
+            if(user_limit > 0)
+                max_subprocesses = user_limit;
+        }
+        catch(...)
+        {
+            // use default
+        }
+    }
+
+    // initialize semaphore once with the determined count
+    std::call_once(semaphore_init_flag, [max_subprocesses]() {
+        subprocess_semaphore = std::make_unique<std::counting_semaphore<>>(max_subprocesses);
+
+        if(LOG_RTC_ENABLED())
+        {
+            (*LogSingleton::GetInstance().GetRTCOS())
+                << "// Max concurrent RTC subprocesses: " << max_subprocesses << std::endl;
+        }
+    });
+
+    return max_subprocesses;
+}
 
 // Get paths to system RTC cache, in decreasing order of preference.
 static std::vector<fs::path> rtccache_db_sys_paths()
@@ -473,10 +544,15 @@ static std::vector<char> cached_compile_impl(const std::string&          kernel_
     {
     case RTCProcessType::FORCE_OUT_PROCESS:
     {
-        compile_begin = std::chrono::steady_clock::now();
         try
         {
-            code = compile_subprocess(kernel_src, gpu_arch);
+            // initialize semaphore and acquire slot (blocks if limit reached)
+            // RAII guard ensures release even if exception occurs
+            get_max_subprocesses();
+            semaphore_guard guard(subprocess_semaphore.get());
+
+            compile_begin = std::chrono::steady_clock::now();
+            code          = compile_subprocess(kernel_src, gpu_arch);
             break;
         }
         catch(std::exception&)
@@ -505,19 +581,37 @@ static std::vector<char> cached_compile_impl(const std::string&          kernel_
         else
         {
             // couldn't acquire lock, so try instead in a subprocess
-            try
+            unsigned int max_procs = get_max_subprocesses();
+
+            // if only 1 CPU is available, better to wait for in-process
+            // compilation rather than spawn a subprocess that will compete
+            // for the same CPU
+            if(max_procs == 1)
             {
-                compile_begin = std::chrono::steady_clock::now();
-                code          = compile_subprocess(kernel_src, gpu_arch);
-            }
-            catch(std::exception&)
-            {
-                // subprocess still didn't work, re-acquire lock
-                // and fall back to in-process if something went
-                // wrong
                 std::lock_guard<std::mutex> lck(compile_lock);
                 compile_begin = std::chrono::steady_clock::now();
                 code          = compile_inprocess(kernel_src, gpu_arch);
+            }
+            else
+            {
+                try
+                {
+                    // acquire semaphore slot (blocks if limit reached)
+                    // RAII guard ensures release even if exception occurs
+                    semaphore_guard guard(subprocess_semaphore.get());
+
+                    compile_begin = std::chrono::steady_clock::now();
+                    code          = compile_subprocess(kernel_src, gpu_arch);
+                }
+                catch(std::exception&)
+                {
+                    // subprocess still didn't work, re-acquire lock
+                    // and fall back to in-process if something went
+                    // wrong
+                    std::lock_guard<std::mutex> lck(compile_lock);
+                    compile_begin = std::chrono::steady_clock::now();
+                    code          = compile_inprocess(kernel_src, gpu_arch);
+                }
             }
         }
     }

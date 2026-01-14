@@ -229,6 +229,11 @@ namespace rocRollerTest
             int getFlattenedWorkgroupSize() const;
 
             CommandParametersPtr getCommandParameters() const;
+            std::tuple<rocRoller::Operations::OperationTag,
+                       rocRoller::Operations::OperationTag,
+                       rocRoller::Operations::OperationTag,
+                       rocRoller::Operations::OperationTag>
+                getOperationTags() const;
 
             std::pair<std::optional<rocRoller::Operations::OperationTag>,
                       std::optional<rocRoller::Operations::OperationTag>>
