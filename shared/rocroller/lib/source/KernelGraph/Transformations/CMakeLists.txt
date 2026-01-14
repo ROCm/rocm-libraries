@@ -20,6 +20,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/ConstantPropagation.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FuseExpressions.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FuseLoops.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/HoistLoopInvariant.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/IdentifyParallelDimensions.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/InlineIncrements.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/InlineInits.cpp"

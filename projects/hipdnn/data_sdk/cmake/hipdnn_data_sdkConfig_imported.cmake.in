@@ -43,6 +43,8 @@ find_package(Threads REQUIRED)
 
 include(CMakeFindDependencyMacro)
 
+find_dependency(hip CONFIG REQUIRED)
+
 find_dependency(flatbuffers REQUIRED)
 find_dependency(spdlog REQUIRED)
 find_dependency(nlohmann_json REQUIRED)

@@ -13,7 +13,6 @@
 #include "logging/Logging.hpp"
 #include "plugin/EnginePluginResourceManager.hpp"
 
-#include <hipdnn_data_sdk/logging/CallbackTypes.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 using namespace hipdnn_backend;

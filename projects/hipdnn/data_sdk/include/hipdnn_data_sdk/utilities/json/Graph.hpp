@@ -89,6 +89,10 @@ inline void to_json(nlohmann::json& graphJson, const data_objects::Graph& graph)
     graphJson["intermediate_data_type"] = graph.intermediate_data_type();
     graphJson["name"] = graph.name()->c_str();
     graphJson["tensors"] = graph.tensors();
+    if(graph.preferred_engine_id().has_value())
+    {
+        graphJson["preferred_engine_id"] = graph.preferred_engine_id().value();
+    }
 }
 
 }
@@ -146,10 +150,22 @@ inline auto to<data_objects::Graph>(flatbuffers::FlatBufferBuilder& builder,
     auto ioType = entry.at("io_data_type").get<data_objects::DataType>();
     auto intermediateType = entry.at("intermediate_data_type").get<data_objects::DataType>();
 
+    flatbuffers::Optional<int64_t> preferredEngineId = flatbuffers::nullopt;
+    if(entry.contains("preferred_engine_id"))
+    {
+        preferredEngineId = entry["preferred_engine_id"].get<int64_t>();
+    }
+
     auto nodes = toVector<Node>(builder, entry.at("nodes"));
     auto tensors = toVector<TensorAttributes>(builder, entry.at("tensors"));
-    return data_objects::CreateGraphDirect(
-        builder, name.c_str(), computeType, intermediateType, ioType, &tensors, &nodes);
+    return data_objects::CreateGraphDirect(builder,
+                                           name.c_str(),
+                                           computeType,
+                                           intermediateType,
+                                           ioType,
+                                           &tensors,
+                                           &nodes,
+                                           preferredEngineId);
 }
 
 }

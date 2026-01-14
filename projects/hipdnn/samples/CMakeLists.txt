@@ -48,6 +48,8 @@ add_hipdnn_sample(fused_conv_fprop_activ convolution/FusedConvFpropActiv.cpp)
 add_hipdnn_sample(fused_conv_fprop_bias_activ convolution/FusedConvFpropBiasActiv.cpp)
 add_hipdnn_sample(conv_wgrad convolution/ConvWgrad.cpp)
 
+add_hipdnn_sample(serialization_roundtrip serialization/SerializationRoundTrip.cpp)
+
 # Enable testing and add sample tests
 enable_testing()
 
@@ -89,6 +91,9 @@ add_hipdnn_sample_test(fused_bn_training_activ)
 add_hipdnn_sample_test(bn_backward)
 add_hipdnn_sample_test(fused_bn_inference_drelu_bn_backward)
 # Note: bn_inference is currently disabled per issue #2459
+
+# Register serialization samples as tests
+add_hipdnn_sample_test(serialization_roundtrip)
 
 # Install the generated CTestTestfile.cmake to HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH
 install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH}

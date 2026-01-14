@@ -114,6 +114,18 @@ void checkBatchnormTensorConfigSupported(
         tensorMap);
 
 void checkBatchnormTensorConfigSupported(
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+void checkBatchnormTensorConfigSupported(
+    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+void checkBatchnormTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
