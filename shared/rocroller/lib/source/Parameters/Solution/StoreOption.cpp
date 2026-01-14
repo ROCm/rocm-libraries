@@ -68,19 +68,6 @@ namespace rocRoller
                 return false;
             }
 
-            bool IsGlobalStore(StorePath const& mode)
-            {
-                switch(mode)
-                {
-                case StorePath::VGPRToGlobal:
-                case StorePath::LDSViaVGPRToGlobal:
-                    return true;
-                default:
-                    break;
-                }
-                return false;
-            }
-
             std::string toString(StorePath mode)
             {
                 switch(mode)

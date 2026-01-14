@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 202 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,8 +27,6 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 
-#include <istream>
-#include <ostream>
 #include <string>
 
 namespace rocRoller
@@ -54,7 +52,6 @@ namespace rocRoller
 
             MemoryType GetMemoryType(StorePath const& path);
             bool       IsLDSStore(StorePath const& path);
-            bool       IsGlobalStore(StorePath const& path);
         } // namespace Solution
     } // namespace Parameters
 } // namespace rocRoller

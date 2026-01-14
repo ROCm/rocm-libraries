@@ -44,8 +44,8 @@ struct GEMMProblemF8NT : GEMMProblem
         this->macN = wavesPerWGY * this->waveN;
         this->macK = 2 * this->waveK;
 
-        this->loadPathA = rocRoller::Parameters::Solution::LoadPath::BufferToLDSViaVGPR;
-        this->loadPathB = rocRoller::Parameters::Solution::LoadPath::BufferToLDSViaVGPR;
+        this->loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        this->loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
 
         this->workgroupSizeX = 256;
         this->workgroupSizeY = 1;
@@ -76,9 +76,9 @@ struct GEMMProblemF8F6F4 : GEMMProblem
         this->macM            = wavesPerWGX * this->waveM;
         this->macN            = wavesPerWGY * this->waveN;
         this->macK            = 2 * this->waveK;
-        this->loadPathA       = rocRoller::Parameters::Solution::LoadPath::BufferToLDSViaVGPR;
-        this->loadPathB       = rocRoller::Parameters::Solution::LoadPath::BufferToLDSViaVGPR;
-        this->storePath       = rocRoller::Parameters::Solution::StorePath::VGPRToBuffer;
+        this->loadPathA       = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        this->loadPathB       = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        this->storePath       = SolutionParams::StorePath::VGPRToBuffer;
         this->workgroupSizeX  = 256;
         this->workgroupSizeY  = 1;
         this->m               = 2 * this->macM;
@@ -108,9 +108,9 @@ struct GEMMProblemF8TN : GEMMProblem
         this->macN = wavesPerWGY * this->waveN;
         this->macK = 2 * this->waveK;
 
-        this->loadPathA = rocRoller::Parameters::Solution::LoadPath::BufferToLDSViaVGPR;
-        this->loadPathB = rocRoller::Parameters::Solution::LoadPath::BufferToLDSViaVGPR;
-        this->storePath = rocRoller::Parameters::Solution::StorePath::VGPRToBuffer;
+        this->loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        this->loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        this->storePath = SolutionParams::StorePath::VGPRToBuffer;
 
         this->workgroupSizeX = 256;
         this->workgroupSizeY = 1;
