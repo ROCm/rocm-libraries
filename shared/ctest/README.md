@@ -17,7 +17,7 @@ shared/ctest/
 
 ## Architecture Overview
 
-The CTest integration provides a flexible, maintainable system for organizing tests into categories with support for platform-specific and GPU-specific(TODO) test exclusions.
+The CTest integration provides a flexible, maintainable system for organizing tests into categories with support for platform-specific and GPU-specific test exclusions.
 
 ### **Core Components**
 
@@ -103,7 +103,7 @@ The parser applies exclusions from `execution_settings` in this order:
 
 1. **Base exclusions** (`exclude`) - Always applied to all categories
 2. **OS-specific exclusions** (`exclude_windows`, `exclude_linux`) - Applied based on detected OS
-3. **GPU-specific exclusions** (TODO) - Will be applied based on detected GPU architecture
+3. **GPU-specific exclusions** (`exclude_gpu_gfx90a`, `exclude_gpu_gfx950`) - Will be applied based on detected GPU architecture
 
 
 ## Integration Guide
@@ -150,6 +150,9 @@ ctest
 
 # Run specific category
 ctest -L standard
+
+# Run excluding tests for gfx90a
+ctest -L standard -LE ex_gpu_gfx90a
 
 # Run with verbose output
 ctest -L quick -V
