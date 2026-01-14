@@ -40,3382 +40,2401 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-template<unsigned int arch, class key_type, class value_type, class enable = void>
-struct default_select_unique_by_key_config : default_partition_config_base<key_type, false>::type
-{};
-
-// Based on key_type = double, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<256, 4>
-{};
-
-// Based on key_type = double, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<512, 8>
-{};
-
-// Based on key_type = double, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<512, 4>
-{};
-
-// Based on key_type = double, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<512, 8>
-{};
-
-// Based on key_type = double, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : select_config<512, 6>
-{};
-
-// Based on key_type = float, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<256, 4>
-{};
-
-// Based on key_type = float, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<512, 4>
-{};
-
-// Based on key_type = float, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<512, 8>
-{};
-
-// Based on key_type = float, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<512, 8>
-{};
-
-// Based on key_type = float, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : select_config<512, 8>
-{};
-
-// Based on key_type = rocprim::half, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : select_config<256, 4>
-{};
-
-// Based on key_type = rocprim::half, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : select_config<512, 8>
-{};
-
-// Based on key_type = rocprim::half, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : select_config<512, 8>
-{};
-
-// Based on key_type = rocprim::half, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : select_config<384, 10>
-{};
-
-// Based on key_type = rocprim::half, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 1))>> : select_config<384, 14>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<256, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<256, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<256, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<256, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1))>>
-    : select_config<256, 4>
-{};
-
-// Based on key_type = int64_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<256, 4>
-{};
-
-// Based on key_type = int64_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<512, 8>
-{};
-
-// Based on key_type = int64_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<512, 4>
-{};
-
-// Based on key_type = int64_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<512, 8>
-{};
-
-// Based on key_type = int64_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : select_config<512, 6>
-{};
-
-// Based on key_type = int, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<256, 4>
-{};
-
-// Based on key_type = int, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<512, 4>
-{};
-
-// Based on key_type = int, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<512, 8>
-{};
-
-// Based on key_type = int, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<512, 8>
-{};
-
-// Based on key_type = int, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : select_config<512, 8>
-{};
-
-// Based on key_type = short, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<256, 4>
-{};
-
-// Based on key_type = short, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<512, 6>
-{};
-
-// Based on key_type = short, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<512, 8>
-{};
-
-// Based on key_type = short, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<384, 10>
-{};
-
-// Based on key_type = short, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1))>>
-    : select_config<384, 14>
-{};
-
-// Based on key_type = int8_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : select_config<256, 4>
-{};
-
-// Based on key_type = int8_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : select_config<512, 6>
-{};
-
-// Based on key_type = int8_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : select_config<512, 8>
-{};
-
-// Based on key_type = int8_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : select_config<384, 14>
-{};
-
-// Based on key_type = int8_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 1))>> : select_config<384, 12>
-{};
-
-// Based on key_type = double, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<512, 4>
-{};
-
-// Based on key_type = double, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<512, 8>
-{};
-
-// Based on key_type = double, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<512, 8>
-{};
-
-// Based on key_type = double, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<384, 8>
-{};
-
-// Based on key_type = double, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : select_config<128, 7>
-{};
-
-// Based on key_type = float, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<512, 4>
-{};
-
-// Based on key_type = float, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<512, 8>
-{};
-
-// Based on key_type = float, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<384, 8>
-{};
-
-// Based on key_type = float, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<128, 10>
-{};
-
-// Based on key_type = float, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : select_config<128, 12>
-{};
-
-// Based on key_type = rocprim::half, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : select_config<192, 4>
-{};
-
-// Based on key_type = rocprim::half, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : select_config<512, 8>
-{};
-
-// Based on key_type = rocprim::half, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : select_config<512, 16>
-{};
-
-// Based on key_type = rocprim::half, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : select_config<512, 16>
-{};
-
-// Based on key_type = rocprim::half, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 1))>> : select_config<192, 16>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<512, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<512, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<512, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<512, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1))>>
-    : select_config<512, 4>
-{};
-
-// Based on key_type = int64_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<512, 4>
-{};
-
-// Based on key_type = int64_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<512, 8>
-{};
-
-// Based on key_type = int64_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<512, 8>
-{};
-
-// Based on key_type = int64_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<128, 8>
-{};
-
-// Based on key_type = int64_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : select_config<128, 7>
-{};
-
-// Based on key_type = int, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<512, 4>
-{};
-
-// Based on key_type = int, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<512, 8>
-{};
-
-// Based on key_type = int, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<384, 8>
-{};
-
-// Based on key_type = int, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<128, 12>
-{};
-
-// Based on key_type = int, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : select_config<128, 12>
-{};
-
-// Based on key_type = short, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = short, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<512, 8>
-{};
-
-// Based on key_type = short, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<128, 11>
-{};
-
-// Based on key_type = short, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<128, 12>
-{};
-
-// Based on key_type = short, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1))>>
-    : select_config<512, 20>
-{};
-
-// Based on key_type = int8_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : select_config<192, 4>
-{};
-
-// Based on key_type = int8_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : select_config<384, 8>
-{};
-
-// Based on key_type = int8_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : select_config<128, 13>
-{};
-
-// Based on key_type = int8_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : select_config<128, 22>
-{};
-
-// Based on key_type = int8_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 1))>> : select_config<384, 20>
-{};
-
-// Based on key_type = double, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<384, 8>
-{};
-
-// Based on key_type = double, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<384, 6>
-{};
-
-// Based on key_type = double, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<384, 6>
-{};
-
-// Based on key_type = double, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : select_config<384, 6>
-{};
-
-// Based on key_type = float, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<384, 4>
-{};
-
-// Based on key_type = float, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<384, 7>
-{};
-
-// Based on key_type = float, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<384, 9>
-{};
-
-// Based on key_type = float, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : select_config<384, 12>
-{};
-
-// Based on key_type = rocprim::half, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : select_config<384, 8>
-{};
-
-// Based on key_type = rocprim::half, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : select_config<512, 16>
-{};
-
-// Based on key_type = rocprim::half, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : select_config<512, 14>
-{};
-
-// Based on key_type = rocprim::half, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 1))>> : select_config<512, 14>
-{};
-
-// Based on key_type = int64_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<384, 8>
-{};
-
-// Based on key_type = int64_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<384, 6>
-{};
-
-// Based on key_type = int64_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<384, 6>
-{};
-
-// Based on key_type = int64_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : select_config<384, 8>
-{};
-
-// Based on key_type = int, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<384, 4>
-{};
-
-// Based on key_type = int, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<384, 7>
-{};
-
-// Based on key_type = int, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<384, 9>
-{};
-
-// Based on key_type = int, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : select_config<384, 12>
-{};
-
-// Based on key_type = short, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<384, 6>
-{};
-
-// Based on key_type = short, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<512, 16>
-{};
-
-// Based on key_type = short, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<512, 24>
-{};
-
-// Based on key_type = short, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1))>>
-    : select_config<512, 14>
-{};
-
-// Based on key_type = int8_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : select_config<256, 8>
-{};
-
-// Based on key_type = int8_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : select_config<512, 16>
-{};
-
-// Based on key_type = int8_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : select_config<512, 32>
-{};
-
-// Based on key_type = int8_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 1))>> : select_config<384, 16>
-{};
-
-// Based on key_type = double, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = double, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<256, 5>
-{};
-
-// Based on key_type = double, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<256, 6>
-{};
-
-// Based on key_type = double, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<192, 7>
-{};
-
-// Based on key_type = double, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : select_config<192, 8>
-{};
-
-// Based on key_type = float, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = float, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<256, 6>
-{};
-
-// Based on key_type = float, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<256, 13>
-{};
-
-// Based on key_type = float, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<192, 14>
-{};
-
-// Based on key_type = float, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : select_config<192, 16>
-{};
-
-// Based on key_type = rocprim::half, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : select_config<192, 4>
-{};
-
-// Based on key_type = rocprim::half, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : select_config<256, 6>
-{};
-
-// Based on key_type = rocprim::half, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : select_config<256, 12>
-{};
-
-// Based on key_type = rocprim::half, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : select_config<192, 14>
-{};
-
-// Based on key_type = rocprim::half, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 1))>> : select_config<256, 16>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<256, 3>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<192, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<192, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<192, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1))>>
-    : select_config<192, 4>
-{};
-
-// Based on key_type = int64_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = int64_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<192, 8>
-{};
-
-// Based on key_type = int64_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<256, 6>
-{};
-
-// Based on key_type = int64_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<192, 7>
-{};
-
-// Based on key_type = int64_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : select_config<192, 8>
-{};
-
-// Based on key_type = int, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = int, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<256, 6>
-{};
-
-// Based on key_type = int, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<256, 13>
-{};
-
-// Based on key_type = int, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<192, 14>
-{};
-
-// Based on key_type = int, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : select_config<192, 16>
-{};
-
-// Based on key_type = short, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = short, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<256, 6>
-{};
-
-// Based on key_type = short, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<256, 12>
-{};
-
-// Based on key_type = short, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<256, 14>
-{};
-
-// Based on key_type = short, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1))>>
-    : select_config<192, 16>
-{};
-
-// Based on key_type = int8_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : select_config<192, 4>
-{};
-
-// Based on key_type = int8_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : select_config<192, 7>
-{};
-
-// Based on key_type = int8_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : select_config<192, 14>
-{};
-
-// Based on key_type = int8_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : select_config<256, 14>
-{};
-
-// Based on key_type = int8_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 1))>> : select_config<192, 17>
-{};
-
-// Based on key_type = double, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = double, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<128, 5>
-{};
-
-// Based on key_type = double, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<128, 6>
-{};
-
-// Based on key_type = double, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<128, 6>
-{};
-
-// Based on key_type = double, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : select_config<192, 8>
-{};
-
-// Based on key_type = float, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = float, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<128, 6>
-{};
-
-// Based on key_type = float, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<256, 13>
-{};
-
-// Based on key_type = float, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<256, 14>
-{};
-
-// Based on key_type = float, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : select_config<256, 16>
-{};
-
-// Based on key_type = rocprim::half, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : select_config<192, 4>
-{};
-
-// Based on key_type = rocprim::half, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : select_config<256, 6>
-{};
-
-// Based on key_type = rocprim::half, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : select_config<256, 12>
-{};
-
-// Based on key_type = rocprim::half, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : select_config<256, 14>
-{};
-
-// Based on key_type = rocprim::half, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 1))>> : select_config<256, 16>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<256, 3>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<192, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<192, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<192, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1))>>
-    : select_config<192, 4>
-{};
-
-// Based on key_type = int64_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = int64_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<128, 5>
-{};
-
-// Based on key_type = int64_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<128, 6>
-{};
-
-// Based on key_type = int64_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<192, 7>
-{};
-
-// Based on key_type = int64_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : select_config<192, 8>
-{};
-
-// Based on key_type = int, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = int, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<128, 6>
-{};
-
-// Based on key_type = int, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<256, 13>
-{};
-
-// Based on key_type = int, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<256, 14>
-{};
-
-// Based on key_type = int, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : select_config<192, 16>
-{};
-
-// Based on key_type = short, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = short, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<256, 6>
-{};
-
-// Based on key_type = short, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<256, 12>
-{};
-
-// Based on key_type = short, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<256, 14>
-{};
-
-// Based on key_type = short, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1))>>
-    : select_config<256, 14>
-{};
-
-// Based on key_type = int8_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : select_config<192, 4>
-{};
-
-// Based on key_type = int8_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : select_config<192, 7>
-{};
-
-// Based on key_type = int8_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : select_config<256, 13>
-{};
-
-// Based on key_type = int8_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : select_config<256, 14>
-{};
-
-// Based on key_type = int8_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 1))>> : select_config<192, 17>
-{};
-
-// Based on key_type = double, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = double, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<128, 4>
-{};
-
-// Based on key_type = double, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<192, 4>
-{};
-
-// Based on key_type = double, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<256, 4>
-{};
-
-// Based on key_type = double, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : select_config<256, 5>
-{};
-
-// Based on key_type = float, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = float, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<192, 5>
-{};
-
-// Based on key_type = float, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<192, 7>
-{};
-
-// Based on key_type = float, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<192, 10>
-{};
-
-// Based on key_type = float, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : select_config<192, 9>
-{};
-
-// Based on key_type = rocprim::half, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : select_config<192, 4>
-{};
-
-// Based on key_type = rocprim::half, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : select_config<192, 5>
-{};
-
-// Based on key_type = rocprim::half, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : select_config<192, 10>
-{};
-
-// Based on key_type = rocprim::half, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : select_config<256, 24>
-{};
-
-// Based on key_type = rocprim::half, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 1))>> : select_config<256, 24>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<256, 3>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<128, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<192, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<192, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1))>>
-    : select_config<192, 4>
-{};
-
-// Based on key_type = int64_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = int64_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<128, 4>
-{};
-
-// Based on key_type = int64_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<192, 4>
-{};
-
-// Based on key_type = int64_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<256, 4>
-{};
-
-// Based on key_type = int64_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : select_config<256, 5>
-{};
-
-// Based on key_type = int, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = int, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<192, 5>
-{};
-
-// Based on key_type = int, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<192, 7>
-{};
-
-// Based on key_type = int, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<192, 10>
-{};
-
-// Based on key_type = int, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : select_config<192, 9>
-{};
-
-// Based on key_type = short, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = short, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<192, 5>
-{};
-
-// Based on key_type = short, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<192, 10>
-{};
-
-// Based on key_type = short, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<256, 24>
-{};
-
-// Based on key_type = short, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1))>>
-    : select_config<256, 24>
-{};
-
-// Based on key_type = int8_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : select_config<192, 4>
-{};
-
-// Based on key_type = int8_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : select_config<256, 6>
-{};
-
-// Based on key_type = int8_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : select_config<192, 10>
-{};
-
-// Based on key_type = int8_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : select_config<256, 28>
-{};
-
-// Based on key_type = int8_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 1))>> : select_config<192, 28>
-{};
-
-// Based on key_type = double, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = double, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<128, 5>
-{};
-
-// Based on key_type = double, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<128, 6>
-{};
-
-// Based on key_type = double, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<128, 6>
-{};
-
-// Based on key_type = double, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : select_config<192, 8>
-{};
-
-// Based on key_type = float, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = float, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<128, 6>
-{};
-
-// Based on key_type = float, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<256, 13>
-{};
-
-// Based on key_type = float, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<256, 14>
-{};
-
-// Based on key_type = float, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : select_config<256, 16>
-{};
-
-// Based on key_type = rocprim::half, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : select_config<192, 4>
-{};
-
-// Based on key_type = rocprim::half, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : select_config<256, 6>
-{};
-
-// Based on key_type = rocprim::half, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : select_config<256, 12>
-{};
-
-// Based on key_type = rocprim::half, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : select_config<256, 14>
-{};
-
-// Based on key_type = rocprim::half, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 1))>> : select_config<256, 16>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<256, 3>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<192, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<192, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<192, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1))>>
-    : select_config<192, 4>
-{};
-
-// Based on key_type = int64_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = int64_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<128, 5>
-{};
-
-// Based on key_type = int64_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<128, 6>
-{};
-
-// Based on key_type = int64_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<192, 7>
-{};
-
-// Based on key_type = int64_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : select_config<192, 8>
-{};
-
-// Based on key_type = int, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = int, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<128, 6>
-{};
-
-// Based on key_type = int, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<256, 13>
-{};
-
-// Based on key_type = int, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<256, 14>
-{};
-
-// Based on key_type = int, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : select_config<192, 16>
-{};
-
-// Based on key_type = short, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<192, 4>
-{};
-
-// Based on key_type = short, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<256, 6>
-{};
-
-// Based on key_type = short, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<256, 12>
-{};
-
-// Based on key_type = short, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<256, 14>
-{};
-
-// Based on key_type = short, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1))>>
-    : select_config<256, 14>
-{};
-
-// Based on key_type = int8_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : select_config<192, 4>
-{};
-
-// Based on key_type = int8_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : select_config<192, 7>
-{};
-
-// Based on key_type = int8_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : select_config<256, 13>
-{};
-
-// Based on key_type = int8_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : select_config<256, 14>
-{};
-
-// Based on key_type = int8_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 1))>> : select_config<192, 17>
-{};
-
-// Based on key_type = double, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<384, 4>
-{};
-
-// Based on key_type = double, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<512, 7>
-{};
-
-// Based on key_type = double, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<512, 7>
-{};
-
-// Based on key_type = double, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<512, 7>
-{};
-
-// Based on key_type = double, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : select_config<512, 7>
-{};
-
-// Based on key_type = float, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<384, 4>
-{};
-
-// Based on key_type = float, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<512, 7>
-{};
-
-// Based on key_type = float, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<512, 15>
-{};
-
-// Based on key_type = float, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<512, 14>
-{};
-
-// Based on key_type = float, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : select_config<512, 15>
-{};
-
-// Based on key_type = rocprim::half, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : select_config<384, 4>
-{};
-
-// Based on key_type = rocprim::half, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : select_config<512, 7>
-{};
-
-// Based on key_type = rocprim::half, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : select_config<512, 14>
-{};
-
-// Based on key_type = rocprim::half, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : select_config<512, 22>
-{};
-
-// Based on key_type = rocprim::half, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(value_type) <= 1))>> : select_config<512, 24>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<384, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<384, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<384, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<384, 4>
-{};
-
-// Based on key_type = rocprim::int128_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
-                      && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1))>>
-    : select_config<384, 4>
-{};
-
-// Based on key_type = int64_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<384, 4>
-{};
-
-// Based on key_type = int64_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<512, 7>
-{};
-
-// Based on key_type = int64_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<512, 7>
-{};
-
-// Based on key_type = int64_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<512, 7>
-{};
-
-// Based on key_type = int64_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : select_config<512, 7>
-{};
-
-// Based on key_type = int, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<384, 4>
-{};
-
-// Based on key_type = int, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<512, 7>
-{};
-
-// Based on key_type = int, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<512, 15>
-{};
-
-// Based on key_type = int, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<512, 14>
-{};
-
-// Based on key_type = int, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
-                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : select_config<512, 15>
-{};
-
-// Based on key_type = short, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
-                      && (sizeof(value_type) > 8))>> : select_config<384, 4>
-{};
-
-// Based on key_type = short, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
-                      && (sizeof(value_type) > 4))>> : select_config<512, 7>
-{};
-
-// Based on key_type = short, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
-                      && (sizeof(value_type) > 2))>> : select_config<512, 14>
-{};
-
-// Based on key_type = short, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
-                      && (sizeof(value_type) > 1))>> : select_config<512, 22>
-{};
-
-// Based on key_type = short, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1))>>
-    : select_config<512, 24>
-{};
-
-// Based on key_type = int8_t, value_type = rocprim::int128_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : select_config<384, 4>
-{};
-
-// Based on key_type = int8_t, value_type = int64_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : select_config<512, 7>
-{};
-
-// Based on key_type = int8_t, value_type = int
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : select_config<512, 15>
-{};
-
-// Based on key_type = int8_t, value_type = short
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : select_config<512, 24>
-{};
-
-// Based on key_type = int8_t, value_type = int8_t
-template<class key_type, class value_type>
-struct default_select_unique_by_key_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    key_type,
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                      && (sizeof(value_type) <= 1))>> : select_config<512, 24>
-{};
+template<class Target, class key_type, class value_type>
+constexpr auto select_unique_by_key_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>>::value,
+    partition_config_params>
+{
+    // Based on key_type = double, value_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {256, 4}
+        };
+    }
+    // Based on key_type = double, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = double, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 4}
+        };
+    }
+    // Based on key_type = double, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = double, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {512, 6}
+        };
+    }
+    // Based on key_type = float, value_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {256, 4}
+        };
+    }
+    // Based on key_type = float, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 4}
+        };
+    }
+    // Based on key_type = float, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = float, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = float, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {256, 4}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {384, 10}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {384, 14}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {256, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {256, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {256, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {256, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {256, 4}
+        };
+    }
+    // Based on key_type = int64_t, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {256, 4}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 4}
+        };
+    }
+    // Based on key_type = int64_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {512, 6}
+        };
+    }
+    // Based on key_type = int, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {256, 4}
+        };
+    }
+    // Based on key_type = int, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 4}
+        };
+    }
+    // Based on key_type = int, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = int, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = int, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = short, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {256, 4}
+        };
+    }
+    // Based on key_type = short, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 6}
+        };
+    }
+    // Based on key_type = short, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = short, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {384, 10}
+        };
+    }
+    // Based on key_type = short, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {384, 14}
+        };
+    }
+    // Based on key_type = int8_t, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {256, 4}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 6}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = int8_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {384, 14}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {384, 12}
+        };
+    }
+    // Default case if none of the conditions match
+    return partition_config_params_base<key_type>();
+}
+
+template<class Target, class key_type, class value_type>
+constexpr auto select_unique_by_key_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>>::value,
+    partition_config_params>
+{
+    // Based on key_type = double, value_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {512, 4}
+        };
+    }
+    // Based on key_type = double, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = double, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = double, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {384, 8}
+        };
+    }
+    // Based on key_type = double, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {128, 7}
+        };
+    }
+    // Based on key_type = float, value_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {512, 4}
+        };
+    }
+    // Based on key_type = float, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = float, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {384, 8}
+        };
+    }
+    // Based on key_type = float, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {128, 10}
+        };
+    }
+    // Based on key_type = float, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {128, 12}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 16}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {512, 16}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {192, 16}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {512, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {512, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {512, 4}
+        };
+    }
+    // Based on key_type = int64_t, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {512, 4}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = int64_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {128, 8}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {128, 7}
+        };
+    }
+    // Based on key_type = int, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {512, 4}
+        };
+    }
+    // Based on key_type = int, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = int, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {384, 8}
+        };
+    }
+    // Based on key_type = int, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {128, 12}
+        };
+    }
+    // Based on key_type = int, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {128, 12}
+        };
+    }
+    // Based on key_type = short, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = short, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 8}
+        };
+    }
+    // Based on key_type = short, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {128, 11}
+        };
+    }
+    // Based on key_type = short, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {128, 12}
+        };
+    }
+    // Based on key_type = short, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {512, 20}
+        };
+    }
+    // Based on key_type = int8_t, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {384, 8}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {128, 13}
+        };
+    }
+    // Based on key_type = int8_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {128, 22}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {384, 20}
+        };
+    }
+    // Default case if none of the conditions match
+    return partition_config_params_base<key_type>();
+}
+
+template<class Target, class key_type, class value_type>
+constexpr auto select_unique_by_key_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna4, target_arch::gfx1200, gpu::rx9060, rep::amdgcn>>::value,
+    partition_config_params>
+{
+    // Based on key_type = double, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {384, 8}
+        };
+    }
+    // Based on key_type = double, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {384, 6}
+        };
+    }
+    // Based on key_type = double, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {384, 6}
+        };
+    }
+    // Based on key_type = double, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {384, 6}
+        };
+    }
+    // Based on key_type = float, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {384, 4}
+        };
+    }
+    // Based on key_type = float, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {384, 7}
+        };
+    }
+    // Based on key_type = float, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {384, 9}
+        };
+    }
+    // Based on key_type = float, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {384, 12}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {384, 8}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 16}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {512, 14}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {512, 14}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {384, 8}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {384, 6}
+        };
+    }
+    // Based on key_type = int64_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {384, 6}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {384, 8}
+        };
+    }
+    // Based on key_type = int, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {384, 4}
+        };
+    }
+    // Based on key_type = int, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {384, 7}
+        };
+    }
+    // Based on key_type = int, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {384, 9}
+        };
+    }
+    // Based on key_type = int, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {384, 12}
+        };
+    }
+    // Based on key_type = short, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {384, 6}
+        };
+    }
+    // Based on key_type = short, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 16}
+        };
+    }
+    // Based on key_type = short, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {512, 24}
+        };
+    }
+    // Based on key_type = short, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {512, 14}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {256, 8}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 16}
+        };
+    }
+    // Based on key_type = int8_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {512, 32}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {384, 16}
+        };
+    }
+    // Default case if none of the conditions match
+    return partition_config_params_base<key_type>();
+}
+
+template<class Target, class key_type, class value_type>
+constexpr auto select_unique_by_key_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>::value,
+    partition_config_params>
+{
+    // Based on key_type = double, value_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = double, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {256, 5}
+        };
+    }
+    // Based on key_type = double, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {256, 6}
+        };
+    }
+    // Based on key_type = double, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {192, 7}
+        };
+    }
+    // Based on key_type = double, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {192, 8}
+        };
+    }
+    // Based on key_type = float, value_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = float, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {256, 6}
+        };
+    }
+    // Based on key_type = float, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {256, 13}
+        };
+    }
+    // Based on key_type = float, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {192, 14}
+        };
+    }
+    // Based on key_type = float, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {192, 16}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {256, 6}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {256, 12}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {192, 14}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {256, 16}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {256, 3}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = int64_t, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {192, 8}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {256, 6}
+        };
+    }
+    // Based on key_type = int64_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {192, 7}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {192, 8}
+        };
+    }
+    // Based on key_type = int, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = int, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {256, 6}
+        };
+    }
+    // Based on key_type = int, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {256, 13}
+        };
+    }
+    // Based on key_type = int, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {192, 14}
+        };
+    }
+    // Based on key_type = int, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {192, 16}
+        };
+    }
+    // Based on key_type = short, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = short, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {256, 6}
+        };
+    }
+    // Based on key_type = short, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {256, 12}
+        };
+    }
+    // Based on key_type = short, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {256, 14}
+        };
+    }
+    // Based on key_type = short, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {192, 16}
+        };
+    }
+    // Based on key_type = int8_t, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {192, 7}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {192, 14}
+        };
+    }
+    // Based on key_type = int8_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {256, 14}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {192, 17}
+        };
+    }
+    // Default case if none of the conditions match
+    return partition_config_params_base<key_type>();
+}
+
+template<class Target, class key_type, class value_type>
+constexpr auto select_unique_by_key_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>>::value,
+    partition_config_params>
+{
+    // Based on key_type = double, value_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = double, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {128, 5}
+        };
+    }
+    // Based on key_type = double, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {128, 6}
+        };
+    }
+    // Based on key_type = double, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {128, 6}
+        };
+    }
+    // Based on key_type = double, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {192, 8}
+        };
+    }
+    // Based on key_type = float, value_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = float, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {128, 6}
+        };
+    }
+    // Based on key_type = float, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {256, 13}
+        };
+    }
+    // Based on key_type = float, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {256, 14}
+        };
+    }
+    // Based on key_type = float, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {256, 16}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {256, 6}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {256, 12}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {256, 14}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {256, 16}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {256, 3}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = int64_t, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {128, 5}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {128, 6}
+        };
+    }
+    // Based on key_type = int64_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {192, 7}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {192, 8}
+        };
+    }
+    // Based on key_type = int, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = int, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {128, 6}
+        };
+    }
+    // Based on key_type = int, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {256, 13}
+        };
+    }
+    // Based on key_type = int, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {256, 14}
+        };
+    }
+    // Based on key_type = int, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {192, 16}
+        };
+    }
+    // Based on key_type = short, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = short, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {256, 6}
+        };
+    }
+    // Based on key_type = short, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {256, 12}
+        };
+    }
+    // Based on key_type = short, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {256, 14}
+        };
+    }
+    // Based on key_type = short, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {256, 14}
+        };
+    }
+    // Based on key_type = int8_t, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {192, 7}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {256, 13}
+        };
+    }
+    // Based on key_type = int8_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {256, 14}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {192, 17}
+        };
+    }
+    // Default case if none of the conditions match
+    return partition_config_params_base<key_type>();
+}
+
+template<class Target, class key_type, class value_type>
+constexpr auto select_unique_by_key_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>>::value,
+    partition_config_params>
+{
+    // Based on key_type = double, value_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = double, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {128, 4}
+        };
+    }
+    // Based on key_type = double, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = double, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {256, 4}
+        };
+    }
+    // Based on key_type = double, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {256, 5}
+        };
+    }
+    // Based on key_type = float, value_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = float, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {192, 5}
+        };
+    }
+    // Based on key_type = float, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {192, 7}
+        };
+    }
+    // Based on key_type = float, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {192, 10}
+        };
+    }
+    // Based on key_type = float, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {192, 9}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {192, 5}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {192, 10}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {256, 24}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {256, 24}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {256, 3}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {128, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = int64_t, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {128, 4}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = int64_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {256, 4}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {256, 5}
+        };
+    }
+    // Based on key_type = int, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = int, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {192, 5}
+        };
+    }
+    // Based on key_type = int, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {192, 7}
+        };
+    }
+    // Based on key_type = int, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {192, 10}
+        };
+    }
+    // Based on key_type = int, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {192, 9}
+        };
+    }
+    // Based on key_type = short, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = short, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {192, 5}
+        };
+    }
+    // Based on key_type = short, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {192, 10}
+        };
+    }
+    // Based on key_type = short, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {256, 24}
+        };
+    }
+    // Based on key_type = short, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {256, 24}
+        };
+    }
+    // Based on key_type = int8_t, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {192, 4}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {256, 6}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {192, 10}
+        };
+    }
+    // Based on key_type = int8_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {256, 28}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {192, 28}
+        };
+    }
+    // Default case if none of the conditions match
+    return partition_config_params_base<key_type>();
+}
+
+template<class Target, class key_type, class value_type>
+constexpr auto select_unique_by_key_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>>::value,
+    partition_config_params>
+{
+    // Based on key_type = double, value_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {384, 4}
+        };
+    }
+    // Based on key_type = double, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 7}
+        };
+    }
+    // Based on key_type = double, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 7}
+        };
+    }
+    // Based on key_type = double, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {512, 7}
+        };
+    }
+    // Based on key_type = double, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {512, 7}
+        };
+    }
+    // Based on key_type = float, value_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {384, 4}
+        };
+    }
+    // Based on key_type = float, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 7}
+        };
+    }
+    // Based on key_type = float, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 15}
+        };
+    }
+    // Based on key_type = float, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {512, 14}
+        };
+    }
+    // Based on key_type = float, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {512, 15}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = rocprim::int128_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {384, 4}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int64_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 7}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 14}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = short
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {512, 22}
+        };
+    }
+    // Based on key_type = rocprim::half, value_type = int8_t
+    if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {512, 24}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {384, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {384, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {384, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {384, 4}
+        };
+    }
+    // Based on key_type = rocprim::int128_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 16)
+                  && (sizeof(key_type) > 8) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {384, 4}
+        };
+    }
+    // Based on key_type = int64_t, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {384, 4}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 7}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 7}
+        };
+    }
+    // Based on key_type = int64_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {512, 7}
+        };
+    }
+    // Based on key_type = int64_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                  && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {512, 7}
+        };
+    }
+    // Based on key_type = int, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {384, 4}
+        };
+    }
+    // Based on key_type = int, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 7}
+        };
+    }
+    // Based on key_type = int, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 15}
+        };
+    }
+    // Based on key_type = int, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {512, 14}
+        };
+    }
+    // Based on key_type = int, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                  && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {512, 15}
+        };
+    }
+    // Based on key_type = short, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 16)
+                  && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {384, 4}
+        };
+    }
+    // Based on key_type = short, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
+                  && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 7}
+        };
+    }
+    // Based on key_type = short, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
+                  && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 14}
+        };
+    }
+    // Based on key_type = short, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
+                  && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {512, 22}
+        };
+    }
+    // Based on key_type = short, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                  && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {512, 24}
+        };
+    }
+    // Based on key_type = int8_t, value_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8)))
+    {
+        return partition_config_params{
+            {384, 4}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
+    {
+        return partition_config_params{
+            {512, 7}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)))
+    {
+        return partition_config_params{
+            {512, 15}
+        };
+    }
+    // Based on key_type = int8_t, value_type = short
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1)))
+    {
+        return partition_config_params{
+            {512, 24}
+        };
+    }
+    // Based on key_type = int8_t, value_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                  && (sizeof(value_type) <= 1)))
+    {
+        return partition_config_params{
+            {512, 24}
+        };
+    }
+    // Default case if none of the conditions match
+    return partition_config_params_base<key_type>();
+}
+
+template<class Target, class key_type, class value_type>
+constexpr auto select_unique_by_key_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>::value,
+    partition_config_params>
+{
+    return select_unique_by_key_config_picker<
+        comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
+        key_type,
+        value_type>();
+}
+
+// All the existing configs should be auto generated
+using select_unique_by_key_targets
+    = comp_targets<comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>,
+                   comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>,
+                   comp_target<gen::rdna4, target_arch::gfx1200, gpu::rx9060, rep::amdgcn>,
+                   comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>,
+                   comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
+                   comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>,
+                   comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>,
+                   comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
 
 } // end namespace detail
 

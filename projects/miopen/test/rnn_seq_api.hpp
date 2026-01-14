@@ -31,7 +31,6 @@
 #include "get_handle.hpp"
 
 #include "random.hpp"
-#include <random>
 #include <cstdlib>
 #include <iostream>
 #include <algorithm>
@@ -1299,24 +1298,60 @@ struct verify_inference_rnn : verify_rnn_api_base<T>
 
     using VerificationObj = std::tuple<std::vector<T>, std::vector<T>, std::vector<T>>;
 
-    VerificationObj
-    result_tuple(std::vector<T>&& fwd_y, std::vector<T>&& fwd_hy, std::vector<T>&& fwd_cy)
+    verify_inference_rnn(miopen::RNNDescriptor& pRD,
+                         seqTensor<T>& x,
+                         seqTensor<T>& y,
+                         seqTensor<T>& dy,
+                         tensor<T>& hx,
+                         tensor<T>& cx,
+                         tensor<T>& dhy,
+                         tensor<T>& dcy,
+                         std::vector<T>& w,
+                         const bool pnohx = false,
+                         const bool pnocx = false,
+                         const bool pnohy = false,
+                         const bool pnocy = false,
+                         T* paddingSymbol = nullptr)
+        : verify_rnn_api_base<T>(pRD, x, y, hx, cx, w, pnohx, pnocx, pnohy, pnocy, paddingSymbol),
+          dyHiddenState(dhy),
+          dyCellState(dcy),
+          dOutput(dy)
     {
-        return std::make_tuple(fwd_y, fwd_hy, fwd_cy);
+    }
+
+    VerificationObj result_tuple(const std::vector<T> fwd_y,
+                                 const std::vector<T> fwd_hy,
+                                 const std::vector<T> fwd_cy) const
+    {
+        return std::make_tuple(std::move(fwd_y), std::move(fwd_hy), std::move(fwd_cy));
+    }
+
+    VerificationObj cpu() const
+    {
+        cpu_rnn_universal_ref<T> refMethod{rnnDesc, input.desc, xHiddenState.desc};
+
+        std::vector<T> reserve_space(refMethod.getReserveSpaceSize());
+
+        auto [fwd_y, fwd_hy, fwd_cy] = refMethod.fwd(input.desc,
+                                                     output.desc,
+                                                     input.data,
+                                                     xHiddenState.data,
+                                                     xCellState.data,
+                                                     weights,
+                                                     reserve_space,
+                                                     nohx,
+                                                     nocx,
+                                                     nohy,
+                                                     nocy);
+        return result_tuple(fwd_y, fwd_hy, fwd_cy);
     }
 
     VerificationObj gpu() const
     {
         auto&& handle = get_handle();
 
-        size_t workSpaceByteSize = 0;
-
-        miopenGetRNNTempSpaceSizes(&handle,
-                                   &rnnDesc,
-                                   &input.desc,
-                                   miopenRNNFWDMode_t::miopenRNNInference,
-                                   &workSpaceByteSize,
-                                   nullptr);
+        size_t workSpaceByteSize =
+            rnnDesc.GetMaxWorkspaceSize(handle, input.desc, miopenRNNFWDMode_t::miopenRNNInference);
 
         auto workSpace_dev = handle.Create(workSpaceByteSize);
 
@@ -1330,29 +1365,28 @@ struct verify_inference_rnn : verify_rnn_api_base<T>
 
         auto weights_dev = handle.Write(weights);
 
-        miopenRNNForward(&handle,
-                         &rnnDesc,
-                         miopenRNNFWDMode_t::miopenRNNInference,
-                         &input.desc,
-                         x_dev.get(),
-                         &xHiddenState.desc,
-                         hx_dev.get(),
-                         hy_dev.get(),
-                         &xCellState.desc,
-                         cx_dev.get(),
-                         cy_dev.get(),
-                         &output.desc,
-                         y_dev.get(),
-                         weights_dev.get(),
-                         weights.size() * sizeof(T),
-                         workSpace_dev.get(),
-                         workSpaceByteSize,
-                         nullptr,
-                         0);
+        rnnDesc.RNNForward(handle,
+                           miopenRNNFWDMode_t::miopenRNNInference,
+                           input.desc,
+                           x_dev.get(),
+                           xHiddenState.desc,
+                           hx_dev.get(),
+                           hy_dev.get(),
+                           xCellState.desc,
+                           cx_dev.get(),
+                           cy_dev.get(),
+                           output.desc,
+                           y_dev.get(),
+                           weights_dev.get(),
+                           weights.size() * sizeof(T),
+                           workSpace_dev.get(),
+                           workSpaceByteSize,
+                           nullptr,
+                           0);
 
         const auto fwd_y  = handle.Read<T>(y_dev, output.GetSize());
-        const auto fwd_hy = readTFromGPUOrEmpty<T>(handle, hy_dev, xHiddenState.GetSize(), nohy);
-        const auto fwd_cy = readTFromGPUOrEmpty<T>(handle, cy_dev, xCellState.GetSize(), nocy);
+        const auto fwd_hy = readTFromGPUOrEmpty(handle, hy_dev, xHiddenState, nohy);
+        const auto fwd_cy = readTFromGPUOrEmpty(handle, cy_dev, xCellState, nocy);
 
         return result_tuple(fwd_y, fwd_hy, fwd_cy);
     }
@@ -1414,6 +1448,7 @@ struct rnn_seq_api_test_driver : test_driver
     int inVecLen{};
     int hiddenSize{};
     int numLayers{};
+    int fwdMode{};
     int inputMode{};
     int biasMode{};
     int dirMode{};
@@ -1433,6 +1468,8 @@ struct rnn_seq_api_test_driver : test_driver
 
     bool skip_backward_data{false};
     bool skip_backward_weights{false};
+
+    bool inference_dropout_issue_notified{false};
 
     rnn_seq_api_test_driver() {}
 
@@ -1565,7 +1602,7 @@ struct rnn_seq_api_test_driver : test_driver
             {
 
                 int padding_val = 0;
-                printf("sampl_lens size == %zu is shmaller than time batch_size == %d, padding the "
+                printf("sampl_lens size == %zu is smaller than time batch_size == %d, padding the "
                        "rest "
                        "of data with %d\n",
                        seqLenArray.size(),
@@ -1690,20 +1727,36 @@ struct rnn_seq_api_test_driver : test_driver
             tolerance = 80;
         }
 
-        auto fwdTrain = verify(verify_train_rnn<T>{rnnDesc,
-                                                   input,
-                                                   output,
-                                                   dy,
-                                                   hx,
-                                                   cx,
-                                                   dhy,
-                                                   dcy,
-                                                   weights,
-                                                   nohx,
-                                                   nocx,
-                                                   nohy,
-                                                   nocy,
-                                                   skip_backward_data,
-                                                   skip_backward_weights});
+        if(fwdMode == miopenRNNFWDMode_t::miopenRNNTraining)
+        {
+            verify(verify_train_rnn<T>{rnnDesc,
+                                       input,
+                                       output,
+                                       dy,
+                                       hx,
+                                       cx,
+                                       dhy,
+                                       dcy,
+                                       weights,
+                                       nohx,
+                                       nocx,
+                                       nohy,
+                                       nocy,
+                                       skip_backward_data,
+                                       skip_backward_weights});
+        }
+        else if(useDropout == 0)
+        {
+            verify(verify_inference_rnn<T>{
+                rnnDesc, input, output, dy, hx, cx, dhy, dcy, weights, nohx, nocx, nohy, nocy});
+        }
+        else if(!inference_dropout_issue_notified)
+        {
+            std::cerr << "Iteration " << this->iteration
+                      << " skipped due to issues with combining inference and dropout, future "
+                         "iterations like this will also be skipped"
+                      << std::endl;
+            inference_dropout_issue_notified = true;
+        }
     }
 };

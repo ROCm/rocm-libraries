@@ -13,6 +13,8 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
               FLATBUFFERS_VERSION_REVISION == 23,
              "Non-compatible flatbuffers version included");
 
+#include "knob_value_generated.h"
+
 namespace hipdnn_data_sdk {
 namespace data_objects {
 
@@ -26,13 +28,19 @@ bool operator!=(const EngineDetailsT &lhs, const EngineDetailsT &rhs);
 struct EngineDetailsT : public ::flatbuffers::NativeTable {
   typedef EngineDetails TableType;
   int64_t engine_id = 0;
+  std::vector<std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT>> knobs{};
+  EngineDetailsT() = default;
+  EngineDetailsT(const EngineDetailsT &o);
+  EngineDetailsT(EngineDetailsT&&) FLATBUFFERS_NOEXCEPT = default;
+  EngineDetailsT &operator=(EngineDetailsT o) FLATBUFFERS_NOEXCEPT;
 };
 
 struct EngineDetails FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef EngineDetailsT NativeTableType;
   typedef EngineDetailsBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
-    VT_ENGINE_ID = 4
+    VT_ENGINE_ID = 4,
+    VT_KNOBS = 6
   };
   int64_t engine_id() const {
     return GetField<int64_t>(VT_ENGINE_ID, 0);
@@ -40,9 +48,18 @@ struct EngineDetails FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   bool mutate_engine_id(int64_t _engine_id = 0) {
     return SetField<int64_t>(VT_ENGINE_ID, _engine_id, 0);
   }
+  const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> *knobs() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> *>(VT_KNOBS);
+  }
+  ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> *mutable_knobs() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> *>(VT_KNOBS);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int64_t>(verifier, VT_ENGINE_ID, 8) &&
+           VerifyOffset(verifier, VT_KNOBS) &&
+           verifier.VerifyVector(knobs()) &&
+           verifier.VerifyVectorOfTables(knobs()) &&
            verifier.EndTable();
   }
   EngineDetailsT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -57,6 +74,9 @@ struct EngineDetailsBuilder {
   void add_engine_id(int64_t engine_id) {
     fbb_.AddElement<int64_t>(EngineDetails::VT_ENGINE_ID, engine_id, 0);
   }
+  void add_knobs(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>>> knobs) {
+    fbb_.AddOffset(EngineDetails::VT_KNOBS, knobs);
+  }
   explicit EngineDetailsBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -70,10 +90,23 @@ struct EngineDetailsBuilder {
 
 inline ::flatbuffers::Offset<EngineDetails> CreateEngineDetails(
     ::flatbuffers::FlatBufferBuilder &_fbb,
-    int64_t engine_id = 0) {
+    int64_t engine_id = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>>> knobs = 0) {
   EngineDetailsBuilder builder_(_fbb);
   builder_.add_engine_id(engine_id);
+  builder_.add_knobs(knobs);
   return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<EngineDetails> CreateEngineDetailsDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    int64_t engine_id = 0,
+    const std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> *knobs = nullptr) {
+  auto knobs__ = knobs ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>>(*knobs) : 0;
+  return hipdnn_data_sdk::data_objects::CreateEngineDetails(
+      _fbb,
+      engine_id,
+      knobs__);
 }
 
 ::flatbuffers::Offset<EngineDetails> CreateEngineDetails(::flatbuffers::FlatBufferBuilder &_fbb, const EngineDetailsT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -81,13 +114,26 @@ inline ::flatbuffers::Offset<EngineDetails> CreateEngineDetails(
 
 inline bool operator==(const EngineDetailsT &lhs, const EngineDetailsT &rhs) {
   return
-      (lhs.engine_id == rhs.engine_id);
+      (lhs.engine_id == rhs.engine_id) &&
+      (lhs.knobs.size() == rhs.knobs.size() && std::equal(lhs.knobs.cbegin(), lhs.knobs.cend(), rhs.knobs.cbegin(), [](std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT> const &a, std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT> const &b) { return (a == b) || (a && b && *a == *b); }));
 }
 
 inline bool operator!=(const EngineDetailsT &lhs, const EngineDetailsT &rhs) {
     return !(lhs == rhs);
 }
 
+
+inline EngineDetailsT::EngineDetailsT(const EngineDetailsT &o)
+      : engine_id(o.engine_id) {
+  knobs.reserve(o.knobs.size());
+  for (const auto &knobs_ : o.knobs) { knobs.emplace_back((knobs_) ? new hipdnn_data_sdk::data_objects::KnobT(*knobs_) : nullptr); }
+}
+
+inline EngineDetailsT &EngineDetailsT::operator=(EngineDetailsT o) FLATBUFFERS_NOEXCEPT {
+  std::swap(engine_id, o.engine_id);
+  std::swap(knobs, o.knobs);
+  return *this;
+}
 
 inline EngineDetailsT *EngineDetails::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
   auto _o = std::unique_ptr<EngineDetailsT>(new EngineDetailsT());
@@ -99,6 +145,7 @@ inline void EngineDetails::UnPackTo(EngineDetailsT *_o, const ::flatbuffers::res
   (void)_o;
   (void)_resolver;
   { auto _e = engine_id(); _o->engine_id = _e; }
+  { auto _e = knobs(); if (_e) { _o->knobs.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->knobs[_i]) { _e->Get(_i)->UnPackTo(_o->knobs[_i].get(), _resolver); } else { _o->knobs[_i] = std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->knobs.resize(0); } }
 }
 
 inline ::flatbuffers::Offset<EngineDetails> EngineDetails::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const EngineDetailsT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -110,9 +157,11 @@ inline ::flatbuffers::Offset<EngineDetails> CreateEngineDetails(::flatbuffers::F
   (void)_o;
   struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const EngineDetailsT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
   auto _engine_id = _o->engine_id;
+  auto _knobs = _o->knobs.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> (_o->knobs.size(), [](size_t i, _VectorArgs *__va) { return CreateKnob(*__va->__fbb, __va->__o->knobs[i].get(), __va->__rehasher); }, &_va ) : 0;
   return hipdnn_data_sdk::data_objects::CreateEngineDetails(
       _fbb,
-      _engine_id);
+      _engine_id,
+      _knobs);
 }
 
 inline const hipdnn_data_sdk::data_objects::EngineDetails *GetEngineDetails(const void *buf) {

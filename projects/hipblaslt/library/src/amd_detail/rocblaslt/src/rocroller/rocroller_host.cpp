@@ -28,11 +28,11 @@
  * The implementation of the rocblaslt<->rocRoller interface layer. *
  *********************************************************/
 
+#include "rocroller_host.hpp"
 #include "gemm.hpp"
 #include "kernel_type.hpp"
-#include "rocroller_host.hpp"
-#include "runtime_args_selection.hpp"
 #include "parameter_selection.hpp"
+#include "runtime_args_selection.hpp"
 #include "solution_cache.hpp"
 #include "solution_selection.hpp"
 
@@ -85,8 +85,10 @@ inline std::string scaleModeOption(RocblasltContractionProblem::ScalingFormat sc
         return "1";
     case RocblasltContractionProblem::ScalingFormat::Vector:
         return "2";
-    case RocblasltContractionProblem::ScalingFormat::Block:
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         return "3";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+        return "1001";
     default:
         return "";
     }
@@ -379,6 +381,11 @@ rocRoller::DataType rocblaslt_compute_type_to_rocRoller_type(rocblaslt_compute_t
     }
 }
 
+rocRoller::DataType getScaleDataType(RocblasltContractionProblem::ScalingFormat s)
+{
+    return rocRoller::DataType::E8M0;
+}
+
 /**
  * @brief Generate a KernelType from a RocblasltContractionProblem
  *
@@ -390,27 +397,34 @@ KernelType genKernelType(const RocblasltContractionProblem& prob)
 {
     KernelType kernelType;
 
-    kernelType.typeA      = hipDataType_to_rocRoller_type(prob.a_type);
-    kernelType.typeB      = hipDataType_to_rocRoller_type(prob.b_type);
-    kernelType.typeC      = hipDataType_to_rocRoller_type(prob.c_type);
-    kernelType.typeD      = hipDataType_to_rocRoller_type(prob.d_type);
-    kernelType.typeAcc    = rocblaslt_compute_type_to_rocRoller_type(prob.compute_type);
-    kernelType.transA     = prob.trans_a == HIPBLAS_OP_T;
-    kernelType.transB     = prob.trans_b == HIPBLAS_OP_T;
-    kernelType.scaleTypeA.mode = prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block
-                                ? rocRoller::Operations::ScaleMode::Separate
-                                : rocRoller::Operations::ScaleMode::None;
-    kernelType.scaleTypeB.mode = prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block
-                                ? rocRoller::Operations::ScaleMode::Separate
-                                : rocRoller::Operations::ScaleMode::None;
-    kernelType.scaleTypeA.blockRowSize = prob.scaleABlockRowSize;
-    kernelType.scaleTypeA.blockColSize = prob.scaleABlockColSize;
-    kernelType.scaleTypeB.blockRowSize = prob.scaleBBlockRowSize;
-    kernelType.scaleTypeB.blockColSize = prob.scaleBBlockColSize;
+    kernelType.typeA   = hipDataType_to_rocRoller_type(prob.a_type);
+    kernelType.typeB   = hipDataType_to_rocRoller_type(prob.b_type);
+    kernelType.typeC   = hipDataType_to_rocRoller_type(prob.c_type);
+    kernelType.typeD   = hipDataType_to_rocRoller_type(prob.d_type);
+    kernelType.typeAcc = rocblaslt_compute_type_to_rocRoller_type(prob.compute_type);
+    kernelType.transA  = prob.trans_a == HIPBLAS_OP_T;
+    kernelType.transB  = prob.trans_b == HIPBLAS_OP_T;
+
+    if(isBlockScaling(prob.scaleAType))
+    {
+        kernelType.scaleTypeA.mode           = rocRoller::Operations::ScaleMode::Separate;
+        kernelType.scaleTypeA.blockRowSize   = blockSize(prob.scaleAType);
+        kernelType.scaleTypeA.blockColSize   = 1;
+        kernelType.scaleTypeA.type           = getScaleDataType(prob.scaleAType);
+        kernelType.scaleTypeA.preSwizzleTile = preSwizzleSizeForScale(prob.scaleAType);
+    }
+
+    if(isBlockScaling(prob.scaleBType))
+    {
+        kernelType.scaleTypeB.mode           = rocRoller::Operations::ScaleMode::Separate;
+        kernelType.scaleTypeB.blockRowSize   = 1;
+        kernelType.scaleTypeB.blockColSize   = blockSize(prob.scaleBType);
+        kernelType.scaleTypeB.type           = getScaleDataType(prob.scaleBType);
+        kernelType.scaleTypeB.preSwizzleTile = preSwizzleSizeForScale(prob.scaleBType);
+    }
 
     return kernelType;
 }
-
 
 /**
  * Generate a kernel from a given SolutionIndexParameters value.
@@ -509,12 +523,13 @@ rocblaslt_status
             break;
 
         index = parametersToIndex(solutionIndexParameter);
-        auto existingSolution = rocroller_handle->cache.getKernel(kernelType, solutionIndexParameter);
+        auto existingSolution
+            = rocroller_handle->cache.getKernel(kernelType, solutionIndexParameter);
         std::shared_ptr<GemmKernel> kernel;
         // If kernel doesn't already exist, generate it
         if(!existingSolution)
         {
-            auto                        status = genKernelFromSolutionIndexParameters(
+            auto status = genKernelFromSolutionIndexParameters(
                 rocroller_handle, kernelType, solutionIndexParameter, index, kernel);
             if(status != rocblaslt_status_success)
                 continue;
@@ -556,8 +571,8 @@ rocblaslt_status
 {
     heuristicResults.resize(maxNumberSolutions());
     int  returnAlgoCount;
-    auto result
-        = getRocRollerBestSolutions(handle, prob, -1, heuristicResults.data(), maxWorkSpaceBytes, &returnAlgoCount);
+    auto result = getRocRollerBestSolutions(
+        handle, prob, -1, heuristicResults.data(), maxWorkSpaceBytes, &returnAlgoCount);
     heuristicResults.resize(returnAlgoCount);
     return result;
 }
@@ -582,7 +597,6 @@ void getRocRollerSolutionsFromIndex(
     result.workspaceSize            = 0;
     heuristicResults.push_back(result);
 }
-
 
 /**
  * @brief Get a kernel based on the provided problem and algo.
@@ -669,8 +683,8 @@ rocblaslt_status runRocRollerContractionProblem(rocblaslt_handle                
     if(algo == nullptr)
     {
         int  returnAlgoCount;
-        auto status
-            = getRocRollerBestSolutions(handle, prob, 1, &heuristicResult, prob.workspaceSize, &returnAlgoCount);
+        auto status = getRocRollerBestSolutions(
+            handle, prob, 1, &heuristicResult, prob.workspaceSize, &returnAlgoCount);
         if(status != rocblaslt_status_success)
             return status;
         if(returnAlgoCount == 0)

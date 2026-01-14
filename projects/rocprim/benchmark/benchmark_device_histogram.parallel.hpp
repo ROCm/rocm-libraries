@@ -195,6 +195,21 @@ struct device_histogram_benchmark : public benchmark_utils::autotune_interface
             + ",cfg:" + config_name<Config>() + "}");
     }
 
+    template<class... Args>
+    void clear_other_caches()
+    {
+        (
+            [](auto u)
+            {
+                using U = decltype(u);
+                if(!std::is_same_v<T, U>)
+                {
+                    input_cache<U>::instance().clear();
+                }
+            }(Args{}),
+            ...);
+    }
+
     void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
@@ -202,7 +217,7 @@ struct device_histogram_benchmark : public benchmark_utils::autotune_interface
 
         using counter_type = unsigned int;
         using level_type   = typename std::
-            conditional_t<std::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
+            conditional_t<rocprim::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
 
         struct case_data
         {
@@ -219,6 +234,16 @@ struct device_histogram_benchmark : public benchmark_utils::autotune_interface
                     [&]() { return generate<T>(bytes, entropy_reduction, 0, bins); });
             };
         };
+
+        // Clear caches for other types that are either empty or already done.
+        clear_other_caches<rocprim::int128_t,
+                           int64_t,
+                           int,
+                           short,
+                           int8_t,
+                           double,
+                           float,
+                           rocprim::half>();
 
         const std::size_t size = bytes / Channels;
 

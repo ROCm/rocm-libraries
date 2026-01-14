@@ -10,11 +10,12 @@ include "batchnorm_inference_attributes_variance_ext.fbs";
 include "convolution_fwd_attributes.fbs";
 include "convolution_bwd_attributes.fbs";
 include "convolution_wrw_attributes.fbs";
+include "matmul_attributes.fbs";
 include "pointwise_attributes.fbs";
 
 namespace hipdnn_data_sdk.data_objects;
 
-union NodeAttributes {BatchnormInferenceAttributes, PointwiseAttributes, BatchnormBackwardAttributes, BatchnormAttributes, ConvolutionFwdAttributes, ConvolutionBwdAttributes, ConvolutionWrwAttributes, BatchnormInferenceAttributesVarianceExt}
+union NodeAttributes {BatchnormInferenceAttributes, PointwiseAttributes, BatchnormBackwardAttributes, BatchnormAttributes, ConvolutionFwdAttributes, ConvolutionBwdAttributes, ConvolutionWrwAttributes, BatchnormInferenceAttributesVarianceExt, MatmulAttributes}
 
 table Node {
 	name: string;
@@ -31,6 +32,7 @@ table Graph {
 	io_data_type: DataType;
 	tensors: [TensorAttributes];
 	nodes: [Node];
+	preferred_engine_id: long = null;
 }
 
 root_type Graph;

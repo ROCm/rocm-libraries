@@ -23,8 +23,8 @@
 # CMake version according to latest ROCm platform requirements
 cmake_minimum_required( VERSION 3.17 )
 
-# We use C++17 features, this will add compile option: -std=c++17
-set( CMAKE_CXX_STANDARD 17 )
+# We use C++20 features, this will add compile option: -std=c++20
+set( CMAKE_CXX_STANDARD 20 )
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Consider removing this in the future
@@ -36,10 +36,6 @@ else()
   set( CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH
     "Install path prefix, prepended onto install directories" )
 endif()
-
-# Workarounds..
-list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm )
-list( APPEND CMAKE_MODULE_PATH ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip /opt/rocm/hip/cmake )
 
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.
@@ -213,7 +209,6 @@ if( BUILD_CLIENTS_BENCH OR BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS )
   if(CLIENTS_OS STREQUAL "sles")
     set(FFTW_RPM "libfftw3-3")
   elseif(CLIENTS_OS STREQUAL "mariner")
-    set(BOOST_RPM RPM "boost = ${Boost_VERSION_MAJOR}_${Boost_VERSION_MINOR}_${Boost_VERSION_PATCH}")
     set(FFTW_RPM "fftw-libs")
   else()
     set(FFTW_RPM "fftw-libs")

@@ -322,7 +322,7 @@ def fatal(msg, code=1):
 
 def deps_cmd():
     if os.name == "nt":
-        exe = f"python3 rdeps.py"
+        exe = f"python rdeps.py"
         stripped_args = ""
     else:
         exe = f"./install.sh --rmake_invoked -d "
@@ -447,6 +447,8 @@ def config_cmd():
         )
         if args.clients_no_fortran:
             cmake_options.append(f"-DBUILD_FORTRAN_CLIENTS=OFF")
+        if os.name == "nt":
+            cmake_options.append( f"-DCREATE_TEST_APP_LOCAL_DEPLOY=ON")
 
     if args.gpu_architecture == "auto":
         gpu_detect()
