@@ -647,15 +647,21 @@ namespace GEMMTests
             GTEST_SKIP() << "Direct2LDS not yet supported for FP6/BF6" << std::endl;
 
         // TODO: enable the test when not run of registers and fix Direct2LDS for BufferToLDS
+        if(typeAB != DataType::FP4
+           && (mode == rocRoller::StreamKMode::TwoTile
+               || mode == rocRoller::StreamKMode::TwoTileDPFirst)
+           && (loadPathA == SolutionParams::LoadPath::BufferToLDSViaVGPR
+               || loadPathB == SolutionParams::LoadPath::BufferToLDSViaVGPR))
+            GTEST_SKIP() << "Skip TwoTile and TwoTileDPFirst with BufferToLDSViaVGPR -- runs out "
+                            "of registers."
+                         << std::endl;
         if((mode == rocRoller::StreamKMode::TwoTile
             || mode == rocRoller::StreamKMode::TwoTileDPFirst)
-           && (loadPathA == SolutionParams::LoadPath::BufferToLDSViaVGPR
-               || loadPathA == SolutionParams::LoadPath::BufferToLDS
-               || loadPathB == SolutionParams::LoadPath::BufferToLDSViaVGPR
+           && (loadPathA == SolutionParams::LoadPath::BufferToLDS
                || loadPathB == SolutionParams::LoadPath::BufferToLDS))
-            GTEST_SKIP() << "Skip TwoTile and TwoTileDPFirst with BufferToLDSViaVGPR due to run "
-                            "out of registers and need to fix Direct2LDS for BufferToLDS"
-                         << std::endl;
+            GTEST_SKIP()
+                << "Skip TwoTile and TwoTileDPFirst with BufferToLDS -- need to fix Direct2LDS."
+                << std::endl;
 
         AssertFatal(loadPathA == SolutionParams::LoadPath::BufferToLDSViaVGPR
                         || loadPathA == SolutionParams::LoadPath::BufferToLDS,
@@ -681,6 +687,9 @@ namespace GEMMTests
         problem.macN = 128;
         problem.macK = 128;
 
+        problem.workgroupSizeX = 2 * problem.wavefrontSize;
+        problem.workgroupSizeY = 2;
+
         problem.m = problem.macM * 4;
         problem.n = problem.macN * problem.numWGs / 2 + problem.macN * 2;
 
@@ -702,18 +711,20 @@ namespace GEMMTests
         // TODO: remove this condition when SwizzleScale supports non-TN data layout
         if(problem.transA == "T" && problem.transB == "N")
         {
+            problem.loadScalePathA = SolutionParams::LoadPath::BufferToVGPR;
+            problem.loadScalePathB = SolutionParams::LoadPath::BufferToVGPR;
+
             problem.scaleAMode = Operations::ScaleMode::Separate;
             problem.scaleBMode = Operations::ScaleMode::Separate;
 
             problem.scaleTypeA = DataType::E8M0;
             problem.scaleTypeB = DataType::E8M0;
 
-            problem.swizzleScale = true;
-            problem.swizzleM     = 64;
-            problem.swizzleN     = 64;
-            problem.swizzleK     = 4;
-            // TODO: Fix scale prefetch for StreamK
-            //problem.prefetchScale = true;
+            problem.swizzleScale  = true;
+            problem.swizzleM      = 64;
+            problem.swizzleN      = 64;
+            problem.swizzleK      = 8;
+            problem.prefetchScale = true;
 
             problem.scaleBlockSize = m_context->targetArchitecture().GetCapability(
                 GPUCapability::DefaultScaleBlockSize);
