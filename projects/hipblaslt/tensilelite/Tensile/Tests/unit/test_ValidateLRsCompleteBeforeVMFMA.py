@@ -558,7 +558,26 @@ class TestValidateLRsCompleteBeforeVMFMA_ForceUnrollSubIter(CMSValidationTestBas
         return verify_lrs_finished_before_vmfma(sched, kernel_dict, codePathIdx)
 
 
-    def test_bf16(self):
+    def test_bf16_pass(self):
+        assert self.num_vmfma == 16
+
+        optSchedule = {
+            "SYNC": [[3, 15]],
+            "LRA0": [[0, 0]],
+            "LRB0": [[0, 0]],
+            "LRA3": [[7, 7]],
+            "LRB3": [[7, 7]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="For LR0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="For LR3s"),
+        ]
+
+        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+
+    def test_bf16_fail(self):
+        """Same as above, but with the proper SWaitCnt for the LR3s."""
         assert self.num_vmfma == 16
 
         optSchedule = {
@@ -570,10 +589,10 @@ class TestValidateLRsCompleteBeforeVMFMA_ForceUnrollSubIter(CMSValidationTestBas
         }
 
         syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="For LR0s"),
         ]
 
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRA3 at index 7 is not valid. Needed before index 0, but only guaranteed at index 3.")
 
 
 class TestIndexForForceUnrollSubIter:

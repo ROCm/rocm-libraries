@@ -1606,7 +1606,7 @@ def verify_lrs_finished_before_vmfma(schedule_info: 'ScheduleInfo', context: dic
     """
     kernel = context["kernel"]
 
-    relevant_names = ["LRA0", "LRB0", "LRA1", "LRB1", "SYNC"]
+    relevant_names = ["LRA0", "LRB0", "LRA1", "LRB1", "LRA3", "LRB3", "SYNC"]
     timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
 
     set_lr_needed_by_for_VMFMA(timeline, kernel, schedule_info.mfmaReorder)
