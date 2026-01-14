@@ -276,6 +276,15 @@ namespace rocRoller
             auto linearFlat
                 = graph.coordinates.addElement(Linear(simplify(slowSize * fastSize), one));
 
+            AssertFatal(contiguousBytes * 8u % elementBits == 0,
+                        "Padding mismatch: contiguous-bytes is not divisible by elementBits.",
+                        ShowValue(contiguousBytes),
+                        ShowValue(elementBits));
+            AssertFatal(paddingBytes * 8u % elementBits == 0,
+                        "Padding mismatch: padding-bytes is not divisible by elementBits.",
+                        ShowValue(paddingBytes),
+                        ShowValue(elementBits));
+
             auto newFastSize   = literal(contiguousBytes * 8u / elementBits);
             auto newSlowSize   = simplify(slowSize * fastSize / newFastSize);
             auto newSlowStride = simplify(newFastSize + literal(paddingBytes * 8u / elementBits));
