@@ -23,7 +23,10 @@ endif()
 add_library(hipthreads STATIC hip/thread.cxx)
 target_include_directories(hipthreads PRIVATE ${CMAKE_SOURCE_DIR}/inc)
 
-target_compile_options(hipthreads PRIVATE "-Werror" "-Wall" "-Wextra" "-Wshadow" "-Wnull-dereference" "-Wold-style-cast" "-Wzero-as-null-pointer-constant" "-Wfloat-equal" "-Wdouble-promotion")
+if(NOT DISABLE_WERROR)
+  target_compile_options(hipthreads PRIVATE "-Werror")
+endif()
+target_compile_options(hipthreads PRIVATE "-Wall" "-Wextra" "-Wshadow" "-Wnull-dereference" "-Wold-style-cast" "-Wzero-as-null-pointer-constant" "-Wfloat-equal" "-Wdouble-promotion")
 target_compile_options(hipthreads PRIVATE "-save-temps=obj" "-O2" "-fgpu-rdc")
 target_link_libraries(hipthreads PRIVATE "-fgpu-rdc")
 

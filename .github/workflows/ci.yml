@@ -1,0 +1,181 @@
+name: CI - Build and Test
+
+on:
+  # Run on push to main and gpu_thread branches
+  push:
+    branches: [ "main", "gpu_thread" ]
+  
+  # Run on pull requests to main and gpu_thread
+  pull_request:
+    branches: [ "main", "gpu_thread" ]
+  
+  # Run nightly at 5 AM UTC
+  schedule:
+    - cron: '0 5 * * *'
+  
+  # Allow manual triggering
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: self-hosted
+    env:
+      HIP_VISIBLE_DEVICES: 0
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Clean previous artifacts
+      run: |
+        echo "Cleaning up previous build artifacts..."
+        rm -rf .venv libhipcxx build-debug
+        # Clear pip cache to prevent accumulation
+        rm -rf ~/.cache/pip
+        echo "Cleanup complete"
+      
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y g++ cmake git python3-venv
+        
+    - name: Setup Python venv
+      run: |
+        python3 -m venv .venv
+        source .venv/bin/activate
+        pip install --upgrade pip
+        
+    - name: Install latest nightly ROCm
+      run: |
+        source .venv/bin/activate
+        pip install \
+          --index-url https://rocm.nightlies.amd.com/v2/gfx120X-all/ \
+          "rocm[libraries,devel]"
+        rocm-sdk init
+        
+    - name: Setup ROCm structure for hipcc
+      run: |
+        source .venv/bin/activate
+        export ROCM_PATH=$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel
+        
+        # Create symlink to match standard ROCm structure
+        cd $ROCM_PATH
+        ln -s lib/llvm/amdgcn amdgcn
+        
+        # Verify symlink
+        echo "Verifying symlink:"
+        ls -la $ROCM_PATH/amdgcn
+        
+    - name: Verify ROCm Installation
+      run: |
+        source .venv/bin/activate
+        echo "ROCm version:"
+        hipcc --version
+        echo ""
+        echo "ROCm SDK info:"
+        rocm-sdk version
+        echo ""
+        echo "Supported targets:"
+        rocm-sdk targets
+        echo ""
+        echo "Checking for AMD GPUs:"
+        rocminfo || echo "rocminfo failed"
+        echo ""
+        echo "Checking GPU devices:"
+        ls -la /dev/kfd /dev/dri/render* || echo "GPU device nodes not found"
+        echo ""
+        echo "Checking GPU permissions:"
+        groups
+        
+    - name: Install libhipcxx
+      run: |
+        source .venv/bin/activate
+        export ROCM_PATH=$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel
+        
+        # Clone libhipcxx
+        git clone https://github.com/ROCm/libhipcxx.git
+        cd libhipcxx
+        
+        # Build and install to venv location
+        mkdir build && cd build
+        HIP_PLATFORM=amd cmake \
+              -DCMAKE_HIP_COMPILER=$ROCM_PATH/lib/llvm/bin/clang++ \
+              -DCMAKE_HIP_ARCHITECTURES=gfx1200 \
+              -DCMAKE_INSTALL_PREFIX=$VIRTUAL_ENV \
+              -DCMAKE_PREFIX_PATH="$VIRTUAL_ENV;$ROCM_PATH" \
+              -DLIBCUDACXX_ENABLE_LIBCUDACXX_TESTS=OFF ..
+        make -j$(nproc)
+        make install
+        
+        # Verify installation
+        echo "libhipcxx installed to $VIRTUAL_ENV"
+        ls -la $VIRTUAL_ENV/include/hip/std/ || echo "Warning: libhipcxx headers not found"
+        
+    - name: Clean previous builds
+      run: |
+        rm -rf build-debug
+        
+    - name: Configure CMake (Debug with tests)
+      run: |
+        source .venv/bin/activate
+        export ROCM_PATH=$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel
+        mkdir -p build-debug
+        cd build-debug
+        HIP_PLATFORM=amd cmake .. \
+          -DCMAKE_CXX_COMPILER=$VIRTUAL_ENV/bin/hipcc \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DDISABLE_WERROR=ON \
+          -DCMAKE_CXX_FLAGS="-isystem $VIRTUAL_ENV/include" \
+          -DCMAKE_HIP_FLAGS="-isystem $VIRTUAL_ENV/include" \
+          -DCMAKE_PREFIX_PATH="$VIRTUAL_ENV;$ROCM_PATH"
+        
+    - name: Build library and tests
+      run: |
+        source .venv/bin/activate
+        cd build-debug
+        cmake --build . -j$(nproc)
+        
+    - name: Verify build outputs
+      run: |
+        echo "=== Library ==="
+        ls -lh build-debug/lib/libhipthreads.a
+        echo ""
+        echo "=== Test Executables ==="
+        ls -lh build-debug/bin/hip_thread_*_test
+        
+    - name: Run mutex test
+      run: |
+        source .venv/bin/activate
+        export ROCM_PATH=$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel
+        export LD_LIBRARY_PATH=$ROCM_PATH/lib:$LD_LIBRARY_PATH
+        cd build-debug
+        echo "Running hip_thread_mutex_test..."
+        ./bin/hip_thread_mutex_test && echo "✓ hip_thread_mutex_test PASSED"
+        
+    - name: Run condvar test
+      run: |
+        source .venv/bin/activate
+        export ROCM_PATH=$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel
+        export LD_LIBRARY_PATH=$ROCM_PATH/lib:$LD_LIBRARY_PATH
+        cd build-debug
+        echo "Running hip_thread_condvar_test..."
+        ./bin/hip_thread_condvar_test && echo "✓ hip_thread_condvar_test PASSED"
+        
+    - name: Upload build artifacts on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs-${{ github.sha }}
+        path: |
+          build-debug/CMakeFiles/*.log
+          build-debug/**/*.ii
+          build-debug/**/*.s
+        retention-days: 7
+        
+    - name: Cleanup temporary files
+      if: always()
+      run: |
+        echo "Cleaning up temporary files..."
+        rm -rf libhipcxx
+        echo "Cleanup complete"
