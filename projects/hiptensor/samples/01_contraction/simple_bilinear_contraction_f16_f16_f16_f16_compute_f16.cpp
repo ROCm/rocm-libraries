@@ -30,6 +30,7 @@ int main(int argc, char* argv[])
     /***************************************
     * Check device support                 *
     **************************************/
+    // FIXME
     //if(!isF16Supported() || !isF32MatrixCoreSupported())
     //{
     //    std::cout << "unsupported host device" << std::endl;

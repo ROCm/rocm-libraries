@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -75,14 +75,9 @@ namespace ck
                                                                                Bilinear,
                                                                                F16>>>& instances)
                 {
-                    printf(
-                        "[HIPTENSOR_DEBUG] f16+f16+f16+f16_kknn_instance: before add, size=%zu\n",
-                        instances.size());
                     add_device_operation_instances(
                         instances,
                         device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_f16_kknn_instance{});
-                    printf("[HIPTENSOR_DEBUG] f16+f16+f16+f16_kknn_instance: after add, size=%zu\n",
-                           instances.size());
                 }
 
             } // namespace instance

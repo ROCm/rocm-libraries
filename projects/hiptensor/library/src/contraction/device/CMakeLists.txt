@@ -69,6 +69,10 @@
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_f64_knnn_instance.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_f64_mknn_instance.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_f64_mnnn_instance.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_scale_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_kkn_instance.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_scale_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_knn_instance.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_scale_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_mkn_instance.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_scale_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_mnn_instance.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_scale_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_kkn_instance.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_scale_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_knn_instance.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_scale_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_mkn_instance.cpp
@@ -81,6 +85,10 @@
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_scale_m6_n6_k6_xdl_c_shuffle_cf64_cf64_cf64_compute_cf64_knn_instance.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_scale_m6_n6_k6_xdl_c_shuffle_cf64_cf64_cf64_compute_cf64_mkn_instance.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_scale_m6_n6_k6_xdl_c_shuffle_cf64_cf64_cf64_compute_cf64_mnn_instance.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_scale_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_kkn_instance.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_scale_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_knn_instance.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_scale_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_mkn_instance.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_scale_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_mnn_instance.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_scale_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_compute_f32_kkn_instance.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_scale_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_compute_f32_knn_instance.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_scale_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_compute_f32_mkn_instance.cpp

@@ -229,6 +229,9 @@ int bilinearContractionSample(void* alpha, void* beta)
      * Set the algorithm to use
      ***************************/
     hiptensorPlanPreference_t planPref;
+    // FIXME
+    //CHECK_HIPTENSOR_ERROR(hiptensorCreatePlanPreference(
+    //    handle, &planPref, HIPTENSOR_ALGO_ACTOR_CRITIC, HIPTENSOR_JIT_MODE_NONE));
     CHECK_HIPTENSOR_ERROR(hiptensorCreatePlanPreference(
         handle, &planPref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE));
 

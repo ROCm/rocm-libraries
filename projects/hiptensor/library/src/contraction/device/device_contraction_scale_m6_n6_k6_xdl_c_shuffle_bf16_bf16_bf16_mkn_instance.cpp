@@ -47,37 +47,37 @@ namespace ck
             {
 
                 // A[m0, m1, k0, k1] * B[n0, n1, k0, k1] + D[m0, m1, n0, n1] = E[m0, m1, n0, n1]
-                // m/n/n/n are the fast changing dimension for A/B/D/E
-                using device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_mnnn_instance
-                    = device_contraction_mn_instance<BF16,
+                // m/k/n/n are the fast changing dimension for A/B/D/E
+                using device_contraction_scale_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_mkn_instance
+                    = device_contraction_mk_instance<BF16,
                                                      BF16,
                                                      F32,
                                                      BF16,
-                                                     BF16_Tuple,
+                                                     Empty_Tuple,
                                                      BF16,
                                                      BF16,
                                                      PassThrough,
                                                      PassThrough,
-                                                     Bilinear,
+                                                     Scale,
                                                      6>;
 
                 void
-                    add_device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_mnnn_instance(
+                    add_device_contraction_scale_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_mkn_instance(
                         std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
                                                                                6,
                                                                                6,
                                                                                BF16,
                                                                                BF16,
-                                                                               BF16_Tuple,
+                                                                               Empty_Tuple,
                                                                                BF16,
                                                                                PassThrough,
                                                                                PassThrough,
-                                                                               Bilinear,
+                                                                               Scale,
                                                                                BF16>>>& instances)
                 {
                     add_device_operation_instances(
                         instances,
-                        device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_mnnn_instance{});
+                        device_contraction_scale_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_mkn_instance{});
                 }
 
             } // namespace instance

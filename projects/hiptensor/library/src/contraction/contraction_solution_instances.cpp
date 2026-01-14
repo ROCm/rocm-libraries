@@ -26,7 +26,6 @@
 
 #include "contraction_solution_instances.hpp"
 #include "contraction_solution.hpp"
-#include <iostream>
 
 // CK data types and utilities
 #include <ck/tensor_operation/gpu/element/binary_element_wise_operation.hpp>
@@ -73,8 +72,8 @@ namespace hiptensor
                                           float>());
 
         // Bilinear f16
-        std::cout << "[DEBUG] Registering f16+f16+f16+f16 with f16 compute solutions..." << std::endl;
-        auto f16_f16_solutions = enumerateContractionSolutions<6,
+        registerSolutions(
+            enumerateContractionSolutions<6,
                                           6,
                                           6,
                                           ck::half_t,
@@ -84,12 +83,10 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::Bilinear,
-                                          ck::half_t>();
-        std::cout << "[DEBUG] Found " << f16_f16_solutions.size() << " f16+f16 compute solutions" << std::endl;
-        registerSolutions(std::move(f16_f16_solutions));
+                                          ck::half_t>());
 
-        std::cout << "[DEBUG] Registering f16+f16+f16+f16 with f32 compute solutions..." << std::endl;
-        auto f16_f32_solutions = enumerateContractionSolutions<6,
+        registerSolutions(
+            enumerateContractionSolutions<6,
                                           6,
                                           6,
                                           ck::half_t,
@@ -99,9 +96,7 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::Bilinear,
-                                          float>();
-        std::cout << "[DEBUG] Found " << f16_f32_solutions.size() << " f16+f32 compute solutions" << std::endl;
-        registerSolutions(std::move(f16_f32_solutions));
+                                          float>());
 
         // Bilinear f32
         registerSolutions(
@@ -209,9 +204,35 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::Scale,
+                                          ck::bhalf_t>());
+
+        registerSolutions(
+            enumerateContractionSolutions<6,
+                                          6,
+                                          6,
+                                          ck::bhalf_t,
+                                          ck::bhalf_t,
+                                          ck::Tuple<>,
+                                          ck::bhalf_t,
+                                          ck::tensor_operation::element_wise::PassThrough,
+                                          ck::tensor_operation::element_wise::PassThrough,
+                                          ck::tensor_operation::element_wise::Scale,
                                           float>());
 
         // Scale f16
+        registerSolutions(
+            enumerateContractionSolutions<6,
+                                          6,
+                                          6,
+                                          ck::half_t,
+                                          ck::half_t,
+                                          ck::Tuple<>,
+                                          ck::half_t,
+                                          ck::tensor_operation::element_wise::PassThrough,
+                                          ck::tensor_operation::element_wise::PassThrough,
+                                          ck::tensor_operation::element_wise::Scale,
+                                          ck::half_t>());
+
         registerSolutions(
             enumerateContractionSolutions<6,
                                           6,

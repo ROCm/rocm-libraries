@@ -24,8 +24,11 @@
  *
  *******************************************************************************/
 
-#include "contraction_solution_registry.hpp"
+#if !NDEBUG
 #include <iostream>
+#endif // !NDEBUG
+
+#include "contraction_solution_registry.hpp"
 
 namespace hiptensor
 {
@@ -71,13 +74,7 @@ namespace hiptensor
                                                   hiptensorDataType_t          typeD,
                                                   hiptensorComputeDescriptor_t typeCompute) const
     {
-        std::cout << "[DEBUG] Querying solutions for types: A=" << typeA << " B=" << typeB
-                  << " C=" << typeC << " D=" << typeD << " Compute=" << typeCompute << std::endl;
-        auto hash = hashTypesComputeABCD(typeA, typeB, typeC, typeD, typeCompute);
-        std::cout << "[DEBUG] Generated hash: " << hash << std::endl;
-        auto result = query(hash);
-        std::cout << "[DEBUG] Query found " << result.solutionCount() << " solutions" << std::endl;
-        return result;
+        return query(hashTypesComputeABCD(typeA, typeB, typeC, typeD, typeCompute));
     }
 
     ContractionSolutionRegistry::Query
@@ -235,14 +232,12 @@ namespace hiptensor
     void ContractionSolutionRegistry::registerSolutions(
         std::vector<std::unique_ptr<ContractionSolution>>&& solutions)
     {
-        std::cout << "[DEBUG] Registering " << solutions.size() << " solutions..." << std::endl;
         for(auto&& solution : solutions)
         {
             // Register with the query then take ownership
             mSolutionQuery.addSolution(solution.get());
             mSolutionStorage.push_back(std::move(solution));
         }
-        std::cout << "[DEBUG] Total registered solutions: " << mSolutionStorage.size() << std::endl;
     }
 
     ContractionSolutionRegistry::Query const& ContractionSolutionRegistry::allSolutions() const
