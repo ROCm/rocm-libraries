@@ -41,13 +41,13 @@ namespace GEMMTests
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         const auto storePath = std::get<1>(GetParam());
-        
+
         GEMMProblem gemm;
         gemm.storePathD = storePath;
-        
+
         // For VGPRToBuffer and VGPRToGlobal, we should not use LDS
-        if (storePath == SolutionParams::StorePath::VGPRToBuffer ||
-            storePath == SolutionParams::StorePath::VGPRToGlobal)
+        if(storePath == SolutionParams::StorePath::VGPRToBuffer
+           || storePath == SolutionParams::StorePath::VGPRToGlobal)
         {
             EXPECT_FALSE(SolutionParams::IsLDSStore(storePath));
         }
@@ -55,7 +55,7 @@ namespace GEMMTests
         {
             EXPECT_TRUE(SolutionParams::IsLDSStore(storePath));
         }
-        
+
         basicGEMM<float>(gemm);
     }
 
@@ -63,14 +63,14 @@ namespace GEMMTests
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         const auto storePath = std::get<1>(GetParam());
-        
+
         GEMMProblem gemm;
         gemm.storePathD = storePath;
-        gemm.macM = 64;
-        gemm.macN = 64;
-        gemm.macK = 16;
-        gemm.waveK = 8;
-        
+        gemm.macM       = 64;
+        gemm.macN       = 64;
+        gemm.macK       = 16;
+        gemm.waveK      = 8;
+
         basicGEMM<Half>(gemm);
     }
 
@@ -79,10 +79,10 @@ namespace GEMMTests
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
         const auto storePath = std::get<1>(GetParam());
-        
-        auto gemm = GEMMProblemF8NT{};
+
+        auto gemm       = GEMMProblemF8NT{};
         gemm.storePathD = storePath;
-        
+
         basicGEMM<FP8, FP8, float>(gemm);
     }
 
@@ -90,14 +90,14 @@ namespace GEMMTests
     TEST_P(GEMMStorePathTestGPU, GPU_BackwardCompatibility_setUseLDS)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
-        
+
         // Test true maps to LDSViaVGPRToBuffer
         {
             GEMM gemm;
             gemm.setUseLDS(true);
             EXPECT_EQ(gemm.getStorePath(), SolutionParams::StorePath::LDSViaVGPRToBuffer);
         }
-        
+
         // Test false maps to VGPRToBuffer
         {
             GEMM gemm;
@@ -109,16 +109,11 @@ namespace GEMMTests
     INSTANTIATE_TEST_SUITE_P(
         GEMMStorePathTest,
         GEMMStorePathTestGPU,
-        ::testing::Combine(
-            currentGPUISA(),
-            ::testing::Values(
-                SolutionParams::StorePath::VGPRToBuffer,
-                SolutionParams::StorePath::VGPRToGlobal,
-                SolutionParams::StorePath::LDSViaVGPRToBuffer,
-                SolutionParams::StorePath::LDSViaVGPRToGlobal,
-                SolutionParams::StorePath::LDSToBuffer
-            )
-        )
-    );
+        ::testing::Combine(currentGPUISA(),
+                           ::testing::Values(SolutionParams::StorePath::VGPRToBuffer,
+                                             SolutionParams::StorePath::VGPRToGlobal,
+                                             SolutionParams::StorePath::LDSViaVGPRToBuffer,
+                                             SolutionParams::StorePath::LDSViaVGPRToGlobal,
+                                             SolutionParams::StorePath::LDSToBuffer)));
 
 } // namespace GEMMTests

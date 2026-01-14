@@ -411,7 +411,7 @@ class GEMMResult(GEMM, RRPerfResult):
             "WG": str(self.workgroup_size_x) + "/" + str(self.workgroup_size_y),
             "Load_A": TF(self.load_A),
             "Load_B": TF(self.load_B),
-            "Store_D": self.store_path,
+            "Store_D": TF(self.store_path),
             "PF": TF(self.prefetch)
             + "/"
             + str(self.prefetchInFlight)

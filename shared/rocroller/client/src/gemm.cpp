@@ -1383,14 +1383,14 @@ namespace rocRoller::Client::GEMMClient::CLI
         }
 
         if(app.get_option(SN(&SP::loadPathA))->count())
-            solution.loadPathA
-                = SolutionParams::loadPathFromString(app.get_option(SN(&SP::loadPathA))->as<std::string>());
+            solution.loadPathA = SolutionParams::loadPathFromString(
+                app.get_option(SN(&SP::loadPathA))->as<std::string>());
         if(app.get_option(SN(&SP::loadPathB))->count())
-            solution.loadPathB
-                = SolutionParams::loadPathFromString(app.get_option(SN(&SP::loadPathB))->as<std::string>());
+            solution.loadPathB = SolutionParams::loadPathFromString(
+                app.get_option(SN(&SP::loadPathB))->as<std::string>());
         if(app.get_option(SN(&SP::storePath))->count())
-            solution.storePath
-                = SolutionParams::storePathFromString(app.get_option(SN(&SP::storePath))->as<std::string>());
+            solution.storePath = SolutionParams::storePathFromString(
+                app.get_option(SN(&SP::storePath))->as<std::string>());
 
         if(app.get_option("--d2lds")->count())
         {

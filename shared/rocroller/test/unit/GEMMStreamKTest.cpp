@@ -305,7 +305,8 @@ namespace GEMMTests
 
             // Runs out of LDS
             if((typeAB == DT::Float) and (loadPathA == LP::BufferToLDSViaVGPR)
-               and (loadPathB == LP::BufferToLDSViaVGPR) and (IsLDSStore(storePath)) and (mode != SM::Standard))
+               and (loadPathB == LP::BufferToLDSViaVGPR) and (IsLDSStore(storePath))
+               and (mode != SM::Standard))
             {
                 continue;
             }
@@ -329,23 +330,23 @@ namespace GEMMTests
         StreamKTestGPU,
         FilterValidStreamKParams(::testing::Combine(
             currentGPUISA(),
-            ::testing::Combine(::testing::Values(rocRoller::DataType::Float,
-                                                 rocRoller::DataType::Half),
-                               ::testing::Values(1, 2), // unrollK
-                               ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
-                                                 SolutionParams::LoadPath::BufferToLDSViaVGPR),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
-                                                 SolutionParams::LoadPath::BufferToLDSViaVGPR),
-                               ::testing::Values(SolutionParams::StorePath::LDSViaVGPRToBuffer,
-                                                 SolutionParams::StorePath::VGPRToBuffer), // storePath
-                               ::testing::Values(rocRoller::StreamKMode::Standard,
-                                                 rocRoller::StreamKMode::TwoTile,
-                                                 rocRoller::StreamKMode::TwoTileDPFirst),
-                               ::testing::Values(true, false), // betaZero
-                               ::testing::Values(PrefetchConfig{0, 0},
-                                                 PrefetchConfig{1, 0},
-                                                 PrefetchConfig{1, 2},
-                                                 PrefetchConfig{2, 0},
-                                                 PrefetchConfig{2, 2})))));
+            ::testing::Combine(
+                ::testing::Values(rocRoller::DataType::Float, rocRoller::DataType::Half),
+                ::testing::Values(1, 2), // unrollK
+                ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
+                                  SolutionParams::LoadPath::BufferToLDSViaVGPR),
+                ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
+                                  SolutionParams::LoadPath::BufferToLDSViaVGPR),
+                ::testing::Values(SolutionParams::StorePath::LDSViaVGPRToBuffer,
+                                  SolutionParams::StorePath::VGPRToBuffer), // storePath
+                ::testing::Values(rocRoller::StreamKMode::Standard,
+                                  rocRoller::StreamKMode::TwoTile,
+                                  rocRoller::StreamKMode::TwoTileDPFirst),
+                ::testing::Values(true, false), // betaZero
+                ::testing::Values(PrefetchConfig{0, 0},
+                                  PrefetchConfig{1, 0},
+                                  PrefetchConfig{1, 2},
+                                  PrefetchConfig{2, 0},
+                                  PrefetchConfig{2, 2})))));
 
 } // namespace GEMMTests

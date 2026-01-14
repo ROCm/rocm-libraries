@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <rocRoller/KernelGraph/Transforms/SwizzleScale.hpp>
+#include <rocRoller/KernelGraph/Transforms/SwizzleScale_detail.hpp>
 
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/Simplify.hpp>

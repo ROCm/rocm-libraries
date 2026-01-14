@@ -58,7 +58,7 @@ namespace GEMMDriverTest
 {
     using namespace rocRoller;
     namespace SolutionParams = rocRoller::Parameters::Solution;
-    
+
     struct GEMMFusionGPU : public CurrentGPUContextFixture
     {
         template <typename T>
@@ -296,7 +296,9 @@ namespace GEMMDriverTest
                 {gemm.macM, gemm.macN},
                 LayoutType::MATRIX_ACCUMULATOR,
                 {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB},
-                (gemm.storePath == SolutionParams::StorePath::LDSViaVGPRToBuffer) ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+                (gemm.storePath == SolutionParams::StorePath::LDSViaVGPRToBuffer)
+                    ? MemoryType::WAVE_LDS
+                    : MemoryType::WAVE);
 
             params->setDimensionInfo(tagLoadA, macTileA);
             params->setDimensionInfo(tagLoadB, macTileB);

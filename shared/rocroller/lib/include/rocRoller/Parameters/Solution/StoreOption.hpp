@@ -39,11 +39,11 @@ namespace rocRoller
         {
             enum class StorePath : int
             {
-                VGPRToBuffer,        // Store from VGPR to buffer using buffer_store_X
-                VGPRToGlobal,        // Store from VGPR to global using global_store_X
-                LDSViaVGPRToBuffer,  // Store to LDS first, then to buffer (former storeLDSD=true)
-                LDSViaVGPRToGlobal,  // Store to LDS first, then to global
-                LDSToBuffer,         // Direct LDS to buffer store
+                VGPRToBuffer, // Store from VGPR to buffer using buffer_store_X
+                VGPRToGlobal, // Store from VGPR to global using global_store_X
+                LDSViaVGPRToBuffer, // Store to LDS first, then to buffer (former storeLDSD=true)
+                LDSViaVGPRToGlobal, // Store to LDS first, then to global
+                LDSToBuffer, // Direct LDS to buffer store
                 Count,
             };
 
