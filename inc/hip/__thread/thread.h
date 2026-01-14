@@ -27,6 +27,34 @@
 #ifndef __LIBHIPTHREADS___THREAD_THREAD_H__
 #define __LIBHIPTHREADS___THREAD_THREAD_H__
 
+/**
+ * @file
+ * @brief GPU-adapted lightweight thread handle and launch wrapper.
+ * @ingroup thread
+ *
+ * Provides a `cuda::thread` API analogous (not identical) to `std::thread`,
+ * adapted for HIP device execution queues. A thread represents a unit of
+ * GPU work submitted through an internal WorkNode. Construction captures a
+ * callable and (optionally) a "width" (workgroup size) and schedules it for
+ * execution. The handle can then be queried (`get_id`, `joinable`) and
+ * synchronized (`join`, `detach`).
+ *
+ * Key differences vs `std::thread`:
+ * - Callable and argument objects must satisfy device transfer constraints
+ *   (trivially copyable / destructible as enforced by static_asserts).
+ * - Width parameter (default 1) controls how many logical GPU lanes
+ *   participate in the callable (upper bounded by `max_width()`).
+ * - Host vs device constructors: host constructor copies a work node to
+ *   device; device constructor inserts directly into a device queue.
+ * - No native handle exposure yet (could be added later).
+ * - Defining `cuda::thread` variables with static storage duration is undefined behaviour.
+ *
+ * Thread life-cycle states:
+ * - Default constructed: not joinable (no work node).
+ * - Move constructed / assigned: ownership transferred, source becomes not joinable.
+ * - After `detach()` or successful `join()`: not joinable.
+ */
+
 #include <utility>
 #include <type_traits>
 #include <system_error>
@@ -57,17 +85,50 @@ namespace internal {
 //====================================================================================================================//
 
 // TODO: split this file up into a WorkNode header and a thread header
+
+/**
+ * @class thread
+ * @brief Handle owning (at most) one scheduled GPU work node (thread of execution).
+ * @ingroup thread
+ *
+ * Constructing schedules a callable for execution (host or device path).
+ * Non-copyable; movable to transfer ownership. Must be joined or detached
+ * before destruction if joinable.
+ *
+ * Memory / transfer constraints:
+ * - Captured callable and argument types must be trivially copyable (host path)
+ *   or trivially destructible (device path) as enforced by static assertions.
+ *
+ * Concurrency model:
+ * - `join()` waits for completion (synchronizing-with the end of the callable).
+ * - `detach()` releases association; work may continue without the handle.
+ *
+ * Width:
+ * - Optional first constructor parameter `width` ( <= `max_width()` ) describes
+ *   how many lanes participate; implementation may map this to a warp subset.
+ */
 class thread {
   public:
     // TODO: temporary measure. Should to be replaced with an actual class.
     // Right now a default constructed id is a valid thread id, and it shouldn't be.
+    /// Alias for thread identifier type (may be refined later).
     using id = __thread_id;
 
     // TODO: The default member initializer for worknode_d makes it impossible to have an instance of hip::thread in
     // __shared__ or __device__ memory (pointers to hip::thread are still allowed). This is not ideal.
+    
+    /// Default constructs a non-joinable thread (no associated work node).
     __host__ thread() noexcept;
+    /// Device-side default constructor (no work node).
     __device__ thread() noexcept {}
+
+    /// \name Deleted copy / move operations
+    /// These special members are intentionally disabled (handle is non-copyable / non-movable).
+    ///@{
     __host__ __device__ thread(const thread &) = delete;
+    ///@}
+
+    /// Move construction transfers ownership; source becomes not joinable.
     __host__ __device__ thread(thread &&other) noexcept
 #ifdef __HIP_DEVICE_COMPILE__
         : worknode_d(other.worknode_d), cached_tdata(::std::move(other.cached_tdata)) {
@@ -76,37 +137,82 @@ class thread {
 #else
         : worknode_d(::std::move(other.worknode_d)), cached_tdata(::std::move(other.cached_tdata)) {}
 #endif
+    ///@{
     __host__ __device__ thread &operator=(const thread&) = delete;
+    ///@}
+
+    /// Move assignment transfers ownership; source becomes not joinable.
     __host__ __device__ thread &operator=(thread &&other) noexcept;
 
+    /**
+     * @brief Construct with explicit width and callable (device path).
+     * @param width Logical participation width (1..max_width()).
+     * @param typed_fn Callable object.
+     * @param args Argument pack forwarded to callable.
+     */
     template <class Fn_t, class... Args_t>
     explicit __device__ thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args);
+
+    /**
+     * @brief Construct with explicit width and callable (host path).
+     * Schedules work node for device execution.
+     */
     template <class Fn_t, class... Args_t>
     explicit __host__ thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args);
 
     // TODO: replace the enable_if_t condition with one that checks if Fn_t is callable
+    /**
+     * @brief Device-side convenience constructor (width = 1) for initial drop-in replacement of `std::thread`.
+     */
     template <class Fn_t, class... Args_t,
               ::std::enable_if_t<!::std::is_arithmetic_v<::std::remove_reference_t<Fn_t>>,
                                bool> = true>
     explicit __device__ thread(Fn_t &&typed_fn, Args_t &&...args)
         : thread(1, ::std::forward<Fn_t>(typed_fn), ::std::forward<Args_t>(args)...) {}
+
+    /**
+     * @brief Host-side convenience constructor (width = 1) for initial drop-in replacement of `std::thread`.
+     */
     template <class Fn_t, class... Args_t,
               ::std::enable_if_t<!::std::is_arithmetic_v<::std::remove_reference_t<Fn_t>>,
                                bool> = true>
     explicit __host__ thread(Fn_t &&typed_fn, Args_t &&...args)
         : thread(1, ::std::forward<Fn_t>(typed_fn), ::std::forward<Args_t>(args)...) {}
 
+    /// Destructor: thread must be not joinable (joined or detached).
     __host__ __device__ ~thread();
 
+    /// Swaps underlying work node ownership with another thread.
     __host__ __device__ void swap(thread& __t) noexcept { hip::std::swap(worknode_d, __t.worknode_d); hip::std::swap(cached_tdata, __t.cached_tdata); }
 
+    /**
+     * @brief Returns the id of the (possibly width-partitioned) logical lane.
+     * @param index Lane index (default 0).
+     */
     __host__ __device__ thread::id get_id(uint32_t index = 0) const;
+    
+    /// Returns true if an execution context is owned and not yet joined/detached.
     __host__ __device__ bool joinable() const noexcept { return worknode_d != nullptr; }
+
+    /**
+     * @brief Waits for completion of the associated work.
+     * Undefined behavior if !joinable().
+     */
     __host__ __device__ void join();
+
+    /**
+     * @brief Releases ownership allowing work to proceed independently.
+     * After detach() the handle becomes not joinable.
+     */
     __host__ __device__ void detach();
 
+    /// Maximum supported width (implementation constant).
     __host__ __device__ static constexpr unsigned int max_width() noexcept { return 32; }
+
+    /// Number of concurrent hardware slots usable (device variant).
     __device__ static unsigned int hardware_concurrency() noexcept;
+
+    /// Number of concurrent hardware slots usable (host reflection / cached).
     __host__ static unsigned int hardware_concurrency() noexcept;
 
   private:

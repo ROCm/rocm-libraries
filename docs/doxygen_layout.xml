@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<doxygenlayout version="1.0">
+  <navindex>
+    <!-- Direct tab to the Standard API group -->
+    <tab type="user" visible="yes" title="Standard API" url="group__standard__api.html"/>
+    <tab type="user" visible="yes" title="Setup" url="md_docs_setup.html"/>
+    <tab type="user" visible="yes" title="Releases" url="md_docs_releases.html"/>
+
+    <!-- Hide default tabs -->
+    <tab type="modules"    visible="no"/>
+    <tab type="mainpage"   visible="no"/>
+    <tab type="namespaces" visible="no"/>
+    <tab type="classes"    visible="no"/>
+    <tab type="files"      visible="no"/>
+    <tab type="examples"   visible="no"/>
+    <tab type="related"    visible="no"/>
+  </navindex>
+  <navpath/>
+</doxygenlayout>

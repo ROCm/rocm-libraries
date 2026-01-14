@@ -1,6 +1,16 @@
 #ifndef __LIBHIPTHREADS___THREAD_WORKITEM_H__
 #define __LIBHIPTHREADS___THREAD_WORKITEM_H__
 
+/**
+ * @file
+ * @brief Internal work node structures for GPU thread scheduling.
+ * @ingroup thread
+ *
+ *
+ * Defines the low-level work node (WorkNode_Header, WorkNode<Callable_t>)
+ * that backs hip::thread.
+ */
+
 #include <memory>
 
 #include "hip/hip_runtime.h"
@@ -14,9 +24,18 @@ namespace cuda::internal {
 
 struct WorkNode_Header;
 
+/// Type-erased function pointer for invoking a work node's callable.
 typedef void (*WrappedFnPointer)(WorkNode_Header *, bool);
 
 // Info about the thread itself that the user might query. (As opposed to info the scheduler uses behind the scenes)
+/**
+ * @struct ThreadData
+ * @brief User-visible metadata about a logical thread.
+ *
+ *
+ * Stores width (active lane count) and a base thread id. The actual
+ * per-lane id is derived from base + lane_index (see this_thread::get_id).
+ */
 struct ThreadData {
     // How many threads per block/vthread are active.
     uint32_t width = 0;
@@ -34,6 +53,13 @@ struct ThreadData {
     static __host__ __thread_id::underlying_type nextTid();
 };
 
+/**
+ * @struct WorkNodeDeleter
+ * @brief Custom deleter for unique_ptr<WorkNode_Header>.
+ *
+ *
+ * Calls `hip::free` (work nodes are allocated via `hip::malloc`).
+ */
 struct WorkNodeDeleter {
     // WorkNode<T> is trivially destructible (implied by ::std::is_trivially_copyable).
     // Note: Technically, we should do a static_cast of ptr back to WorkNode<T> before freeing. If we really want to fix
@@ -44,20 +70,40 @@ struct WorkNodeDeleter {
 };
 
 // TODO: Can we make a bunch of these members private?
+/**
+ * @struct WorkNode_Header
+ * @brief Type-erased base for a scheduled unit of GPU work.
+ */
 struct WorkNode_Header {
+    /// Points to instantiation of wrapper<WorkNode<Callable_t>>.
     const WrappedFnPointer wrapper_fn;
+    /// Data the user might query (width, base id).
     const ThreadData tdata;
 
-    // Stores the sizeof(WorkNode<T>), so we can do a memcpy without knowing T.
-    // Not initialized when a WorkNode is constructed from device code because we don't need it.
+    /**
+     * @brief Stores sizeof(WorkNode<T>) for memcpy.
+     *
+     * Stores the sizeof(WorkNode<T>), so we can do a memcpy without knowing T
+     * (e.g. in thread::detach()).
+     *
+     * Not initialized when a WorkNode is constructed from device code because
+     * we don't need it.
+     */
     const size_t worknodeSize = 0;
 
-    // link_to_self enables thread::detach() to copy a worknode into memory the gpu can free on its own.
-    // It can be either &mainWorkQueue[i], &cpuWorkQueue[i], &currentWorkNode[blockIdx.x], &(prev->next) or nullptr
-    //
-    // In the scheduler, link_to_self == nullptr indicates we've been detached.
-    // In detach and join, link_to_self == nullptr indicates we've finished executing.
-    //
+    /**
+     * @brief Double pointer for locking and thread::detach().
+     *
+     * Enables thread::detach() to copy a worknode into memory the gpu can free on its own.
+     *
+     * It can be either &mainWorkQueue[i], &cpuWorkQueue[i], &currentWorkNode[blockIdx.x], &(prev->next) or nullptr.
+     *
+     * Locking semantics:
+     *  - *link_to_self == this: Unlocked.
+     *  - *link_to_self == nullptr (or another node during move): Locked.
+     *  - link_to_self == nullptr: In thread::detach() and thread::join() - execution is complete.
+     *                             In the scheduler - WorkNode has been detached.
+     */
     // When holding a pointer to a WorkNode, it must always be in a "locked" state to ensure the pointer doesn't get
     // invalidated by detach. A WorkNode is "locked" if *link_to_self != self (or, if the worknode has already been
     // detached, whatever link_to_self would have been).
@@ -71,52 +117,88 @@ struct WorkNode_Header {
     // lock, I think that implies detachWorkNode is holding the lock.
     WorkNode_Header **link_to_self = reinterpret_cast<WorkNode_Header **>(1);
 
-    WorkNode_Header *next = nullptr; // Must always be device-accessible. Either zero-copy pinned host memory, or device memory
-    // Since *link_to_self == nullptr is used as a per-workitem lock, we need some way to differentiate between
-    // next == nullptr because there's nobody waiting and next == nullptr because next has been locked.
+    /// Pointer to the next waiting/yielded node the scheduler will resume on completion.
+    WorkNode_Header *next = nullptr;
+    /// Flag distinguishing null next (no waiters vs next WorkNode is currently locked).
     bool hasWaiting = false;
 
+    /// Factory (host): allocates + constructs WorkNode with lambda wrapping callable + args.
     template <class Fn_t, class... Args_t>
     static __host__ auto make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args);
 
+    /// Factory (device): placement new into malloc buffer.
     template <class Fn_t, class... Args_t>
     static __device__ auto make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args);
 
-    // Attempts to lock the WorkNode at location, and if successful, returns the WorkNode. If unsuccessful (i.e. it's
-    // already locked) returns nullptr.
+    /**
+     * @brief Attempts to lock the WorkNode at location.
+     * @return A pointer to the WorkNode if ownership obtained; nullptr if already locked.
+     */
     [[nodiscard]] static __device__ WorkNode_Header *tryLockAndFetch(WorkNode_Header **location);
 
-    // Locks and returns the WorkNode at location. If *location == nullptr (i.e. it's currently locked), spins until the
-    // WorkNode is unlocked.
+    /**
+     * @brief Locks and returns the WorkNode at location.
+     *
+     * If *location == nullptr (i.e. it's currently locked), spins until the WorkNode is unlocked.
+     */
     [[nodiscard]] static __device__ WorkNode_Header *lockAndFetch(WorkNode_Header **location);
 
-    // Lock a worknode we already have a pointer to. For convenience, returns worknode->link_to_self (which might be nullptr
-    // if the node has finished executing). This function is not safe to call from the scheduler, and is only meant for use
-    // in join and detach, where we can be sure that the worknode pointer isn't going to be invalidated unexpectedly while
-    // we are trying to acquire the lock for it.
+    /**
+     * @brief Lock a worknode we already have a pointer to (for join/detach).
+     * @return worknode->link_to_self (which might be nullptr if the node has finished executing).
+     *
+     * This function is not safe to call from the scheduler, and is only meant
+     * for use in join and detach, where we can be sure that the worknode pointer
+     * isn't going to be invalidated unexpectedly while we are trying to acquire
+     * the lock for it.
+     */
     __device__ WorkNode_Header **lock();
 
-    // For use in functions like get_width where worknode hasn't moved anywhere, and we know *link_to_self == nullptr.
+    /// Unlock after inline query (e.g. get_width), where node hasn't moved and we know *link_to_self == nullptr.
     __device__ void unlockActive();
+
+    /// Move the worknode to *new_location and unlock.
     __device__ void moveAndUnlock(WorkNode_Header **new_location);
-    // Signal that the caller is abdicating any responsability for freeing the WorkNode, unless the caller is the last
-    // one to do so, in which case, we free ourself.
-    // Returns true if we're the last one with any responsability for worknode (i.e. the WorkNode has already been
-    // detached, or the WorkNode has finished execution).
+
+    /**
+     * @brief Either free ourself, or tell someone else to.
+     * @return true if we free'd ourselves
+     *
+     * Signal that the caller is abdicating any responsability for freeing the
+     * WorkNode, unless the caller is the last one to do so, in which case, we
+     * free ourself. I.e. If the WorkNode has already been detached, or the
+     * WorkNode has already finished execution, we free ourselves.
+     */
     __device__ bool release();
+
+    /// Check if scheduler no longer references this node.
     __device__ bool isSchedulerDoneWith();
 
-    // Postcondition: unlocks node
+    /// Mark as current work node and unlock.
     __device__ void makeCurrent(bool yielding);
 
-    // Post-condition: worknode is likely unlocked and may get invalidated
+    /**
+     * @brief Insert into main scheduler queue.
+     * @post worknode is likely unlocked and may get invalidated
+     */
     __device__ void insertIntoMainQueue();
 
+    /// Transfer node to device memory for execution (host utility).
     __host__ ::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> sendToGPU();
     __host__ ::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> sendToGPU(WorkNode_Header **new_location);
 };
 static_assert(::std::is_standard_layout_v<WorkNode_Header>);
 
+/**
+ * @struct WorkNode
+ * @brief Templated work node holding a concrete Callable.
+ * @tparam Callable_t Move-constructible callable type.
+ *
+ *
+ * Extends WorkNode_Header with typed member `fn` (the callable).
+ * Constructors capture callable; wrapper<WorkNode<Callable_t>> extracts
+ * and invokes it.
+ */
 template <class Callable_t>
 struct WorkNode : WorkNode_Header {
     using Callable = Callable_t;
@@ -167,6 +249,16 @@ __device__ auto WorkNode_Header::make_worknode(uint32_t width, Fn_t &&typed_fn, 
 
 // Precondition: We're still holding the lock acquired in invokeNext. Needed to make sure detach doesn't make worknode
 // an invalid pointer before we load typed_node_ptr and width.
+/**
+ * @brief Type-erased wrapper function (device kernel invoked by scheduler).
+ * @tparam WorkNode_t Concrete WorkNode<Callable> type.
+ * @param worknode Pointer to work node.
+ * @param yielding True if invocation is part of a yield path.
+ *
+ *
+ * Extracts callable, moves it out, unlocks node (makeCurrent), then invokes
+ * with active lanes (threadIdx.x < width).
+ */
 template <class WorkNode_t>
 __device__ void wrapper(WorkNode_Header *worknode, bool yielding) {
     WorkNode_t *typed_node_ptr = static_cast<WorkNode_t *>(worknode);
@@ -192,11 +284,21 @@ template <class Callable_t>
 __device__ WorkNode<Callable_t>::WorkNode(uint32_t w, Callable_t &&callable)
     : WorkNode_Header{wrapper<WorkNode<Callable_t>>, ThreadData(w)}, fn(::std::move(callable)) {}
 
+/**
+ * @brief Host helper kernel: stores device pointer to wrapper<WorkNode_t> in output.
+ *
+ */
 template <class WorkNode_t>
 __global__ void getWrapperFn(WrappedFnPointer *ptr) {
     *ptr = wrapper<WorkNode_t>;
 }
 
+/**
+ * @brief Host utility: obtain device-side wrapper function pointer for a given Callable_t.
+ *
+ *
+ * Launches getWrapperFn kernel once per specialization, caches result.
+ */
 template <class Callable_t>
 __host__ WrappedFnPointer getWrapperFn() {
     // Only way to pass the device the information about how to invoke WorkNode<Callable_t>.fn is by launching a kernel.

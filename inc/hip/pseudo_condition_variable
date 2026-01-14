@@ -30,24 +30,109 @@
 #include "hip/thread"
 #include "hip/hip_runtime.h" // Atomics aren't part of hip_runtime_api.h
 
+/**
+ * @file
+ * @brief Spinning condition variable variant that periodically pseudo_yield()s.
+ * @ingroup condition_variable
+ *
+ * Provides the same counter-based wait/notify semantics as condition_variable_any
+ * but inserts cooperative yield calls during long spin intervals to reduce pressure
+ * on execution resources.
+ *
+ * Differences vs:
+ * - condition_variable_any: identical logic except this one calls pseudo_yield()
+ *   every N spin iterations (configurable).
+ * - spin_condition_variable: this one is generic (templated wait) and adds yielding;
+ *   spin_condition_variable stays pure tight spin specialized to spin_mutex.
+ *
+ * @note pseudo_yield() has important limitations: it prevents the yielding
+ *       thread from resuming until the yieldee completes execution. This means
+ *       yield-loops (A yields to B, B tries to acquire a lock held by A) will
+ *       deadlock. Exercise caution when using pseudo_condition_variable in
+ *       scenarios where threads may yield to each other.
+ *
+ * Notes:
+ * - Spurious wakeups possible: always use predicate overload.
+ * - Yield cadence currently fixed (TODO: tune / make configurable).
+ */
+
 namespace cuda {
 
 // Like condition_variable_any but it calls hip::this_thread::pseudo_yield(); when waiting for extended periods of time.
+
+/**
+ * @brief Spinning condition variable with periodic pseudo_yield.
+ * @ingroup condition_variable
+ *
+ * Mechanism:
+ * - Each waiter atomically takes a ticket (wait_counter).
+ * - Notifiers advance notify_counter.
+ * - A waiter proceeds when its ticket < notify_counter.
+ * - During the spin loop, every K iterations (default 0x10000) a
+ *   hip::this_thread::pseudo_yield() is issued to reduce wasted GPU resources.
+ *
+ * Guarantees / caveats:
+ * - No true sleep; still busy-waiting between yields.
+ * - The "unlock and sleep" operation in wait() isn't technically atomic. A notify
+ *   that occurs between taking the ticket and unlocking may "wake" the wait-er
+ *   before it unlocked.
+ * - Predicate form recommended to guard against spurious wakeups.
+ */
 class pseudo_condition_variable {
     uint64_t wait_counter = 0;
     uint64_t notify_counter = 0;
 
   public:
+    /// Constructs an empty pseudo_condition_variable.
     __device__ constexpr pseudo_condition_variable() noexcept = default;
 
+    /// \name Deleted copy / move operations
+    /// Instances are neither copyable nor movable.
+    ///@{
     __device__ pseudo_condition_variable(const pseudo_condition_variable &) = delete;
     __device__ pseudo_condition_variable &operator=(const pseudo_condition_variable &) = delete;
+    ///@}
 
+    /**
+     * @brief Wakes at most one waiter (if any present).
+     *
+     * Increments notify_counter iff there is at least one unmatched wait ticket.
+     * No effect if no current waiters.
+     */
     __device__ inline void notify_one() noexcept;
+
+    /**
+     * @brief Wakes all current waiters.
+     *
+     * Sets notify_counter to wait_counter so every waiter observes progress.
+     */
     __device__ inline void notify_all() noexcept;
 
+    /**
+     * @brief Waits until notified (may spuriously wake).
+     *
+     * Steps:
+     * 1. Atomically obtain ticket (wait_counter++).
+     * 2. Unlock supplied lock.
+     * 3. Spin until ticket < notify_counter; pseudo_yield periodically.
+     * 4. Re-lock before returning.
+     *
+     * @tparam _Lock BasicLockable providing unlock()/lock().
+     * @param __lock Held lock protecting the predicate.
+     */
     template <class _Lock>
     __device__ inline void wait(_Lock &__lock);
+
+    /**
+     * @brief Waits until predicate returns true.
+     *
+     * Repeats wait(lock) while !pred().
+     *
+     * @tparam _Lock BasicLockable.
+     * @tparam _Predicate Callable returning bool.
+     * @param __lock Held lock.
+     * @param __pred Predicate to satisfy.
+     */
     template <class _Lock, class _Predicate>
     __device__ inline void wait(_Lock &__lock, _Predicate __pred);
 };

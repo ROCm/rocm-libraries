@@ -27,27 +27,99 @@
 #ifndef __LIBHIPTHREADS___CONDITION_VARIABLE_CONDITION_VARIABLE_ANY_H__
 #define __LIBHIPTHREADS___CONDITION_VARIABLE_CONDITION_VARIABLE_ANY_H__
 
+/**
+ * @file
+ * @brief Generic condition variable usable with any lock type meeting BasicLockable.
+ * @ingroup condition_variable
+ *
+ * Device-side analogue of std::condition_variable_any. Provides wait()/notify
+ * coordination where wait() releases the supplied lock and reacquires it before
+ * returning.
+ *
+ * Characteristics / differences vs the standard host version:
+ * - Implemented with spinning (no true sleep); suitable only when expected
+ *   waits are short.
+ * - Time-based waits (wait_for / wait_until) are not yet enabled (chrono TODOs).
+ * - All current members are device-qualified (__device__).
+ * - Spurious wakeups can occur: always use the predicate overload when waiting
+ *   for a condition.
+ */
+
 #include "hip/thread_config"
 
 #include "hip/hip_runtime.h" // Atomics aren't part of hip_runtime_api.h
 
 namespace cuda {
 
+/**
+ * @brief Condition variable that works with any BasicLockable lock.
+ * @ingroup condition_variable
+ *
+ * Maintains separate counters for waiters and notifications. Each wait()
+ * obtains an arrival index; notify operations advance a notification counter.
+ *
+ * @note Not copyable or movable.
+ * @warning Implementation spins while waiting; avoid long waits to prevent
+ *          excessive resource usage.
+ */
 class _LIBHIPTHREADS_TYPE_VIS condition_variable_any {
     uint64_t wait_counter = 0;
     uint64_t notify_counter = 0;
 
   public:
+    /// Constructs an empty condition variable (no waiters).
     __device__ _LIBHIPTHREADS_HIDE_FROM_ABI _LIBHIPTHREADS_CONSTEXPR condition_variable_any() _NOEXCEPT = default;
 
+    /// \name Deleted copy / move operations
+    /// Condition variable objects are neither copyable nor movable.
+    ///@{
     __device__ condition_variable_any(const condition_variable_any &) = delete;
     __device__ condition_variable_any &operator=(const condition_variable_any &) = delete;
+    ///@}
 
+    /**
+     * @brief Wakes at most one waiting thread/work item (if any).
+     *
+     * If no waiter is currently blocked, the call is a no-op (no "stored"
+     * wake token).
+     */
     __device__ _LIBHIPTHREADS_HIDE_FROM_ABI void notify_one() _NOEXCEPT;
+
+    /**
+     * @brief Wakes all current waiters.
+     *
+     * Advances the notification counter to match the waiter counter so every
+     * waiter observing the value will proceed.
+     */
     __device__ _LIBHIPTHREADS_HIDE_FROM_ABI void notify_all() _NOEXCEPT;
 
+    /**
+     * @brief Blocks (spins) until notified.
+     *
+     * Atomically:
+     * 1. Records arrival index.
+     * 2. Releases the supplied lock (lock.unlock()).
+     * 3. Spins until its index is < current notify counter.
+     * 4. Reacquires the lock before returning.
+     *
+     * @tparam _Lock Lock type supporting unlock() / lock().
+     * @param __lock Acquired lock protecting the predicate.
+     * @warning Spurious wakeups are possible—prefer the predicate form.
+     */
     template <class _Lock>
     __device__ _LIBHIPTHREADS_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS void wait(_Lock &__lock);
+
+    /**
+     * @brief Waits until predicate returns true.
+     *
+     * Repeatedly invokes the simple wait() and rechecks __pred() under the
+     * lock. Returns only when __pred() evaluates to true.
+     *
+     * @tparam _Lock Lock type.
+     * @tparam _Predicate Callable returning bool, evaluated with the lock held.
+     * @param __lock Acquired lock.
+     * @param __pred Predicate defining the wake condition.
+     */
     template <class _Lock, class _Predicate>
     __device__ _LIBHIPTHREADS_HIDE_FROM_ABI void wait(_Lock &__lock, _Predicate __pred);
 
