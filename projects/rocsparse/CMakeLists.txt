@@ -109,13 +109,6 @@ if(BUILD_WITH_OFFLOAD_COMPRESS)
   endif()
 endif()
 
-#
-#if(BUILD_CODE_COVERAGE)
-#  # Only apply coverage flags to host code (C/CXX), not GPU device code (HIP)
-#  add_compile_options(-fprofile-arcs -ftest-coverage)
-#  add_link_options(--coverage -lgcov)
-#endif()
-
 if(BUILD_COMPRESSED_DBG)
   add_compile_options($<$<CONFIG:Debug>:-gz> $<$<CONFIG:RelWithDebInfo>:-gz>)
 endif()
