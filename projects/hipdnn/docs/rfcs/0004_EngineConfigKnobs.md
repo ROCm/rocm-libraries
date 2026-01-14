@@ -428,7 +428,6 @@ public:
     struct FloatConstraint {
         double minValue;
         double maxValue;
-        std::vector<double> validValues;  // Optional explicit list
     };
 
     std::optional<IntConstraint> getIntConstraint() const;
