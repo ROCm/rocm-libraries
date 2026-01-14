@@ -216,7 +216,7 @@ class TestNameValidator:
                     elif line and current_suite:
                         test_case = line.strip()
                         test_names.append(
-                            f"{current_suite}.{test_case.split("#")[0].strip()}"
+                            current_suite + "." + test_case.split("#")[0].strip()
                         )
 
             except subprocess.TimeoutExpired:
