@@ -52,7 +52,7 @@ namespace GEMMTests
     {
     };
 
-    // Params are:  wakeK, loadLDSScaleA, loadLDSScaleB, unrollK, loadPathAB, padA, padB
+    // Params are: waveK, loadLDSScaleA, loadLDSScaleB, unrollK, loadPathAB, padA, padB
     class SwizzleScaledF4TNTestGPU : public BaseGEMMContextFixture<int,
                                                                    SolutionParams::LoadPath,
                                                                    SolutionParams::LoadPath,
@@ -495,8 +495,10 @@ namespace GEMMTests
         gemm.loadScalePathA = loadScaleA;
         gemm.loadScalePathB = loadScaleB;
         gemm.unrollK        = unrollK;
-        // gemm.padA           = padA;
-        // gemm.padB           = padB;
+        if(padA != 0)
+            gemm.padA = {padA, 128};
+        if(padB != 0)
+            gemm.padB = {padB, 128};
 
         basicGEMM<FP4, FP4, float>(gemm);
 
@@ -509,17 +511,21 @@ namespace GEMMTests
         }
         EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
 
-        if(padA == 0 && padB == 0)
+        if(loadPathAB == SolutionParams::LoadPath::BufferToLDS
+           || loadPathAB == SolutionParams::LoadPath::BufferToLDSViaVGPR)
         {
-            auto offsets = nonZeroDSReadOffsets("ds_read_b128", generatedCode);
-            EXPECT_EQ(offsets.contains(2048), true);
-            EXPECT_EQ(offsets.contains(2176), false);
-        }
-        if(padA == -1 && padB == -1)
-        {
-            auto offsets = nonZeroDSReadOffsets("ds_read_b128", generatedCode);
-            EXPECT_EQ(offsets.contains(2048), false);
-            EXPECT_EQ(offsets.contains(2176), true);
+            if(padA == 0 && padB == 0)
+            {
+                auto offsets = nonZeroDSReadOffsets("ds_read_b128", generatedCode);
+                EXPECT_EQ(offsets.contains(4 * 1024), true);
+                EXPECT_EQ(offsets.contains(4 * 1024 + 2 * 128), false);
+            }
+            if(padA == 2048 && padB == 2048)
+            {
+                auto offsets = nonZeroDSReadOffsets("ds_read_b128", generatedCode);
+                EXPECT_EQ(offsets.contains(4 * 1024), false);
+                EXPECT_EQ(offsets.contains(4 * 1024 + 2 * 128), true);
+            }
         }
     }
 
@@ -546,7 +552,7 @@ namespace GEMMTests
                            ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
                                              SolutionParams::LoadPath::BufferToVGPR,
                                              SolutionParams::LoadPath::BufferToLDS),
-                           ::testing::Values(-1, 0),
-                           ::testing::Values(-1, 0)));
+                           ::testing::Values(0, 2048),
+                           ::testing::Values(0, 2048)));
 
 } // namespace GEMMTests
