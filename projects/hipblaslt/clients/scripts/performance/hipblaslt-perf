@@ -340,7 +340,7 @@ def main():
                         default=False)
 
     parser.add_argument('-p',
-                        '--problems-dir',
+                        '--problems_dir',
                         type=str,
                         help='custom directory containing problem YAML files (only works with --suite all)',
                         default=None)
