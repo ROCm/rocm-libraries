@@ -26,6 +26,7 @@ target_link_libraries(hipblaslt-clients-common
         ${LAPACK_LIBRARIES}
     PRIVATE
         hip::device
+        tensilelite::tensilelite-host
 )
 
 if(HIPBLASLT_ENABLE_ROCROLLER)

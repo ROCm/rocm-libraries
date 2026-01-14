@@ -103,13 +103,29 @@ namespace TensileLite
             std::shared_ptr<MySolution> rv;
             const bool                  streamK = Debug::Instance().useExperimentalSelection() == 2;
 
+            if(Debug::Instance().printDeviceSelection())
+            {
+                std::cout << "=== ExactLogicLibrary: Evaluating " << rows.size()
+                          << " rows for hardware: " << hardware.description() << std::endl;
+            }
+
             for(auto const& row : rows)
             {
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
                     continue;
 
+                if(Debug::Instance().printDeviceSelection())
+                {
+                    std::cout << "  Checking predicate: " << row.first.value->type() << "... ";
+                }
+
                 if(row.first(problem, hardware))
                 {
+                    if(Debug::Instance().printDeviceSelection())
+                    {
+                        std::cout << "MATCHED! Searching nested library." << std::endl;
+                    }
+
                     rv = row.second->findBestSolution(problem, hardware, fitness);
 
                     if(rv

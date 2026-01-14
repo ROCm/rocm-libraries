@@ -32,6 +32,8 @@
 #include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/Predicates.hpp>
 
+#include <iostream>
+
 namespace TensileLite
 {
     namespace Serialization
@@ -135,13 +137,32 @@ namespace TensileLite
         using HardwarePredicateSMT = SubclassMappingTraits<Predicates::Predicate<Hardware>, IO>;
 
         template <typename IO>
-        const typename HardwarePredicateSMT<IO>::SubclassMap SubclassMappingTraits<Predicates::Predicate<Hardware>, IO>::subclasses
+        const typename HardwarePredicateSMT<IO>::SubclassMap
+            SubclassMappingTraits<Predicates::Predicate<Hardware>, IO>::subclasses
             = HardwarePredicateSMT<IO>::GetSubclasses();
 
         template <typename IO>
         struct MappingTraits<Predicates::IsSubclass<Hardware, AMDGPU>, IO>
             : public AutoMappingTraits<Predicates::IsSubclass<Hardware, AMDGPU>, IO>
         {
+            using Base = AutoMappingTraits<Predicates::IsSubclass<Hardware, AMDGPU>, IO>;
+            using iot  = IOTraits<IO>;
+
+            static void mapping(IO& io, Predicates::IsSubclass<Hardware, AMDGPU>& obj)
+            {
+                Base::mapping(io, obj);
+
+                // Debug output when deserializing
+                if(!iot::outputting(io) && TensileLite::Debug::Instance().printDataInit())
+                {
+                    std::cout << "Deserialized IsSubclass<Hardware, AMDGPU> predicate";
+                    if(obj.value)
+                    {
+                        std::cout << " with nested predicate type: " << obj.value->type();
+                    }
+                    std::cout << std::endl;
+                }
+            }
         };
 
         template <typename IO>
@@ -165,6 +186,7 @@ namespace TensileLite
             {
                 SubclassMap rv({Base::template Pair<Predicates::GPU::ProcessorEqual>(),
                                 Base::template Pair<Predicates::GPU::CUCountEqual>(),
+                                Base::template Pair<Predicates::GPU::PciChipIDEqual>(),
                                 Base::template Pair<Predicates::GPU::RunsKernelTargeting>()});
 
                 auto gmap = Generic::GetSubclasses();
@@ -178,19 +200,89 @@ namespace TensileLite
         using AMDGPUPredicateSMT = SubclassMappingTraits<Predicates::Predicate<AMDGPU>, IO>;
 
         template <typename IO>
-        const typename AMDGPUPredicateSMT<IO>::SubclassMap SubclassMappingTraits<Predicates::Predicate<AMDGPU>, IO>::subclasses
+        const typename AMDGPUPredicateSMT<IO>::SubclassMap
+            SubclassMappingTraits<Predicates::Predicate<AMDGPU>, IO>::subclasses
             = AMDGPUPredicateSMT<IO>::GetSubclasses();
 
         template <typename IO>
         struct MappingTraits<Predicates::GPU::ProcessorEqual, IO>
-            : public AutoMappingTraits<Predicates::GPU::ProcessorEqual, IO>
         {
+            using iot = IOTraits<IO>;
+
+            static void mapping(IO& io, Predicates::GPU::ProcessorEqual& obj)
+            {
+                iot::mapRequired(io, "value", obj.value);
+
+                // Debug output when deserializing
+                if(!iot::outputting(io) && TensileLite::Debug::Instance().printDataInit())
+                {
+                    std::cout << "Deserialized ProcessorEqual predicate: value="
+                              << AMDGPU::toString(obj.value) << std::endl;
+                }
+            }
+
+            const static bool flow = true;
         };
 
         template <typename IO>
         struct MappingTraits<Predicates::GPU::CUCountEqual, IO>
-            : public AutoMappingTraits<Predicates::GPU::CUCountEqual, IO>
         {
+            using iot = IOTraits<IO>;
+
+            static void mapping(IO& io, Predicates::GPU::CUCountEqual& obj)
+            {
+                iot::mapRequired(io, "value", obj.value);
+
+                // Debug output when deserializing
+                if(!iot::outputting(io) && TensileLite::Debug::Instance().printDataInit())
+                {
+                    std::cout << "Deserialized CUCountEqual predicate: value=" << obj.value
+                              << std::endl;
+                }
+            }
+
+            const static bool flow = true;
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::GPU::PciChipIDEqual, IO>
+        {
+            using iot = IOTraits<IO>;
+
+            static void mapping(IO& io, Predicates::GPU::PciChipIDEqual& obj)
+            {
+                if(!iot::outputting(io) && TensileLite::Debug::Instance().printDataInit())
+                {
+                    std::cout << "About to deserialize PciChipIDEqual 'value' field..." << std::endl;
+                }
+
+                try
+                {
+                    iot::mapRequired(io, "value", obj.value);
+
+                    // Debug output when deserializing
+                    if(!iot::outputting(io) && TensileLite::Debug::Instance().printDataInit())
+                    {
+                        std::cout << "Successfully deserialized PciChipIDEqual predicate: value=0x"
+                                  << std::hex << obj.value << std::dec << std::endl;
+                    }
+                }
+                catch(const std::bad_cast& e)
+                {
+                    std::cerr << "[ERROR] bad_cast in PciChipIDEqual::mapping - expected int for 'value' field" << std::endl;
+                    std::cerr << "[ERROR] Exception message: " << e.what() << std::endl;
+                    std::cerr << "[ERROR] This likely means the msgpack file contains a non-integer type (e.g., string or array)" << std::endl;
+                    std::cerr << "[ERROR] Check if solution library was regenerated after changing PciChipID to DeviceNames in Python" << std::endl;
+                    throw;
+                }
+                catch(const std::exception& e)
+                {
+                    std::cerr << "[ERROR] Exception in PciChipIDEqual::mapping: " << e.what() << std::endl;
+                    throw;
+                }
+            }
+
+            const static bool flow = true;
         };
 
         template <typename IO>
@@ -251,9 +343,8 @@ namespace TensileLite
 
             static SubclassMap GetSubclasses()
             {
-                SubclassMap rv(
-                    {Base::template Pair<Predicates::Contraction::LaunchLimits>(),
-                     Base::template Pair<Predicates::Contraction::WorkspaceCheck>()});
+                SubclassMap rv({Base::template Pair<Predicates::Contraction::LaunchLimits>(),
+                                Base::template Pair<Predicates::Contraction::WorkspaceCheck>()});
 
                 auto gmap = Generic::GetSubclasses();
                 rv.insert(gmap.begin(), gmap.end());
@@ -266,7 +357,8 @@ namespace TensileLite
         using TaskPredicateSMT = SubclassMappingTraits<Predicates::Predicate<Task>, IO>;
 
         template <typename IO>
-        const typename TaskPredicateSMT<IO>::SubclassMap SubclassMappingTraits<Predicates::Predicate<Task>,IO>::subclasses
+        const typename TaskPredicateSMT<IO>::SubclassMap
+            SubclassMappingTraits<Predicates::Predicate<Task>, IO>::subclasses
             = TaskPredicateSMT<IO>::GetSubclasses();
 
         template <typename IO>

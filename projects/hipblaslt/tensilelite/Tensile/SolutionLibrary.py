@@ -357,16 +357,20 @@ class MasterSolutionLibrary:
             devicePart = d["ArchitectureName"]
             cuCount = d["CUCount"]
 
+            # TODO: Read PCI Chip ID from solution data when available
+            pciChipId = d.get("DeviceNames", None)
+
             newLib = PredicateLibrary(tag="Hardware")
             if devicePart == "fallback":
                 pred = Hardware.HardwarePredicate("TruePred")
             else:
-                pred = Hardware.HardwarePredicate.FromHardware(gfxToIsa(devicePart), cuCount)
+                pred = Hardware.HardwarePredicate.FromHardware(gfxToIsa(devicePart), cuCount, pciChipId)
 
             newLib.rows.append({"predicate": pred, "library": library})
 
             if lazyLibrary:
                 if cuCount: placeholderName += "_CU" + str(cuCount)
+                # if pciChipId: placeholderName += "_ChipID" + str(pciChipId)
                 placeholderName += "_" + str(devicePart)
 
             return newLib, placeholderName

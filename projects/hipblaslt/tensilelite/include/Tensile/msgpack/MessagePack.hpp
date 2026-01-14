@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <iostream>
 #include <type_traits>
 
 #include <Tensile/ContractionLibrary.hpp>
@@ -131,6 +132,59 @@ namespace TensileLite
                 if(iterator != objectMap.end())
                 {
                     auto&            value  = iterator->second;
+
+                    if(TensileLite::Debug::Instance().printDataInit())
+                    {
+                        // Debug output: show msgpack type for 'value' field
+                        if(std::string(key) == "value")
+                        {
+                            std::cout << "mapRequired for key='value', msgpack type=";
+                            switch(value.type)
+                            {
+                                case msgpack::type::NIL:        std::cout << "NIL"; break;
+                                case msgpack::type::BOOLEAN:    std::cout << "BOOLEAN"; break;
+                                case msgpack::type::POSITIVE_INTEGER: std::cout << "POSITIVE_INTEGER"; break;
+                                case msgpack::type::NEGATIVE_INTEGER: std::cout << "NEGATIVE_INTEGER"; break;
+                                case msgpack::type::FLOAT32:    std::cout << "FLOAT32"; break;
+                                case msgpack::type::FLOAT64:    std::cout << "FLOAT64"; break;
+                                case msgpack::type::STR:        std::cout << "STRING"; break;
+                                case msgpack::type::BIN:        std::cout << "BINARY"; break;
+                                case msgpack::type::ARRAY:      std::cout << "ARRAY"; break;
+                                case msgpack::type::MAP:        std::cout << "MAP"; break;
+                                case msgpack::type::EXT:        std::cout << "EXT"; break;
+                                default:                        std::cout << "UNKNOWN(" << (int)value.type << ")"; break;
+                            }
+
+                            // Try to show the actual value
+                            try
+                            {
+                                if(value.type == msgpack::type::STR)
+                                {
+                                    std::string strVal;
+                                    value.convert(strVal);
+                                    std::cout << ", value=\"" << strVal << "\"";
+                                }
+                                else if(value.type == msgpack::type::POSITIVE_INTEGER ||
+                                        value.type == msgpack::type::NEGATIVE_INTEGER)
+                                {
+                                    int64_t intVal;
+                                    value.convert(intVal);
+                                    std::cout << ", value=" << intVal << " (0x" << std::hex << intVal << std::dec << ")";
+                                }
+                                else if(value.type == msgpack::type::ARRAY)
+                                {
+                                    auto arr = value.as<std::vector<msgpack::object>>();
+                                    std::cout << ", array_size=" << arr.size() << ", array_item=" << arr[0];
+                                }
+                            }
+                            catch(...)
+                            {
+                                std::cout << ", (could not extract value)";
+                            }
+                            std::cout << std::endl;
+                        }
+                    }
+
                     MessagePackInput subRef = createSubRef(value);
                     subRef.input(obj);
                     error.insert(error.end(), subRef.error.begin(), subRef.error.end());

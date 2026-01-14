@@ -32,10 +32,11 @@ namespace TensileLite
 {
     namespace hip
     {
-        HipAMDGPU::HipAMDGPU(hipDeviceProp_t const& prop)
+        HipAMDGPU::HipAMDGPU(hipDeviceProp_t const& prop, std::optional<int> pciChipId)
             : AMDGPU(AMDGPU::toProcessor(prop.gcnArchName),
                      prop.multiProcessorCount,
-                     std::string(prop.name))
+                     std::string(prop.name),
+                     pciChipId)
             , properties(prop)
         {
             if(origami::hardware_t::is_hardware_supported(prop))
@@ -70,13 +71,19 @@ namespace TensileLite
                                                     deviceId));
             }
 #endif
+            // Query the PCI Chip ID (the actual hardware identifier, e.g., 0x7550)
+            // This is distinct from prop.pciDeviceID which is the PCIe bus slot number
+            int pciChipId = 0;
+            HIP_CHECK_EXC(hipDeviceGetAttribute(&pciChipId, hipDeviceAttributePciChipId, deviceId));
 
-            return GetDevice(prop);
+            return std::make_shared<HipAMDGPU>(prop, std::make_optional(pciChipId));
         }
 
         std::shared_ptr<Hardware> GetDevice(hipDeviceProp_t const& prop)
         {
-            return std::make_shared<HipAMDGPU>(prop);
+            // When called with just prop (no device ID available), chip ID is unknown
+            // This maintains backwards compatibility for code paths that don't have the device ID
+            return std::make_shared<HipAMDGPU>(prop, std::nullopt);
         }
     } // namespace hip
 } // namespace TensileLite

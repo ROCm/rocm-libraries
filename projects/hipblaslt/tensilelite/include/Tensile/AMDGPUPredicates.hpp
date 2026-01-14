@@ -110,6 +110,49 @@ namespace TensileLite
                 }
             };
 
+            struct PciChipIDEqual : public Predicate_CRTP<PciChipIDEqual, AMDGPU>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                PciChipIDEqual() = default;
+                PciChipIDEqual(int val)
+                    : value(val)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "PciChipID";
+                }
+
+                virtual bool operator()(AMDGPU const& gpu) const override
+                {
+                    // Only matches if pciChipId is set and equals the value
+                    return gpu.pciChipId().has_value() && gpu.pciChipId().value() == value;
+                }
+
+                virtual bool debugEval(AMDGPU const& gpu,
+                                       std::ostream& stream) const override
+                {
+                    bool result = (*this)(gpu);
+                    stream << result << ": " << this->type() << " [" << gpu.deviceName << "]";
+                    stream << " gpu_pciChipId=";
+                    if(gpu.pciChipId().has_value())
+                        stream << "0x" << std::hex << gpu.pciChipId().value() << std::dec;
+                    else
+                        stream << "nullopt";
+                    stream << " == solution_pciChipId=0x" << std::hex << value << std::dec;
+                    stream << " processor=" << gpu.archName();
+                    stream << std::endl;
+                    return result;
+                }
+            };
+
             struct RunsKernelTargeting : public Predicate_CRTP<RunsKernelTargeting, AMDGPU>
             {
                 enum

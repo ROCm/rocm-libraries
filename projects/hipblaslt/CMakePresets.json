@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 6,
   "configurePresets": [
     {
       "name": "default:release",
@@ -87,6 +87,22 @@
       }
     },
     {
+      "name": "all-clients",
+      "displayName": "All Clients",
+      "description": "Configures targets required to build clients",
+      "inherits": "default:release",
+      "cacheVariables": {
+        "HIPBLASLT_ENABLE_HOST": "ON",
+        "HIPBLASLT_ENABLE_DEVICE": "ON",
+        "HIPBLASLT_ENABLE_CLIENT": "ON",
+        "HIPBLASLT_ENABLE_SAMPLES": "OFF",
+        "TENSILELITE_ENABLE_HOST": "ON",
+        "TENSILELITE_BUILD_TESTING": "ON",
+        "TENSILELITE_ENABLE_CLIENT": "ON",
+        "TENSILELITE_ENABLE_AUTOBUILD": "ON"
+      }
+    },
+    {
       "name": "rocm-7.0.0",
       "displayName": "hipblaslt 7.0.0 config",
       "description": "Configuration command used in 7.0.0 builds",
@@ -133,6 +149,31 @@
         "CMAKE_INSTALL_LIBDIR": "lib",
         "BLA_STATIC": "ON"
       }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "all-clients",
+      "displayName": "Build All Clients",
+      "configurePreset": "all-clients",
+      "jobs": 32
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "all-clients-build",
+      "displayName": "All Clients: Configure and Build",
+      "description": "Configure and build all clients (hipBLASLt and TensileLite)",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "all-clients"
+        },
+        {
+          "type": "build",
+          "name": "all-clients"
+        }
+      ]
     }
   ]
 }

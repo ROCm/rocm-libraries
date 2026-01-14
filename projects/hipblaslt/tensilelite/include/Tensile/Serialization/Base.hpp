@@ -29,10 +29,12 @@
 #include <algorithm>
 #include <cstddef>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
+#include <Tensile/Debug.hpp>
 #include <Tensile/Activation.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/KernelLanguageTypes.hpp>
@@ -231,8 +233,17 @@ namespace TensileLite
 
                 iot::mapRequired(io, "type", type);
 
+                // Debug output when deserializing
+                if(!iot::outputting(io) && TensileLite::Debug::Instance().printDataInit())
+                {
+                    std::cout << "BaseClassMappingTraits: Deserializing type='" << type << "'" << std::endl;
+                }
+
                 if(!SubclassMappingTraits<T, IO>::mapping(io, type, value))
+                {
+                    std::cerr << "[ERROR] Unknown subclass type '" << type << "'" << std::endl;
                     iot::setError(io, "Unknown subclass type " + type);
+                }
             }
 
             const static bool flow = Flow;

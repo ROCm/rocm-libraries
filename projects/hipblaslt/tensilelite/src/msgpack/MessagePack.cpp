@@ -137,6 +137,8 @@ namespace TensileLite
                 std::string value;
                 pair.second.convert(value);
                 libraryMapping[key] = value;
+                if(Debug::Instance().printDataInit())
+                    std::cout << "Msgpack files contents: " << key << " : " << value << std::endl;
             }
         }
         catch(std::runtime_error const& exc)
