@@ -45,7 +45,7 @@ bool IsTestSupportedForDevice()
 bool IsWorkspaceTestSupportedForDevice()
 {
     using e_mask = enabled<Gpu::gfx94X>;
-    // gfx120X is not enabled due to WORKAROUND_SWDEV_479810
+    // requires ConvCKIgemmGrpFwdBiasActivFused solver
     using d_mask = disabled<Gpu::None>;
     return ::IsTestSupportedForDevMask<d_mask, e_mask>();
 }
