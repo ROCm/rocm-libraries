@@ -111,7 +111,8 @@ endif()
 
 #
 if(BUILD_CODE_COVERAGE)
-  add_compile_options(-fprofile-arcs -ftest-coverage)
+  # Only apply coverage flags to host code (C/CXX), not GPU device code (HIP)
+  add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-fprofile-arcs> $<$<COMPILE_LANGUAGE:C,CXX>:-ftest-coverage>)
   add_link_options(--coverage -lgcov)
 endif()
 
