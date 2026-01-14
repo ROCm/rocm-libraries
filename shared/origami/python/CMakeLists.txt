@@ -90,24 +90,12 @@ if(NOT ROCM_PATH IN_LIST CMAKE_PREFIX_PATH)
     message(STATUS "Added ROCM_PATH to CMAKE_PREFIX_PATH: ${ROCM_PATH}")
 endif()
 
-# Find HIP
 find_package(hip REQUIRED)
-
-# Fetch nanobind
-include(FetchContent)
-FetchContent_Declare(
-    nanobind
-    GIT_REPOSITORY https://github.com/wjakob/nanobind.git
-    GIT_TAG        v2.0.0
-)
-FetchContent_MakeAvailable(nanobind)
 
 find_package(nanobind CONFIG REQUIRED)
 
-# Set Python package directory
 set(PY_PACKAGE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/origami")
 
-# Add nanobind module
 nanobind_add_module(_pyorigami "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/bindings.cpp")
 
 set_target_properties(_pyorigami PROPERTIES OUTPUT_NAME "origami")
