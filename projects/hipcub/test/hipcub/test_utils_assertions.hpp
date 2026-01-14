@@ -247,7 +247,7 @@ inline auto assert_near(const custom_test_type<T>& result, const custom_test_typ
     -> typename std::enable_if<std::is_integral<T>::value>::type
 {
     ASSERT_EQ(result.x,expected.x);
-    ASSERT_EQ(result.x,expected.x);
+    ASSERT_EQ(result.y,expected.y);
 }
 
 // End assert_near
