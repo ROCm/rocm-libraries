@@ -45,9 +45,37 @@ namespace hiptensor
                                         ck::tensor_operation::element_wise::PassThrough,
                                         ck::tensor_operation::element_wise::PassThrough,
                                         ck::tensor_operation::element_wise::Bilinear,
+                                        ck::half_t>());
+
+        registerSolutions(
+            enumerateReferenceSolutions<6,
+                                        6,
+                                        6,
+                                        ck::half_t,
+                                        ck::half_t,
+                                        float,
+                                        ck::Tuple<ck::half_t>,
+                                        ck::half_t,
+                                        ck::tensor_operation::element_wise::PassThrough,
+                                        ck::tensor_operation::element_wise::PassThrough,
+                                        ck::tensor_operation::element_wise::Bilinear,
                                         float>());
 
         // Bilinear bf16
+        registerSolutions(
+            enumerateReferenceSolutions<6,
+                                        6,
+                                        6,
+                                        ck::bhalf_t,
+                                        ck::bhalf_t,
+                                        float,
+                                        ck::Tuple<ck::bhalf_t>,
+                                        ck::bhalf_t,
+                                        ck::tensor_operation::element_wise::PassThrough,
+                                        ck::tensor_operation::element_wise::PassThrough,
+                                        ck::tensor_operation::element_wise::Bilinear,
+                                        ck::bhalf_t>());
+
         registerSolutions(
             enumerateReferenceSolutions<6,
                                         6,

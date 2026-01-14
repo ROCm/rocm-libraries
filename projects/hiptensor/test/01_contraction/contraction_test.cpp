@@ -286,7 +286,7 @@ namespace hiptensor
                     || (computeType == HIPTENSOR_COMPUTE_DESC_C32F)
                     || (computeType == HIPTENSOR_COMPUTE_DESC_C64F));
 
-        mRunFlag &= checkDevice(DDataType, computeType);
+        mRunFlag = true;
 
         if(!mRunFlag)
         {

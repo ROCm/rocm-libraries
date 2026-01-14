@@ -230,7 +230,7 @@ int bilinearContractionSample(void* alpha, void* beta)
      ***************************/
     hiptensorPlanPreference_t planPref;
     CHECK_HIPTENSOR_ERROR(hiptensorCreatePlanPreference(
-        handle, &planPref, HIPTENSOR_ALGO_ACTOR_CRITIC, HIPTENSOR_JIT_MODE_NONE));
+        handle, &planPref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE));
 
     /**********************
      * Query workspace

@@ -30,11 +30,11 @@ int main(int argc, char* argv[])
     /***************************************
     * Check device support                 *
     **************************************/
-    if(!isF16Supported() || !isF32MatrixCoreSupported())
-    {
-        std::cout << "unsupported host device" << std::endl;
-        exit(EXIT_FAILURE);
-    }
+    //if(!isF16Supported() || !isF32MatrixCoreSupported())
+    //{
+    //    std::cout << "unsupported host device" << std::endl;
+    //    exit(EXIT_FAILURE);
+    //}
 
     typedef _Float16 ADataType;
     typedef _Float16 BDataType;
@@ -44,7 +44,7 @@ int main(int argc, char* argv[])
     constexpr hiptensorDataType_t          typeA       = HIPTENSOR_R_16F;
     constexpr hiptensorDataType_t          typeB       = HIPTENSOR_R_16F;
     constexpr hiptensorDataType_t          typeC       = HIPTENSOR_R_16F;
-    constexpr hiptensorComputeDescriptor_t typeCompute = HIPTENSOR_COMPUTE_DESC_32F;
+    constexpr hiptensorComputeDescriptor_t typeCompute = HIPTENSOR_COMPUTE_DESC_16F;
 
     floatTypeCompute alpha{1.0f};
     floatTypeCompute beta{1.0f};

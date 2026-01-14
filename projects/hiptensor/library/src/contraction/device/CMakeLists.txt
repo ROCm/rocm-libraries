@@ -25,6 +25,10 @@
  ###############################################################################
 
  set(CK_CONTRACTION_INSTANCE_SOURCES
+     ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_kknn_instance.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_knnn_instance.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_mknn_instance.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_mnnn_instance.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_compute_f32_kknn_instance.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_compute_f32_knnn_instance.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_compute_f32_mknn_instance.cpp
@@ -37,6 +41,10 @@
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_cf64_cf64_cf64_cf64_compute_cf64_knnn_instance.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_cf64_cf64_cf64_cf64_compute_cf64_mknn_instance.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_cf64_cf64_cf64_cf64_compute_cf64_mnnn_instance.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_f16_kknn_instance.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_f16_knnn_instance.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_f16_mknn_instance.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_f16_mnnn_instance.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_f16_compute_f32_kknn_instance.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_f16_compute_f32_knnn_instance.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/device_contraction_bilinear_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_f16_compute_f32_mknn_instance.cpp
