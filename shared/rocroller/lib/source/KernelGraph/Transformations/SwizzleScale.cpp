@@ -80,13 +80,13 @@ namespace rocRoller
             return scaleLoads;
         }
 
-            void SwizzleScaleDetail::orderExchangesBeforeMultipliesInLoopBody(
-                KernelGraph&                       graph,
-                ContextPtr                         context,
-                NaryArgument                       arg,
-                std::map<int, int>                 tileExchangeMap,
-                std::map<int, std::pair<int, int>> scaleLoads,
-                int                                loopTag)
+        void SwizzleScaleDetail::orderExchangesBeforeMultipliesInLoopBody(
+            KernelGraph&                       graph,
+            ContextPtr                         context,
+            NaryArgument                       arg,
+            std::map<int, int>                 tileExchangeMap,
+            std::map<int, std::pair<int, int>> scaleLoads,
+            int                                loopTag)
         {
             auto loopBodies = graph.control.getOutputNodeIndices<Body>(loopTag).to<std::vector>();
             for(auto loopBodyTag : loopBodies)
@@ -939,7 +939,7 @@ namespace rocRoller
                     maybeSetCoordinate = findContainingOperation<SetCoordinate>(tag, graph);
                 }
             }
-            
+
             SwizzleScaleDetail::orderExchangesBeforeMultipliesInLoopBody(
                 graph, context, arg, tileExchangeMap, scaleLoads, loopTag);
         }

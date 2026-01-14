@@ -24,8 +24,8 @@
  *
  *******************************************************************************/
 
-#include "GEMMTestBase.hpp"
 #include "GEMMF8F6F4.hpp"
+#include "GEMMTestBase.hpp"
 #include <rocRoller/Parameters/Solution/StoreOption.hpp>
 
 namespace GEMMTests
@@ -65,12 +65,11 @@ namespace GEMMTests
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
         const auto storePath = std::get<1>(GetParam());
 
-        auto gemm       = GEMMProblemF8NT{};
+        auto gemm      = GEMMProblemF8NT{};
         gemm.storePath = storePath;
 
         basicGEMM<FP8, FP8, float>(gemm);
     }
-
 
     INSTANTIATE_TEST_SUITE_P(
         GEMMStorePathTest,

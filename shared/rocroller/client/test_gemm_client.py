@@ -32,11 +32,11 @@ import functools
 import itertools
 import os
 import pathlib
+import shutil
 import subprocess
 from dataclasses import dataclass
 
 import pytest
-import shutil
 import yaml
 
 SOLUTION_NOT_SUPPORTED_ON_ARCH = 3
@@ -918,6 +918,7 @@ def test_gemm_wgm(tmp_path, solution_params, problem_params):
         return
 
     gemm_validate_single_stage(tmp_path, solution_params, problem_params)
+
 
 def test_kernel_graph_dot_truncation(tmp_path):
     """Validate Graphviz DOT rendering succeeds when node labels are truncated.
