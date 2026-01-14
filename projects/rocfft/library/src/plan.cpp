@@ -1662,7 +1662,7 @@ void rocfft_plan_t::GatherScatterSingleDevicePlan(std::unique_ptr<ExecPlan>&& ex
 
     // Allocate another temp buf if FFT is not-in-place and outfield was specified
     // TODO: this only needs to be done if there are multiple bricks in the output field.
-    if(placement == rocfft_placement_notinplace && !desc.outFields.empty())
+    if(/*placement == rocfft_placement_notinplace &&*/ !desc.outFields.empty())
     {
         const auto   out_elem_size  = element_size(precision, desc.outArrayType);
         const size_t out_elem_count = compute_ptrdiff(
