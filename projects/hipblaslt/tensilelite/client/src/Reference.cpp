@@ -118,332 +118,6 @@ namespace TensileLite
             }
         };
 
-        // Solve various forms of f16, bf16, f32 gemm problems using efficient CPU code.
-        // Only solves for a subset of geometries, this is what allows it to be faster than
-        // the 'legacy' reference implementation.
-        bool solveCPUFastInF32(ContractionProblemGemm const& problem,
-                               ContractionInputs const&      inputs,
-                               int64_t                       elementsToValidate)
-        {
-
-          std::cout << "In Fast CPU Solver" << std::endl;
-
-            // This fast solver computes all elements. If the number of elements to validate
-            // is in [0, 0.2 * totalElements), skip this solver, falling through to another
-            // solver that handles the partial validation sparsity efficiently.
-            if(elementsToValidate >= 0
-               && elementsToValidate < 0.2 * problem.d().totalLogicalElements())
-            {
-                return false;
-            }
-
-            // Guard rails to check that the fast path is appropriate to use. Some of these can be relaxed
-            // as support on this path is generalized.
-            auto isSupportedType = [](rocisa::DataType t) {
-                return t == rocisa::DataType::Float || t == rocisa::DataType::Half
-                       || t == rocisa::DataType::BFloat16;
-            };
-
-            if(!isSupportedType(problem.a().dataType()) || !isSupportedType(problem.b().dataType())
-               || !isSupportedType(problem.c().dataType())
-               || !isSupportedType(problem.d().dataType()))
-            {
-                return false;
-            }
-
-            if(problem.batchIndices().empty())
-            {
-                return false;
-            }
-
-            if(problem.useBias())
-            {
-                return false;
-            }
-
-            if(problem.useGradient())
-            {
-                return false;
-            }
-
-            if(problem.outputAmaxD())
-            {
-                return false;
-            }
-
-            if(problem.useE())
-            {
-                return false;
-            }
-
-            if(problem.activationType() != ActivationType::None)
-            {
-                return false;
-            }
-
-            if(problem.useScaleCD())
-            {
-                return false;
-            }
-
-            if(problem.useScaleAB() == "Scalar")
-            {
-                return false;
-            }
-
-            if(problem.useScaleAB() == "Vector")
-            {
-                return false;
-            }
-
-            // Resolve strides & dimensions
-            if(problem.boundIndices().size() != 1 || problem.freeIndicesA().size() != 1
-               || problem.freeIndicesB().size() != 1)
-            {
-                return false;
-            }
-
-            size_t idx_M_A = problem.freeIndicesA()[0].i;
-            size_t idx_K_A = problem.boundIndices()[0].a;
-            size_t idx_N_B = problem.freeIndicesB()[0].i;
-            size_t idx_K_B = problem.boundIndices()[0].b;
-            size_t idx_M_D = problem.freeIndices()[0].d;
-            size_t idx_N_D = problem.freeIndices()[1].d;
-
-            size_t stride_M_A = problem.a().strides()[idx_M_A];
-            size_t stride_K_A = problem.a().strides()[idx_K_A];
-            size_t stride_N_B = problem.b().strides()[idx_N_B];
-            size_t stride_K_B = problem.b().strides()[idx_K_B];
-            size_t stride_N_D = problem.d().strides()[idx_N_D];
-            size_t stride_N_C = problem.c().strides()[idx_N_D];
-
-            size_t stride_Batch_A = problem.a().strides()[problem.batchIndices()[0].a];
-            size_t stride_Batch_B = problem.b().strides()[problem.batchIndices()[0].b];
-            size_t stride_Batch_C = problem.c().strides()[problem.batchIndices()[0].d];
-            size_t stride_Batch_D = problem.d().strides()[problem.batchIndices()[0].d];
-
-            // Layout validation
-            bool isPackedA = (stride_M_A == 1 || stride_K_A == 1);
-            bool isPackedB = (stride_N_B == 1 || stride_K_B == 1);
-            bool isPackedD = (problem.d().strides()[idx_M_D] == 1);
-
-            if(!isPackedA || !isPackedB || !isPackedD)
-            {
-                return false;
-            }
-
-            // 4. Shadow copies
-            ShadowBuffer shadowA(
-                inputs.a, problem.a().dataType(), problem.a().totalAllocatedElements());
-            ShadowBuffer shadowB(
-                inputs.b, problem.b().dataType(), problem.b().totalAllocatedElements());
-            ShadowBuffer shadowC(
-                inputs.c, problem.c().dataType(), problem.c().totalAllocatedElements());
-
-            std::vector<float> shadowD;
-            float*             ptrD = nullptr;
-            if(problem.d().dataType() == rocisa::DataType::Float)
-            {
-                ptrD = static_cast<float*>(inputs.d);
-            }
-            else
-            {
-                shadowD.resize(problem.d().totalAllocatedElements());
-                ptrD = shadowD.data();
-            }
-
-            // --- Alpha Vector ---
-            bool useScaleAlphaVec = problem.useScaleAlphaVec();
-            int  factorDim        = problem.getParams().factorDim(); // 0 = Row(M), 1 = Col(N)
-
-            // AlphaVec is conditional
-            ShadowBuffer shadowAlphaVec;
-            if(problem.useScaleAlphaVec())
-            {
-                size_t vecLen  = (factorDim == 0) ? problem.freeSizeA(0) : problem.freeSizeB(0);
-                shadowAlphaVec = ShadowBuffer(inputs.scaleAlphaVec, problem.alphaType(), vecLen);
-            }
-
-            // -------------------------------------------------------------------------
-            // 5. Math Loop
-            // -------------------------------------------------------------------------
-            size_t size_Batch = problem.batchSize(0);
-            size_t size_K     = problem.boundSize(0);
-            size_t size_M     = problem.freeSizeA(0);
-            size_t size_N     = problem.freeSizeB(0);
-
-            constexpr size_t BLOCK_M = 32;
-            constexpr size_t BLOCK_N = 32;
-            constexpr size_t BLOCK_K = 8;
-
-            auto nTiles = (size_N / BLOCK_N + (size_N % BLOCK_N != 0));
-            auto mTiles = (size_M / BLOCK_M + (size_M % BLOCK_M != 0));
-            auto kTiles = (size_K / BLOCK_K + (size_K % BLOCK_K != 0));
-
-// parallelize over the batch, M, and N dimensions.
-#pragma omp parallel for collapse(3)
-            for(size_t b = 0; b < size_Batch; ++b)
-            {
-                const float* curBatchA = shadowA.data() + (b * stride_Batch_A);
-                const float* curBatchB = shadowB.data() + (b * stride_Batch_B);
-                const float* curBatchC = shadowC.data() + (b * stride_Batch_C);
-                float*       curBatchD = ptrD + (b * stride_Batch_D);
-                for(size_t m = 0; m < mTiles; ++m)
-                {
-                    auto m0 = m * BLOCK_M;
-                    for(size_t n = 0; n < nTiles; ++n)
-                    {
-                        auto n0 = n * BLOCK_N;
-
-                        std::array<float, BLOCK_M * BLOCK_K> A_reg = {0};
-                        std::array<float, BLOCK_K * BLOCK_N> B_reg = {0};
-                        std::array<float, BLOCK_M * BLOCK_N> C_reg = {0};
-                        for(size_t k = 0; k < kTiles; ++k)
-                        {
-                            auto k0 = k * BLOCK_K;
-
-                            // Populate A 'registers':
-                            for(size_t km = 0; km < BLOCK_K; ++km)
-                            {
-                                for(size_t mm = 0; mm < BLOCK_M; ++mm)
-                                {
-                                    size_t global_k = k0 + km;
-                                    size_t global_m = m0 + mm;
-                                    if(global_k < size_K && global_m < size_M)
-                                    {
-                                        auto offset = global_m * stride_M_A + global_k * stride_K_A;
-                                        A_reg[km * BLOCK_M + mm] = curBatchA[offset];
-                                    }
-                                    else
-                                    {
-                                        A_reg[km * BLOCK_M + mm] = 0.0f;
-                                    }
-                                }
-                            }
-
-                            // Populate B 'registers':
-                            for(size_t kn = 0; kn < BLOCK_K; ++kn)
-                            {
-                                for(size_t nn = 0; nn < BLOCK_N; ++nn)
-                                {
-                                    size_t global_k = k0 + kn;
-                                    size_t global_n = n0 + nn;
-                                    if(global_k < size_K && global_n < size_N)
-                                    {
-                                        B_reg[kn * BLOCK_N + nn]
-                                            = curBatchB[global_n * stride_N_B
-                                                        + global_k * stride_K_B];
-                                    }
-                                    else
-                                    {
-                                        B_reg[kn * BLOCK_N + nn] = 0.0f;
-                                    }
-                                }
-                            }
-
-                            // Perform matrix multiplication accumulation with k as inner-most (fastest) dimension for both A and B.
-                            // A, B, and C of sizes defined by BLOCK_M, BLOCK_N, BLOCK_K.
-                            // Store result in row-major order.
-                            auto innerReduction = [BLOCK_M, BLOCK_N, BLOCK_K](
-                                                      const float* A, const float* B, float* C) {
-                                for(size_t k_i = 0; k_i < BLOCK_K; ++k_i)
-                                {
-                                    for(size_t m_i = 0; m_i < BLOCK_M; ++m_i)
-                                    {
-                                        for(size_t n_i = 0; n_i < BLOCK_N; ++n_i)
-                                        {
-                                            auto b_index = k_i * BLOCK_N + n_i;
-                                            auto a_index = k_i * BLOCK_M + m_i;
-                                            auto c_index = m_i * BLOCK_N + n_i;
-                                            assert(b_index < BLOCK_K * BLOCK_N);
-                                            assert(a_index < BLOCK_K * BLOCK_M);
-                                            assert(c_index < BLOCK_M * BLOCK_N);
-                                            float valB = B[b_index];
-                                            float valA = A[a_index];
-                                            C[c_index] += valA * valB;
-                                        }
-                                    }
-                                }
-                            };
-                            innerReduction(A_reg.data(), B_reg.data(), C_reg.data());
-                        }
-
-                        // Copy from C to curBatchD:
-                        for(size_t nn = 0; nn < BLOCK_N; ++nn)
-                        {
-                            for(size_t mm = 0; mm < BLOCK_M; ++mm)
-                            {
-                                size_t global_n = n0 + nn;
-                                size_t global_m = m0 + mm;
-                                if(global_n < size_N && global_m < size_M)
-                                {
-                                    size_t idxD     = global_n * stride_N_D + global_m;
-                                    curBatchD[idxD] = C_reg[mm * BLOCK_N + nn];
-                                }
-                            }
-                        }
-
-                        // Perform non-linearity on the block.
-                        for(size_t nn = 0; nn < BLOCK_N; ++nn)
-                        {
-                            for(size_t mm = 0; mm < BLOCK_M; ++mm)
-                            {
-
-                                const float originalAlpha = std::get<float>(inputs.alpha);
-                                const float beta          = std::get<float>(inputs.beta);
-                                float       alpha         = originalAlpha;
-                                size_t      global_n      = n0 + nn;
-                                size_t      global_m      = m0 + mm;
-                                if(global_n < size_N && global_m < size_M)
-                                {
-                                    size_t idxD      = global_m + (global_n * stride_N_D);
-                                    size_t idxC      = global_m + (global_n * stride_N_C);
-                                    auto   startingC = curBatchC[idxC];
-                                    auto   startingD = curBatchD[idxD];
-                                    if(useScaleAlphaVec)
-                                    {
-                                        if(factorDim == 1)
-                                        {
-                                            alpha *= shadowAlphaVec[global_n];
-                                        }
-                                        else
-                                        {
-                                            alpha *= shadowAlphaVec[global_m];
-                                        }
-                                    }
-                                    if(beta != 0.0f)
-                                    {
-                                        curBatchD[idxD] = (alpha * startingD) + (beta * startingC);
-                                    }
-                                    else
-                                    {
-                                        curBatchD[idxD] = (alpha * startingD);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // -------------------------------------------------------------------------
-            // 6. Write Back
-            // -------------------------------------------------------------------------
-            if(problem.d().dataType() == rocisa::DataType::Half)
-            {
-                storeFromFloat<TensileLite::Half>(
-                    inputs.d, shadowD, problem.d().totalAllocatedElements());
-            }
-            else if(problem.d().dataType() == rocisa::DataType::BFloat16)
-            {
-                storeFromFloat<TensileLite::BFloat16>(
-                    inputs.d, shadowD, problem.d().totalAllocatedElements());
-            }
-
-            std::cout << "Completed Fast CPU Solver" << std::endl;
-
-            return true;
-        }
     }
 
     namespace Client
@@ -1106,6 +780,352 @@ namespace TensileLite
         {
             throw std::runtime_error("Unsupported input type.");
         }
+
+
+        // Solve various forms of f16, bf16, f32 gemm problems using efficient CPU code.
+        // Only solves for a subset of geometries, this is what allows it to be faster than
+        // the 'legacy' reference implementation.
+        bool solveCPUFastInF32(ContractionProblemGemm const& problem,
+                               ContractionInputs const&      inputs,
+                               int64_t                       elementsToValidate)
+        {
+
+            // This fast solver computes all elements. If the number of elements to validate
+            // is in [0, 0.2 * totalElements), skip this solver, falling through to another
+            // solver that handles the partial validation sparsity efficiently.
+            if(elementsToValidate >= 0
+               && elementsToValidate < 0.2 * problem.d().totalLogicalElements())
+            {
+                return false;
+            }
+
+            // Guard rails to check that the fast path is appropriate to use. 
+            // Some of these can be relaxed  as support on this path is generalized.
+            auto isSupportedType = [](rocisa::DataType t) {
+                return t == rocisa::DataType::Float || t == rocisa::DataType::Half
+                       || t == rocisa::DataType::BFloat16;
+            };
+
+            if(!isSupportedType(problem.a().dataType()) || !isSupportedType(problem.b().dataType())
+               || !isSupportedType(problem.c().dataType())
+               || !isSupportedType(problem.d().dataType()))
+            {
+                return false;
+            }
+
+            // TODO(newling) understand batchIndices. 
+            if(problem.batchIndices().empty())
+            {
+                return false;
+            }
+
+            if(problem.useBias())
+            {
+                return false;
+            }
+
+            if(problem.useGradient())
+            {
+                return false;
+            }
+
+            if(problem.outputAmaxD())
+            {
+                return false;
+            }
+
+            if(problem.useE())
+            {
+                return false;
+            }
+
+            if(problem.useScaleCD())
+            {
+                return false;
+            }
+
+            if(problem.useScaleAB() == "Scalar")
+            {
+                return false;
+            }
+
+            if(problem.useScaleAB() == "Vector")
+            {
+                return false;
+            }
+
+            // Resolve strides & dimensions
+            if(problem.boundIndices().size() != 1 || problem.freeIndicesA().size() != 1
+               || problem.freeIndicesB().size() != 1)
+            {
+                return false;
+            }
+
+
+            bool doActivation = false;
+            std::vector<float> actArgs;
+            if(problem.activationType() != ActivationType::None)
+            {
+                doActivation = true;
+                for(int i = 0; i < inputs.activationArgs.size(); i++)
+                {
+                    actArgs.push_back(constVariantCast<float>(inputs.activationArgs[i]));
+                }
+            }
+
+            size_t idx_M_A = problem.freeIndicesA()[0].i;
+            size_t idx_K_A = problem.boundIndices()[0].a;
+            size_t idx_N_B = problem.freeIndicesB()[0].i;
+            size_t idx_K_B = problem.boundIndices()[0].b;
+            size_t idx_M_D = problem.freeIndices()[0].d;
+            size_t idx_N_D = problem.freeIndices()[1].d;
+
+            size_t stride_M_A = problem.a().strides()[idx_M_A];
+            size_t stride_K_A = problem.a().strides()[idx_K_A];
+            size_t stride_N_B = problem.b().strides()[idx_N_B];
+            size_t stride_K_B = problem.b().strides()[idx_K_B];
+            size_t stride_N_D = problem.d().strides()[idx_N_D];
+            size_t stride_N_C = problem.c().strides()[idx_N_D];
+
+            size_t stride_Batch_A = problem.a().strides()[problem.batchIndices()[0].a];
+            size_t stride_Batch_B = problem.b().strides()[problem.batchIndices()[0].b];
+            size_t stride_Batch_C = problem.c().strides()[problem.batchIndices()[0].d];
+            size_t stride_Batch_D = problem.d().strides()[problem.batchIndices()[0].d];
+
+            // Layout validation
+            bool isPackedA = (stride_M_A == 1 || stride_K_A == 1);
+            bool isPackedB = (stride_N_B == 1 || stride_K_B == 1);
+            bool isPackedD = (problem.d().strides()[idx_M_D] == 1);
+
+            if(!isPackedA || !isPackedB || !isPackedD)
+            {
+                return false;
+            }
+
+            // 4. Shadow copies
+            ShadowBuffer shadowA(
+                inputs.a, problem.a().dataType(), problem.a().totalAllocatedElements());
+            ShadowBuffer shadowB(
+                inputs.b, problem.b().dataType(), problem.b().totalAllocatedElements());
+            ShadowBuffer shadowC(
+                inputs.c, problem.c().dataType(), problem.c().totalAllocatedElements());
+
+            std::vector<float> shadowD;
+            float*             ptrD = nullptr;
+            if(problem.d().dataType() == rocisa::DataType::Float)
+            {
+                ptrD = static_cast<float*>(inputs.d);
+            }
+            else
+            {
+                shadowD.resize(problem.d().totalAllocatedElements());
+                ptrD = shadowD.data();
+            }
+
+            // --- Alpha Vector ---
+            bool useScaleAlphaVec = problem.useScaleAlphaVec();
+            int  factorDim        = problem.getParams().factorDim(); // 0 = Row(M), 1 = Col(N)
+
+            // AlphaVec is conditional
+            ShadowBuffer shadowAlphaVec;
+            if(problem.useScaleAlphaVec())
+            {
+                size_t vecLen  = (factorDim == 0) ? problem.freeSizeA(0) : problem.freeSizeB(0);
+                shadowAlphaVec = ShadowBuffer(inputs.scaleAlphaVec, problem.alphaType(), vecLen);
+            }
+
+            // -------------------------------------------------------------------------
+            // 5. Math Loop
+            // -------------------------------------------------------------------------
+            size_t size_Batch = problem.batchSize(0);
+            size_t size_K     = problem.boundSize(0);
+            size_t size_M     = problem.freeSizeA(0);
+            size_t size_N     = problem.freeSizeB(0);
+
+            constexpr size_t BLOCK_M = 32;
+            constexpr size_t BLOCK_N = 32;
+            constexpr size_t BLOCK_K = 8;
+
+            auto nTiles = (size_N / BLOCK_N + (size_N % BLOCK_N != 0));
+            auto mTiles = (size_M / BLOCK_M + (size_M % BLOCK_M != 0));
+            auto kTiles = (size_K / BLOCK_K + (size_K % BLOCK_K != 0));
+
+// parallelize over the batch, M, and N dimensions.
+#pragma omp parallel for collapse(3)
+            for(size_t b = 0; b < size_Batch; ++b)
+            {
+                const float* curBatchA = shadowA.data() + (b * stride_Batch_A);
+                const float* curBatchB = shadowB.data() + (b * stride_Batch_B);
+                const float* curBatchC = shadowC.data() + (b * stride_Batch_C);
+                float*       curBatchD = ptrD + (b * stride_Batch_D);
+                for(size_t m = 0; m < mTiles; ++m)
+                {
+                    auto m0 = m * BLOCK_M;
+                    for(size_t n = 0; n < nTiles; ++n)
+                    {
+                        auto n0 = n * BLOCK_N;
+
+                        std::array<float, BLOCK_M * BLOCK_K> A_reg = {0};
+                        std::array<float, BLOCK_K * BLOCK_N> B_reg = {0};
+                        std::array<float, BLOCK_M * BLOCK_N> C_reg = {0};
+                        for(size_t k = 0; k < kTiles; ++k)
+                        {
+                            auto k0 = k * BLOCK_K;
+
+                            // Populate A 'registers':
+                            for(size_t km = 0; km < BLOCK_K; ++km)
+                            {
+                                for(size_t mm = 0; mm < BLOCK_M; ++mm)
+                                {
+                                    size_t global_k = k0 + km;
+                                    size_t global_m = m0 + mm;
+                                    if(global_k < size_K && global_m < size_M)
+                                    {
+                                        auto offset = global_m * stride_M_A + global_k * stride_K_A;
+                                        A_reg[km * BLOCK_M + mm] = curBatchA[offset];
+                                    }
+                                    else
+                                    {
+                                        A_reg[km * BLOCK_M + mm] = 0.0f;
+                                    }
+                                }
+                            }
+
+                            // Populate B 'registers':
+                            for(size_t kn = 0; kn < BLOCK_K; ++kn)
+                            {
+                                for(size_t nn = 0; nn < BLOCK_N; ++nn)
+                                {
+                                    size_t global_k = k0 + kn;
+                                    size_t global_n = n0 + nn;
+                                    if(global_k < size_K && global_n < size_N)
+                                    {
+                                        B_reg[kn * BLOCK_N + nn]
+                                            = curBatchB[global_n * stride_N_B
+                                                        + global_k * stride_K_B];
+                                    }
+                                    else
+                                    {
+                                        B_reg[kn * BLOCK_N + nn] = 0.0f;
+                                    }
+                                }
+                            }
+
+                            // Perform matrix multiplication accumulation with k as inner-most (fastest) dimension for both A and B.
+                            // A, B, and C of sizes defined by BLOCK_M, BLOCK_N, BLOCK_K.
+                            // Store result in row-major order.
+                            auto innerReduction = [BLOCK_M, BLOCK_N, BLOCK_K](
+                                                      const float* A, const float* B, float* C) {
+                                for(size_t k_i = 0; k_i < BLOCK_K; ++k_i)
+                                {
+                                    for(size_t m_i = 0; m_i < BLOCK_M; ++m_i)
+                                    {
+                                        for(size_t n_i = 0; n_i < BLOCK_N; ++n_i)
+                                        {
+                                            auto b_index = k_i * BLOCK_N + n_i;
+                                            auto a_index = k_i * BLOCK_M + m_i;
+                                            auto c_index = m_i * BLOCK_N + n_i;
+                                            assert(b_index < BLOCK_K * BLOCK_N);
+                                            assert(a_index < BLOCK_K * BLOCK_M);
+                                            assert(c_index < BLOCK_M * BLOCK_N);
+                                            float valB = B[b_index];
+                                            float valA = A[a_index];
+                                            C[c_index] += valA * valB;
+                                        }
+                                    }
+                                }
+                            };
+                            innerReduction(A_reg.data(), B_reg.data(), C_reg.data());
+                        }
+
+                        // Copy from C to curBatchD:
+                        for(size_t nn = 0; nn < BLOCK_N; ++nn)
+                        {
+                            for(size_t mm = 0; mm < BLOCK_M; ++mm)
+                            {
+                                size_t global_n = n0 + nn;
+                                size_t global_m = m0 + mm;
+                                if(global_n < size_N && global_m < size_M)
+                                {
+                                    size_t idxD     = global_n * stride_N_D + global_m;
+                                    curBatchD[idxD] = C_reg[mm * BLOCK_N + nn];
+                                }
+                            }
+                        }
+
+                        // Perform non-linearity on the block.
+                        for(size_t nn = 0; nn < BLOCK_N; ++nn)
+                        {
+                            for(size_t mm = 0; mm < BLOCK_M; ++mm)
+                            {
+
+                                const float originalAlpha = std::get<float>(inputs.alpha);
+                                const float beta          = std::get<float>(inputs.beta);
+                                float       alpha         = originalAlpha;
+                                size_t      global_n      = n0 + nn;
+                                size_t      global_m      = m0 + mm;
+                                if(global_n < size_N && global_m < size_M)
+                                {
+                                    size_t idxD      = global_m + (global_n * stride_N_D);
+                                    size_t idxC      = global_m + (global_n * stride_N_C);
+                                    auto   startingC = curBatchC[idxC];
+                                    auto   current   = curBatchD[idxD];
+                                    if(useScaleAlphaVec)
+                                    {
+                                        if(factorDim == 1)
+                                        {
+                                            alpha *= shadowAlphaVec[global_n];
+                                        }
+                                        else
+                                        {
+                                            alpha *= shadowAlphaVec[global_m];
+                                        }
+                                    }
+                                    if(beta != 0.0f)
+                                    {
+                                        current = (alpha * current) + (beta * startingC);
+                                    }
+                                    else
+                                    {
+                                        current = (alpha * current);
+                                    }
+
+                                    if (doActivation){
+                                        current = Activation(problem.activationType(),
+                                                             current,
+                                                             problem.getParams().activationEnum(),
+                                                             actArgs);
+                                    }
+
+                                    curBatchD[idxD] = current;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // -------------------------------------------------------------------------
+            // 6. Write Back
+            // -------------------------------------------------------------------------
+            if(problem.d().dataType() == rocisa::DataType::Half)
+            {
+                storeFromFloat<TensileLite::Half>(
+                    inputs.d, shadowD, problem.d().totalAllocatedElements());
+            }
+            else if(problem.d().dataType() == rocisa::DataType::BFloat16)
+            {
+                storeFromFloat<TensileLite::BFloat16>(
+                    inputs.d, shadowD, problem.d().totalAllocatedElements());
+            }
+
+
+            std::cout << "Completed Fast CPU Solver" << std::endl;
+
+            return true;
+        }
+
+
 
         template <typename Inputs, typename Accumulator, typename MathOpAccum>
         void ReferenceSolution<Inputs, Accumulator, MathOpAccum>::SolveCPU(
