@@ -888,6 +888,17 @@ else()
         )
 endif()
 
+if (BUILD_CODE_COVERAGE)
+	target_compile_options(MIOpen PRIVATE
+    -w
+    -fprofile-instr-generate
+    -fcoverage-mapping
+  )
+  target_link_options(MIOpen PUBLIC
+    -fprofile-instr-generate
+  )
+endif()
+
 rocm_set_soversion(MIOpen ${MIOpen_SOVERSION})
 
 clang_tidy_check(MIOpen)
