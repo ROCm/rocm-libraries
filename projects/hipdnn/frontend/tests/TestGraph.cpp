@@ -399,10 +399,14 @@ TEST_F(TestGraph, BatchnormInferenceNodeVarianceExtCreation)
     scale->set_dim(derivedDims).set_stride(derivedStrides);
     bias->set_dim(derivedDims).set_stride(derivedStrides);
 
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_name("Epsilon").set_value(1e-5f);
+
     BatchnormInferenceAttributesVarianceExt attributes;
     attributes.set_name("BatchnormNodeVariance");
 
-    auto y = graph.batchnorm_inference_variance_ext(x, mean, variance, scale, bias, attributes);
+    auto y = graph.batchnorm_inference_variance_ext(
+        x, mean, variance, scale, bias, epsilon, attributes);
 
     EXPECT_EQ(y->get_name(), "BatchnormNodeVariance::Y");
     EXPECT_TRUE(y->get_is_virtual());
@@ -702,11 +706,14 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceVarianceExtGraph)
         .set_dim(derivedDims)
         .set_stride(derivedStrides);
 
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(6).set_name("Epsilon").set_value(1e-5f);
+
     BatchnormInferenceAttributesVarianceExt batchnormAttributes;
     batchnormAttributes.set_name("BatchnormNodeVariance");
 
     auto y = graph.batchnorm_inference_variance_ext(
-        x, mean, variance, scale, bias, batchnormAttributes);
+        x, mean, variance, scale, bias, epsilon, batchnormAttributes);
 
     auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
@@ -722,7 +729,7 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceVarianceExtGraph)
     EXPECT_EQ(deserializedGraph->intermediate_data_type,
               hipdnn_data_sdk::data_objects::DataType::HALF);
     EXPECT_EQ(deserializedGraph->io_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
-    EXPECT_EQ(deserializedGraph->tensors.size(), 6);
+    EXPECT_EQ(deserializedGraph->tensors.size(), 7);
     EXPECT_EQ(deserializedGraph->nodes.size(), 1);
 
     std::unordered_map<int64_t, hipdnn_data_sdk::data_objects::TensorAttributesT> tensorLookup;
@@ -736,6 +743,7 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceVarianceExtGraph)
     validateTensor(*variance, tensorLookup[variance->get_uid()]);
     validateTensor(*scale, tensorLookup[scale->get_uid()]);
     validateTensor(*bias, tensorLookup[bias->get_uid()]);
+    validateTensor(*epsilon, tensorLookup[epsilon->get_uid()]);
     validateTensor(*y, tensorLookup[y->get_uid()]);
 
     EXPECT_EQ(deserializedGraph->nodes[0]->name, "BatchnormNodeVariance");
@@ -749,6 +757,7 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceVarianceExtGraph)
     EXPECT_EQ(deserializedBatchnormAttributes->variance_tensor_uid, variance->get_uid());
     EXPECT_EQ(deserializedBatchnormAttributes->scale_tensor_uid, scale->get_uid());
     EXPECT_EQ(deserializedBatchnormAttributes->bias_tensor_uid, bias->get_uid());
+    EXPECT_EQ(deserializedBatchnormAttributes->epsilon_tensor_uid, epsilon->get_uid());
     EXPECT_EQ(deserializedBatchnormAttributes->y_tensor_uid, y->get_uid());
 }
 
@@ -1352,6 +1361,89 @@ TEST_F(TestGraph, BuildAndSerializeConvolutionFwdGraph)
     EXPECT_EQ(deserializedConvolutionAttributes->post_padding, std::vector<int64_t>({1, 1}));
     EXPECT_EQ(deserializedConvolutionAttributes->stride, std::vector<int64_t>({1, 1}));
     EXPECT_EQ(deserializedConvolutionAttributes->dilation, std::vector<int64_t>({1, 1}));
+}
+
+TEST_F(TestGraph, MatmulNodeCreation)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto a = std::make_shared<TensorAttributes>();
+    a->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
+
+    auto b = std::make_shared<TensorAttributes>();
+    b->set_dim({8, 5}).set_stride({5, 1}).set_data_type(DataType::FLOAT);
+
+    MatmulAttributes attributes;
+    attributes.set_name("MatmulNode");
+
+    auto c = graph.matmul(a, b, attributes);
+
+    EXPECT_EQ(c->get_name(), "MatmulNode::C");
+    EXPECT_TRUE(c->get_is_virtual());
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, BuildAndSerializeMatmulGraph)
+{
+    Graph graph;
+
+    graph.set_name("SerializedMatmulGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto a = std::make_shared<TensorAttributes>();
+    a->set_uid(1).set_name("A").set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
+
+    auto b = std::make_shared<TensorAttributes>();
+    b->set_uid(2).set_name("B").set_dim({8, 5}).set_stride({5, 1}).set_data_type(DataType::FLOAT);
+
+    MatmulAttributes attributes;
+    attributes.set_name("MatmulNode");
+
+    auto c = graph.matmul(a, b, attributes);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+
+    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> deserializedGraph;
+    expectGraphSerializedToBackendDescriptor(deserializedGraph);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
+
+    EXPECT_EQ(deserializedGraph->name, "SerializedMatmulGraph");
+    EXPECT_EQ(deserializedGraph->compute_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->intermediate_data_type,
+              hipdnn_data_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(deserializedGraph->io_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->tensors.size(), 3);
+    EXPECT_EQ(deserializedGraph->nodes.size(), 1);
+
+    std::unordered_map<int64_t, hipdnn_data_sdk::data_objects::TensorAttributesT> tensorLookup;
+    for(auto& tensor : deserializedGraph->tensors)
+    {
+        tensorLookup[tensor->uid] = *tensor;
+    }
+
+    validateTensor(*a, tensorLookup[a->get_uid()]);
+    validateTensor(*b, tensorLookup[b->get_uid()]);
+    validateTensor(*c, tensorLookup[c->get_uid()]);
+
+    EXPECT_EQ(deserializedGraph->nodes[0]->name, "MatmulNode");
+    EXPECT_EQ(deserializedGraph->nodes[0]->attributes.type,
+              hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes);
+    auto deserializedMatmulAttributes
+        = deserializedGraph->nodes[0]->attributes.AsMatmulAttributes();
+    ASSERT_NE(deserializedMatmulAttributes, nullptr);
+    EXPECT_EQ(deserializedMatmulAttributes->a_tensor_uid, a->get_uid());
+    EXPECT_EQ(deserializedMatmulAttributes->b_tensor_uid, b->get_uid());
+    EXPECT_EQ(deserializedMatmulAttributes->c_tensor_uid, c->get_uid());
 }
 
 TEST_F(TestGraph, BuildAndSerializeConvolutionDgradGraph)

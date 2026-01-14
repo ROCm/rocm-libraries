@@ -245,6 +245,12 @@ namespace rocRoller
             getDefaultValueForKernelGraphDOTSerialization,
             -1};
 
+        static inline const SettingsOption<std::size_t> GraphNodeLabelMaxLength{
+            "ROCROLLER_KGRAPH_NODE_LABEL_MAX_LENGTH",
+            "Maximum length of KernelGraph node expression when emitting DOT",
+            std::size_t{1000},
+            -1};
+
         /**
          * @brief Creates a help dialog for the environment variables with
          * their names, default values and bit-offset (if it has one).

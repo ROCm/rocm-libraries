@@ -30,17 +30,18 @@
 #include <stdint.h>
 
 #ifdef HIPBLASLT_USE_ROCROLLER
-std::vector<float> generateMXInput(hipDataType            dataType,
-                                   void*                  data,
-                                   void*                  scale,
-                                   uint64_t               row,
-                                   uint64_t               col,
-                                   uint64_t               stride,
-                                   bool                   isTranspose,
-                                   int const              scaleBlockRowSize,
-                                   int const              scaleBlockColSize,
-                                   bool                   isMatrixA,
-                                   std::string_view const initMethod = "Bounded",
-                                   float                  min_val    = -1.0f,
-                                   float                  max_val    = 1.0f);
+std::vector<float> generateMXInput(hipDataType                dataType,
+                                   void*                      data,
+                                   void*                      scale,
+                                   uint64_t                   row,
+                                   uint64_t                   col,
+                                   uint64_t                   stride,
+                                   bool                       isTranspose,
+                                   const std::vector<size_t>& preSwizzleTile,
+                                   int const                  scaleBlockRowSize,
+                                   int const                  scaleBlockColSize,
+                                   bool                       isMatrixA,
+                                   std::string_view const     initMethod = "Bounded",
+                                   float                      min_val    = -1.0f,
+                                   float                      max_val    = 1.0f);
 #endif

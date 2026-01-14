@@ -3,7 +3,7 @@
 
 include(GoogleTest)
 
-if(HIP_DNN_SKIP_TESTS)
+if(HIPDNN_SKIP_TESTS)
     message(STATUS "Skipping Data SDK tests")
     return()
 endif()
@@ -21,6 +21,7 @@ add_executable(
     flatbuffer_utilities/TestNodeWrapper.cpp
     utilities/TestAllocators.cpp
     utilities/TestCallbackLogger.cpp
+    utilities/TestEngineNames.cpp
     utilities/TestFloats.cpp
     utilities/TestJson.cpp
     utilities/TestMigratableMemory.cpp
@@ -31,6 +32,7 @@ add_executable(
     utilities/TestShallowTensor.cpp
     utilities/TestShapeUtilities.cpp
     utilities/TestStaticCast.cpp
+    utilities/TestStringUtil.cpp
     utilities/TestTensor.cpp
     utilities/TestTensorIterator.cpp
     utilities/TestTensorView.cpp

@@ -29,10 +29,10 @@
 #include <set>
 #include <vector>
 
+#include "../../../shared/device_properties.h"
 #include "../../../shared/gpubuf.h"
 #include "../../../shared/hip_object_wrapper.h"
 #include "../../../shared/rocfft_complex.h"
-#include "../../shared/device_properties.h"
 #include "../device/kernels/callback.h"
 #include "../device/kernels/common.h"
 #include "callback_map.h"
