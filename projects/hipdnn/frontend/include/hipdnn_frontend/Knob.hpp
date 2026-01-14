@@ -296,6 +296,16 @@ private:
 class Knob : public IKnob
 {
 public:
+    // Move constructor
+    Knob(Knob&& other) noexcept = default;
+
+    // Move assignment operator
+    Knob& operator=(Knob&& other) noexcept = default;
+
+    // Delete copy constructor and copy assignment (Knob contains unique_ptr)
+    Knob(const Knob&) = delete;
+    Knob& operator=(const Knob&) = delete;
+
     // Factory function to create from flatbuffer
     static Knob fromFlatbuffer(const hipdnn_data_sdk::data_objects::Knob* fbKnob)
     {
@@ -448,11 +458,6 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    // Flatbuffer pack method
-    // TODO: Implement once flatbuffer schemas are available
-    // flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob> pack(
-    //     flatbuffers::FlatBufferBuilder& builder) const;
-
     // Helper to hash the string ID to the int ID
     static int64_t makeKnobId(const std::string& strID)
     {
@@ -484,7 +489,7 @@ public:
     }
 
 private:
-    // Private constructor - use factory function to create instances
+    // Private constructor - use flatbuffer factory function to create instances
     Knob(std::string knobIdStr,
          std::string description,
          std::variant<KNOB_TYPES> defaultValue,
@@ -522,9 +527,6 @@ private:
 
     // Constraint (polymorphic)
     std::unique_ptr<IConstraint> _constraint;
-
-    // Allow factory function access to private members
-    // friend Knob fromFlatbuffer(const hipdnn_data_sdk::data_objects::Knob* fbKnob);
 };
 
 } // namespace hipdnn_frontend

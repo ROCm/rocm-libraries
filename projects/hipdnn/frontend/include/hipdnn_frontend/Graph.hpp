@@ -110,7 +110,10 @@ private:
         return {ErrorCode::OK, ""};
     }
 
-    Error initializeEngineConfig()
+    Error
+        getEngineConfigs(std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>>& engineConfigs,
+                         std::vector<int64_t>& engineIds,
+                         bool getAll)
     {
         int64_t availableEngineCount = 0;
         RETURN_ON_BACKEND_FAILURE(
@@ -130,8 +133,7 @@ private:
 
         // Get only top hit if preferred engine id isn't set.
         // Otherwise get all available engine configs to search for preferred id.
-        int64_t requiredCount = _preferredEngineId.has_value() ? availableEngineCount : 1;
-        std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>> engineConfigs;
+        int64_t requiredCount = getAll ? availableEngineCount : 1;
         std::vector<hipdnnBackendDescriptor_t> engineConfigsShallow;
         for(size_t i = 0; i < static_cast<size_t>(requiredCount); ++i)
         {
@@ -164,7 +166,7 @@ private:
         }
 
         // Finalize and get ids for engine configs
-        std::vector<int64_t> engineIds(static_cast<size_t>(count), -1);
+        engineIds.resize(static_cast<size_t>(count), -1);
         for(size_t i = 0; i < static_cast<size_t>(count); ++i)
         {
             auto engineConfigDesc = engineConfigsShallow[i];
@@ -194,13 +196,23 @@ private:
                 "Failed to get engine id from engine descriptor.");
         }
 
+        return {ErrorCode::OK, ""};
+    }
+
+    Error initializeEngineConfig()
+    {
+        std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>> engineConfigs;
+        std::vector<int64_t> engineIds;
+        Error status = getEngineConfigs(engineConfigs, engineIds, _preferredEngineId.has_value());
+        HIPDNN_CHECK_ERROR(status);
+
         // Select engine config based on preferred ID or use first available
         size_t selectedIndex = 0;
         if(_preferredEngineId.has_value())
         {
             bool found = false;
 
-            for(size_t i = 0; i < static_cast<size_t>(count); ++i)
+            for(size_t i = 0; i < engineIds.size(); ++i)
             {
 
                 if(engineIds[i] == _preferredEngineId.value())
@@ -781,15 +793,49 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
     Error get_knobs_for_engine(int64_t engineId, std::vector<Knob>& knobs) const
     {
-        // TODO: Implement once flatbuffer schemas and backend support are available
-        // This method will:
-        // 1. Query the backend for engine details using HIPDNN_ATTR_ENGINE_KNOB_INFO
-        // 2. Deserialize the EngineDetails flatbuffer
-        // 3. Extract the supported_knobs array
-        // 4. Convert each flatbuffer Knob to a frontend Knob object using Knob::fromFlatbuffer()
-        // 5. Populate the knobs vector
+        // 1. Get engine descriptor
+        auto engineDesc
+            = std::make_unique<ScopedHipdnnBackendDescriptor>(HIPDNN_BACKEND_ENGINE_DESCRIPTOR);
 
-        (void)engineId; // Suppress unused parameter warning
+        RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendSetAttribute(engineDesc->get(),
+                                                 HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
+                                                 HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                 1,
+                                                 &_graphDesc->get()),
+            "Failed to set operation graph on the engine descriptor.");
+
+        RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendSetAttribute(engineDesc->get(),
+                                                 HIPDNN_ATTR_ENGINE_GLOBAL_INDEX,
+                                                 HIPDNN_TYPE_INT64,
+                                                 1,
+                                                 &engineId),
+            "Failed to set engine id on the engine descriptor.");
+
+        RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineDesc->get()),
+                                  "Failed to finalize engine descriptor");
+
+        // 2. get HIPDNN_ATTR_ENGINE_KNOB_INFO from engine descriptor
+        // int64_t count = 0;
+        // RETURN_ON_BACKEND_FAILURE(
+        //     hipdnnBackend()->backendGetAttribute(_engineHeuristicDesc->get(),
+        //                                          HIPDNN_ATTR_ENGINE_KNOB_INFO,
+        //                                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+        //                                          static_cast<int64_t>(engineConfigsShallow.size()),
+        //                                          &count,
+        //                                          engineConfigsShallow.data()),
+        //     "Failed to get engine configurations from the heuristic descriptor.");
+
+        // if(count == 0)
+        // {
+        //     return {ErrorCode::HIPDNN_BACKEND_ERROR,
+        //             "No engine configurations retrieved from the heuristic desc."};
+        // }
+
+        // 3. Convert knob flatbuffers to frontend Knobs vector
+        // TODO
+
         (void)knobs; // Suppress unused parameter warning
 
         return {ErrorCode::OK, "get_knobs_for_engine not yet implemented"};
@@ -799,9 +845,14 @@ public:
     Error get_knob_lookup_for_engine(int64_t engineId,
                                      std::unordered_map<int64_t, Knob>& knobs) const
     {
-        // TODO
-        (void)engineId;
-        (void)knobs;
+        std::vector<Knob> knobVector;
+        Error status = get_knobs_for_engine(engineId, knobVector);
+        HIPDNN_CHECK_ERROR(status);
+
+        for(auto& knob : knobVector)
+        {
+            knobs.try_emplace(knob.getKnobId(), std::move(knob));
+        }
 
         return {ErrorCode::OK, ""};
     }
@@ -811,17 +862,15 @@ public:
     Error get_ranked_engine_ids(std::vector<int64_t>& rankedEngineIds,
                                 const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
     {
-        // TODO: Implement once backend heuristics support is available
-        // This method will:
-        // 1. Initialize heuristic descriptor with the provided modes
-        // 2. Query all available engine configurations
-        // 3. Extract engine IDs in ranked order
-        // 4. Populate rankedEngineIds vector
+        Error status = initializeHeuristicDescriptor(modes);
+        HIPDNN_CHECK_ERROR(status);
 
-        (void)rankedEngineIds; // Suppress unused parameter warning
-        (void)modes; // Suppress unused parameter warning
+        std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>> engineConfigs;
+        std::vector<int64_t> engineIds;
+        status = getEngineConfigs(engineConfigs, rankedEngineIds, true);
+        HIPDNN_CHECK_ERROR(status);
 
-        return {ErrorCode::OK, "get_ranked_engine_ids not yet implemented"};
+        return {ErrorCode::OK, ""};
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
