@@ -14,6 +14,8 @@ add_executable(
     IntegrationGpuBatchnormBackward.cpp
     IntegrationGpuBatchnormBackwardActivation.cpp
     IntegrationGpuBatchnormForwardInference.cpp
+    IntegrationGpuBatchnormForwardInferenceWithVariance.cpp
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
     IntegrationGpuBatchnormFwdPlusActive.cpp
     IntegrationGpuBatchnormForwardTraining.cpp
     IntegrationGpuBatchnormFwdTrainingActiv.cpp
@@ -38,7 +40,7 @@ target_link_libraries(
 )
 
 # Ensure that the miopen_legacy_plugin is built before the miopen_plugin_integration_test, as the
-# integration tests depend on the MIOpen legacy plugin
+# integration tests depend on the MIOpen Provider Plugin
 add_dependencies(miopen_plugin_integration_test miopen_legacy_plugin)
 
 if(BUILD_PLUGIN_AS_DEPENDENCY)

@@ -71,6 +71,18 @@ struct BnTrainingTensorIds : BnCommonTensorIds
     [[maybe_unused]] static constexpr int64_t NEXT_RUNNING_VARIANCE = 12;
 };
 
+// Inference with variance extension (standalone - uses variance instead of inv_variance, plus epsilon)
+struct BnInferenceVarianceExtTensorIds
+{
+    [[maybe_unused]] static constexpr int64_t X = 1;
+    [[maybe_unused]] static constexpr int64_t Y = 2;
+    [[maybe_unused]] static constexpr int64_t SCALE = 3;
+    [[maybe_unused]] static constexpr int64_t BIAS = 4;
+    [[maybe_unused]] static constexpr int64_t EPSILON = 5;
+    [[maybe_unused]] static constexpr int64_t MEAN = 6;
+    [[maybe_unused]] static constexpr int64_t VARIANCE = 7;
+};
+
 // --- Tensor Role Classification ---
 enum class TensorRole
 {
@@ -747,6 +759,27 @@ struct BatchnormFusedBackwardConfigTestCase
     }
 };
 
+struct BatchnormInferenceVarianceExtFusedConfigTestCase
+{
+    std::string name;
+    bool shouldPass;
+    std::vector<TensorConfig> tensorConfigs;
+    int64_t xUid;
+    int64_t yUid;
+    int64_t scaleUid;
+    int64_t biasUid;
+    int64_t epsilonUid;
+    int64_t meanUid;
+    int64_t varianceUid;
+    hipdnn_data_sdk::data_objects::PointwiseMode activationMode;
+
+    friend std::ostream& operator<<(std::ostream& os,
+                                    const BatchnormInferenceVarianceExtFusedConfigTestCase& tc)
+    {
+        return os << tc.name;
+    }
+};
+
 struct ActivationModeTestCase
 {
     std::string name;
@@ -1126,6 +1159,100 @@ inline flatbuffers::FlatBufferBuilder
         hipdnn_data_sdk::data_objects::DataType::FLOAT,
         hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttrs.Union()));
+
+    // Build graph
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test_graph",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorOffsets,
+        &nodes);
+
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+inline flatbuffers::FlatBufferBuilder buildBatchnormInferenceWithVarianceFusedGraph(
+    const std::vector<TensorConfig>& configs,
+    int64_t xUid,
+    int64_t yUid,
+    int64_t scaleUid,
+    int64_t biasUid,
+    int64_t epsilonUid,
+    int64_t meanUid,
+    int64_t varianceUid,
+    int64_t bnYVirtualUid,
+    hipdnn_data_sdk::data_objects::PointwiseMode activationMode
+    = hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD)
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorOffsets;
+    tensorOffsets.reserve(configs.size());
+    for(const auto& cfg : configs)
+    {
+        if(cfg.isPassByValue)
+        {
+            hipdnn_data_sdk::data_objects::Float64Value floatValue(cfg.passedValue);
+            auto valueOffset = builder.CreateStruct(floatValue).Union();
+            tensorOffsets.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                cfg.uid,
+                cfg.name.c_str(),
+                cfg.dataType,
+                &cfg.strides,
+                &cfg.dims,
+                cfg.isVirtual,
+                hipdnn_data_sdk::data_objects::TensorValue::Float64Value,
+                valueOffset));
+        }
+        else
+        {
+            tensorOffsets.push_back(
+                hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(builder,
+                                                                            cfg.uid,
+                                                                            cfg.name.c_str(),
+                                                                            cfg.dataType,
+                                                                            &cfg.strides,
+                                                                            &cfg.dims,
+                                                                            cfg.isVirtual));
+        }
+    }
+
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+
+    // Node 0: Batchnorm Inference with Variance
+    auto bnAttrs = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributesVarianceExt(
+        builder, xUid, meanUid, varianceUid, scaleUid, biasUid, bnYVirtualUid, epsilonUid);
+
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "batchnorm_inference_variance_ext",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt,
+        bnAttrs.Union()));
+
+    // Node 1: Activation
+    auto actAttrs = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
+        builder,
+        activationMode,
+        flatbuffers::nullopt, // relu_lower_clip
+        flatbuffers::nullopt, // relu_upper_clip
+        flatbuffers::nullopt, // relu_lower_clip_slope
+        flatbuffers::nullopt, // axis_tensor_uid
+        bnYVirtualUid, // in_0_tensor_uid
+        flatbuffers::nullopt, // in_1_tensor_uid
+        flatbuffers::nullopt, // in_2_tensor_uid
+        yUid); // out_0_tensor_uid
+
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "activation",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        actAttrs.Union()));
 
     // Build graph
     auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
@@ -3257,6 +3384,354 @@ TEST(TestBatchnormApplicabilityChecks, RejectsBatchnormFwdTrainingWithPeerStats)
         hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
+// --- Variance Extension Support ---
+
+// Creates tensors for BatchnormInferenceAttributesVarianceExt
+inline std::vector<TensorConfig> createBatchnormInferenceWithVarianceTensors(
+    const BnTensorTypes& types, const std::vector<int64_t>& dims, const TensorLayout& layout)
+{
+    using UIDs = BnInferenceVarianceExtTensorIds;
+    std::vector<TensorConfig> configs;
+
+    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
+    configs.push_back(createIoTensor(UIDs::X, "x", types.io, dims, strides));
+    configs.push_back(createIoTensor(UIDs::Y, "y", types.io, dims, strides));
+
+    auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides
+        = hipdnn_data_sdk::utilities::generateStrides(derivedDims, layout.strideOrder);
+    configs.push_back(
+        createAffineTensor(UIDs::SCALE, "scale", types.affine, derivedDims, derivedStrides));
+    configs.push_back(
+        createAffineTensor(UIDs::BIAS, "bias", types.affine, derivedDims, derivedStrides));
+
+    configs.push_back(createScalarTensor(UIDs::EPSILON, "epsilon", 1e-5));
+
+    configs.push_back(
+        createStatTensor(UIDs::MEAN, "mean", types.stat, derivedDims, derivedStrides));
+    configs.push_back(
+        createStatTensor(UIDs::VARIANCE, "variance", types.stat, derivedDims, derivedStrides));
+
+    return configs;
+}
+
+inline flatbuffers::FlatBufferBuilder
+    buildBatchnormInferenceWithVarianceGraph(const std::vector<TensorConfig>& configs,
+                                             int64_t xUid,
+                                             int64_t yUid,
+                                             int64_t scaleUid,
+                                             int64_t biasUid,
+                                             int64_t epsilonUid,
+                                             int64_t meanUid,
+                                             int64_t varianceUid)
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>> tensorOffsets;
+    tensorOffsets.reserve(configs.size());
+    for(const auto& cfg : configs)
+    {
+        if(cfg.isPassByValue)
+        {
+            hipdnn_data_sdk::data_objects::Float64Value floatValue(cfg.passedValue);
+            auto valueOffset = builder.CreateStruct(floatValue).Union();
+            tensorOffsets.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
+                builder,
+                cfg.uid,
+                cfg.name.c_str(),
+                cfg.dataType,
+                &cfg.strides,
+                &cfg.dims,
+                cfg.isVirtual,
+                hipdnn_data_sdk::data_objects::TensorValue::Float64Value,
+                valueOffset));
+        }
+        else
+        {
+            tensorOffsets.push_back(
+                hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(builder,
+                                                                            cfg.uid,
+                                                                            cfg.name.c_str(),
+                                                                            cfg.dataType,
+                                                                            &cfg.strides,
+                                                                            &cfg.dims,
+                                                                            cfg.isVirtual));
+        }
+    }
+
+    auto bnAttrs = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributesVarianceExt(
+        builder, xUid, meanUid, varianceUid, scaleUid, biasUid, yUid, epsilonUid);
+
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "batchnorm_inference_variance_ext",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt,
+        bnAttrs.Union()));
+
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test_graph",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorOffsets,
+        &nodes);
+
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+struct BatchnormInferenceVarianceExtConfigTestCase
+{
+    std::string name;
+    bool shouldPass;
+    std::vector<TensorConfig> tensorConfigs;
+    int64_t xUid;
+    int64_t yUid;
+    int64_t scaleUid;
+    int64_t biasUid;
+    int64_t epsilonUid;
+    int64_t meanUid;
+    int64_t varianceUid;
+
+    friend std::ostream& operator<<(std::ostream& os,
+                                    const BatchnormInferenceVarianceExtConfigTestCase& tc)
+    {
+        return os << tc.name;
+    }
+};
+
+inline std::vector<BatchnormInferenceVarianceExtConfigTestCase>
+    getCheckBatchnormInferenceWithVarianceConfigSupportedTestCases()
+{
+    using namespace canonical_layouts;
+    using UIDs = BnInferenceVarianceExtTensorIds;
+
+    std::vector<BatchnormInferenceVarianceExtConfigTestCase> cases;
+
+    // Happy paths - all shapes × all 4D layouts × all valid type configurations
+    for(const auto& dims : shapes::INFERENCE_4D)
+    {
+        for(const auto* layout : LAYOUTS_4D)
+        {
+            for(const auto& typeConfig : bn_type_configs::VALID)
+            {
+                cases.push_back(
+                    {"AcceptsInferenceVarExt_" + generateName(dims, *layout) + "_"
+                         + toString(typeConfig),
+                     true,
+                     createBatchnormInferenceWithVarianceTensors(typeConfig, dims, *layout),
+                     UIDs::X,
+                     UIDs::Y,
+                     UIDs::SCALE,
+                     UIDs::BIAS,
+                     UIDs::EPSILON,
+                     UIDs::MEAN,
+                     UIDs::VARIANCE});
+            }
+        }
+    }
+
+    // Happy paths - 5D shapes
+    for(const auto& dims : shapes::INFERENCE_5D)
+    {
+        for(const auto* layout : LAYOUTS_5D)
+        {
+            cases.push_back({"AcceptsInferenceVarExt_" + generateName(dims, *layout) + "_AllFloat",
+                             true,
+                             createBatchnormInferenceWithVarianceTensors(
+                                 bn_type_configs::ALL_FLOAT, dims, *layout),
+                             UIDs::X,
+                             UIDs::Y,
+                             UIDs::SCALE,
+                             UIDs::BIAS,
+                             UIDs::EPSILON,
+                             UIDs::MEAN,
+                             UIDs::VARIANCE});
+        }
+    }
+
+    // Unhappy paths - invalid type configurations
+    const auto& sampleDims = shapes::INFERENCE_4D[0];
+    for(const auto& invalidConfig : type_configs::INVALID_ALL)
+    {
+        cases.push_back({"RejectsInferenceVarExt_" + toString(invalidConfig),
+                         false,
+                         createBatchnormInferenceWithVarianceTensors(
+                             invalidConfig, sampleDims, TensorLayout::NCHW),
+                         UIDs::X,
+                         UIDs::Y,
+                         UIDs::SCALE,
+                         UIDs::BIAS,
+                         UIDs::EPSILON,
+                         UIDs::MEAN,
+                         UIDs::VARIANCE});
+    }
+
+    return cases;
+}
+
+inline std::vector<BatchnormInferenceVarianceExtFusedConfigTestCase>
+    getCheckBatchnormInferenceWithVarianceFusedConfigSupportedTestCases()
+{
+    using namespace canonical_layouts;
+    using DT = hipdnn_data_sdk::data_objects::DataType;
+    using UIDs = BnInferenceVarianceExtTensorIds;
+    using PM = hipdnn_data_sdk::data_objects::PointwiseMode;
+
+    std::vector<BatchnormInferenceVarianceExtFusedConfigTestCase> cases;
+    const int64_t bnYVirtualUid = 100;
+
+    // Happy paths - all shapes × all 4D layouts × all valid type configurations
+    for(const auto& dims : shapes::INFERENCE_4D)
+    {
+        for(const auto* layout : LAYOUTS_4D)
+        {
+            for(const auto& typeConfig : bn_type_configs::VALID)
+            {
+                auto configs
+                    = createBatchnormInferenceWithVarianceTensors(typeConfig, dims, *layout);
+                // Add virtual tensor for fusion
+                auto strides
+                    = hipdnn_data_sdk::utilities::generateStrides(dims, layout->strideOrder);
+                configs.push_back(
+                    createIoTensor(bnYVirtualUid, "bn_y", typeConfig.io, dims, strides, true));
+
+                cases.push_back({"AcceptsInferenceVarExtFused_" + generateName(dims, *layout) + "_"
+                                     + toString(typeConfig),
+                                 true,
+                                 configs,
+                                 UIDs::X,
+                                 UIDs::Y,
+                                 UIDs::SCALE,
+                                 UIDs::BIAS,
+                                 UIDs::EPSILON,
+                                 UIDs::MEAN,
+                                 UIDs::VARIANCE,
+                                 PM::RELU_FWD});
+            }
+        }
+    }
+
+    // Unhappy paths - unsupported activation mode
+    const auto& sampleDims = shapes::INFERENCE_4D[0];
+    auto configs = createBatchnormInferenceWithVarianceTensors(
+        bn_type_configs::ALL_FLOAT, sampleDims, TensorLayout::NCHW);
+    auto strides
+        = hipdnn_data_sdk::utilities::generateStrides(sampleDims, TensorLayout::NCHW.strideOrder);
+    configs.push_back(createIoTensor(bnYVirtualUid, "bn_y", DT::FLOAT, sampleDims, strides, true));
+
+    cases.push_back({"RejectsInferenceVarExtFused_UnsupportedActivation",
+                     false,
+                     configs,
+                     UIDs::X,
+                     UIDs::Y,
+                     UIDs::SCALE,
+                     UIDs::BIAS,
+                     UIDs::EPSILON,
+                     UIDs::MEAN,
+                     UIDs::VARIANCE,
+                     PM::SIGMOID_FWD});
+
+    return cases;
+}
+
+class TestCheckBatchnormInferenceWithVarianceConfigSupported
+    : public ::testing::TestWithParam<BatchnormInferenceVarianceExtConfigTestCase>
+{
+};
+
+TEST_P(TestCheckBatchnormInferenceWithVarianceConfigSupported, ValidatesCorrectly)
+{
+    const auto& tc = GetParam();
+
+    auto builder = buildBatchnormInferenceWithVarianceGraph(tc.tensorConfigs,
+                                                            tc.xUid,
+                                                            tc.yUid,
+                                                            tc.scaleUid,
+                                                            tc.biasUid,
+                                                            tc.epsilonUid,
+                                                            tc.meanUid,
+                                                            tc.varianceUid);
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_BatchnormInferenceAttributesVarianceExt();
+    ASSERT_NE(attrs, nullptr);
+
+    if(tc.shouldPass)
+    {
+        EXPECT_NO_THROW({ checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); });
+    }
+    else
+    {
+        EXPECT_THROW(
+            { checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); },
+            hipdnn_plugin_sdk::HipdnnPluginException);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    AllCases,
+    TestCheckBatchnormInferenceWithVarianceConfigSupported,
+    testing::ValuesIn(getCheckBatchnormInferenceWithVarianceConfigSupportedTestCases()));
+
+class TestCheckBatchnormInferenceWithVarianceFusedConfigSupported
+    : public ::testing::TestWithParam<BatchnormInferenceVarianceExtFusedConfigTestCase>
+{
+};
+
+TEST_P(TestCheckBatchnormInferenceWithVarianceFusedConfigSupported, ValidatesCorrectly)
+{
+    const auto& tc = GetParam();
+    const int64_t bnYVirtualUid = 100;
+
+    auto builder = buildBatchnormInferenceWithVarianceFusedGraph(tc.tensorConfigs,
+                                                                 tc.xUid,
+                                                                 tc.yUid,
+                                                                 tc.scaleUid,
+                                                                 tc.biasUid,
+                                                                 tc.epsilonUid,
+                                                                 tc.meanUid,
+                                                                 tc.varianceUid,
+                                                                 bnYVirtualUid,
+                                                                 tc.activationMode);
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& bnNode = graph.getNode(0);
+    const auto& actNode = graph.getNode(1);
+
+    auto* bnAttrs = bnNode.attributes_as_BatchnormInferenceAttributesVarianceExt();
+    auto* actAttrs = actNode.attributes_as_PointwiseAttributes();
+
+    ASSERT_NE(bnAttrs, nullptr);
+    ASSERT_NE(actAttrs, nullptr);
+
+    if(tc.shouldPass)
+    {
+        EXPECT_NO_THROW(
+            { checkBatchnormTensorConfigSupported(*bnAttrs, *actAttrs, graph.getTensorMap()); });
+    }
+    else
+    {
+        EXPECT_THROW(
+            { checkBatchnormTensorConfigSupported(*bnAttrs, *actAttrs, graph.getTensorMap()); },
+            hipdnn_plugin_sdk::HipdnnPluginException);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    AllCases,
+    TestCheckBatchnormInferenceWithVarianceFusedConfigSupported,
+    testing::ValuesIn(getCheckBatchnormInferenceWithVarianceFusedConfigSupportedTestCases()));
+
+// --- Integration Tests: Peer Stats Validation ---
+
+namespace
+{
+
 TEST(TestBatchnormApplicabilityChecks, RejectsBatchnormBackwardWithPeerStats)
 {
     using namespace canonical_layouts;
@@ -3325,3 +3800,5 @@ TEST(TestBatchnormApplicabilityChecks, RejectsBatchnormBackwardWithPeerStats)
         { checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); },
         hipdnn_plugin_sdk::HipdnnPluginException);
 }
+
+} // namespace

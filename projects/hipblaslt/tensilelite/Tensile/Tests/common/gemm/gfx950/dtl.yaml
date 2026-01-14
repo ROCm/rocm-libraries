@@ -80,11 +80,13 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - TransposeLDS: [1]
         - StaggerU: [0]
-        - StreamK: [0]
+        - TailloopInNll: [0, 1]
+        - StreamK: [0,3]
         - DirectToLds: [0, 1, 2, 3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
+          - Exact: [256, 256, 1, 255]
           - Exact: [256, 256, 1, 256]
 
 
@@ -124,7 +126,8 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [1, 4]
         - ScheduleIterAlg: [3]
         - StaggerU: [0]
-        - StreamK: [0]
+        - TailloopInNll: [0, 1]
+        - StreamK: [0,3]
         - DirectToLds: [1, 2, 3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -542,6 +545,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1, 2]
         - SourceSwap: [1]
+        - SwapGlobalReadOrder: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -661,6 +665,8 @@ BenchmarkProblems:
         - GlobalSplitU: [1, 2]
         - LDSTrInst: [0,1]
         - SourceSwap: [1]
+        - TailloopInNll: [0, 1]
+        - StreamK: [0,3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -721,6 +727,7 @@ BenchmarkProblems:
         - LDSTrInst: [1]
         - UseSgprForGRO: [1]
         - SourceSwap: [1]
+        - SwapGlobalReadOrder: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -801,6 +808,8 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
         - SourceSwap: [1]
+        - TailloopInNll: [0, 1]
+        - StreamK: [0,3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -829,6 +838,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
         - SourceSwap: [1]
+        - SwapGlobalReadOrder: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -878,6 +888,8 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1, 2]
         - SourceSwap: [1]
+        - TailloopInNll: [0, 1]
+        - StreamK: [0,3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -957,6 +969,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - SourceSwap: [1]
         - LDSTrInst: [0,1]
+        - SwapGlobalReadOrder: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1040,6 +1053,8 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - SourceSwap: [1]
         - LDSTrInst: [0,1]
+        - TailloopInNll: [0, 1]
+        - StreamK: [0,3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1091,6 +1106,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
         - SourceSwap: [1]
+        - SwapGlobalReadOrder: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1119,6 +1135,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
            - [16, 16, 32, 1,  1, 2, 1,  4, 1 ]
+           - [16, 16, 32, 1,  1, 2, 1,  2, 1 ]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [256]
@@ -1146,6 +1163,11 @@ BenchmarkProblems:
         - VectorWidthB: [1]
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
+        - SwapGlobalReadOrder: [0, 1]
+        - TailloopInNll: [0, 1]
+        - WorkGroup:
+           - [64, 4, 1]
+           - [32, 4, 2]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
