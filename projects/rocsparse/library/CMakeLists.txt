@@ -96,9 +96,8 @@ if (BUILD_WITH_ROCBLAS AND rocblas_FOUND)
 endif()
 
 if(BUILD_CODE_COVERAGE)
-  # Use -Xarch_host to apply coverage flags only to host compilation, not device
-  target_compile_options(rocsparse PRIVATE -Xarch_host -fprofile-arcs -Xarch_host -ftest-coverage)
-  target_link_libraries(rocsparse PRIVATE --coverage -lgcov)
+  target_compile_options(rocsparse PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  target_link_libraries(rocsparse PRIVATE -fprofile-instr-generate)
 endif()
 
 if (NOT WIN32)
