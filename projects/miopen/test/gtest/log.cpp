@@ -28,8 +28,8 @@
 #include "get_handle.hpp"
 #include "../lib_env_var.hpp"
 
+#include <gtest/gtest_common.hpp>
 #include <miopen/config.h>
-#include <miopen/env.hpp>
 #include <miopen/fusion_plan.hpp>
 #include <miopen/logger.hpp>
 #include "../random.hpp"
@@ -45,8 +45,6 @@
 #else
 #define MDEXE "./bin/MIOpenDriver"
 #endif
-
-MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_LOG_LEVEL)
 
 const std::string logConv =
     "MIOpen(" BKEND "): Command [LogCmdConvolution] " MDEXE " conv -n 128 -c 3 -H 32 -W 32 -k "
@@ -343,69 +341,75 @@ void TestLogBuffer()
     size_t line_i = 0;
     std::string line;
 
-    miopen::env::update(MIOPEN_LOG_LEVEL, 5); // miopen::LoggingLevel::Info);
-    // test log dump after error
-    miopen::log_buffer_i = 0;
-    miopen::log_buffer   = std::vector<std::string>(miopen::log_buffer_size, "");
-    MIOPEN_LOG_W("warn");
-    MIOPEN_LOG_I("info");
-    MIOPEN_LOG_I2("info2");
-    MIOPEN_LOG_T("trace");
-    MIOPEN_LOG_E("error");
-    ASSERT_TRUE(fs::exists(filename));
-    std::cerr << filename << std::endl;
-    auto log_file = std::ifstream{filename};
-    while(std::getline(log_file, line))
     {
-        std::cerr << line << std::endl;
-        switch(line_i)
+        ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
+                                                     "5"); // miopen::LoggingLevel::Info
+        // test log dump after error
+        miopen::log_buffer_i = 0;
+        miopen::log_buffer   = std::vector<std::string>(miopen::log_buffer_size, "");
+        MIOPEN_LOG_W("warn");
+        MIOPEN_LOG_I("info");
+        MIOPEN_LOG_I2("info2");
+        MIOPEN_LOG_T("trace");
+        MIOPEN_LOG_E("error");
+        ASSERT_TRUE(fs::exists(filename));
+        std::cerr << filename << std::endl;
+        auto log_file = std::ifstream{filename};
+        while(std::getline(log_file, line))
         {
-        case 0: ASSERT_TRUE(isSubStr(line, "warn")); break;
-        case 1: ASSERT_TRUE(isSubStr(line, "info")); break;
-        case 2: ASSERT_TRUE(isSubStr(line, "info2")); break;
-        case 3:
-            ASSERT_FALSE(isSubStr(line, "trace"));
-            ASSERT_TRUE(isSubStr(line, "error"));
-            break;
+            std::cerr << line << std::endl;
+            switch(line_i)
+            {
+            case 0: ASSERT_TRUE(isSubStr(line, "warn")); break;
+            case 1: ASSERT_TRUE(isSubStr(line, "info")); break;
+            case 2: ASSERT_TRUE(isSubStr(line, "info2")); break;
+            case 3:
+                ASSERT_FALSE(isSubStr(line, "trace"));
+                ASSERT_TRUE(isSubStr(line, "error"));
+                break;
+            }
+            line_i++;
         }
-        line_i++;
+        fs::remove(filename);
+
+        // test log dump after throw
+        miopen::log_buffer_i = 0;
+        miopen::log_buffer   = std::vector<std::string>(miopen::log_buffer_size, "");
+        MIOPEN_LOG_W("warn");
+        MIOPEN_LOG_I("info");
+        MIOPEN_LOG_I2("info2");
+        MIOPEN_LOG_T("trace");
+        EXPECT_ANY_THROW(MIOPEN_THROW("throw"));
+
+        EXPECT_TRUE(fs::exists(filename));
+        log_file = std::ifstream{filename};
+        line_i   = 0;
+        while(std::getline(log_file, line))
+        {
+            switch(line_i)
+            {
+            case 0: ASSERT_TRUE(isSubStr(line, "warn")); break;
+            case 1: ASSERT_TRUE(isSubStr(line, "info")); break;
+            case 2: ASSERT_TRUE(isSubStr(line, "info2")); break;
+            case 3: ASSERT_TRUE(isSubStr(line, "throw")); break;
+            }
+            line_i++;
+        }
+        fs::remove(filename);
     }
-    fs::remove(filename);
 
-    // test log dump after throw
-    miopen::log_buffer_i = 0;
-    miopen::log_buffer   = std::vector<std::string>(miopen::log_buffer_size, "");
-    MIOPEN_LOG_W("warn");
-    MIOPEN_LOG_I("info");
-    MIOPEN_LOG_I2("info2");
-    MIOPEN_LOG_T("trace");
-    EXPECT_ANY_THROW(MIOPEN_THROW("throw"));
-
-    EXPECT_TRUE(fs::exists(filename));
-    log_file = std::ifstream{filename};
-    line_i   = 0;
-    while(std::getline(log_file, line))
     {
-        switch(line_i)
-        {
-        case 0: ASSERT_TRUE(isSubStr(line, "warn")); break;
-        case 1: ASSERT_TRUE(isSubStr(line, "info")); break;
-        case 2: ASSERT_TRUE(isSubStr(line, "info2")); break;
-        case 3: ASSERT_TRUE(isSubStr(line, "throw")); break;
-        }
-        line_i++;
+        miopen::log_buffer_i = 0;
+        miopen::log_buffer   = std::vector<std::string>(miopen::log_buffer_size, "");
+        ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
+                                                     "6"); // miopen::LoggingLevel::Info2
+        // log messages
+        MIOPEN_LOG_W("warn");
+        MIOPEN_LOG_I("info");
+        MIOPEN_LOG_I2("info2");
+        MIOPEN_LOG_T("trace");
+        // test log dump after error
+        MIOPEN_LOG_E("error");
+        ASSERT_FALSE(fs::exists(filename));
     }
-    fs::remove(filename);
-
-    miopen::log_buffer_i = 0;
-    miopen::log_buffer   = std::vector<std::string>(miopen::log_buffer_size, "");
-    miopen::env::update(MIOPEN_LOG_LEVEL, 6); // miopen::LoggingLevel::Info2);
-    // log messages
-    MIOPEN_LOG_W("warn");
-    MIOPEN_LOG_I("info");
-    MIOPEN_LOG_I2("info2");
-    MIOPEN_LOG_T("trace");
-    // test log dump after error
-    MIOPEN_LOG_E("error");
-    ASSERT_FALSE(fs::exists(filename));
 }
