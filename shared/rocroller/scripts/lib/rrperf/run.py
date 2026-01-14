@@ -147,6 +147,9 @@ def generate_missing_attr_value(run, attr):
             wgm_dim = getattr(run, "workgroupMappingDim")
             wgm_value = getattr(run, "workgroupMappingValue")
             return (wgm_dim, wgm_value)
+        case "storeLDS_D":
+            store_path = getattr(run, "store_path")
+            return store_path.startswith("LDS")
         case _:
             raise RuntimeError(
                 f"Cannot handle attribute missing in previous rrperf version: {attr}"
