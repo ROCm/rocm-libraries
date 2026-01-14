@@ -71,7 +71,13 @@
 #    include <memory>
 #  endif // _CCCL_COMPILER_NVRTC
 
-#  ifndef __cpp_lib_constexpr_dynamic_alloc
+// NOTE(HIP/AMD): HIPRTC requires explicit std::construct_at fallback definition.
+// The __cpp_lib_constexpr_dynamic_alloc macro may be defined by system headers
+// (e.g., /usr/include/c++/13/version) that get included indirectly through <new>.
+// However, HIPRTC cannot include <memory> (excluded above), so std::construct_at
+// is not available even when the macro indicates library support.
+// We force the fallback definition for HIPRTC regardless of the macro state.
+#if !defined(__cpp_lib_constexpr_dynamic_alloc) || defined(_CCCL_COMPILER_HIPRTC)
 namespace std
 {
 template <class _Tp,
