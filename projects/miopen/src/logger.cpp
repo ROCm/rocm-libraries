@@ -74,9 +74,9 @@ MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_LOG_BUFFER_SIZE, 128);
 
 namespace miopen {
 
-size_t log_buffer_size = env::value(MIOPEN_LOG_BUFFER_SIZE);
-size_t log_buffer_i    = 0;
-std::vector<std::string> log_buffer(log_buffer_size, "");
+thread_local size_t log_buffer_size = env::value(MIOPEN_LOG_BUFFER_SIZE);
+thread_local size_t log_buffer_i    = 0;
+thread_local std::vector<std::string> log_buffer(log_buffer_size, "");
 
 void OutputBufferedLogs()
 {

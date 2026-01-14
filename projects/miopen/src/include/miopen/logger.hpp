@@ -139,8 +139,8 @@
 
 namespace miopen {
 
-extern size_t log_buffer_size, log_buffer_i;
-extern std::vector<std::string> log_buffer;
+extern thread_local size_t log_buffer_size, log_buffer_i;
+extern thread_local std::vector<std::string> log_buffer;
 
 void OutputBufferedLogs();
 
@@ -385,7 +385,8 @@ constexpr std::string_view LoggingParseFunction(const std::string_view func,
         {                                                                               \
             std::cerr << miopen_log_ss.str();                                           \
         }                                                                               \
-        if(level == miopen::LoggingLevel::Error)                                        \
+        if(level == miopen::LoggingLevel::Error &&                                      \
+           !miopen::IsLogging(miopen::LoggingLevel::Info2, disableQuieting))            \
         {                                                                               \
             miopen::OutputBufferedLogs();                                               \
         }                                                                               \

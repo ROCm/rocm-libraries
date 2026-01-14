@@ -48,4 +48,6 @@ TEST(CPU_LOG_TEST_FUSION_NONE, AssertTestLogCmdBNormFusionOutput)
     TestLogCmdBNormFusion(miopen::debug::LogCmdFusion, logBnormActiv, true);
 }
 
+TEST(CPU_LOG_TEST_ASSERT_NONE, AssertLogBuffer) { TestLogBuffer(); }
+
 #endif
