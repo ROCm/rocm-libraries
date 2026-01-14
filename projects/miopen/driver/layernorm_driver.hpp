@@ -28,7 +28,7 @@
 
 #include <../test/tensor_holder.hpp>
 #include <../test/verify.hpp>
-#include <../test/gtest/layernorm.hpp>
+#include <../test/cpu_layernorm.hpp>
 #include "InputFlags.hpp"
 #include "driver.hpp"
 #include "miopen/miopen.h"
