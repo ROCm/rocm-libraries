@@ -392,9 +392,9 @@ if(BUILD_CODE_COVERAGE)
     coverage
     DEPENDS coverage_analysis
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocsparse-coverage_*.profraw -o ./coverage-report/rocsparse.profdata
-    COMMAND ${LLVM_COV} report -object ./library/src/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata
-    COMMAND ${LLVM_COV} show -object ./library/src/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata -format=html -output-dir=coverage-report
-    COMMAND ${LLVM_COV} export -object ./library/src/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata -format=lcov > ./coverage-report/coverage.info
+    COMMAND ${LLVM_COV} report -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata
+    COMMAND ${LLVM_COV} show -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 
