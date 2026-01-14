@@ -32,11 +32,11 @@ import functools
 import itertools
 import os
 import pathlib
-import shutil
 import subprocess
 from dataclasses import dataclass
 
 import pytest
+import shutil
 import yaml
 
 SOLUTION_NOT_SUPPORTED_ON_ARCH = 3
@@ -911,6 +911,14 @@ def test_gemm_validate_once(tmp_path, solution_params, problem_params):
     gemm_validate_two_stage_codeobject(tmp_path, solution_params, problem_params)
 
 
+@pytest.mark.parametrize("solution_params,problem_params", build_wgm_params())
+def test_gemm_wgm(tmp_path, solution_params, problem_params):
+    # TODO This is a temporary fix to enable GFX12 CI
+    if rocm_gfx().startswith("gfx12"):
+        return
+
+    gemm_validate_single_stage(tmp_path, solution_params, problem_params)
+
 def test_kernel_graph_dot_truncation(tmp_path):
     """Validate Graphviz DOT rendering succeeds when node labels are truncated.
     - With truncation enabled (small max label length), kgraph.py should succeed and produce non-empty outputs.
@@ -1026,15 +1034,6 @@ def test_kernel_graph_dot_truncation(tmp_path):
     assert (
         max_line2 >= 16384
     ), f"Expected an extremely long DOT line without truncation, got max {max_line2}"
-
-
-@pytest.mark.parametrize("solution_params,problem_params", build_wgm_params())
-def test_gemm_wgm(tmp_path, solution_params, problem_params):
-    # TODO This is a temporary fix to enable GFX12 CI
-    if rocm_gfx().startswith("gfx12"):
-        return
-
-    gemm_validate_single_stage(tmp_path, solution_params, problem_params)
 
 
 if __name__ == "__main__":

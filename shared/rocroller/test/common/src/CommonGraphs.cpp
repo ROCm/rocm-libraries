@@ -157,7 +157,7 @@ namespace rocRollerTest::Graphs
             auto macTileScaleA = MacroTile({m_macM, m_macK / 32},
                                            LayoutType::MATRIX_A,
                                            {m_waveM, m_waveN, m_waveK / 32, m_waveB},
-                                           GetMemoryType(m_loadPathA));
+                                           GetMemoryType(SolutionParams::LoadPath::BufferToVGPR));
             params->setDimensionInfo(m_tagScaleA, macTileScaleA);
         }
         {
@@ -172,7 +172,7 @@ namespace rocRollerTest::Graphs
             auto macTileScaleB = MacroTile({m_macK, m_macN / 32},
                                            LayoutType::MATRIX_B,
                                            {m_waveM, m_waveN, m_waveK / 32, m_waveB},
-                                           GetMemoryType(m_loadPathB));
+                                           GetMemoryType(SolutionParams::LoadPath::BufferToVGPR));
             params->setDimensionInfo(m_tagScaleB, macTileScaleB);
         }
         {
@@ -500,7 +500,31 @@ namespace rocRollerTest::Graphs
                             : MemoryType::WAVE);
 
         params->setDimensionInfo(m_tagA, macTileA);
+
+        if(m_problem.scaleAMode == Operations::ScaleMode::Separate)
+        {
+            int  blockSize     = m_problem.scaleBlockSize > 0 ? m_problem.scaleBlockSize : 32;
+            auto macTileScaleA = MacroTile(
+                {m_problem.macM, m_problem.macK / blockSize},
+                LayoutType::MATRIX_A,
+                {m_problem.waveM, m_problem.waveN, m_problem.waveK / blockSize, m_problem.waveB},
+                GetMemoryType(SolutionParams::LoadPath::BufferToVGPR));
+            params->setDimensionInfo(m_tagScaleA, macTileScaleA);
+        }
+
         params->setDimensionInfo(m_tagB, macTileB);
+
+        if(m_problem.scaleBMode == Operations::ScaleMode::Separate)
+        {
+            int  blockSize     = m_problem.scaleBlockSize > 0 ? m_problem.scaleBlockSize : 32;
+            auto macTileScaleB = MacroTile(
+                {m_problem.macK, m_problem.macN / blockSize},
+                LayoutType::MATRIX_B,
+                {m_problem.waveM, m_problem.waveN, m_problem.waveK / blockSize, m_problem.waveB},
+                GetMemoryType(SolutionParams::LoadPath::BufferToVGPR));
+            params->setDimensionInfo(m_tagScaleB, macTileScaleB);
+        }
+
         params->setDimensionInfo(m_tagC, macTileC);
         params->setDimensionInfo(m_tagD, macTileD);
 
