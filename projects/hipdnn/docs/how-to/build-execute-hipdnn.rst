@@ -8,102 +8,93 @@
 Build and execute operation graphs in hipDNN
 ********************************************
 
-This section covers how to use the various components of hipDNN in your applications.
+This section covers how to use the frontend API to build and execute graph operations in hipDNN.
 
-### Using the Frontend
+The hipDNN frontend provides a C++ header-only API for building and executing operation graphs. 
 
-The hipDNN frontend provides a C++ header-only API for building and executing operation graphs. For detailed architecture and design information, see the [Frontend section in the Design Guide](./Design.md#frontend).
+.. note::
 
-#### File Structure
-- Library includes: [`frontend/include/`](../frontend/include/)
-- Unit tests: [`frontend/tests/`](../frontend/tests/)
-- Samples: [`samples/`](../samples/)
+  The MIOpen Provider plugin serves as the kernel provider. It employs a modular C++ architecture, largely decoupled from the API layer. See :ref:`miopen` for more info.
 
-### Using the Backend
+Simplified workflow
+===================
 
-The hipDNN backend is a shared library that provides the core C API for graph execution and plugin management. For comprehensive details about the backend architecture, descriptor types, and workflow, see the [Backend section in the Design Guide](./Design.md#backend).
+This example demonstrates sample code that creates a graph, creates tensors, and adds operations before building and executing them. Here's a simplified workflow example:
 
-#### File Structure
-- Public includes: [`backend/include/`](../backend/include/)
-- Public API tests: [`tests/backend/`](../tests/backend/)
+.. code:: cpp
 
-### Using the SDKs
+  // Create a graph
+  Graph graph;
+  graph.set_compute_data_type(DataType_t::FLOAT);
 
-hipDNN provides three header-only C++ SDK libraries for plugin development and testing. For complete SDK functionality and roadmap, see the [SDKs section in the Design Guide](./Design.md#sdks).
+  // Create tensors
+  auto x = Graph::tensor(/* tensor attributes */);
+  auto scale = Graph::tensor(/* tensor attributes */);
+  auto bias = Graph::tensor(/* tensor attributes */);
 
-#### Key Components
-- **Data SDK**: Schema files and data structures: [`data_sdk/schemas/`](../data_sdk/schemas/)
-- **Plugin SDK**: Plugin interface definitions: [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
-- **Test SDK**: Test utilities and CPU reference implementations: [`test_sdk/include/hipdnn_test_sdk/`](../test_sdk/include/hipdnn_test_sdk/)
-- Logging: [`data_sdk/include/hipdnn_data_sdk/logging/Logger.hpp`](../data_sdk/include/hipdnn_data_sdk/logging/Logger.hpp)
+  // Add operations
+  auto [y, mean, inv_var, _, _] = graph.batchnorm(x, scale, bias, bn_attributes);
 
-### CMake Integration
+  // Build and execute
+  graph.build_operation_graph(handle);
+  graph.create_execution_plans();
+  graph.build_plans();
+  graph.execute(handle, variant_pack, workspace);
 
-hipDNN components can be easily integrated into your CMake projects using the installed package files.
+This is the basic frontend workflow:
 
-> [!NOTE]
-> Enable PIC/PIE to ensure compatibility with the plugin loader system (dlopen). This prevents potential Thread Local Storage (TLS) allocation issues (such as static TLS exhaustion) between the executable and dynamically loaded backend plugins.
-> ```cmake
-> set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-> ```
+1. Instantiate a :ref:`graph` that houses tensors and operations.
+2. Create input tensors for the operations within the graph.
+3. Add operations which become :ref:`nodes`. Any :ref:`attributes` you add configure the behaviour of these nodes.
 
-#### Frontend Integration
-```cmake
-find_package(hipdnn_frontend REQUIRED)
-target_link_libraries(your_target PRIVATE hipdnn_frontend)
-```
+For complete working examples, see the official `samples on GitHub <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn/samples>`_.
 
-#### Backend Integration
-```cmake
-find_package(hipdnn_backend REQUIRED)
-target_link_libraries(your_target PRIVATE hipdnn_backend)
-```
+Frontend file structure
+=======================
 
-#### Data SDK Integration
-```cmake
-find_package(hipdnn_data_sdk REQUIRED)
-target_link_libraries(your_plugin PRIVATE hipdnn_data_sdk)
-```
+- Library includes: `frontend/include/ <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn/frontend/include>`_
+- Unit tests: `frontend/tests/ <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn/frontend/tests>`_
+- Samples: `samples <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn/samples>`_
 
-#### Plugin SDK Integration
-```cmake
-find_package(hipdnn_plugin_sdk REQUIRED)
-target_link_libraries(your_plugin PRIVATE hipdnn_plugin_sdk)
-```
+Frontend architecture
+=====================
 
-#### Test SDK Integration
-```cmake
-find_package(hipdnn_test_sdk REQUIRED)
-target_link_libraries(your_test PRIVATE hipdnn_test_sdk)
-```
+.. _graph:
 
-#### Using AMD Half or BFloat16 Types
-If you use AMD half or bfloat16 types (via the Data SDK's `UtilsFp16.hpp` or `UtilsBfp16.hpp`), you need:
-```cmake
-find_package(hip REQUIRED)
-enable_language(HIP)
-target_link_libraries(your_target hip::host hip::device)
-```
+Graph class
+-----------
 
-> [!NOTE]
-> 📝 If CMake cannot find the packages after installation, ensure your `CMAKE_PREFIX_PATH` includes the install location. By default on Linux systems, hipDNN CMake files are installed to `/opt/rocm/lib/cmake`.
+The central abstraction in the frontend is the ``Graph`` class, which:
 
-### Logging Setup
+- Manages the construction of operation graphs.
+- Handles the creation and configuration of nodes.
+- Orchestrates the execution workflow.
 
-hipDNN uses the spdlog header-only library for logging. See the [Environment docs](./Environment.md#logging-configuration) for further details.
+.. _nodes:
 
-> [!CAUTION]
-> There is a known issue on Windows where logging must be explicitly shut down before the application exits to ensure all log messages are flushed and resources are released. See [spdlog Windows Issues](https://github.com/gabime/spdlog/wiki/Asynchronous-logging#windows-issues) for more information.
-> ```cpp
-> spdlog::shutdown();
-> ```
+Tensors
+-------
 
-### Working with Schemas
+Tensors are defined by Data Type, Dimensions, and Layout.
 
-hipDNN uses FlatBuffers for schema-based data objects to describe graphs and operations.
+See :ref:`operation-support` for a detailed list of the supported operations.
 
-#### Key Concepts
-- Graphs and operations are defined using `.fbs` schema files
-- Attributes marked as `long` types in graphs are foreign keys to the `uid` in `tensor_attributes`
-- Schema files are located in [`data_sdk/schemas/`](../data_sdk/schemas/)
----
+Nodes
+-----
+
+Nodes represent individual operations within a graph:
+
+- Each node type (for example, ``BatchnormNode``, ``PointwiseNode``) inherits from ``INode``.
+- Nodes encapsulate their specific attributes and tensor connections.
+- Support serialization to Flatbuffer format for backend consumption.
+
+.. _attributes:
+
+Attributes
+----------
+
+Attributes configure the behavior of nodes:
+
+- Each node type has corresponding attribute classes (for example, ``Batchnorm_attributes``).
+- Attributes include operation-specific parameters like epsilon, momentum, etc.
+- Support builder pattern for easy configuration.

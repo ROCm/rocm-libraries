@@ -189,7 +189,8 @@ That same file may also contain ``TestGpuMyClass`` but it is not the primary tes
 Integration tests
 ------------------
 
-See [TestingStrategy.md](testing/TestingStrategy.md) for more information on integration tests. Integration tests should be named to reflect the feature or component under test.
+See `Testing Strategy on GitHub <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/testing/TestingStrategy.md>`_ for more information on integration tests. 
+Integration tests should be named to reflect the feature or component under test.
 
 Naming examples
 ---------------
