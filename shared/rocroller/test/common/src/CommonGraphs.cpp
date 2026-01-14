@@ -639,4 +639,13 @@ namespace rocRollerTest::Graphs
 
         return params;
     }
+
+    std::tuple<rocRoller::Operations::OperationTag,
+               rocRoller::Operations::OperationTag,
+               rocRoller::Operations::OperationTag,
+               rocRoller::Operations::OperationTag>
+        GEMM::getOperationTags() const
+    {
+        return {m_tagA, m_tagB, m_tagC, m_tagD};
+    }
 }
