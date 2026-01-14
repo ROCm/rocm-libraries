@@ -2184,19 +2184,17 @@ namespace TensileLite
                 auto end = std::chrono::high_resolution_clock::now();
                 std::chrono::duration<double, std::milli> duration = end - start;
                 std::cout << "[NEWLING][REFERENCE][ReferenceSolution fast path took "
-                          << duration.count() << " ms]\n";
+                          << duration.count() << " ms]" << std::endl;
                 return;
             }
 
             auto contractionInputsTypeId = getInputContractionInputsTypeId(problem);
-            std::cout << "[NEWLING][REFERENCE][SolveCPU][contractionInputsTypeId = "
-                      << contractionInputsTypeId << "]" << std::endl;
             SolveCPUTemplates(contractionInputsTypeId, problem, inputs, elementsToValidate);
 
             auto end = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double, std::milli> duration = end - start;
             std::cout << "[NEWLING][REFERENCE][ReferenceSolution legacy path took "
-                      << duration.count() << " ms]\n";
+                      << duration.count() << " ms]" << std::endl;
         }
 
         void SolveCPU(ContractionProblem const* problem,
