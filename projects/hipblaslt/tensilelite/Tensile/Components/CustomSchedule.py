@@ -4293,12 +4293,13 @@ def _get_schedule_128x256x64_16bit(kernel, useLDSTr, TLDS):
 
         assert startGRB < numMfma // 2, "startGRB {} numMfma/2 {}".format(startGRB, numMfma//2)
         grb = create_range(min_val = startGRB, num = 4, step = 2, repeat = 2)
-        startLRA3 = max(grb) + 3
-        grb += create_range(min_val = 55, num = 4, step = 2, repeat = 2)
+        startLRA1 = max(grb) + 3
 
-        lra1 = create_range(min_val = startLRA3, num = 8, step = 1, repeat = 1)
-        lrb1 = create_range(min_val = max(lra1)+1, num = 8, step = 1, repeat = 1)
-
+        lra1 = create_range(min_val = startLRA1, num = 8, step = 1, repeat = 1)
+        startLRB1 = max(lra1) + 1
+        grb += create_range(min_val = startLRB1, num = 4, step = 2, repeat = 2)
+        lrb1 = create_range(min_val = startLRB1+1, num = 4, step = 2, repeat = 1)
+        lrb1 += create_range(min_val = max(lrb1)+2, num = 4, step = 1, repeat = 1)
         syncTable = [
             -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 & LRB0"),
             waitLRA0,  SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0"),
@@ -4306,8 +4307,11 @@ def _get_schedule_128x256x64_16bit(kernel, useLDSTr, TLDS):
 
             startGRB-1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0"),
             startGRB-1, SBarrier(comment=""),
-            startLRA3-1, SWaitCnt(dscnt=-1, vlcnt=8, vscnt=-1, comment="wait for previous GRA & GRB"),
-            startLRA3-1, SBarrier(comment="")
+            startLRA1-1, SWaitCnt(dscnt=-1, vlcnt=16, vscnt=-1, comment="wait for previous GRA & GRB"),
+            startLRA1-1, SBarrier(comment=""),
+
+            startLRB1-1, SWaitCnt(dscnt=-1, vlcnt=8, vscnt=-1, comment="wait for previous GRA & GRB"),
+            startLRB1-1, SBarrier(comment="")
         ]
 
         optSchedule = {
