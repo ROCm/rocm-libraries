@@ -163,11 +163,7 @@ protected:
         ctx.SetStream(&handle);
 
         miopen::conv::ProblemDescription problem{
-            CONV_DIR == Direction::BackwardData ? output.desc : output.desc,
-            weights.desc,
-            CONV_DIR == Direction::BackwardData ? input.desc : input.desc,
-            conv_desc,
-            CONV_DIR};
+            output.desc, weights.desc, input.desc, conv_desc, CONV_DIR};
 
         if(!solv.IsApplicable(ctx, problem))
         {
@@ -283,6 +279,8 @@ protected:
     }
 };
 
+} // namespace
+
 // 2D BWD
 using GPU_GroupConv2D_Deterministic_BWD_FP32 =
     GPU_GroupConvDeterministicSplitK<float,
@@ -335,17 +333,15 @@ using GPU_GroupConv3D_Deterministic_WRW_BFP16 =
                                      true>;
 
 // Test definitions
-TEST_P(GPU_GroupConv2D_Deterministic_BWD_FP32, Test) { RunTest(); }
-TEST_P(GPU_GroupConv2D_Deterministic_BWD_FP16, Test) { RunTest(); }
-TEST_P(GPU_GroupConv2D_Deterministic_BWD_BFP16, Test) { RunTest(); }
-
-TEST_P(GPU_GroupConv2D_Deterministic_WRW_FP32, Test) { RunTest(); }
-TEST_P(GPU_GroupConv2D_Deterministic_WRW_FP16, Test) { RunTest(); }
-TEST_P(GPU_GroupConv2D_Deterministic_WRW_BFP16, Test) { RunTest(); }
-
-TEST_P(GPU_GroupConv3D_Deterministic_WRW_FP32, Test) { RunTest(); }
-TEST_P(GPU_GroupConv3D_Deterministic_WRW_FP16, Test) { RunTest(); }
-TEST_P(GPU_GroupConv3D_Deterministic_WRW_BFP16, Test) { RunTest(); }
+TEST_P(GPU_GroupConv2D_Deterministic_BWD_FP32, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_GroupConv2D_Deterministic_BWD_FP16, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_GroupConv2D_Deterministic_BWD_BFP16, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_GroupConv2D_Deterministic_WRW_FP32, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_GroupConv2D_Deterministic_WRW_FP16, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_GroupConv2D_Deterministic_WRW_BFP16, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_GroupConv3D_Deterministic_WRW_FP32, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_GroupConv3D_Deterministic_WRW_FP16, DeterministicTest) { this->RunTest(); };
+TEST_P(GPU_GroupConv3D_Deterministic_WRW_BFP16, DeterministicTest) { this->RunTest(); };
 
 // Test instantiations
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -377,5 +373,3 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_GroupConv3D_Deterministic_WRW_BFP16,
                          testing::ValuesIn(GetDeterministicTestConfigs3D()));
-
-} // namespace
