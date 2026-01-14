@@ -375,20 +375,22 @@ constexpr std::string_view LoggingParseFunction(const std::string_view func,
         std::ostringstream miopen_log_ss;                                               \
         miopen_log_ss << miopen::LoggingPrefix() << category << " [" << fn_name << "] " \
                       << __VA_ARGS__ << std::endl;                                      \
-        if(level < miopen::LoggingLevel::Trace)                                         \
-        {                                                                               \
-            miopen::log_buffer[miopen::log_buffer_i % miopen::log_buffer_size] =        \
-                miopen_log_ss.str();                                                    \
-            miopen::log_buffer_i++;                                                     \
-        }                                                                               \
         if(miopen::IsLogging(level, disableQuieting))                                   \
         {                                                                               \
             std::cerr << miopen_log_ss.str();                                           \
         }                                                                               \
-        if(level == miopen::LoggingLevel::Error &&                                      \
-           !miopen::IsLogging(miopen::LoggingLevel::Info2, disableQuieting))            \
+        if(!miopen::IsLogging(miopen::LoggingLevel::Info2, disableQuieting))            \
         {                                                                               \
-            miopen::OutputBufferedLogs();                                               \
+            if(level < miopen::LoggingLevel::Trace)                                     \
+            {                                                                           \
+                miopen::log_buffer[miopen::log_buffer_i % miopen::log_buffer_size] =    \
+                    miopen_log_ss.str();                                                \
+                miopen::log_buffer_i++;                                                 \
+            }                                                                           \
+            if(level == miopen::LoggingLevel::Error)                                    \
+            {                                                                           \
+                miopen::OutputBufferedLogs();                                           \
+            }                                                                           \
         }                                                                               \
     } while(false)
 
