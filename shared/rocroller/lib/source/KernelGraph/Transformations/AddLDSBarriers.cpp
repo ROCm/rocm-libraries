@@ -185,10 +185,6 @@ namespace rocRoller
                 for(size_t i = 0; i < firstOpRecordIndex; ++i)
                 {
                     int ctrl = allRecords[i].control;
-                    Log::debug(fmt::format("Checking index {}, before firstOp index {}, for "
-                                           "loop-carried required LDS Barrier.",
-                                           i,
-                                           firstOpRecordIndex));
                     // Check if this control node is a Barrier connected to LDS and is within the common ancestor loop
                     if(graph.control.get<Barrier>(ctrl) && isBarrierForLDS(graph, ctrl))
                     {
@@ -390,19 +386,20 @@ namespace rocRoller
 
                             if(not hasBarrierForForwardDependency)
                             {
-                                retval.combine(
-                                    false,
-                                    concatenate("Missing LDS barrier between first operation ",
-                                                firstOpTag,
-                                                " (",
-                                                getOpName(firstOpTag),
-                                                ") and second operation ",
-                                                secondOpTag,
-                                                " (",
-                                                getOpName(secondOpTag),
-                                                ") for LDS coordinate ",
-                                                ldsCoord,
-                                                "."));
+                                const auto message
+                                    = concatenate("Missing LDS barrier between first operation ",
+                                                  firstOpTag,
+                                                  " (",
+                                                  getOpName(firstOpTag),
+                                                  ") and second operation ",
+                                                  secondOpTag,
+                                                  " (",
+                                                  getOpName(secondOpTag),
+                                                  ") for LDS coordinate ",
+                                                  ldsCoord,
+                                                  ".");
+                                Log::debug(message);
+                                retval.combine(false, message);
                             }
 
                             if(commonAncestorLoop.has_value())
@@ -421,22 +418,23 @@ namespace rocRoller
 
                                 if(not hasBarrierForLoopCarriedDependency)
                                 {
-                                    retval.combine(
-                                        false,
-                                        concatenate("Missing LDS barrier between second operation ",
-                                                    secondOpTag,
-                                                    " (",
-                                                    getOpName(secondOpTag),
-                                                    ") and first operation ",
-                                                    firstOpTag,
-                                                    " (",
-                                                    getOpName(firstOpTag),
-                                                    ") in loop ",
-                                                    commonAncestorLoop.value(),
-                                                    " for LDS coordinate ",
-                                                    ldsCoord,
-                                                    ". A barrier is required to handle "
-                                                    "loop-carried dependencies."));
+                                    const auto message = concatenate(
+                                        "Missing LDS barrier between second operation ",
+                                        secondOpTag,
+                                        " (",
+                                        getOpName(secondOpTag),
+                                        ") and first operation ",
+                                        firstOpTag,
+                                        " (",
+                                        getOpName(firstOpTag),
+                                        ") in loop ",
+                                        commonAncestorLoop.value(),
+                                        " for LDS coordinate ",
+                                        ldsCoord,
+                                        ". A barrier is required to handle "
+                                        "loop-carried dependencies.");
+                                    Log::debug(message);
+                                    retval.combine(false, message);
                                 }
                             }
                         }
