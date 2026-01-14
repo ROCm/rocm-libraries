@@ -100,15 +100,15 @@ Version bumps should be handled automatically by the same process as minor versi
 #### Tweak version
 The patch version is determined by the short commit hash of rocm-libraries, and updates automatically as a result.
 
-### 4.X Requirements
+### 4.3 Requirements
 
 TBD
 
-### 4.X Public API
+### 4.4 Public API
 Excluding the exception below, everything included in headers available to the user are part of the public API. Some of the library components have been split into multiple APIs with a user-facing header.
 
 If something must be included in a user-facing header, but shouldn't be part of the public API, it should be put inside a `detail` namespace. Anything in a detail namespace should not be used outside of the library internals, as it can be changed or removed at any time.
-### 4.X Versioned components
+### 4.5 Versioned components
 In the proposed design, the following table lists the components of hipDNN, and the other internal components that they depend on
 
 | Target                        | Requirements                                                                                            |
@@ -125,8 +125,8 @@ In the proposed design, the following table lists the components of hipDNN, and 
 [^1]: Schema refers to both serialized formats of flatbuffers and json.
 [^2]: The heuristic API hasn't yet been implemented
 [^3]: Static schema version is determined by the data_sdk compiled with, dynamic schema version comes from the schema version used for a serialization being consumed. Described in more detail below
-### 4.4 Individual component details
-#### 4.4.1 Schema
+### 4.6 Individual component details
+#### 4.6.1 Schema
 The schema covers both the flatbuffer serialization and the json serialization. These two serializations should change in lockstep as new fields, enums and structs are added. The version should be encoded directly within the schema.
 
 Schemas should be backwards and forward compatible within a major release. To this aim, the following changes can be made within the same major version:
@@ -148,14 +148,14 @@ Json serialization changes should be made in concert with flatbuffer schema file
 
 > Consideration: Should schema files only have a major version?
 
-#### 4.4.2 Backend
+#### 4.6.2 Backend
 The backend has two components: hipdnn_backend (the API) and hipdnn_backend_private (the implementation). Both of these components need independent versions. While the hipdnn_backend will typically be consumed in a statically at build time, hipdnn_backend_private will exclusively be used dynamically at runtime.
 
 The hipdnn_backend_private should have functions to return both its internal version, as well as the version of the API it was built with.
 
 The backend must be entirely agnostic to the schema version (Note, this is not the current behaviour).
 
-#### 4.4.3 Frontend
+#### 4.6.3 Frontend
 The frontend must be forward and backward compatible with any hipdnn_backend version within a major release. This must be handled statically with hipdnn_backend, and dynamically with hipdnn_backend_private.
 
 When new functionality is added dependent on a backend feature that was added since the last major release, there must be static and dynamic guards placed to ensure that it is supported by both the backend api and the backend library. The `IHipdnnBackend` interface from `frontend/include/HipdnnBackendInterface.hpp` is a good location to place these guards when appropriate.
@@ -164,7 +164,7 @@ When a function is called that is not supported by one of the backends, the fron
 
 >Note: using a macro that handles the static and dynamic checks would likely be a good way to handle both at once without duplication
 
-#### 4.4.4 Plugins
+#### 4.6.4 Plugins
 Plugins must have a function that reports the plugin API they were compiled with.
 
 Plugins are responsible for failing gracefully on unsupported schemas. Typically this will involve logging a warning, and registering the plugin as not applicable.
@@ -208,7 +208,7 @@ project(<component> VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH})
 **Drawbacks**:
 - Can't dynamically set tweak version
 ## 6. Risks
-### 6.X Flatbuffer and Json schema definitions getting out of sync
+### 6.1 Flatbuffer and Json schema definitions getting out of sync
 **Risk**: The flatbuffer schema might be updated without also updating the json serialization
 **Mitigation**
 - Automate tests creating serializations for all flatbuffer Unions and ensure that json can properly serialize them as well
