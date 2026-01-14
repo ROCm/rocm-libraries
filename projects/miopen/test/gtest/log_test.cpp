@@ -38,7 +38,9 @@ TEST(CPU_LOG_TEST_ASSERT_NONE, AssertLogFindCmdOutput)
     TestLogFun(miopen::debug::LogCmdFindConvolution, logFindConv, true);
 }
 
-TEST(CPU_LOG_TEST_ASSERT_NONE, AssertLogBuffer) { TestLogBuffer(); }
+TEST(CPU_LOG_TEST_ASSERT_NONE, AssertLogBufferOn) { TestLogBufferOn(); }
+
+TEST(CPU_LOG_TEST_ASSERT_NONE, AssertLogBufferOff) { TestLogBufferOff(); }
 
 TEST(CPU_LOG_TEST_FUSION_NONE, AssertTestLogCmdCBAFusionOutput)
 {

@@ -6,6 +6,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ### Added
 * New API entry-points `miopenBatchNormalizationForwardInferenceInvVariance` and
   `miopenBatchNormForwardInferenceActivationInvVariance` to support hipDNN.
+* Log level Info2 dumped to file (/tmp/miopen_error_<pid>) on error log or MIOpen throw.
 
 ### Optimized
 * Added `MIOPEN_SEARCH_CUTOFF` option which can reduce tuning times by skipping slow solvers and kernels
