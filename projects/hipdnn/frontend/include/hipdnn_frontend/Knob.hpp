@@ -82,18 +82,9 @@ public:
             if(_validValues.count(val) == 0)
             {
                 std::ostringstream oss;
-                oss << "Value " << val << " is not in the list of valid values: [";
-                bool first = true;
-                for(const auto& validVal : _validValues)
-                {
-                    if(!first)
-                    {
-                        oss << ", ";
-                    }
-                    oss << validVal;
-                    first = false;
-                }
-                oss << "]";
+                oss << "Value " << val << " is not in the list of valid values: ";
+                std::vector<int64_t> sortedValues(_validValues.begin(), _validValues.end());
+                std::sort(sortedValues.begin(), sortedValues.end());
                 return {ErrorCode::INVALID_VALUE, oss.str()};
             }
             return {ErrorCode::OK, ""};
@@ -234,18 +225,10 @@ public:
             if(_validValues.count(val) == 0)
             {
                 std::ostringstream oss;
-                oss << "Value \"" << val << "\" is not in the list of valid values: [";
-                bool first = true;
-                for(const auto& validVal : _validValues)
-                {
-                    if(!first)
-                    {
-                        oss << ", ";
-                    }
-                    oss << "\"" << validVal << "\"";
-                    first = false;
-                }
-                oss << "]";
+                oss << "Value \"" << val << "\" is not in the list of valid values: ";
+                std::vector<std::string> sortedValues(_validValues.begin(), _validValues.end());
+                std::sort(sortedValues.begin(), sortedValues.end());
+                hipdnn_data_sdk::utilities::stringVecToStream(oss, sortedValues);
                 return {ErrorCode::INVALID_VALUE, oss.str()};
             }
             return {ErrorCode::OK, ""};
