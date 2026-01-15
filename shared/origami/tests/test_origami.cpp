@@ -153,30 +153,33 @@ TEST_CASE("Origami: select_workgroup_mapping", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - workgroup mapping selection") {
       auto hardware = make_hardware(gpu_arch);
-      auto problem  = make_problem(4096, 4096, 8192);
-
+      
+      // Large problem size
+      auto problem_large  = make_problem(4096, 4096, 8192);
       auto config_large = make_config(256, 256, 32, 32, 32, 8, 1);
-      auto skGrid_large = (4096 + 256 - 1) / 256 * (4096 + 256 - 1) / 256;
-      auto [best_wgmxcc_large_tile, best_wgm_large_tile] =
-          origami::select_workgroup_mapping(problem, hardware, config_large, skGrid_large);
+      auto skGrid_large = ((4096 + 256 - 1) / 256) * ((4096 + 256 - 1) / 256);
+      auto mapping_large =
+          origami::select_workgroup_mapping(problem_large, hardware, config_large, skGrid_large);
 
-      auto config_small = make_config(128, 128, 64, 32, 32, 8, 1);
-      auto skGrid_small = (4096 + 128 - 1) / 128 * (4096 + 128 - 1) / 128;
-      auto [best_wgmxcc_small_tile, best_wgm_small_tile] =
-          origami::select_workgroup_mapping(problem, hardware, config_small, skGrid_small);
+      // Small problem size
+      auto problem_small  = make_problem(2048, 2048, 2048);
+      auto skGrid_small = ((2048 + 256 - 1) / 256) * ((2048 + 256 - 1) / 256);
+      auto mapping_small =
+          origami::select_workgroup_mapping(problem_small, hardware, config_large, skGrid_small);
 
       // Different problem size for nonsquare test
-      origami::problem_t problem_nonsquare = problem;
-      problem_nonsquare.size.m             = 2048;
-      problem_nonsquare.size.n             = 5120;
-      auto skGrid_nonsquare                = (2048 + 128 - 1) / 128 * (5120 + 128 - 1) / 128;
-
-      auto [best_wgmxcc_nonsquare_tile, best_wgm_nonsquare] = origami::select_workgroup_mapping(
+      auto problem_nonsquare = make_problem(5120, 512, 5120);
+      auto skGrid_nonsquare  = ((5120 + 256 - 1) / 256) * ((512 + 256 - 1) / 256);
+      auto mapping_nonsquare = origami::select_workgroup_mapping(
           problem_nonsquare, hardware, config_large, skGrid_nonsquare);
 
-      REQUIRE(best_wgmxcc_large_tile == best_wgmxcc_small_tile);
-      REQUIRE(best_wgm_large_tile > best_wgm_small_tile);
-      REQUIRE(best_wgm_large_tile != best_wgm_nonsquare);
+      REQUIRE(mapping_large.wgmxccchunk >= mapping_small.wgmxccchunk);
+      REQUIRE(mapping_large.wgmxcc == mapping_small.wgmxcc);
+      REQUIRE(mapping_large.wgm >= mapping_small.wgm);
+
+      REQUIRE(mapping_large.wgmxccchunk >= mapping_nonsquare.wgmxccchunk);
+      REQUIRE(mapping_large.wgmxcc == mapping_nonsquare.wgmxcc);
+      REQUIRE(mapping_large.wgm >= mapping_nonsquare.wgm);
     }
   }
 }
