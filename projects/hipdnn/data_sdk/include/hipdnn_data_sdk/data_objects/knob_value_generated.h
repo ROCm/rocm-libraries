@@ -843,7 +843,6 @@ struct KnobT : public ::flatbuffers::NativeTable {
   int64_t knob_id = 0;
   std::string knob_id_str{};
   std::string description{};
-  hipdnn_data_sdk::data_objects::KnobValueUnion value_type{};
   hipdnn_data_sdk::data_objects::KnobValueUnion default_value{};
   hipdnn_data_sdk::data_objects::KnobConstraintUnion constraints{};
   bool deprecated = false;
@@ -856,13 +855,11 @@ struct Knob FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_KNOB_ID = 4,
     VT_KNOB_ID_STR = 6,
     VT_DESCRIPTION = 8,
-    VT_VALUE_TYPE_TYPE = 10,
-    VT_VALUE_TYPE = 12,
-    VT_DEFAULT_VALUE_TYPE = 14,
-    VT_DEFAULT_VALUE = 16,
-    VT_CONSTRAINTS_TYPE = 18,
-    VT_CONSTRAINTS = 20,
-    VT_DEPRECATED = 22
+    VT_DEFAULT_VALUE_TYPE = 10,
+    VT_DEFAULT_VALUE = 12,
+    VT_CONSTRAINTS_TYPE = 14,
+    VT_CONSTRAINTS = 16,
+    VT_DEPRECATED = 18
   };
   int64_t knob_id() const {
     return GetField<int64_t>(VT_KNOB_ID, 0);
@@ -881,25 +878,6 @@ struct Knob FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   }
   ::flatbuffers::String *mutable_description() {
     return GetPointer<::flatbuffers::String *>(VT_DESCRIPTION);
-  }
-  hipdnn_data_sdk::data_objects::KnobValue value_type_type() const {
-    return static_cast<hipdnn_data_sdk::data_objects::KnobValue>(GetField<uint8_t>(VT_VALUE_TYPE_TYPE, 0));
-  }
-  const void *value_type() const {
-    return GetPointer<const void *>(VT_VALUE_TYPE);
-  }
-  template<typename T> const T *value_type_as() const;
-  const hipdnn_data_sdk::data_objects::IntValue *value_type_as_IntValue() const {
-    return value_type_type() == hipdnn_data_sdk::data_objects::KnobValue::IntValue ? static_cast<const hipdnn_data_sdk::data_objects::IntValue *>(value_type()) : nullptr;
-  }
-  const hipdnn_data_sdk::data_objects::FloatValue *value_type_as_FloatValue() const {
-    return value_type_type() == hipdnn_data_sdk::data_objects::KnobValue::FloatValue ? static_cast<const hipdnn_data_sdk::data_objects::FloatValue *>(value_type()) : nullptr;
-  }
-  const hipdnn_data_sdk::data_objects::StringValue *value_type_as_StringValue() const {
-    return value_type_type() == hipdnn_data_sdk::data_objects::KnobValue::StringValue ? static_cast<const hipdnn_data_sdk::data_objects::StringValue *>(value_type()) : nullptr;
-  }
-  void *mutable_value_type() {
-    return GetPointer<void *>(VT_VALUE_TYPE);
   }
   hipdnn_data_sdk::data_objects::KnobValue default_value_type() const {
     return static_cast<hipdnn_data_sdk::data_objects::KnobValue>(GetField<uint8_t>(VT_DEFAULT_VALUE_TYPE, 0));
@@ -952,9 +930,6 @@ struct Knob FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyString(knob_id_str()) &&
            VerifyOffset(verifier, VT_DESCRIPTION) &&
            verifier.VerifyString(description()) &&
-           VerifyField<uint8_t>(verifier, VT_VALUE_TYPE_TYPE, 1) &&
-           VerifyOffset(verifier, VT_VALUE_TYPE) &&
-           VerifyKnobValue(verifier, value_type(), value_type_type()) &&
            VerifyField<uint8_t>(verifier, VT_DEFAULT_VALUE_TYPE, 1) &&
            VerifyOffset(verifier, VT_DEFAULT_VALUE) &&
            VerifyKnobValue(verifier, default_value(), default_value_type()) &&
@@ -968,18 +943,6 @@ struct Knob FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   void UnPackTo(KnobT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
   static ::flatbuffers::Offset<Knob> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const KnobT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 };
-
-template<> inline const hipdnn_data_sdk::data_objects::IntValue *Knob::value_type_as<hipdnn_data_sdk::data_objects::IntValue>() const {
-  return value_type_as_IntValue();
-}
-
-template<> inline const hipdnn_data_sdk::data_objects::FloatValue *Knob::value_type_as<hipdnn_data_sdk::data_objects::FloatValue>() const {
-  return value_type_as_FloatValue();
-}
-
-template<> inline const hipdnn_data_sdk::data_objects::StringValue *Knob::value_type_as<hipdnn_data_sdk::data_objects::StringValue>() const {
-  return value_type_as_StringValue();
-}
 
 template<> inline const hipdnn_data_sdk::data_objects::IntValue *Knob::default_value_as<hipdnn_data_sdk::data_objects::IntValue>() const {
   return default_value_as_IntValue();
@@ -1018,12 +981,6 @@ struct KnobBuilder {
   void add_description(::flatbuffers::Offset<::flatbuffers::String> description) {
     fbb_.AddOffset(Knob::VT_DESCRIPTION, description);
   }
-  void add_value_type_type(hipdnn_data_sdk::data_objects::KnobValue value_type_type) {
-    fbb_.AddElement<uint8_t>(Knob::VT_VALUE_TYPE_TYPE, static_cast<uint8_t>(value_type_type), 0);
-  }
-  void add_value_type(::flatbuffers::Offset<void> value_type) {
-    fbb_.AddOffset(Knob::VT_VALUE_TYPE, value_type);
-  }
   void add_default_value_type(hipdnn_data_sdk::data_objects::KnobValue default_value_type) {
     fbb_.AddElement<uint8_t>(Knob::VT_DEFAULT_VALUE_TYPE, static_cast<uint8_t>(default_value_type), 0);
   }
@@ -1055,8 +1012,6 @@ inline ::flatbuffers::Offset<Knob> CreateKnob(
     int64_t knob_id = 0,
     ::flatbuffers::Offset<::flatbuffers::String> knob_id_str = 0,
     ::flatbuffers::Offset<::flatbuffers::String> description = 0,
-    hipdnn_data_sdk::data_objects::KnobValue value_type_type = hipdnn_data_sdk::data_objects::KnobValue::NONE,
-    ::flatbuffers::Offset<void> value_type = 0,
     hipdnn_data_sdk::data_objects::KnobValue default_value_type = hipdnn_data_sdk::data_objects::KnobValue::NONE,
     ::flatbuffers::Offset<void> default_value = 0,
     hipdnn_data_sdk::data_objects::KnobConstraint constraints_type = hipdnn_data_sdk::data_objects::KnobConstraint::NONE,
@@ -1066,13 +1021,11 @@ inline ::flatbuffers::Offset<Knob> CreateKnob(
   builder_.add_knob_id(knob_id);
   builder_.add_constraints(constraints);
   builder_.add_default_value(default_value);
-  builder_.add_value_type(value_type);
   builder_.add_description(description);
   builder_.add_knob_id_str(knob_id_str);
   builder_.add_deprecated(deprecated);
   builder_.add_constraints_type(constraints_type);
   builder_.add_default_value_type(default_value_type);
-  builder_.add_value_type_type(value_type_type);
   return builder_.Finish();
 }
 
@@ -1081,8 +1034,6 @@ inline ::flatbuffers::Offset<Knob> CreateKnobDirect(
     int64_t knob_id = 0,
     const char *knob_id_str = nullptr,
     const char *description = nullptr,
-    hipdnn_data_sdk::data_objects::KnobValue value_type_type = hipdnn_data_sdk::data_objects::KnobValue::NONE,
-    ::flatbuffers::Offset<void> value_type = 0,
     hipdnn_data_sdk::data_objects::KnobValue default_value_type = hipdnn_data_sdk::data_objects::KnobValue::NONE,
     ::flatbuffers::Offset<void> default_value = 0,
     hipdnn_data_sdk::data_objects::KnobConstraint constraints_type = hipdnn_data_sdk::data_objects::KnobConstraint::NONE,
@@ -1095,8 +1046,6 @@ inline ::flatbuffers::Offset<Knob> CreateKnobDirect(
       knob_id,
       knob_id_str__,
       description__,
-      value_type_type,
-      value_type,
       default_value_type,
       default_value,
       constraints_type,
@@ -1358,7 +1307,6 @@ inline bool operator==(const KnobT &lhs, const KnobT &rhs) {
       (lhs.knob_id == rhs.knob_id) &&
       (lhs.knob_id_str == rhs.knob_id_str) &&
       (lhs.description == rhs.description) &&
-      (lhs.value_type == rhs.value_type) &&
       (lhs.default_value == rhs.default_value) &&
       (lhs.constraints == rhs.constraints) &&
       (lhs.deprecated == rhs.deprecated);
@@ -1381,8 +1329,6 @@ inline void Knob::UnPackTo(KnobT *_o, const ::flatbuffers::resolver_function_t *
   { auto _e = knob_id(); _o->knob_id = _e; }
   { auto _e = knob_id_str(); if (_e) _o->knob_id_str = _e->str(); }
   { auto _e = description(); if (_e) _o->description = _e->str(); }
-  { auto _e = value_type_type(); _o->value_type.type = _e; }
-  { auto _e = value_type(); if (_e) _o->value_type.value = hipdnn_data_sdk::data_objects::KnobValueUnion::UnPack(_e, value_type_type(), _resolver); }
   { auto _e = default_value_type(); _o->default_value.type = _e; }
   { auto _e = default_value(); if (_e) _o->default_value.value = hipdnn_data_sdk::data_objects::KnobValueUnion::UnPack(_e, default_value_type(), _resolver); }
   { auto _e = constraints_type(); _o->constraints.type = _e; }
@@ -1401,8 +1347,6 @@ inline ::flatbuffers::Offset<Knob> CreateKnob(::flatbuffers::FlatBufferBuilder &
   auto _knob_id = _o->knob_id;
   auto _knob_id_str = _o->knob_id_str.empty() ? 0 : _fbb.CreateString(_o->knob_id_str);
   auto _description = _o->description.empty() ? 0 : _fbb.CreateString(_o->description);
-  auto _value_type_type = _o->value_type.type;
-  auto _value_type = _o->value_type.Pack(_fbb);
   auto _default_value_type = _o->default_value.type;
   auto _default_value = _o->default_value.Pack(_fbb);
   auto _constraints_type = _o->constraints.type;
@@ -1413,8 +1357,6 @@ inline ::flatbuffers::Offset<Knob> CreateKnob(::flatbuffers::FlatBufferBuilder &
       _knob_id,
       _knob_id_str,
       _description,
-      _value_type_type,
-      _value_type,
       _default_value_type,
       _default_value,
       _constraints_type,

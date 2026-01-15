@@ -41,6 +41,8 @@ public:
         return *_plan;
     }
 
+    bool benchmarkingEnabled = false;
+
 private:
     std::unique_ptr<miopen_legacy_plugin::IPlan> _plan;
 };
