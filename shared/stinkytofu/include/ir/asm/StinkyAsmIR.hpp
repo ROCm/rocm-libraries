@@ -161,11 +161,30 @@ namespace stinkytofu
         {
             if(dataType != other.dataType)
                 return dataType < other.dataType;
-            if(reg.type != other.reg.type)
-                return reg.type < other.reg.type;
-            if(reg.idx != other.reg.idx)
-                return reg.idx < other.reg.idx;
-            return reg.num < other.reg.num;
+
+            switch(dataType)
+            {
+            case Type::Register:
+            {
+                if(reg.type != other.reg.type)
+                    return reg.type < other.reg.type;
+                if(reg.idx != other.reg.idx)
+                    return reg.idx < other.reg.idx;
+                if(reg.num != other.reg.num)
+                    return reg.num < other.reg.num;
+                return literalValue < other.literalValue;
+            }
+            case Type::LiteralInt:
+                return literalInt < other.literalInt;
+            case Type::LiteralDouble:
+                return literalDouble < other.literalDouble;
+            case Type::LiteralString:
+                return literalValue < other.literalValue;
+            case Type::Invalid:
+                return false;
+            }
+
+            return false;
         }
 
         // define equality for comparisons
@@ -298,6 +317,8 @@ namespace stinkytofu
         }
 
         void dump(std::ostream& out, const std::string& prefix = "") const;
+
+        void dump() const;
 
         static StinkyRegister getSCCRegister()
         {

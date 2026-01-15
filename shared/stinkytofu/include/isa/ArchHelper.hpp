@@ -54,12 +54,10 @@ namespace stinkytofu
             virtual ~ArchInfo() = default;
 
             virtual stinkytofu::IsaOpcode
-                getIsaOpcode(stinkytofu::UnifiedOpcode unifiedOpcode) const
-                = 0;
-            virtual const HwInstDesc* getMCIDTable() const = 0;
+                getIsaOpcode(stinkytofu::UnifiedOpcode unifiedOpcode) const = 0;
+            virtual const HwInstDesc* getMCIDTable() const                  = 0;
             virtual const std::unordered_map<std::string, uint16_t>&
-                getMnemonicToIsaOpcodeMap() const
-                = 0;
+                getMnemonicToIsaOpcodeMap() const = 0;
 
             const uint32_t major;
             const uint32_t minor;
@@ -103,6 +101,15 @@ namespace stinkytofu
     inline uint32_t getWaveFrontSize(uint32_t major, uint32_t minor, uint32_t stepping)
     {
         return getWaveFrontSize(getGfxArchID(major, minor, stepping));
+    }
+
+    inline std::string getArchName(GfxArchID archID)
+    {
+        const auto* archInfo = ArchHelper::getInstance().getArchInfo(archID);
+        if(!archInfo)
+            return "gfx_unknown";
+        return "gfx" + std::to_string(archInfo->major) + std::to_string(archInfo->minor)
+               + std::to_string(archInfo->stepping);
     }
 
 } // namespace stinkytofu

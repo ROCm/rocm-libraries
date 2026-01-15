@@ -24,6 +24,7 @@
 #include "ir/asm/StinkyAsmEmitter.hpp"
 
 #include <iomanip>
+#include <limits>
 
 namespace stinkytofu
 {
@@ -61,7 +62,16 @@ namespace stinkytofu
             std::string symbolicName = useSymbolic ? reg.getSymbolicName() : "";
 
             // Emit register: v0, v[0:3], s1, acc0, etc. or v[vgprName+0]
-            os << regTypeToString(reg.reg.type);
+            const std::string regTypeStr = regTypeToString(reg.reg.type);
+            os << regTypeStr;
+
+            // Special registers are singletons, no index suffix needed.
+            if(reg.reg.type == RegType::VCC || reg.reg.type == RegType::VCC_LO
+               || reg.reg.type == RegType::VCC_HI || reg.reg.type == RegType::EXEC
+               || reg.reg.type == RegType::EXEC_LO || reg.reg.type == RegType::EXEC_HI)
+            {
+                break;
+            }
 
             if(reg.reg.num > 1)
             {
@@ -102,8 +112,23 @@ namespace stinkytofu
             break;
 
         case StinkyRegister::Type::LiteralDouble:
-            os << reg.literalDouble;
+        {
+            // For floating-point literals, always show at least one decimal place
+            // Check if it's a whole number
+            double value = reg.literalDouble;
+            if(value == static_cast<int>(value) && std::abs(value) < 1e10)
+            {
+                // It's a whole number - print with .0 suffix
+                os << static_cast<int>(value) << ".0";
+            }
+            else
+            {
+                // Use full precision for non-whole numbers
+                // max_digits10 = 17 for double (sufficient to preserve all significant digits)
+                os << std::setprecision(std::numeric_limits<double>::max_digits10) << value;
+            }
             break;
+        }
 
         case StinkyRegister::Type::LiteralString:
             os << reg.getLiteralString();
@@ -168,16 +193,25 @@ namespace stinkytofu
                 os << ", ";
             }
 
-            // Check if this is the last source operand of a MUBUF instruction with offen
-            // and it's a literal int 0. In that case, emit "null" instead of "0" for the soffset parameter
-            if(mubufMod && i == srcRegs.size() - 1
-               && srcRegs[i].dataType == StinkyRegister::Type::LiteralInt
-               && srcRegs[i].literalInt == 0)
+            // Check if this is the last source operand of a MUBUF instruction
+            // and it's a literal zero. In that case, emit "null" instead of "0" for the soffset parameter
+            // This matches the AMDGPU ISA convention where buffer instructions use "null" for zero soffset
+            bool isMUBUFLastOperand = (mubufMod && i == srcRegs.size() - 1);
+
+            if(isMUBUFLastOperand)
             {
-                os << "null";
-                firstOperand = false;
-                nonSkippedIndex++;
-                continue;
+                assert(srcRegs[i].dataType == StinkyRegister::Type::LiteralInt
+                       || srcRegs[i].dataType == StinkyRegister::Type::Register
+                              && "MUBUF last operand must be an integer or register.");
+
+                if(srcRegs[i].dataType == StinkyRegister::Type::LiteralInt
+                   && srcRegs[i].literalInt == 0)
+                {
+                    os << "null";
+                    firstOperand = false;
+                    nonSkippedIndex++;
+                    continue;
+                }
             }
 
             bool needsNeg = false;
@@ -332,7 +366,9 @@ namespace stinkytofu
         }
     }
 
-    void StinkyAsmEmitter::emitCycleComment(std::ostream& os, const StinkyInstruction& inst, int currentColumn)
+    void StinkyAsmEmitter::emitCycleComment(std::ostream&            os,
+                                            const StinkyInstruction& inst,
+                                            int                      currentColumn)
     {
         bool needsComment = false;
 
@@ -395,6 +431,32 @@ namespace stinkytofu
         }
     }
 
+    void StinkyAsmEmitter::emit(std::ostream& os, const AsmDirective& directive)
+    {
+        std::ostringstream dirStream;
+        if(directive.kind == AsmDirectiveKind::SET)
+        {
+            dirStream << directive.name << " " << directive.symbol;
+            if(!directive.value.empty())
+            {
+                dirStream << ", " << directive.value;
+            }
+        }
+        else if(directive.kind == AsmDirectiveKind::MACRO)
+        {
+            dirStream << directive.value;
+        }
+
+        if(!dirStream.str().empty())
+        {
+            if(options.emitComments && !directive.comment.empty())
+            {
+                dirStream << " // " << directive.comment;
+            }
+            os << dirStream.str() << "\n";
+        }
+    }
+
     void StinkyAsmEmitter::emit(std::ostream& os, const StinkyInstruction& inst)
     {
         // Check if this is a label
@@ -405,6 +467,17 @@ namespace stinkytofu
             {
                 os << labelData->label << ":";
             }
+
+            // Emit comment if present
+            if(options.emitComments)
+            {
+                const CommentData* comment = inst.getModifier<CommentData>();
+                if(comment && !comment->comment.empty())
+                {
+                    os << "  /// " << comment->comment;
+                }
+            }
+
             os << "\n";
             return;
         }
@@ -432,8 +505,8 @@ namespace stinkytofu
         emitMemoryModifiers(instrStream, inst);
 
         // Get the instruction string and its length for comment alignment
-        std::string instrStr = instrStream.str();
-        int currentColumn = instrStr.length();
+        std::string instrStr      = instrStream.str();
+        int         currentColumn = instrStr.length();
 
         // Write the instruction to the output stream
         os << instrStr;
@@ -448,12 +521,23 @@ namespace stinkytofu
     {
         for(auto it = irlist.begin(); it != irlist.end(); ++it)
         {
-            const StinkyInstruction* inst = cast<StinkyInstruction>(it.getNodePtr());
+            const StinkyInstruction* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
             if(inst)
             {
                 emit(os, *inst);
 
                 if(options.emitBlankLines && inst->getUnifiedOpcode() != GFX::LABEL)
+                {
+                    os << "\n";
+                }
+                continue;
+            }
+
+            const AsmDirective* directive = dyn_cast<AsmDirective>(it.getNodePtr());
+            if(directive)
+            {
+                emit(os, *directive);
+                if(options.emitBlankLines)
                 {
                     os << "\n";
                 }
@@ -472,6 +556,13 @@ namespace stinkytofu
     {
         std::ostringstream oss;
         emit(oss, irlist);
+        return oss.str();
+    }
+
+    std::string StinkyAsmEmitter::emit(const AsmDirective& directive)
+    {
+        std::ostringstream oss;
+        emit(oss, directive);
         return oss.str();
     }
 

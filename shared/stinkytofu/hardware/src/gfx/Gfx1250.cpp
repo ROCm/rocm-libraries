@@ -24,7 +24,6 @@
 #include <utility>
 
 #include "gfx/CommonInstsDSL.hpp"
-#include "gfx/GpuArchManager.hpp"
 #include "gfx/InstDefDSL.hpp"
 
 namespace stinkytofu
@@ -106,7 +105,7 @@ namespace stinkytofu
 
         // New barrier instructions for gfx1250
         DEF_T(BarrierInst, "s_barrier_signal"); // Signal barrier with ID
-        DEF_T(BarrierInst, "s_barrier_wait");   // Wait on barrier with ID
+        DEF_T(BarrierInst, "s_barrier_wait"); // Wait on barrier with ID
 
         // scalar instructions that have side effects
         for(auto op : {
@@ -155,13 +154,15 @@ namespace stinkytofu
         for(auto ty : {"f16", "f32", "f64"})
             DEF_T(CommutativeVALU, "v_fma_" + std::string(ty));
 
-        for(std::string suffix : {"_i32", "_u32", "_co_u32", "c_co_u32", "3_u32"})
+        // nc: no carry in, no carry out.
+        for(std::string suffix : {"_i32", "_co_u32", "c_co_u32", "3_u32"})
             DEF_T(CommutativeVALU, "v_add" + suffix);
+        DEF_T(CommutativeVALU, "v_add_nc_u32");
 
         for(std::string suffix : {"lo_u32", "hi_i32", "hi_u32", "i32_i24", "u32_u24"})
             DEF_T(CommutativeVALU, "v_mul_" + suffix);
 
-        for(std::string suffix : {"f16", "f32", "i32", "u32", "co_u32"})
+        for(std::string suffix : {"f16", "f32", "i32", "u32", "nc_u32", "co_u32"})
             DEF_T(VALU, "v_sub_" + suffix);
 
         // Commutative VALU
@@ -181,7 +182,7 @@ namespace stinkytofu
                 "v_mad_u32_u24",
                 "v_med3_i32",
                 "v_med3_f32",
-                "v_mac_f32",
+                "v_fmac_f32",
                 "v_mad_mix_f32",
             })
             DEF_T(VALU, name);
@@ -215,7 +216,8 @@ namespace stinkytofu
                        "v_mov_b64",
                        "v_bfe_i32",
                        "v_bfe_u32",
-                       "v_rndne_f32"})
+                       "v_rndne_f32",
+                       "v_add_co_ci_u32"})
             DEF_T(VALU, op);
 
         // VTrans: vector transcendental instructions
@@ -641,14 +643,14 @@ namespace stinkytofu
         // Wait Instructions (gfx1250 specific)
         // ============================================
         // Separate wait counters for different memory operations
-        DEF_T(WaitCntInst, "s_wait_loadcnt");    // Wait for VMEM loads
-        DEF_T(WaitCntInst, "s_wait_storecnt");   // Wait for VMEM stores
-        DEF_T(WaitCntInst, "s_wait_dscnt");      // Wait for LDS operations
-        DEF_T(WaitCntInst, "s_wait_kmcnt");      // Wait for scalar memory/constant fetch
-        DEF_T(WaitCntInst, "s_wait_asynccnt");   // Wait for async operations
+        DEF_T(WaitCntInst, "s_wait_loadcnt"); // Wait for VMEM loads
+        DEF_T(WaitCntInst, "s_wait_storecnt"); // Wait for VMEM stores
+        DEF_T(WaitCntInst, "s_wait_dscnt"); // Wait for LDS operations
+        DEF_T(WaitCntInst, "s_wait_kmcnt"); // Wait for scalar memory/constant fetch
+        DEF_T(WaitCntInst, "s_wait_asynccnt"); // Wait for async operations
 
         // Combined wait instructions
-        DEF_T(WaitCntInst, "s_wait_loadcnt_dscnt");  // Wait for loads and LDS
+        DEF_T(WaitCntInst, "s_wait_loadcnt_dscnt"); // Wait for loads and LDS
         DEF_T(WaitCntInst, "s_wait_storecnt_dscnt"); // Wait for stores and LDS
 
         // ============================================
@@ -882,8 +884,10 @@ namespace stinkytofu
             {"VAddF32", "v_add_f32"},
             {"VAddF64", "v_add_f64"},
             {"VAddI32", "v_add_i32"},
-            {"VAddU32", "v_add_u32"},
+            {"VAddU32", "v_add_nc_u32"},
             {"VAddCOU32", "v_add_co_u32"},
+            {"VAddCCOU32", "v_add_co_ci_u32"},
+            {"VNop", "v_nop"},
 
             {"VMulF16", "v_mul_f16"},
             {"VMulF32", "v_mul_f32"},
@@ -895,9 +899,9 @@ namespace stinkytofu
             {"VMulU32U24", "v_mul_u32_u24"},
             {"VSubF32", "v_sub_f32"},
             {"VSubI32", "v_sub_i32"},
-            {"VSubU32", "v_sub_u32"},
+            {"VSubU32", "v_sub_nc_u32"},
             {"VSubCoU32", "v_sub_co_u32"},
-            {"VMacF32", "v_mac_f32"},
+            {"VMacF32", "v_fmac_f32"},
             {"VDot2CF32F16", "v_dot2c_f32_f16"},
             {"VDot2F32F16", "v_dot2_f32_f16"},
             {"VFmaF16", "v_fma_f16"},

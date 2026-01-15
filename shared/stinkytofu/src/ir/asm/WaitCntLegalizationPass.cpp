@@ -63,13 +63,12 @@
 /// Usage: Should be added at the END of the optimization pipeline, after all
 /// scheduling and optimization passes, but before final code emission.
 
-#include "ErrorHandling.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/asm/StinkyModifiers.hpp"
 #include "isa/ArchHelper.hpp"
 #include "support/Casting.hpp"
 
-#include <iostream>
+#include <optional>
 #include <vector>
 
 namespace
@@ -118,8 +117,9 @@ namespace
             // Collect s_waitcnt instructions to replace
             struct WaitCntToReplace
             {
-                IRList::iterator   iter;
-                const SWaitCntData waitData;
+                IRList::iterator           iter;
+                const SWaitCntData         waitData;
+                std::optional<std::string> comment;
             };
             std::vector<WaitCntToReplace> waitCntsToReplace;
 
@@ -138,7 +138,12 @@ namespace
                     const SWaitCntData* waitData = inst->getModifier<SWaitCntData>();
                     if(waitData)
                     {
-                        waitCntsToReplace.push_back({it, *waitData});
+                        std::optional<std::string> comment;
+                        if(const CommentData* commentData = inst->getModifier<CommentData>())
+                        {
+                            comment = commentData->comment;
+                        }
+                        waitCntsToReplace.push_back({it, *waitData, comment});
                     }
                 }
                 else if(inst->getUnifiedOpcode() == GFX::s_barrier)
@@ -156,7 +161,7 @@ namespace
             // Replace each s_waitcnt with new wait instructions
             for(const auto& entry : waitCntsToReplace)
             {
-                legalizeWaitCnt(entry.iter, entry.waitData, irBuilder, irlist, arch);
+                legalizeWaitCnt(entry.iter, entry.waitData, entry.comment, irBuilder, irlist, arch);
             }
 
             // Replace each s_barrier with signal/wait pair
@@ -168,11 +173,12 @@ namespace
             return waitCntsToReplace.size() + barriersToReplace.size();
         }
 
-        void legalizeWaitCnt(IRList::iterator     waitCntIter,
-                             const SWaitCntData&  waitData,
-                             StinkyInstIRBuilder& irBuilder,
-                             IRList&              irlist,
-                             GfxArchID            arch)
+        void legalizeWaitCnt(IRList::iterator                  waitCntIter,
+                             const SWaitCntData&               waitData,
+                             const std::optional<std::string>& comment,
+                             StinkyInstIRBuilder&              irBuilder,
+                             IRList&                           irlist,
+                             GfxArchID                         arch)
         {
             // The wait count values in SWaitCntData:
             // - vlcnt: VMEM load count
@@ -224,6 +230,7 @@ namespace
                 createCombinedWaitInst(GFX::s_wait_loadcnt_dscnt,
                                        waitData.vlcnt,
                                        combinedDscnt,
+                                       comment,
                                        irBuilder,
                                        insertPoint,
                                        arch);
@@ -236,6 +243,7 @@ namespace
                 createCombinedWaitInst(GFX::s_wait_storecnt_dscnt,
                                        waitData.vscnt,
                                        combinedDscnt,
+                                       comment,
                                        irBuilder,
                                        insertPoint,
                                        arch);
@@ -247,22 +255,22 @@ namespace
             if(hasVlcnt)
             {
                 createSingleWaitInst(
-                    GFX::s_wait_loadcnt, waitData.vlcnt, irBuilder, insertPoint, arch);
+                    GFX::s_wait_loadcnt, waitData.vlcnt, comment, irBuilder, insertPoint, arch);
             }
             if(hasVscnt)
             {
                 createSingleWaitInst(
-                    GFX::s_wait_storecnt, waitData.vscnt, irBuilder, insertPoint, arch);
+                    GFX::s_wait_storecnt, waitData.vscnt, comment, irBuilder, insertPoint, arch);
             }
             if(hasCombinedDs)
             {
                 createSingleWaitInst(
-                    GFX::s_wait_dscnt, combinedDscnt, irBuilder, insertPoint, arch);
+                    GFX::s_wait_dscnt, combinedDscnt, comment, irBuilder, insertPoint, arch);
             }
             if(hasKmcnt)
             {
                 createSingleWaitInst(
-                    GFX::s_wait_kmcnt, waitData.kmcnt, irBuilder, insertPoint, arch);
+                    GFX::s_wait_kmcnt, waitData.kmcnt, comment, irBuilder, insertPoint, arch);
             }
 
             // Remove the old s_waitcnt instruction
@@ -302,11 +310,12 @@ namespace
             irlist.erase(barrierIter);
         }
 
-        void createSingleWaitInst(GFX                  unifiedOpcode,
-                                  int8_t               count,
-                                  StinkyInstIRBuilder& irBuilder,
-                                  IRList::iterator     insertPoint,
-                                  GfxArchID            arch)
+        void createSingleWaitInst(GFX                               unifiedOpcode,
+                                  int8_t                            count,
+                                  const std::optional<std::string>& comment,
+                                  StinkyInstIRBuilder&              irBuilder,
+                                  IRList::iterator                  insertPoint,
+                                  GfxArchID                         arch)
         {
             const HwInstDesc* desc = getMCIDByUOp(unifiedOpcode, arch);
 
@@ -315,14 +324,19 @@ namespace
             // Add the count as a literal operand
             // The wait instruction format is: s_wait_xxx <count>
             inst->addSrcReg(StinkyRegister(static_cast<int>(count)));
+            if(comment && !comment->empty())
+            {
+                inst->addModifier<CommentData>(CommentData{*comment});
+            }
         }
 
-        void createCombinedWaitInst(GFX                  unifiedOpcode,
-                                    int8_t               count1,
-                                    int8_t               count2,
-                                    StinkyInstIRBuilder& irBuilder,
-                                    IRList::iterator     insertPoint,
-                                    GfxArchID            arch)
+        void createCombinedWaitInst(GFX                               unifiedOpcode,
+                                    int8_t                            count1,
+                                    int8_t                            count2,
+                                    const std::optional<std::string>& comment,
+                                    StinkyInstIRBuilder&              irBuilder,
+                                    IRList::iterator                  insertPoint,
+                                    GfxArchID                         arch)
         {
             const HwInstDesc* desc = getMCIDByUOp(unifiedOpcode, arch);
 
@@ -334,6 +348,10 @@ namespace
             // SIMM16[7:0] = second count (DS)
             uint16_t combinedCount = ((count1 & 0xFF) << 8) | (count2 & 0xFF);
             inst->addSrcReg(StinkyRegister(static_cast<int>(combinedCount)));
+            if(comment && !comment->empty())
+            {
+                inst->addModifier<CommentData>(CommentData{*comment});
+            }
         }
     };
 

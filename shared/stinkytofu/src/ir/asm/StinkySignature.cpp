@@ -21,6 +21,7 @@
  *
  * ************************************************************************ */
 #include "ir/asm/StinkySignature.hpp"
+#include "ir/asm/StinkyAsmModule.hpp"
 
 #include <cmath>
 #include <iomanip>
@@ -352,6 +353,7 @@ namespace stinkytofu
                                                          int                       groupSegSize,
                                                          const std::array<int, 3>& sgprWorkGroup,
                                                          int                       vgprWorkItem,
+                                                         int                       wavefrontSize,
                                                          int                       totalVgprs,
                                                          int                       totalAgprs,
                                                          int                       totalSgprs,
@@ -367,6 +369,7 @@ namespace stinkytofu
         , vgprWorkItem(vgprWorkItem)
         , enablePreloadKernArgs(preloadKernArgs)
         , isaVersion(isaVersion)
+        , wavefrontSize(wavefrontSize)
     {
         // Check if this architecture has unified register file (CDNA3+: gfx94x with x >= 2)
         bool hasUnifiedRegs = (isaVersion[0] == 9 && isaVersion[1] == 4 && isaVersion[2] >= 2)
@@ -436,9 +439,6 @@ namespace stinkytofu
         bool hasWave32 = (isaVersion[0] >= 10); // GFX10+
         if(hasWave32)
         {
-            // Determine wavefront size (assume 64 unless explicitly set differently)
-            // Note: This could be parameterized in the future
-            int wavefrontSize = 64; // Default
             if(wavefrontSize == 32)
             {
                 kStr += kdIndent + ".amdhsa_wavefront_size32 1 // 32-thread wavefronts\n";
@@ -472,11 +472,6 @@ namespace stinkytofu
 
         kStr += ".end_amdhsa_kernel\n";
         kStr += ".text\n";
-
-        // Add comment blocks
-        kStr += "// Num VGPR   =" + std::to_string(originalTotalVgprs) + "\n";
-        kStr += "// Num AccVGPR=" + std::to_string(totalAgprs) + "\n";
-        kStr += "// Num SGPR   =" + std::to_string(totalSgprs) + "\n";
 
         return kStr;
     }
@@ -593,6 +588,7 @@ namespace stinkytofu
                            groupSegmentSize,
                            sgprWorkGroup,
                            vgprWorkItem,
+                           wavefrontSize,
                            totalVgprs,
                            totalAgprs,
                            totalSgprs,
@@ -680,9 +676,82 @@ namespace stinkytofu
     }
 
     /***************************************
-     * KernelBody - Implementation in python bridge
+     * KernelBody
      ***************************************/
-    // KernelBody implementation is in python_module/src/StinkyTofu.cpp
-    // to avoid circular dependencies with IRListModule
+    KernelBody::KernelBody(const std::string& name)
+        : name(name)
+        , totalVgprs(0)
+        , totalAgprs(0)
+        , totalSgprs(0)
+    {
+    }
+
+    void KernelBody::addSignature(const std::shared_ptr<SignatureBase>& signature)
+    {
+        this->signature = signature;
+    }
+
+    void KernelBody::addBody(const std::shared_ptr<IRListModule>& body)
+    {
+        this->body = body;
+    }
+
+    void KernelBody::setGprs(int totalVgprs, int totalAgprs, int totalSgprs)
+    {
+        this->totalVgprs = totalVgprs;
+        this->totalAgprs = totalAgprs;
+        this->totalSgprs = totalSgprs;
+
+        if(signature)
+        {
+            signature->setGprs(totalVgprs, totalAgprs, totalSgprs);
+        }
+    }
+
+    int KernelBody::getNextFreeVgpr() const
+    {
+        return totalVgprs;
+    }
+
+    int KernelBody::getNextFreeSgpr() const
+    {
+        return totalSgprs;
+    }
+
+    std::string KernelBody::getName() const
+    {
+        return name;
+    }
+
+    std::shared_ptr<SignatureBase> KernelBody::getSignature() const
+    {
+        return signature;
+    }
+
+    std::shared_ptr<IRListModule> KernelBody::getBody() const
+    {
+        return body;
+    }
+
+    std::string KernelBody::toString(bool emitComments, bool emitCycleInfo) const
+    {
+        std::string result;
+
+        // Add signature if present
+        if(signature)
+        {
+            result += signature->toString();
+        }
+
+        // Add instruction body if present
+        if(body)
+        {
+            // Note: StinkyAsmModule::emitAssembly() uses internal defaults for emitComments/emitCycleInfo
+            // The parameters to KernelBody::toString() are currently ignored
+            result += body->emitAssembly();
+        }
+
+        return result;
+    }
 
 } // namespace stinkytofu

@@ -319,12 +319,14 @@ namespace stinkytofu
         int                vgprWorkItem;
         bool               enablePreloadKernArgs;
         std::array<int, 3> isaVersion;
+        int                wavefrontSize;
 
         SignatureKernelDescriptor(const std::string&        name,
                                   const std::array<int, 3>& isaVersion,
                                   int                       groupSegSize,
                                   const std::array<int, 3>& sgprWorkGroup,
                                   int                       vgprWorkItem,
+                                  int                       wavefrontSize    = 64,
                                   int                       totalVgprs      = 0,
                                   int                       totalAgprs      = 0,
                                   int                       totalSgprs      = 0,
@@ -429,10 +431,14 @@ namespace stinkytofu
         static std::string slash(const std::string& text);
     };
 
+    // Forward declaration for StinkyAsmModule
+    class StinkyAsmModule;
+
     /**
-     * Forward declaration for IRListModule
+     * IRListModule is an alias for StinkyAsmModule
+     * This provides compatibility with rocisa's KernelBody API
      */
-    class IRListModule;
+    using IRListModule = StinkyAsmModule;
 
     /**
      * @brief KernelBody - Complete kernel container combining metadata and instructions

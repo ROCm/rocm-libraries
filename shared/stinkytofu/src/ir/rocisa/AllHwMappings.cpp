@@ -34,6 +34,7 @@
 
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/rocisa/AllHwMappings.hpp"
+#include "isa/ArchHelper.hpp"
 
 namespace
 {
@@ -175,8 +176,8 @@ namespace stinkytofu
 
         if(it == convMap->end())
         {
-            std::cerr << "Error: No conversion entry for rocisa " << type.name() << " in arch gfx"
-                      << std::to_string((int)arch) << "\n";
+            std::cerr << "Error: No conversion entry for rocisa " << type.name() << " in arch "
+                      << getArchName(arch) << "\n";
 
             return nullptr;
         }
@@ -185,8 +186,8 @@ namespace stinkytofu
 
         if(convFn == nullptr)
         {
-            std::cerr << "Error (TODO): conversion for rocisa " << type.name() << " in arch gfx"
-                      << std::to_string((int)arch) << " is not implemented yet\n";
+            std::cerr << "Error (TODO): conversion for rocisa " << type.name() << " in arch "
+                      << getArchName(arch) << " is not implemented yet\n";
 
             return nullptr;
         }
