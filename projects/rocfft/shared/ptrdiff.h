@@ -20,23 +20,29 @@
 
 #pragma once
 
+#include <numeric>
 #include <vector>
 
 // Compute the farthest point from the original pointer.
+static size_t compute_ptrdiff(const std::vector<size_t>& length,
+                              const std::vector<size_t>& stride)
+{
+    // 1 + sum_i [ ( length_i - 1 ) * stride_i
+    // = 1 + dot(length, stride) - sum(stride)
+    // Since length is the one-past-the-end, we subtract the strides.
+    // The length-zero vector is a scalar, so the buffer size is 1.
+    return std::inner_product(length.begin(), length.end(), stride.begin(), 1)
+        - std::accumulate(stride.begin(), stride.end(), 1, std::plus<size_t>());
+}   
+
 static size_t compute_ptrdiff(const std::vector<size_t>& length,
                               const std::vector<size_t>& stride,
                               const size_t               nbatch,
                               const size_t               dist)
 {
-    size_t val = 0;
-    if(!length.empty())
-    {
-        val = 1;
-        for(unsigned int i = 0; i < length.size(); ++i)
-        {
-            val += (length[i] - 1) * stride[i];
-        }
-        val += (nbatch - 1) * dist;
-    }
-    return val;
+    std::vector l = length;
+    l.push_back(nbatch);
+    std::vector s = stride;
+    s.push_back(dist);
+    return compute_ptrdiff(l, s);
 }
