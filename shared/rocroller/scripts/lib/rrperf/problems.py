@@ -598,6 +598,11 @@ def cast_missing_parameters(result):
         result["workgroupMappingDim"] = wgmDim
         result["workgroupMappingValue"] = wgmValue
 
+    if "storeLDS_D" in result:
+        storeLDS_D = result["storeLDS_D"]
+        del result["storeLDS_D"]
+        result["store_path"] = "LDSViaVGPRToBuffer" if storeLDS_D else "VGPRToBuffer"
+
 
 def load_results(path: pathlib.Path):
     """
