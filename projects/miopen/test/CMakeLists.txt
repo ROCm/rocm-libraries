@@ -666,6 +666,9 @@ function(add_custom_test NAME)
     foreach(__environment ${PARSE_ENVIRONMENT})
         set_tests_properties(${NAME} PROPERTIES ENVIRONMENT "${__environment}")
     endforeach()
+    set_tests_properties(${NAME} PROPERTIES ENVIRONMENT
+        "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/coverage-report/profraw/MIOpen-coverage-%p-%m.profraw"
+    )
 
     # The tests often change the contents of the user databases, which may affect performance after testing.
     # For example, MIOPEN_DEBUG_FIND_ONLY_SOLVER results in non-optimal records in user-find-db.
@@ -853,6 +856,41 @@ add_custom_test(conv_transposed_bwd_find_2
 add_custom_test(conv_transposed_wrw_find_2
     COMMAND $<TARGET_FILE:test_conv2d_find2> ${TEST_CONV_VERBOSE_W} --input 64 64  28 28 --weights 64  64  1 1 --pads_strides_dilations 0 0 1 1 1 1 --cmode transpose ${MIOPEN_TEST_FLAGS_ARGS}
 )
+
+if (MIOPEN_ENABLE_COVERAGE)
+  add_custom_target(
+    coverage_setup
+    COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
+    COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
+
+  find_program(
+    LLVM_PROFDATA
+    llvm-profdata
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  find_program(
+    LLVM_COV
+    llvm-cov
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+  add_custom_target(
+    coverage
+    DEPENDS coverage_setup test_group_conv2d_fwd
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/MIOpen-coverage_*.profraw -o ./coverage-report/MIOpen.profdata
+    COMMAND ${LLVM_COV} report -object ./lib/libMIOpen.so -instr-profile=./coverage-report/MIOpen.profdata
+    COMMAND ${LLVM_COV} show -object ./lib/libMIOpen.so -instr-profile=./coverage-report/MIOpen.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./lib/libMIOpen.so -instr-profile=./coverage-report/MIOpen.profdata -format=lcov > ./coverage-report/coverage.info
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
+endif()
 
 #Dont install the tests if we are building each test separately
 #When the tests are built as a single unit, then we want to be
