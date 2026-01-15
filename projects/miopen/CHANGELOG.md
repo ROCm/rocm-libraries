@@ -14,7 +14,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 
 ### Optimized
 * Added `MIOPEN_SEARCH_CUTOFF` option which can reduce tuning times by skipping slow solvers and kernels
-* Improved 3D solver selection and kernel tuning heuristics for gfx942 and gfx950
+* [Conv] Improved 3D solver selection and kernel tuning heuristics for gfx942 and gfx950
 * [Conv] Removed obsolete explicit gemm solver VRAM limit
 
 ### Resolved issues
