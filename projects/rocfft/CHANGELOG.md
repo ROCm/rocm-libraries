@@ -5,6 +5,11 @@ Documentation for rocFFT is available at
 
 ## (Unreleased) rocFFT 1.0.37
 
+### Optimized
+
+* Allow plans to share hipModules if they use the same kernels.  This reduces time spent and memory used when 
+  creating plans that exist concurrently.
+
 ### Changed
 
 * Moved library to C++20 standard.

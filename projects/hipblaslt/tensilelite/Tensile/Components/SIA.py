@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -259,7 +259,7 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
     # final index definition
     writer.states.numMfmaForNextLoopLR = min(writer.states.numMfmaForNextLoopLR,numMfmaPerIter-1)
     writer.states.syncPlrMfmaIndex = numMfmaPerIter*(kernel["LoopIters"]-writer.states.numItersPLR+1) - writer.states.numMfmaForNextLoopLR - 1 if writer.states.numItersPLR else 0
-    
+
     if kernel["ForceUnrollSubIter"]:
         if ( kernel["ProblemType"]["DataType"].isComplex()):
             writer.states.syncPlrMfmaIndex = writer.states.syncPlrMfmaIndex *4   # Complex
@@ -282,7 +282,8 @@ def getLocalWriteMFMAStart(writer, kernel, tensorParametersA, tensorParametersB,
     #########
     if not (kernel["1LDSBuffer"] or kernel["DirectToLds"]):
         # TODO: replace here for real number of globalReadIncInst
-        numGRIncInst = 18 # Always on. Original logic: 12 if not kernel["StaggerU"] else 18
+        # numGRIncInst = 18 # Always on. Original logic: 12 if not kernel["StaggerU"] else 18
+        numGRIncInst = 12 if writer.states.staggerU else 18
         numInstPerMfma = max(roundUp(writer.states.miLatencyLeft/2),1)
         numMfmaToSched = roundUp(numGRIncInst/numInstPerMfma)
         lwStartMfmaIndex = 1 + numMfmaToSched
