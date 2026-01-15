@@ -243,8 +243,7 @@ TEST_CASE("VerifyLDSBarriers - Multiple LDS coordinates require barriers for eac
 // ForLoop tests
 // =============================================================================
 
-TEST_CASE("VerifyLDSBarriers - ForLoop without barrier fails",
-          "[kernel-graph][graph-transform]")
+TEST_CASE("VerifyLDSBarriers - ForLoop without barrier fails", "[kernel-graph][graph-transform]")
 {
     KG::KernelGraph graph;
 
@@ -252,9 +251,8 @@ TEST_CASE("VerifyLDSBarriers - ForLoop without barrier fails",
     auto lds      = graph.coordinates.addElement(LDS());
     auto forCoord = graph.coordinates.addElement(ForLoop());
 
-    auto kernel = graph.control.addElement(Kernel());
-    auto counter
-        = dataFlowTag(forCoord, Register::Type::Scalar, DataType::Int32);
+    auto kernel   = graph.control.addElement(Kernel());
+    auto counter  = dataFlowTag(forCoord, Register::Type::Scalar, DataType::Int32);
     auto forLoop  = graph.control.addElement(ForLoopOp{counter < literal(10), "test_loop"});
     auto storeLDS = graph.control.addElement(StoreLDSTile());
     auto loadLDS  = graph.control.addElement(LoadLDSTile());
@@ -284,9 +282,8 @@ TEST_CASE("VerifyLDSBarriers - ForLoop with single barrier between ops fails for
     auto lds      = graph.coordinates.addElement(LDS());
     auto forCoord = graph.coordinates.addElement(ForLoop());
 
-    auto kernel = graph.control.addElement(Kernel());
-    auto counter
-        = dataFlowTag(forCoord, Register::Type::Scalar, DataType::Int32);
+    auto kernel   = graph.control.addElement(Kernel());
+    auto counter  = dataFlowTag(forCoord, Register::Type::Scalar, DataType::Int32);
     auto forLoop  = graph.control.addElement(ForLoopOp{counter < literal(10), "test_loop"});
     auto storeLDS = graph.control.addElement(StoreLDSTile());
     auto barrier  = graph.control.addElement(Barrier());
@@ -322,14 +319,13 @@ TEST_CASE("VerifyLDSBarriers - ForLoop with barrier after load handles loop-carr
     auto lds      = graph.coordinates.addElement(LDS());
     auto forCoord = graph.coordinates.addElement(ForLoop());
 
-    auto kernel = graph.control.addElement(Kernel());
-    auto counter
-        = dataFlowTag(forCoord, Register::Type::Scalar, DataType::Int32);
-    auto forLoop   = graph.control.addElement(ForLoopOp{counter < literal(10), "test_loop"});
-    auto storeLDS  = graph.control.addElement(StoreLDSTile());
-    auto barrier1  = graph.control.addElement(Barrier());
-    auto loadLDS   = graph.control.addElement(LoadLDSTile());
-    auto barrier2  = graph.control.addElement(Barrier());
+    auto kernel   = graph.control.addElement(Kernel());
+    auto counter  = dataFlowTag(forCoord, Register::Type::Scalar, DataType::Int32);
+    auto forLoop  = graph.control.addElement(ForLoopOp{counter < literal(10), "test_loop"});
+    auto storeLDS = graph.control.addElement(StoreLDSTile());
+    auto barrier1 = graph.control.addElement(Barrier());
+    auto loadLDS  = graph.control.addElement(LoadLDSTile());
+    auto barrier2 = graph.control.addElement(Barrier());
 
     graph.control.addElement(Body(), {kernel}, {forLoop});
     graph.control.addElement(Body(), {forLoop}, {storeLDS});
@@ -361,14 +357,13 @@ TEST_CASE("VerifyLDSBarriers - ForLoop with barrier before store handles loop-ca
     auto lds      = graph.coordinates.addElement(LDS());
     auto forCoord = graph.coordinates.addElement(ForLoop());
 
-    auto kernel = graph.control.addElement(Kernel());
-    auto counter
-        = dataFlowTag(forCoord, Register::Type::Scalar, DataType::Int32);
-    auto forLoop   = graph.control.addElement(ForLoopOp{counter < literal(10), "test_loop"});
-    auto barrier1  = graph.control.addElement(Barrier());
-    auto storeLDS  = graph.control.addElement(StoreLDSTile());
-    auto barrier2  = graph.control.addElement(Barrier());
-    auto loadLDS   = graph.control.addElement(LoadLDSTile());
+    auto kernel   = graph.control.addElement(Kernel());
+    auto counter  = dataFlowTag(forCoord, Register::Type::Scalar, DataType::Int32);
+    auto forLoop  = graph.control.addElement(ForLoopOp{counter < literal(10), "test_loop"});
+    auto barrier1 = graph.control.addElement(Barrier());
+    auto storeLDS = graph.control.addElement(StoreLDSTile());
+    auto barrier2 = graph.control.addElement(Barrier());
+    auto loadLDS  = graph.control.addElement(LoadLDSTile());
 
     graph.control.addElement(Body(), {kernel}, {forLoop});
     graph.control.addElement(Body(), {forLoop}, {barrier1});
@@ -401,14 +396,13 @@ TEST_CASE("VerifyLDSBarriers - ForLoop barrier not connected to LDS fails",
     auto forCoord  = graph.coordinates.addElement(ForLoop());
     auto otherTile = graph.coordinates.addElement(MacroTile());
 
-    auto kernel = graph.control.addElement(Kernel());
-    auto counter
-        = dataFlowTag(forCoord, Register::Type::Scalar, DataType::Int32);
-    auto forLoop   = graph.control.addElement(ForLoopOp{counter < literal(10), "test_loop"});
-    auto barrier1  = graph.control.addElement(Barrier());
-    auto storeLDS  = graph.control.addElement(StoreLDSTile());
-    auto barrier2  = graph.control.addElement(Barrier());
-    auto loadLDS   = graph.control.addElement(LoadLDSTile());
+    auto kernel   = graph.control.addElement(Kernel());
+    auto counter  = dataFlowTag(forCoord, Register::Type::Scalar, DataType::Int32);
+    auto forLoop  = graph.control.addElement(ForLoopOp{counter < literal(10), "test_loop"});
+    auto barrier1 = graph.control.addElement(Barrier());
+    auto storeLDS = graph.control.addElement(StoreLDSTile());
+    auto barrier2 = graph.control.addElement(Barrier());
+    auto loadLDS  = graph.control.addElement(LoadLDSTile());
 
     graph.control.addElement(Body(), {kernel}, {forLoop});
     graph.control.addElement(Body(), {forLoop}, {barrier1});
@@ -436,18 +430,16 @@ TEST_CASE("VerifyLDSBarriers - ForLoop barrier not connected to LDS fails",
 // DoWhile tests
 // =============================================================================
 
-TEST_CASE("VerifyLDSBarriers - DoWhile without barrier fails",
-          "[kernel-graph][graph-transform]")
+TEST_CASE("VerifyLDSBarriers - DoWhile without barrier fails", "[kernel-graph][graph-transform]")
 {
     KG::KernelGraph graph;
 
-    auto tile      = graph.coordinates.addElement(MacroTile());
-    auto lds       = graph.coordinates.addElement(LDS());
-    auto condTile  = graph.coordinates.addElement(MacroTile());
+    auto tile     = graph.coordinates.addElement(MacroTile());
+    auto lds      = graph.coordinates.addElement(LDS());
+    auto condTile = graph.coordinates.addElement(MacroTile());
 
-    auto kernel = graph.control.addElement(Kernel());
-    auto condExpr
-        = dataFlowTag(condTile, Register::Type::Vector, DataType::Float) > literal(0.0f);
+    auto kernel   = graph.control.addElement(Kernel());
+    auto condExpr = dataFlowTag(condTile, Register::Type::Vector, DataType::Float) > literal(0.0f);
     auto doWhile  = graph.control.addElement(DoWhileOp{condExpr});
     auto storeLDS = graph.control.addElement(StoreLDSTile());
     auto loadLDS  = graph.control.addElement(LoadLDSTile());
@@ -477,9 +469,8 @@ TEST_CASE("VerifyLDSBarriers - DoWhile with single barrier between ops fails for
     auto lds      = graph.coordinates.addElement(LDS());
     auto condTile = graph.coordinates.addElement(MacroTile());
 
-    auto kernel = graph.control.addElement(Kernel());
-    auto condExpr
-        = dataFlowTag(condTile, Register::Type::Vector, DataType::Float) > literal(0.0f);
+    auto kernel   = graph.control.addElement(Kernel());
+    auto condExpr = dataFlowTag(condTile, Register::Type::Vector, DataType::Float) > literal(0.0f);
     auto doWhile  = graph.control.addElement(DoWhileOp{condExpr});
     auto storeLDS = graph.control.addElement(StoreLDSTile());
     auto barrier  = graph.control.addElement(Barrier());
@@ -503,8 +494,7 @@ TEST_CASE("VerifyLDSBarriers - DoWhile with single barrier between ops fails for
     CHECK_THAT(result.explanation, ContainsSubstring("loop-carried"));
 }
 
-TEST_CASE("VerifyLDSBarriers - DoWhile with two barriers passes",
-          "[kernel-graph][graph-transform]")
+TEST_CASE("VerifyLDSBarriers - DoWhile with two barriers passes", "[kernel-graph][graph-transform]")
 {
     KG::KernelGraph graph;
 
@@ -512,9 +502,8 @@ TEST_CASE("VerifyLDSBarriers - DoWhile with two barriers passes",
     auto lds      = graph.coordinates.addElement(LDS());
     auto condTile = graph.coordinates.addElement(MacroTile());
 
-    auto kernel = graph.control.addElement(Kernel());
-    auto condExpr
-        = dataFlowTag(condTile, Register::Type::Vector, DataType::Float) > literal(0.0f);
+    auto kernel   = graph.control.addElement(Kernel());
+    auto condExpr = dataFlowTag(condTile, Register::Type::Vector, DataType::Float) > literal(0.0f);
     auto doWhile  = graph.control.addElement(DoWhileOp{condExpr});
     auto storeLDS = graph.control.addElement(StoreLDSTile());
     auto barrier1 = graph.control.addElement(Barrier());
@@ -550,9 +539,8 @@ TEST_CASE("VerifyLDSBarriers - DoWhile only LDS-connected barriers are valid",
     auto condTile  = graph.coordinates.addElement(MacroTile());
     auto otherTile = graph.coordinates.addElement(MacroTile());
 
-    auto kernel = graph.control.addElement(Kernel());
-    auto condExpr
-        = dataFlowTag(condTile, Register::Type::Vector, DataType::Float) > literal(0.0f);
+    auto kernel   = graph.control.addElement(Kernel());
+    auto condExpr = dataFlowTag(condTile, Register::Type::Vector, DataType::Float) > literal(0.0f);
     auto doWhile  = graph.control.addElement(DoWhileOp{condExpr});
     auto storeLDS = graph.control.addElement(StoreLDSTile());
     auto barrier1 = graph.control.addElement(Barrier());
@@ -650,19 +638,17 @@ TEST_CASE("VerifyLDSBarriers - Nested ForLoops need barriers in common ancestor"
 {
     KG::KernelGraph graph;
 
-    auto tile       = graph.coordinates.addElement(MacroTile());
-    auto lds        = graph.coordinates.addElement(LDS());
-    auto forCoord1  = graph.coordinates.addElement(ForLoop());
-    auto forCoord2  = graph.coordinates.addElement(ForLoop());
+    auto tile      = graph.coordinates.addElement(MacroTile());
+    auto lds       = graph.coordinates.addElement(LDS());
+    auto forCoord1 = graph.coordinates.addElement(ForLoop());
+    auto forCoord2 = graph.coordinates.addElement(ForLoop());
 
     auto kernel = graph.control.addElement(Kernel());
 
-    auto counter1
-        = dataFlowTag(forCoord1, Register::Type::Scalar, DataType::Int32);
+    auto counter1  = dataFlowTag(forCoord1, Register::Type::Scalar, DataType::Int32);
     auto outerLoop = graph.control.addElement(ForLoopOp{counter1 < literal(10), "outer_loop"});
 
-    auto counter2
-        = dataFlowTag(forCoord2, Register::Type::Scalar, DataType::Int32);
+    auto counter2  = dataFlowTag(forCoord2, Register::Type::Scalar, DataType::Int32);
     auto innerLoop = graph.control.addElement(ForLoopOp{counter2 < literal(10), "inner_loop"});
 
     auto storeLDS = graph.control.addElement(StoreLDSTile());
@@ -807,4 +793,259 @@ TEST_CASE("VerifyLDSBarriers - Read before write in sequence with barrier passes
     auto result      = graph.checkConstraints(constraints);
 
     CHECK(result.satisfied);
+}
+
+// =============================================================================
+// AddLDSBarriers::apply tests
+// =============================================================================
+
+TEST_CASE("AddLDSBarriers::apply - No LDS operations returns unchanged graph",
+          "[kernel-graph][graph-transform]")
+{
+    KG::KernelGraph graph;
+
+    auto tile   = graph.coordinates.addElement(MacroTile());
+    auto kernel = graph.control.addElement(Kernel());
+    auto assign = graph.control.addElement(
+        Assign{Register::Type::Vector, dataFlowTag(tile, Register::Type::Vector, DataType::Float)});
+
+    graph.control.addElement(Body(), {kernel}, {assign});
+    graph.mapper.connect(assign, tile, NaryArgument::DEST);
+
+    KG::AddLDSBarriers transform;
+    auto               result = transform.apply(graph);
+
+    // Should return graph unchanged (no barriers added)
+    auto constraints = transform.postConstraints();
+    auto status      = result.checkConstraints(constraints);
+
+    CHECK(status.satisfied);
+}
+
+TEST_CASE("AddLDSBarriers::apply - Inserts barrier between LDS write and read",
+          "[kernel-graph][graph-transform]")
+{
+    KG::KernelGraph graph;
+
+    auto tile = graph.coordinates.addElement(MacroTile());
+    auto lds  = graph.coordinates.addElement(LDS());
+
+    auto kernel   = graph.control.addElement(Kernel());
+    auto storeLDS = graph.control.addElement(StoreLDSTile());
+    auto loadLDS  = graph.control.addElement(LoadLDSTile());
+
+    graph.control.addElement(Body(), {kernel}, {storeLDS});
+    graph.control.addElement(Sequence(), {storeLDS}, {loadLDS});
+
+    graph.mapper.connect<MacroTile>(storeLDS, tile);
+    graph.mapper.connect<LDS>(storeLDS, lds);
+    graph.mapper.connect<MacroTile>(loadLDS, tile);
+    graph.mapper.connect<LDS>(loadLDS, lds);
+
+    // Verify constraint fails before applying transform
+    auto constraints  = KG::AddLDSBarriers().postConstraints();
+    auto statusBefore = graph.checkConstraints(constraints);
+    CHECK_FALSE(statusBefore.satisfied);
+
+    // Apply the transform
+    KG::AddLDSBarriers transform;
+    auto               result = transform.apply(graph);
+
+    // Verify constraint passes after applying transform
+    auto statusAfter = result.checkConstraints(constraints);
+    CHECK(statusAfter.satisfied);
+}
+
+TEST_CASE("AddLDSBarriers::apply - Reuses existing non-LDS barrier",
+          "[kernel-graph][graph-transform]")
+{
+    KG::KernelGraph graph;
+
+    auto tile      = graph.coordinates.addElement(MacroTile());
+    auto lds       = graph.coordinates.addElement(LDS());
+    auto otherTile = graph.coordinates.addElement(MacroTile());
+
+    auto kernel   = graph.control.addElement(Kernel());
+    auto storeLDS = graph.control.addElement(StoreLDSTile());
+    auto barrier  = graph.control.addElement(Barrier());
+    auto loadLDS  = graph.control.addElement(LoadLDSTile());
+
+    graph.control.addElement(Body(), {kernel}, {storeLDS});
+    graph.control.addElement(Sequence(), {storeLDS}, {barrier});
+    graph.control.addElement(Sequence(), {barrier}, {loadLDS});
+
+    graph.mapper.connect<MacroTile>(storeLDS, tile);
+    graph.mapper.connect<LDS>(storeLDS, lds);
+    // Barrier connected to a non-LDS coordinate
+    graph.mapper.connect<MacroTile>(barrier, otherTile);
+    graph.mapper.connect<MacroTile>(loadLDS, tile);
+    graph.mapper.connect<LDS>(loadLDS, lds);
+
+    // Verify constraint fails before applying transform
+    auto constraints  = KG::AddLDSBarriers().postConstraints();
+    auto statusBefore = graph.checkConstraints(constraints);
+    CHECK_FALSE(statusBefore.satisfied);
+
+    // Count barriers before
+    int barrierCountBefore = 0;
+    for(auto tag : graph.control.getNodes<Barrier>())
+    {
+        (void)tag;
+        barrierCountBefore++;
+    }
+
+    // Apply the transform
+    KG::AddLDSBarriers transform;
+    auto               result = transform.apply(graph);
+
+    // Count barriers after
+    int barrierCountAfter = 0;
+    for(auto tag : result.control.getNodes<Barrier>())
+    {
+        (void)tag;
+        barrierCountAfter++;
+    }
+
+    // Should reuse the existing barrier (no new barriers added)
+    CHECK(barrierCountAfter == barrierCountBefore);
+
+    // Verify constraint passes after applying transform
+    auto statusAfter = result.checkConstraints(constraints);
+    CHECK(statusAfter.satisfied);
+}
+
+TEST_CASE("AddLDSBarriers::apply - Inserts two barriers for loop",
+          "[kernel-graph][graph-transform]")
+{
+    KG::KernelGraph graph;
+
+    auto tile     = graph.coordinates.addElement(MacroTile());
+    auto lds      = graph.coordinates.addElement(LDS());
+    auto forCoord = graph.coordinates.addElement(ForLoop());
+
+    auto kernel   = graph.control.addElement(Kernel());
+    auto counter  = dataFlowTag(forCoord, Register::Type::Scalar, DataType::Int32);
+    auto forLoop  = graph.control.addElement(ForLoopOp{counter < literal(10), "test_loop"});
+    auto storeLDS = graph.control.addElement(StoreLDSTile());
+    auto loadLDS  = graph.control.addElement(LoadLDSTile());
+
+    graph.control.addElement(Body(), {kernel}, {forLoop});
+    graph.control.addElement(Body(), {forLoop}, {storeLDS});
+    graph.control.addElement(Sequence(), {storeLDS}, {loadLDS});
+
+    graph.mapper.connect<MacroTile>(storeLDS, tile);
+    graph.mapper.connect<LDS>(storeLDS, lds);
+    graph.mapper.connect<MacroTile>(loadLDS, tile);
+    graph.mapper.connect<LDS>(loadLDS, lds);
+
+    // Verify constraint fails before applying transform
+    auto constraints  = KG::AddLDSBarriers().postConstraints();
+    auto statusBefore = graph.checkConstraints(constraints);
+    CHECK_FALSE(statusBefore.satisfied);
+
+    // Apply the transform
+    KG::AddLDSBarriers transform;
+    auto               result = transform.apply(graph);
+
+    // Verify constraint passes after applying transform
+    auto statusAfter = result.checkConstraints(constraints);
+    CHECK(statusAfter.satisfied);
+}
+
+TEST_CASE("AddLDSBarriers::apply - Reuses existing barriers in loop",
+          "[kernel-graph][graph-transform]")
+{
+    KG::KernelGraph graph;
+
+    auto tile      = graph.coordinates.addElement(MacroTile());
+    auto lds       = graph.coordinates.addElement(LDS());
+    auto forCoord  = graph.coordinates.addElement(ForLoop());
+    auto otherTile = graph.coordinates.addElement(MacroTile());
+
+    auto kernel   = graph.control.addElement(Kernel());
+    auto counter  = dataFlowTag(forCoord, Register::Type::Scalar, DataType::Int32);
+    auto forLoop  = graph.control.addElement(ForLoopOp{counter < literal(10), "test_loop"});
+    auto storeLDS = graph.control.addElement(StoreLDSTile());
+    auto barrier1 = graph.control.addElement(Barrier());
+    auto loadLDS  = graph.control.addElement(LoadLDSTile());
+    auto barrier2 = graph.control.addElement(Barrier());
+
+    graph.control.addElement(Body(), {kernel}, {forLoop});
+    graph.control.addElement(Body(), {forLoop}, {storeLDS});
+    graph.control.addElement(Sequence(), {storeLDS}, {barrier1});
+    graph.control.addElement(Sequence(), {barrier1}, {loadLDS});
+    graph.control.addElement(Sequence(), {loadLDS}, {barrier2});
+
+    graph.mapper.connect<MacroTile>(storeLDS, tile);
+    graph.mapper.connect<LDS>(storeLDS, lds);
+    // Barriers connected to non-LDS
+    graph.mapper.connect<MacroTile>(barrier1, otherTile);
+    graph.mapper.connect<MacroTile>(barrier2, otherTile);
+    graph.mapper.connect<MacroTile>(loadLDS, tile);
+    graph.mapper.connect<LDS>(loadLDS, lds);
+
+    // Verify constraint fails before applying transform
+    auto constraints  = KG::AddLDSBarriers().postConstraints();
+    auto statusBefore = graph.checkConstraints(constraints);
+    CHECK_FALSE(statusBefore.satisfied);
+
+    // Count barriers before
+    int barrierCountBefore = 0;
+    for(auto tag : graph.control.getNodes<Barrier>())
+    {
+        (void)tag;
+        barrierCountBefore++;
+    }
+
+    // Apply the transform
+    KG::AddLDSBarriers transform;
+    auto               result = transform.apply(graph);
+
+    // Count barriers after
+    int barrierCountAfter = 0;
+    for(auto tag : result.control.getNodes<Barrier>())
+    {
+        (void)tag;
+        barrierCountAfter++;
+    }
+
+    // Should reuse the existing barriers (no new barriers added)
+    CHECK(barrierCountAfter == barrierCountBefore);
+
+    // Verify constraint passes after applying transform
+    auto statusAfter = result.checkConstraints(constraints);
+    CHECK(statusAfter.satisfied);
+}
+
+TEST_CASE("AddLDSBarriers::apply - Handles LoadTileDirect2LDS", "[kernel-graph][graph-transform]")
+{
+    KG::KernelGraph graph;
+
+    auto tile = graph.coordinates.addElement(MacroTile());
+    auto lds  = graph.coordinates.addElement(LDS());
+
+    auto kernel      = graph.control.addElement(Kernel());
+    auto loadDirect  = graph.control.addElement(LoadTileDirect2LDS());
+    auto loadLDSTile = graph.control.addElement(LoadLDSTile());
+
+    graph.control.addElement(Body(), {kernel}, {loadDirect});
+    graph.control.addElement(Sequence(), {loadDirect}, {loadLDSTile});
+
+    graph.mapper.connect<MacroTile>(loadDirect, tile);
+    graph.mapper.connect<LDS>(loadDirect, lds);
+    graph.mapper.connect<MacroTile>(loadLDSTile, tile);
+    graph.mapper.connect<LDS>(loadLDSTile, lds);
+
+    // Verify constraint fails before applying transform
+    auto constraints  = KG::AddLDSBarriers().postConstraints();
+    auto statusBefore = graph.checkConstraints(constraints);
+    CHECK_FALSE(statusBefore.satisfied);
+
+    // Apply the transform
+    KG::AddLDSBarriers transform;
+    auto               result = transform.apply(graph);
+
+    // Verify constraint passes after applying transform
+    auto statusAfter = result.checkConstraints(constraints);
+    CHECK(statusAfter.satisfied);
 }
