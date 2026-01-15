@@ -1,0 +1,106 @@
+// MIT License
+//
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#include "benchmark_warp_sort_stable.hpp"
+
+#include "primbench.hpp"
+
+#define CREATE_SORT_BENCHMARK_ALGO(K, BS, WS, IPT, ALGO) \
+    executor.queue<warp_sort_stable_benchmark<K, BS, WS, IPT, rocprim::empty_type, ALGO>>();
+
+#define CREATE_SORT_BENCHMARK(K, BS, WS, IPT)                                                   \
+    CREATE_SORT_BENCHMARK_ALGO(K, BS, WS, IPT, rocprim::warp_sort_stable_algorithm::merge_path) \
+    CREATE_SORT_BENCHMARK_ALGO(K, BS, WS, IPT, rocprim::warp_sort_stable_algorithm::shuffle)
+
+#define CREATE_SORTBYKEY_BENCHMARK_ALGO(K, V, BS, WS, IPT, ALGO) \
+    executor.queue<warp_sort_stable_benchmark<K, BS, WS, IPT, V, ALGO>>();
+
+#define CREATE_SORTBYKEY_BENCHMARK(K, V, BS, WS, IPT)                                \
+    CREATE_SORTBYKEY_BENCHMARK_ALGO(K,                                               \
+                                    V,                                               \
+                                    BS,                                              \
+                                    WS,                                              \
+                                    IPT,                                             \
+                                    rocprim::warp_sort_stable_algorithm::merge_path) \
+    CREATE_SORTBYKEY_BENCHMARK_ALGO(K,                                               \
+                                    V,                                               \
+                                    BS,                                              \
+                                    WS,                                              \
+                                    IPT,                                             \
+                                    rocprim::warp_sort_stable_algorithm::shuffle);
+
+// clang-format off
+#define BENCHMARK_TYPE(type)                \
+    CREATE_SORT_BENCHMARK(type, 64, 64, 1)  \
+    CREATE_SORT_BENCHMARK(type, 64, 64, 2)  \
+    CREATE_SORT_BENCHMARK(type, 64, 64, 4)  \
+    CREATE_SORT_BENCHMARK(type, 128, 64, 1) \
+    CREATE_SORT_BENCHMARK(type, 128, 64, 2) \
+    CREATE_SORT_BENCHMARK(type, 128, 64, 4) \
+    CREATE_SORT_BENCHMARK(type, 256, 64, 1) \
+    CREATE_SORT_BENCHMARK(type, 256, 64, 2) \
+    CREATE_SORT_BENCHMARK(type, 256, 64, 4) \
+    CREATE_SORT_BENCHMARK(type, 64, 32, 1)  \
+    CREATE_SORT_BENCHMARK(type, 64, 32, 2)  \
+    CREATE_SORT_BENCHMARK(type, 64, 16, 1)  \
+    CREATE_SORT_BENCHMARK(type, 64, 16, 2)  \
+    CREATE_SORT_BENCHMARK(type, 64, 16, 4)
+// clang-format on
+
+// clang-format off
+#define BENCHMARK_KEY_TYPE(type, value)                 \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 64, 1)  \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 64, 2)  \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 64, 4)  \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 1) \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 2) \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 4)
+// clang-format on
+
+int main(int argc, char* argv[])
+{
+    primbench::executor executor(argc, argv, 128 * primbench::MiB);
+
+    BENCHMARK_TYPE(int)
+    BENCHMARK_TYPE(float)
+    BENCHMARK_TYPE(double)
+    BENCHMARK_TYPE(int8_t)
+    BENCHMARK_TYPE(uint8_t)
+    BENCHMARK_TYPE(rocprim::half)
+    BENCHMARK_TYPE(rocprim::int128_t)
+    BENCHMARK_TYPE(rocprim::uint128_t)
+
+    BENCHMARK_KEY_TYPE(float, float)
+    BENCHMARK_KEY_TYPE(unsigned int, int)
+    BENCHMARK_KEY_TYPE(int, custom_double2)
+    BENCHMARK_KEY_TYPE(int, custom_int_double)
+    BENCHMARK_KEY_TYPE(custom_int2, custom_double2)
+    BENCHMARK_KEY_TYPE(custom_int2, custom_char_double)
+    BENCHMARK_KEY_TYPE(custom_int2, custom_longlong_double)
+    BENCHMARK_KEY_TYPE(int8_t, int8_t)
+    BENCHMARK_KEY_TYPE(uint8_t, uint8_t)
+    BENCHMARK_KEY_TYPE(rocprim::half, rocprim::half)
+    BENCHMARK_KEY_TYPE(rocprim::int128_t, rocprim::int128_t)
+    BENCHMARK_KEY_TYPE(rocprim::uint128_t, rocprim::uint128_t)
+
+    executor.run();
+}

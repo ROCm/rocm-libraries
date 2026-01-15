@@ -198,8 +198,7 @@ public:
 
         warp_shuffle_sort_impl<VirtualWaveSize, ItemsPerThread>::apply_permutation(
             thread_values,
-            [&](unsigned int i) { return stable_items[i].index; }
-        );
+            [&](unsigned int i) { return stable_items[i].index; });
     }
 
     template<class BinaryFunction, class V = Value>

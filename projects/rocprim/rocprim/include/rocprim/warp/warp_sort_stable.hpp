@@ -60,9 +60,8 @@ template<class Value>
 struct default_warp_sort_stable_algo
 {
     static constexpr warp_sort_stable_algorithm value
-        = std::is_same<Value, ::rocprim::empty_type>::value
-              ? warp_sort_stable_algorithm::merge_path
-              : warp_sort_stable_algorithm::shuffle;
+        = std::is_same<Value, ::rocprim::empty_type>::value ? warp_sort_stable_algorithm::merge_path
+                                                            : warp_sort_stable_algorithm::shuffle;
 };
 
 // Selector for warp_sort_stable algorithm which gives implementation
