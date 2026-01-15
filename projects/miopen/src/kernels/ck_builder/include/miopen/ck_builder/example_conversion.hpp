@@ -85,7 +85,7 @@ constexpr auto example_instance = make_xdl_instance_from_old_params(
     ckb::DataType::FP32, // EDataType (output)
 
     // 10-11. Specializations
-    ckb::ConvFwdSpecialization::DEFAULT, // ConvForwardSpecialization
+    ckb::ConvSpecialization::DEFAULT,    // ConvForwardSpecialization
     ckb::GemmSpecialization::MNKPadding, // GemmSpecialization
 
     // 12. NumGemmKPrefetchStage
@@ -152,7 +152,7 @@ constexpr auto example_instances()
                                                            ckb::DataType::FP32,
                                                            ckb::DataType::FP32,
                                                            ckb::DataType::FP32,
-                                                           ckb::ConvFwdSpecialization::DEFAULT,
+                                                           ckb::ConvSpecialization::DEFAULT,
                                                            ckb::GemmSpecialization::MNKPadding,
                                                            1,
                                                            64,
@@ -187,7 +187,7 @@ constexpr auto example_instances()
                                                            ckb::DataType::FP32,
                                                            ckb::PipelineScheduler::DEFAULT,
                                                            1),
-                                                           make_xdl_instance_from_old_params(2,
+                         make_xdl_instance_from_old_params(2,
                                                            ckb::TensorLayout::NGCHW,
                                                            ckb::TensorLayout::GKCYX,
                                                            ckb::TensorLayout::NGKHW,
@@ -196,7 +196,7 @@ constexpr auto example_instances()
                                                            ckb::DataType::FP32,
                                                            ckb::DataType::FP32,
                                                            ckb::DataType::FP32,
-                                                           ckb::ConvFwdSpecialization::DEFAULT,
+                                                           ckb::ConvSpecialization::DEFAULT,
                                                            ckb::GemmSpecialization::MNKPadding,
                                                            1,
                                                            64,
@@ -240,7 +240,7 @@ constexpr auto example_instances()
                                                            ckb::DataType::FP32,
                                                            ckb::DataType::FP32,
                                                            ckb::DataType::FP32,
-                                                           ckb::ConvFwdSpecialization::DEFAULT,
+                                                           ckb::ConvSpecialization::DEFAULT,
                                                            ckb::GemmSpecialization::MNKPadding,
                                                            1,
                                                            256,
@@ -275,7 +275,7 @@ constexpr auto example_instances()
                                                            ckb::DataType::FP32,
                                                            ckb::PipelineScheduler::DEFAULT,
                                                            1),
-                                                         make_xdl_instance_from_old_params(2,
+                         make_xdl_instance_from_old_params(2,
                                                            ckb::TensorLayout::NGCHW,
                                                            ckb::TensorLayout::GKCYX,
                                                            ckb::TensorLayout::NGKHW,
@@ -284,7 +284,7 @@ constexpr auto example_instances()
                                                            ckb::DataType::FP32,
                                                            ckb::DataType::FP32,
                                                            ckb::DataType::FP32,
-                                                           ckb::ConvFwdSpecialization::DEFAULT,
+                                                           ckb::ConvSpecialization::DEFAULT,
                                                            ckb::GemmSpecialization::MNKPadding,
                                                            1,
                                                            128,
@@ -345,11 +345,11 @@ constexpr auto example_instances()
 // tensor_layout::convolution::NHWGC -> ckb::TensorLayout::NHWGC
 // tensor_layout::convolution::NHWGK -> ckb::TensorLayout::NHWGK
 //
-// ConvolutionForwardSpecialization::Default           -> ckb::ConvFwdSpecialization::DEFAULT
+// ConvolutionForwardSpecialization::Default           -> ckb::ConvSpecialization::DEFAULT
 // ConvolutionForwardSpecialization::Filter1x1Pad0     ->
-// ckb::ConvFwdSpecialization::FILTER_1X1_PAD0
+// ckb::ConvSpecialization::FILTER_1X1_PAD0
 // ConvolutionForwardSpecialization::Filter1x1Stride1Pad0 ->
-// ckb::ConvFwdSpecialization::FILTER_1X1_STRIDE1_PAD0
+// ckb::ConvSpecialization::FILTER_1X1_STRIDE1_PAD0
 //
 // GemmSpecialization::MNKPadding  -> ckb::GemmSpecialization::MNKPadding
 //

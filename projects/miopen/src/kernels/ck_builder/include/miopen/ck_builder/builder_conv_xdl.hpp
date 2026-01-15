@@ -12,19 +12,18 @@ namespace ckb = ck_tile::builder;
 
 struct XdlAlgorithm
 {
-    using ConvSpecial = ckb::ConvFwdSpecialization;
+    using ConvSpecial = ckb::ConvSpecialization;
     using GemmSpecial = ckb::GemmSpecialization;
-    using PipeVers    = ckb::PipelineVersion;
     using PipeSched   = ckb::PipelineScheduler;
 
     struct ThreadBlock
     {
-        int block_size;
+        unsigned int block_size;
         struct TileSize
         {
-            int m;
-            int n;
-            int k;
+            unsigned int m;
+            unsigned int n;
+            unsigned int k;
         } tile_size;
     } thread_block;
 
@@ -32,31 +31,34 @@ struct XdlAlgorithm
 
     struct GridwiseGemm
     {
-        int ak1;
-        int bk1;
-        int m_per_xdl;
-        int n_per_xdl;
-        int m_xdl_per_wave;
-        int n_xdl_per_wave;
+        unsigned int ak1;
+        unsigned int bk1;
+        struct XdlParams
+        {
+            unsigned int m_per_xdl      = 16;
+            unsigned int n_per_xdl      = 16;
+            unsigned int m_xdl_per_wave = 4;
+            unsigned int n_xdl_per_wave = 1;
+        } xdl_params;
+        static_assert(ckb::GridwiseXdlGemmDescriptor<XdlParams>);
     } gridwise_gemm;
 
-    static_assert(ckb::GridwiseXdlGemmDescriptor<GridwiseGemm>);
-
+    static_assert(ckb::GridwiseFwdXdlGemmDescriptor<GridwiseGemm>);
     struct TransferABC
     {
         struct TransferAB
         {
             struct BlockTransfer
             {
-                int k0;
-                int m_n;
-                int k1;
+                unsigned int k0;
+                unsigned int m_n;
+                unsigned int k1;
             } block_transfer;
             struct LdsTransfer
             {
-                int src_vector_dim;
-                int src_scalar_per_vector;
-                int lds_dst_scalar_per_vector;
+                unsigned int src_vector_dim;
+                unsigned int src_scalar_per_vector;
+                unsigned int lds_dst_scalar_per_vector;
                 bool is_direct_load;
                 bool lds_padding;
             } lds_transfer;
@@ -75,16 +77,16 @@ struct XdlAlgorithm
         {
             struct ThreadClusterDims
             {
-                int m_block;
-                int m_wave_per_xdl;
-                int n_block;
-                int n_wave_per_xdl;
+                unsigned int m_block;
+                unsigned int m_wave_per_xdl;
+                unsigned int n_block;
+                unsigned int n_wave_per_xdl;
             } thread_cluster_dims;
             struct Epilogue
             {
-                int m_xdl_per_wave_per_shuffle;
-                int n_per_wave_per_shuffle;
-                int scalar_per_vector;
+                unsigned int m_xdl_per_wave_per_shuffle;
+                unsigned int n_per_wave_per_shuffle;
+                unsigned int scalar_per_vector;
             } epilogue;
         } c;
     } transfer;
@@ -94,7 +96,7 @@ struct XdlAlgorithm
     GemmSpecial gemm_specialization;
 
     std::size_t num_gemm_k_prefetch_stages;
-    std::size_t num_groups_to_merge;
+    std::size_t num_conv_groups_to_merge;
     PipeSched loop_scheduler;
 };
 
@@ -146,7 +148,7 @@ struct XdlInstance
 // template parameters Parameters are in the same order as the template parameters
 constexpr XdlInstance make_xdl_instance_from_old_params(
     // 1. NDimSpatial
-    int spatial_dim,
+    unsigned int spatial_dim,
     // 2-5. Layouts
     ckb::TensorLayout input_layout,
     ckb::TensorLayout weight_layout,
@@ -159,50 +161,50 @@ constexpr XdlInstance make_xdl_instance_from_old_params(
     ckb::DataType output_data_type,
     // 12-14. Elementwise operations (not stored in XdlSignature/XdlAlgorithm currently)
     // 15-16. Specializations
-    ckb::ConvFwdSpecialization conv_fwd_specialization,
+    ckb::ConvSpecialization conv_fwd_specialization,
     ckb::GemmSpecialization gemm_specialization,
     // 17. NumGemmKPrefetchStage
-    int num_gemm_k_prefetch_stage,
+    unsigned int num_gemm_k_prefetch_stage,
     // 18-21. Block dimensions
-    int block_size,
-    int m_per_block,
-    int n_per_block,
-    int k_per_block,
+    unsigned int block_size,
+    unsigned int m_per_block,
+    unsigned int n_per_block,
+    unsigned int k_per_block,
     // 22-27. XDL parameters
-    int ak1,
-    int bk1,
-    int m_per_xdl,
-    int n_per_xdl,
-    int m_xdl_per_wave,
-    int n_xdl_per_wave,
+    unsigned int ak1,
+    unsigned int bk1,
+    unsigned int m_per_xdl,
+    unsigned int n_per_xdl,
+    unsigned int m_xdl_per_wave,
+    unsigned int n_xdl_per_wave,
     // 28-34. A block transfer parameters
     std::array<std::size_t, 3> a_thread_cluster_lengths,
     std::array<std::size_t, 3> a_thread_cluster_arrange_order,
     std::array<std::size_t, 3> a_block_transfer_src_access_order,
-    int a_block_transfer_src_vector_dim,
-    int a_block_transfer_src_scalar_per_vector,
-    int a_block_transfer_dst_scalar_per_vector_k1,
+    unsigned int a_block_transfer_src_vector_dim,
+    unsigned int a_block_transfer_src_scalar_per_vector,
+    unsigned int a_block_transfer_dst_scalar_per_vector_k1,
     bool a_block_lds_extra_m,
     // 35-41. B block transfer parameters
     std::array<std::size_t, 3> b_thread_cluster_lengths,
     std::array<std::size_t, 3> b_thread_cluster_arrange_order,
     std::array<std::size_t, 3> b_block_transfer_src_access_order,
-    int b_block_transfer_src_vector_dim,
-    int b_block_transfer_src_scalar_per_vector,
-    int b_block_transfer_dst_scalar_per_vector_k1,
+    unsigned int b_block_transfer_src_vector_dim,
+    unsigned int b_block_transfer_src_scalar_per_vector,
+    unsigned int b_block_transfer_dst_scalar_per_vector_k1,
     bool b_block_lds_extra_n,
     // 42-45. C shuffle parameters
-    int c_shuffle_m_xdl_per_wave_per_shuffle,
-    int c_shuffle_n_xdl_per_wave_per_shuffle,
+    unsigned int c_shuffle_m_xdl_per_wave_per_shuffle,
+    unsigned int c_shuffle_n_xdl_per_wave_per_shuffle,
     std::array<std::size_t, 4> c_thread_cluster_lengths,
-    int c_block_transfer_scalar_per_vector,
+    unsigned int c_block_transfer_scalar_per_vector,
     // 46-47. Compute data types
     ckb::DataType input_compute_type,
     ckb::DataType weight_compute_type,
     // 48. Loop scheduler
     ckb::PipelineScheduler loop_scheduler,
     // 49. Groups to merge
-    int num_groups_to_merge)
+    unsigned int num_conv_groups_to_merge)
 {
     return XdlInstance{
         .signature = {.spatial_dim            = spatial_dim,
@@ -225,12 +227,12 @@ constexpr XdlInstance make_xdl_instance_from_old_params(
         .algorithm =
             {.thread_block  = {.block_size = block_size,
                               .tile_size  = {.m = m_per_block, .n = n_per_block, .k = k_per_block}},
-             .gridwise_gemm = {.ak1            = ak1,
-                               .bk1            = bk1,
-                               .m_per_xdl      = m_per_xdl,
-                               .n_per_xdl      = n_per_xdl,
-                               .m_xdl_per_wave = m_xdl_per_wave,
-                               .n_xdl_per_wave = n_xdl_per_wave},
+             .gridwise_gemm = {.ak1 = ak1,
+                               .bk1 = bk1,
+                               .xdl_params{.m_per_xdl      = m_per_xdl,
+                                           .n_per_xdl      = n_per_xdl,
+                                           .m_xdl_per_wave = m_xdl_per_wave,
+                                           .n_xdl_per_wave = n_xdl_per_wave}},
              .transfer =
                  {.a = {.block_transfer = {.k0  = static_cast<int>(a_thread_cluster_lengths[0]),
                                            .m_n = static_cast<int>(a_thread_cluster_lengths[1]),
@@ -268,6 +270,6 @@ constexpr XdlInstance make_xdl_instance_from_old_params(
              .fwd_specialization         = conv_fwd_specialization,
              .gemm_specialization        = gemm_specialization,
              .num_gemm_k_prefetch_stages = static_cast<std::size_t>(num_gemm_k_prefetch_stage),
-             .num_groups_to_merge        = static_cast<std::size_t>(num_groups_to_merge),
+             .num_conv_groups_to_merge   = static_cast<std::size_t>(num_conv_groups_to_merge),
              .loop_scheduler             = loop_scheduler}};
 }

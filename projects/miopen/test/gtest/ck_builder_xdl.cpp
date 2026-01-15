@@ -25,7 +25,6 @@ struct DefaultAlgorithm
 {
     using ConvSpecial = ckb::ConvSpecialization;
     using GemmSpecial = ckb::GemmSpecialization;
-    using PipeVers    = ckb::PipelineVersion;
     using PipeSched   = ckb::PipelineScheduler;
 
     struct ThreadBlock
@@ -203,10 +202,10 @@ TEST(CKBuilderXdl, CreateExistingInstance)
     // This will instantiate the DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle kernel
     using Builder = ckb::ConvBuilder<kSignature, kAlgorithm>;
 
+    static_assert(ckb::factory::FwdXdlAlgorithm<DefaultAlgorithm>);
+
     // Verify that Builder is a class type
     static_assert(std::is_class_v<Builder>, "Builder should be a class type");
-
-    static_assert(ckb::factory::FwdXdlAlgorithm<DefaultAlgorithm>);
 
     // Verify that Builder::Instance exists and is the actual device kernel class
     static_assert(std::is_class_v<typename Builder::Instance>,
@@ -249,11 +248,55 @@ TEST(CKBuilderXdl, CreateExistingInstance)
     }
 }
 
-TEST(CK_Builder, Static_Instance)
+template <typename Builder>
+constexpr void do_builder_checks()
+{
+    // Verify that Builder is a class type
+    static_assert(std::is_class_v<Builder>, "Builder should be a class type");
+
+    // Verify that Builder::Instance exists and is the actual device kernel class
+    static_assert(std::is_class_v<typename Builder::Instance>,
+                  "Builder::Instance should be a class type");
+
+    static_assert(ck_tile::reflect::HasInstanceTraits<typename Builder::Instance>);
+}
+
+void print_closest_instance(std::string builderKernelInstanceString, auto&& factoryInstances)
+{
+    std::size_t m = 0;
+    std::string desc{};
+
+    for(auto&& k : factoryInstances)
+    {
+        auto kernelDescription = k->GetInstanceString();
+        auto firstDifferent    = FirstDifference(builderKernelInstanceString, kernelDescription);
+        if(firstDifferent > m)
+        {
+            m    = firstDifferent;
+            desc = kernelDescription;
+        }
+    }
+
+    if(m < builderKernelInstanceString.size())
+    {
+        std::cout << builderKernelInstanceString << std::endl << desc << std::endl;
+
+        for(auto i = 0; i < m; i++)
+        {
+            std::cout << ' ';
+        }
+
+        std::cout << '^' << std::endl << std::endl;
+    }
+}
+
+TEST(CKBuilderXdl, Static_Instance)
 {
     constexpr XdlInstance instance = miopen::ck_builder::make_instance();
 
     using Builder = ckb::ConvBuilder<instance.signature, instance.algorithm>;
+
+    static_assert(ckb::factory::FwdXdlAlgorithm<decltype(instance.algorithm)>);
     do_builder_checks<Builder>();
 
     auto builderKernelInstance       = Builder::Instance{};
@@ -275,31 +318,7 @@ TEST(CK_Builder, Static_Instance)
                          return kernelPtr->GetInstanceString() == builderKernelInstanceString;
                      });
 
-    std::size_t m = 0;
-    std::string desc{};
-
-    for(auto&& k : factoryInstances)
-    {
-        auto kernelDescription = k->GetInstanceString();
-        auto firstDifferent    = FirstDifference(builderKernelInstanceString, kernelDescription);
-        if(firstDifferent > m)
-        {
-            m    = firstDifferent;
-            desc = kernelDescription;
-        }
-    }
-
-    if(m < builderKernelInstanceString.size())
-    {
-        std::cout << builderKernelInstanceString << std::endl << desc << std::endl;
-
-        for(auto i = 0; i < m; i++)
-        {
-            std::cout << ' ';
-        }
-
-        std::cout << '^' << std::endl << std::endl;
-    }
+    print_closest_instance(builderKernelInstanceString, factoryInstances);
 
     ASSERT_TRUE(result != factoryInstances.end())
         << "Instance string " << builderKernelInstanceString
@@ -307,7 +326,7 @@ TEST(CK_Builder, Static_Instance)
 }
 
 template <typename T>
-void test_instance(const std::unique_ptr<T> &builderKernelInstance)
+void test_instance(const std::unique_ptr<T>& builderKernelInstance)
 {
     auto builderKernelInstanceString = builderKernelInstance->GetInstanceString();
 
@@ -327,35 +346,11 @@ void test_instance(const std::unique_ptr<T> &builderKernelInstance)
                          return kernelPtr->GetInstanceString() == builderKernelInstanceString;
                      });
 
-    std::size_t m = 0;
-    std::string desc{};
-
-    for(auto&& k : factoryInstances)
-    {
-        auto kernelDescription = k->GetInstanceString();
-        auto firstDifferent    = FirstDifference(builderKernelInstanceString, kernelDescription);
-        if(firstDifferent > m)
-        {
-            m    = firstDifferent;
-            desc = kernelDescription;
-        }
-    }
-
-    if(m < builderKernelInstanceString.size())
-    {
-        std::cout << builderKernelInstanceString << std::endl << desc << std::endl;
-
-        for(auto i = 0; i < m; i++)
-        {
-            std::cout << ' ';
-        }
-
-        std::cout << '^' << std::endl << std::endl;
-    }
-
     ASSERT_TRUE(result != factoryInstances.end())
         << "Instance string " << builderKernelInstanceString
         << " not found in list of instances returned by factory.";
+
+    print_closest_instance(builderKernelInstanceString, factoryInstances);
 }
 
 template <typename T, std::size_t N, typename F>
@@ -420,22 +415,17 @@ constexpr void build_kernels(std::vector<BaseOperatorPtr>& kernels)
     build_kernels_impl<T, N, arr>(kernels, std::make_index_sequence<N>{});
 }
 
-TEST(CK_Builder, Multiple_Static_Instances)
+TEST(CKBuilderXdl, Multiple_Static_Instances)
 {
     std::vector<BaseOperatorPtr> kernels{};
     constexpr auto instances = miopen::ck_builder::example_instances();
-    constexpr auto instanceMultiplier = std::array<int, 1000>{};
-    constexpr auto moreInstances = multiplex_array(instances, instanceMultiplier, [](auto a, auto b) {return a;});
 
-    std::cout << moreInstances.size() << std::endl;
-
-    
-    build_kernels<XdlInstance, moreInstances.size(), moreInstances>(kernels);
+    build_kernels<XdlInstance, instances.size(), instances>(kernels);
 
     std::cout << "Instance count: " << kernels.size() << std::endl;
 
-    for(auto&& k : kernels) {
+    for(auto&& k : kernels)
+    {
         test_instance(k);
     }
-        
 }
