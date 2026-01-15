@@ -25,19 +25,19 @@
  *******************************************************************************/
 
 #include "lstm.hpp"
+#include <gtest/gtest_common.hpp>
 
-int main(int argc, const char* argv[])
+template <typename T>
+struct GPU_lstm_Test : public ::testing::Test
 {
-#if(MIO_RNN_TIME_EVERYTHING > 0)
-    auto t_start = std::chrono::high_resolution_clock::now();
-#endif
-    test_drive<lstm_driver>(argc, argv);
+};
 
-#if(MIO_RNN_TIME_EVERYTHING > 0)
-    auto t_end = std::chrono::high_resolution_clock::now();
+using GPU_lstm_FP32 = GPU_lstm_Test<float>;
 
-    std::cout << "Wall clock: RNN test pass time: "
-              << std::chrono::duration<double>(t_end - t_start).count() << " seconds." << std::endl;
-#endif
-    exit(0); // NOLINT (concurrency-mt-unsafe)
+TEST_F(GPU_lstm_FP32, FloatTest_lstm)
+{
+    testing::internal::CaptureStderr();
+    test_drive<lstm_driver<float>>(0, nullptr);
+    auto capture = testing::internal::GetCapturedStderr();
+    std::cout << capture;
 }

@@ -27,10 +27,9 @@
 #include "lstm.hpp"
 #include "get_handle.hpp"
 #include <gtest/gtest_common.hpp>
-#include <gtest/gtest.h>
-#include <boost/algorithm/string.hpp>
 
 namespace lstm_extra {
+
 void GetArgs(const std::string& param, std::vector<std::string>& tokens)
 {
     std::stringstream ss(param);
@@ -103,14 +102,13 @@ void Run2dDriver(miopenDataType_t prec)
     {
         GTEST_SKIP();
     }
-    std::vector<std::string> params = GPU_lstm_extra_FP32::GetParam();
 
+    std::vector<std::string> params = GPU_lstm_extra_FP32::GetParam();
     for(const auto& test_value : params)
     {
         std::vector<std::string> tokens;
         GetArgs(test_value, tokens);
         std::vector<const char*> ptrs;
-
         std::transform(tokens.begin(), tokens.end(), std::back_inserter(ptrs), [](const auto& str) {
             return str.data();
         });
@@ -119,9 +117,10 @@ void Run2dDriver(miopenDataType_t prec)
         auto capture = testing::internal::GetCapturedStderr();
         std::cout << capture;
     }
-};
+}
 
 } // namespace lstm_extra
+
 using namespace lstm_extra;
 
 TEST_P(GPU_lstm_extra_FP32, FloatTest_lstm_extra) { Run2dDriver(miopenFloat); };

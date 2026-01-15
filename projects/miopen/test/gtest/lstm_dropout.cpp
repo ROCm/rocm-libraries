@@ -25,16 +25,13 @@
  *******************************************************************************/
 
 #include "lstm_common.hpp"
+#include <gtest/gtest_common.hpp>
 
 template <class T>
 struct lstm_dropout_driver : lstm_basic_driver<T>
 {
     lstm_dropout_driver() : lstm_basic_driver<T>()
     {
-        std::vector<int> modes(2, 0);
-        modes[1] = 1;
-        std::vector<int> defaultBS(1);
-
         this->add(this->batchSize, "batch-size", this->generate_data({17}));
         this->add(this->seqLength, "seq-len", this->generate_data({25}));
         this->add(this->inVecLen, "vector-len", this->generate_data({17}));
@@ -50,20 +47,25 @@ struct lstm_dropout_driver : lstm_basic_driver<T>
         this->add(this->nodcx, "no-dcx", this->generate_data({false}));
         this->add(this->flatBatchFill, "flat-batch-fill", this->generate_data({false, true}));
         this->add(this->useDropout, "use-dropout", this->generate_data({1}));
-
-#if(MIO_LSTM_TEST_DEBUG == 3)
-        biasMode  = 0;
-        dirMode   = 0;
-        inputMode = 0;
-        algoMode  = 0;
-#else
         this->add(this->inputMode, "in-mode", this->generate_data({0}));
         this->add(this->biasMode, "bias-mode", this->generate_data({1}));
-        this->add(this->dirMode, "dir-mode", this->generate_data(modes));
+        this->add(this->dirMode, "dir-mode", this->generate_data(std::vector<int>{0, 1}));
         this->add(this->algoMode, "algo-mode", this->generate_data({0}));
-#endif
-        this->add(this->batchSeq, "batch-seq", this->generate_data(defaultBS));
+        this->add(this->batchSeq, "batch-seq", this->generate_data(std::vector<int>{0}));
     }
 };
 
-int main(int argc, const char* argv[]) { test_drive<lstm_dropout_driver>(argc, argv); }
+template <typename T>
+struct GPU_lstm_dropout_Test : public ::testing::Test
+{
+};
+
+using GPU_lstm_dropout_FP32 = GPU_lstm_dropout_Test<float>;
+
+TEST_F(GPU_lstm_dropout_FP32, FloatTest_lstm_dropout)
+{
+    testing::internal::CaptureStderr();
+    test_drive<lstm_dropout_driver<float>>(0, nullptr);
+    auto capture = testing::internal::GetCapturedStderr();
+    std::cout << capture;
+}

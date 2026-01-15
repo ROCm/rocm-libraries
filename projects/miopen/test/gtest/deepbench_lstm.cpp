@@ -23,13 +23,10 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <utility>
 
 #include "lstm.hpp"
 #include "get_handle.hpp"
 #include <gtest/gtest_common.hpp>
-#include <gtest/gtest.h>
-#include "gtest_common.hpp"
 
 namespace deepbench_lstm {
 
@@ -102,6 +99,7 @@ void Run2dDriverFloat(void)
         std::cout << capture;
     }
 };
+
 } // namespace deepbench_lstm
 
 using namespace deepbench_lstm;

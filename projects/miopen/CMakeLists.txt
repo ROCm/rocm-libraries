@@ -23,7 +23,7 @@
 # SOFTWARE.
 #
 ################################################################################
-cmake_minimum_required( VERSION 3.15 )
+cmake_minimum_required(VERSION 3.15)
 
 if (POLICY CMP0074)
   cmake_policy(SET CMP0074 NEW)
@@ -76,8 +76,6 @@ project(MIOpen CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-
-include(CTest)
 
 find_package(Threads REQUIRED)
 
@@ -163,7 +161,7 @@ if(NOT WIN32 AND NOT MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM)
     check_cxx_linker_flag(-lstdc++fs HAS_LIB_STD_FILESYSTEM)
 endif()
 
-list(APPEND CMAKE_PREFIX_PATH ${CMAKE_INSTALL_PREFIX} ${CMAKE_INSTALL_PREFIX}/llvm ${CMAKE_INSTALL_PREFIX}/hip /opt/rocm /opt/rocm/llvm /opt/rocm/hip)
+list(APPEND CMAKE_PREFIX_PATH ${CMAKE_INSTALL_PREFIX} ${CMAKE_INSTALL_PREFIX}/llvm ${CMAKE_INSTALL_PREFIX}/hip)
 
 option(ENABLE_HIP_WORKAROUNDS Off)
 set(MIOPEN_INSTALL_CXX_HEADERS Off CACHE BOOL "Install MIOpen's C++ header interface")
@@ -175,9 +173,9 @@ message( STATUS "MIOPEN_OFFLINE_COMPILER_PATHS_V2: ${MIOPEN_OFFLINE_COMPILER_PAT
 # Embedded Build Configuration
 set(MIOPEN_EMBED_DB "" CACHE STRING "Semi-colon separated list of architecture to embed on-disk DBs in the binary. Example gfx906_60;gfx900_56")
 if(NOT MIOPEN_EMBED_DB STREQUAL "")
-    option(MIOPEN_DISABLE_SYSDB  "Disable sys database access" Off)
+    option(MIOPEN_DISABLE_SYSDB "Disable sys database access" Off)
 else()
-    option(MIOPEN_DISABLE_SYSDB  "Disable sys database access" ${MIOPEN_EMBED_BUILD})
+    option(MIOPEN_DISABLE_SYSDB "Disable sys database access" ${MIOPEN_EMBED_BUILD})
 endif()
 set(MIOPEN_BINCACHE_PATH "" CACHE STRING "URL or path containing binary cache files to embed")
 option(MIOPEN_EMBED_BINCACHE "Embed Binary Cache or KDB" Off)
@@ -214,9 +212,9 @@ option(MIOPEN_BUILD_DRIVER "Build MIOpenDriver (and use it in tests)" ${MIOPEN_B
 message(STATUS "MIOPEN_BUILD_DRIVER: ${MIOPEN_BUILD_DRIVER}" )
 
 # OpenCL 1.2
-if( MIOPEN_BACKEND STREQUAL "OpenCL")
+if(MIOPEN_BACKEND STREQUAL "OpenCL")
     set(MIOPEN_BACKEND_OPENCL 1)
-    find_package( OpenCL REQUIRED )
+    find_package(OpenCL REQUIRED)
     find_program(MIOPEN_HIP_COMPILER clang++
         PATH_SUFFIXES bin
         PATHS
@@ -297,7 +295,7 @@ option(MIOPEN_HIP_COMPILER_USE_SYSTEM_INCLUDE_DIRECTORIES "Append include direct
        ${MIOPEN_HIP_COMPILER_USE_SYSTEM_INCLUDE_DIRECTORIES_DEFAULT})
 
 target_flags(HIP_COMPILER_FLAGS hip::device)
-# Remove cuda arch flags
+# Remove CUDA arch flags
 string(REGEX REPLACE --cuda-gpu-arch=[a-z0-9]+ "" HIP_COMPILER_FLAGS "${HIP_COMPILER_FLAGS}")
 string(REGEX REPLACE --offload-arch=[a-z0-9:+-]+ "" HIP_COMPILER_FLAGS "${HIP_COMPILER_FLAGS}")
 # Skip library paths since hip will incorrectly treat it as a source file
@@ -336,12 +334,12 @@ message(STATUS "Hip compiler flags: ${HIP_COMPILER_FLAGS}")
 add_compile_definitions($<$<COMPILE_LANGUAGE:CXX>:HIP_COMPILER_FLAGS=${HIP_COMPILER_FLAGS}>)
 
 # HIP
-if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+if(MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
     if(MIOPEN_USE_COMPOSABLEKERNEL)
         if(MIOPEN_BUILD_CK)
             include(cmake/Dependencies.cmake)
 
-            execute_process (
+            execute_process(
                 COMMAND bash -c "grep -P -o '^[ \t]*(?<!#)[ \t]*\.\./composablekernel' ${CMAKE_SOURCE_DIR}/requirements.txt"
                 OUTPUT_VARIABLE _match
             )
@@ -406,7 +404,7 @@ else()
         message(FATAL_ERROR "HIPRTC cannot be used without HIP backend")
     endif()
 endif()
-message( STATUS "${MIOPEN_BACKEND} backend selected." )
+message(STATUS "${MIOPEN_BACKEND} backend selected.")
 
 # look for and register clang-offload-bundler
 if(MIOPEN_HIP_COMPILER MATCHES ".*clang\\+\\+.*")
@@ -494,19 +492,19 @@ if(MIOPEN_USE_HIPRTC)
 endif()
 
 option(Boost_USE_STATIC_LIBS "Use boost static libraries" ON)
-add_definitions(-DBOOST_ALL_NO_LIB=1)
+dd_definitions(-DBOOST_ALL_NO_LIB=1)
 find_package(Boost REQUIRED COMPONENTS filesystem CONFIG)
 
 find_path(HALF_INCLUDE_DIR half/half.hpp)
 message(STATUS "HALF_INCLUDE_DIR: ${HALF_INCLUDE_DIR}")
 
-option( MIOPEN_DEBUG_FIND_DB_CACHING "Use system find-db caching" ON)
+option(MIOPEN_DEBUG_FIND_DB_CACHING "Use system find-db caching" ON)
 
 if(WIN32)
     set( DATA_INSTALL_DIR bin )
-    set( DATABASE_INSTALL_DIR ${DATA_INSTALL_DIR})
+    set( DATABASE_INSTALL_DIR ${DATA_INSTALL_DIR} )
 else()
-    set( MIOPEN_INSTALL_DIR miopen)
+    set( MIOPEN_INSTALL_DIR miopen )
     set( DATA_INSTALL_DIR ${CMAKE_INSTALL_DATADIR}/${MIOPEN_INSTALL_DIR} )
     set( DATABASE_INSTALL_DIR ${DATA_INSTALL_DIR}/db )
 endif()
@@ -684,7 +682,7 @@ endfunction()
 # install for all targets; this was the behaviour before MIOPEN_INSTALL_GPU_DATABASES
 # was added.
 set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx1030)
-set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE LIST "List of AMDGPU targets for which to install databases")
+set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE STRING "List of AMDGPU targets for which to install databases")
 
 # This list should be updated when a new KDB file is added to the project
 set(KDB_BZ2_FILES gfx942.kdb.bz2 gfx90a.kdb.bz2 gfx1030.kdb.bz2 gfx908.kdb.bz2 gfx906.kdb.bz2 gfx900.kdb.bz2)
@@ -831,7 +829,6 @@ enable_cppcheck(
         CPPCHECK=1
         __linux__=1
 )
-
 
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)

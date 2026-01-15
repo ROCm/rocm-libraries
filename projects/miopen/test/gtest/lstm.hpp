@@ -33,10 +33,6 @@ struct lstm_driver : lstm_basic_driver<T>
 {
     lstm_driver() : lstm_basic_driver<T>()
     {
-        std::vector<int> modes(2, 0);
-        modes[1] = 1;
-        std::vector<int> defaultBS(1);
-
         this->add(this->batchSize, "batch-size", this->generate_data(get_lstm_batchSize(), {17}));
         this->add(this->seqLength, "seq-len", this->generate_data(get_lstm_seq_len(), {2}));
         this->add(this->inVecLen, "vector-len", this->generate_data(get_lstm_vector_len()));
@@ -54,21 +50,16 @@ struct lstm_driver : lstm_basic_driver<T>
         this->add(this->useDropout, "use-dropout", this->generate_data({0}));
         this->add(this->usePadding, "use-padding", this->generate_data({false, true}));
 
-#if(MIO_LSTM_TEST_DEBUG == 3)
-        this->biasMode  = 0;
-        this->dirMode   = 0;
-        this->inputMode = 0;
-        this->algoMode  = 0;
-#else
+        std::vector<int> modes{0, 1};
         this->add(this->inputMode, "in-mode", this->generate_data(modes));
         this->add(this->biasMode, "bias-mode", this->generate_data(modes));
         this->add(this->dirMode, "dir-mode", this->generate_data(modes));
         this->add(this->algoMode, "algo-mode", this->generate_data(modes));
-#endif
-        this->add(
-            this->batchSeq,
-            "batch-seq",
-            this->lazy_generate_data(
-                [=] { return generate_batchSeq(this->batchSize, this->seqLength); }, defaultBS));
+
+        this->add(this->batchSeq,
+                  "batch-seq",
+                  this->lazy_generate_data(
+                      [=] { return generate_batchSeq(this->batchSize, this->seqLength); },
+                      std::vector<int>{0}));
     }
 };
