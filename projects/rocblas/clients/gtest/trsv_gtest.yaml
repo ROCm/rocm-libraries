@@ -175,6 +175,14 @@ Tests:
   incx: [ 2 ]
   batch_count: [ 3 ]
 
+- name: trsv_big_batch_kernel
+  category: pre_checkin
+  function: trsv_batched
+  arguments: *common_args
+  matrix_size: *small_matrix_size_range
+  incx: [ 1 ]
+  batch_count: [ 1024, 4100 ]
+
 - name: trsv_batched_grid_z_16bit
   category: stress
   arguments:
