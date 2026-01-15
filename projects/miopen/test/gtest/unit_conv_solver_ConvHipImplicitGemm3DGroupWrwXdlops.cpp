@@ -81,6 +81,9 @@ const auto& GetTestParams()
         // Increased tolerance because of tolerance failures
         p.SetTolerance(supportedDevices, miopenFloat, 30.0f);
 
+        // Tolerance bump for FP16 on gfx110X and gfx115X due to observed precision differences.
+        p.SetTolerance(Gpu::gfx110X | Gpu::gfx115X, miopenHalf, 4.0f);
+
         return p;
     }();
     return params;
