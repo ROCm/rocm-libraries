@@ -62,25 +62,25 @@ CMake module providing:
 flowchart TD
     A[Project CMakeLists.txt] -->|include| B[TestCategories.cmake]
     A -->|call| C[apply_test_category_labels<br/>target, yaml, workdir]
-    
+
     C -->|execute_process| E[parse_test_categories.py]
-    
+
     E -->|read| F[test_categories.yaml]
 
     E -->|apply| H[Exclusion Rules]
     E -->|generate| I[CMake Code]
-    
+
     I -->|write to| J[Generated CMake<br/>build/test_categories.cmake]
-    
+
     J -->|add_test, set_tests_properties| K[Test Registration]
-        
+
     K --> M[CTest Execution]
-    
-    
+
+
     M -->|ctest -L category_name| N[Run by Category]
     M -->|ctest -L label| O[Run by Label]
     M -->|ctest --timeout 600| P[Run with Timeout]
-    
+
     style A fill:#e1f5ff
     style E fill:#fff4e1
     style J fill:#e8f5e9
@@ -108,6 +108,68 @@ execution_settings:
   category_timeouts:
     category_name: 600
 ```
+
+### **Enhanced Structure (Optional Fields)**
+
+All fields below are **optional** and can be added incrementally. Teams can use them for richer test documentation and enable future capabilities like AI-assisted test selection:
+
+```yaml
+test_categories:
+  category_name:
+    # Required fields (same as base)
+    description: "Human-readable description"
+    test_patterns: ["*pattern1*", "*pattern2*"]
+    labels: ["label1", "label2"]
+
+    # Optional enhancement fields - add only if useful for your project
+    notes: |
+      Human-readable context about when to run these tests.
+      Can include historical context, gotchas, or guidance for developers and AI tools.
+    source_coverage:
+      - "library/src/file.cpp"
+      - "library/src/module.cpp:function_name"
+    api_coverage:
+      - "apiFunction1"
+      - "apiFunction2"
+    feature_tags:
+      - "performance-critical"
+      - "numerical-stability"
+    dependencies:
+      - "other_category"  # Run this category after dependencies complete
+
+    # Standard fields (from base)
+    exclude: ["*always_exclude*"]
+    exclude_windows: ["*linux_only*"]
+    exclude_linux: ["*windows_only*"]
+
+# Optional: Top-level context for AI/LLM tools
+llm_context:
+  code_to_test_mapping_guidelines: |
+    Guidance for AI tools on how to map code changes to test categories.
+    Projects can use this for AI-assisted test selection.
+
+execution_settings:
+  default_timeout: 300
+  category_timeouts:
+    category_name: 600
+```
+
+**Optional Field Descriptions:**
+
+| Field | Purpose | Example Use |
+|-------|---------|-------------|
+| `notes` | Free-form text for context and documentation | "Run when epilogue changes. See bug #8765 for history" |
+| `source_coverage` | Source files/functions tested by this category | `["library/src/gemm.cpp:matmul_kernel"]` |
+| `api_coverage` | API functions tested by this category | `["hipblasLtMatmul", "hipblasLtMatmulAlgo"]` |
+| `feature_tags` | Semantic tags for classification and filtering | `["performance-critical", "mixed-precision"]` |
+| `dependencies` | Test categories that should run first | `["auxiliary"]` - run auxiliary tests before this category |
+| `llm_context` | Top-level guidance for AI-assisted workflows | Instructions for AI tools on test selection logic |
+
+**Key Points:**
+- All enhancement fields are **optional** - teams can ignore them entirely ✅
+- Projects can adopt incrementally: start with just `notes`, add more later ✅
+- Parser gracefully ignores unknown fields - no code changes needed ✅
+- Enables richer test documentation and future AI-assisted workflows ✅
 
 ### **Exclusion Hierarchy**
 
@@ -142,7 +204,7 @@ include(${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake)
 
 if(BUILD_TESTING)
     enable_testing()
-    
+
     # Apply test categorization
     apply_test_category_labels(
         myproject-test                               # Test executable name
@@ -178,5 +240,3 @@ Projects currently using this architecture:
 
 - **hipblas** - [test_categories.yaml](../../projects/hipblas/clients/gtest/test_categories.yaml) | [CMakeLists.txt](../../projects/hipblas/clients/gtest/CMakeLists.txt)
 - **rocfft** - [test_categories.yaml](../../projects/rocfft/clients/tests/test_categories.yaml) | [CMakeLists.txt](../../projects/rocfft/clients/tests/CMakeLists.txt)
-
-

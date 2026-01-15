@@ -4,13 +4,50 @@
 test_categories:
   level1:
     description: "Auxiliary functions (set/get operations, utility functions)"
+
+    # Optional: Context for developers and AI tools
+    notes: |
+      Fast-running sanity checks for auxiliary functions (set/get operations,
+      mode handling, matrix/vector transfers).
+
+      Run these when:
+      - Auxiliary functions change (library/src/auxiliary.cpp, library/src/handle.cpp)
+      - API initialization/cleanup changes
+      - Basic data movement functionality changes
+
+      These are foundational tests that should pass before running more complex test suites.
+
+    # Optional: Map to source code (enables test-to-code lookup)
+    source_coverage:
+      - "library/src/auxiliary.cpp"
+      - "library/src/handle.cpp"
+
+    # Optional: API functions tested (enables API coverage analysis)
+    api_coverage:
+      - "hipblasCreate"
+      - "hipblasDestroy"
+      - "hipblasSetPointerMode"
+      - "hipblasGetPointerMode"
+      - "hipblasSetVector"
+      - "hipblasGetVector"
+      - "hipblasSetMatrix"
+      - "hipblasGetMatrix"
+
+    # Optional: Semantic tags for classification
+    feature_tags:
+      - "initialization"
+      - "auxiliary"
+      - "fast"
+      - "foundational"
+
+    # Standard fields (unchanged from base PR)
     test_patterns:
       - "*auxiliary*"
       - "*set_get*"
       - "*auxil*"
     test_files:
       - "auxil/auxiliary_gtest.cpp"
-      - "auxil/set_get_mode_gtest.cpp" 
+      - "auxil/set_get_mode_gtest.cpp"
       - "auxil/set_get_matrix_vector_gtest.cpp"
     labels:
       - "auxil"
