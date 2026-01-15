@@ -179,6 +179,12 @@ namespace rocRoller
                                                                 int                assign);
 
         /**
+         * @brief Return the edge tag of type EdgeType connected to tag in direction Direction.
+         */
+        template <Graph::Direction Direction, typename EdgeType>
+        std::optional<int> GetEdgeTag(KernelGraph const& graph, int tag);
+
+        /**
          * @brief Create a range-based for loop.
          *
          * returns {dimension, operation}

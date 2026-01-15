@@ -112,34 +112,6 @@ namespace rocRoller
         using namespace AddLDSPaddingDetail;
 
         /**
-         * @brief Get the upstream Flatten edge coming in to an LDS node.
-         */
-        std::optional<int> GetFlattenEdgeTag(KernelGraph const& graph, int tag)
-        {
-            for(auto elem : graph.coordinates.getNeighbours<GD::Upstream>(tag))
-            {
-                auto maybeFlatten = graph.coordinates.get<Flatten>(elem);
-                if(maybeFlatten)
-                    return elem;
-            }
-            return {};
-        }
-
-        /**
-         * @brief Get the downstream Tile edge coming out of an LDS node.
-         */
-        std::optional<int> GetTileEdgeTag(KernelGraph const& graph, int tag)
-        {
-            for(auto elem : graph.coordinates.getNeighbours<GD::Downstream>(tag))
-            {
-                auto maybeTile = graph.coordinates.get<Tile>(elem);
-                if(maybeTile)
-                    return elem;
-            }
-            return {};
-        }
-
-        /**
          * @brief
          */
         uint GetFastThreadTileIndexElementWidth(KernelGraph const& graph, int tileTag)
@@ -387,8 +359,9 @@ namespace rocRoller
          */
         void AddLDSPaddingVisitor::stage(KernelGraph const& graph, int ldsTag)
         {
-            auto flattenEdgeTag = GetFlattenEdgeTag(graph, ldsTag);
-            auto tileEdgeTag    = GetTileEdgeTag(graph, ldsTag);
+            using GD            = Graph::Direction;
+            auto flattenEdgeTag = GetEdgeTag<GD::Upstream, Flatten>(graph, ldsTag);
+            auto tileEdgeTag    = GetEdgeTag<GD::Downstream, Tile>(graph, ldsTag);
 
             if((not flattenEdgeTag) or (not tileEdgeTag))
                 return;
