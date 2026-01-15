@@ -5142,13 +5142,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Add a label at the end of the asm for indexing.
     module.add(Label("ASM_End", "The end of the kernel"))
 
-    if self.states.stinkyOpt:
+    #if self.states.stinkyOpt:
+    if True:
       import rocisa
       import stinkytofu # import stinkytofu to avoid type resolution issues across modules
       stModule = rocisa.toStinkyTofuModule(module, self.states.version, "kernel_name")
       print("="*20)
       stModule.runOptimizationPipeline()
-      print(stModule.emitAssembly())
+      #print(stModule.emitAssembly())
+      # write the assembly to a file
+      with open("st.all.asm", "w") as f:
+        f.write(stModule.emitAssembly())
       print("="*20)
 
     moduleKernelBody.addBody(module)

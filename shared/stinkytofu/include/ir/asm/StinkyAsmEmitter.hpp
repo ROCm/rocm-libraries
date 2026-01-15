@@ -54,6 +54,11 @@ namespace stinkytofu
         // If true: v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+3]
         // If false: v10, v[46:49]
         bool useSymbolicNames = false;
+
+        // Column position for aligning comments (0 = no alignment)
+        // When > 0, comments will be aligned at this column position
+        // e.g., 50 will pad instruction to column 50 before adding comment
+        int commentAlignColumn = 51;
     };
 
     /**
@@ -191,8 +196,11 @@ namespace stinkytofu
 
         /**
          * Emit cycle information as a comment.
+         * @param os Output stream
+         * @param inst The instruction
+         * @param currentColumn Current column position (for alignment)
          */
-        void emitCycleComment(std::ostream& os, const StinkyInstruction& inst);
+        void emitCycleComment(std::ostream& os, const StinkyInstruction& inst, int currentColumn);
     };
 
     /**

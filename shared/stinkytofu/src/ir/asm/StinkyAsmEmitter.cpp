@@ -332,7 +332,7 @@ namespace stinkytofu
         }
     }
 
-    void StinkyAsmEmitter::emitCycleComment(std::ostream& os, const StinkyInstruction& inst)
+    void StinkyAsmEmitter::emitCycleComment(std::ostream& os, const StinkyInstruction& inst, int currentColumn)
     {
         bool needsComment = false;
 
@@ -359,8 +359,20 @@ namespace stinkytofu
             return;
         }
 
+        // Pad to comment alignment column if specified
+        if(options.commentAlignColumn > 0 && currentColumn < options.commentAlignColumn)
+        {
+            int padding = options.commentAlignColumn - currentColumn;
+            os << std::string(padding, ' ');
+        }
+        else
+        {
+            // No alignment, just add a space before comment
+            os << " ";
+        }
+
         // Start comment
-        os << " //";
+        os << "//";
 
         // Emit cycle info first if enabled
         if(options.emitCycleInfo)
@@ -397,27 +409,37 @@ namespace stinkytofu
             return;
         }
 
+        // Track current column position for comment alignment
+        std::ostringstream instrStream;
+
         // Emit indentation
         for(int i = 0; i < options.indent; ++i)
         {
-            os << " ";
+            instrStream << " ";
         }
 
         // Emit mnemonic
-        emitMnemonic(os, inst);
+        emitMnemonic(instrStream, inst);
 
         // Emit operands if any
         if(!inst.getDestRegs().empty() || !inst.getSrcRegs().empty())
         {
-            os << " ";
-            emitOperands(os, inst);
+            instrStream << " ";
+            emitOperands(instrStream, inst);
         }
 
         // Emit memory modifiers (DS, FLAT, MUBUF, SMEM)
-        emitMemoryModifiers(os, inst);
+        emitMemoryModifiers(instrStream, inst);
 
-        // Emit cycle information and/or user comments
-        emitCycleComment(os, inst);
+        // Get the instruction string and its length for comment alignment
+        std::string instrStr = instrStream.str();
+        int currentColumn = instrStr.length();
+
+        // Write the instruction to the output stream
+        os << instrStr;
+
+        // Emit cycle information and/or user comments with alignment
+        emitCycleComment(os, inst, currentColumn);
 
         os << "\n";
     }
