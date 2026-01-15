@@ -312,7 +312,9 @@ INSTANTIATE_TEST_SUITE_P(
     GPU_CBAFind2FusionWorkspace_FP32,
     testing::Combine(testing::Values(miopenActivationRELU),
                      testing::Values(ConvTestCaseBase{
-                         1, 64, 56, 56, 64, 1, 1, 0, 0, 1, 1, 1, 1, miopenConvolution}),
+                         1, 64, 52, 53, 63, 1, 1, 0, 0, 1, 1, 1, 1, miopenConvolution}),
+                     // try to use unique case that uses ConvCKIgemmGrpFwdBiasActivFused solver
+                     // to avoid interference with other tests
                      testing::Values(miopenTensorNCHW),
                      testing::Values(0.25f),
                      testing::Values(0.25f),
