@@ -45,26 +45,8 @@ set_target_properties(origami_python PROPERTIES
 
 target_link_libraries(origami_python PRIVATE roc::origami)
 
-# On Windows copy origami DLL alongside Python module in build directory for ctest
-if(WIN32)
-    add_custom_command(TARGET origami_python POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:roc::origami>
-            $<TARGET_FILE_DIR:origami_python>
-        COMMENT "Copying origami DLL to Python module directory for Windows"
-    )
-endif()
-
 # Install Python module to bin/origami for TheRock CI testing
 install(TARGETS origami_python
     LIBRARY DESTINATION "${CMAKE_INSTALL_BINDIR}/origami"
     COMPONENT tests
 )
-
-# On Windows install origami DLL alongside Python module so it can be found at runtime
-if(WIN32)
-    install(TARGETS origami
-        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}/origami"
-        COMPONENT tests
-    )
-endif()
