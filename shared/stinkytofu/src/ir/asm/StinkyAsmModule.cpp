@@ -24,7 +24,7 @@
 #include "ir/asm/StinkyAsmEmitter.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/asm/StinkyAsmPrinter.hpp"
-#include "isa/ArchHelper.hpp"
+#include "stinkypasses.hpp"
 
 #include <iostream>
 #include <sstream>
@@ -133,8 +133,29 @@ namespace stinkytofu
 
     void StinkyAsmModule::runOptimizationPipeline()
     {
-        // TODO: Implement optimization pipeline
-        std::cout << "Running optimization pipeline on " << pImpl->name << std::endl;
+        // Create PassContext for running the pass
+        PassContext passCtx;
+
+        // Configure GemmTileConfig with the module's architecture
+        GemmTileConfig config;
+        config.arch = pImpl->arch;
+        // Set default tile sizes (not used by WaitCntLegalizationPass)
+        config.TileA0 = 0;
+        config.TileB0 = 0;
+        config.TileM0 = 0;
+        config.NumGRA = 0;
+        config.NumGRB = 0;
+        passCtx.setGemmTileConfig(config);
+
+        // Create and run WaitCntLegalizationPass
+        auto pass = createWaitCntLegalizationPass();
+        pass->run(*pImpl->function, passCtx);
+
+        // dump the function
+        // std::cout << "After WaitCntLegalizationPass:" << std::endl;
+        // pImpl->function->dump(std::cerr);
+
+        // std::cout << "============================================\n\n";
     }
 
     IRList& StinkyAsmModule::getIRList()
