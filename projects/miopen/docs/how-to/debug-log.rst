@@ -52,7 +52,7 @@ environmental variables to control logging. Both variables are disabled by defau
   If ``MIOPEN_LOG_LEVEL`` is less than 6, then log messages will be buffered.
   The buffered logs will be dumped to a log file when MIOpen logs an error message,
   or an error is thrown by MIOpen.
-  This log can be found in /tmp/miopen_error_<pid>.
+  This log can be found in ``/tmp/miopen_error_<pid>``.
 
 .. note::
 
