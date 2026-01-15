@@ -4,6 +4,22 @@
 from invoke.tasks import task
 import os
 
+def detect_gpu_arch():
+    import subprocess
+    try:
+        result = subprocess.run(["rocm_agent_enumerator", "-v"], capture_output=True, text=True)
+        if result.returncode == 0:
+            target = next((line.strip() for line in result.stdout.splitlines() if line.startswith("gfx") and line.strip() != "gfx000"), None)
+            if target:
+                return target
+    except Exception:
+        pass
+    return "gfx90a"
+
+@task
+def get_gpu_arch(c):
+    print(detect_gpu_arch())
+
 @task(
     help={
         "clean": "Remove the client build directory before building.",
@@ -14,7 +30,11 @@ import os
         "gpu_targets": "Comma-separated list of GPU targets (e.g. gfx90a,gfx1101)."
     }
 )
-def build_client(c, clean=False, configure=True, build=True, build_dir="build_tmp", build_type="Release", gpu_targets="gfx90a"):
+def build_client(c, clean=False, configure=True, build=True, build_dir="build_tmp", build_type="Release", gpu_targets=None):
+
+    if gpu_targets is None:
+        gpu_targets = detect_gpu_arch()
+        print(f"warning: No GPU targets specified. Detected and using: {gpu_targets}")
 
     if clean and os.path.exists(build_dir):
         c.run(f"rm -rf {build_dir}")
