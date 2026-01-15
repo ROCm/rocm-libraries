@@ -4412,11 +4412,12 @@ class KernelWriterAssembly(KernelWriter):
         regStr = vgpr("ValuC+%u"%(i-numAccvgprs)) if i >= numAccvgprs else accvgpr(i)
         module.add(copyInst(dst=regStr, src=0, comment="initC"))
 
+      _accvgpr_alias = vgpr if  kernel["MIArchVgpr"] else accvgpr
       for i in range(min(16, numCVgpr), numCVgpr, 16):
         if i + 16 <= numCVgpr:
           module.add(MFMAInstruction(instType=InstType.INST_I8, accType=InstType.INST_I32, variant=[32,32,16,1], mfma1k=False, \
-                                     acc=accvgpr(i,16), a=vgpr(tmpVgpr,2), b=vgpr(tmpVgpr,2), acc2=accvgpr(0,16), \
-                                     comment="initC: [%u, %u]"%(i, i+15)))
+                                    acc=_accvgpr_alias(i,16), a=vgpr(tmpVgpr,2), b=vgpr(tmpVgpr,2), acc2=_accvgpr_alias(0,16), \
+                                    comment="initC: [%u, %u]"%(i, i+15)))
         else:
           for j in range(i,min(i+16, numCVgpr)):
             copyInst = VMovB32 if j >= numAccvgprs else VAccvgprWrite
