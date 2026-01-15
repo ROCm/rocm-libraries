@@ -62,8 +62,10 @@ TEST_F(LogicalModuleOwnershipTest, SharedPtrToRawPointerConversion)
     // Step 1: Create PyLogicalModule with shared_ptr (simulating Python usage)
     auto module = std::make_shared<PyLogicalModule>("test_ownership");
 
-    module->add(std::make_shared<VAddF32>(v0, v1, v2, std::nullopt, std::nullopt, "add"));
-    module->add(std::make_shared<VMulF32>(v0, v0, v3, std::nullopt, std::nullopt, "mul"));
+    module->add(std::shared_ptr<LogicalInstruction>(
+        VAddF32(v0, v1, v2, std::nullopt, std::nullopt, "add")));
+    module->add(std::shared_ptr<LogicalInstruction>(
+        VMulF32(v0, v0, v3, std::nullopt, std::nullopt, "mul")));
 
     EXPECT_EQ(module->size(), 2);
 
@@ -131,8 +133,8 @@ TEST_F(LogicalModuleOwnershipTest, LogicalModuleSurvivesAfterConversion)
 {
     // Create PyLogicalModule
     auto module = std::make_shared<PyLogicalModule>("test_survival");
-    module->add(std::make_shared<VAddF32>(v0, v1, v2));
-    module->add(std::make_shared<VAddF32>(v1, v2, v3));
+    module->add(std::shared_ptr<LogicalInstruction>(VAddF32(v0, v1, v2)));
+    module->add(std::shared_ptr<LogicalInstruction>(VAddF32(v1, v2, v3)));
 
     EXPECT_EQ(module->size(), 2);
 
@@ -172,8 +174,8 @@ TEST_F(LogicalModuleOwnershipTest, NoDoubleFreeWithCompositeInstruction)
     StinkyRegister src1 = vgpr(4, 2);
 
     // Add a composite instruction
-    module->add(std::make_shared<VAddPKF32>(dst, src0, src1));
-    module->add(std::make_shared<VMulF32>(v0, v1, v2));
+    module->add(std::shared_ptr<LogicalInstruction>(VAddPKF32(dst, src0, src1)));
+    module->add(std::shared_ptr<LogicalInstruction>(VMulF32(v0, v1, v2)));
 
     EXPECT_EQ(module->size(), 2);
 

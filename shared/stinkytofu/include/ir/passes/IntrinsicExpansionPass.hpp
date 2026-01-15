@@ -23,82 +23,97 @@
 
 #pragma once
 
-#include "ir/IntrinsicLibrary.hpp"
-#include "ir/asm/StinkyAsmIR.hpp" // For StinkyRegister
-#include "ir/python/PyLogicalModule.hpp"
+#include "ir/asm/PatternParser.hpp"
+#include "ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu.hpp"
 #include <memory>
 #include <unordered_map>
 
 namespace stinkytofu
 {
     /**
-     * @brief Pass that expands IntrinsicCall instructions using IntrinsicLibrary
+     * @brief Pass that expands IntrinsicCall instructions using IntrinsicRegistry
      *
      * This pass:
-     *   1. Finds all IntrinsicCall instructions in the module
-     *   2. Looks up the intrinsic definition from IntrinsicLibrary
-     *   3. Expands the call into concrete high-level IR instructions
+     *   1. Finds all IntrinsicCall instructions in the function
+     *   2. Looks up the intrinsic definition from IntrinsicRegistry
+     *   3. Expands the call into concrete LogicalInstructions
      *   4. Replaces the IntrinsicCall with the expanded instructions
      *
      * Example:
      *   Before:
      *     IntrinsicCall("ReluF32", [v0, v1, v2])  // dest, src, temp
      *
-     *   After:
-     *     v2 = v_cmp_gt_f32(v1, 0.0)
-     *     v0 = v_select_f32(v2, v1, 0.0)
+     *   After (expanded from intrinsics.st.bc):
+     *     v2 = VCmpGtF32(v1, 0.0)
+     *     v0 = VCndMaskB32(0.0, v1, v2)
+     *
+     * This pass must run BEFORE ToStinkyAsmPass, as it operates on LogicalIR.
      */
-    class IntrinsicExpansionPass
+    class IntrinsicExpansionPass : public Pass
     {
     public:
-        /**
-         * @brief Construct expansion pass with intrinsic library
-         *
-         * @param library Shared pointer to loaded IntrinsicLibrary
-         */
-        explicit IntrinsicExpansionPass(std::shared_ptr<IntrinsicLibrary> library);
+        IntrinsicExpansionPass();
+        ~IntrinsicExpansionPass() override;
 
-        /**
-         * @brief Run the expansion pass on an IR module
-         *
-         * @param module IR module to transform
-         * @return true if any expansions were performed, false otherwise
-         */
-        bool run(PyLogicalModule* module);
+        void run(Function& func, PassContext& passCtx) override;
+
+        PassID getPassID() const override
+        {
+            return &ID;
+        }
+
+        const char* getName() const override
+        {
+            return "IntrinsicExpansion";
+        }
 
     private:
-        std::shared_ptr<IntrinsicLibrary> library_;
+        static char ID;
+
+        /**
+         * @brief Expand all IntrinsicCall instructions in a BasicBlock
+         *
+         * @param bb BasicBlock to process
+         */
+        void expandIntrinsicsInBlock(BasicBlock& bb);
 
         /**
          * @brief Expand a single IntrinsicCall instruction
          *
          * @param call IntrinsicCall instruction to expand
-         * @return Vector of expanded IR instructions, or empty on error
+         * @return Vector of expanded LogicalInstructions (raw pointers for IRList)
          */
         std::vector<LogicalInstruction*> expandIntrinsic(LogicalInstruction* call);
 
         /**
-         * @brief Create an IR instruction from intrinsic body instruction
+         * @brief Create a LogicalInstruction from intrinsic body instruction
          *
-         * @param inst Intrinsic instruction definition
+         * @param instDef Intrinsic instruction definition
          * @param regMap Map from intrinsic argument names to actual registers
          * @return Created LogicalInstruction, or nullptr on error
          */
-        LogicalInstruction*
-            createInstruction(const IntrinsicInstruction&                            inst,
-                              const std::unordered_map<std::string, StinkyRegister>& regMap);
+        LogicalInstruction* createInstructionFromIntrinsic(
+            const IntrinsicInstruction&                            instDef,
+            const std::unordered_map<std::string, StinkyRegister>& regMap);
 
         /**
-         * @brief Parse operand string and resolve to register or immediate
+         * @brief Resolve operand string to register
          *
          * @param operand Operand string (register name or immediate value)
          * @param regMap Map from intrinsic argument names to actual registers
          * @param outReg Output register if operand is a register
          * @return true if operand is a register, false if it's an immediate
          */
-        bool parseOperand(const std::string&                                     operand,
-                          const std::unordered_map<std::string, StinkyRegister>& regMap,
-                          StinkyRegister&                                        outReg);
+        bool resolveOperand(const std::string&                                     operand,
+                            const std::unordered_map<std::string, StinkyRegister>& regMap,
+                            StinkyRegister&                                        outReg);
     };
+
+    /**
+     * @brief Factory function to create IntrinsicExpansionPass
+     * @return Unique pointer to IntrinsicExpansionPass
+     */
+    std::unique_ptr<Pass> createIntrinsicExpansionPass();
 
 } // namespace stinkytofu

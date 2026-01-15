@@ -62,11 +62,12 @@ set(STINKYTOFU_SOURCE_FILES
     stinkytofu.cpp
     ir/python/PyLogicalModule.cpp
     ir/logical/LogicalToFunctionConverter.cpp
+    ir/logical/LogicalOpcode.cpp
     ir/IRSerializer.cpp
     ir/IntrinsicLibrary.cpp
     ir/IntrinsicRegistry.cpp
     ir/IntrinsicPatternConverter.cpp
-    # ir/passes/IntrinsicExpansionPass.cpp  # TODO: Fix API compatibility
+    ir/passes/IntrinsicExpansionPass.cpp
     ir/logical/passes/ToStinkyAsmPass.cpp
     ir/logical/passes/CompositeInstructionLoweringPass.cpp
     ir/logical/passes/LogicalPeepholePass.cpp
@@ -167,7 +168,7 @@ add_dependencies(stinkytofu tablegen_generated)
 # Intrinsic Compiler Tool
 ##===----------------------------------------------------------------------===##
 # Add intrinsic-compiler subdirectory AFTER stinkytofu library is built
-# This tool compiles Intrinsics.def to intrinsics.st.bc
+# This tool compiles Intrinsics.intrinsic to intrinsics.st.bc
 add_subdirectory(tools/intrinsic-compiler)
 
 ##===----------------------------------------------------------------------===##

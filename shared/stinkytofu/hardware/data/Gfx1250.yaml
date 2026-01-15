@@ -5,10 +5,10 @@
 - instructions:
   - default_cycle: 1
   - cycle:
-    - buffer_load_dwordx4: 12
-    - buffer_load_dwordx3: 12
-    - buffer_load_dwordx2: 12
-    - buffer_load_dword: 12
+    - buffer_load_b128: 12
+    - buffer_load_b96: 12
+    - buffer_load_b64: 12
+    - buffer_load_b32: 12
     - buffer_load_ubyte: 12
     - buffer_load_sbyte: 12
     - buffer_load_ushort: 12
@@ -21,10 +21,10 @@
     - buffer_load_short_d16_hi: 12
   - latency:
     - ds_load_b128: 56
-    - buffer_load_dwordx4: 116
-    - buffer_load_dwordx3: 120
-    - buffer_load_dwordx2: 120
-    - buffer_load_dword: 108
+    - buffer_load_b128: 116
+    - buffer_load_b96: 120
+    - buffer_load_b64: 120
+    - buffer_load_b32: 108
     - buffer_load_ubyte: 108
     - buffer_load_sbyte: 104
     - buffer_load_ushort: 108

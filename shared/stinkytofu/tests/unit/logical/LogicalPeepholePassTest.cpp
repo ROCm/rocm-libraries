@@ -23,7 +23,6 @@
 
 #include "ir/logical/passes/LogicalPeepholePass.hpp"
 #include "TestHelpers.hpp"
-#include "ir/logical/LogicalInstructionFactory.hpp"
 #include "ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu.hpp"
 #include <gtest/gtest.h>
@@ -93,12 +92,11 @@ TEST_F(LogicalPeepholePassTest, SimpleInstructions)
     IRList& irlist = bb->getIR();
 
     // v1 = v_add_f32(v0, v0) - use factory function
-    irlist.push_back(
-        static_cast<IRBase*>(createVAddF32(v1, v0, v0, std::nullopt, std::nullopt, "")));
+    irlist.push_back(static_cast<IRBase*>(VAddF32(v1, v0, v0, std::nullopt, std::nullopt, "")));
 
     // v2 = v_mul_f32(v1, 2.0)
     irlist.push_back(
-        static_cast<IRBase*>(createVMulF32(v2, v1, vgpr(2), std::nullopt, std::nullopt, "")));
+        static_cast<IRBase*>(VMulF32(v2, v1, vgpr(2), std::nullopt, std::nullopt, "")));
 
     // Run pass - should not crash
     runPass();
@@ -123,8 +121,7 @@ TEST_F(LogicalPeepholePassTest, MultipleRuns)
     StinkyRegister v1 = vgpr(1);
 
     IRList& irlist = bb->getIR();
-    irlist.push_back(
-        static_cast<IRBase*>(createVAddF32(v1, v0, v0, std::nullopt, std::nullopt, "")));
+    irlist.push_back(static_cast<IRBase*>(VAddF32(v1, v0, v0, std::nullopt, std::nullopt, "")));
 
     // Run pass multiple times - should not crash and produce same results
     runPass();
@@ -162,11 +159,11 @@ TEST_F(LogicalPeepholePassTest, MulMulFusion)
 
     // v1 = v_mul_f32(v0, 2.0)
     irlist.push_back(
-        static_cast<IRBase*>(createVMulF32(v1, v0, vgpr(10), std::nullopt, std::nullopt, "")));
+        static_cast<IRBase*>(VMulF32(v1, v0, vgpr(10), std::nullopt, std::nullopt, "")));
 
     // v2 = v_mul_f32(v1, 3.0)
     irlist.push_back(
-        static_cast<IRBase*>(createVMulF32(v2, v1, vgpr(11), std::nullopt, std::nullopt, "")));
+        static_cast<IRBase*>(VMulF32(v2, v1, vgpr(11), std::nullopt, std::nullopt, "")));
 
     // Verify we start with 2 instructions
     size_t countBefore = 0;
@@ -207,12 +204,10 @@ TEST_F(LogicalPeepholePassTest, AddFMAFusion)
     IRList& irlist = bb->getIR();
 
     // v2 = v_mul_f32(v0, v1)
-    irlist.push_back(
-        static_cast<IRBase*>(createVMulF32(v2, v0, v1, std::nullopt, std::nullopt, "")));
+    irlist.push_back(static_cast<IRBase*>(VMulF32(v2, v0, v1, std::nullopt, std::nullopt, "")));
 
     // v3 = v_add_f32(v2, v0)
-    irlist.push_back(
-        static_cast<IRBase*>(createVAddF32(v3, v2, v0, std::nullopt, std::nullopt, "")));
+    irlist.push_back(static_cast<IRBase*>(VAddF32(v3, v2, v0, std::nullopt, std::nullopt, "")));
 
     // Verify we start with 2 instructions
     size_t countBefore = 0;

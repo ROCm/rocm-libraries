@@ -57,8 +57,8 @@ TEST(IRModuleTest, AddInstructions)
     StinkyRegister src0 = vgpr(1);
     StinkyRegister src1 = vgpr(2);
 
-    auto inst1 = std::make_shared<VAddU32>(dst, src0, src1);
-    auto inst2 = std::make_shared<VMulF32>(dst, src0, src1);
+    auto inst1 = std::shared_ptr<LogicalInstruction>(VAddU32(dst, src0, src1));
+    auto inst2 = std::shared_ptr<LogicalInstruction>(VMulF32(dst, src0, src1));
 
     module->add(inst1);
     module->add(inst2);

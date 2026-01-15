@@ -69,10 +69,8 @@ TEST_F(IRToAsmPipelineTest, SimpleVectorALU)
 
     // Step 2: Create instructions directly using factory functions (raw pointers)
     // These instructions are now owned by the Function/IRList
-    LogicalInstruction* vadd
-        = new VAddF32(v0, v1, v2, std::nullopt, std::nullopt, "add two floats");
-    LogicalInstruction* vmul
-        = new VMulF32(v0, v0, v3, std::nullopt, std::nullopt, "multiply result");
+    LogicalInstruction* vadd = VAddF32(v0, v1, v2, std::nullopt, std::nullopt, "add two floats");
+    LogicalInstruction* vmul = VMulF32(v0, v0, v3, std::nullopt, std::nullopt, "multiply result");
 
     // Create a basic block and add instructions
     BasicBlock* entryBB = func.createBasicBlock("entry");

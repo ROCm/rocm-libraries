@@ -3,7 +3,7 @@
 
 # Intrinsic Compiler Tool
 #
-# This tool compiles intrinsic definitions (.def) to optimized bitcode (.st.bc)
+# This tool compiles intrinsic definitions (.intrinsic) to optimized bitcode (.st.bc)
 # It runs AFTER the main library is built, so it can link against libstinkytofu.
 
 set(SOURCES
@@ -28,7 +28,7 @@ target_include_directories(intrinsic-compiler PRIVATE
 
 # Custom command to compile intrinsics to .st.bc
 # This runs AFTER the main library is built
-set(INTRINSIC_DEF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../lib/Intrinsics/Intrinsics.def")
+set(INTRINSIC_DEF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../lib/Intrinsics/Intrinsics.intrinsic")
 set(INTRINSIC_BC_FILE "${CMAKE_BINARY_DIR}/intrinsics.st.bc")
 
 add_custom_command(

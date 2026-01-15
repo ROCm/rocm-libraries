@@ -59,7 +59,7 @@ namespace stinkytofu
         {
         }
 
-        const char* getLogicalName() const override
+        const char* getLogicalName() const
         {
             return operation.c_str();
         }

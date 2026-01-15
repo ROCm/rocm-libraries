@@ -91,37 +91,38 @@ TEST_F(IntrinsicFlowTest, IntrinsicDefinitionStructure)
     ASSERT_NE(relu, nullptr);
 
     EXPECT_EQ(relu->name, "ReluF32");
-    EXPECT_EQ(relu->arguments.size(), 3); // dest, src, temp
-    EXPECT_EQ(relu->body.size(), 2); // 2 instructions
+    EXPECT_EQ(relu->arguments.size(), 2); // dest, src
+    EXPECT_EQ(relu->body.size(), 1); // 1 instruction: v_max_f32(dest, src, 0.0)
     EXPECT_TRUE(relu->pythonBinding);
 
     // Verify arguments
     EXPECT_EQ(relu->arguments[0].name, "dest");
     EXPECT_EQ(relu->arguments[1].name, "src");
-    EXPECT_EQ(relu->arguments[2].name, "temp");
 
-    // Verify body
-    EXPECT_EQ(relu->body[0].destReg, "temp");
-    EXPECT_EQ(relu->body[0].operation, "v_cmp_gt_f32");
-    EXPECT_EQ(relu->body[1].destReg, "dest");
-    EXPECT_EQ(relu->body[1].operation, "v_select_f32");
+    // Verify body: dest = v_max_f32(src, 0.0)
+    EXPECT_EQ(relu->body[0].destReg, "dest");
+    EXPECT_EQ(relu->body[0].operation, "v_max_f32");
+    EXPECT_EQ(relu->body[0].operands.size(), 2);
+    EXPECT_EQ(relu->body[0].operands[0].type, IntrinsicOperand::Register);
+    EXPECT_EQ(relu->body[0].operands[0].registerName, "src");
+    EXPECT_EQ(relu->body[0].operands[1].type, IntrinsicOperand::FloatLiteral);
+    EXPECT_DOUBLE_EQ(relu->body[0].operands[1].floatValue, 0.0);
 }
 
 TEST_F(IntrinsicFlowTest, CreateIntrinsicCall)
 {
-    // Create registers for ReluF32(dest=v0, src=v1, temp=v2)
+    // Create registers for ReluF32(dest=v0, src=v1)
     StinkyRegister v0(RegType::V, 0, 1);
     StinkyRegister v1(RegType::V, 1, 1);
-    StinkyRegister v2(RegType::V, 2, 1);
 
     // Create IntrinsicCall
-    std::vector<StinkyRegister> args = {v0, v1, v2};
+    std::vector<StinkyRegister> args = {v0, v1};
     IntrinsicCall*              call = new IntrinsicCall("ReluF32", args);
 
     EXPECT_EQ(call->getFunctionName(), "ReluF32");
     EXPECT_TRUE(call->isComposite());
     EXPECT_EQ(strcmp(call->getLogicalName(), "IntrinsicCall"), 0);
-    EXPECT_EQ(call->dests.size(), 3);
+    EXPECT_EQ(call->dests.size(), 2);
 
     delete call;
 }

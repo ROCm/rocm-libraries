@@ -74,7 +74,7 @@ namespace stinkytofu
             return functionName;
         }
 
-        bool isComposite() const override
+        bool isComposite() const
         {
             return true; // Needs expansion by IntrinsicExpansionPass
         }

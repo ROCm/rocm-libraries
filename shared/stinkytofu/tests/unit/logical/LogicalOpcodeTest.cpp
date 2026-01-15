@@ -41,42 +41,42 @@ TEST_F(IROpcodeTest, InstructionOpcodes)
     StinkyRegister v2 = vgpr(2);
 
     // Create some IR instructions and check their opcodes
-    auto add = std::make_shared<VAddF32>(v0, v1, v2);
-    EXPECT_EQ(add->getOpcode(), HLIR::VAddF32);
+    auto add = std::shared_ptr<LogicalInstruction>(VAddF32(v0, v1, v2));
+    EXPECT_EQ(add->getOpcode(), logical::VAddF32);
 
-    auto mul = std::make_shared<VMulF32>(v0, v1, v2);
-    EXPECT_EQ(mul->getOpcode(), HLIR::VMulF32);
+    auto mul = std::shared_ptr<LogicalInstruction>(VMulF32(v0, v1, v2));
+    EXPECT_EQ(mul->getOpcode(), logical::VMulF32);
 
-    auto fma = std::make_shared<VFmaF32>(v0, v1, v2, v0);
-    EXPECT_EQ(fma->getOpcode(), HLIR::VFmaF32);
+    auto fma = std::shared_ptr<LogicalInstruction>(VFmaF32(v0, v1, v2, v0));
+    EXPECT_EQ(fma->getOpcode(), logical::VFmaF32);
 
-    auto max = std::make_shared<VMaxF32>(v0, v1, v2);
-    EXPECT_EQ(max->getOpcode(), HLIR::VMaxF32);
+    auto max = std::shared_ptr<LogicalInstruction>(VMaxF32(v0, v1, v2));
+    EXPECT_EQ(max->getOpcode(), logical::VMaxF32);
 
-    auto mov = std::make_shared<VMovB32>(v0, v1);
-    EXPECT_EQ(mov->getOpcode(), HLIR::VMovB32);
+    auto mov = std::shared_ptr<LogicalInstruction>(VMovB32(v0, v1));
+    EXPECT_EQ(mov->getOpcode(), logical::VMovB32);
 }
 
 // Test: Opcode to name mapping
 TEST_F(IROpcodeTest, OpcodeToName)
 {
-    EXPECT_STREQ(HLIR::getOpcodeName(HLIR::UNKNOWN), "UNKNOWN");
-    EXPECT_STREQ(HLIR::getOpcodeName(HLIR::VAddF32), "VAddF32");
-    EXPECT_STREQ(HLIR::getOpcodeName(HLIR::VMulF32), "VMulF32");
-    EXPECT_STREQ(HLIR::getOpcodeName(HLIR::VFmaF32), "VFmaF32");
-    EXPECT_STREQ(HLIR::getOpcodeName(HLIR::VMaxF32), "VMaxF32");
-    EXPECT_STREQ(HLIR::getOpcodeName(HLIR::VMovB32), "VMovB32");
+    EXPECT_STREQ(logical::getOpcodeName(logical::UNKNOWN), "UNKNOWN");
+    EXPECT_STREQ(logical::getOpcodeName(logical::VAddF32), "VAddF32");
+    EXPECT_STREQ(logical::getOpcodeName(logical::VMulF32), "VMulF32");
+    EXPECT_STREQ(logical::getOpcodeName(logical::VFmaF32), "VFmaF32");
+    EXPECT_STREQ(logical::getOpcodeName(logical::VMaxF32), "VMaxF32");
+    EXPECT_STREQ(logical::getOpcodeName(logical::VMovB32), "VMovB32");
 }
 
 // Test: Opcode to mnemonic mapping
 TEST_F(IROpcodeTest, OpcodeToMnemonic)
 {
-    EXPECT_STREQ(HLIR::getOpcodeMnemonic(HLIR::UNKNOWN), "unknown");
-    EXPECT_STREQ(HLIR::getOpcodeMnemonic(HLIR::VAddF32), "v_add_f32");
-    EXPECT_STREQ(HLIR::getOpcodeMnemonic(HLIR::VMulF32), "v_mul_f32");
-    EXPECT_STREQ(HLIR::getOpcodeMnemonic(HLIR::VFmaF32), "v_fma_f32");
-    EXPECT_STREQ(HLIR::getOpcodeMnemonic(HLIR::VMaxF32), "v_max_f32");
-    EXPECT_STREQ(HLIR::getOpcodeMnemonic(HLIR::VMovB32), "v_mov_b32");
+    EXPECT_STREQ(logical::getOpcodeMnemonic(logical::UNKNOWN), "unknown");
+    EXPECT_STREQ(logical::getOpcodeMnemonic(logical::VAddF32), "v_add_f32");
+    EXPECT_STREQ(logical::getOpcodeMnemonic(logical::VMulF32), "v_mul_f32");
+    EXPECT_STREQ(logical::getOpcodeMnemonic(logical::VFmaF32), "v_fma_f32");
+    EXPECT_STREQ(logical::getOpcodeMnemonic(logical::VMaxF32), "v_max_f32");
+    EXPECT_STREQ(logical::getOpcodeMnemonic(logical::VMovB32), "v_mov_b32");
 }
 
 // Test: F16 variants
@@ -86,15 +86,15 @@ TEST_F(IROpcodeTest, F16Variants)
     StinkyRegister v1 = vgpr(1);
     StinkyRegister v2 = vgpr(2);
 
-    auto add = std::make_shared<VAddF16>(v0, v1, v2);
-    EXPECT_EQ(add->getOpcode(), HLIR::VAddF16);
-    EXPECT_STREQ(HLIR::getOpcodeName(HLIR::VAddF16), "VAddF16");
-    EXPECT_STREQ(HLIR::getOpcodeMnemonic(HLIR::VAddF16), "v_add_f16");
+    auto add = std::shared_ptr<LogicalInstruction>(VAddF16(v0, v1, v2));
+    EXPECT_EQ(add->getOpcode(), logical::VAddF16);
+    EXPECT_STREQ(logical::getOpcodeName(logical::VAddF16), "VAddF16");
+    EXPECT_STREQ(logical::getOpcodeMnemonic(logical::VAddF16), "v_add_f16");
 
-    auto mul = std::make_shared<VMulF16>(v0, v1, v2);
-    EXPECT_EQ(mul->getOpcode(), HLIR::VMulF16);
-    EXPECT_STREQ(HLIR::getOpcodeName(HLIR::VMulF16), "VMulF16");
-    EXPECT_STREQ(HLIR::getOpcodeMnemonic(HLIR::VMulF16), "v_mul_f16");
+    auto mul = std::shared_ptr<LogicalInstruction>(VMulF16(v0, v1, v2));
+    EXPECT_EQ(mul->getOpcode(), logical::VMulF16);
+    EXPECT_STREQ(logical::getOpcodeName(logical::VMulF16), "VMulF16");
+    EXPECT_STREQ(logical::getOpcodeMnemonic(logical::VMulF16), "v_mul_f16");
 }
 
 // Test: getLogicalName still works (backward compatibility)
@@ -104,9 +104,55 @@ TEST_F(IROpcodeTest, LogicalNameBackwardCompatibility)
     StinkyRegister v1 = vgpr(1);
     StinkyRegister v2 = vgpr(2);
 
-    auto add = std::make_shared<VAddF32>(v0, v1, v2);
+    auto add = std::shared_ptr<LogicalInstruction>(VAddF32(v0, v1, v2));
     EXPECT_STREQ(add->getLogicalName(), "VAddF32");
 
     // Logical name should match the opcode name
-    EXPECT_STREQ(add->getLogicalName(), HLIR::getOpcodeName(add->getOpcode()));
+    EXPECT_STREQ(add->getLogicalName(), logical::getOpcodeName(add->getOpcode()));
+}
+
+// Test: String to opcode parsing (CamelCase)
+TEST_F(IROpcodeTest, ParseOpcodeCamelCase)
+{
+    EXPECT_EQ(logical::parseOpcode("VAddF32"), logical::VAddF32);
+    EXPECT_EQ(logical::parseOpcode("VMulF32"), logical::VMulF32);
+    EXPECT_EQ(logical::parseOpcode("VMaxF32"), logical::VMaxF32);
+    EXPECT_EQ(logical::parseOpcode("VMinF32"), logical::VMinF32);
+    EXPECT_EQ(logical::parseOpcode("VCmpGTF32"), logical::VCmpGTF32);
+    EXPECT_EQ(logical::parseOpcode("VCndMaskB32"), logical::VCndMaskB32);
+    EXPECT_EQ(logical::parseOpcode("VMovB32"), logical::VMovB32);
+}
+
+// Test: String to opcode parsing (snake_case - using actual generated mnemonics)
+TEST_F(IROpcodeTest, ParseOpcodeSnakeCase)
+{
+    EXPECT_EQ(logical::parseOpcode("v_add_f32"), logical::VAddF32);
+    EXPECT_EQ(logical::parseOpcode("v_mul_f32"), logical::VMulF32);
+    EXPECT_EQ(logical::parseOpcode("v_max_f32"), logical::VMaxF32);
+    EXPECT_EQ(logical::parseOpcode("v_min_f32"), logical::VMinF32);
+    // Note: TableGen generates mnemonics with underscore between each capital letter
+    EXPECT_EQ(logical::parseOpcode("v_cmp_g_t_f32"), logical::VCmpGTF32);
+    EXPECT_EQ(logical::parseOpcode("v_cnd_mask_b32"), logical::VCndMaskB32);
+    EXPECT_EQ(logical::parseOpcode("v_mov_b32"), logical::VMovB32);
+}
+
+// Test: Parse unknown/invalid opcodes
+TEST_F(IROpcodeTest, ParseOpcodeInvalid)
+{
+    EXPECT_EQ(logical::parseOpcode("invalid_instruction"), logical::UNKNOWN);
+    EXPECT_EQ(logical::parseOpcode(""), logical::UNKNOWN);
+    EXPECT_EQ(logical::parseOpcode(nullptr), logical::UNKNOWN);
+    EXPECT_EQ(logical::parseOpcode("v_nonexistent_f32"), logical::UNKNOWN);
+}
+
+// Test: Round-trip conversion (opcode -> string -> opcode)
+TEST_F(IROpcodeTest, OpcodeRoundTrip)
+{
+    // Test with CamelCase
+    EXPECT_EQ(logical::parseOpcode(logical::getOpcodeName(logical::VAddF32)), logical::VAddF32);
+    EXPECT_EQ(logical::parseOpcode(logical::getOpcodeName(logical::VMaxF32)), logical::VMaxF32);
+
+    // Test with snake_case
+    EXPECT_EQ(logical::parseOpcode(logical::getOpcodeMnemonic(logical::VAddF32)), logical::VAddF32);
+    EXPECT_EQ(logical::parseOpcode(logical::getOpcodeMnemonic(logical::VMaxF32)), logical::VMaxF32);
 }

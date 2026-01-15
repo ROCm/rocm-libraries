@@ -15,7 +15,7 @@ Intrinsics are automatically available throughout StinkyTofu via the `IntrinsicR
 
 ### Step 1: Define Your Intrinsic
 
-Edit `lib/Intrinsics/Intrinsics.def`:
+Edit `lib/Intrinsics/Intrinsics.intrinsic`:
 
 ```
 intrinsic ReluF32 {
@@ -43,7 +43,7 @@ ninja
 ```
 
 The build system automatically:
-1. Parses `Intrinsics.def`
+1. Parses `Intrinsics.intrinsic`
 2. Compiles it to `intrinsics.st.bc` (binary format)
 3. Makes it available to the runtime
 
@@ -205,7 +205,7 @@ TEST_F(IntrinsicFlowTest, MyNewIntrinsic) {
 **Intrinsic not found at runtime:**
 - Rebuild: `ninja` in the build directory
 - Check `intrinsics.st.bc` was generated
-- Verify syntax in `Intrinsics.def`
+- Verify syntax in `Intrinsics.intrinsic`
 
 **Parse errors:**
 - Check matching braces `{ }`
@@ -220,4 +220,4 @@ TEST_F(IntrinsicFlowTest, MyNewIntrinsic) {
 
 - [Intrinsic System Design](../design/intrinsic-system.md) - Technical details
 - [IntrinsicRegistry API](../../include/ir/IntrinsicRegistry.hpp) - Runtime API
-- Example intrinsics: `lib/Intrinsics/Intrinsics.def`
+- Example intrinsics: `lib/Intrinsics/Intrinsics.intrinsic`
