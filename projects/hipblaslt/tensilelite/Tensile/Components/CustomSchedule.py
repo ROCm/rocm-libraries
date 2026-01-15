@@ -3297,8 +3297,7 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_160x128x64_TF32(kernel, useLDSTr, TLDS):
-    #'PackA0': [[-1, -1, -1, -1,-1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7]], # 50
-    #'PackB0': [[-1, -1, -1, -1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6]], # 40
+    print("Using CMS!!!!!!!!")
     kernel["MfmaInitCVgprs"] = True
 
     n_mfma = 120
@@ -3307,58 +3306,51 @@ def _get_schedule_160x128x64_TF32(kernel, useLDSTr, TLDS):
 
     syncs = SyncSchedule()
     syncCode = []
-    snops: list[tuple[int, SNop]] = []
-    snopCode = []
-    S4 = SNop(4)
     gr_inc_step = 0
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UsePLRPack"] = True
 
-        grinca = [0,1,2,3,4,5,6,7,8]
-        grincb = [9,10,12,13,14,15,16,17,18]
+        grinca = [0,0,1,1,2,2,3,3,4]
+        grincb = [4,5,5,6,6,7,7,8,8]
         lrsa   = [58]
-        lrsb   = [58]
+        lrsb   = [59]
         lwsa   = [118]
         lwsb   = [118]
 
-        pack_a = [0,0,0,0, 1,1,   2,2,2,2,
-                  3,3,3,3, 4,4,   5,5,5,5,
-                  6,6,6,6, 7,7,   8,8,8,8,
-                  9,9,9,9, 10,10, 11,11,11,11
+        pack_a = [0,0,1,1, 8,8, 9,9,10,10,
+                  2,2,3,3, 8,8, 11,11,12,12,
+                  4,4,5,5, 8,8, 13,13,14,14,
+                  6,6,7,7, 8,8, 15,15,16,16
                   ]
-        pack_b = [0,0,0,0, 1,1,   2,2,2,2,
-                  3,3,3,3, 4,4,   5,5,5,5,
-                  6,6,6,6, 7,7,   8,8,8,8,
-                  9,9,9,9, 10,10, 11,11,11,11,
-                  12,12,12,12, 13,13, 14,14,14,14
+        pack_b = [0,0,1,1, 10,10, 11,11,12,12,
+                  2,2,3,3, 10,10, 13,13,14,14,
+                  4,4,5,5, 10,10, 15,15,16,16,
+                  6,6,7,7, 10,10, 17,17,18,18,
+                  8,8,9,9, 10,10, 19,19,20,20
                   ]
         lra0   = [0,1,2,3,4,5,6,7]
         syncs.add(                 12, dscnt=4, comment="wait for LRA0 before pack to complete")
-        pack_a0 = [                i+13 for i in pack_a]
-        snops.extend([               (14, S4), (17, S4), (20, S4), (23, S4)])
+        pack_a0 = [                i+13 for i in pack_a]  ## last element = 13 + 16 = 29
 
         lrb0   = [               8,9,10,11,12,13,14,15,16,17]
         syncs.add(                                                   23, dscnt=0, barrier=True, comment="wait for LRB0 before pack to complete + barrier for GR")
-        pack_b0 = [                                                  i+28 for i in pack_b]
-        snops.extend([                                                 (29, S4), (32, S4), (35, S4), (38, S4), (41, S4)])
+        pack_b0 = [                                                  i+28 for i in pack_b]  ## last element = 28 + 20 = 48
 
-        gra    = [                                    24,28,32,36, 44,48,52,56] # one index for two instructions
-        grb    = [                                                             66,70,74,78, 88,92,96,100, 110,114] # one index for two instructions
+        gra    = [                                    24,28,32,36, 46,50,54,58] # one index for two instructions
+        grb    = [                                                             68,72,76,80, 90,94,98,102, 112,116] # one index for two instructions
         num_gr = len(gra) + len(grb)
 
         syncs.add(                                                            59, vlcnt=8, barrier=True, comment="wait for previous set of global reads")
 
         lra1   = [60,61,62,63,64,65,66,67]
         syncs.add(                          72, dscnt=4, comment="wait for LRA1 before pack to complete")
-        pack_a1 = [                         i+73 for i in pack_a]
-        snops.extend([                        (74, S4), (77, S4), (80, S4),(83, S4)])
+        pack_a1 = [                         i+73 for i in pack_a]  ## last element = 73 + 16 = 89
 
         lrb1   = [                        68,69,70,71,72,73,74,75,76,77]
         syncs.add(                                                            83, dscnt=0, comment="wait for LRB1 before pack to complete")
-        pack_b1 = [                                                           i+88 for i in pack_b]
-        snops.extend([                                                          (89, S4), (92, S4), (95, S4), (98, S4), (101, S4)])
+        pack_b1 = [                                                           i+88 for i in pack_b]  ## last element = 88 + 20 = 108
 
         optSchedule = {
             'SYNC':   [syncs.get_indicies()],
@@ -3383,11 +3375,8 @@ def _get_schedule_160x128x64_TF32(kernel, useLDSTr, TLDS):
 
         syncCode = syncs.get_code()
         nglshift = nllshift = num_gr
-        if snops:
-            optSchedule['SNOP'] = [ [s[0] for s in snops] ]
-            snopCode = [s[1] for s in snops]
 
-        opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift, snopCode=snopCode)
+        opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift)
         return True, opt1
 
     else:
