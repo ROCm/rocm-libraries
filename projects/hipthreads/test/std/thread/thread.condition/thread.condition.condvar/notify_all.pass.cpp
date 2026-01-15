@@ -14,27 +14,29 @@
 
 // void notify_all();
 
-#include <atomic>
-#include <condition_variable>
-#include <mutex>
+#include <hip/atomic>
+#include <hip/condition_variable>
+#include <hip/mutex>
 #include <hip/thread>
 #include <cassert>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-::std::condition_variable cv;
-::std::mutex mut;
+#include "force_include_hip.h"
 
-int test0 = 0;
-int test1 = 0;
-int test2 = 0;
+__device__ hip::spin_condition_variable cv;
+__device__ hip::spin_mutex mut;
 
-::std::atomic<int> ready_count(0);
+__device__ int test0 = 0;
+__device__ int test1 = 0;
+__device__ int test2 = 0;
 
-void f1()
+__device__ hip::std::atomic<int> ready_count(0);
+
+__device__ void f1()
 {
-    hip::unique_lock<::std::mutex> lk(mut);
+    hip::unique_lock<hip::spin_mutex> lk(mut);
     assert(test1 == 0);
     ready_count += 1;
     while (test1 == 0)
@@ -43,9 +45,9 @@ void f1()
     test1 = 2;
 }
 
-void f2()
+__device__ void f2()
 {
-    hip::unique_lock<::std::mutex> lk(mut);
+    hip::unique_lock<hip::spin_mutex> lk(mut);
     assert(test2 == 0);
     ready_count += 1;
     while (test2 == 0)
@@ -56,25 +58,26 @@ void f2()
 
 int main(int, char**)
 {
+#ifdef __HIP_DEVICE_COMPILE__
     hip::thread t1 = support::make_test_thread(f1);
     hip::thread t2 = support::make_test_thread(f2);
     while (ready_count.load() != 2) {
       hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(100));
     }
     {
-        hip::unique_lock<::std::mutex>lk(mut);
+        hip::unique_lock<hip::spin_mutex>lk(mut);
         test1 = 1;
         test2 = 1;
     }
     cv.notify_all();
     {
         hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(100));
-        hip::unique_lock<::std::mutex>lk(mut);
+        hip::unique_lock<hip::spin_mutex>lk(mut);
     }
     t1.join();
     t2.join();
     assert(test1 == 2);
     assert(test2 == 2);
-
+#endif
   return 0;
 }

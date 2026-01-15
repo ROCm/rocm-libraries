@@ -8,6 +8,7 @@
 
 // UNSUPPORTED: no-threads
 // UNSUPPORTED: c++03
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
 
 // <mutex>
 

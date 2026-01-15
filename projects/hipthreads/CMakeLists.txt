@@ -13,13 +13,14 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
+add_compile_options("-Wno-error=#warnings")
+
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld -stdlib=libc++")
 set(CMAKE_MODULE_LINKER_FLAGS_INIT "-fuse-ld=lld")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "-fuse-ld=lld")
 
 list(APPEND CMAKE_PREFIX_PATH /opt/rocm /opt/rocm/hip)
 find_package(hip REQUIRED)
-# find_package(libhipcxx REQUIRED)
 
 # Set compiler and linker
 set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})

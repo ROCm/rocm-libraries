@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++03, c++11, c++14
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
 
 // <mutex>
 
@@ -14,7 +15,7 @@
 
 // Make sure that the implicitly-generated CTAD works.
 
-#include <mutex>
+#include <hip/mutex>
 
 #include "checking_mutex.h"
 

@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: no-threads
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
 
 // <mutex>
 
@@ -14,7 +15,7 @@
 
 // mutex(const mutex&) = delete;
 
-#include <mutex>
+#include <hip/mutex>
 #include <type_traits>
 
-static_assert(!::std::is_copy_constructible<::std::mutex>::value, "");
+static_assert(!::std::is_copy_constructible<hip::spin_mutex>::value, "");

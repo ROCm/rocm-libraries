@@ -8,6 +8,8 @@
 
 // UNSUPPORTED: no-exceptions
 // UNSUPPORTED: no-threads
+// XFAIL: *
+// REASON: wait_for()/wait_until() with chrono is not yet implemented in hipThreads
 
 // <condition_variable>
 

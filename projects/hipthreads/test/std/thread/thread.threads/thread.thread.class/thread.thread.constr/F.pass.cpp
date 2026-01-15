@@ -6,6 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+// UNSUPPORTED: target={{.*}}
+// REASON: Test requires custom operator new/delete, exception handling, and std::vector - not supported in device code
+
 // <thread>
 
 // class thread

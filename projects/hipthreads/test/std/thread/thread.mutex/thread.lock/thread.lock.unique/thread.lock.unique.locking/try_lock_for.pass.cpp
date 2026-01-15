@@ -6,6 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+// XFAIL: *
+// REASON: unique_lock::try_lock_for() not yet implemented in hipThreads
+
 // <mutex>
 
 // template <class Mutex> class unique_lock;
@@ -16,6 +20,7 @@
 #include <cassert>
 #include <mutex>
 #include <system_error>
+#include <hip/mutex>
 
 #include "test_macros.h"
 #include "checking_mutex.h"

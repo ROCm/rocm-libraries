@@ -15,25 +15,27 @@
 // template <class Lock>
 //   void wait(Lock& lock);
 
-#include <condition_variable>
-#include <mutex>
+#include <hip/condition_variable>
+#include <hip/mutex>
 #include <hip/thread>
 #include <cassert>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-::std::condition_variable_any cv;
+#include "force_include_hip.h"
 
-typedef ::std::timed_mutex L0;
+__device__ hip::condition_variable_any cv;
+
+typedef hip::spin_mutex L0;
 typedef hip::unique_lock<L0> L1;
 
-L0 m0;
+__device__ L0 m0;
 
-int test1 = 0;
-int test2 = 0;
+__device__ int test1 = 0;
+__device__ int test2 = 0;
 
-void f()
+__device__ void f()
 {
     L1 lk(m0);
     assert(test2 == 0);
@@ -46,6 +48,7 @@ void f()
 
 int main(int, char**)
 {
+#ifdef __HIP_DEVICE_COMPILE__
     L1 lk(m0);
     hip::thread t = support::make_test_thread(f);
     assert(test1 == 0);
@@ -56,6 +59,7 @@ int main(int, char**)
     lk.unlock();
     cv.notify_one();
     t.join();
+#endif
 
   return 0;
 }

@@ -7,14 +7,17 @@
 //===----------------------------------------------------------------------===//
 //
 // UNSUPPORTED: no-threads
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
 
 // <mutex>
 
 // template <class L1, class L2, class... L3>
 //   int try_lock(L1&, L2&, L3&...);
 
-#include <mutex>
 #include <cassert>
+#include <hip/mutex>
+
+#include "force_include_hip.h"
 
 #include "test_macros.h"
 
@@ -23,17 +26,17 @@ class L0
     bool locked_;
 
 public:
-    L0() : locked_(false) {}
+    __host__ __device__ L0() : locked_(false) {}
 
-    bool try_lock()
+    __host__ __device__ bool try_lock()
     {
         locked_ = true;
         return locked_;
     }
 
-    void unlock() {locked_ = false;}
+    __host__ __device__ void unlock() {locked_ = false;}
 
-    bool locked() const {return locked_;}
+    __host__ __device__ bool locked() const {return locked_;}
 };
 
 class L1
@@ -41,17 +44,17 @@ class L1
     bool locked_;
 
 public:
-    L1() : locked_(false) {}
+    __host__ __device__ L1() : locked_(false) {}
 
-    bool try_lock()
+    __host__ __device__ bool try_lock()
     {
         locked_ = false;
         return locked_;
     }
 
-    void unlock() {locked_ = false;}
+    __host__ __device__ void unlock() {locked_ = false;}
 
-    bool locked() const {return locked_;}
+    __host__ __device__ bool locked() const {return locked_;}
 };
 
 class L2
@@ -74,24 +77,25 @@ public:
 
 int main(int, char**)
 {
+#ifdef __HIP_DEVICE_COMPILE__
     {
         L0 l0;
         L0 l1;
-        assert(::std::try_lock(l0, l1) == -1);
+        assert(hip::try_lock(l0, l1) == -1);
         assert(l0.locked());
         assert(l1.locked());
     }
     {
         L0 l0;
         L1 l1;
-        assert(::std::try_lock(l0, l1) == 1);
+        assert(hip::try_lock(l0, l1) == 1);
         assert(!l0.locked());
         assert(!l1.locked());
     }
     {
         L1 l0;
         L0 l1;
-        assert(::std::try_lock(l0, l1) == 0);
+        assert(hip::try_lock(l0, l1) == 0);
         assert(!l0.locked());
         assert(!l1.locked());
     }
@@ -130,7 +134,7 @@ int main(int, char**)
         L0 l0;
         L0 l1;
         L0 l2;
-        assert(::std::try_lock(l0, l1, l2) == -1);
+        assert(hip::try_lock(l0, l1, l2) == -1);
         assert(l0.locked());
         assert(l1.locked());
         assert(l2.locked());
@@ -139,7 +143,7 @@ int main(int, char**)
         L1 l0;
         L1 l1;
         L1 l2;
-        assert(::std::try_lock(l0, l1, l2) == 0);
+        assert(hip::try_lock(l0, l1, l2) == 0);
         assert(!l0.locked());
         assert(!l1.locked());
         assert(!l2.locked());
@@ -175,7 +179,7 @@ int main(int, char**)
         L0 l0;
         L0 l1;
         L1 l2;
-        assert(::std::try_lock(l0, l1, l2) == 2);
+        assert(hip::try_lock(l0, l1, l2) == 2);
         assert(!l0.locked());
         assert(!l1.locked());
         assert(!l2.locked());
@@ -184,7 +188,7 @@ int main(int, char**)
         L0 l0;
         L1 l1;
         L0 l2;
-        assert(::std::try_lock(l0, l1, l2) == 1);
+        assert(hip::try_lock(l0, l1, l2) == 1);
         assert(!l0.locked());
         assert(!l1.locked());
         assert(!l2.locked());
@@ -193,7 +197,7 @@ int main(int, char**)
         L1 l0;
         L0 l1;
         L0 l2;
-        assert(::std::try_lock(l0, l1, l2) == 0);
+        assert(hip::try_lock(l0, l1, l2) == 0);
         assert(!l0.locked());
         assert(!l1.locked());
         assert(!l2.locked());
@@ -252,7 +256,7 @@ int main(int, char**)
         L1 l0;
         L1 l1;
         L0 l2;
-        assert(::std::try_lock(l0, l1, l2) == 0);
+        assert(hip::try_lock(l0, l1, l2) == 0);
         assert(!l0.locked());
         assert(!l1.locked());
         assert(!l2.locked());
@@ -261,7 +265,7 @@ int main(int, char**)
         L1 l0;
         L0 l1;
         L1 l2;
-        assert(::std::try_lock(l0, l1, l2) == 0);
+        assert(hip::try_lock(l0, l1, l2) == 0);
         assert(!l0.locked());
         assert(!l1.locked());
         assert(!l2.locked());
@@ -270,7 +274,7 @@ int main(int, char**)
         L0 l0;
         L1 l1;
         L1 l2;
-        assert(::std::try_lock(l0, l1, l2) == 1);
+        assert(hip::try_lock(l0, l1, l2) == 1);
         assert(!l0.locked());
         assert(!l1.locked());
         assert(!l2.locked());
@@ -471,7 +475,7 @@ int main(int, char**)
         L0 l1;
         L0 l2;
         L0 l3;
-        assert(::std::try_lock(l0, l1, l2, l3) == -1);
+        assert(hip::try_lock(l0, l1, l2, l3) == -1);
         assert(l0.locked());
         assert(l1.locked());
         assert(l2.locked());
@@ -482,7 +486,7 @@ int main(int, char**)
         L0 l1;
         L0 l2;
         L0 l3;
-        assert(::std::try_lock(l0, l1, l2, l3) == 0);
+        assert(hip::try_lock(l0, l1, l2, l3) == 0);
         assert(!l0.locked());
         assert(!l1.locked());
         assert(!l2.locked());
@@ -493,7 +497,7 @@ int main(int, char**)
         L1 l1;
         L0 l2;
         L0 l3;
-        assert(::std::try_lock(l0, l1, l2, l3) == 1);
+        assert(hip::try_lock(l0, l1, l2, l3) == 1);
         assert(!l0.locked());
         assert(!l1.locked());
         assert(!l2.locked());
@@ -504,7 +508,7 @@ int main(int, char**)
         L0 l1;
         L1 l2;
         L0 l3;
-        assert(::std::try_lock(l0, l1, l2, l3) == 2);
+        assert(hip::try_lock(l0, l1, l2, l3) == 2);
         assert(!l0.locked());
         assert(!l1.locked());
         assert(!l2.locked());
@@ -515,13 +519,14 @@ int main(int, char**)
         L0 l1;
         L0 l2;
         L1 l3;
-        assert(::std::try_lock(l0, l1, l2, l3) == 3);
+        assert(hip::try_lock(l0, l1, l2, l3) == 3);
         assert(!l0.locked());
         assert(!l1.locked());
         assert(!l2.locked());
         assert(!l3.locked());
     }
 #endif // TEST_STD_VER >= 11
+#endif // __HIP_DEVICE_COMPILE__
 
   return 0;
 }

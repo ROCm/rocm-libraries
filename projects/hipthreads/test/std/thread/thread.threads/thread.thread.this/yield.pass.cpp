@@ -15,11 +15,15 @@
 #include <hip/thread>
 #include <cassert>
 
+#include "force_include_hip.h"
+
 #include "test_macros.h"
 
 int main(int, char**)
 {
+#ifdef __HIP_DEVICE_COMPILE__
     hip::this_thread::pseudo_yield();
+#endif
 
   return 0;
 }

@@ -7,6 +7,9 @@
 //===----------------------------------------------------------------------===//
 //
 // UNSUPPORTED: no-threads
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+// XFAIL: *
+// REASON: not yet implemented in hipThreads
 
 // <condition_variable>
 
@@ -19,8 +22,8 @@
 
 int main(int, char**)
 {
-    assert(static_cast<int>(::std::cv_status::no_timeout) == 0);
-    assert(static_cast<int>(::std::cv_status::timeout)    == 1);
+    assert(static_cast<int>(hip::cv_status::no_timeout) == 0);
+    assert(static_cast<int>(hip::cv_status::timeout)    == 1);
 
   return 0;
 }

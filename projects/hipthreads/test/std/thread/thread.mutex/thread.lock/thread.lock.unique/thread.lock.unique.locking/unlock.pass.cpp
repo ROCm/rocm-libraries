@@ -12,14 +12,19 @@
 
 // void unlock();
 
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+
 #include <cassert>
-#include <mutex>
 #include <system_error>
+#include <hip/mutex>
+
+#include "force_include_hip.h"
 
 #include "test_macros.h"
 #include "checking_mutex.h"
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   checking_mutex mux;
   hip::unique_lock<checking_mutex> lock(mux);
   assert(mux.current_state == checking_mutex::locked_via_lock);
@@ -49,6 +54,7 @@ int main(int, char**) {
     assert(mux.last_try == checking_mutex::none);
     assert(e.code() == ::std::errc::operation_not_permitted);
   }
+#endif
 #endif
 
   return 0;

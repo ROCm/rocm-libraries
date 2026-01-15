@@ -14,21 +14,23 @@
 
 // ~condition_variable_any();
 
-#include <condition_variable>
-#include <mutex>
+#include <hip/condition_variable>
+#include <hip/mutex>
 #include <hip/thread>
 #include <cassert>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-::std::condition_variable_any* cv;
-::std::mutex m;
+#include "force_include_hip.h"
 
-bool f_ready = false;
-bool g_ready = false;
+__device__ hip::condition_variable_any* cv;
+__device__ hip::spin_mutex m;
 
-void f()
+__device__ bool f_ready = false;
+__device__ bool g_ready = false;
+
+__device__ void f()
 {
     m.lock();
     f_ready = true;
@@ -37,7 +39,7 @@ void f()
     m.unlock();
 }
 
-void g()
+__device__ void g()
 {
     m.lock();
     g_ready = true;
@@ -49,7 +51,8 @@ void g()
 
 int main(int, char**)
 {
-    cv = new ::std::condition_variable_any;
+#ifdef __HIP_DEVICE_COMPILE__
+    cv = new hip::condition_variable_any;
     hip::thread th2 = support::make_test_thread(g);
     m.lock();
     while (!g_ready)
@@ -58,6 +61,7 @@ int main(int, char**)
     hip::thread th1 = support::make_test_thread(f);
     th1.join();
     th2.join();
+#endif
 
   return 0;
 }

@@ -7,6 +7,8 @@
 //===----------------------------------------------------------------------===//
 //
 // UNSUPPORTED: no-threads
+// XFAIL: *
+// REASON: not yet implemented in hipThreads
 
 // notify_all_at_thread_exit(...) requires move semantics to transfer the unique_lock.
 // UNSUPPORTED: c++03
@@ -32,6 +34,7 @@
 #include <memory>
 #include <mutex>
 #include <hip/thread>
+#include <hip/mutex>
 
 int condition_variable_lock_skipped_counter = 0;
 

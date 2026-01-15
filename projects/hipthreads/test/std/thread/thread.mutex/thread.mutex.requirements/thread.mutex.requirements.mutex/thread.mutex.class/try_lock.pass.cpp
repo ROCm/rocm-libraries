@@ -15,16 +15,20 @@
 
 // bool try_lock();
 
-#include <mutex>
 #include <cassert>
+#include <hip/mutex>
 #include <hip/thread>
+#include <hip/std/memory>
+
+#include "force_include_hip.h"
 
 #include "make_test_thread.h"
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   // Try to lock a mutex that is not locked yet. This should succeed.
   {
-    ::std::mutex m;
+    hip::spin_mutex m;
     bool succeeded = m.try_lock();
     assert(succeeded);
     m.unlock();
@@ -32,7 +36,8 @@ int main(int, char**) {
 
   // Try to lock a mutex that is already locked. This should fail.
   {
-    ::std::mutex m;
+    auto m_ptr = hip::std::make_unique<hip::spin_mutex>();
+    hip::spin_mutex &m = *m_ptr;
     m.lock();
 
     hip::thread t = support::make_test_thread([&] {
@@ -45,6 +50,7 @@ int main(int, char**) {
 
     m.unlock();
   }
+#endif
 
   return 0;
 }

@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: no-threads, c++03
-
 // <condition_variable>
 
 // class condition_variable_any;
@@ -15,14 +14,17 @@
 // template <class Lock, class Predicate>
 //   void wait(Lock& lock, Predicate pred);
 
-#include <condition_variable>
-#include <atomic>
 #include <cassert>
-#include <mutex>
+#include <hip/atomic>
+#include <hip/condition_variable>
+#include <hip/mutex>
 #include <hip/thread>
+#include <hip/std/memory>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
+
+#include "force_include_hip.h"
 
 template <class Mutex>
 struct MyLock : hip::unique_lock<Mutex> {
@@ -30,7 +32,7 @@ struct MyLock : hip::unique_lock<Mutex> {
 };
 
 template <class Lock>
-void test() {
+__device__ void test() {
   using Mutex = typename Lock::mutex_type;
 
   // Test unblocking via a call to notify_one() in another thread.
@@ -39,10 +41,14 @@ void test() {
   // spurious wakeup by updating the likely_spurious flag only immediately
   // before we perform the notification.
   {
-    ::std::atomic<bool> ready(false);
-    ::std::atomic<bool> likely_spurious(true);
-    ::std::condition_variable_any cv;
-    Mutex mutex;
+    auto ready_ptr = hip::std::make_unique<hip::std::atomic<bool>>(false);
+    auto likely_spurious_ptr = hip::std::make_unique<hip::std::atomic<bool>>(true);
+    auto cv_ptr = hip::std::make_unique<hip::condition_variable_any>();
+    auto mutex_ptr = hip::std::make_unique<Mutex>();
+    hip::std::atomic<bool> &ready = *ready_ptr;
+    hip::std::atomic<bool> &likely_spurious = *likely_spurious_ptr;
+    hip::condition_variable_any &cv = *cv_ptr;
+    Mutex &mutex = *mutex_ptr;
 
     hip::thread t1 = support::make_test_thread([&] {
       Lock lock(mutex);
@@ -63,7 +69,7 @@ void test() {
       lock.unlock();
       cv.notify_one();
     });
-
+    
     t2.join();
     t1.join();
   }
@@ -78,15 +84,19 @@ void test() {
   // taken. In particular, we do need to eventually ensure we get out of the wait
   // by standard means, so we actually wake up the thread at the end.
   {
-    ::std::atomic<bool> ready(false);
-    ::std::atomic<bool> awoken(false);
-    ::std::condition_variable_any cv;
-    Mutex mutex;
-
+    auto ready_ptr = hip::std::make_unique<hip::std::atomic<bool>>(false);
+    auto awoken_ptr = hip::std::make_unique<hip::std::atomic<bool>>(false);
+    auto cv_ptr = hip::std::make_unique<hip::condition_variable_any>();
+    auto mutex_ptr = hip::std::make_unique<Mutex>();
+    hip::std::atomic<bool> &ready = *ready_ptr;
+    hip::std::atomic<bool> &awoken = *awoken_ptr;
+    hip::condition_variable_any &cv = *cv_ptr;
+    Mutex &mutex = *mutex_ptr;
+    
     hip::thread t1 = support::make_test_thread([&] {
       Lock lock(mutex);
       ready = true;
-      cv.wait(lock, [&] { return true; });
+      cv.wait(lock, [] { return true; });
       awoken = true;
     });
 
@@ -112,6 +122,7 @@ void test() {
       // Whatever happened, actually awaken the condition variable to ensure the test finishes.
       cv.notify_one();
     });
+    
 
     t2.join();
     t1.join();
@@ -119,10 +130,13 @@ void test() {
 }
 
 int main(int, char**) {
-  test<hip::unique_lock<::std::mutex>>();
-  test<hip::unique_lock<::std::timed_mutex>>();
-  test<MyLock<::std::mutex>>();
-  test<MyLock<::std::timed_mutex>>();
+#ifdef __HIP_DEVICE_COMPILE__
+  test<hip::unique_lock<hip::spin_mutex>>();
+  test<MyLock<hip::spin_mutex>>();
+  // TODO: re-add testing using hip::timed_spin_mutex once we support it
+  // test<hip::unique_lock<hip::timed_spin_mutex>>();
+  // test<MyLock<hip::timed_spin_mutex>>();
+#endif
 
   return 0;
 }

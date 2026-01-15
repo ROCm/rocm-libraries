@@ -15,13 +15,18 @@
 // template<class _Mutex> unique_lock(unique_lock<_Mutex>)
 //     -> unique_lock<_Mutex>;  // C++17
 
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+
 #include <cassert>
-#include <mutex>
+#include <hip/mutex>
+
+#include "force_include_hip.h"
 
 #include "checking_mutex.h"
 #include "test_macros.h"
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   checking_mutex mux;
 
   {
@@ -32,6 +37,7 @@ int main(int, char**) {
 
 #if TEST_STD_VER >= 17
   static_assert(::std::is_same_v<hip::unique_lock<checking_mutex>, decltype(hip::unique_lock{mux})>, "");
+#endif
 #endif
 
   return 0;

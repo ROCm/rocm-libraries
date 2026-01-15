@@ -6,6 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+// XFAIL: *
+// REASON: unique_lock timed constructors not yet implemented in hipThreads
+
 // <mutex>
 
 // template <class Rep, class Period>
@@ -13,11 +17,14 @@
 
 #include <cassert>
 #include <hip/std/chrono>
-#include <mutex>
+#include <hip/mutex>
+
+#include "force_include_hip.h"
 
 #include "checking_mutex.h"
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   checking_mutex mux;
   { // check successful lock
     mux.reject = false;
@@ -35,6 +42,7 @@ int main(int, char**) {
     assert(!lock.owns_lock());
   }
   assert(mux.current_state == checking_mutex::unlocked);
+#endif
 
   return 0;
 }

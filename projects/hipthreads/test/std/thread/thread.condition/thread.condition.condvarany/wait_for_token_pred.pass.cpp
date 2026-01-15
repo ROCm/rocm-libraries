@@ -8,7 +8,8 @@
 //
 // UNSUPPORTED: no-threads
 // UNSUPPORTED: c++03, c++11, c++14, c++17
-// XFAIL: availability-synchronization_library-missing
+// REASON: wait_for() with chrono is not yet implemented in hipThreads
+// XFAIL: *
 
 // <condition_variable>
 

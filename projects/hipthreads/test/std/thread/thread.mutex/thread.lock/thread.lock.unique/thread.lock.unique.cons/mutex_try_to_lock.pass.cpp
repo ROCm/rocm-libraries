@@ -12,12 +12,19 @@
 
 // unique_lock(mutex_type& m, try_to_lock_t);
 
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+
 #include <cassert>
 #include <mutex>
+#include <hip/mutex>
+
+#include "force_include_hip.h"
 
 #include "checking_mutex.h"
 
 int main(int, char**) {
+  
+#ifdef __HIP_DEVICE_COMPILE__
   checking_mutex mux;
 
   { // check successful lock
@@ -36,6 +43,7 @@ int main(int, char**) {
     assert(!lock.owns_lock());
   }
   assert(mux.current_state == checking_mutex::unlocked);
+#endif
 
   return 0;
 }

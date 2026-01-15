@@ -12,27 +12,30 @@
 
 // Make sure hip::unique_lock works with ::std::mutex as expected.
 
-#include <atomic>
 #include <cassert>
 #include <mutex>
+#include <hip/atomic>
+#include <hip/mutex>
+
+#include "force_include_hip.h"
 
 #include "make_test_thread.h"
 
-::std::atomic<bool> keep_waiting;
-::std::atomic<bool> child_thread_locked;
-::std::mutex mux;
-bool main_thread_unlocked  = false;
-bool child_thread_unlocked = false;
+__device__ hip::std::atomic<bool> keep_waiting;
+__device__ hip::std::atomic<bool> child_thread_locked;
+__device__ hip::spin_mutex mux;
+__device__ bool main_thread_unlocked  = false;
+__device__ bool child_thread_unlocked = false;
 
-void lock_thread() {
-  hip::unique_lock<::std::mutex> lock(mux);
+__device__ void lock_thread() {
+  hip::unique_lock<hip::spin_mutex> lock(mux);
   assert(main_thread_unlocked);
   main_thread_unlocked  = false;
   child_thread_unlocked = true;
 }
 
-void try_lock_thread() {
-  hip::unique_lock<::std::mutex> lock(mux, ::std::try_to_lock_t());
+__device__ void try_lock_thread() {
+  hip::unique_lock<hip::spin_mutex> lock(mux, ::std::try_to_lock_t());
   assert(lock.owns_lock());
   child_thread_locked = true;
 
@@ -43,6 +46,7 @@ void try_lock_thread() {
 }
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   {
     mux.lock();
     hip::thread t        = support::make_test_thread(lock_thread);
@@ -64,6 +68,7 @@ int main(int, char**) {
     t.join();
     assert(child_thread_unlocked);
   }
+#endif
 
   return 0;
 }
