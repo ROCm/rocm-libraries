@@ -141,7 +141,7 @@ typing-extensions==4.12.2
     # via
     #   pydata-sphinx-theme
     #   pygithub
-urllib3==2.2.2
+urllib3==2.6.3
     # via
     #   pygithub
     #   requests
