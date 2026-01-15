@@ -210,6 +210,7 @@ std::vector<std::pair<std::string, size_t>>
 AllFFTForwardBackwardDataWorkspaceSize(const miopen::ExecutionContext& ctx,
                                        const miopen::conv::ProblemDescription& problem);
 
+MIOPEN_INTERNALS_EXPORT
 std::vector<miopen::solver::ConvSolution>
 FindAllDirectSolutions(const miopen::ExecutionContext& ctx,
                        const miopen::conv::ProblemDescription& problem,
@@ -235,6 +236,7 @@ FindImplicitGemmWrWAllSolutions(const miopen::ExecutionContext& ctx,
                                 const miopen::conv::ProblemDescription& problem,
                                 const miopen::AnyInvokeParams& invoke_ctx);
 
+MIOPEN_INTERNALS_EXPORT
 std::vector<miopen::solver::ConvSolution>
 FindAllBwdWrW2DSolutions(const miopen::ExecutionContext& ctx,
                          const miopen::conv::ProblemDescription& problem,
