@@ -425,6 +425,22 @@ struct problem_t {
 };
 
 /**
+ * @brief Struct to define various workgroup mapping parameters.
+ *
+ * Contains all the parameters needed to describe various workgroup mapping parameters.
+ */
+struct workgroup_mapping_t {
+  /// Workgroup mapping chunk size.
+  std::size_t wgmxccchunk = 0;
+
+  /// Workgroup mapping size.
+  std::size_t wgmxcc = 8;
+
+  /// Workgroup mapping size.
+  int32_t wgm = 1;
+};
+
+/**
  * @brief Get runtime options (always uses global singleton).
  *
  * @param config Configuration struct (unused, kept for API compatibility)
