@@ -231,7 +231,7 @@ namespace rocRollerTest::Graphs
                                               : std::vector<size_t>({});
 
         auto tagTensorA = m_command->addOperation(rocRoller::Operations::Tensor(
-            2, m_ta, m_problem.transA == "N" ? oneStridesN : oneStridesT)); // A
+            2, m_ta, {}, m_problem.transA == "N" ? oneStridesN : oneStridesT)); // A
         m_tagA          = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
         auto tagA       = m_tagA;
 
@@ -246,7 +246,7 @@ namespace rocRollerTest::Graphs
         }
 
         auto tagTensorB = m_command->addOperation(rocRoller::Operations::Tensor(
-            2, m_tb, m_problem.transB == "N" ? oneStridesN : oneStridesT)); // B
+            2, m_tb, {}, m_problem.transB == "N" ? oneStridesN : oneStridesT)); // B
         m_tagB          = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
         auto tagB       = m_tagB;
 
@@ -261,7 +261,7 @@ namespace rocRollerTest::Graphs
         }
 
         auto tagTensorC
-            = m_command->addOperation(rocRoller::Operations::Tensor(2, m_tc, oneStridesN)); // C
+            = m_command->addOperation(rocRoller::Operations::Tensor(2, m_tc, {}, oneStridesN)); // C
         m_tagC = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorC));
 
         auto tagScalarAlpha
@@ -296,7 +296,7 @@ namespace rocRollerTest::Graphs
         m_command->addOperation(std::move(execute));
 
         auto tagTensorD
-            = m_command->addOperation(rocRoller::Operations::Tensor(2, m_td, oneStridesN)); // D
+            = m_command->addOperation(rocRoller::Operations::Tensor(2, m_td, {}, oneStridesN)); // D
         m_command->addOperation(rocRoller::Operations::T_Store_Tiled(m_tagD, tagTensorD)); // D
 
         if(m_problem.streamK)
