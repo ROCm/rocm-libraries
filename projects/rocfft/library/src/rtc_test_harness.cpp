@@ -314,6 +314,7 @@ void write_standalone_test_harness(const Function& f, const std::string& src)
     main_file << rocfft_hip_h;
     main_file << rocfft_complex_h;
     main_file << gpubuf_h;
+    main_file << hip_object_wrapper_h;
     main_file << device_properties_h;
     main_file << rtc_kernel_h;
     main_file << rtc_kernel_cpp;
