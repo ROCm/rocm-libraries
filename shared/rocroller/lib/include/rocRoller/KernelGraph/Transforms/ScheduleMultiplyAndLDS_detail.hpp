@@ -114,14 +114,6 @@ namespace rocRoller::KernelGraph
         std::string showGroups(vec3 const& groups);
 
         /**
-         * Allows the multiply nodes to get a head start so that we can hide
-         * more of the arithmetic and global loads at the beginning of each
-         * subiter.
-         */
-        std::map<DataType, int> getMultiplyHeadStarts(KernelGraph&            graph,
-                                                      ParallelChainSet const& chainSet);
-
-        /**
          * Given groups of chains (grouped by node type), identifies which chains of different
          * types are parallel to each other. Returns sets of chains that each contain at least 2
          * chains and are parallel to each other.
@@ -169,6 +161,14 @@ namespace rocRoller::KernelGraph
             ChainTypes            multiplyTagTypes;
             std::vector<DataType> ldsChainTypes;
         };
+
+        /**
+         * Allows the multiply nodes to get a head start so that we can hide
+         * more of the arithmetic and global loads at the beginning of each
+         * subiter.
+         */
+        std::map<DataType, int> getMultiplyHeadStarts(KernelGraph&            graph,
+                                                      ParallelChainSet const& chainSet);
 
         std::vector<ParallelChainSet>
             identifyParallelMultiplyAndLDSChainsWithTypes(KernelGraph const& graph);
