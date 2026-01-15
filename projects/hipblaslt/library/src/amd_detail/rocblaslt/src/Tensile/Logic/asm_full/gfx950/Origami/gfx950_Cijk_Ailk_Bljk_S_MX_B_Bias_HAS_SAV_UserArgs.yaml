@@ -246,7 +246,7 @@
     StoreVectorWidth: 4
     StreamK: 3
     StreamKAtomic: 0
-    StreamKXCCMapping: 0
+    StreamKXCCMapping: 8
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -280,8 +280,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 06
-    WorkGroupMappingXCC: -1
+    WorkGroupMapping: 6
+    WorkGroupMappingXCC: 0
     WorkgroupMappingXCCGroup: 256
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]

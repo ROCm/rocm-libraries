@@ -33,7 +33,9 @@ public:
         miopenCreateTensorDescriptor(&dInputTensor);
         miopenCreateTensorDescriptor(&dOutputTensor);
 
-        data_type = (sizeof(Tgpu) == 4) ? miopenFloat : miopenHalf;
+        data_type = std::is_same_v<Tgpu, float>              ? miopenFloat
+                    : std::is_same_v<Tgpu, half_float::half> ? miopenHalf
+                                                             : miopenBFloat16;
     }
 
     int AddCmdLineArgs() override;
@@ -52,6 +54,7 @@ public:
     int RunBackwardGPU() override;
     int RunBackwardCPU();
 
+    Tref GetTolerance();
     int VerifyBackward() override;
     int VerifyForward() override;
     ~SoftmaxDriver() override
@@ -389,13 +392,24 @@ int SoftmaxDriver<Tgpu, Tref>::RunBackwardGPU()
 }
 
 template <typename Tgpu, typename Tref>
+Tref SoftmaxDriver<Tgpu, Tref>::GetTolerance()
+{
+    auto tolerance = data_type == miopenFloat ? 1e-3 : 5e-2;
+
+    // bf16 mantissa has 7 bits, by 3 bits shorter than fp16.
+    if(std::is_same<Tgpu, bfloat16>::value)
+        tolerance *= 8.0;
+    return tolerance;
+}
+
+template <typename Tgpu, typename Tref>
 int SoftmaxDriver<Tgpu, Tref>::VerifyForward()
 {
     mloSoftmaxForwardRunHost<Tgpu, Tref>(
         inputTensor, outputTensor, in.data(), outhost.data(), alpha, beta, algo, mode);
 
     auto error           = miopen::rms_range(outhost, out);
-    const Tref tolerance = data_type == miopenHalf ? 5e-2 : 1e-3; // 1e-6;
+    const Tref tolerance = GetTolerance();
     if(!std::isfinite(error) || error > tolerance)
     {
         std::cout << "Forward Softmax FAILED: " << error << std::endl;
@@ -429,7 +443,7 @@ int SoftmaxDriver<Tgpu, Tref>::VerifyBackward()
                                           mode);
 
     auto error           = miopen::rms_range(dinhost, din);
-    const Tref tolerance = data_type == miopenHalf ? 5e-2 : 1e-3; // 1e-6;
+    const Tref tolerance = GetTolerance();
 
     if(!std::isfinite(error) || error > tolerance)
     {
