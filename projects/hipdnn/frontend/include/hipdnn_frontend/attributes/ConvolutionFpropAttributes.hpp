@@ -199,6 +199,42 @@ public:
             &dilation,
             toSdkType(math_mode));
     }
+
+    static ConvFpropAttributes fromFlatBuffer(
+        const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes* fb,
+        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    {
+        ConvFpropAttributes attr;
+
+        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
+        attr.set_w(tensorMap.at(fb->w_tensor_uid()));
+        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
+
+        if(fb->pre_padding() != nullptr)
+        {
+            std::vector<int64_t> prePadding(fb->pre_padding()->begin(), fb->pre_padding()->end());
+            attr.set_pre_padding(std::move(prePadding));
+        }
+        if(fb->post_padding() != nullptr)
+        {
+            std::vector<int64_t> postPadding(fb->post_padding()->begin(),
+                                             fb->post_padding()->end());
+            attr.set_post_padding(std::move(postPadding));
+        }
+        if(fb->stride() != nullptr)
+        {
+            std::vector<int64_t> strideVec(fb->stride()->begin(), fb->stride()->end());
+            attr.set_stride(std::move(strideVec));
+        }
+        if(fb->dilation() != nullptr)
+        {
+            std::vector<int64_t> dilationVec(fb->dilation()->begin(), fb->dilation()->end());
+            attr.set_dilation(std::move(dilationVec));
+        }
+        attr.set_convolution_mode(fromSdkType(fb->conv_mode()));
+
+        return attr;
+    }
 };
 typedef ConvFpropAttributes Conv_fprop_attributes;
 } // namespace hipdnn_frontend::graph

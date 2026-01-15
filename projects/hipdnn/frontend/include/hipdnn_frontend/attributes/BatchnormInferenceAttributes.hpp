@@ -139,6 +139,22 @@ public:
             get_bias()->get_uid(),
             get_y()->get_uid());
     }
+
+    static BatchnormInferenceAttributes fromFlatBuffer(
+        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes* fb,
+        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    {
+        BatchnormInferenceAttributes attr;
+
+        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
+        attr.set_mean(tensorMap.at(fb->mean_tensor_uid()));
+        attr.set_inv_variance(tensorMap.at(fb->inv_variance_tensor_uid()));
+        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
+        attr.set_bias(tensorMap.at(fb->bias_tensor_uid()));
+        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
+
+        return attr;
+    }
 };
 typedef BatchnormInferenceAttributes Batchnorm_inference_attributes;
 } // namespace hipdnn_frontend::graph

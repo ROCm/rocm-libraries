@@ -104,3 +104,28 @@ Tests:
              HIPSPARSE_SPMM_COO_ALG3,
              HIPSPARSE_SPMM_COO_ALG4]
   filename: [Chebyshev4]
+
+- name: spmm_coo
+  category: pre_checkin
+  function: spmm_coo
+  indextype: *i64
+  precision: *double_only_precisions
+  M: 1
+  N: [26]
+  K: 1
+  alpha: [2.5]
+  alphai: [1.0]
+  beta: [1.5]
+  betai: [-1.0]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  orderB: [HIPSPARSE_ORDER_COL]
+  orderC: [HIPSPARSE_ORDER_COL]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT, 
+             HIPSPARSE_SPMM_COO_ALG1,
+             HIPSPARSE_SPMM_COO_ALG2,
+             HIPSPARSE_SPMM_COO_ALG3,
+             HIPSPARSE_SPMM_COO_ALG4]
+  filename: [nos1]
+  graph_test: true
