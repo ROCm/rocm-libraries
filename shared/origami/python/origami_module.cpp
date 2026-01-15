@@ -170,6 +170,11 @@ NB_MODULE(origami, m) {
         &hardware_t::get_hardware_for_device,
         "This gets a hardware object for a device.");
 
+  m.def("get_hardware_for_arch_name",
+        &hardware_t::get_hardware_for_arch_name,
+        "arch_name"_a,
+        "Create hardware object from architecture name string with default parameters.");
+
   m.def("datatype_to_bits", &origami::datatype_to_bits, "Return the number of bits in a datatype");
   m.def("string_to_datatype",
         &origami::string_to_datatype,

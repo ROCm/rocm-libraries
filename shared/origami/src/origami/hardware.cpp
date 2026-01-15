@@ -82,6 +82,59 @@ hardware_t hardware_t::get_hardware_for_device(int deviceId) {
   return get_hardware_for_properties(prop);
 }
 
+hardware_t hardware_t::get_hardware_for_arch_name(const std::string& arch_name) {
+  // Map of architecture names to their typical hardware properties
+  struct ArchProps {
+    int multiProcessorCount;
+    size_t sharedMemPerBlock;
+    size_t l2CacheSize;
+    int clockRate;  // in KHz
+  };
+
+  // These can not be obtained from hipDeviceProperties without a device but we may want to use
+  // origami Without having a device present. Therefore, encode relevant properties for architecture
+  // lookup
+  // In a map
+  static const std::unordered_map<std::string, ArchProps> arch_properties = {
+      //{NUM_CUS,LDS_SIZE,L2_cache_size,}
+      {"gfx90a", {110, 65536, 8388608, 1700000}},   // MI250X
+      {"gfx942", {304, 65536, 33554432, 2100000}},  // MI300X
+      {"gfx950", {256, 65536, 33554432, 2200000}},  // MI350X
+      {"gfx1201", {96, 65536, 6291456, 2500000}},   // Radeon 7900 XTX
+      {"gfx1100", {84, 65536, 5242880, 2400000}},   // Radeon 7900 XT
+      {"gfx1151", {12, 65536, 2097152, 2700000}}    // Radeon 780M
+  };
+
+  auto it = arch_properties.find(arch_name);
+  if (it == arch_properties.end()) {
+    throw std::runtime_error(
+        std::string("Attempting to create hardware for unsupported architecture: ") + arch_name);
+  }
+
+  // Validate architecture is recognized
+  auto arch_enum = arch_name_to_enum(arch_name);
+  if (arch_enum == architecture_t::Count) {
+    throw std::runtime_error(
+        std::string("Attempting to create hardware for unsupported architecture: ") + arch_name);
+  }
+
+  // Create hipDeviceProp_t with typical values for this architecture
+  hipDeviceProp_t prop = {};
+  const auto& props    = it->second;
+
+  strncpy(prop.gcnArchName, arch_name.c_str(), sizeof(prop.gcnArchName) - 1);
+  prop.multiProcessorCount = props.multiProcessorCount;
+  prop.sharedMemPerBlock   = props.sharedMemPerBlock;
+  prop.l2CacheSize         = props.l2CacheSize;
+  prop.clockRate           = props.clockRate;
+
+  auto constants       = get_arch_constants(arch_enum);
+  prop.memoryClockRate = prop.clockRate / constants.mem_clock_ratio;
+
+  // Use the existing constructor that takes hipDeviceProp_t
+  return hardware_t(prop);
+}
+
 bool hardware_t::is_hardware_supported(hipDeviceProp_t properties) {
   auto arch_name = get_before_first_colon(properties.gcnArchName);
   auto arch_enum = arch_name_to_enum(arch_name);

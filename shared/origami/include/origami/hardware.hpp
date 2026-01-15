@@ -125,11 +125,12 @@ class hardware_t {
 
   /**
    * @brief Map of matrix instruction latencies by architecture.
-   * 
+   *
    * Inline to prevent ODR violations when included in multiple shared libraries.
    * This ensures only one definition exists across all translation units. (PR#1862)
    */
-  static inline const std::unordered_map<architecture_t, std::unordered_map<matrix_instruction, size_t>>
+  static inline const std::unordered_map<architecture_t,
+                                         std::unordered_map<matrix_instruction, size_t>>
       INSTRUCTION_MAP = {
           // clang-format off
         {architecture_t::gfx90a,
@@ -447,6 +448,25 @@ class hardware_t {
    * @return hardware_t Configured hardware instance for the device
    */
   static hardware_t get_hardware_for_device(int deviceId);
+
+  /**
+   * @brief Create hardware_t instance from architecture name string with default parameters.
+   *
+   * Creates a hardware instance using typical/default values for the specified
+   * architecture. Useful for analytical modeling when actual hardware is not available.
+   * Uses representative values based on common SKUs for each architecture:
+   * - gfx90a: MI250X (110 CUs)
+   * - gfx942: MI300X (304 CUs)
+   * - gfx950: MI350X (256 CUs)
+   * - gfx1201: Radeon 7900 XTX (96 CUs)
+   * - gfx1100: Radeon 7900 XT (84 CUs)
+   * - gfx1151: Radeon 780M (12 CUs)
+   *
+   * @param arch_name Architecture name as string (e.g., "gfx942", "gfx950")
+   * @return hardware_t Configured hardware instance with default parameters
+   * @throws std::runtime_error if architecture is not supported
+   */
+  static hardware_t get_hardware_for_arch_name(const std::string& arch_name);
 
   /**
    * @brief Check if the hardware described by properties is supported.
