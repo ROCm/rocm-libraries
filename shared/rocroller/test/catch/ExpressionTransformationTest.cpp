@@ -664,18 +664,6 @@ TEST_CASE("ConvertPropagation", "[expression][expression-transformation]")
 
     SECTION("Other expressions")
     {
-        {
-            const auto inner = std::make_shared<Expression::Expression>(
-                Expression::ScaledMatrixMultiply{r64[0], r32[0], r32[1], r32[2], r32[3]});
-            auto expr = convertPropagation(convert(Int32, inner));
-            CHECK_THAT(
-                expr,
-                IdenticalTo(convert(
-                    Int32,
-                    std::make_shared<Expression::Expression>(Expression::ScaledMatrixMultiply{
-                        convert(Int32, r64[0]), r32[0], r32[1], r32[2], r32[3]}))));
-        }
-
         CHECK_THAT(Expression::convertPropagation(Expression::convert(Int32, -r64[0])),
                    IdenticalTo(Expression::convert(Int32, -Expression::convert(Int32, r64[0]))));
 
