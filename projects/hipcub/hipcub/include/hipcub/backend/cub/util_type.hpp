@@ -83,6 +83,9 @@ struct lazy_trait
     using type = Trait<Args...>;
 };
 
+template<int Value>
+using int_constant_t = _HIPCUB_STD::integral_constant<int, Value>;
+
 } // namespace detail
 
 END_HIPCUB_NAMESPACE
