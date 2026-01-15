@@ -4,9 +4,10 @@
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 ## (Unreleased) MIOpen 3.5.1 for ROCm 7.11.0
 ### Added
+* [BatchNorm] Added V3 batch normalization API with separate running statistics buffers (prevResultRunningMean/Variance and nextResultRunningMean/Variance)
 * New API entry-points `miopenBatchNormalizationForwardInferenceInvVariance` and
   `miopenBatchNormForwardInferenceActivationInvVariance` to support hipDNN.
-* Log level Info2 dumped to file (/tmp/miopen_error_<pid>) on error log or MIOpen throw.
+* Log level Info2 dumped to file (`/tmp/miopen_error_<pid>`) on error log or MIOpen throw.
 
 ### Optimized
 * Added `MIOPEN_SEARCH_CUTOFF` option which can reduce tuning times by skipping slow solvers and kernels

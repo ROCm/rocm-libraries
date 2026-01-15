@@ -96,90 +96,55 @@ INSTANTIATE_TEST_SUITE_P(,
 
 //--------------------------
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNchw)
+template <typename T1, typename T2>
+struct TypePair
 {
-    Tensor<float> inputTensor({1, 3, 224, 224});
-    Tensor<float> outputTensor({1, 3, 224, 224});
-    Tensor<float> biasTensor({1, 3});
-    Tensor<float> scaleTensor({1, 3});
-    Tensor<float> meanTensor({1, 3});
-    Tensor<float> varianceTensor({1, 3});
+    using First = T1;
+    using Second = T2;
+};
+
+using TypesFwdInferenceNchw = ::testing::Types<TypePair<float, float>,
+                                               TypePair<half, float>,
+                                               TypePair<hip_bfloat16, float>,
+                                               TypePair<double, double>,
+                                               TypePair<int8_t, float>>;
+
+template <class T>
+class CpuFpReferenceBatchnormFwdInferenceNchw : public ::testing::Test
+{
+};
+
+TYPED_TEST_SUITE(CpuFpReferenceBatchnormFwdInferenceNchw, TypesFwdInferenceNchw, );
+
+TYPED_TEST(CpuFpReferenceBatchnormFwdInferenceNchw, BatchnormFwdInferenceNchw)
+{
+    Tensor<typename TypeParam::First> inputTensor({1, 3, 224, 224});
+    Tensor<typename TypeParam::First> outputTensor({1, 3, 224, 224});
+    Tensor<typename TypeParam::Second> biasTensor({1, 3});
+    Tensor<typename TypeParam::Second> scaleTensor({1, 3});
+    Tensor<typename TypeParam::Second> meanTensor({1, 3});
+    Tensor<typename TypeParam::Second> varianceTensor({1, 3});
 
     CpuFpReferenceBatchnorm::fwdInference(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 }
 
-TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdInferenceNchw)
+using TypesFwdInferenceNhwc
+    = ::testing::Types<TypePair<float, float>, TypePair<half, hip_bfloat16>>;
+
+template <class T>
+class CpuFpReferenceBatchnormFwdInferenceNhwc : public ::testing::Test
 {
-    Tensor<hip_bfloat16> inputTensor({1, 3, 224, 224});
-    Tensor<hip_bfloat16> outputTensor({1, 3, 224, 224});
-    Tensor<float> biasTensor({1, 3});
-    Tensor<float> scaleTensor({1, 3});
-    Tensor<float> meanTensor({1, 3});
-    Tensor<float> varianceTensor({1, 3});
+};
 
-    CpuFpReferenceBatchnorm::fwdInference(
-        inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
-}
+TYPED_TEST_SUITE(CpuFpReferenceBatchnormFwdInferenceNhwc, TypesFwdInferenceNhwc, );
 
-TEST(TestCpuFpReferenceBatchnormFp16, BatchnormFwdInferenceNchw)
+TYPED_TEST(CpuFpReferenceBatchnormFwdInferenceNhwc, BatchnormFwdInferenceNhwc)
 {
-    Tensor<half> inputTensor({1, 3, 224, 224});
-    Tensor<half> outputTensor({1, 3, 224, 224});
-    Tensor<float> biasTensor({1, 3});
-    Tensor<float> scaleTensor({1, 3});
-    Tensor<float> meanTensor({1, 3});
-    Tensor<float> varianceTensor({1, 3});
-
-    CpuFpReferenceBatchnorm::fwdInference(
-        inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
-}
-
-TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdInferenceNchw)
-{
-    Tensor<double> inputTensor({1, 3, 224, 224});
-    Tensor<double> outputTensor({1, 3, 224, 224});
-    Tensor<double> biasTensor({1, 3});
-    Tensor<double> scaleTensor({1, 3});
-    Tensor<double> meanTensor({1, 3});
-    Tensor<double> varianceTensor({1, 3});
-
-    CpuFpReferenceBatchnorm::fwdInference(
-        inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
-}
-
-TEST(TestCpuFpReferenceBatchnormInt8, BatchnormFwdInferenceNchw)
-{
-    Tensor<int8_t> inputTensor({1, 3, 224, 224});
-    Tensor<int8_t> outputTensor({1, 3, 224, 224});
-    Tensor<float> biasTensor({1, 3});
-    Tensor<float> scaleTensor({1, 3});
-    Tensor<float> meanTensor({1, 3});
-    Tensor<float> varianceTensor({1, 3});
-
-    CpuFpReferenceBatchnorm::fwdInference(
-        inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
-}
-
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNhwc)
-{
-    Tensor<float> inputTensor({6, 3, 32, 32}, TensorLayout::NHWC);
-    Tensor<float> outputTensor({6, 3, 32, 32}, TensorLayout::NHWC);
-    Tensor<float> biasTensor({1, 3});
-    Tensor<float> scaleTensor({1, 3});
-    Tensor<float> meanTensor({1, 3});
-    Tensor<float> varianceTensor({1, 3});
-
-    CpuFpReferenceBatchnorm::fwdInference(
-        inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
-}
-
-TEST(TestCpuFpReferenceBatchnormMixedPrecision, BatchnormFwdInferenceNhwc)
-{
-    Tensor<half> inputTensor({6, 3, 32, 32}, TensorLayout::NHWC);
-    Tensor<half> outputTensor({6, 3, 32, 32}, TensorLayout::NHWC);
-    Tensor<hip_bfloat16> biasTensor({1, 3});
-    Tensor<hip_bfloat16> scaleTensor({1, 3});
+    Tensor<typename TypeParam::First> inputTensor({6, 3, 32, 32}, TensorLayout::NHWC);
+    Tensor<typename TypeParam::First> outputTensor({6, 3, 32, 32}, TensorLayout::NHWC);
+    Tensor<typename TypeParam::Second> biasTensor({1, 3});
+    Tensor<typename TypeParam::Second> scaleTensor({1, 3});
     Tensor<float> meanTensor({1, 3});
     Tensor<float> varianceTensor({1, 3});
 
@@ -323,121 +288,38 @@ TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdInferenceNdhwc)
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNchw)
+template <typename T1, typename T2, typename T3>
+struct TypeTriplet
 {
-    Tensor<float> xTensor({6, 3, 32, 32});
-    Tensor<float> dyTensor({6, 3, 32, 32});
-    Tensor<float> dxTensor({6, 3, 32, 32});
-    Tensor<float> scaleTensor({1, 3});
-    Tensor<float> meanTensor({1, 3});
-    Tensor<float> invVarianceTensor({1, 3});
-    Tensor<float> dscaleTensor({1, 3});
-    Tensor<float> dbiasTensor({1, 3});
+    using First = T1;
+    using Second = T2;
+    using Third = T3;
+};
 
-    CpuFpReferenceBatchnorm::backward(dyTensor,
-                                      xTensor,
-                                      meanTensor,
-                                      invVarianceTensor,
-                                      scaleTensor,
-                                      dxTensor,
-                                      dscaleTensor,
-                                      dbiasTensor);
-}
+using TypesBackwardNchw = ::testing::Types<TypeTriplet<float, float, float>,
+                                           TypeTriplet<hip_bfloat16, float, float>,
+                                           TypeTriplet<half, float, float>,
+                                           TypeTriplet<int8_t, float, float>,
+                                           TypeTriplet<half, hip_bfloat16, float>,
+                                           TypeTriplet<double, double, double>>;
 
-TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormBackwardNchw)
+template <typename T>
+class CpuFpReferenceBatchnormBackwardNchw : public ::testing::Test
 {
-    Tensor<hip_bfloat16> xTensor({6, 3, 32, 32});
-    Tensor<hip_bfloat16> dyTensor({6, 3, 32, 32});
-    Tensor<hip_bfloat16> dxTensor({6, 3, 32, 32});
-    Tensor<float> scaleTensor({1, 3});
-    Tensor<float> meanTensor({1, 3});
-    Tensor<float> invVarianceTensor({1, 3});
-    Tensor<float> dscaleTensor({1, 3});
-    Tensor<float> dbiasTensor({1, 3});
+};
 
-    CpuFpReferenceBatchnorm::backward(dyTensor,
-                                      xTensor,
-                                      meanTensor,
-                                      invVarianceTensor,
-                                      scaleTensor,
-                                      dxTensor,
-                                      dscaleTensor,
-                                      dbiasTensor);
-}
+TYPED_TEST_SUITE(CpuFpReferenceBatchnormBackwardNchw, TypesBackwardNchw, );
 
-TEST(TestCpuFpReferenceBatchnormFp16, BatchnormBackwardNchw)
+TYPED_TEST(CpuFpReferenceBatchnormBackwardNchw, BatchnormBackwardNchw)
 {
-    Tensor<half> xTensor({6, 3, 32, 32});
-    Tensor<half> dyTensor({6, 3, 32, 32});
-    Tensor<half> dxTensor({6, 3, 32, 32});
-    Tensor<float> scaleTensor({1, 3});
-    Tensor<float> meanTensor({1, 3});
-    Tensor<float> invVarianceTensor({1, 3});
-    Tensor<float> dscaleTensor({1, 3});
-    Tensor<float> dbiasTensor({1, 3});
-
-    CpuFpReferenceBatchnorm::backward(dyTensor,
-                                      xTensor,
-                                      meanTensor,
-                                      invVarianceTensor,
-                                      scaleTensor,
-                                      dxTensor,
-                                      dscaleTensor,
-                                      dbiasTensor);
-}
-
-TEST(TestCpuFpReferenceBatchnormInt8, BatchnormBackwardNchw)
-{
-    Tensor<int8_t> xTensor({6, 3, 32, 32});
-    Tensor<int8_t> dyTensor({6, 3, 32, 32});
-    Tensor<int8_t> dxTensor({6, 3, 32, 32});
-    Tensor<float> scaleTensor({1, 3});
-    Tensor<float> meanTensor({1, 3});
-    Tensor<float> invVarianceTensor({1, 3});
-    Tensor<float> dscaleTensor({1, 3});
-    Tensor<float> dbiasTensor({1, 3});
-
-    CpuFpReferenceBatchnorm::backward(dyTensor,
-                                      xTensor,
-                                      meanTensor,
-                                      invVarianceTensor,
-                                      scaleTensor,
-                                      dxTensor,
-                                      dscaleTensor,
-                                      dbiasTensor);
-}
-
-TEST(TestCpuFpReferenceBatchnormMixedPrecision, BatchnormBackwardNchw)
-{
-    Tensor<half> xTensor({6, 3, 32, 32});
-    Tensor<half> dyTensor({6, 3, 32, 32});
-    Tensor<half> dxTensor({6, 3, 32, 32});
-    Tensor<hip_bfloat16> scaleTensor({1, 3});
-    Tensor<float> meanTensor({1, 3});
-    Tensor<float> invVarianceTensor({1, 3});
-    Tensor<hip_bfloat16> dscaleTensor({1, 3});
-    Tensor<hip_bfloat16> dbiasTensor({1, 3});
-
-    CpuFpReferenceBatchnorm::backward(dyTensor,
-                                      xTensor,
-                                      meanTensor,
-                                      invVarianceTensor,
-                                      scaleTensor,
-                                      dxTensor,
-                                      dscaleTensor,
-                                      dbiasTensor);
-}
-
-TEST(TestCpuFpReferenceBatchnormFp64, BatchnormBackwardNchw)
-{
-    Tensor<double> xTensor({6, 3, 32, 32});
-    Tensor<double> dyTensor({6, 3, 32, 32});
-    Tensor<double> dxTensor({6, 3, 32, 32});
-    Tensor<double> scaleTensor({1, 3});
-    Tensor<double> meanTensor({1, 3});
-    Tensor<double> invVarianceTensor({1, 3});
-    Tensor<double> dscaleTensor({1, 3});
-    Tensor<double> dbiasTensor({1, 3});
+    Tensor<typename TypeParam::First> xTensor({6, 3, 32, 32});
+    Tensor<typename TypeParam::First> dyTensor({6, 3, 32, 32});
+    Tensor<typename TypeParam::First> dxTensor({6, 3, 32, 32});
+    Tensor<typename TypeParam::Second> scaleTensor({1, 3});
+    Tensor<typename TypeParam::Third> meanTensor({1, 3});
+    Tensor<typename TypeParam::Third> invVarianceTensor({1, 3});
+    Tensor<typename TypeParam::Second> dscaleTensor({1, 3});
+    Tensor<typename TypeParam::Second> dbiasTensor({1, 3});
 
     CpuFpReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
@@ -1070,124 +952,33 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwFullFeatures)
     }
 }
 
-TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdTrainingNchw)
-{
-    Tensor<hip_bfloat16> inputTensor({2, 3, 4, 4});
-    Tensor<hip_bfloat16> outputTensor({2, 3, 4, 4});
-    Tensor<float> scaleTensor({1, 3});
-    Tensor<float> biasTensor({1, 3});
-    Tensor<float> savedMean({1, 3});
-    Tensor<float> savedInvVariance({1, 3});
+using TypesFwdTrainingNhwc = ::testing::Types<TypeTriplet<hip_bfloat16, float, float>,
+                                              TypeTriplet<half, float, float>,
+                                              TypeTriplet<double, double, double>,
+                                              TypeTriplet<int8_t, double, double>,
+                                              TypeTriplet<half, hip_bfloat16, float>>;
 
-    inputTensor.fillWithValue(1.0_bf);
+template <typename T>
+class CpuFpReferenceBatchnromFwdTrainingNchw : public ::testing::Test
+{
+};
+
+TYPED_TEST_SUITE(CpuFpReferenceBatchnromFwdTrainingNchw, TypesFwdTrainingNhwc, );
+
+TYPED_TEST(CpuFpReferenceBatchnromFwdTrainingNchw, BatchnormFwdTrainingNchw)
+{
+    Tensor<typename TypeParam::First> inputTensor({2, 3, 4, 4});
+    Tensor<typename TypeParam::First> outputTensor({2, 3, 4, 4});
+    Tensor<typename TypeParam::Second> scaleTensor({1, 3});
+    Tensor<typename TypeParam::Second> biasTensor({1, 3});
+    Tensor<typename TypeParam::Third> savedMean({1, 3});
+    Tensor<typename TypeParam::Third> savedInvVariance({1, 3});
+
+    inputTensor.fillWithValue(static_cast<typename TypeParam::First>(1.0));
     for(int i = 0; i < 3; i++)
     {
-        scaleTensor.setHostValue(1.0f, 0, i);
-        biasTensor.setHostValue(0.0f, 0, i);
-    }
-
-    CpuFpReferenceBatchnorm::fwdTraining(inputTensor,
-                                         scaleTensor,
-                                         biasTensor,
-                                         outputTensor,
-                                         BATCHNORM_DEFAULT_EPSILON,
-                                         0.1,
-                                         &savedMean,
-                                         &savedInvVariance);
-}
-
-TEST(TestCpuFpReferenceBatchnormFp16, BatchnormFwdTrainingNchw)
-{
-    Tensor<half> inputTensor({2, 3, 4, 4});
-    Tensor<half> outputTensor({2, 3, 4, 4});
-    Tensor<float> scaleTensor({1, 3});
-    Tensor<float> biasTensor({1, 3});
-    Tensor<float> savedMean({1, 3});
-    Tensor<float> savedInvVariance({1, 3});
-
-    inputTensor.fillWithValue(1.0_h);
-    for(int i = 0; i < 3; i++)
-    {
-        scaleTensor.setHostValue(1.0f, 0, i);
-        biasTensor.setHostValue(0.0f, 0, i);
-    }
-
-    CpuFpReferenceBatchnorm::fwdTraining(inputTensor,
-                                         scaleTensor,
-                                         biasTensor,
-                                         outputTensor,
-                                         BATCHNORM_DEFAULT_EPSILON,
-                                         0.1,
-                                         &savedMean,
-                                         &savedInvVariance);
-}
-
-TEST(TestCpuFpReferenceBatchnormFp64, BatchnormFwdTrainingNchw)
-{
-    Tensor<double> inputTensor({2, 3, 4, 4});
-    Tensor<double> outputTensor({2, 3, 4, 4});
-    Tensor<double> scaleTensor({1, 3});
-    Tensor<double> biasTensor({1, 3});
-    Tensor<double> savedMean({1, 3});
-    Tensor<double> savedInvVariance({1, 3});
-
-    inputTensor.fillWithValue(1.0);
-    for(int i = 0; i < 3; i++)
-    {
-        scaleTensor.setHostValue(1.0, 0, i);
-        biasTensor.setHostValue(0.0, 0, i);
-    }
-
-    CpuFpReferenceBatchnorm::fwdTraining(inputTensor,
-                                         scaleTensor,
-                                         biasTensor,
-                                         outputTensor,
-                                         BATCHNORM_DEFAULT_EPSILON,
-                                         0.1,
-                                         &savedMean,
-                                         &savedInvVariance);
-}
-
-TEST(TestCpuFpReferenceBatchnormInt8, BatchnormFwdTrainingNchw)
-{
-    Tensor<int8_t> inputTensor({2, 3, 4, 4});
-    Tensor<int8_t> outputTensor({2, 3, 4, 4});
-    Tensor<double> scaleTensor({1, 3});
-    Tensor<double> biasTensor({1, 3});
-    Tensor<double> savedMean({1, 3});
-    Tensor<double> savedInvVariance({1, 3});
-
-    inputTensor.fillWithValue(1);
-    for(int i = 0; i < 3; i++)
-    {
-        scaleTensor.setHostValue(1.0, 0, i);
-        biasTensor.setHostValue(0.0, 0, i);
-    }
-
-    CpuFpReferenceBatchnorm::fwdTraining(inputTensor,
-                                         scaleTensor,
-                                         biasTensor,
-                                         outputTensor,
-                                         BATCHNORM_DEFAULT_EPSILON,
-                                         0.1,
-                                         &savedMean,
-                                         &savedInvVariance);
-}
-
-TEST(TestCpuFpReferenceBatchnormMixedPrecision, BatchnormFwdTrainingNchw)
-{
-    Tensor<half> inputTensor({2, 3, 4, 4});
-    Tensor<half> outputTensor({2, 3, 4, 4});
-    Tensor<hip_bfloat16> scaleTensor({1, 3});
-    Tensor<hip_bfloat16> biasTensor({1, 3});
-    Tensor<float> savedMean({1, 3});
-    Tensor<float> savedInvVariance({1, 3});
-
-    inputTensor.fillWithValue(1.0);
-    for(int i = 0; i < 3; i++)
-    {
-        scaleTensor.setHostValue(staticCast<hip_bfloat16>(1.0), 0, i);
-        biasTensor.setHostValue(staticCast<hip_bfloat16>(0.0), 0, i);
+        scaleTensor.setHostValue(static_cast<typename TypeParam::Second>(1.0), 0, i);
+        biasTensor.setHostValue(static_cast<typename TypeParam::Second>(0.0), 0, i);
     }
 
     CpuFpReferenceBatchnorm::fwdTraining(inputTensor,
