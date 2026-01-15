@@ -28,7 +28,7 @@ import unittest
 from Tensile.Components.CMSValidator import estimate_quad_cycles_precomputed, MFMA, Pack, precompute_issue_times, SNop, ValidatorInstruction
 
 class TestEstimateQuadCyclesValidator(unittest.TestCase):
-    def validate(self, instruction: ValidatorInstruction, expected_quad_cycles: int, all_instructions: list[ValidatorInstruction], is_4x4mfma: bool):
+    def validate(self, instruction: ValidatorInstruction, expected_quad_cycles: int, all_instructions: list[ValidatorInstruction], is_4x4mfma_tf32_packs: bool):
         """
         Helper method to validate quad-cycle estimation.
         
@@ -37,7 +37,7 @@ class TestEstimateQuadCyclesValidator(unittest.TestCase):
         2. Only the starting instruction has estimated_quad_cycles_before_result_used set to expected value  
         3. All other instructions have estimated_quad_cycles_before_result_used set to 0
         """
-        issue_times = precompute_issue_times(all_instructions, is_4x4mfma)
+        issue_times = precompute_issue_times(all_instructions, is_4x4mfma_tf32_packs)
         i_instruction = all_instructions.index(instruction)
         i_needed_by = all_instructions.index(instruction.needed_by)
         

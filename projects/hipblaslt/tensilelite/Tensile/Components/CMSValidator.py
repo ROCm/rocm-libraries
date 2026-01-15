@@ -1465,13 +1465,13 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
             
             _set_pack_needed_by(packs, pack_name, i_loop, mfma_reorder, mfmas_by_index, timeline.num_vmfma, kernel)
 
-def precompute_issue_times(instructions: list[ValidatorInstruction], is_4x4mfma: bool) -> list[int]:
+def precompute_issue_times(instructions: list[ValidatorInstruction], is_4x4mfma_tf32_packs: bool) -> list[int]:
     """
     Returns a list where issue_times[i] represents the quad-cycle when instruction i starts issuing.
     
     Args:
         instructions: List of ValidatorInstruction objects in execution order.
-        is_4x4mfma: True if using TF32 4x4 MFMA mode (affects Pack timing).
+        is_4x4mfma_tf32_packs: True if using TF32 4x4 MFMA mode (affects Pack timing).
     """
     class MFMAType(Enum):
         """Used for tracking type switching penalties in quad-cycle estimation."""
@@ -1490,7 +1490,7 @@ def precompute_issue_times(instructions: list[ValidatorInstruction], is_4x4mfma:
         """
         if isinstance(instruction, MFMA):
             return (MFMAType.STANDARD, 3)
-        if isinstance(instruction, Pack) and is_4x4mfma:
+        if isinstance(instruction, Pack) and is_4x4mfma_tf32_packs:
             idx_in_group = instruction.issue_index % 10
             if idx_in_group in [4, 5]:
                 return (MFMAType.MFMA_4X4, 1)
