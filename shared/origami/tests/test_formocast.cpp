@@ -78,41 +78,19 @@ Formocast::SizeMapping make_size_mapping(int MT0 = 128, int MT1 = 128, int depth
 TEST_CASE("Formocast: Hardware constants retrieval", "[formocast]") {
     Formocast simulator;
     
-    SECTION("gfx950 hardware constants") {
+    SECTION("gfx950 is supported") {
         auto hw = simulator.getHardwareConstants(hardware_t::architecture_t::gfx950);
-        
         REQUIRE(hw.architecture == hardware_t::architecture_t::gfx950);
-        REQUIRE(hw.NumCUs > 0);
-        REQUIRE(hw.wavefrontSize > 0);
-        REQUIRE(hw.L1CacheCapacity > 0);
-        REQUIRE(hw.L2CacheCapacity > 0);
-        REQUIRE(hw.L3CacheCapacity > 0);
-        REQUIRE(hw.math_frequency > 0);
-        REQUIRE(hw.mem_frequency > 0);
-        REQUIRE(hw.hbmBandWidth > 0);
     }
     
-    SECTION("gfx942 hardware constants") {
+    SECTION("gfx942 is supported") {
         auto hw = simulator.getHardwareConstants(hardware_t::architecture_t::gfx942);
-        
         REQUIRE(hw.architecture == hardware_t::architecture_t::gfx942);
-        REQUIRE(hw.NumCUs > 0);
-        REQUIRE(hw.wavefrontSize > 0);
-        REQUIRE(hw.L1CacheCapacity > 0);
-        REQUIRE(hw.L2CacheCapacity > 0);
-        REQUIRE(hw.L3CacheCapacity > 0);
-        REQUIRE(hw.math_frequency > 0);
-        REQUIRE(hw.mem_frequency > 0);
-        REQUIRE(hw.hbmBandWidth > 0);
     }
 
-    SECTION("gfx1201 hardware constants") {
+    SECTION("gfx1201 is supported") {
         auto hw = simulator.getHardwareConstants(hardware_t::architecture_t::gfx1201);
-        
         REQUIRE(hw.architecture == hardware_t::architecture_t::gfx1201);
-        REQUIRE(hw.NumCUs > 0);
-        REQUIRE(hw.wavefrontSize > 0);
-        REQUIRE(hw.L1CacheCapacity > 0);
     }
 
     SECTION("Unsupported architecture throws exception") {
@@ -188,9 +166,9 @@ TEST_CASE("Formocast: Performance prediction", "[formocast]") {
         
         auto perf = simulator.predictedPerformance();
         
-        REQUIRE(perf.microSeconds > 0);
-        REQUIRE(perf.hitRate >= 0);
-        REQUIRE(perf.hitRate <= 100);
+        // Check specific expected values for 2048x512x1024 on gfx942
+        REQUIRE(perf.microSeconds == Approx(68.640434).epsilon(0.01));
+        REQUIRE(perf.hitRate == Approx(70.0).epsilon(0.01));
     }
     
     SECTION("Performance prediction with batched problem") {
@@ -203,7 +181,9 @@ TEST_CASE("Formocast: Performance prediction", "[formocast]") {
         
         auto perf = simulator.predictedPerformance();
         
-        REQUIRE(perf.microSeconds > 0);
+        // Check specific expected values for batched 512x512x512 (4 batches)
+        REQUIRE(perf.microSeconds == Approx(23.165081).epsilon(0.01));
+        REQUIRE(perf.hitRate == Approx(62.5).epsilon(0.01));
     }
     
     SECTION("Performance prediction with GlobalSplitU") {
@@ -235,10 +215,8 @@ TEST_CASE("Formocast: Cache hit rate computation", "[formocast]") {
             256, 2, 2
         );
         
-        REQUIRE(l1_hit.tile0HitRate >= 0.0);
-        REQUIRE(l1_hit.tile0HitRate <= 1.0);
-        REQUIRE(l1_hit.tile1HitRate >= 0.0);
-        REQUIRE(l1_hit.tile1HitRate <= 1.0);
+        REQUIRE(l1_hit.tile0HitRate == Approx(0.5).epsilon(0.01));
+        REQUIRE(l1_hit.tile1HitRate == Approx(0.5).epsilon(0.01));
     }
     
     SECTION("L2 cache hit rate computation") {
@@ -252,12 +230,9 @@ TEST_CASE("Formocast: Cache hit rate computation", "[formocast]") {
             1024, 1024, 1024, hw, 1, 8, 1, 2, 2, 0, 0, false
         );
         
-        REQUIRE(l2_hit.totalHitRate >= 0.0);
-        REQUIRE(l2_hit.totalHitRate <= 1.0);
-        REQUIRE(l2_hit.tile0HitRate >= 0.0);
-        REQUIRE(l2_hit.tile0HitRate <= 1.0);
-        REQUIRE(l2_hit.tile1HitRate >= 0.0);
-        REQUIRE(l2_hit.tile1HitRate <= 1.0);
+        REQUIRE(l2_hit.totalHitRate == Approx(0.4375).epsilon(0.01));
+        REQUIRE(l2_hit.tile0HitRate == Approx(0.875).epsilon(0.01));
+        REQUIRE(l2_hit.tile1HitRate == Approx(0.0).epsilon(0.01));
     }
     
     SECTION("L3 cache hit rate computation") {
@@ -265,12 +240,9 @@ TEST_CASE("Formocast: Cache hit rate computation", "[formocast]") {
             1024, 1024, 1024, hw, 2, 2, 0, 0, 8, 8, 8, 8
         );
         
-        REQUIRE(l3_hit.totalHitRate >= 0.0);
-        REQUIRE(l3_hit.totalHitRate <= 1.0);
-        REQUIRE(l3_hit.tile0HitRate >= 0.0);
-        REQUIRE(l3_hit.tile0HitRate <= 1.0);
-        REQUIRE(l3_hit.tile1HitRate >= 0.0);
-        REQUIRE(l3_hit.tile1HitRate <= 1.0);
+        REQUIRE(l3_hit.totalHitRate == Approx(0.875).epsilon(0.01));
+        REQUIRE(l3_hit.tile0HitRate == Approx(0.875).epsilon(0.01));
+        REQUIRE(l3_hit.tile1HitRate == Approx(0.875).epsilon(0.01));
     }
 }
 
@@ -281,13 +253,14 @@ TEST_CASE("Formocast: Store performance calculation", "[formocast]") {
     auto hw = simulator.hw_consts;
     double store, store_edge;
     
-    SECTION("Calculate store performance for square problem") {
+    SECTION("Calculate store performance with edge case") {
+        // Use 1000x1000 which is not a multiple of 128, creating edge tiles
         simulator.calculateStorePerformance(
-            1024, 1024, 1, 128, 128, 4, 2, hw, 304, 38, store, store_edge
+            1000, 1000, 1, 128, 128, 4, 2, hw, 304, 38, store, store_edge
         );
         
-        REQUIRE(store > 0);
-        REQUIRE(store_edge >= 0);
+        REQUIRE(store == Approx(2.75062).epsilon(0.01));
+        REQUIRE(store_edge == Approx(7.01728).epsilon(0.01));
     }
     
     SECTION("Calculate store performance with different GWVWD") {
@@ -301,8 +274,12 @@ TEST_CASE("Formocast: Store performance calculation", "[formocast]") {
             1024, 1024, 1, 128, 128, 4, 2, hw, 304, 38, store2, store_edge2
         );
         
-        // GWVWD=1 should have higher cost (multiplied by 2)
+        // GWVWD=1 should have higher cost
         REQUIRE(store1 > store2);
+        
+        // Check specific expected values
+        REQUIRE(store1 == Approx(6.259750).epsilon(0.01));
+        REQUIRE(store2 == Approx(2.679505).epsilon(0.01));
     }
 }
 
@@ -371,25 +348,25 @@ TEST_CASE("Formocast: GSU overhead calculation", "[formocast]") {
     auto hw = simulator.hw_consts;
     
     SECTION("GSU overhead with MultipleBuffer method") {
-        double gsu_overhead = simulator.calculateGSUOverhead(
+        double gsu_overhead = simulator.calculateGlobalSplitUOverhead(
             1024, 1024, 1024, 1, 2, 2, // gsuMethod=2 (MultipleBuffer)
             problem, hw, 304, 38, 128, 128, 32, 1.0, 1.0
         );
         
-        REQUIRE(gsu_overhead >= 0);
+        REQUIRE(gsu_overhead == Approx(1.979094).epsilon(0.01));
     }
     
     SECTION("GSU overhead with MBSK method") {
-        double gsu_overhead = simulator.calculateGSUOverhead(
+        double gsu_overhead = simulator.calculateGlobalSplitUOverhead(
             1024, 1024, 1024, 1, 2, 3, // gsuMethod=3 (MBSK)
             problem, hw, 304, 38, 128, 128, 32, 1.0, 1.0
         );
         
-        REQUIRE(gsu_overhead >= 0);
+        REQUIRE(gsu_overhead == Approx(2.155789).epsilon(0.01));
     }
     
     SECTION("No GSU overhead when GlobalSplitU=1") {
-        double gsu_overhead = simulator.calculateGSUOverhead(
+        double gsu_overhead = simulator.calculateGlobalSplitUOverhead(
             1024, 1024, 1024, 1, 1, 2, // GlobalSplitU=1
             problem, hw, 304, 38, 128, 128, 32, 1.0, 1.0
         );
@@ -408,23 +385,27 @@ TEST_CASE("Formocast: LSU overhead calculation", "[formocast]") {
     auto hw = simulator.hw_consts;
     
     SECTION("LSU overhead calculation") {
-        double lsu_overhead = simulator.calculateLSUOverhead(
+        double lsu_overhead = simulator.calculateLocalSplitUOverhead(
             128, 128, 2, 4, 256, problem, hw
         );
         
-        REQUIRE(lsu_overhead >= 0);
+        REQUIRE(lsu_overhead == Approx(1.066667).epsilon(0.01));
     }
     
     SECTION("LSU overhead increases with larger LSU value") {
-        double lsu_overhead1 = simulator.calculateLSUOverhead(
+        double lsu_overhead1 = simulator.calculateLocalSplitUOverhead(
             128, 128, 2, 4, 256, problem, hw
         );
         
-        double lsu_overhead2 = simulator.calculateLSUOverhead(
+        double lsu_overhead2 = simulator.calculateLocalSplitUOverhead(
             128, 128, 4, 4, 256, problem, hw
         );
         
         REQUIRE(lsu_overhead2 > lsu_overhead1);
+        
+        // Check specific expected values
+        REQUIRE(lsu_overhead1 == Approx(1.066667).epsilon(0.01));
+        REQUIRE(lsu_overhead2 == Approx(1.351111).epsilon(0.01));
     }
 }
 
@@ -441,15 +422,15 @@ TEST_CASE("Formocast: Intermediate metrics calculation", "[formocast]") {
     SECTION("Calculate intermediate metrics") {
         auto metrics = simulator.calculateIntermediateMetrics();
         
-        REQUIRE(metrics.compute_cycles > 0);
-        REQUIRE(metrics.prefetch_cost >= 0);
-        REQUIRE(metrics.startup_cost >= 0);
-        REQUIRE(metrics.output_write_cost >= 0);
-        REQUIRE(metrics.output_write_cost_edge >= 0);
-        REQUIRE(metrics.split_accumulation_overhead >= 0);
-        REQUIRE(metrics.local_split_overhead >= 0);
-        REQUIRE(metrics.cache_hits.A_L1_hit >= 0.0);
-        REQUIRE(metrics.cache_hits.A_L1_hit <= 1.0);
+        REQUIRE(metrics.compute_cycles == Approx(2048.0).epsilon(0.01));
+        REQUIRE(metrics.prefetch_cost == Approx(0.557778).epsilon(0.01));
+        REQUIRE(metrics.startup_cost == Approx(2.6).epsilon(0.01));
+        REQUIRE(metrics.output_write_cost == Approx(1.202859).epsilon(0.01));
+        REQUIRE(metrics.output_write_cost_edge == Approx(0.0).epsilon(0.01));
+        REQUIRE(metrics.split_accumulation_overhead == Approx(0.0).epsilon(0.01));
+        REQUIRE(metrics.local_split_overhead == Approx(0.0).epsilon(0.01));
+        REQUIRE(metrics.cache_hits.A_L1_hit == Approx(0.5).epsilon(0.01));
+        REQUIRE(metrics.cache_hits.B_L1_hit == Approx(0.5).epsilon(0.01));
     }
     
     SECTION("Calculate final performance from intermediate metrics") {
@@ -514,13 +495,13 @@ TEST_CASE("Formocast: FIFO queue operations", "[formocast]") {
     
     SECTION("Check global read FIFO full") {
         std::queue<int> fifo;
-        int result = simulator.checkGlobalReadFIFOFull(100, fifo, 8, 4, false);
+        int result = simulator.getGlobalReadQueueFullStallCycles(100, fifo, 8, 4, false);
         REQUIRE(result >= 0);
     }
     
     SECTION("Check local read FIFO full") {
         std::queue<int> fifo;
-        int result = simulator.checkLocalReadFIFOFull(100, fifo, 8, 4, false, 1.0);
+        int result = simulator.getLocalReadQueueFullStallCycles(100, fifo, 8, 4, false, 1.0);
         REQUIRE(result >= 0);
     }
     
@@ -530,7 +511,7 @@ TEST_CASE("Formocast: FIFO queue operations", "[formocast]") {
         fifo.push(60);
         fifo.push(70);
         
-        int result = simulator.checkLocalReadFinished(100, fifo, 2);
+        int result = simulator.getLocalReadCompletionCycle(100, fifo, 2);
         REQUIRE(result >= 0);
     }
     
@@ -558,7 +539,7 @@ TEST_CASE("Formocast: Bank conflict analysis", "[formocast]") {
         // Create mock VGPR state for 64 threads
         std::vector<std::unordered_map<std::string, int64_t>> vgprState(64);
         
-        // Initialize with some test addresses
+        // Initialize with some test addresses (no conflicts in this pattern)
         for (int i = 0; i < 64; i++) {
             vgprState[i]["vgprLocalReadAddrA"] = i * 4;
             vgprState[i]["vgprLocalReadAddrB"] = i * 8;
@@ -568,8 +549,9 @@ TEST_CASE("Formocast: Bank conflict analysis", "[formocast]") {
             vgprState, "vgprLocalReadAddrA", "vgprLocalReadAddrB", 4, 8
         );
         
-        REQUIRE(result.ratioA >= 1.0);
-        REQUIRE(result.ratioB >= 1.0);
+        // Check specific expected values (no conflicts = 1.0)
+        REQUIRE(result.ratioA == Approx(1.0).epsilon(0.01));
+        REQUIRE(result.ratioB == Approx(1.0).epsilon(0.01));
     }
 }
 
@@ -646,12 +628,11 @@ TEST_CASE("Formocast: Occupancy resolution", "[formocast]") {
         // Calculate performance with occupancy = 2 (last parameter)
         double perf_occ2 = simulator.resolveOccupancy(hw, 100.0, 10.0, 50.0, 20.0, 2, 2);
         
-        // Both should be positive
-        REQUIRE(perf_occ1 > 0);
-        REQUIRE(perf_occ2 > 0);
-        
         // Higher occupancy should result in better or equal performance (lower value)
         REQUIRE(perf_occ2 <= perf_occ1);
+        
+        REQUIRE(perf_occ1 == Approx(201.7).epsilon(0.01));
+        REQUIRE(perf_occ2 == Approx(130.0).epsilon(0.01));
     }
     
     SECTION("NumTiles comparison: numTile=1 perf should be <= numTile=2 perf") {
@@ -661,12 +642,11 @@ TEST_CASE("Formocast: Occupancy resolution", "[formocast]") {
         // Calculate performance with numTile = 2, occupancy = 1
         double perf_tile2 = simulator.resolveOccupancy(hw, 100.0, 10.0, 50.0, 20.0, 2, 1);
         
-        // Both should be positive
-        REQUIRE(perf_tile1 > 0);
-        REQUIRE(perf_tile2 > 0);
-        
         // numTile=1 perf should be less than or equal to numTile=2 perf
         REQUIRE(perf_tile1 <= perf_tile2);
+        
+        REQUIRE(perf_tile1 == Approx(100.0).epsilon(0.01));
+        REQUIRE(perf_tile2 == Approx(201.7).epsilon(0.01));
     }
 }
 

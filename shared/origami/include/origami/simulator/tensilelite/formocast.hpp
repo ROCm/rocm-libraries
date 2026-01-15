@@ -14,7 +14,7 @@ namespace origami
     // Forward declarations
     class Formocast;
 
-    namespace Simulator
+    namespace simulator
     {
         // Load request calculation functions
         
@@ -52,10 +52,10 @@ namespace origami
         // GSU overhead calculation functions
         
         /**
-         * @brief Calculate memory-bound overhead for matrix operations
+         * @brief Calculate memory-bound overhead for matrix operations with Split K for multiple buffers
          * @param M Matrix dimension M
          * @param N Matrix dimension N
-         * @param GlobalSplitU Global split-U factor
+         * @param GlobalSplitU Global split-K factor
          * @param NumBatches Number of batches
          * @param bpeCompute Bytes per element for computation
          * @param bpeD Bytes per element for output matrix D
@@ -71,21 +71,47 @@ namespace origami
          * @param L2BusWidthPerCU L2 bus width per CU
          * @param L1WriteBusWidthPerCU L1 write bus width per CU
          * @param L2WriteBusWidthPerCU L2 write bus width per CU
-         * @return The calculated memory-bound overhead
+         * @return The calculated memory-bound overhead of Split K for multiple buffers
          */
-        double getMBOverhead(double M, double N, double GlobalSplitU, double NumBatches,
+        double getMultipleBufferOverhead(double M, double N, double GlobalSplitU, double NumBatches,
                             uint32_t bpeCompute, uint32_t bpeD, double hbmBandWidth,
                             double L1CacheLineSize, double NumCUs, double boost_frequency,
                             double mem_frequency, double L2WriteArbEff, double L2ReadArbEff,
                             double L3BandWidth, double L1BusWidthPerCU, double L2BusWidthPerCU,
                             double L1WriteBusWidthPerCU, double L2WriteBusWidthPerCU);
 
-        double getMBSKOverhead(double GlobalSplitU, double MT0, double MT1, uint32_t bpeCompute,
+        /**
+         * @brief Calculate overhead for multiple buffer single kernel (StreamK) Global Split K approach
+         * @param GlobalSplitU Global split-K factor
+         * @param MT0 Macro tile dimension 0 (M dimension)
+         * @param MT1 Macro tile dimension 1 (N dimension)
+         * @param bpeCompute Bytes per element for computation
+         * @param NumCUs Number of compute units
+         * @param numWGs Total number of workgroups
+         * @param boost_frequency Boost frequency in MHz
+         * @param L2ReadArbEff L2 read arbitration efficiency
+         * @param L1BusWidthPerCU L1 bus width per compute unit
+         * @param L2BusWidthPerCU L2 bus width per compute unit
+         * @param storeGSU Store overhead for Global Split K accumulation
+         * @return The calculated overhead for MBSK (Multiple Buffer Single Kernel) approach
+         */
+        double getMultipleBufferSingleKernelOverhead(double GlobalSplitU, double MT0, double MT1, uint32_t bpeCompute,
                               double NumCUs, uint32_t numWGs, double boost_frequency,
                               double L2ReadArbEff, double L1BusWidthPerCU, double L2BusWidthPerCU,
                               double storeGSU);
 
-        double getLSUOverhead(double MT0, double MT1, double lsu, uint32_t svw, 
+        /**
+         * @brief Calculate overhead for Local Split K operation
+         * @param MT0 Macro tile dimension 0 (M dimension)
+         * @param MT1 Macro tile dimension 1 (N dimension)
+         * @param lsu Local Split K factor (split along K dimension within workgroup)
+         * @param svw Store vector width
+         * @param numThreads Number of threads per workgroup
+         * @param bpeCompute Bytes per element for computation
+         * @param math_frequency Math frequency in MHz
+         * @return The calculated overhead for Local Split K accumulation and reduction
+         */
+        double getLocalSplitKOverhead(double MT0, double MT1, double lsu, uint32_t svw, 
                              uint32_t numThreads, uint32_t bpeCompute, double math_frequency);
 
         // Cache hit rate calculation functions
@@ -109,8 +135,6 @@ namespace origami
             double tile0HitRate;  ///< Hit rate for tile 0
             double tile1HitRate;  ///< Hit rate for tile 1
         };
-
-        struct HardwareConstants;  // Forward declaration
 
         /**
          * @brief Compute L1 cache hit rate for matrix operations
@@ -248,35 +272,35 @@ namespace origami
         // FIFO and queue simulation functions
         
         /**
-         * @brief Check if global read FIFO is full
+         * @brief Get stall cycles when global read queue is full
          * @param currentCycle Current simulation cycle
          * @param fifo FIFO queue to check
          * @param bpRead Bytes per read operation
          * @param numWaves Number of waves
          * @param isStall Whether the pipeline is stalled
-         * @return Stall cycles if FIFO is full, 0 otherwise
+         * @return Stall cycles if FIFO is full, currentCycle otherwise
          */
-        int checkGlobalReadFIFOFull(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, bool isStall);
+        int getGlobalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, bool isStall);
         
         /**
-         * @brief Check if local read operations have finished
+         * @brief Get the cycle when local read operations complete
          * @param currentCycle Current simulation cycle
          * @param fifo FIFO queue to check
          * @param numLR Number of local reads
-         * @return Cycle number when local reads finish
+         * @return Cycle number if local reads not completed, currentCycle otherwise
          */
-        int checkLocalReadFinished(int currentCycle, std::queue<int>& fifo, int numLR);
+        int getLocalReadCompletionCycle(int currentCycle, std::queue<int>& fifo, int numLR);
         
         /**
-         * @brief Check if local read FIFO is full
+         * @brief Get stall cycles when local read queue is full
          * @param currentCycle Current simulation cycle
          * @param fifo FIFO queue to check
          * @param bpRead Bytes per read operation
          * @param numWaves Number of waves
          * @param lrStallLatencyBuffer Local read stall latency buffer
-         * @return Stall cycles if FIFO is full, 0 otherwise
+         * @return Stall cycles if FIFO is full, currentCycle otherwise
          */
-        int checkLocalReadFIFOFull(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, int lrStallLatencyBuffer);
+        int getLocalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, int lrStallLatencyBuffer);
         
         /**
          * @brief Push a local read operation into the FIFO
@@ -314,6 +338,6 @@ namespace origami
             int BANK_WIDTH,
             int LocalReadBytesA);
 
-    } // namespace Simulator
+    } // namespace simulator
 } // namespace origami
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <origami/simulator/tensilelite/formocast.hpp>
-#include <origami/simulator/tensilelite/formocast_utils.hpp>
+#include <origami/math.hpp>
 
 #include <algorithm>
 #include <cassert>
@@ -13,10 +13,10 @@
 
 namespace origami
 {
-    namespace Simulator
+    namespace simulator
     {
-        using Utils::ceiling_math;
-        using Utils::ceilDivide;
+        using math::ceiling_math;
+        using math::safe_ceil_div;
 
         // Load request calculation functions
         /**
@@ -59,12 +59,12 @@ namespace origami
                 if(isSwizzled)
                 {
                     L1_req = MTX * DU * bpe / 64;
-                    L1_req *= ceilDivide(VW, uint32_t(2));
+                    L1_req *= safe_ceil_div(VW, uint32_t(2));
                 }
                 else
                 {
                     L1_req = MTX * DU * bpe / 64;
-                    tcc_ea0_coalesced = ceilDivide((uint32_t)L1CacheLineSize, (uint32_t)DU * bpe);
+                    tcc_ea0_coalesced = safe_ceil_div((uint32_t)L1CacheLineSize, (uint32_t)DU * bpe);
                     if(grvw * bpe == 8 || grvw * bpe <= 2)
                         L1_req *= 2;
                     if(dtv)
@@ -87,7 +87,7 @@ namespace origami
         }
 
         // GSU overhead calculation functions
-        double getMBOverhead(double M, double N, double GlobalSplitU, double NumBatches,
+        double getMultipleBufferOverhead(double M, double N, double GlobalSplitU, double NumBatches,
                             uint32_t bpeCompute, uint32_t bpeD, double hbmBandWidth,
                             double L1CacheLineSize, double NumCUs, double boost_frequency,
                             double mem_frequency, double L2WriteArbEff, double L2ReadArbEff,
@@ -119,7 +119,7 @@ namespace origami
             double write_l2_req = M * N * bpeOut / 64;
             double write_l3_req = write_l2_req;
 
-            double WGs = M * N / (1024);
+            double WGs = ceiling_math(M * N, 1024.0);
             WGs = std::min(NumCUs, WGs);
 
             double cu_freq  = boost_frequency;
@@ -151,7 +151,7 @@ namespace origami
             return GSU_mem_overall + store;
         }
 
-        double getMBSKOverhead(double GlobalSplitU, double MT0, double MT1, uint32_t bpeCompute,
+        double getMultipleBufferSingleKernelOverhead(double GlobalSplitU, double MT0, double MT1, uint32_t bpeCompute,
                               double NumCUs, uint32_t numWGs, double boost_frequency,
                               double L2ReadArbEff, double L1BusWidthPerCU, double L2BusWidthPerCU,
                               double storeGSU)
@@ -178,7 +178,7 @@ namespace origami
             return 0 + (GlobalSplitU * std::max(std::max(GSU_L1_clk/cu_freq, GSU_L2_clk/cu_freq), cost_overhead));
         }
 
-        double getLSUOverhead(double MT0, double MT1, double lsu, uint32_t svw, 
+        double getLocalSplitKOverhead(double MT0, double MT1, double lsu, uint32_t svw, 
                              uint32_t numThreads, uint32_t bpeCompute, double math_frequency)
         {
             if (lsu == 1) return 0.0;
@@ -253,7 +253,7 @@ namespace origami
                 if(DTVA)
                     A_L1_hit *= 4;
                 A_L1_hit = isL1BypassA ? 0: 1 - 1 / A_L1_hit;
-                A_L1_hit = isSwizzleA ? 1 - 1 / ceilDivide(VWA, uint32_t(2)) : A_L1_hit;
+                A_L1_hit = isSwizzleA ? 1 - 1 / safe_ceil_div(VWA, uint32_t(2)) : A_L1_hit;
             }
             else
             {
@@ -330,7 +330,7 @@ namespace origami
                 if(DTVB)
                     B_L1_hit *= 4;
                 B_L1_hit = isL1BypassB ? 0: 1 - 1 / B_L1_hit;
-                B_L1_hit = isSwizzleB ? 1 - 1 / ceilDivide(VWB, uint32_t(2)) : B_L1_hit;
+                B_L1_hit = isSwizzleB ? 1 - 1 / safe_ceil_div(VWB, uint32_t(2)) : B_L1_hit;
             }
 
             hr.tile0HitRate = A_L1_hit;
@@ -386,8 +386,8 @@ namespace origami
         {
             L2CacheHitRate hitRate;
 
-            uint32_t wg0 = ceilDivide(M, MT0);
-            uint32_t wg1 = ceilDivide(N, MT1);
+            uint32_t wg0 = safe_ceil_div(M, MT0);
+            uint32_t wg1 = safe_ceil_div(N, MT1);
 
             uint32_t MT0_Edge = MT0 - ((wg0 * MT0) - M);
             uint32_t MT1_Edge = MT1 - ((wg1 * MT1) - N);
@@ -788,7 +788,7 @@ namespace origami
         }
 
 
-        int checkGlobalReadFIFOFull(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, bool isStall)
+        int getGlobalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, bool isStall)
         {
             int finalCycle = currentCycle;
             int grStallLatencyBuffer;
@@ -819,7 +819,7 @@ namespace origami
             return finalCycle;
         }
 
-        int checkLocalReadFinished(int currentCycle, std::queue<int>& fifo, int numLR)
+        int getLocalReadCompletionCycle(int currentCycle, std::queue<int>& fifo, int numLR)
         {
             if(fifo.size() <= numLR)
                 return currentCycle;
@@ -843,7 +843,7 @@ namespace origami
             return finalCycle;
         }
 
-        int checkLocalReadFIFOFull(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, int lrStallLatencyBuffer)
+        int getLocalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, int lrStallLatencyBuffer)
         {
             int finalCycle = currentCycle;
 
@@ -857,7 +857,7 @@ namespace origami
                 } else {
                     // stall happens
                     int wavesPerFifo = 16 / numWaves;
-                    int stallCycles = ceilDivide(lrStallLatencyBuffer + 1, wavesPerFifo);
+                    int stallCycles = safe_ceil_div(lrStallLatencyBuffer + 1, wavesPerFifo);
                     finalCycle = std::max(currentCycle, fifo.back() + stallCycles);
                     fifo.pop();
                     fifo.push(finalCycle);
@@ -956,6 +956,6 @@ namespace origami
             
             return ratioA;
         }
-    }
-} // namespace Tensilelite
+    } // namespace simulator
+} // namespace origami
 
