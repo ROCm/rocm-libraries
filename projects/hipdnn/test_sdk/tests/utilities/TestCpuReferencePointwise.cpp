@@ -79,8 +79,8 @@ protected:
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_3));
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testBinarySubtractOperation()
@@ -99,8 +99,8 @@ protected:
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_3));
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testBinaryAddOperationSanityValidation()
@@ -109,32 +109,58 @@ protected:
         Tensor<Input2Type> input2({1, 1, 2, 2});
         Tensor<OutputType> output({1, 1, 2, 2});
 
-        input1.setHostValue(static_cast<Input1Type>(PI), 0, 0, 0, 0); // π
-        input1.setHostValue(static_cast<Input1Type>(E), 0, 0, 0, 1); // e
-        input1.setHostValue(static_cast<Input1Type>(SQRT_2), 0, 0, 1, 0); // √2
-        input1.setHostValue(static_cast<Input1Type>(GOLDEN_RATIO), 0, 0, 1, 1); // φ (golden ratio)
+        // Create expected tensor with computed results
+        Tensor<OutputType> expected({1, 1, 2, 2});
 
-        input2.setHostValue(static_cast<Input2Type>(LN_2), 0, 0, 0, 0); // ln(2)
-        input2.setHostValue(static_cast<Input2Type>(std::sin(1.0f)), 0, 0, 0, 1);
-        input2.setHostValue(static_cast<Input2Type>(std::cos(1.0f)), 0, 0, 1, 0);
-        input2.setHostValue(static_cast<Input2Type>(std::tan(1.0f)), 0, 0, 1, 1);
+        if constexpr(std::is_integral_v<Input1Type> || std::is_integral_v<Input2Type>)
+        {
+            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0);
+            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 1);
+            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_3), 0, 0, 1, 0);
+            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_4), 0, 0, 1, 1);
+
+            input2.setHostValue(static_cast<Input2Type>(-TEST_VALUE_4), 0, 0, 0, 0);
+            input2.setHostValue(static_cast<Input2Type>(-TEST_VALUE_3), 0, 0, 0, 1);
+            input2.setHostValue(static_cast<Input2Type>(-TEST_VALUE_2), 0, 0, 1, 0);
+            input2.setHostValue(static_cast<Input2Type>(-TEST_VALUE_1), 0, 0, 1, 1);
+
+            expected.setHostValue(
+                static_cast<OutputType>(TEST_VALUE_1 + (-TEST_VALUE_4)), 0, 0, 0, 0);
+            expected.setHostValue(
+                static_cast<OutputType>(TEST_VALUE_2 + (-TEST_VALUE_3)), 0, 0, 0, 1);
+            expected.setHostValue(
+                static_cast<OutputType>(TEST_VALUE_3 + (-TEST_VALUE_2)), 0, 0, 1, 0);
+            expected.setHostValue(
+                static_cast<OutputType>(TEST_VALUE_4 + (-TEST_VALUE_1)), 0, 0, 1, 1);
+        }
+        else
+        {
+            input1.setHostValue(static_cast<Input1Type>(PI), 0, 0, 0, 0); // π
+            input1.setHostValue(static_cast<Input1Type>(E), 0, 0, 0, 1); // e
+            input1.setHostValue(static_cast<Input1Type>(SQRT_2), 0, 0, 1, 0); // √2
+            input1.setHostValue(
+                static_cast<Input1Type>(GOLDEN_RATIO), 0, 0, 1, 1); // φ (golden ratio)
+
+            input2.setHostValue(static_cast<Input2Type>(LN_2), 0, 0, 0, 0); // ln(2)
+            input2.setHostValue(static_cast<Input2Type>(std::sin(1.0f)), 0, 0, 0, 1);
+            input2.setHostValue(static_cast<Input2Type>(std::cos(1.0f)), 0, 0, 1, 0);
+            input2.setHostValue(static_cast<Input2Type>(std::tan(1.0f)), 0, 0, 1, 1);
+
+            expected.setHostValue(static_cast<OutputType>(PI + LN_2), 0, 0, 0, 0); // π + ln(2)
+            expected.setHostValue(
+                static_cast<OutputType>(E + std::sin(1.0f)), 0, 0, 0, 1); // e + sin(1)
+            expected.setHostValue(
+                static_cast<OutputType>(SQRT_2 + std::cos(1.0f)), 0, 0, 1, 0); // √2 + cos(1)
+            expected.setHostValue(
+                static_cast<OutputType>(GOLDEN_RATIO + std::tan(1.0f)), 0, 0, 1, 1); // φ + tan(1)
+        }
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::ADD, output, input1, input2);
 
-        // Create expected tensor with computed results
-        Tensor<OutputType> expected({1, 1, 2, 2});
-        expected.setHostValue(static_cast<OutputType>(PI + LN_2), 0, 0, 0, 0); // π + ln(2)
-        expected.setHostValue(
-            static_cast<OutputType>(E + std::sin(1.0f)), 0, 0, 0, 1); // e + sin(1)
-        expected.setHostValue(
-            static_cast<OutputType>(SQRT_2 + std::cos(1.0f)), 0, 0, 1, 0); // √2 + cos(1)
-        expected.setHostValue(
-            static_cast<OutputType>(GOLDEN_RATIO + std::tan(1.0f)), 0, 0, 1, 1); // φ + tan(1)
-
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testBinarySubtractOperationSanityValidation()
@@ -143,35 +169,63 @@ protected:
         Tensor<Input2Type> input2({1, 1, 2, 2});
         Tensor<OutputType> output({1, 1, 2, 2});
 
-        input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_2 * PI), 0, 0, 0, 0); // 2π
-        input1.setHostValue(static_cast<Input1Type>(E * E), 0, 0, 0, 1); // e²
-        input1.setHostValue(static_cast<Input1Type>(SQRT_5), 0, 0, 1, 0); // √5
-        input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // Simple test value
+        // Create expected tensor with computed results
+        Tensor<OutputType> expected({1, 1, 2, 2});
 
-        input2.setHostValue(static_cast<Input2Type>(PI / TEST_VALUE_2), 0, 0, 0, 0); // π/2
-        input2.setHostValue(static_cast<Input2Type>(E), 0, 0, 0, 1); // e
-        input2.setHostValue(static_cast<Input2Type>(SQRT_3), 0, 0, 1, 0); // √3
-        input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // Simple test value
+        if constexpr(std::is_integral_v<Input1Type> || std::is_integral_v<Input2Type>)
+        {
+            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0);
+            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 1);
+            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_3), 0, 0, 1, 0);
+            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_4), 0, 0, 1, 1);
+
+            input2.setHostValue(static_cast<Input2Type>(-TEST_VALUE_4), 0, 0, 0, 0);
+            input2.setHostValue(static_cast<Input2Type>(-TEST_VALUE_3), 0, 0, 0, 1);
+            input2.setHostValue(static_cast<Input2Type>(-TEST_VALUE_2), 0, 0, 1, 0);
+            input2.setHostValue(static_cast<Input2Type>(-TEST_VALUE_1), 0, 0, 1, 1);
+
+            expected.setHostValue(
+                static_cast<OutputType>(TEST_VALUE_1 - (-TEST_VALUE_4)), 0, 0, 0, 0);
+            expected.setHostValue(
+                static_cast<OutputType>(TEST_VALUE_2 - (-TEST_VALUE_3)), 0, 0, 0, 1);
+            expected.setHostValue(
+                static_cast<OutputType>(TEST_VALUE_3 - (-TEST_VALUE_2)), 0, 0, 1, 0);
+            expected.setHostValue(
+                static_cast<OutputType>(TEST_VALUE_4 - (-TEST_VALUE_1)), 0, 0, 1, 1);
+        }
+        else
+        {
+            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_2 * PI), 0, 0, 0, 0); // 2π
+            input1.setHostValue(static_cast<Input1Type>(E * E), 0, 0, 0, 1); // e²
+            input1.setHostValue(static_cast<Input1Type>(SQRT_5), 0, 0, 1, 0); // √5
+            input1.setHostValue(
+                static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 1, 1); // Simple test value
+
+            input2.setHostValue(static_cast<Input2Type>(PI / TEST_VALUE_2), 0, 0, 0, 0); // π/2
+            input2.setHostValue(static_cast<Input2Type>(E), 0, 0, 0, 1); // e
+            input2.setHostValue(static_cast<Input2Type>(SQRT_3), 0, 0, 1, 0); // √3
+            input2.setHostValue(
+                static_cast<Input2Type>(TEST_VALUE_1), 0, 0, 1, 1); // Simple test value
+
+            expected.setHostValue(
+                static_cast<OutputType>((TEST_VALUE_2 * PI) - (PI / TEST_VALUE_2)),
+                0,
+                0,
+                0,
+                0); // 2π - π/2 = 3π/2
+            expected.setHostValue(static_cast<OutputType>((E * E) - E), 0, 0, 0,
+                                  1); // e² - e
+            expected.setHostValue(static_cast<OutputType>(SQRT_5 - SQRT_3), 0, 0, 1, 0); // √5 - √3
+            expected.setHostValue(
+                static_cast<OutputType>(TEST_VALUE_2 - TEST_VALUE_1), 0, 0, 1, 1); // 2 - 1
+        }
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::SUB, output, input1, input2);
 
-        // Create expected tensor with computed results
-        Tensor<OutputType> expected({1, 1, 2, 2});
-        expected.setHostValue(static_cast<OutputType>((TEST_VALUE_2 * PI) - (PI / TEST_VALUE_2)),
-                              0,
-                              0,
-                              0,
-                              0); // 2π - π/2 = 3π/2
-        expected.setHostValue(static_cast<OutputType>((E * E) - E), 0, 0, 0,
-                              1); // e² - e
-        expected.setHostValue(static_cast<OutputType>(SQRT_5 - SQRT_3), 0, 0, 1, 0); // √5 - √3
-        expected.setHostValue(
-            static_cast<OutputType>(TEST_VALUE_2 - TEST_VALUE_1), 0, 0, 1, 1); // 2 - 1
-
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testBinaryAddOperation3D()
@@ -190,8 +244,8 @@ protected:
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_4));
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testBinarySingleElementTensors()
@@ -200,19 +254,30 @@ protected:
         Tensor<Input2Type> input2({1, 1, 1, 1});
         Tensor<OutputType> output({1, 1, 1, 1});
 
-        input1.setHostValue(static_cast<Input1Type>(E * E), 0, 0, 0, 0); // e²
-        input2.setHostValue(static_cast<Input2Type>(E), 0, 0, 0, 0); // e
+        Tensor<OutputType> expected({1, 1, 1, 1});
+
+        if constexpr(std::is_integral_v<Input1Type> || std::is_integral_v<Input2Type>)
+        {
+            input1.setHostValue(static_cast<Input1Type>(TEST_VALUE_2), 0, 0, 0, 0);
+            input2.setHostValue(static_cast<Input2Type>(TEST_VALUE_5), 0, 0, 0, 0);
+
+            expected.setHostValue(static_cast<OutputType>(TEST_VALUE_2 - TEST_VALUE_5), 0, 0, 0, 0);
+        }
+        else
+        {
+            input1.setHostValue(static_cast<Input1Type>(E * E), 0, 0, 0, 0); // e²
+            input2.setHostValue(static_cast<Input2Type>(E), 0, 0, 0, 0); // e
+
+            expected.setHostValue(static_cast<OutputType>((E * E) - E), 0, 0, 0,
+                                  0); // e² - e
+        }
 
         CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
             PointwiseMode::SUB, output, input1, input2);
 
-        Tensor<OutputType> expected({1, 1, 1, 1});
-        expected.setHostValue(static_cast<OutputType>((E * E) - E), 0, 0, 0,
-                              0); // e² - e
-
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testBinaryNumericalPrecision()
@@ -232,8 +297,8 @@ protected:
             static_cast<OutputType>(PRECISION_TEST_A + PRECISION_TEST_B), 0, 0, 0, 0);
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testElementwise1D()
@@ -260,8 +325,8 @@ protected:
         expected.setHostValue(static_cast<OutputType>(static_cast<float>(13)), 4);
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testBroadcast2Dx1D()
@@ -302,8 +367,8 @@ protected:
         }
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testBroadcast3D()
@@ -337,8 +402,8 @@ protected:
         }
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testBroadcast3DImplicitLeading()
@@ -373,8 +438,8 @@ protected:
         }
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     // Test case: 4D × 4D: [N,C,H,W] + [1,C,1,1] → broadcast to [N,C,H,W]
@@ -424,8 +489,8 @@ protected:
         }
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     // Test case: Complex N-D broadcasting: [2,1,3,1] + [1,2,1,4] → [2,2,3,4]
@@ -478,8 +543,8 @@ protected:
         }
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testBroadcast5D()
@@ -542,8 +607,8 @@ protected:
         }
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     // ======================= UNARY OPERATIONS =======================
@@ -588,8 +653,8 @@ protected:
             static_cast<OutputType>(TEST_VALUE_1_5), 0, 2, 1, 1); // max(0, 1.5) = 1.5
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testReluBackwardOperation()
@@ -665,8 +730,8 @@ protected:
                               1); // dy=3.0, x=1.5>0: dx=3.0*1=3.0
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testParameterizedReluForwardOperation()
@@ -720,8 +785,8 @@ protected:
         expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1), 0, 1, 1, 1); // 1.0 (in range)
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testParameterizedReluBackwardOperation()
@@ -804,8 +869,8 @@ protected:
         }
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testSigmoidForwardOperation()
@@ -870,8 +935,8 @@ protected:
                               1); // sigmoid(1.5)
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testSigmoidBackwardOperation()
@@ -928,8 +993,8 @@ protected:
         }
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testTanhForwardOperation()
@@ -969,8 +1034,8 @@ protected:
             static_cast<OutputType>(std::tanh(TEST_VALUE_1_5)), 0, 1, 1, 1); // tanh(1.5)
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testTanhBackwardOperation()
@@ -1025,8 +1090,8 @@ protected:
         }
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testAbsoluteValueOperation()
@@ -1066,8 +1131,8 @@ protected:
             static_cast<OutputType>(std::abs(-TEST_VALUE_4)), 0, 1, 1, 1); // |-4| = 4
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testNegationOperation()
@@ -1100,8 +1165,8 @@ protected:
         expected.setHostValue(static_cast<OutputType>(TEST_VALUE_4), 0, 1, 1, 1); // -(-4) = 4
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testUnary1DOperation()
@@ -1128,8 +1193,8 @@ protected:
         expected.setHostValue(static_cast<OutputType>(2.0f), 4); // max(0, 2) = 2
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testUnary2DOperation()
@@ -1162,8 +1227,8 @@ protected:
         }
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testUnary3DOperation()
@@ -1181,8 +1246,8 @@ protected:
         expected.fillWithValue(static_cast<OutputType>(TEST_VALUE_2_5));
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testUnarySingleElementTensor()
@@ -1200,8 +1265,8 @@ protected:
         expected.setHostValue(static_cast<OutputType>(std::tanh(E)), 0, 0, 0, 0);
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 
     void testIdentityOperation()
@@ -1234,12 +1299,12 @@ protected:
         expected.setHostValue(static_cast<OutputType>(SQRT_2), 0, 1, 1, 1); // √2
 
         auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
     }
 };
 
-using TestTypes = ::testing::Types<float, half, hip_bfloat16, double>;
+using TestTypes = ::testing::Types<float, half, hip_bfloat16, double, int8_t>;
 // Empty third argument required for C++17 compatibility with TYPED_TEST_SUITE macro
 TYPED_TEST_SUITE(CpuReferencePointwiseFixture, TestTypes, );
 
@@ -1271,6 +1336,12 @@ TYPED_TEST(CpuReferencePointwiseFixture, BinarySingleElementTensors)
 
 TYPED_TEST(CpuReferencePointwiseFixture, BinaryNumericalPrecision)
 {
+    // This test uses fractional precision test values,
+    // which don't make sense for integer types since they'd be truncated to 0.
+    if constexpr(std::is_integral_v<TypeParam>)
+    {
+        GTEST_SKIP() << "Skipping numerical precision test for integer types";
+    }
     this->testBinaryNumericalPrecision();
 }
 

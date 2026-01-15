@@ -51,23 +51,24 @@ namespace detail
 {
 
 template<class Config,
+         class Selector,
          class InputIterator,
          class OutputIterator,
          class OffsetIterator,
          class ResultType,
          class BinaryFunction>
-inline hipError_t launch_segmented_arg_minmax(::rocprim::detail::target_arch arch,
-                                              InputIterator                  input,
-                                              OutputIterator                 output,
-                                              OffsetIterator                 begin_offsets,
-                                              OffsetIterator                 end_offsets,
-                                              BinaryFunction                 reduce_op,
-                                              ResultType                     initial_value,
-                                              ResultType                     empty_value,
-                                              dim3                           grid,
-                                              dim3                           block,
-                                              size_t                         shmem,
-                                              hipStream_t                    stream)
+inline hipError_t launch_segmented_arg_minmax(::rocprim::detail::target current_target,
+                                              InputIterator             input,
+                                              OutputIterator            output,
+                                              OffsetIterator            begin_offsets,
+                                              OffsetIterator            end_offsets,
+                                              BinaryFunction            reduce_op,
+                                              ResultType                initial_value,
+                                              ResultType                empty_value,
+                                              dim3                      grid,
+                                              dim3                      block,
+                                              size_t                    shmem,
+                                              hipStream_t               stream)
 {
     auto kernel = [=](auto arch_config)
     {
@@ -103,7 +104,12 @@ inline hipError_t launch_segmented_arg_minmax(::rocprim::detail::target_arch arc
         }
     };
 
-    return ::rocprim::detail::execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
+    return ::rocprim::detail::execute_launch_plan<Config, Selector>(current_target,
+                                                                    kernel,
+                                                                    grid,
+                                                                    block,
+                                                                    shmem,
+                                                                    stream);
 }
 
 /// Dispatch function similar to \p rocprim::segmented_reduce but writes \p empty_value for empty
@@ -129,17 +135,24 @@ inline hipError_t segmented_arg_minmax(void*          temporary_storage,
     using input_type  = typename std::iterator_traits<InputIterator>::value_type;
     using result_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
 
-    using config = ::rocprim::detail::wrapped_reduce_config<Config, result_type>;
+    using selector = ::rocprim::detail::segmented_reduce_config_selector<result_type>;
 
     ::rocprim::detail::target_arch target_arch;
-    hipError_t                     result = host_target_arch(stream, target_arch);
+    hipError_t result = ::rocprim::detail::host_target_arch(stream, target_arch);
     if(result != hipSuccess)
     {
         return result;
     }
-    const ::rocprim::detail::reduce_config_params params
-        = ::rocprim::detail::dispatch_target_arch<config, false>(target_arch);
+    ::rocprim::detail::gpu target_gpu;
+    result = ::rocprim::detail::host_target_gpu(stream, target_gpu);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
 
+    const ::rocprim::detail::target current_target(target_arch, target_gpu);
+
+    const auto         params = ::rocprim::detail::get_config<selector>(Config{}, current_target);
     const unsigned int block_size = params.kernel_config.block_size;
 
     if(temporary_storage == nullptr)
@@ -160,18 +173,18 @@ inline hipError_t segmented_arg_minmax(void*          temporary_storage,
         start = std::chrono::high_resolution_clock::now();
     }
     ROCPRIM_RETURN_ON_ERROR(
-        launch_segmented_arg_minmax<config>(target_arch,
-                                            input,
-                                            output,
-                                            begin_offsets,
-                                            end_offsets,
-                                            reduce_op,
-                                            static_cast<result_type>(initial_value),
-                                            static_cast<result_type>(empty_value),
-                                            dim3(segments),
-                                            dim3(block_size),
-                                            0,
-                                            stream));
+        launch_segmented_arg_minmax<Config, selector>(current_target,
+                                                      input,
+                                                      output,
+                                                      begin_offsets,
+                                                      end_offsets,
+                                                      reduce_op,
+                                                      static_cast<result_type>(initial_value),
+                                                      static_cast<result_type>(empty_value),
+                                                      dim3(segments),
+                                                      dim3(block_size),
+                                                      0,
+                                                      stream));
     HIPCUB_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_arg_minmax", segments, start);
 
     return hipSuccess;

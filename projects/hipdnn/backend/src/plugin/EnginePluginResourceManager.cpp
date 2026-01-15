@@ -16,6 +16,7 @@
 #include "descriptors/VariantDescriptor.hpp"
 #include "logging/Logging.hpp"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <spdlog/fmt/ranges.h>
 
 namespace hipdnn_backend
 {
@@ -140,20 +141,75 @@ EnginePluginResourceManager::EnginePluginResourceManager()
 EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EnginePluginManager> pm)
     : _pm(std::move(pm))
 {
+    // Helper to safely destroy a handle during error cleanup, logging any failures
+    auto safeDestroyHandle = [](const EnginePlugin* plugin, hipdnnEnginePluginHandle_t handle) {
+        try
+        {
+            plugin->destroyHandle(handle);
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_LOG_WARN("Failed to destroy handle for plugin '{}' during cleanup: {}",
+                            plugin->name(),
+                            e.what());
+        }
+        catch(...)
+        {
+            HIPDNN_LOG_WARN(
+                "Failed to destroy handle for plugin '{}' during cleanup: unknown error",
+                plugin->name());
+        }
+    };
+
     // Create plugin handles
     const auto& plugins = _pm->getPlugins();
     for(const auto& plugin : plugins)
     {
-        auto handle = plugin->createHandle();
+        hipdnnEnginePluginHandle_t handle = nullptr;
+
+        try
+        {
+            handle = plugin->createHandle();
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_LOG_ERROR(
+                "Failed to create handle for plugin '{}': {}", plugin->name(), e.what());
+            continue;
+        }
+
+        if(handle == nullptr)
+        {
+            HIPDNN_LOG_ERROR("Plugin '{}' returned null handle", plugin->name());
+            continue;
+        }
 
         if(_handleToPlugin.find(handle) != _handleToPlugin.end())
         {
-            throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR, "Plugin handle already exists");
+            safeDestroyHandle(plugin.get(), handle);
+            HIPDNN_LOG_ERROR("Plugin '{}' returned a handle that collides with another plugin. "
+                             "This may indicate a symbol collision between plugins. "
+                             "Ensure all plugins are built with -fvisibility=hidden.",
+                             plugin->name());
+            continue;
         }
 
         _handleToPlugin[handle] = plugin.get();
 
-        auto engineIds = plugin->getAllEngineIds();
+        std::vector<int64_t> engineIds;
+        try
+        {
+            engineIds = plugin->getAllEngineIds();
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_LOG_ERROR(
+                "Failed to get engine IDs for plugin '{}': {}", plugin->name(), e.what());
+            safeDestroyHandle(plugin.get(), handle);
+            _handleToPlugin.erase(handle);
+            continue;
+        }
+
         for(const auto id : engineIds)
         {
             _engineIdToHandle[id] = handle;
@@ -559,6 +615,27 @@ hipdnnEnginePluginExecutionContext_t EngineExecutionContextWrapper::get() const
     }
 
     return _executionContext;
+}
+
+std::string EnginePluginResourceManager::toString() const
+{
+    if(!_pm)
+    {
+        return "EnginePluginResourceManager: {loadedPlugins=0}";
+    }
+
+    auto loadedPlugins = _pm->getLoadedPluginFiles();
+
+    std::vector<std::string> pluginPathStrings;
+    pluginPathStrings.reserve(loadedPlugins.size());
+    for(const auto& path : loadedPlugins)
+    {
+        pluginPathStrings.push_back(path.string());
+    }
+
+    return fmt::format("EnginePluginResourceManager: {{loadedPlugins={}, loadedPluginPaths=[{}]}}",
+                       loadedPlugins.size(),
+                       fmt::join(pluginPathStrings, ", "));
 }
 
 } // namespace plugin

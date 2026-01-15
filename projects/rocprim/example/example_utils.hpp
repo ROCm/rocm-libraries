@@ -47,8 +47,8 @@
     }
 
 template<class T>
-inline auto get_random_data(size_t size, T min, T max)
-    -> typename std::enable_if<std::is_integral<T>::value, std::vector<T>>::type
+inline auto get_random_data(size_t size, T min, T max) ->
+    typename std::enable_if<rocprim::is_integral<T>::value, std::vector<T>>::type
 {
     std::random_device rd;
     std::default_random_engine gen(rd());

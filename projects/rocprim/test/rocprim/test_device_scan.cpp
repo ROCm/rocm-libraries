@@ -305,15 +305,20 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScan)
     const bool deterministic     = TestFixture::deterministic;
     const bool use_initial_value = TestFixture::use_initial_value;
 
-    using Config = typename TestFixture::config_helper;
-    using config = rocprim::detail::wrapped_scan_config<Config, acc_type>;
+    using Config   = typename TestFixture::config_helper;
+    using Selector = rocprim::detail::scan_config_selector<acc_type>;
 
     hipStream_t stream = hipStreamDefault;
 
     rocprim::detail::target_arch target_arch;
-    HIP_CHECK(host_target_arch(stream, target_arch));
-    const rocprim::detail::scan_config_params params
-        = rocprim::detail::dispatch_target_arch<config, false>(target_arch);
+    HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
+
+    rocprim::detail::gpu target_gpu;
+    HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
+
+    const rocprim::detail::target current_target(target_arch, target_gpu);
+
+    const auto params = rocprim::detail::get_config<Selector>(Config{}, current_target);
 
     // For non-associative operations in inclusive scan
     // intermediate results use the type of input iterator, then
@@ -497,12 +502,13 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScan)
                                                false,
                                                ordered_bid);
                     };
-                    return rocprim::detail::execute_launch_plan<config>(target_arch,
-                                                                        lookback_scan_kernel,
-                                                                        dim3(grid_size),
-                                                                        dim3(block_size),
-                                                                        0,
-                                                                        stream);
+                    return rocprim::detail::execute_launch_plan<Config, Selector>(
+                        current_target,
+                        lookback_scan_kernel,
+                        dim3(grid_size),
+                        dim3(block_size),
+                        0,
+                        stream);
                 });
 
             ASSERT_EQ(hipSuccess, launch_err);
@@ -553,15 +559,20 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScanGetCompleteValue)
     const bool deterministic     = TestFixture::deterministic;
     const bool use_initial_value = TestFixture::use_initial_value;
 
-    using Config = typename TestFixture::config_helper;
-    using config = rocprim::detail::wrapped_scan_config<Config, acc_type>;
+    using Config   = typename TestFixture::config_helper;
+    using Selector = rocprim::detail::scan_config_selector<acc_type>;
 
     hipStream_t stream = hipStreamDefault;
 
     rocprim::detail::target_arch target_arch;
-    HIP_CHECK(host_target_arch(stream, target_arch));
-    const rocprim::detail::scan_config_params params
-        = rocprim::detail::dispatch_target_arch<config, false>(target_arch);
+    HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
+
+    rocprim::detail::gpu target_gpu;
+    HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
+
+    const rocprim::detail::target current_target(target_arch, target_gpu);
+
+    const auto params = rocprim::detail::get_config<Selector>(Config{}, current_target);
 
     // For non-associative operations in inclusive scan
     // intermediate results use the type of input iterator, then
@@ -735,12 +746,12 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScanGetCompleteValue)
                                            false,
                                            ordered_bid);
                 };
-                return rocprim::detail::execute_launch_plan<config>(target_arch,
-                                                                    lookback_scan_kernel,
-                                                                    dim3(grid_size),
-                                                                    dim3(block_size),
-                                                                    0,
-                                                                    stream);
+                return rocprim::detail::execute_launch_plan<Config, Selector>(current_target,
+                                                                              lookback_scan_kernel,
+                                                                              dim3(grid_size),
+                                                                              dim3(block_size),
+                                                                              0,
+                                                                              stream);
             });
 
         ASSERT_EQ(hipSuccess, launch_err);

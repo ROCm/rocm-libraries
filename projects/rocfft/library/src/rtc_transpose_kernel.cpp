@@ -110,12 +110,12 @@ RTCKernel::RTCGenerator RTCKernelTranspose::generate_from_node(const LeafNode&  
     generator.generate_src
         = [=](const std::string& kernel_name) { return transpose_rtc(kernel_name, specs); };
 
-    generator.construct_rtckernel = [=](const std::string&       kernel_name,
-                                        const std::vector<char>& code,
-                                        dim3                     gridDim,
-                                        dim3                     blockDim) {
+    generator.construct_rtckernel = [=](const std::string&                       kernel_name,
+                                        std::shared_future<hipModule_wrapper_t>& module,
+                                        dim3                                     gridDim,
+                                        dim3                                     blockDim) {
         return std::unique_ptr<RTCKernel>(
-            new RTCKernelTranspose(kernel_name, code, gridDim, blockDim));
+            new RTCKernelTranspose(kernel_name, module, gridDim, blockDim));
     };
     return generator;
 }

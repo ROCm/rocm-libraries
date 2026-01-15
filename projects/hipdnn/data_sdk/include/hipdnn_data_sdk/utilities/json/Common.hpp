@@ -79,6 +79,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(DataType,
                                  {DataType::DOUBLE, "double"},
                                  {DataType::UINT8, "uint8"},
                                  {DataType::INT32, "int32"},
+                                 {DataType::INT8, "int8"},
                              }
 
 )

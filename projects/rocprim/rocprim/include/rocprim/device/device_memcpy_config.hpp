@@ -40,47 +40,45 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// Specialization for user provided configuration
-template<typename BatchMemcpyConfig, typename, bool>
-struct wrapped_batch_memcpy_config
+template<class Config, class Selector, class Target>
+struct non_blev_batch_memcpy_config_static_selector
 {
-    static_assert(std::is_same<typename BatchMemcpyConfig::tag, batch_memcpy_config_tag>::value,
-                  "Config must be a specialization of struct template batch_memcpy_config");
-
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr batch_memcpy_config_params params = BatchMemcpyConfig{};
-    };
+    static constexpr auto block_size = target_config<Config, Selector, Target>::params
+                                           .non_blev_batch_memcpy_kernel_config.block_size;
 };
 
-// Specialization for selecting the default configuration for out of place
-template<typename Value, bool IsMemCpy>
-struct wrapped_batch_memcpy_config<default_config, Value, IsMemCpy>
+template<class Config, class Selector, class Target>
+struct blev_batch_memcpy_config_static_selector
 {
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr batch_memcpy_config_params params
-            = IsMemCpy ? (batch_memcpy_config_params)
-                      default_batch_memcpy_config<static_cast<unsigned int>(Arch), Value>{}
-                       : (batch_memcpy_config_params)
-                           default_batch_copy_config<static_cast<unsigned int>(Arch), Value>{};
-    };
+    static constexpr auto block_size = target_config<Config, Selector, Target>::params
+                                           .blev_batch_memcpy_kernel_config.block_size;
 };
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-template<class BatchMemcpyConfig, class Value, bool IsMemCpy>
-template<target_arch Arch>
-constexpr batch_memcpy_config_params
-    wrapped_batch_memcpy_config<BatchMemcpyConfig, Value, IsMemCpy>::architecture_config<
-        Arch>::params;
 template<class Value, bool IsMemCpy>
-template<target_arch Arch>
-constexpr batch_memcpy_config_params
-    wrapped_batch_memcpy_config<rocprim::default_config, Value, IsMemCpy>::architecture_config<
-        Arch>::params;
-#endif // DOXYGEN_SHOULD_SKIP_THIS
+struct batch_memcpy_config_selector
+{
+    using targets    = std::conditional_t<IsMemCpy, batch_memcpy_targets, batch_copy_targets>;
+    using param_type = batch_memcpy_config_params;
+
+    param_type params;
+
+    template<class Target>
+    constexpr param_type picker_helper()
+    {
+        if constexpr(IsMemCpy)
+        {
+            return batch_memcpy_config_picker<Target, Value>();
+        }
+        else
+        {
+            return batch_copy_config_picker<Target, Value>();
+        }
+    }
+
+    template<class Target>
+    constexpr batch_memcpy_config_selector(Target) : params(picker_helper<Target>())
+    {}
+};
 
 } // namespace detail
 

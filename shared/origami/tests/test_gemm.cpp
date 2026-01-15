@@ -154,16 +154,16 @@ TEST_CASE("GEMM: compute_tile_latency", "[gemm]") {
 
 TEST_CASE("GEMM: compute_timestep_latency", "[gemm]") {
   for (int gpu_arch : test_architectures) {
-    DYNAMIC_SECTION("gfx" << gpu_arch << " - wave latency equals tile latency") {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - timestep latency equals tile latency") {
       auto hardware = make_hardware(gpu_arch);
       auto problem =
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
       auto config = make_config(128, 128, 64, 32, 32, 8, 8);
 
       auto tile_latency = origami::compute_tile_latency(problem, hardware, config, 304, 4);
-      auto wave_latency = origami::compute_timestep_latency(problem, hardware, config, 304, 4);
+      auto timestep_latency = origami::compute_timestep_latency(problem, hardware, config, 304, 4);
 
-      REQUIRE(wave_latency == Approx(tile_latency));
+      REQUIRE(timestep_latency == Approx(tile_latency));
     }
   }
 }

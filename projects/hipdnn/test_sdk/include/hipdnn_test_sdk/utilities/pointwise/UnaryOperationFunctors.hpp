@@ -92,7 +92,7 @@ struct Negation
     template <typename X>
     auto operator()(const X& x) const -> X
     {
-        return -x;
+        return static_cast<X>(-x);
     }
 };
 

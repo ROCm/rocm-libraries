@@ -630,7 +630,7 @@ namespace rocRoller
             graph.control.addElement(CG::Body(), {newOp}, {op});
         }
 
-        bool needsComputeIndex(CG::Operation const& op)
+        bool needsIndexAssignment(CG::Operation const& op)
         {
             if(std::holds_alternative<CG::StoreTiled>(op) //
                || std::holds_alternative<CG::StoreLDSTile>(op) //
@@ -641,7 +641,7 @@ namespace rocRoller
             return false;
         }
 
-        std::vector<int> findComputeIndexCandidates(KernelGraph const& kgraph, int start)
+        std::vector<int> findIndexAssignmentCandidates(KernelGraph const& kgraph, int start)
         {
             std::vector<int> rv;
 
@@ -653,7 +653,7 @@ namespace rocRoller
                         if(!std::holds_alternative<CG::Operation>(elem))
                             return false;
                         auto op = std::get<CG::Operation>(elem);
-                        return needsComputeIndex(op);
+                        return needsIndexAssignment(op);
                     },
                     GD::Downstream)
                 .to<std::vector>();

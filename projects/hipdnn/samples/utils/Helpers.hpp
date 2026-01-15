@@ -107,14 +107,16 @@ inline Config parseCommandLineArgs(int argc, char* argv[])
 }
 
 template <typename F>
-void run(F&& f)
+bool run(F&& f)
 {
-    f.template operator()<float, float>(TensorLayout::NCHW);
-    f.template operator()<half, float>(TensorLayout::NCHW);
-    f.template operator()<hip_bfloat16, float>(TensorLayout::NCHW);
-    f.template operator()<float, float>(TensorLayout::NHWC);
-    f.template operator()<half, float>(TensorLayout::NHWC);
-    f.template operator()<hip_bfloat16, float>(TensorLayout::NHWC);
+    bool allPassed = true;
+    allPassed &= f.template operator()<float, float>(TensorLayout::NCHW);
+    allPassed &= f.template operator()<half, float>(TensorLayout::NCHW);
+    allPassed &= f.template operator()<hip_bfloat16, float>(TensorLayout::NCHW);
+    allPassed &= f.template operator()<float, float>(TensorLayout::NHWC);
+    allPassed &= f.template operator()<half, float>(TensorLayout::NHWC);
+    allPassed &= f.template operator()<hip_bfloat16, float>(TensorLayout::NHWC);
+    return allPassed;
 }
 
 inline std::shared_ptr<hipdnn_frontend::graph::Tensor_attributes>
@@ -146,5 +148,5 @@ struct SampleRunner
     Config config;
 
     template <typename InputType, typename IntermediateType>
-    void operator()(const TensorLayout& layout);
+    bool operator()(const TensorLayout& layout);
 };

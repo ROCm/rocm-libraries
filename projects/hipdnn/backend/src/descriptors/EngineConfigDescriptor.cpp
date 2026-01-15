@@ -222,4 +222,12 @@ hipdnnPluginConstData_t EngineConfigDescriptor::getSerializedEngineConfig() cons
     return {_engineConfigSerializedBuffer.data(), _engineConfigSerializedBuffer.size()};
 }
 
+std::string EngineConfigDescriptor::toString() const
+{
+    std::string str = "EngineConfigDescriptor: {engineId=";
+    str += _engine ? std::to_string(_engine->getEngineId()) : "null";
+    str += ", maxWorkspaceSize=" + std::to_string(_maxWorkspaceSize) + "}";
+    return str;
+}
+
 } // namespace hipdnn_backend

@@ -124,7 +124,7 @@ Sample output:
 ```
 Internal ctest changing into directory: /workspace/therock-build/bin/hipdnn
 Test project /workspace/therock-build/bin/hipdnn
-  Test #1: hipdnn_sdk_tests
+  Test #1: hipdnn_data_sdk_tests
   Test #2: hipdnn_backend_tests
   Test #3: hipdnn_frontend_tests
   Test #4: hipdnn_test_sdk_tests
@@ -143,7 +143,7 @@ Sample output:
 ```
 Internal ctest changing into directory: /workspace/therock-build/bin/hipdnn
 Test project /workspace/therock-build/bin/hipdnn
-    Start 1: hipdnn_sdk_tests
+    Start 1: hipdnn_data_sdk_tests
     Start 2: hipdnn_backend_tests
     Start 6: public_hipdnn_backend_tests
     Start 7: public_hipdnn_frontend_tests
@@ -156,7 +156,7 @@ Test project /workspace/therock-build/bin/hipdnn
 4/7 Test #7: public_hipdnn_frontend_tests .....   Passed    0.27 sec
 5/7 Test #6: public_hipdnn_backend_tests ......   Passed    0.84 sec
 6/7 Test #2: hipdnn_backend_tests .............   Passed    1.33 sec
-7/7 Test #1: hipdnn_sdk_tests .................   Passed    2.64 sec
+7/7 Test #1: hipdnn_data_sdk_tests ............   Passed    2.64 sec
 
 100% tests passed, 0 tests failed out of 7
 

@@ -64,6 +64,8 @@ public:
     static hipdnnBackendDescriptorType_t getStaticType();
 
     static constexpr int64_t INVALID_WORKSPACE_SIZE = -1;
+
+    std::string toString() const override;
 };
 
 } // namespace hipdnn_backend

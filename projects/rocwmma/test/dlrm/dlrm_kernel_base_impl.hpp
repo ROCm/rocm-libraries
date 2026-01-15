@@ -335,6 +335,7 @@ namespace rocwmma
                                               inputBatchOffset,
                                               outputBatchOffset,
                                               accBatchOffset);
+                        CHECK_HIP_ERROR(hipGetLastError());
                     };
                 }
             }
@@ -370,6 +371,7 @@ namespace rocwmma
                                               mB,
                                               upstreamBatchOffset,
                                               accBatchOffset);
+                        CHECK_HIP_ERROR(hipGetLastError());
                         CHECK_HIP_ERROR(hipEventRecord(syncEvent));
                         CHECK_HIP_ERROR(hipEventSynchronize(syncEvent));
 
@@ -392,6 +394,7 @@ namespace rocwmma
                                               inputBatchOffset,
                                               upstreamBatchOffset,
                                               accBatchOffset);
+                        CHECK_HIP_ERROR(hipGetLastError());
                     };
                 }
             }

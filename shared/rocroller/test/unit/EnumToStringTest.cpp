@@ -243,19 +243,6 @@ TEST(EnumToStringTest, ALL)
         });
     }
 
-    {
-        using namespace KernelGraph::Connections;
-        verify<ComputeIndexArgument>({
-            {ComputeIndexArgument::TARGET, "TARGET"},
-            {ComputeIndexArgument::INCREMENT, "INCREMENT"},
-            {ComputeIndexArgument::BASE, "BASE"},
-            {ComputeIndexArgument::OFFSET, "OFFSET"},
-            {ComputeIndexArgument::STRIDE, "STRIDE"},
-            {ComputeIndexArgument::BUFFER, "BUFFER"},
-            {ComputeIndexArgument::BASEADDRESS, "BASEADDRESS"},
-        });
-    }
-
     verify<Operations::RandomNumberGenerator::SeedMode>({
         {Operations::RandomNumberGenerator::SeedMode::Default, "Default"},
         {Operations::RandomNumberGenerator::SeedMode::PerThread, "PerThread"},

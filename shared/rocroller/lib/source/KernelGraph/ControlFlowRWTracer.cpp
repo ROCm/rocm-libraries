@@ -361,11 +361,6 @@ namespace rocRoller::KernelGraph
         }
     }
 
-    void ControlFlowRWTracer::operator()(ComputeIndex const& op, int tag)
-    {
-        // Already in a Scope
-    }
-
     void ControlFlowRWTracer::operator()(ConditionalOp const& op, int tag)
     {
         CollectDataFlowExpressionVisitor visitor;
@@ -419,8 +414,8 @@ namespace rocRoller::KernelGraph
         // typically involve: incrementing loop counters and
         // offsets.  Loop counters are scoped already.
         //
-        // Offsets are created "inside" ComputeIndex nodes and are
-        // used in other nodes like LoadTiled.  These "inside"
+        // Offsets are created by AssignIndexExpressions and are
+        // used in other nodes like LoadTiled.  These
         // references do not explicitly appear in the graph.
         //
         // If we examine loop increment operations and "track" an

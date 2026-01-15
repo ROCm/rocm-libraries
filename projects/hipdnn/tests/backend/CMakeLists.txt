@@ -17,6 +17,7 @@ add_executable(
     IntegrationExecutionPlanApi.cpp
     IntegrationGetLastErrorString.cpp
     IntegrationHandleApi.cpp
+    IntegrationLoggingPipeline.cpp
     IntegrationPluginLoading.cpp
     IntegrationSetPluginPathsExt.cpp
     IntegrationVariantPackApi.cpp

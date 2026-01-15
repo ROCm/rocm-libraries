@@ -36,7 +36,7 @@
 
 #include <gtest/gtest.h>
 
-#include <DataGenerator.hpp>
+#include <mxDataGenerator/DataGenerator.hpp>
 
 using std::vector;
 using ::testing::TestWithParam;

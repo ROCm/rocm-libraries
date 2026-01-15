@@ -38,5 +38,7 @@ public:
     virtual const std::vector<int64_t>& getTensorIds() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
+
+    std::string toString() const override;
 };
 }

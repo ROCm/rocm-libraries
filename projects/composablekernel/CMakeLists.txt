@@ -31,28 +31,13 @@ endif()
 # Default installation path
 if(NOT WIN32)
     set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
+else()
+    set(CMAKE_INSTALL_PREFIX "C:/dist/TheRock" CACHE PATH "")
 endif()
 
 set(version 1.2.0)
-# Check support for CUDA/HIP in Cmake
-project(composable_kernel VERSION ${version} LANGUAGES CXX HIP)
+project(composable_kernel VERSION ${version} LANGUAGES CXX)
 include(CTest)
-
-# Set the default value of LLVM_MAIN_REVISION to the equivalent of ROCm7.1.1 release
-set(LLVM_MAIN_REVISION 524190)
-if (CMAKE_CXX_COMPILER MATCHES "/opt/rocm")
-    message("compiler in default /opt/rocm/ path")
-    file(READ "/opt/rocm/llvm/include/llvm/Config/llvm-config.h" HEADER_CONTENT)
-    string(REGEX MATCH "#define LLVM_MAIN_REVISION[ \t]+([0-9]+)" MATCH_RESULT "${HEADER_CONTENT}")
-    set(LLVM_MAIN_REVISION ${CMAKE_MATCH_1})
-elseif (CMAKE_CXX_COMPILER MATCHES "/llvm-project/build")
-    message("compiler in custom /llvm-project/build/ path")
-    file(READ "/llvm-project/build/include/llvm/Config/llvm-config.h" HEADER_CONTENT)
-    string(REGEX MATCH "#define LLVM_MAIN_REVISION[ \t]+([0-9]+)" MATCH_RESULT "${HEADER_CONTENT}")
-    set(LLVM_MAIN_REVISION ${CMAKE_MATCH_1})
-endif()
-message("From CMake: LLVM_MAIN_REVISION=${LLVM_MAIN_REVISION}")
-add_definitions(-DLLVM_MAIN_REVISION=${LLVM_MAIN_REVISION})
 
 option(ENABLE_CLANG_CPP_CHECKS "Enables clang tidy, cppcheck" ON)
 option(MIOPEN_REQ_LIBS_ONLY "Build only the MIOpen required libraries" OFF)
@@ -178,7 +163,13 @@ execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD OUTPUT_VARIABLE COMMI
 configure_file(include/ck/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/include/ck/version.h)
 
 set(ROCM_SYMLINK_LIBS OFF)
-find_package(ROCM REQUIRED PATHS /opt/rocm)
+
+if (WIN32)
+    find_package(ROCmCMakeBuildTools REQUIRED PATHS C:/dist/TheRock)
+    set(HIP_PLATFORM "amd" CACHE STRING "HIP platform")
+else()
+    find_package(ROCM REQUIRED PATHS /opt/rocm)
+endif()
 
 include(ROCMInstallTargets)
 include(ROCMPackageConfigHelpers)
@@ -205,7 +196,10 @@ if(GPU_TARGETS)
 else()
     set(USER_GPU_TARGETS 0)
 endif()
+
 find_package(hip REQUIRED)
+enable_language(HIP)
+
 # No assumption that HIP kernels are launched with uniform block size for backward compatibility
 # SWDEV-413293 and https://reviews.llvm.org/D155213
 math(EXPR hip_VERSION_FLAT "(${hip_VERSION_MAJOR} * 1000 + ${hip_VERSION_MINOR}) * 100000 + ${hip_VERSION_PATCH}")

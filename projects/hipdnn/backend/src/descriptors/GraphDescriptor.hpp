@@ -44,5 +44,7 @@ public:
     virtual hipdnnHandle_t getHandle() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
+
+    std::string toString() const override;
 };
 }

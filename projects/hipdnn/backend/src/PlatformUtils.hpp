@@ -45,5 +45,6 @@ std::filesystem::path getCurrentModuleDirectory();
 PluginLibHandle openLibrary(const std::filesystem::path& libraryPath);
 void closeLibrary(PluginLibHandle handle);
 void* getSymbol(PluginLibHandle handle, const char* symbolName);
+std::string getSystemInfo();
 
 }

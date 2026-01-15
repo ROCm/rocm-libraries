@@ -1,25 +1,5 @@
-# ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-#
-# ########################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 set(HIPSPARSE_TEST_SOURCES
     # Level 1
@@ -28,15 +8,20 @@ set(HIPSPARSE_TEST_SOURCES
     test_gthrz.cpp
     test_roti.cpp
     test_sctr.cpp
+    test_doti.cpp
+    test_dotci.cpp
     # Level 2
     test_bsrmv.cpp
     test_bsrsv2.cpp
     test_bsrxmv.cpp
     test_csrsv2.cpp
+    test_csrmv.cpp
     test_gemvi.cpp
+    test_hybmv.cpp
     # Level 3
     test_bsrmm.cpp
     test_bsrsm2.cpp
+    test_csrmm.cpp
     test_csrsm2.cpp
     test_gemmi.cpp
     # Precond 
@@ -65,9 +50,12 @@ set(HIPSPARSE_TEST_SOURCES
     test_cscsort.cpp
     test_csr2bsr.cpp
     test_csr2coo.cpp
+    test_csr2csc.cpp
+    test_csr2csc_ex2.cpp
     test_csr2csr_compress.cpp
     test_csr2dense.cpp
     test_csr2gebsr.cpp
+    test_csr2hyb.cpp
     test_csrilusv.cpp
     test_csrsort.cpp
     test_csru2csr.cpp
@@ -76,6 +64,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_gebsr2csr.cpp
     test_gebsr2gebsc.cpp
     test_gebsr2gebsr.cpp
+    test_hyb2csr.cpp
     test_identity.cpp
     test_nnz.cpp
     test_prune_csr2csr.cpp

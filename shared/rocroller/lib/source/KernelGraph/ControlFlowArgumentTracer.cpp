@@ -161,8 +161,6 @@ namespace rocRoller::KernelGraph
             incorporate(node, op.expression);
         }
 
-        void operator()(int node, CG::ComputeIndex const& op) {}
-
         void operator()(int                                 node,
                         CIsAnyOf<CG::LoadLDSTile, //
                                  CG::LoadLinear,

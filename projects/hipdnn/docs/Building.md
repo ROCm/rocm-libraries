@@ -124,13 +124,7 @@ ninja check
 ### Building Specific Components
 ```bash
 # Build without plugins
-cmake -GNinja -DHIP_DNN_BUILD_PLUGINS=OFF ..
-
-# Build without frontend
-cmake -GNinja -DHIP_DNN_BUILD_FRONTEND=OFF ..
-
-# Build without backend
-cmake -GNinja -DHIP_DNN_BUILD_BACKEND=OFF ..
+cmake -GNinja -DHIPDNN_BUILD_PLUGINS=OFF ..
 ```
 
 ### ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX
@@ -197,7 +191,7 @@ All targets support parallel builds with ninja.
 | `current-coverage` | Generate test coverage reports using coverage data already on disk (does not automatically run `check`; requires `-DHIPDNN_ENABLE_COVERAGE=ON`) |
 | `clean` | Clean build artifacts |
 | `validate_test_names` | Validates test names conform to naming rules |
-| `generate_hipdnn_sdk_headers` | Generate C++ headers from schema (`.fbs`) files |
+| `generate_hipdnn_data_sdk_headers` | Generate C++ headers from schema (`.fbs`) files |
 
 The following example build commands are equivalent (depending on which generator was used) and will build the `check` target, to build and run all tests.
 

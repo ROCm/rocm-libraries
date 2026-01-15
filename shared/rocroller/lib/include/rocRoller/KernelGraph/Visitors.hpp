@@ -332,7 +332,6 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(ControlGraph::Assign);
             MAKE_OPERATION_VISITOR(ControlGraph::Barrier);
             MAKE_OPERATION_VISITOR(ControlGraph::Block);
-            MAKE_OPERATION_VISITOR(ControlGraph::ComputeIndex);
             MAKE_OPERATION_VISITOR(ControlGraph::ConditionalOp);
             MAKE_OPERATION_VISITOR(ControlGraph::Deallocate);
             MAKE_OPERATION_VISITOR(ControlGraph::DoWhileOp);
