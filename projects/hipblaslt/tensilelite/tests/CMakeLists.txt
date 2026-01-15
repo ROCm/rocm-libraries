@@ -34,12 +34,13 @@ target_sources(tensilelite-tests
 
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
-# if(HIPBLASLT_ENABLE_MSGPACK)
-#     target_sources(tensilelite-tests
-#         PRIVATE
-#             "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
-#     )
-# endif()
+if(0) # HIPBLASLT_ENABLE_LLVM OR HIPBLASLT_ENABLE_MSGPACK)
+    target_sources(tensilelite-tests
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
+    )
+endif()
+
 
 target_link_libraries(tensilelite-tests
     PUBLIC
@@ -61,9 +62,10 @@ endif()
 
 enable_testing()
 
-#########################################
-# Integration Tests for CPU-GEMM-DRIVER #
-#########################################
+#################################################
+#        Tests for cpu-gemm-driver              #
+#################################################
+
 function(add_cpu_gemm_test TEST_NAME)
     cmake_parse_arguments(ARG "" "" "ARGS" ${ARGN})
 

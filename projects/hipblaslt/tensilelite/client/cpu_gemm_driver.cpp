@@ -1,3 +1,29 @@
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -12,11 +38,40 @@
 #include "Reference.hpp"
 #include "rocisa/include/enum.hpp"
 
+/*
+ * CPU GEMM Driver and Validator
+ *
+ * This tool acts as a test harness for the TensileLite CPU GEMM implementation.
+ * It allows for command-line verification of matrix multiplication kernels across
+ * different data types (f32, f16, bf16) and geometries. It can also be used for
+ * benchmarking different CPU GEMM implementations.
+ *
+ * The driver performs the following steps:
+ * 1. Sets up a contraction problem based on user arguments (M, N, K, Transpose, etc).
+ * 2. Initializes input matrices (A, B) with random data.
+ * 3. Executes the "Device Under Test" (the optimized CPU solve).
+ * 4. Optionally validates the result against a simple, golden reference implementation.
+ *
+ * Usage Examples:
+ * # Standard f32 run
+ * ./cpu_gemm_driver --M 1024 --N 1024 --K 1024
+ *
+ * # BF16 run with validation enabled
+ * ./cpu_gemm_driver --type bf16 --M 512 --N 512 --K 256 --validate 1
+ *
+ * # Benchmark mode (validation disabled)
+ * ./cpu_gemm_driver --M 2048 --N 2048 --K 2048 --validate 0 --tryFastPath 1
+ *
+ * # Help messnage
+ * ./cpu_gemm_driver --help
+ */
+
 namespace
 {
     namespace po = boost::program_options;
     using namespace TensileLite;
 
+    // Helper traits to map C++ storage types to rocisa data type enums.
     template <typename T>
     struct TypeTraits;
 
@@ -38,7 +93,12 @@ namespace
         static constexpr rocisa::DataType value = rocisa::DataType::BFloat16;
     };
 
-    // --- Reference Implementation ---
+    // A naive, slow, golden reference implementation of GEMM.
+    // Used strictly for validating the correctness of the optimized path.
+    // Calculates D = alpha * (A * B) + beta * C
+    //
+    // We can all the various bells and whistles that tensile supports
+    // (activations, etc) as needed.
     void columnMajorGemm(const float* a,
                          const float* b,
                          const float* c,
@@ -73,7 +133,13 @@ namespace
     }
 }
 
-// InputT: The storage type for A/B.
+/*
+ * Main templated runner.
+ * Handles memory allocation, data initialization, execution, and validation.
+ *
+ * InputT: The C++ type used for storage of A and B matrices (e.g. float, half).
+ * AccumulateT: The type used for accumulation (currently restricted to float).
+ */
 template <typename InputT, typename AccumulateT = float>
 int runGemm(size_t m,
             size_t n,
@@ -89,13 +155,13 @@ int runGemm(size_t m,
     static_assert(std::is_same<AccumulateT, float>::value,
                   "Currently only float accumulation is supported");
 
-    // Layout calculations
+    // Calculate strides assuming standard column-major packed storage
     size_t lda        = transA ? k : m;
     size_t ldb        = transB ? n : k;
     size_t ldc        = m;
     size_t batchCount = 1;
 
-    // 2. Setup Problem Definition
+    // Define the contraction problem (geometry, strides, types)
     ContractionProblemGemm contraction
         = ContractionProblemGemm::GEMM_Strides(transA,
                                                transB,
@@ -119,13 +185,13 @@ int runGemm(size_t m,
 
     contraction.setComputeInputType(dtypeEnum);
 
-    // 3. Data Initialization (Host Memory)
+    // Allocate host memory for inputs and outputs
     std::vector<InputT> a(m * k);
     std::vector<InputT> b(k * n);
     std::vector<float>  c(m * n);
     std::vector<float>  d(m * n);
 
-    // We sample at random from the 2 values {-1.0, +1.0}.
+    // Initialize inputs with random values in {-1.0, 1.0}
     size_t                          seed = 42;
     std::mt19937                    gen(seed);
     std::uniform_int_distribution<> dis(0, 1);
@@ -140,7 +206,9 @@ int runGemm(size_t m,
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    // -1 validates all elements. This ensures that the 'fast path' is considered.
+    // Execute the 'device under test'.
+    // passing -1 for elementsToValidate ensures that the 'fast path' which we
+    // currently want to test is maybe taken.
     int elementsToValidate = -1;
     TensileLite::Client::SolveGemmCPU(contraction, inputs, elementsToValidate, tryFastPath);
 
@@ -148,19 +216,17 @@ int runGemm(size_t m,
     std::chrono::duration<double, std::milli> duration = end - start;
     std::cout << "Execution Time: " << duration.count() << " ms" << std::endl;
 
-    // 4. Validation (Optional)
     if(validate)
     {
         std::cout << "Validating..." << std::endl;
 
-        // Convert Inputs to Float for Reference Gemm
-        // Note: Using vectors constructor for cleaner copy/cast
+        // Convert inputs to f32 for the golden reference comparison
         std::vector<float> aF32(a.begin(), a.end());
         std::vector<float> bF32(b.begin(), b.end());
         std::vector<float> cF32(c.begin(), c.end());
         std::vector<float> dRef(d.size());
 
-        // Run Reference
+        // Run the golden reference
         columnMajorGemm(aF32.data(),
                         bF32.data(),
                         cF32.data(),
@@ -173,7 +239,7 @@ int runGemm(size_t m,
                         alpha,
                         beta);
 
-        // Compare
+        // Compare results
         bool  allClose = true;
         float maxDiff  = 0.0f;
 
@@ -210,7 +276,7 @@ int runGemm(size_t m,
 
 int main(int argc, char* argv[])
 {
-    // Define Options
+    // command line argument storage
     size_t      m, n, k;
     float       alpha, beta;
     std::string typeStr;
@@ -231,7 +297,6 @@ int main(int argc, char* argv[])
         "validate", po::value<bool>(&validate)->default_value(true), "Run validation against ref")(
         "tryFastPath", po::value<bool>(&tryFastPath)->default_value(true), "Use optimized path");
 
-    // Parse
     po::variables_map vm;
     try
     {

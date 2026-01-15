@@ -41,32 +41,32 @@ namespace TensileLite
     namespace
     {
 
-        // Helper to shadow-copy 16-bit types to float.
+        // Helper to load data from various source types into a float buffer.
         template <typename SrcType>
-        std::vector<float> loadToFloat(void const* src, size_t count)
+        std::vector<float> loadToFloat(void const* src, size_t N)
         {
-            std::vector<float> buffer(count);
+            std::vector<float> buffer(N);
             const SrcType*     sPtr = static_cast<const SrcType*>(src);
-            for(size_t i = 0; i < count; ++i)
+            for(size_t i = 0; i < N; ++i)
             {
                 buffer[i] = static_cast<float>(sPtr[i]);
             }
             return buffer;
         }
 
-        // Helper to write back float to 16-bit types.
+        // Helper to store data from a float buffer into various destination types.
         template <typename DstType>
-        void storeFromFloat(void* dst, const std::vector<float>& buffer, size_t count)
+        void storeFromFloat(void* dst, const std::vector<float>& buffer, size_t N)
         {
             DstType* dPtr = static_cast<DstType*>(dst);
-            for(size_t i = 0; i < count; ++i)
+            for(size_t i = 0; i < N; ++i)
             {
                 dPtr[i] = static_cast<DstType>(buffer[i]);
             }
         }
 
         // Helper class that wraps a shadow copy of input buffers in float format.
-        // In quietly manages the indirection between directly using the input pointer
+        // It quietly manages the indirection between directly using the input pointer
         // (for float) and a shadow copy (for half / bfloat16).
         class ShadowBuffer
         {
@@ -75,24 +75,24 @@ namespace TensileLite
 
         public:
             ShadowBuffer() = default;
-
-            ShadowBuffer(void const* ptr, rocisa::DataType type, size_t count)
+            ShadowBuffer(void const* ptr, rocisa::DataType type, size_t N)
             {
                 if(ptr == nullptr)
-                    return;
-
-                if(type == rocisa::DataType::Float)
+                {
+                    assert(N == 0 && "Null pointer with non-zero size");
+                }
+                else if(type == rocisa::DataType::Float)
                 {
                     m_ptr = static_cast<const float*>(ptr);
                 }
                 else if(type == rocisa::DataType::Half)
                 {
-                    m_storage = loadToFloat<TensileLite::Half>(ptr, count);
+                    m_storage = loadToFloat<TensileLite::Half>(ptr, N);
                     m_ptr     = m_storage.data();
                 }
                 else if(type == rocisa::DataType::BFloat16)
                 {
-                    m_storage = loadToFloat<TensileLite::BFloat16>(ptr, count);
+                    m_storage = loadToFloat<TensileLite::BFloat16>(ptr, N);
                     m_ptr     = m_storage.data();
                 }
                 else
@@ -117,7 +117,6 @@ namespace TensileLite
                 return m_ptr[idx];
             }
         };
-
     }
 
     namespace Client
@@ -164,7 +163,7 @@ namespace TensileLite
             constexpr bool needAccumCast
                 = !(std::is_same<TypeL, Accumulator>() && std::is_same<TypeR, Accumulator>())
                   && !std::is_same<TypeL,
-                                   Int8>() //case I8/I32/I32, I8 be implicitly cast to int.
+                                   Int8>() //case I8/I32/I32, I8 implicitly cast to int.
                   && !std::is_same<TypeL,
                                    Int8x4>(); //case I8x4/I32/I32, I8x4 overloading the op*.
 
@@ -781,25 +780,14 @@ namespace TensileLite
             throw std::runtime_error("Unsupported input type.");
         }
 
-
-        // Solve various forms of f16, bf16, f32 gemm problems using efficient CPU code.
-        // Only solves for a subset of geometries, this is what allows it to be faster than
-        // the 'legacy' reference implementation.
+        // Solve combinations of f16, bf16, f32 gemm problems using efficient CPU code.
+        // This versions only solves for a subset of geometries. The set of geometries
+        // supported should be extended as new bottlenecks in validation are discovered.
         bool solveCPUFastInF32(ContractionProblemGemm const& problem,
-                               ContractionInputs const&      inputs,
-                               int64_t                       elementsToValidate)
+                               ContractionInputs const&      inputs)
         {
 
-            // This fast solver computes all elements. If the number of elements to validate
-            // is in [0, 0.2 * totalElements), skip this solver, falling through to another
-            // solver that handles the partial validation sparsity efficiently.
-            if(elementsToValidate >= 0
-               && elementsToValidate < 0.2 * problem.d().totalLogicalElements())
-            {
-                return false;
-            }
-
-            // Guard rails to check that the fast path is appropriate to use. 
+            // Guard rails to check that the fast path is appropriate to use.
             // Some of these can be relaxed  as support on this path is generalized.
             auto isSupportedType = [](rocisa::DataType t) {
                 return t == rocisa::DataType::Float || t == rocisa::DataType::Half
@@ -813,7 +801,6 @@ namespace TensileLite
                 return false;
             }
 
-            // TODO(newling) understand batchIndices. 
             if(problem.batchIndices().empty())
             {
                 return false;
@@ -849,19 +836,13 @@ namespace TensileLite
                 return false;
             }
 
-            // Resolve strides & dimensions
             if(problem.boundIndices().size() != 1 || problem.freeIndicesA().size() != 1
                || problem.freeIndicesB().size() != 1)
             {
                 return false;
             }
 
-           if(problem.useBias())
-           {
-              // supported!
-           }
-
-            bool doActivation = false;
+            bool               doActivation = false;
             std::vector<float> actArgs;
             if(problem.activationType() != ActivationType::None)
             {
@@ -872,36 +853,36 @@ namespace TensileLite
                 }
             }
 
-            size_t idx_M_A = problem.freeIndicesA()[0].i;
-            size_t idx_K_A = problem.boundIndices()[0].a;
-            size_t idx_N_B = problem.freeIndicesB()[0].i;
-            size_t idx_K_B = problem.boundIndices()[0].b;
-            size_t idx_M_D = problem.freeIndices()[0].d;
-            size_t idx_N_D = problem.freeIndices()[1].d;
+            size_t indexMA = problem.freeIndicesA()[0].i;
+            size_t indexKA = problem.boundIndices()[0].a;
+            size_t indexNB = problem.freeIndicesB()[0].i;
+            size_t indexKB = problem.boundIndices()[0].b;
+            size_t indexMD = problem.freeIndices()[0].d;
 
-            size_t stride_M_A = problem.a().strides()[idx_M_A];
-            size_t stride_K_A = problem.a().strides()[idx_K_A];
-            size_t stride_N_B = problem.b().strides()[idx_N_B];
-            size_t stride_K_B = problem.b().strides()[idx_K_B];
-            size_t stride_N_D = problem.d().strides()[idx_N_D];
-            size_t stride_N_C = problem.c().strides()[idx_N_D];
-
-            size_t stride_Batch_A = problem.a().strides()[problem.batchIndices()[0].a];
-            size_t stride_Batch_B = problem.b().strides()[problem.batchIndices()[0].b];
-            size_t stride_Batch_C = problem.c().strides()[problem.batchIndices()[0].d];
-            size_t stride_Batch_D = problem.d().strides()[problem.batchIndices()[0].d];
+            size_t strideMA = problem.a().strides()[indexMA];
+            size_t strideKA = problem.a().strides()[indexKA];
+            size_t strideNB = problem.b().strides()[indexNB];
+            size_t strideKB = problem.b().strides()[indexKB];
 
             // Layout validation
-            bool isPackedA = (stride_M_A == 1 || stride_K_A == 1);
-            bool isPackedB = (stride_N_B == 1 || stride_K_B == 1);
-            bool isPackedD = (problem.d().strides()[idx_M_D] == 1);
-
+            bool isPackedA = (strideMA == 1 || strideKA == 1);
+            bool isPackedB = (strideNB == 1 || strideKB == 1);
+            bool isPackedD = (problem.d().strides()[indexMD] == 1);
             if(!isPackedA || !isPackedB || !isPackedD)
             {
                 return false;
             }
 
-            // 4. Shadow copies
+            size_t indexND  = problem.freeIndices()[1].d;
+            size_t strideND = problem.d().strides()[indexND];
+            size_t strideNC = problem.c().strides()[indexND];
+
+            size_t strideBatchA = problem.a().strides()[problem.batchIndices()[0].a];
+            size_t strideBatchB = problem.b().strides()[problem.batchIndices()[0].b];
+            size_t strideBatchC = problem.c().strides()[problem.batchIndices()[0].d];
+            size_t strideBatchD = problem.d().strides()[problem.batchIndices()[0].d];
+
+            // 4. Shadow copies in f32.
             ShadowBuffer shadowA(
                 inputs.a, problem.a().dataType(), problem.a().totalAllocatedElements());
             ShadowBuffer shadowB(
@@ -924,7 +905,6 @@ namespace TensileLite
             bool useScaleAlphaVec = problem.useScaleAlphaVec();
             int  factorDim        = problem.getParams().factorDim(); // 0 = Row(M), 1 = Col(N)
 
-            // AlphaVec is conditional
             ShadowBuffer shadowAlphaVec;
             if(problem.useScaleAlphaVec())
             {
@@ -932,40 +912,39 @@ namespace TensileLite
                 shadowAlphaVec = ShadowBuffer(inputs.scaleAlphaVec, problem.alphaType(), vecLen);
             }
 
-            // -------------------------------------------------------------------------
-            // 5. Math Loop
-            // -------------------------------------------------------------------------
-            size_t size_Batch = problem.batchSize(0);
-            size_t size_K     = problem.boundSize(0);
-            size_t size_M     = problem.freeSizeA(0);
-            size_t size_N     = problem.freeSizeB(0);
+            size_t sizeBatch = problem.batchSize(0);
+            size_t sizeK     = problem.boundSize(0);
+            size_t sizeM     = problem.freeSizeA(0);
+            size_t sizeN     = problem.freeSizeB(0);
 
             constexpr size_t BLOCK_M = 32;
             constexpr size_t BLOCK_N = 32;
             constexpr size_t BLOCK_K = 8;
 
-            auto nTiles = (size_N / BLOCK_N + (size_N % BLOCK_N != 0));
-            auto mTiles = (size_M / BLOCK_M + (size_M % BLOCK_M != 0));
-            auto kTiles = (size_K / BLOCK_K + (size_K % BLOCK_K != 0));
+            auto nTiles = (sizeN / BLOCK_N + (sizeN % BLOCK_N != 0));
+            auto mTiles = (sizeM / BLOCK_M + (sizeM % BLOCK_M != 0));
+            auto kTiles = (sizeK / BLOCK_K + (sizeK % BLOCK_K != 0));
 
-// Parallelize over the 3 non-reduction dimensions: batch, M, and N.
-// Each thread computes a BLOCK_M x BLOCK_N tile.
+            // Perform the contraction.
+            // Parallelize over the 3 non-reduction dimensions: batch, M, and N.
+            // Each thread computes a BLOCK_M x BLOCK_N tile.
 #pragma omp parallel for collapse(3)
-            for(size_t b = 0; b < size_Batch; ++b)
+            for(size_t b = 0; b < sizeBatch; ++b)
             {
-                const float* curBatchA = shadowA.data() + (b * stride_Batch_A);
-                const float* curBatchB = shadowB.data() + (b * stride_Batch_B);
-                const float* curBatchC = shadowC.data() + (b * stride_Batch_C);
-                float*       curBatchD = ptrD + (b * stride_Batch_D);
+                const float* curBatchA = shadowA.data() + (b * strideBatchA);
+                const float* curBatchB = shadowB.data() + (b * strideBatchB);
+                const float* curBatchC = shadowC.data() + (b * strideBatchC);
+                float*       curBatchD = ptrD + (b * strideBatchD);
                 for(size_t m = 0; m < mTiles; ++m)
                 {
                     auto m0 = m * BLOCK_M;
                     for(size_t n = 0; n < nTiles; ++n)
                     {
                         auto n0 = n * BLOCK_N;
-                        std::array<float, BLOCK_M * BLOCK_K> A_reg = {0};
-                        std::array<float, BLOCK_K * BLOCK_N> B_reg = {0};
-                        std::array<float, BLOCK_M * BLOCK_N> C_reg = {0};
+
+                        std::array<float, BLOCK_M * BLOCK_K> aReg;
+                        std::array<float, BLOCK_K * BLOCK_N> bReg;
+                        std::array<float, BLOCK_M * BLOCK_N> cReg;
                         for(size_t k = 0; k < kTiles; ++k)
                         {
                             auto k0 = k * BLOCK_K;
@@ -977,14 +956,14 @@ namespace TensileLite
                                 {
                                     size_t global_k = k0 + km;
                                     size_t global_m = m0 + mm;
-                                    if(global_k < size_K && global_m < size_M)
+                                    if(global_k < sizeK && global_m < sizeM)
                                     {
-                                        auto offset = global_m * stride_M_A + global_k * stride_K_A;
-                                        A_reg[km * BLOCK_M + mm] = curBatchA[offset];
+                                        auto offset = global_m * strideMA + global_k * strideKA;
+                                        aReg[km * BLOCK_M + mm] = curBatchA[offset];
                                     }
                                     else
                                     {
-                                        A_reg[km * BLOCK_M + mm] = 0.0f;
+                                        aReg[km * BLOCK_M + mm] = 0.0f;
                                     }
                                 }
                             }
@@ -996,21 +975,20 @@ namespace TensileLite
                                 {
                                     size_t global_k = k0 + kn;
                                     size_t global_n = n0 + nn;
-                                    if(global_k < size_K && global_n < size_N)
+                                    if(global_k < sizeK && global_n < sizeN)
                                     {
-                                        B_reg[kn * BLOCK_N + nn]
-                                            = curBatchB[global_n * stride_N_B
-                                                        + global_k * stride_K_B];
+                                        bReg[kn * BLOCK_N + nn]
+                                            = curBatchB[global_n * strideNB + global_k * strideKB];
                                     }
                                     else
                                     {
-                                        B_reg[kn * BLOCK_N + nn] = 0.0f;
+                                        bReg[kn * BLOCK_N + nn] = 0.0f;
                                     }
                                 }
                             }
 
-                            // Perform matrix multiplication accumulation with k as inner-most (fastest) dimension for both A and B.
-                            // A, B, and C of sizes defined by BLOCK_M, BLOCK_N, BLOCK_K.
+                            // Perform matrix multiplication accumulation with k as inner-most (fastest)
+                            // dimension for both A and B. A, B, and C of sizes defined by BLOCK_M, BLOCK_N, BLOCK_K.
                             // Store result in row-major order.
                             auto innerReduction = [BLOCK_M, BLOCK_N, BLOCK_K](
                                                       const float* A, const float* B, float* C) {
@@ -1020,37 +998,35 @@ namespace TensileLite
                                     {
                                         for(size_t n_i = 0; n_i < BLOCK_N; ++n_i)
                                         {
-                                            auto b_index = k_i * BLOCK_N + n_i;
-                                            auto a_index = k_i * BLOCK_M + m_i;
-                                            auto c_index = m_i * BLOCK_N + n_i;
-                                            assert(b_index < BLOCK_K * BLOCK_N);
-                                            assert(a_index < BLOCK_K * BLOCK_M);
-                                            assert(c_index < BLOCK_M * BLOCK_N);
-                                            float valB = B[b_index];
-                                            float valA = A[a_index];
+                                            auto  b_index = k_i * BLOCK_N + n_i;
+                                            auto  a_index = k_i * BLOCK_M + m_i;
+                                            auto  c_index = m_i * BLOCK_N + n_i;
+                                            float valB    = B[b_index];
+                                            float valA    = A[a_index];
                                             C[c_index] += valA * valB;
                                         }
                                     }
                                 }
                             };
-                            innerReduction(A_reg.data(), B_reg.data(), C_reg.data());
+                            innerReduction(aReg.data(), bReg.data(), cReg.data());
                         }
 
-                        // Copy from C to curBatchD:
+                        // Copy from cReg back.
                         for(size_t nn = 0; nn < BLOCK_N; ++nn)
                         {
                             for(size_t mm = 0; mm < BLOCK_M; ++mm)
                             {
                                 size_t global_n = n0 + nn;
                                 size_t global_m = m0 + mm;
-                                if(global_n < size_N && global_m < size_M)
+                                if(global_n < sizeN && global_m < sizeM)
                                 {
-                                    size_t idxD     = global_n * stride_N_D + global_m;
-                                    curBatchD[idxD] = C_reg[mm * BLOCK_N + nn];
+                                    size_t idxD     = global_n * strideND + global_m;
+                                    curBatchD[idxD] = cReg[mm * BLOCK_N + nn];
                                 }
                             }
                         }
 
+                        // Perform all the post-reduction stuff.
                         const float originalAlpha = std::get<float>(inputs.alpha);
                         const float beta          = std::get<float>(inputs.beta);
                         for(size_t nn = 0; nn < BLOCK_N; ++nn)
@@ -1059,15 +1035,13 @@ namespace TensileLite
                             {
                                 size_t global_n = n0 + nn;
                                 size_t global_m = m0 + mm;
-                                if(global_n < size_N && global_m < size_M)
+                                if(global_n < sizeN && global_m < sizeM)
                                 {
-
-                                    size_t idxD      = global_m + (global_n * stride_N_D);
-                                    size_t idxC      = global_m + (global_n * stride_N_C);
+                                    size_t idxD      = global_m + (global_n * strideND);
+                                    size_t idxC      = global_m + (global_n * strideNC);
                                     auto   startingC = curBatchC[idxC];
                                     auto   current   = curBatchD[idxD];
-
-                                    float alpha = originalAlpha;
+                                    float  alpha     = originalAlpha;
                                     if(useScaleAlphaVec)
                                     {
                                         if(factorDim == 1)
@@ -1123,7 +1097,8 @@ namespace TensileLite
                                         current += GetValue<float>(type, inputs.bias, pos, false);
                                     }
 
-                                    if (doActivation){
+                                    if(doActivation)
+                                    {
                                         current = Activation(problem.activationType(),
                                                              current,
                                                              problem.getParams().activationEnum(),
@@ -1138,9 +1113,7 @@ namespace TensileLite
                 }
             }
 
-            // -------------------------------------------------------------------------
             // 6. Write Back
-            // -------------------------------------------------------------------------
             if(problem.d().dataType() == rocisa::DataType::Half)
             {
                 storeFromFloat<TensileLite::Half>(
@@ -1154,8 +1127,6 @@ namespace TensileLite
 
             return true;
         }
-
-
 
         template <typename Inputs, typename Accumulator, typename MathOpAccum>
         void ReferenceSolution<Inputs, Accumulator, MathOpAccum>::SolveCPU(
@@ -1506,21 +1477,16 @@ namespace TensileLite
                 // bias
                 if(problem.useBias() && inputs.bias && !problem.useGradient())
                 {
-                    int    pos       = problem.bias().index(biasCoord);
-                    size_t d0        = problem.d().sizes()[0];
-                    size_t d1        = problem.d().sizes()[1];
-                    auto   type      = problem.bias().dataType();
-                    auto   factorDim = problem.getParams().factorDim();
-                    pos += factorDim ? int(int(dNum / d0) % d1) : int(dNum % d0);
-                    Accumulator bias = GetValue<Accumulator>(type, inputs.bias, pos, aConjugate);
+                    auto biasIndex = problem.bias().index(biasCoord);
+                    int  pos       = 0;
+                    if(problem.getParams().factorDim())
+                        pos = int(int(dNum / problem.d().sizes()[0]) % problem.d().sizes()[1])
+                              + biasIndex;
+                    else
+                        pos = int(dNum % problem.d().sizes()[0]) + biasIndex;
+                    Accumulator bias = GetValue<Accumulator>(
+                        problem.bias().dataType(), inputs.bias, pos, aConjugate);
                     resultD += bias;
-
-//                     std::cout << "\n\n";
-//                     std::cout << "Bias      : " << problem.bias() << std::endl;
-//                     std::cout << "Factor dim: " << problem.getParams().factorDim() << std::endl;
-//                     std::cout << "dNum      : " << dNum << std::endl;
-//                     std::cout << "sizes of D: " << problem.d() << std::endl;
-//                     std::cout << "pos       : " << pos << std::endl;
                 }
                 // E
                 if(problem.useE() && !problem.useGradient())
@@ -1693,7 +1659,6 @@ namespace TensileLite
                                            betaType,
                                            problem.computeInputType());
         }
-
 
         template <typename Problem, typename Inputs>
         void SolveCPUTemplates(uint64_t const& contractionInputsTypeId,
@@ -2234,22 +2199,28 @@ namespace TensileLite
                           bool                          tryFastPath)
         {
             auto start = std::chrono::high_resolution_clock::now();
-            if(tryFastPath && solveCPUFastInF32(problem, inputs, elementsToValidate))
+
+            // The fast solver computes all elements. If the number of elements to validate
+            // is in [0, sparsityThreshold * totalElements), skip this solver, falling through to another
+            // solver that handles the partial validation sparsity efficiently.
+            double sparsityThreshold        = 0.2;
+            bool   isDenseEnoughForFastPath = true;
+            if(elementsToValidate >= 0
+               && elementsToValidate < sparsityThreshold * problem.d().totalLogicalElements())
+            {
+                isDenseEnoughForFastPath = false;
+            }
+
+            if(tryFastPath && isDenseEnoughForFastPath && solveCPUFastInF32(problem, inputs))
             {
                 auto end = std::chrono::high_resolution_clock::now();
                 std::chrono::duration<double, std::milli> duration = end - start;
-                std::cout << "[NEWLING][REFERENCE][ReferenceSolution fast path took "
-                          << duration.count() << " ms]" << std::endl;
                 return;
             }
 
             auto contractionInputsTypeId = getInputContractionInputsTypeId(problem);
             SolveCPUTemplates(contractionInputsTypeId, problem, inputs, elementsToValidate);
-
             auto end = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double, std::milli> duration = end - start;
-            std::cout << "[NEWLING][REFERENCE][ReferenceSolution legacy path took "
-                      << duration.count() << " ms]" << std::endl;
         }
 
         void SolveCPU(ContractionProblem const* problem,
