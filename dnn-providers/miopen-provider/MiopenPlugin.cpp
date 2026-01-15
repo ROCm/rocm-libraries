@@ -18,7 +18,7 @@
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenContainer.hpp"
 #include "MiopenHandleFactory.hpp"
-#include "MiopenLegacyPlugin.hpp"
+#include "MiopenPlugin.hpp"
 
 static const char* pluginName = "miopen_plugin";
 static const char* pluginVersion = "1.0.0";
