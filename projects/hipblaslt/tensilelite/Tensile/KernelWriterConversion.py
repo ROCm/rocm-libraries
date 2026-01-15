@@ -298,14 +298,10 @@ class KernelWriterConversion(KernelWriterBase):
     self.num_dword_store = int(self.num_elements_load * self.state["ProblemType"]["DestDataType"].numBytes() / 4)
     if self.num_dword_store == 0:
       self.num_dword_store = self.num_elements_load * self.state["ProblemType"]["DestDataType"].numBytes() / 4
-    if self.state["ProblemType"]["DataType"].isDouble() or self.state["ProblemType"]["DataType"].isSingleComplex():
-      self.num_dword_load  = self.num_dword_load // 2
-    if self.state["ProblemType"]["DestDataType"].isDouble() or self.state["ProblemType"]["DestDataType"].isSingleComplex():
-      self.num_dword_store = self.num_dword_store // 2
-    if self.state["ProblemType"]["DataType"].isDoubleComplex():
-      self.num_dword_load  = self.num_dword_load // 4
-    if self.state["ProblemType"]["DestDataType"].isDoubleComplex():
-      self.num_dword_store = self.num_dword_store // 4
+    if self.state["ProblemType"]["DataType"].isDouble() or self.state["ProblemType"]["DataType"].isComplex():
+      self.num_dword_load  = self.num_elements_load
+    if self.state["ProblemType"]["DestDataType"].isDouble() or self.state["ProblemType"]["DestDataType"].isComplex():
+      self.num_dword_store = self.num_elements_load
     kStr += "#define NUM_ELEMENT_LOAD %d%s" % ( self.num_elements_load, self.endLine)
     kStr += "#define NUM_GSU %d%s" % (self.state["GlobalSplitU"], self.endLine)
 
