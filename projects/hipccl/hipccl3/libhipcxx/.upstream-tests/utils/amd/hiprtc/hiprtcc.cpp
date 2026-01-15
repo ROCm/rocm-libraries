@@ -8,7 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Modifications Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -68,8 +68,8 @@ int g_argc;
 char** g_argv;
 
 // Ignore PTX arch, only capture output version since PTX only compilation *must* be the same
-std::regex real_capture(R"((?:--offload-arch=)?(gfx(90[8a]|94[012]|1030|110[01]|120[01]|950)))");
-std::regex virtual_capture(R"((?:--offload-arch=)?(gfx(90[8a]|94[012]|1030|110[01]|120[01]|950)))"); // NOTE(HIP): HIP does not support virtual archs
+std::regex real_capture(R"((?:--offload-arch=)?(gfx(90.|94.|95.|10..|11..|12..)))");
+std::regex virtual_capture(R"((?:--offload-arch=)?(gfx(90.|94.|95.|10..|11..|12..)))"); // NOTE(HIP): HIP does not support virtual archs
 
 // Arch list is a set of unique pairs of strings and bools
 // e.x. { compute_arch, real_or_virtual }
