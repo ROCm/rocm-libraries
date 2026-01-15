@@ -368,6 +368,7 @@ class TestValidatePackTF32(CMSValidationTestBase):
         kernel_updates["UsePLRPack"] = True
         kernel_updates["UseF32XEmulation"] = True
         kernel_updates["ForceUnrollSubIter"] = True
+        kernel_updates["UseDirect32XEmulation"] = True
         kernel_updates["DepthU"] = 32
         super().setUp(kernel_updates)
 
@@ -548,6 +549,7 @@ class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
         kernel_updates["UsePLRPack"] = True
         kernel_updates["UseF32XEmulation"] = True
+        kernel_updates["UseDirect32XEmulation"] = True
         kernel_updates["ForceUnrollSubIter"] = True
         kernel_updates["DepthU"] = 32
         super().setUp(kernel_updates)
@@ -627,6 +629,7 @@ class TestValidatePackTF32CrossPackInterleaving(CMSValidationTestBase):
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
         kernel_updates["UsePLRPack"] = True
         kernel_updates["UseF32XEmulation"] = True
+        kernel_updates["UseDirect32XEmulation"] = True
         kernel_updates["ForceUnrollSubIter"] = True
         kernel_updates["DepthU"] = 32
         kernel_updates["MIWaveTileA"] = 4
@@ -733,6 +736,7 @@ class TestValidatePackTF32MultipleGroups(CMSValidationTestBase):
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
         kernel_updates["UsePLRPack"] = True
         kernel_updates["UseF32XEmulation"] = True
+        kernel_updates["UseDirect32XEmulation"] = True
         kernel_updates["ForceUnrollSubIter"] = True
         kernel_updates["DepthU"] = 32
 
@@ -873,6 +877,7 @@ class TestValidatePackTF32MFMA4x4x4(CMSValidationTestBase):
         kernel_updates["UsePLRPack"] = True
         kernel_updates["UseF32XEmulation"] = True
         kernel_updates["UseMFMAF32XEmulation"] = True
+        kernel_updates["UseDirect32XEmulation"] = True
         kernel_updates["ForceUnrollSubIter"] = True
         kernel_updates["DepthU"] = 32
         kernel_updates["MIWaveTileA"] = 4

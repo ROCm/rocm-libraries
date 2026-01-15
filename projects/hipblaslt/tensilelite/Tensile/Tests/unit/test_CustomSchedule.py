@@ -588,7 +588,7 @@ class TestCustomScheduleTF32:
             "TransposeA": transA, "TransposeB": transB
         })
         kernel.update({
-            "UseF32XEmulation": True,
+            "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "ForceUnrollSubIter": True,
             "MacroTile0": 192, "MacroTile1": 256, "DepthU": 32,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
@@ -614,7 +614,7 @@ class TestCustomScheduleTF32:
             "TransposeA": True, "TransposeB": False
         })
         kernel.update({
-            "UseF32XEmulation": True,
+            "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "MacroTile0": 128, "MacroTile1": 192, "DepthU": 32,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
             "DirectToLds": True,
@@ -639,7 +639,7 @@ class TestCustomScheduleTF32:
             "TransposeA": True, "TransposeB": False
         })
         kernel.update({
-            "UseF32XEmulation": True,
+            "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "MacroTile0": 192, "MacroTile1": 128, "DepthU": 32,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
             "DirectToLds": True,
@@ -664,7 +664,7 @@ class TestCustomScheduleTF32:
             "TransposeA": True, "TransposeB": False
         })
         kernel.update({
-            "UseF32XEmulation": True,
+            "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "ForceUnrollSubIter": True,
             "MacroTile0": 256, "MacroTile1": 256, "DepthU": 32,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
@@ -690,7 +690,7 @@ class TestCustomScheduleTF32:
             "TransposeA": True, "TransposeB": False
         })
         kernel.update({
-            "UseF32XEmulation": True,
+            "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "ForceUnrollSubIter": True,
             "MacroTile0": 256, "MacroTile1": 192, "DepthU": 32,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
@@ -716,7 +716,7 @@ class TestCustomScheduleTF32:
             "TransposeA": True, "TransposeB": False
         })
         kernel.update({
-            "UseF32XEmulation": True,
+            "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "ForceUnrollSubIter": True,
             "MacroTile0": 128, "MacroTile1": 256, "DepthU": 32,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
@@ -748,7 +748,7 @@ class TestCustomScheduleTF32:
             "TransposeA": transA, "TransposeB": transB
         })
         kernel.update({
-            "UseF32XEmulation": True,
+            "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "ForceUnrollSubIter": True,
             "MacroTile0": 128, "MacroTile1": 128, "DepthU": 32,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
@@ -782,7 +782,7 @@ class TestCustomScheduleTF32:
             "TransposeA": transA, "TransposeB": transB
         })
         kernel.update({
-            "UseF32XEmulation": True,
+            "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "MacroTile0": 128, "MacroTile1": 128, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
@@ -815,7 +815,7 @@ class TestCustomScheduleTF32:
             "TransposeA": transA, "TransposeB": transB
         })
         kernel.update({
-            "UseF32XEmulation": True,
+            "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "MacroTile0": 128, "MacroTile1": 160, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,

@@ -1420,8 +1420,13 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
     if mfma_reorder and len(mfma_reorder) != timeline.num_vmfma:
         raise ValueError(f"Incorrect number of VMFMA indices in mfmaReorder. Expected {timeline.num_vmfma}, given {len(mfma_reorder)}.")
     
+
     is_tf32_emulation = kernel.get("UseF32XEmulation", False)
     is_4x4mfma_tf32 = kernel.get("UseMFMAF32XEmulation", False)
+    is_direct_32x_emulation = kernel.get("UseDirect32XEmulation", False)
+
+    if is_tf32_emulation and not is_direct_32x_emulation:
+        raise ValueError("UseDirect32XEmulation is False, case not supported.")
 
     mfmas_by_index: dict[int, MFMA] = {
         int(mfma.issued_at): mfma for _, mfma in timeline.get_instructions_combined("MFMA")
@@ -1565,6 +1570,9 @@ def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
     if not kernel.get("UseF32XEmulation", False):
         # Only F32 emulation issues instructions (Packs) which need estimation of quad-cycles for correctness.
         return
+
+    if not kernel.get("UseDirect32XEmulation", False):
+        raise ValueError("UseDirect32XEmulation is False, case not supported.")
 
     # Build helper lookup
     index_for_inst_id = {id(inst): i for i, inst in enumerate(timeline.combined_timeline)}
@@ -1987,6 +1995,10 @@ def verify_packs_start_and_end_at_correct_indices(schedule_info: 'ScheduleInfo',
         relevant_names.append(f"LRB{num}")
     kernel = context["kernel"]
     timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
+    
+    if kernel.get("UseF32XEmulation", False) and not kernel.get("UseDirect32XEmulation", False):
+        printWarning("UseF32XEmulation is set to True but UseDirect32XEmulation is not set to True. Skipping CMS validation for packs.")
+        return True, ""
     
     apply_swaits(timeline)
     apply_barriers(timeline)
