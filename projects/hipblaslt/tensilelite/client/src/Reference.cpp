@@ -819,11 +819,6 @@ namespace TensileLite
                 return false;
             }
 
-            if(problem.useBias())
-            {
-                return false;
-            }
-
             if(problem.useGradient())
             {
                 return false;
@@ -861,6 +856,10 @@ namespace TensileLite
                 return false;
             }
 
+           if(problem.useBias())
+           {
+              // supported!
+           }
 
             bool doActivation = false;
             std::vector<float> actArgs;
@@ -922,7 +921,6 @@ namespace TensileLite
                 ptrD = shadowD.data();
             }
 
-            // --- Alpha Vector ---
             bool useScaleAlphaVec = problem.useScaleAlphaVec();
             int  factorDim        = problem.getParams().factorDim(); // 0 = Row(M), 1 = Col(N)
 
@@ -950,7 +948,8 @@ namespace TensileLite
             auto mTiles = (size_M / BLOCK_M + (size_M % BLOCK_M != 0));
             auto kTiles = (size_K / BLOCK_K + (size_K % BLOCK_K != 0));
 
-// parallelize over the batch, M, and N dimensions.
+// Parallelize over the 3 non-reduction dimensions: batch, M, and N.
+// Each thread computes a BLOCK_M x BLOCK_N tile.
 #pragma omp parallel for collapse(3)
             for(size_t b = 0; b < size_Batch; ++b)
             {
@@ -964,7 +963,6 @@ namespace TensileLite
                     for(size_t n = 0; n < nTiles; ++n)
                     {
                         auto n0 = n * BLOCK_N;
-
                         std::array<float, BLOCK_M * BLOCK_K> A_reg = {0};
                         std::array<float, BLOCK_K * BLOCK_N> B_reg = {0};
                         std::array<float, BLOCK_M * BLOCK_N> C_reg = {0};
@@ -1053,23 +1051,23 @@ namespace TensileLite
                             }
                         }
 
-                        // Perform non-linearity on the block.
+                        const float originalAlpha = std::get<float>(inputs.alpha);
+                        const float beta          = std::get<float>(inputs.beta);
                         for(size_t nn = 0; nn < BLOCK_N; ++nn)
                         {
                             for(size_t mm = 0; mm < BLOCK_M; ++mm)
                             {
-
-                                const float originalAlpha = std::get<float>(inputs.alpha);
-                                const float beta          = std::get<float>(inputs.beta);
-                                float       alpha         = originalAlpha;
-                                size_t      global_n      = n0 + nn;
-                                size_t      global_m      = m0 + mm;
+                                size_t global_n = n0 + nn;
+                                size_t global_m = m0 + mm;
                                 if(global_n < size_N && global_m < size_M)
                                 {
+
                                     size_t idxD      = global_m + (global_n * stride_N_D);
                                     size_t idxC      = global_m + (global_n * stride_N_C);
                                     auto   startingC = curBatchC[idxC];
                                     auto   current   = curBatchD[idxD];
+
+                                    float alpha = originalAlpha;
                                     if(useScaleAlphaVec)
                                     {
                                         if(factorDim == 1)
@@ -1088,6 +1086,41 @@ namespace TensileLite
                                     else
                                     {
                                         current = (alpha * current);
+                                    }
+
+                                    if(problem.useBias() && inputs.bias)
+                                    {
+                                        assert(!problem.useGradient()
+                                               && "Bias gradient not supported on this path.");
+
+                                        auto const&          bias = problem.bias();
+                                        auto const&          d    = problem.d();
+                                        std::vector<int64_t> dCoord(d.dimensions());
+                                        std::vector<int64_t> biasCoord(bias.dimensions());
+                                        CoordNumbered(idxD,
+                                                      dCoord.begin(),
+                                                      dCoord.end(),
+                                                      d.sizes().begin(),
+                                                      d.sizes().end());
+                                        for(size_t i = 0; i < problem.batchIndices().size(); i++)
+                                        {
+                                            auto const& idx   = problem.batchIndices()[i];
+                                            size_t      coord = dCoord[idx.d];
+                                            if(biasCoord.size() > 2)
+                                            {
+                                                biasCoord[2] = coord;
+                                            }
+                                        }
+                                        size_t d0 = problem.d().sizes()[0];
+                                        size_t d1 = problem.d().sizes()[1];
+
+                                        int pos       = problem.bias().index(biasCoord);
+                                        int factorDim = problem.getParams().factorDim();
+                                        pos += factorDim ? int(int(idxD / d0) % d1)
+                                                         : int(idxD % d0);
+
+                                        rocisa::DataType type = problem.bias().dataType();
+                                        current += GetValue<float>(type, inputs.bias, pos, false);
                                     }
 
                                     if (doActivation){
@@ -1118,9 +1151,6 @@ namespace TensileLite
                 storeFromFloat<TensileLite::BFloat16>(
                     inputs.d, shadowD, problem.d().totalAllocatedElements());
             }
-
-
-            std::cout << "Completed Fast CPU Solver" << std::endl;
 
             return true;
         }
@@ -1476,16 +1506,21 @@ namespace TensileLite
                 // bias
                 if(problem.useBias() && inputs.bias && !problem.useGradient())
                 {
-                    auto biasIndex = problem.bias().index(biasCoord);
-                    int  pos       = 0;
-                    if(problem.getParams().factorDim())
-                        pos = int(int(dNum / problem.d().sizes()[0]) % problem.d().sizes()[1])
-                              + biasIndex;
-                    else
-                        pos = int(dNum % problem.d().sizes()[0]) + biasIndex;
-                    Accumulator bias = GetValue<Accumulator>(
-                        problem.bias().dataType(), inputs.bias, pos, aConjugate);
+                    int    pos       = problem.bias().index(biasCoord);
+                    size_t d0        = problem.d().sizes()[0];
+                    size_t d1        = problem.d().sizes()[1];
+                    auto   type      = problem.bias().dataType();
+                    auto   factorDim = problem.getParams().factorDim();
+                    pos += factorDim ? int(int(dNum / d0) % d1) : int(dNum % d0);
+                    Accumulator bias = GetValue<Accumulator>(type, inputs.bias, pos, aConjugate);
                     resultD += bias;
+
+//                     std::cout << "\n\n";
+//                     std::cout << "Bias      : " << problem.bias() << std::endl;
+//                     std::cout << "Factor dim: " << problem.getParams().factorDim() << std::endl;
+//                     std::cout << "dNum      : " << dNum << std::endl;
+//                     std::cout << "sizes of D: " << problem.d() << std::endl;
+//                     std::cout << "pos       : " << pos << std::endl;
                 }
                 // E
                 if(problem.useE() && !problem.useGradient())
