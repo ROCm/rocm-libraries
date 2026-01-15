@@ -31,7 +31,7 @@ The component public repository is located at `https://github.com/ROCm/rocm-libr
   .. grid-item-card:: How to
 
     * :doc:`Build and execute operation graphs in hipDNN <how-to/build-execute-hipdnn>`
-    * :doc:`Add new plugins and operations to hipDNN <how-to/add-plugins>`
+    * :doc:`Extend hipDNN functionality (Advanced) <how-to/extend-hipdnn>`
 
   .. grid-item-card:: Reference
 

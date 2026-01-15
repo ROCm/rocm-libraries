@@ -4,12 +4,16 @@
 
 .. _architecture:
 
-******************************************
+******************************
 hipDNN high-level architecture
-******************************************
+******************************
 
 hipDNN has a plugin-based architecture in order to allow contributors and users to extend hipDNN without modifying the core library. 
 hipDNN has support for engine plugins, which provide the kernels to solve graphs. 
+
+.. note::
+
+  See :ref:`detailed-architecture` for a more granular breakdown of the system architecture and the backend API.
 
 Architecture overview
 =====================
@@ -217,7 +221,7 @@ See `Plugin Development ` for advanced information on developing and using plugi
 Backend
 -------
 
-The Backend is the core engine of hipDNN responsible for managing plugins and orchestrating graph execution.
+The backend is the core engine of hipDNN responsible for managing plugins and orchestrating graph execution.
 
 Key characteristics
 ~~~~~~~~~~~~~~~~~~~
@@ -225,16 +229,16 @@ Key characteristics
 - **Installable library**: C API with ABI for language interoperability, which is dynamically loadable.
 - **Dependencies**: :ref:`data`.
 - **Purpose**: Provides a stable C API for interacting with the hipDNN kernel providers.
-- **Expected Usage**: Library linked to the frontend API and expert user projects that provides access to the backend API.
+- **Expected usage**: Library linked to the frontend API and expert user projects that provides access to the backend API.
 
 Workflow
 ~~~~~~~~
 
 1. **Create a Graph**: Build an operation graph using the frontend.
-2. **Create Heuristic Descriptor**: Initialize with the graph and desired heuristic mode.
-3. **Get Engine Configs**: Query available engine configurations from the heuristic.
-4. **Create Execution Plan**: Combine selected engine config with the graph.
-5. **Run Execution Plan**: Execute with variant pack containing tensor data.
+2. **Create heuristic descriptor**: Initialize with the graph and desired heuristic mode.
+3. **Get engine configs**: Query available engine configurations from the heuristic.
+4. **Create execution plan**: Combine selected engine config with the graph.
+5. **Run execution plan**: Execute with variant pack containing tensor data.
 
 .. code:: c
 

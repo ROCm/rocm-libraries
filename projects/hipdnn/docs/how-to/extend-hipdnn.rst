@@ -1,12 +1,12 @@
 .. meta::
-  :description: Add new plugins and operations to hipDNN
+  :description: Extend hipDNN functionality
   :keywords: hipDNN, ROCm, API, how-to 
 
-.. _plugins:
+.. _extend:
 
-***************************************************
-Add new plugins and operations to hipDNN (Advanced)
-***************************************************
+**************************************
+Extend hipDNN functionality (Advanced)
+**************************************
 
 This section covers how to extend hipDNN with new functionality.
 

@@ -18,15 +18,21 @@ subtrees:
 
 - caption: Conceptual
   entries:
+  - file: conceptual/miopen-plugin.rst
+    title: MIOpen Provider plugin architecture
   - file: conceptual/architecture.rst
     title: High-level architecture
+  - file: conceptual/backend-architecture.rst
+    title: Backend architecture (Advanced)
 
 - caption: How to
   entries:
   - file: how-to/build-execute-hipdnn.rst
     title: Build and execute operation graphs
-  - file: how-to/add-plugins.rst
-    title: Add new plugins and operations
+  - file: how-to/extend-hipdnn.rst
+    title: Extend hipDNN functionality (Advanced)
+  - file: how-to/develop-plugins.rst
+    title: Develop plugins for hipDNN (Advanced)
 
 - caption: Reference
   entries:
@@ -34,6 +40,8 @@ subtrees:
     title: Environment variables
   - file: reference/naming-guidelines.rst
     title: Coding style and naming guidelines
+  - file: reference/glossary.rst
+    title: Glossary
     
 - caption: About
   entries:
