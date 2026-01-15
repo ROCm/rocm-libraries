@@ -24,6 +24,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * Fixed runtime kernel compilation issues for TheRock
 * Fixed Windows Conv2d GPU timeout issue
 * Fixed solver selection bug caused by incorrect handling of unpacked tensors
+* [Conv] Fixed parsing of CK type strings for 3D heuristics
 
 ## MIOpen 3.5.1 for ROCm 7.2.0
 ### Changed
