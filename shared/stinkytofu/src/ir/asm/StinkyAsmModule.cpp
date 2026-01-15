@@ -33,9 +33,9 @@ namespace stinkytofu
 {
     struct StinkyAsmModule::Impl
     {
-        std::string                     name;
-        std::array<int, 3>              arch;
-        std::vector<StinkyInstruction*> instructions;
+        std::string          name;
+        std::array<int, 3>   arch;
+        std::vector<IRBase*> instructions;
 
         // The IRList is owned by a Function/BasicBlock
         // We maintain a pointer to it for compatibility
@@ -56,7 +56,7 @@ namespace stinkytofu
         ~Impl()
         {
             // Function destructor will clean up BasicBlocks and their IRLists
-            // The StinkyInstructions in the IRList will be deleted by the Function
+            // The IRBases in the IRList will be deleted by the Function
         }
     };
 
@@ -80,7 +80,7 @@ namespace stinkytofu
         return pImpl->arch;
     }
 
-    void StinkyAsmModule::add(StinkyInstruction* inst)
+    void StinkyAsmModule::add(IRBase* inst)
     {
         if(inst)
         {
@@ -88,15 +88,15 @@ namespace stinkytofu
         }
     }
 
-    void StinkyAsmModule::add(const std::vector<StinkyInstruction*>& insts)
+    void StinkyAsmModule::add(const std::vector<IRBase*>& insts)
     {
-        for(StinkyInstruction* inst : insts)
+        for(IRBase* inst : insts)
         {
             add(inst);
         }
     }
 
-    const std::vector<StinkyInstruction*>& StinkyAsmModule::getInstructions() const
+    const std::vector<IRBase*>& StinkyAsmModule::getInstructions() const
     {
         return pImpl->instructions;
     }

@@ -22,6 +22,13 @@
  * ************************************************************************ */
 #pragma once
 #include "code.hpp"
+#include <memory>
+
+// Forward declaration for StinkyTofu types
+namespace stinkytofu
+{
+    class StinkyAsmModule;
+}
 
 namespace rocisa
 {
@@ -60,8 +67,10 @@ namespace rocisa
     std::string getActFuncModuleName(int gwvw, int sgpr, int tmpVgpr, int tmpSgpr);
     std::string getActFuncBranchModuleName();
 
-    rocIsaPassResult rocIsaPass(std::shared_ptr<KernelBody>& kernel,
-                                const rocIsaPassOption&      option); // Return value is std::move()
+    // rocIsaPass with optional StinkyAsmModule parameter (for gfx1250)
+    rocIsaPassResult rocIsaPass(std::shared_ptr<KernelBody>&                  kernel,
+                                const rocIsaPassOption&                       option,
+                                std::shared_ptr<stinkytofu::StinkyAsmModule>& stModule);
 
     // Internal use only
     struct Graph

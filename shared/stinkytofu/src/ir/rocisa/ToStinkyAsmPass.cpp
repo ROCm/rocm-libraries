@@ -154,6 +154,12 @@ namespace
 
                 return reg;
             }
+            else if(auto hwregContainer = std::dynamic_pointer_cast<HWRegContainer>(*pptr))
+            {
+                // Handle hardware register containers like hwreg(26,4,1)
+                // These should be emitted as literal strings in the assembly
+                return StinkyRegister(hwregContainer->toString());
+            }
         }
         else if(const int* literalInt = std::get_if<int>(&input))
         {

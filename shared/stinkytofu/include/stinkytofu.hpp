@@ -103,6 +103,7 @@ namespace stinkytofu
         enum class IRType
         {
             StinkyTofu, // Assembly-level IR (StinkyInstruction)
+            StinkyAsmDirective, // Assembly directives
             LogicalIR, // High-level, architecture-independent IR (LogicalInstruction)
         };
 

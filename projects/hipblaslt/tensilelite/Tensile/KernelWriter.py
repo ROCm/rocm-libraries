@@ -5142,21 +5142,36 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Add a label at the end of the asm for indexing.
     module.add(Label("ASM_End", "The end of the kernel"))
 
-    #if self.states.stinkyOpt:
-    if True:
-      import rocisa
-      import stinkytofu # import stinkytofu to avoid type resolution issues across modules
-      stModule = rocisa.toStinkyTofuModule(module, self.states.version, "kernel_name")
-      print("="*20)
-      stModule.runOptimizationPipeline()
-      #print(stModule.emitAssembly())
-      # write the assembly to a file
-      with open("st.all.asm", "w") as f:
-        f.write(stModule.emitAssembly())
-      print("="*20)
-
     moduleKernelBody.addBody(module)
     self.checkResources(kernel, moduleKernelBody) # check resource available or not
+
+    # Initialize stModule as None (will be set for supported architectures)
+    stModule = None
+
+    # List of architectures that support StinkyTofu optimization
+    # Can be extended to support more architectures as needed
+    stinkyTofuSupportedArchs = [
+      (12, 5, 0),  # gfx1250
+      # Add more architectures here as needed
+      # (12, 5, 1),  # Example: gfx1251
+    ]
+
+    # Run StinkyTofu conversion for supported architectures
+    if self.states.version in stinkyTofuSupportedArchs:
+      import rocisa
+
+      print("="*80)
+      print(f"StinkyTofu: Converting kernel to stinkytofu IR for gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}...")
+
+      # Convert rocisa module to stinkytofu with signature
+      # Returns a KernelBody wrapper that includes signature and instruction module
+      # - runOptimizationPipeline() optimizes the instruction body
+      # - emitAssembly() outputs complete kernel: signature + optimized instructions
+      stModule = rocisa.toStinkyTofuModule(module, self.states.version, "kernel_name",
+                                           signature=fs, wavefrontSize=kernel["WavefrontSize"])
+
+      # Run optimizations on the instruction body
+      stModule.runOptimizationPipeline()
 
     # Tensile instruction pass, temporarily disable due to build time.
     # Kernels with epilog especially with activation is too long (50000~ lines).
@@ -5190,14 +5205,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.states.stinkyOpt:
       ripo.stinkyOpt = True
 
-    passResult = rocIsaPass(moduleKernelBody, ripo)
+    passResult = rocIsaPass(moduleKernelBody, ripo, stModule)
     kernel["MathClocksUnrolledLoop"] = passResult.cycles
 
 
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
 
-    return (error, str(moduleKernelBody))
+    # For supported architectures with StinkyTofu, use stModule.emitAssembly()
+    # which includes signature + optimized instructions
+    # For other architectures, use the original moduleKernelBody
+    if stModule is not None:
+      return (error, stModule.emitAssembly())
+    else:
+      return (error, str(moduleKernelBody))
 
   ##############################################################################
   # Init Kernel

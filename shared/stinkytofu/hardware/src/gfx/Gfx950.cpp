@@ -24,7 +24,6 @@
 #include <utility>
 
 #include "gfx/CommonInstsDSL.hpp"
-#include "gfx/GpuArchManager.hpp"
 #include "gfx/InstDefDSL.hpp"
 
 namespace stinkytofu
@@ -177,7 +176,7 @@ namespace stinkytofu
                 "v_mad_u32_u24",
                 "v_med3_i32",
                 "v_med3_f32",
-                "v_mac_f32",
+                "v_fmac_f32",
                 "v_mad_mix_f32",
             })
             DEF_T(VALU, name);
@@ -826,7 +825,7 @@ namespace stinkytofu
             {"VSubI32", "v_sub_i32"},
             {"VSubU32", "v_sub_u32"},
             {"VSubCoU32", "v_sub_co_u32"},
-            {"VMacF32", "v_mac_f32"},
+            {"VMacF32", "v_fmac_f32"},
             {"VDot2CF32F16", "v_dot2c_f32_f16"},
             {"VDot2F32F16", "v_dot2_f32_f16"},
             {"VFmaF16", "v_fma_f16"},

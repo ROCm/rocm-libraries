@@ -43,6 +43,11 @@ namespace stinkytofu
         printer.print(*this);
     }
 
+    void StinkyRegister::dump() const
+    {
+        dump(std::cerr);
+    }
+
     //----------------------------------------------------------------------
     // StinkyInstruction implementation
     //----------------------------------------------------------------------
@@ -134,8 +139,11 @@ namespace stinkytofu
         {
             if(prevNode->getType() == IRBase::IRType::StinkyTofu)
             {
-                auto* candidateInst = cast<StinkyInstruction>(prevNode);
-
+                auto* candidateInst = dyn_cast<StinkyInstruction>(prevNode);
+                if(!candidateInst)
+                {
+                    continue;
+                }
                 // Check if this instruction defines the register we're looking for
                 for(const auto& destReg : candidateInst->destRegs)
                 {
@@ -167,7 +175,11 @@ namespace stinkytofu
         {
             if(nextNode->getType() == IRBase::IRType::StinkyTofu)
             {
-                auto* candidateInst = cast<StinkyInstruction>(nextNode);
+                auto* candidateInst = dyn_cast<StinkyInstruction>(nextNode);
+                if(!candidateInst)
+                {
+                    continue;
+                }
 
                 // Check if this instruction uses the register we just defined
                 for(const auto& srcReg : candidateInst->srcRegs)
@@ -216,7 +228,11 @@ namespace stinkytofu
                 {
                     if(prevNode->getType() == IRBase::IRType::StinkyTofu)
                     {
-                        auto* candidateInst = cast<StinkyInstruction>(prevNode);
+                        auto* candidateInst = dyn_cast<StinkyInstruction>(prevNode);
+                        if(!candidateInst)
+                        {
+                            continue;
+                        }
 
                         for(const auto& destReg : candidateInst->destRegs)
                         {
@@ -254,7 +270,11 @@ namespace stinkytofu
             {
                 if(nextNode->getType() == IRBase::IRType::StinkyTofu)
                 {
-                    auto* candidateInst = cast<StinkyInstruction>(nextNode);
+                    auto* candidateInst = dyn_cast<StinkyInstruction>(nextNode);
+                    if(!candidateInst)
+                    {
+                        continue;
+                    }
 
                     // Check if this instruction uses our destination register
                     for(const auto& srcReg : candidateInst->srcRegs)

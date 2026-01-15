@@ -88,7 +88,7 @@ namespace stinkytofu
         int64_t     intValue; // For .align, .skip, etc.
 
         AsmDirective()
-            : IRBase(IRType::StinkyTofu)
+            : IRBase(IRType::StinkyAsmDirective)
             , kind(AsmDirectiveKind::SET)
             , intValue(0)
         {
@@ -106,6 +106,12 @@ namespace stinkytofu
                 out << " " << condition;
             if(!comment.empty())
                 out << "  // " << comment;
+        }
+
+    public:
+        static bool classof(const IRBase* ir)
+        {
+            return ir->getType() == IRType::StinkyAsmDirective;
         }
     };
 
