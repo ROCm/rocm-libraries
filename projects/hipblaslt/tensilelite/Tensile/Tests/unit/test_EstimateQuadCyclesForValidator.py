@@ -33,7 +33,7 @@ class TestEstimateQuadCyclesValidator(unittest.TestCase):
         Helper method to validate quad-cycle estimation.
         
         Ensures:
-        1. The estimate function returns the expected quad cycles
+        1. The estimate function returns the expected quad-cycles
         2. Only the starting instruction has estimated_quad_cycles_before_result_used set to expected value  
         3. All other instructions have estimated_quad_cycles_before_result_used set to 0
         """
@@ -58,7 +58,7 @@ class TestEstimateQuadCyclesValidator(unittest.TestCase):
         Test that consecutive MFMA instructions correctly stall each other.
         
         Validates that when multiple MFMA instructions are issued back-to-back,
-        the estimated quad cycles account for the execution latency and stalling.
+        the estimated quad-cycles account for the execution latency and stalling.
         """
         target_mfma = MFMA(issued_at=3)
         pack0 = Pack(name="Pack0", issue_index=0, issued_at=0, num_vmfma=0, needed_by=target_mfma)
