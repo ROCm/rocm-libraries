@@ -66,10 +66,6 @@ struct ConvSolution
     int n_in_data_tiles; // # of blocks of different inputs in LDS
     int n_stacks;        // # of diff stacks (part of batch).
 
-#ifdef CK_EXPERIMENTAL_BUILDER
-    std::string ck_kernel_desc; // ck builder kernel description
-#endif
-
     ConvSolution(miopenStatus_t status_ = miopenStatusSuccess)
         : status(status_),
           solver_id("<unknown>"),

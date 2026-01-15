@@ -384,7 +384,6 @@ ConvSolution InitAnyInvokerFactory(const ProblemDescriptionType& problem,
     ConvSolution result;
 #ifdef CK_EXPERIMENTAL_BUILDER
     std::string description = (*ptr_iter)->describe()->detailed();
-    result.ck_kernel_desc   = description;
 
     if(!description.empty())
     {
@@ -1151,7 +1150,6 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
 
 #ifdef CK_EXPERIMENTAL_BUILDER
     std::string description = (*ptr_iter)->describe()->detailed();
-    result.ck_kernel_desc   = description;
 
     if(!description.empty())
     {
@@ -1310,7 +1308,6 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
     ConvSolution result;
 #ifdef CK_EXPERIMENTAL_BUILDER
     std::string description = (*ptr_iter)->describe()->detailed();
-    result.ck_kernel_desc   = description;
 
     if(!description.empty())
     {
