@@ -336,8 +336,6 @@ namespace rocRoller
             void stage(KernelGraph const& graph);
             void commit(KernelGraph&);
 
-            std::unordered_set<int> storeLDSTileOperations() const;
-
         private:
             // Keys are: ForLoop tag, Unroll value/segment, LDS tag
             std::map<int, std::map<int, std::map<int, LDSOperationInfo>>> m_info;
@@ -352,32 +350,13 @@ namespace rocRoller
             std::map<int, std::unordered_set<int>>         m_prefetchDelete;
             std::map<int, int>                             m_exchangeSegment;
 
-            std::unordered_set<int> m_storeLDSTileOperations;
-
             std::map<int, std::map<int, std::vector<int>>> m_deferredToOrder;
 
             std::map<int, int> m_exchangeLoadMap;
 
             CommandParametersPtr m_params;
             ContextPtr           m_context;
-
-            void trackStores(KernelGraph const& graph, int start);
         };
-
-        void AddPrefetchVisitor::trackStores(KernelGraph const& graph, int start)
-        {
-            for(auto tag : graph.control.depthFirstVisit(start, GD::Downstream))
-            {
-                auto maybeStoreLDSTile = graph.control.get<StoreLDSTile>(tag);
-                if(maybeStoreLDSTile)
-                    m_storeLDSTileOperations.insert(tag);
-            }
-        }
-
-        std::unordered_set<int> AddPrefetchVisitor::storeLDSTileOperations() const
-        {
-            return m_storeLDSTileOperations;
-        }
 
         KernelGraph AddPrefetch::apply(KernelGraph const& original)
         {
@@ -385,16 +364,12 @@ namespace rocRoller
             removeRedundantBodyEdges(graph);
             removeRedundantNOPs(graph);
 
-            std::unordered_set<int> storeHasBarrierAlready;
-
             if(m_params->prefetch)
             {
                 auto visitor = AddPrefetchVisitor(m_params, m_context);
                 AssertFatal(m_params->unrollK > 1, "KLoop must be unrolled when prefetching.");
                 visitor.stage(graph);
                 visitor.commit(graph);
-
-                storeHasBarrierAlready = visitor.storeLDSTileOperations();
             }
 
             removeRedundantSequenceEdges(graph);
@@ -601,7 +576,6 @@ namespace rocRoller
             {
                 logger->debug("  prefetch: pre-loop commit lds: unroll {} user {}", 0, load.user);
                 auto storeChain = duplicateChain(graph, {load.ldsChain});
-                trackStores(graph, storeChain);
                 preChain.push_back(storeChain);
 
                 auto ldsTileTag = graph.mapper.get<LDS>(storeChain);
@@ -786,7 +760,6 @@ namespace rocRoller
 
                 // Commit in-flight to LDS
                 auto globalStores = loadsByUnroll[ldsPrefetchU];
-                trackStores(graph, globalStores[0].ldsChain);
                 if(separateMemOps)
                 {
                     graph.control.addElement(Sequence(), {nop}, {globalStores[0].ldsChain});
@@ -811,7 +784,6 @@ namespace rocRoller
 
                 for(int i = 1; i < globalStores.size(); i++)
                 {
-                    trackStores(graph, globalStores[i].ldsChain);
                     graph.control.addElement(
                         Sequence(), {globalStores[i - 1].ldsChain}, {globalStores[i].ldsChain});
 
