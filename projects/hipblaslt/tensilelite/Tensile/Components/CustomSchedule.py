@@ -156,7 +156,6 @@ def switch_A_B_schedule(optSchedule):
         swappedSchedule[new_key] = value
     return swappedSchedule
 
-
 class ScheduleInfo:
     def __init__(
         self,
@@ -3298,108 +3297,6 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_160x128x64_TF32(kernel, useLDSTr, TLDS):
-    # print("Using CMS!!!!!!!!")
-    # kernel["MfmaInitCVgprs"] = True
-
-    # n_mfma = 120
-    # optSchedule = dict()
-    # nglshift = nllshift = 0
-
-    # syncs = SyncSchedule()
-    # syncCode = []
-    # gr_inc_step = 0
-
-    # if isTN(kernel) and not useLDSTr and TLDS==1:
-    #     kernel["UseMFMAF32XEmulation"] = True
-    #     kernel["UsePLRPack"] = True
-
-    #     grinca = [0,0,1,1,2,2,3,3,4]
-    #     grincb = [4,5,5,6,6,7,7,8,8]
-    #     lrsa   = [58]
-    #     lrsb   = [59]
-    #     lwsa   = [118]
-    #     lwsb   = [118]
-
-    #     pack_a = [0,0,1,1, 8,8, 9,9,10,10,
-    #               2,2,3,3, 8,8, 11,11,12,12,
-    #               4,4,5,5, 8,8, 13,13,14,14,
-    #               6,6,7,7, 8,8, 15,15,16,16
-    #               ]
-    #     pack_b = [0,0,1,1, 10,10, 11,11,12,12,
-    #               2,2,3,3, 10,10, 13,13,14,14,
-    #               4,4,5,5, 10,10, 15,15,16,16,
-    #               6,6,7,7, 10,10, 17,17,18,18,
-    #               8,8,9,9, 10,10, 19,19,20,20
-    #               ]
-    #     lra0   = [0,1,2,3,4,5,6,7]
-    #     syncs.add(                 12, dscnt=4, comment="wait for LRA0 before pack to complete")
-    #     pack_a0 = [                i+13 for i in pack_a]  ## last element = 13 + 16 = 29
-
-    #     lrb0   = [               8,9,10,11,12,13,14,15,16,17]
-    #     syncs.add(                                                   23, dscnt=0, barrier=True, comment="wait for LRB0 before pack to complete + barrier for GR")
-    #     pack_b0 = [                                                  i+28 for i in pack_b]  ## last element = 28 + 20 = 48
-
-    #     gra    = [                                    24,28,32,36, 46,50,54,58] # one index for two instructions
-    #     grb    = [                                                             68,72,76,80, 90,94,98,102, 112,116] # one index for two instructions
-    #     num_gr = len(gra) + len(grb)
-
-    #     syncs.add(                                                            59, vlcnt=8, barrier=True, comment="wait for previous set of global reads")
-
-    #     lra1   = [60,61,62,63,64,65,66,67]
-    #     syncs.add(                          72, dscnt=4, comment="wait for LRA1 before pack to complete")
-    #     pack_a1 = [                         i+73 for i in pack_a]  ## last element = 73 + 16 = 89
-
-    #     lrb1   = [                        68,69,70,71,72,73,74,75,76,77]
-    #     syncs.add(                                                            83, dscnt=0, comment="wait for LRB1 before pack to complete")
-    #     pack_b1 = [                                                           i+88 for i in pack_b]  ## last element = 88 + 20 = 108
-
-    #     optSchedule = {
-    #         'SYNC':   [syncs.get_indicies()],
-    #         'GRIncB': [grinca],
-    #         'GRIncA': [grincb],
-    #         'LRB0':   [lra0],
-    #         'LRA0':   [lrb0],
-    #         'PackB0': [pack_a0],
-    #         'PackA0': [pack_b0],
-    #         'GRB':    [duplicate_list_items(gra, 2, gr_inc_step)],
-    #         'GRA':    [duplicate_list_items(grb, 2, gr_inc_step)],
-    #         'LRSB':   [lrsa],
-    #         'LRSA':   [lrsb],
-    #         'LWSB':   [lwsa],
-    #         'LWSA':   [lwsb],
-    #         'LRB1':   [lra1],
-    #         'LRA1':   [lrb1],
-    #         'PackA1': [pack_b1],
-    #         'PackB1': [pack_a1],
-    #         'LCC':    [[n_mfma-2, n_mfma-1]],
-    #     }
-
-    #     syncCode = syncs.get_code()
-    #     nglshift = nllshift = num_gr
-
-    #     opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift)
-    #     return True, opt1
-
-    # else:
-    #     return False, None
-
-    def switch_A_B_schedule(optSchedule):
-        # Swap A and B entries in the schedule
-        # Only replace A/B if it's the last or second-last character
-        swappedSchedule = dict()
-        for key, value in optSchedule.items():
-            # Check if A or B is in the last or second-last position
-            if len(key) >= 1 and key[-1] in ('A', 'B'):
-                # Last character is A or B
-                new_key = key[:-1] + ('B' if key[-1] == 'A' else 'A')
-            elif len(key) >= 2 and key[-2] in ('A', 'B'):
-                # Second-last character is A or B
-                new_key = key[:-2] + ('B' if key[-2] == 'A' else 'A') + key[-1]
-            else:
-                # No A or B in last or second-last position, keep unchanged
-                new_key = key
-            swappedSchedule[new_key] = value
-        return swappedSchedule
     valid, opt = _get_schedule_128x160x64_TF32(kernel, useLDSTr, TLDS)
     if not valid:
         return False, None
