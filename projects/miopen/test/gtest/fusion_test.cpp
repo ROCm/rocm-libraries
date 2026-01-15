@@ -30,7 +30,7 @@
 #include "tensor_holder.hpp"
 #include "get_handle.hpp"
 #include "cba.hpp"
-#include "lib_env_var.hpp"
+#include "../lib_env_var.hpp"
 
 #if MIOPEN_BACKEND_HIP
 namespace {
@@ -214,7 +214,7 @@ public:
         // This test requires a case with a non-zero workspace size.
         // If this check fails, the test configuration needs to be updated
         // to a case that requires workspace.
-        EXPECT_OP(workspace_size, >, 0);
+        EXPECT_TRUE(workspace_size > 0);
 
         if(PositiveTest)
         {
@@ -308,7 +308,7 @@ TEST_P(GPU_CBAFind2FusionWorkspace_FP32, CBAFind2_testWorkspaceInvalidSize)
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    Full,
+    Smoke,
     GPU_CBAFind2FusionWorkspace_FP32,
     testing::Combine(testing::Values(miopenActivationRELU),
                      testing::Values(ConvTestCaseBase{
