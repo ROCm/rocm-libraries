@@ -11,7 +11,7 @@
 
 using namespace hipdnn_plugin_sdk;
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 void EngineManager::addEngine(std::unique_ptr<IEngine> engine)

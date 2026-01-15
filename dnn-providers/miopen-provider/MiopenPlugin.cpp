@@ -20,11 +20,11 @@
 #include "MiopenHandleFactory.hpp"
 #include "MiopenLegacyPlugin.hpp"
 
-static const char* pluginName = "miopen_legacy_plugin";
+static const char* pluginName = "miopen_plugin";
 static const char* pluginVersion = "1.0.0";
 
 using namespace hipdnn_plugin_sdk;
-using namespace miopen_legacy_plugin;
+using namespace miopen_plugin;
 
 // NOLINTNEXTLINE
 thread_local char PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH] = "";
@@ -159,7 +159,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginCreateImpl(hipdnnEnginePluginHandle_t* ha
     return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
         throwIfNull(handle);
 
-        miopen_legacy_plugin::MiopenHandleFactory::createMiopenHandle(handle);
+        miopen_plugin::MiopenHandleFactory::createMiopenHandle(handle);
 
         auto miopenContainerPtr = miopenContainerLifecyclePtr.lock();
         if(miopenContainerPtr != nullptr)
@@ -197,7 +197,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginDestroyImpl(hipdnnEnginePluginHandle_t ha
     return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
         throwIfNull(handle);
 
-        miopen_legacy_plugin::MiopenHandleFactory::destroyMiopenHandle(handle);
+        miopen_plugin::MiopenHandleFactory::destroyMiopenHandle(handle);
         delete handle;
         handle = nullptr;
 

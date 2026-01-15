@@ -11,8 +11,8 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     )
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-    set(MIOPEN_LEGACY_PLUGIN "0.0.1")
-    project(hipDNN VERSION ${MIOPEN_LEGACY_PLUGIN} LANGUAGES CXX)
+    set(MIOPEN_PLUGIN_VERSION "0.0.1")
+    project(hipDNN VERSION ${MIOPEN_PLUGIN_VERSION} LANGUAGES CXX)
 
     if(NOT WIN32)
         # Only set if not already specified by user
@@ -104,7 +104,7 @@ file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 find_package(miopen CONFIG REQUIRED)
 
 add_library(
-    miopen_legacy_plugin_private
+    miopen_plugin_private
     engines/MiopenEngine.cpp
     engines/plans/MiopenBatchnormApplicabilityChecks.cpp
     engines/plans/MiopenBatchnormPlanBuilder.cpp
@@ -126,28 +126,28 @@ add_library(
     MiopenConvDescriptor.cpp
     MiopenUtils.cpp
     MiopenTensor.cpp
-    MiopenLegacyPlugin.cpp
+    MiopenPlugin.cpp
 )
 target_compile_definitions(
-    miopen_legacy_plugin_private PRIVATE COMPONENT_NAME="miopen_legacy_plugin"
+    miopen_plugin_private PRIVATE COMPONENT_NAME="miopen_plugin"
 )
-target_include_directories(miopen_legacy_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(miopen_legacy_plugin_private PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
-target_compile_options(miopen_legacy_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_include_directories(miopen_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(miopen_plugin_private PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
+target_compile_options(miopen_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
 if(BUILD_PLUGIN_AS_DEPENDENCY)
-    clang_tidy_check(miopen_legacy_plugin_private)
+    clang_tidy_check(miopen_plugin_private)
 endif()
 
-add_library(miopen_legacy_plugin SHARED MiopenLegacyPluginPublic.cpp)
-target_compile_definitions(miopen_legacy_plugin PRIVATE COMPONENT_NAME="miopen_legacy_plugin")
-target_link_libraries(miopen_legacy_plugin PRIVATE miopen_legacy_plugin_private)
+add_library(miopen_plugin SHARED MiopenPluginPublic.cpp)
+target_compile_definitions(miopen_plugin PRIVATE COMPONENT_NAME="miopen_plugin")
+target_link_libraries(miopen_plugin PRIVATE miopen_plugin_private)
 target_link_libraries(
-    miopen_legacy_plugin PRIVATE "-Xlinker --exclude-libs=ALL"
+    miopen_plugin PRIVATE "-Xlinker --exclude-libs=ALL"
 ) # Hide symbols from linked static libs
-target_compile_options(miopen_legacy_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(miopen_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(
-    miopen_legacy_plugin
+    miopen_plugin
     PROPERTIES CXX_VISIBILITY_PRESET hidden
                LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
                RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
@@ -157,8 +157,11 @@ set_target_properties(
                BUILD_WITH_INSTALL_RPATH TRUE
 )
 
+# Backwards compatibility alias for TheRock until submodule is bumped
+add_library(miopen_legacy_plugin ALIAS miopen_plugin)
+
 if(BUILD_PLUGIN_AS_DEPENDENCY)
-    clang_tidy_check(miopen_legacy_plugin)
+    clang_tidy_check(miopen_plugin)
 endif()
 
 if(NOT HIPDNN_SKIP_TESTS)
@@ -171,11 +174,18 @@ if(NOT HIPDNN_SKIP_TESTS)
         finalize_test_targets()
 
         # For standalone builds we need to install the ctest files
-        install_miopen_legacy_plugin_ctest_files()
+        install_miopen_plugin_ctest_files()
     endif()
 endif()
 
-install(TARGETS miopen_legacy_plugin EXPORT miopen-legacy-plugin
+install(TARGETS miopen_plugin EXPORT miopen-plugin
         LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
+
+# Backwards compatibility symlinks for TheRock until submodule is bumped
+install(CODE "
+    execute_process(COMMAND \${CMAKE_COMMAND} -E create_symlink
+        libmiopen_plugin.so
+        \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/libmiopen_legacy_plugin.so)
+")

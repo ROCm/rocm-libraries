@@ -11,7 +11,7 @@
 #include "PlanBuilderInterface.hpp"
 #include "PlanInterface.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class BatchnormFwdInferenceWithVarianceParams
@@ -88,4 +88,4 @@ private:
     BatchnormFwdInferenceWithVarianceParams _inferenceParams;
 };
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

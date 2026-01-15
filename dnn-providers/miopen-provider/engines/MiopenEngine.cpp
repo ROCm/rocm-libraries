@@ -6,7 +6,7 @@
 
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 MiopenEngine::MiopenEngine(int64_t id)

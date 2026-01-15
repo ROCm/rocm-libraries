@@ -49,7 +49,7 @@
         }                                                                                 \
     } while(0)
 
-namespace miopen_legacy_plugin::miopen_utils
+namespace miopen_plugin::miopen_utils
 {
 
 struct ActivationParams
@@ -85,4 +85,4 @@ size_t getSpatialDimCount(const hipdnn_data_sdk::data_objects::TensorAttributes&
 using hipdnn_data_sdk::utilities::extractDoubleFromTensorValue;
 using hipdnn_data_sdk::utilities::extractValueFromTensorValue;
 
-} // namespace miopen_legacy_plugin::miopen_utils
+} // namespace miopen_plugin::miopen_utils

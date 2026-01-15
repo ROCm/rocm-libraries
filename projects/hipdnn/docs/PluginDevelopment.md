@@ -294,7 +294,7 @@ This path is relative to the backend shared library location, typically:
 /opt/rocm/lib/
 └── hipdnn_plugins/
     └── engines/
-        ├── miopen_legacy_plugin.so
+        ├── miopen_plugin.so
         └── other_plugin.so
 ```
 

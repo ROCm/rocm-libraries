@@ -14,7 +14,7 @@
 #include "MiopenTensor.hpp"
 #include "PlanInterface.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class ConvWrwParams
@@ -72,4 +72,4 @@ private:
     size_t _workspaceSize = 0;
 };
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

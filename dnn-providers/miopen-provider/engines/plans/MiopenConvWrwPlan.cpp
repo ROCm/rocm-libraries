@@ -12,7 +12,7 @@
 #include "MiopenConvWrwPlan.hpp"
 #include "MiopenUtils.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 ConvWrwParams::ConvWrwParams(
@@ -147,4 +147,4 @@ void ConvWrwPlan::execute(const HipdnnEnginePluginHandle& handle,
                                               workspaceSize));
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

@@ -11,7 +11,7 @@
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 MiopenContainer::MiopenContainer()
@@ -48,4 +48,4 @@ EngineManager& MiopenContainer::getEngineManager()
     return *_engineManager;
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

@@ -6,7 +6,7 @@
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
-using namespace miopen_legacy_plugin;
+using namespace miopen_plugin;
 
 TEST(TestBatchnormFwdTrainingParams, InitializesRequiredTensorsFromValidGraph)
 {

@@ -11,7 +11,7 @@
 
 #include "engines/EngineInterface.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class MockEngine : public IEngine
@@ -39,4 +39,4 @@ public:
                 (const, override));
 };
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

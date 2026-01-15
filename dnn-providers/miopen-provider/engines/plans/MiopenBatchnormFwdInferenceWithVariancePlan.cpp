@@ -6,7 +6,7 @@
 
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 // We have made the intentional decision to hardcode the batchnorm mode to miopenBNSpatial
@@ -179,4 +179,4 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnEnginePluginHand
     }
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

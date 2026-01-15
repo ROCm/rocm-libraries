@@ -12,7 +12,7 @@
 #include "engines/plans/MiopenBatchnormApplicabilityChecks.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlan.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 namespace
@@ -373,4 +373,4 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
     }
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin
