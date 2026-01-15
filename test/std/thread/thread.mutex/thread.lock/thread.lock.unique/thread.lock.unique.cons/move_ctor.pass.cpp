@@ -12,10 +12,14 @@
 
 // unique_lock(unique_lock&& u);
 
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+
 #include <cassert>
 #include <memory>
-#include <mutex>
 #include <type_traits>
+#include <hip/mutex>
+
+#include "force_include_hip.h"
 
 #include "checking_mutex.h"
 #include "test_macros.h"
@@ -25,14 +29,16 @@ static_assert(::std::is_nothrow_move_constructible<hip::unique_lock<checking_mut
 #endif
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   checking_mutex m;
   hip::unique_lock<checking_mutex> lk0(m);
   hip::unique_lock<checking_mutex> lk = ::std::move(lk0);
 
-  assert(lk.mutex() == ::std::addressof(m));
+  assert(lk.mutex() == hip::std::addressof(m));
   assert(lk.owns_lock());
   assert(lk0.mutex() == nullptr);
   assert(!lk0.owns_lock());
+#endif
 
   return 0;
 }

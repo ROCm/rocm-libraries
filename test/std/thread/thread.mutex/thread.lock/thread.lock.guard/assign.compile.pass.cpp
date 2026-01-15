@@ -12,7 +12,9 @@
 
 // lock_guard& operator=(lock_guard const&) = delete;
 
-#include <mutex>
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+
+#include <hip/mutex>
 
 #include "types.h"
 

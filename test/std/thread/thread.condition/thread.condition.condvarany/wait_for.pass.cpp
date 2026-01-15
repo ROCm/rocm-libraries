@@ -7,6 +7,8 @@
 //===----------------------------------------------------------------------===//
 //
 // UNSUPPORTED: no-threads, c++03
+// XFAIL: *
+// REASON: wait_for() with chrono is not yet implemented in hipThreads
 
 // <condition_variable>
 
@@ -21,6 +23,7 @@
 #include <cassert>
 #include <hip/std/chrono>
 #include <mutex>
+#include <hip/mutex>
 #include <hip/thread>
 
 #include "make_test_thread.h"

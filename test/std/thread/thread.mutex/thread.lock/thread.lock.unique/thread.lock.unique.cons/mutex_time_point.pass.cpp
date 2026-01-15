@@ -6,6 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+// XFAIL: *
+// REASON: unique_lock timed constructors not yet implemented in hipThreads
+
 // <mutex>
 
 // template <class Clock, class Duration>
@@ -13,7 +17,7 @@
 
 #include <cassert>
 #include <hip/std/chrono>
-#include <mutex>
+#include <hip/mutex>
 
 #include "checking_mutex.h"
 

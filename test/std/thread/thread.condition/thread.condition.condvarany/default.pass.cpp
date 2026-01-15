@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 //
 // UNSUPPORTED: no-threads
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
 
 // <condition_variable>
 
@@ -14,14 +15,17 @@
 
 // condition_variable_any();
 
-#include <condition_variable>
 #include <cassert>
 
 #include "test_macros.h"
+#include <hip/condition_variable>
+#include "force_include_hip.h"
 
 int main(int, char**)
 {
-    ::std::condition_variable_any cv;
+#ifdef __HIP_DEVICE_COMPILE__
+    [[maybe_unused]] hip::condition_variable_any cv;
+#endif
 
   return 0;
 }

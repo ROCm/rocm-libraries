@@ -12,7 +12,9 @@
 
 // unique_lock(unique_lock const&) = delete;
 
-#include <mutex>
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+
+#include <hip/mutex>
 
 #include "checking_mutex.h"
 

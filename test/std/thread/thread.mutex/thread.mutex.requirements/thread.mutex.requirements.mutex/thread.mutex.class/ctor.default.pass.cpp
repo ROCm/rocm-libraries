@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: no-threads
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
 
 // <mutex>
 
@@ -14,19 +15,23 @@
 
 // mutex() noexcept;
 
-#include <mutex>
+#include <hip/mutex>
 #include <cassert>
 #include <type_traits>
+
+#include "force_include_hip.h"
 
 static_assert(::std::is_nothrow_default_constructible<::std::mutex>::value, "");
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   // The mutex is unlocked after default construction
   {
-    ::std::mutex m;
+    hip::spin_mutex m;
     assert(m.try_lock());
     m.unlock();
   }
+#endif
 
   return 0;
 }

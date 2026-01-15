@@ -16,8 +16,10 @@
 //     ...
 // };
 
-#include <mutex>
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+
 #include <type_traits>
+#include <hip/mutex>
 
 #include "checking_mutex.h"
 

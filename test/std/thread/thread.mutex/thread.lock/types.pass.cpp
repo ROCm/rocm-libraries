@@ -8,6 +8,9 @@
 //
 // UNSUPPORTED: no-threads
 // UNSUPPORTED: c++03
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+// XFAIL: *
+// REASON: defer_lock_t, try_to_lock_t, adopt_lock_t not yet implemented in hipThreads
 
 // <mutex>
 
@@ -19,19 +22,19 @@
 // constexpr try_to_lock_t try_to_lock{};
 // constexpr adopt_lock_t  adopt_lock{};
 
-#include <mutex>
+#include <hip/mutex>
 
 #include "test_macros.h"
 
 int main(int, char**)
 {
-    typedef ::std::defer_lock_t T1;
-    typedef ::std::try_to_lock_t T2;
-    typedef ::std::adopt_lock_t T3;
+    typedef hip::defer_lock_t T1;
+    typedef hip::try_to_lock_t T2;
+    typedef hip::adopt_lock_t T3;
 
-    T1 t1 = ::std::defer_lock; ((void)t1);
-    T2 t2 = ::std::try_to_lock; ((void)t2);
-    T3 t3 = ::std::adopt_lock; ((void)t3);
+    T1 t1 = hip::defer_lock; ((void)t1);
+    T2 t2 = hip::try_to_lock; ((void)t2);
+    T3 t3 = hip::adopt_lock; ((void)t3);
 
     return 0;
 }

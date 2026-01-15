@@ -8,6 +8,7 @@
 
 // UNSUPPORTED: c++03, c++11
 // REQUIRES: availability-synchronization_library-missing
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
 
 // Test the availability markup on ::std::barrier.
 

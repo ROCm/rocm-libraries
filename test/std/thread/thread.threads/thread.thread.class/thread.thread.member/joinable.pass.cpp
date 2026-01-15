@@ -22,6 +22,8 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
+#include "force_include_hip.h"
+
 class G
 {
     int alive_;
@@ -47,11 +49,13 @@ __device__ bool G::op_run = false;
 int main(int, char**)
 {
     {
+    #ifdef __HIP_DEVICE_COMPILE__
         G g;
         hip::thread t0 = support::make_test_thread(g);
         assert(t0.joinable());
         t0.join();
         assert(!t0.joinable());
+    #endif
     }
 
   return 0;

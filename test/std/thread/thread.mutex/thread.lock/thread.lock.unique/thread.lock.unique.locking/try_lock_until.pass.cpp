@@ -6,6 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+// XFAIL: *
+// REASON: unique_lock::try_lock_until() not yet implemented in hipThreads
+
 // <mutex>
 
 // template <class Mutex> class unique_lock;
@@ -17,6 +21,7 @@
 #include <hip/std/chrono>
 #include <mutex>
 #include <system_error>
+#include <hip/mutex>
 
 #include "checking_mutex.h"
 #include "test_macros.h"

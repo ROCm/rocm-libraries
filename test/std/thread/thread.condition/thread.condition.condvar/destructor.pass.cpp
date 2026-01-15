@@ -14,22 +14,25 @@
 
 // ~condition_variable();
 
-#include <condition_variable>
-#include <mutex>
 #include <hip/thread>
 #include <cassert>
+#include <hip/condition_variable>
+#include <hip/mutex>
+#include <cstdio>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-::std::condition_variable* cv;
-::std::mutex m;
-typedef hip::unique_lock<::std::mutex> Lock;
+#include "force_include_hip.h"
 
-bool f_ready = false;
-bool g_ready = false;
+__device__ hip::spin_condition_variable* cv;
+__device__ hip::spin_mutex m;
+typedef hip::unique_lock<hip::spin_mutex> Lock;
 
-void f()
+__device__ bool f_ready = false;
+__device__ bool g_ready = false;
+
+__device__ void f()
 {
     Lock lk(m);
     f_ready = true;
@@ -37,7 +40,7 @@ void f()
     delete cv;
 }
 
-void g()
+__device__ void g()
 {
     Lock lk(m);
     g_ready = true;
@@ -48,7 +51,8 @@ void g()
 
 int main(int, char**)
 {
-    cv = new ::std::condition_variable;
+#ifdef __HIP_DEVICE_COMPILE__
+    cv = new hip::spin_condition_variable;
     hip::thread th2 = support::make_test_thread(g);
     Lock lk(m);
     while (!g_ready)
@@ -57,6 +61,6 @@ int main(int, char**)
     hip::thread th1 = support::make_test_thread(f);
     th1.join();
     th2.join();
-
+#endif
   return 0;
 }

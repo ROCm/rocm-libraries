@@ -12,13 +12,19 @@
 
 // condition_variable(const condition_variable&) = delete;
 
-#include <condition_variable>
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+
 #include <cassert>
+
+#include "force_include_hip.h"
+#include <hip/condition_variable>
 
 int main(int, char**)
 {
-    ::std::condition_variable cv0;
-    ::std::condition_variable cv1(cv0);
+#ifdef __HIP_DEVICE_COMPILE__
+    hip::spin_condition_variable cv0;
+    hip::spin_condition_variable cv1(cv0);
+#endif
 
   return 0;
 }

@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 //
 // UNSUPPORTED: no-threads
-// ADDITIONAL_COMPILE_FLAGS: -DTEST_USE_GPU_THREADS
 
 // <thread>
 

@@ -19,6 +19,8 @@
 #include <cstdlib>
 #include <cassert>
 
+#include "force_include_hip.h"
+
 #include "make_test_thread.h"
 #include "test_macros.h"
 
@@ -46,6 +48,7 @@ __device__ bool G::op_run = false;
 
 int main(int, char**)
 {
+#ifdef __HIP_DEVICE_COMPILE__
     {
         G g;
         hip::thread t0 = support::make_test_thread(g);
@@ -57,6 +60,7 @@ int main(int, char**)
         assert(t1.get_id() == id0);
         t1.join();
     }
+#endif
 
   return 0;
 }

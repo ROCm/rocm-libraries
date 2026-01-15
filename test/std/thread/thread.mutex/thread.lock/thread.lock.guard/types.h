@@ -12,9 +12,9 @@
 #include <cassert>
 
 struct MyMutex {
-  bool locked = false;
+  __host__ __device__ bool locked = false;
 
-  MyMutex() = default;
+  __host__ __device__ MyMutex() = default;
   __host__ __device__ ~MyMutex() { assert(!locked); }
 
   __host__ __device__ void lock() {

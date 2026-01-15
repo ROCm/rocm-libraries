@@ -38,27 +38,29 @@
 //     pthread_cond_signal().
 
 
-#include <condition_variable>
-#include <atomic>
-#include <mutex>
+#include <hip/atomic>
+#include <hip/condition_variable>
+#include <hip/mutex>
 #include <hip/thread>
 #include <cassert>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
 
+#include "force_include_hip.h"
 
-::std::condition_variable cv;
-::std::mutex mut;
 
-::std::atomic_int test1(0);
-::std::atomic_int test2(0);
-::std::atomic_int ready(2);
-::std::atomic_int which(0);
+__device__ hip::spin_condition_variable cv;
+__device__ hip::spin_mutex mut;
 
-void f1()
+__device__ hip::std::atomic_int test1(0);
+__device__ hip::std::atomic_int test2(0);
+__device__ hip::std::atomic_int ready(2);
+__device__ hip::std::atomic_int which(0);
+
+__device__ void f1()
 {
-  hip::unique_lock<::std::mutex> lk(mut);
+  hip::unique_lock<hip::spin_mutex> lk(mut);
   assert(test1 == 0);
   --ready;
   while (test1 == 0)
@@ -68,9 +70,9 @@ void f1()
   test1 = 2;
 }
 
-void f2()
+__device__ void f2()
 {
-  hip::unique_lock<::std::mutex> lk(mut);
+  hip::unique_lock<hip::spin_mutex> lk(mut);
   assert(test2 == 0);
   --ready;
   while (test2 == 0)
@@ -82,6 +84,7 @@ void f2()
 
 int main(int, char**)
 {
+#ifdef __HIP_DEVICE_COMPILE__
   hip::thread t1 = support::make_test_thread(f1);
   hip::thread t2 = support::make_test_thread(f2);
   {
@@ -90,7 +93,7 @@ int main(int, char**)
     // At this point:
     // 1) Both f1 and f2 have entered their condition variable wait.
     // 2) Either f1 or f2 has the mutex locked and is about to wait.
-    hip::unique_lock<::std::mutex> lk(mut);
+    hip::unique_lock<hip::spin_mutex> lk(mut);
     test1 = 1;
     test2 = 1;
     ready = 1;
@@ -99,7 +102,7 @@ int main(int, char**)
   {
     while (which == 0)
       hip::this_thread::pseudo_yield();
-    hip::unique_lock<::std::mutex> lk(mut);
+    hip::unique_lock<hip::spin_mutex> lk(mut);
     if (test1 == 2) {
       assert(test2 == 1);
       t1.join();
@@ -116,7 +119,7 @@ int main(int, char**)
   {
     while (which == 0)
       hip::this_thread::pseudo_yield();
-    hip::unique_lock<::std::mutex> lk(mut);
+    hip::unique_lock<hip::spin_mutex> lk(mut);
     if (test1 == 2) {
       assert(test2 == 0);
       t1.join();
@@ -128,6 +131,7 @@ int main(int, char**)
       test2 = 0;
     }
   }
+#endif
 
   return 0;
 }

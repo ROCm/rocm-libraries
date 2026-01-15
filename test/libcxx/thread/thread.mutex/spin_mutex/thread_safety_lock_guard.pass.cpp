@@ -15,6 +15,7 @@
 
 // UNSUPPORTED: no-threads
 // REQUIRES: thread-safety
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
 
 // <mutex>
 

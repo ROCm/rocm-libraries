@@ -12,9 +12,13 @@
 
 // explicit operator bool() const noexcept;
 
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+
 #include <cassert>
-#include <mutex>
 #include <type_traits>
+#include <hip/mutex>
+
+#include "force_include_hip.h"
 
 #include "checking_mutex.h"
 #include "test_macros.h"
@@ -24,6 +28,7 @@ static_assert(noexcept(static_cast<bool>(::std::declval<hip::unique_lock<checkin
 #endif
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   static_assert(::std::is_constructible<bool, hip::unique_lock<checking_mutex> >::value, "");
   static_assert(!::std::is_convertible<hip::unique_lock<checking_mutex>, bool>::value, "");
 
@@ -36,6 +41,7 @@ int main(int, char**) {
   assert(!static_cast<bool>(lk1));
 
   ASSERT_NOEXCEPT(static_cast<bool>(lk0));
+#endif
 
   return 0;
 }

@@ -12,9 +12,13 @@
 
 // mutex_type *mutex() const;
 
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+
 #include <cassert>
 #include <memory>
-#include <mutex>
+#include <hip/mutex>
+
+#include "force_include_hip.h"
 
 #include "checking_mutex.h"
 #include "test_macros.h"
@@ -24,14 +28,16 @@ static_assert(noexcept(::std::declval<hip::unique_lock<checking_mutex>&>().mutex
 #endif
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   checking_mutex mux;
   const hip::unique_lock<checking_mutex> lock0; // Make sure `mutex()` is `const`
   static_assert(::std::is_same<decltype(lock0.mutex()), checking_mutex*>::value, "");
   assert(lock0.mutex() == nullptr);
   hip::unique_lock<checking_mutex> lock1(mux);
-  assert(lock1.mutex() == ::std::addressof(mux));
+  assert(lock1.mutex() == hip::std::addressof(mux));
   lock1.unlock();
-  assert(lock1.mutex() == ::std::addressof(mux));
+  assert(lock1.mutex() == hip::std::addressof(mux));
+#endif
 
   return 0;
 }

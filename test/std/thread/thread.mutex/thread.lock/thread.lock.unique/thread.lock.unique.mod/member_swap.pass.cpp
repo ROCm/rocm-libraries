@@ -12,9 +12,13 @@
 
 // void swap(unique_lock& u);
 
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+
 #include <cassert>
 #include <memory>
-#include <mutex>
+#include <hip/mutex>
+
+#include "force_include_hip.h"
 
 #include "checking_mutex.h"
 #include "test_macros.h"
@@ -26,6 +30,7 @@ static_assert(
 #endif
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   checking_mutex mux;
   hip::unique_lock<checking_mutex> lock1(mux);
   hip::unique_lock<checking_mutex> lock2;
@@ -34,8 +39,9 @@ int main(int, char**) {
 
   assert(lock1.mutex() == nullptr);
   assert(!lock1.owns_lock());
-  assert(lock2.mutex() == ::std::addressof(mux));
+  assert(lock2.mutex() == hip::std::addressof(mux));
   assert(lock2.owns_lock() == true);
+#endif
 
   return 0;
 }

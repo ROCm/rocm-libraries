@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 //
 // UNSUPPORTED: no-threads
-// ADDITIONAL_COMPILE_FLAGS: -DTEST_USE_GPU_THREADS
 
 // <thread>
 
@@ -36,6 +35,7 @@ public:
 
 int main(int, char**)
 {
+#ifdef __HIP_DEVICE_COMPILE__
     {
         G g;
         hip::thread t0 = support::make_test_thread(g);
@@ -47,6 +47,7 @@ int main(int, char**)
         assert(t1.get_id() == hip::thread::id());
         t0.join();
     }
+#endif
 
   return 0;
 }

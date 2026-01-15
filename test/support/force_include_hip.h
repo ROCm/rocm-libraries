@@ -27,6 +27,7 @@
 #define LIBCUDACXX_FORCE_INCLUDE_HIP
 
 #include "hip/hip_runtime.h"
+#include <hip/thread>
 
 // We use <stdio.h> instead of <iostream> to avoid relying on the host system's
 // C++ standard library.
@@ -101,15 +102,13 @@ int main(int argc, char** argv)
     int * hip_ret = 0;
     HIP_CALL(err, hipMalloc(&hip_ret, sizeof(int)));
 
-#ifdef TEST_USE_GPU_THREADS
+#ifdef TEST_NO_HIP_THREAD
+    fake_main_kernel<<<1, cuda_thread_count>>>(hip_ret);
+#else
     {
-        // Use hip::thread to call fake_main so it can call functions in hip::this_thread. This is also ensures that the
-        // GPU is already polling for work, and fake_main can launch more threads.
-        hip::thread thd{cuda_thread_count, [] __device__(int *ret) { *ret = fake_main(0, NULL); }, hip_ret};
+        hip::thread thd(cuda_thread_count, [] __device__(int *ret) { *ret = fake_main(0, NULL); }, hip_ret);
         thd.join();
     }
-#else
-    fake_main_kernel<<<1, cuda_thread_count>>>(hip_ret);
 #endif
      
     HIP_CALL(err, hipGetLastError());

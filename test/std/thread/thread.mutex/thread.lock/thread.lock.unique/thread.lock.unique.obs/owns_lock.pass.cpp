@@ -12,8 +12,12 @@
 
 // bool owns_lock() const;
 
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+
 #include <cassert>
-#include <mutex>
+#include <hip/mutex>
+
+#include "force_include_hip.h"
 
 #include "checking_mutex.h"
 #include "test_macros.h"
@@ -23,6 +27,7 @@ static_assert(noexcept(::std::declval<hip::unique_lock<checking_mutex>&>().owns_
 #endif
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   {
     checking_mutex mux;
     const hip::unique_lock<checking_mutex> lock0; // Make sure `owns_lock()` is `const`
@@ -32,6 +37,7 @@ int main(int, char**) {
     lock1.unlock();
     assert(!lock1.owns_lock());
   }
+#endif
 
   return 0;
 }

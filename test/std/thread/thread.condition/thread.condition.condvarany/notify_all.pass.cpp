@@ -14,28 +14,30 @@
 
 // void notify_all();
 
-#include <condition_variable>
-#include <mutex>
+#include <hip/condition_variable>
+#include <hip/mutex>
 #include <hip/thread>
 #include <vector>
-#include <atomic>
 #include <cassert>
+
+#include <hip/atomic>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-::std::condition_variable_any cv;
+#include "force_include_hip.h"
 
-typedef ::std::timed_mutex L0;
+__device__ hip::condition_variable_any cv;
+
+typedef hip::spin_mutex L0;
 typedef hip::unique_lock<L0> L1;
 
-L0 m0;
+__device__ L0 m0;
 
-const unsigned threadCount = 2;
-bool pleaseExit = false;
-::std::atomic<unsigned> notReady;
+__device__  bool pleaseExit = false;
+__device__  hip::std::atomic<unsigned> notReady;
 
-void helper() {
+__device__ void helper() {
   L1 lk(m0);
   --notReady;
   while (pleaseExit == false)
@@ -44,8 +46,10 @@ void helper() {
 
 int main(int, char**)
 {
+#ifdef __HIP_DEVICE_COMPILE__
+  const unsigned threadCount = 2;
   notReady = threadCount;
-  ::std::vector<hip::thread> threads(threadCount);
+  hip::thread threads[threadCount];
   for (unsigned i = 0; i < threadCount; i++)
     threads[i] = support::make_test_thread(helper);
   {
@@ -62,6 +66,7 @@ int main(int, char**)
   // The test will hang if not all of the threads were woken.
   for (unsigned i = 0; i < threadCount; i++)
     threads[i].join();
+#endif
 
   return 0;
 }

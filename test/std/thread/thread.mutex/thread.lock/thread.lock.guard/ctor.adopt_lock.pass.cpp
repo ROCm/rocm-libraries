@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++03
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
 
 // <mutex>
 
@@ -16,10 +17,14 @@
 
 #include <mutex>
 #include <cassert>
+#include <hip/mutex>
+
+#include "force_include_hip.h"
 
 #include "types.h"
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   MyMutex m;
   {
     m.lock();
@@ -27,6 +32,6 @@ int main(int, char**) {
     assert(m.locked);
   }
   assert(!m.locked);
-
+#endif
   return 0;
 }

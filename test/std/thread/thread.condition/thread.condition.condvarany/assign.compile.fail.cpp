@@ -12,14 +12,20 @@
 
 // condition_variable_any& operator=(const condition_variable_any&) = delete;
 
-#include <condition_variable>
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_NO_HIP_THREAD
+
 #include <cassert>
+
+#include <hip/condition_variable>
+#include "force_include_hip.h"
 
 int main(int, char**)
 {
-    ::std::condition_variable_any cv0;
-    ::std::condition_variable_any cv1;
+#ifdef __HIP_DEVICE_COMPILE__
+    hip::condition_variable_any cv0;
+    hip::condition_variable_any cv1;
     cv1 = cv0;
+#endif
 
   return 0;
 }

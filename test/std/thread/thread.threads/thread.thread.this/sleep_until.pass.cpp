@@ -7,6 +7,8 @@
 //===----------------------------------------------------------------------===//
 //
 // UNSUPPORTED: no-threads
+// XFAIL: *
+// REASON: this_thread::sleep_until() not yet implemented in hipThreads (only sleep_for available)
 
 // <thread>
 

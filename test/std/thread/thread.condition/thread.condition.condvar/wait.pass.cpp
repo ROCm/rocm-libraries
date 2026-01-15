@@ -14,23 +14,25 @@
 
 // void wait(unique_lock<mutex>& lock);
 
-#include <condition_variable>
-#include <mutex>
+#include <hip/condition_variable>
+#include <hip/mutex>
 #include <hip/thread>
 #include <cassert>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-::std::condition_variable cv;
-::std::mutex mut;
+#include "force_include_hip.h"
 
-int test1 = 0;
-int test2 = 0;
+__device__ hip::spin_condition_variable cv;
+__device__ hip::spin_mutex mut;
 
-void f()
+__device__ int test1 = 0;
+__device__ int test2 = 0;
+
+__device__ void f()
 {
-    hip::unique_lock<::std::mutex> lk(mut);
+    hip::unique_lock<hip::spin_mutex> lk(mut);
     assert(test2 == 0);
     test1 = 1;
     cv.notify_one();
@@ -41,7 +43,8 @@ void f()
 
 int main(int, char**)
 {
-    hip::unique_lock<::std::mutex> lk(mut);
+#ifdef __HIP_DEVICE_COMPILE__
+    hip::unique_lock<hip::spin_mutex> lk(mut);
     hip::thread t = support::make_test_thread(f);
     assert(test1 == 0);
     while (test1 == 0)
@@ -51,6 +54,6 @@ int main(int, char**)
     lk.unlock();
     cv.notify_one();
     t.join();
-
+#endif
   return 0;
 }

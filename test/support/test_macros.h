@@ -186,7 +186,7 @@
 #endif
 
 #if !TEST_HAS_FEATURE(cxx_exceptions) && !defined(__cpp_exceptions) \
-     && !defined(__EXCEPTIONS)
+     && !defined(__EXCEPTIONS) || defined(__HIP_DEVICE_COMPILE__)
 #define TEST_HAS_NO_EXCEPTIONS
 #endif
 
