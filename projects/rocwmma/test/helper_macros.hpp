@@ -302,7 +302,7 @@
                                    CASE_LABEL8,                       \
                                    CASE_LABEL9,                       \
                                    CASE_LABEL10,                     \
-                								   CASE_LABEL11)                      \
+                                   CASE_LABEL11)                     \
     switch(SWITCH_ARG)                                                \
     {                                                                 \
         ROCWMMA_CASE_BODY_ARG1(CASE_LABEL0, CASE_IMPL, CASE_LABEL0)   \
@@ -316,7 +316,7 @@
         ROCWMMA_CASE_BODY_ARG1(CASE_LABEL8, CASE_IMPL, CASE_LABEL8)   \
         ROCWMMA_CASE_BODY_ARG1(CASE_LABEL9, CASE_IMPL, CASE_LABEL9)   \
         ROCWMMA_CASE_BODY_ARG1(CASE_LABEL10, CASE_IMPL, CASE_LABEL10) \
-    		ROCWMMA_CASE_BODY_ARG1(CASE_LABEL11, CASE_IMPL, CASE_LABEL11) \
+        ROCWMMA_CASE_BODY_ARG1(CASE_LABEL11, CASE_IMPL, CASE_LABEL11) \
     default:;                                                         \
     }
 	
