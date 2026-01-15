@@ -47,11 +47,7 @@ __device__ auto warp_exchange_benchmark(T* d_output)
         thread_data[i] = static_cast<T>(i);
     }
 
-    using WarpExchangeT                                           = ::hipcub::WarpExchange<T,
-                                                 ItemsPerThread,
-                                                 LogicalWarpSize,
-                                                 1, // ARCH
-                                                 Algorithm>;
+    using WarpExchangeT = ::hipcub::WarpExchange<T, ItemsPerThread, LogicalWarpSize, Algorithm>;
     constexpr unsigned                             warps_in_block = BlockSize / LogicalWarpSize;
     __shared__ typename WarpExchangeT::TempStorage temp_storage[warps_in_block];
     const unsigned                                 warp_id = threadIdx.x / LogicalWarpSize;
