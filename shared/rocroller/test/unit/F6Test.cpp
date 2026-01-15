@@ -335,12 +335,12 @@ namespace rocRollerTest
 
             auto command = std::make_shared<Command>();
 
-            auto tagTensorA
-                = command->addOperation(rocRoller::Operations::Tensor(2, F6Type, {0, 1})); // Load A
+            auto tagTensorA = command->addOperation(
+                rocRoller::Operations::Tensor(2, F6Type, {}, {0, 1})); // Load A
             auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
             auto tagTensorB = command->addOperation(
-                rocRoller::Operations::Tensor(2, F6Type, {0, 1})); // Store B
+                rocRoller::Operations::Tensor(2, F6Type, {}, {0, 1})); // Store B
             command->addOperation(rocRoller::Operations::T_Store_Tiled(tagLoadA, tagTensorB));
 
             auto commandArgs = command->createArguments();

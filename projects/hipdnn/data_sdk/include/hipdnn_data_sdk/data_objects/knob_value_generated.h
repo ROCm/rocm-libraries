@@ -663,7 +663,6 @@ struct FloatConstraintT : public ::flatbuffers::NativeTable {
   typedef FloatConstraint TableType;
   double min_value = 0.0;
   double max_value = 0.0;
-  std::vector<double> valid_values{};
 };
 
 struct FloatConstraint FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -671,8 +670,7 @@ struct FloatConstraint FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef FloatConstraintBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_MIN_VALUE = 4,
-    VT_MAX_VALUE = 6,
-    VT_VALID_VALUES = 8
+    VT_MAX_VALUE = 6
   };
   double min_value() const {
     return GetField<double>(VT_MIN_VALUE, 0.0);
@@ -686,18 +684,10 @@ struct FloatConstraint FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   bool mutate_max_value(double _max_value = 0.0) {
     return SetField<double>(VT_MAX_VALUE, _max_value, 0.0);
   }
-  const ::flatbuffers::Vector<double> *valid_values() const {
-    return GetPointer<const ::flatbuffers::Vector<double> *>(VT_VALID_VALUES);
-  }
-  ::flatbuffers::Vector<double> *mutable_valid_values() {
-    return GetPointer<::flatbuffers::Vector<double> *>(VT_VALID_VALUES);
-  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<double>(verifier, VT_MIN_VALUE, 8) &&
            VerifyField<double>(verifier, VT_MAX_VALUE, 8) &&
-           VerifyOffset(verifier, VT_VALID_VALUES) &&
-           verifier.VerifyVector(valid_values()) &&
            verifier.EndTable();
   }
   FloatConstraintT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -715,9 +705,6 @@ struct FloatConstraintBuilder {
   void add_max_value(double max_value) {
     fbb_.AddElement<double>(FloatConstraint::VT_MAX_VALUE, max_value, 0.0);
   }
-  void add_valid_values(::flatbuffers::Offset<::flatbuffers::Vector<double>> valid_values) {
-    fbb_.AddOffset(FloatConstraint::VT_VALID_VALUES, valid_values);
-  }
   explicit FloatConstraintBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -732,26 +719,11 @@ struct FloatConstraintBuilder {
 inline ::flatbuffers::Offset<FloatConstraint> CreateFloatConstraint(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     double min_value = 0.0,
-    double max_value = 0.0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<double>> valid_values = 0) {
+    double max_value = 0.0) {
   FloatConstraintBuilder builder_(_fbb);
   builder_.add_max_value(max_value);
   builder_.add_min_value(min_value);
-  builder_.add_valid_values(valid_values);
   return builder_.Finish();
-}
-
-inline ::flatbuffers::Offset<FloatConstraint> CreateFloatConstraintDirect(
-    ::flatbuffers::FlatBufferBuilder &_fbb,
-    double min_value = 0.0,
-    double max_value = 0.0,
-    const std::vector<double> *valid_values = nullptr) {
-  auto valid_values__ = valid_values ? _fbb.CreateVector<double>(*valid_values) : 0;
-  return hipdnn_data_sdk::data_objects::CreateFloatConstraint(
-      _fbb,
-      min_value,
-      max_value,
-      valid_values__);
 }
 
 ::flatbuffers::Offset<FloatConstraint> CreateFloatConstraint(::flatbuffers::FlatBufferBuilder &_fbb, const FloatConstraintT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -1219,8 +1191,7 @@ inline ::flatbuffers::Offset<IntConstraint> CreateIntConstraint(::flatbuffers::F
 inline bool operator==(const FloatConstraintT &lhs, const FloatConstraintT &rhs) {
   return
       (lhs.min_value == rhs.min_value) &&
-      (lhs.max_value == rhs.max_value) &&
-      (lhs.valid_values == rhs.valid_values);
+      (lhs.max_value == rhs.max_value);
 }
 
 inline bool operator!=(const FloatConstraintT &lhs, const FloatConstraintT &rhs) {
@@ -1239,7 +1210,6 @@ inline void FloatConstraint::UnPackTo(FloatConstraintT *_o, const ::flatbuffers:
   (void)_resolver;
   { auto _e = min_value(); _o->min_value = _e; }
   { auto _e = max_value(); _o->max_value = _e; }
-  { auto _e = valid_values(); if (_e) { _o->valid_values.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->valid_values[_i] = _e->Get(_i); } } else { _o->valid_values.resize(0); } }
 }
 
 inline ::flatbuffers::Offset<FloatConstraint> FloatConstraint::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const FloatConstraintT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -1252,12 +1222,10 @@ inline ::flatbuffers::Offset<FloatConstraint> CreateFloatConstraint(::flatbuffer
   struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const FloatConstraintT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
   auto _min_value = _o->min_value;
   auto _max_value = _o->max_value;
-  auto _valid_values = _o->valid_values.size() ? _fbb.CreateVector(_o->valid_values) : 0;
   return hipdnn_data_sdk::data_objects::CreateFloatConstraint(
       _fbb,
       _min_value,
-      _max_value,
-      _valid_values);
+      _max_value);
 }
 
 
