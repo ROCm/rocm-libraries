@@ -173,7 +173,6 @@ namespace TensileLite
             constexpr bool needMathOpAccumCast = !std::is_same<Accumulator, MathOpAccum>();
             using LMathOpMultT = std::conditional_t<needMathOpAccumCast, MathOpAccum, LMultT>;
             using RMathOpMultT = std::conditional_t<needMathOpAccumCast, MathOpAccum, RMultT>;
-
             return static_cast<Accumulator>(static_cast<LMultT>(static_cast<LMathOpMultT>(l))
                                             * static_cast<RMultT>(static_cast<RMathOpMultT>(r)));
         }
@@ -942,9 +941,9 @@ namespace TensileLite
                     {
                         auto n0 = n * BLOCK_N;
 
-                        std::array<float, BLOCK_M * BLOCK_K> aReg;
-                        std::array<float, BLOCK_K * BLOCK_N> bReg;
-                        std::array<float, BLOCK_M * BLOCK_N> cReg;
+                        std::array<float, BLOCK_M * BLOCK_K> aReg = {0};
+                        std::array<float, BLOCK_K * BLOCK_N> bReg = {0};
+                        std::array<float, BLOCK_M * BLOCK_N> cReg = {0};
                         for(size_t k = 0; k < kTiles; ++k)
                         {
                             auto k0 = k * BLOCK_K;
@@ -2198,7 +2197,6 @@ namespace TensileLite
                           size_t                        elementsToValidate,
                           bool                          tryFastPath)
         {
-            auto start = std::chrono::high_resolution_clock::now();
 
             // The fast solver computes all elements. If the number of elements to validate
             // is in [0, sparsityThreshold * totalElements), skip this solver, falling through to another
@@ -2213,8 +2211,6 @@ namespace TensileLite
 
             if(tryFastPath && isDenseEnoughForFastPath && solveCPUFastInF32(problem, inputs))
             {
-                auto end = std::chrono::high_resolution_clock::now();
-                std::chrono::duration<double, std::milli> duration = end - start;
                 return;
             }
 
