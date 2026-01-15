@@ -107,9 +107,19 @@ namespace rocRoller::KernelGraph
          */
         void logChainTagTable(KernelGraph const& graph, vec chain);
 
+        std::string showChain(vec const& chain);
+
         std::string showChains(vec2 const& chains);
 
         std::string showGroups(vec3 const& groups);
+
+        /**
+         * Allows the multiply nodes to get a head start so that we can hide
+         * more of the arithmetic and global loads at the beginning of each
+         * subiter.
+         */
+        std::map<DataType, int> getMultiplyHeadStarts(KernelGraph&            graph,
+                                                      ParallelChainSet const& chainSet);
 
         /**
          * Given groups of chains (grouped by node type), identifies which chains of different
@@ -135,15 +145,19 @@ namespace rocRoller::KernelGraph
          *     * Chain B is parallel to chain G
          *     * Chain C is parallel to chain H
          *
-         * The return value should be:
+         * The return value will be:
          * {
          *      { {chain A}, {chain F} },
          *      { {chain B}, {chain G} },
          *      { {chain C}, {chain H} }
          * }
-         *
-         * TODO: This *might* reverse the order of each set (i.e. {{chain F}, {chain A}})
-         * Verify if this is the case and update the comment if so.
+         * 
+         * If instead, Chain A is not parallel to anything, then the return value will be:
+         * {
+         *      {},
+         *      { {chain B}, {chain G} },
+         *      { {chain C}, {chain H} }
+         * }
          */
         vec3 identifyParallelChains(KernelGraph const& graph, vec3 groups);
 

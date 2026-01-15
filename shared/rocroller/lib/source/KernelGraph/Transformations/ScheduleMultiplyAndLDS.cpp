@@ -491,22 +491,23 @@ namespace rocRoller::KernelGraph
                 return rv;
 
             rv.reserve(groups[0].size());
-            for(auto & chain: groups[0])
+            for(auto& chain : groups[0])
             {
                 rv.push_back({std::move(chain)});
             }
 
             // Skip the first input group
-            for(auto & inputGroup: groups | std::views::drop(1))
+            for(auto& inputGroup : groups | std::views::drop(1))
             {
-                for(auto & chain: inputGroup)
+                for(auto& chain : inputGroup)
                 {
                     bool didJoin = false;
-                    for(auto & outputGroup: rv)
+                    for(auto& outputGroup : rv)
                     {
                         if(canJoin(graph, outputGroup, chain))
                         {
-                            Log::debug("({}) joining {}", showChain(chain), showChains(outputGroup));
+                            Log::debug(
+                                "({}) joining {}", showChain(chain), showChains(outputGroup));
                             outputGroup.push_back(std::move(chain));
                             didJoin = true;
                             break;
@@ -517,9 +518,17 @@ namespace rocRoller::KernelGraph
                 }
             }
 
-            for(auto & group: rv)
+            for(auto& group : rv)
                 if(group.size() == 1)
                     group.clear();
+
+            for(auto const& group : rv)
+            {
+                for(auto const& chain : group)
+                {
+                    logChainTagTable(graph, chain);
+                }
+            }
 
             return rv;
         }
@@ -626,13 +635,15 @@ namespace rocRoller::KernelGraph
 
             auto ts = [](auto const& x) { return toString(x); };
 
-            // TODO: Generalize this?
+            Log::debug("#########################\nchainSets: [{}]\nmultiplyCoordTypes: [{}]",
+                       showGroups(chainSets),
+                       fmt::join(multiplyCoordTypes | std::views::transform(ts), ", "));
+
             if(chainSets.size() != multiplyCoordTypes.size())
             {
-                Log::debug(
-                    "#########################\nchainSets: [{}]\nmultiplyCoordTypes: [{}]",
-                    showGroups(chainSets),
-                    fmt::join(multiplyCoordTypes | std::views::transform(ts), ", "));
+                Log::debug("#########################\nchainSets: [{}]\nmultiplyCoordTypes: [{}]",
+                           showGroups(chainSets),
+                           fmt::join(multiplyCoordTypes | std::views::transform(ts), ", "));
 
                 Log::debug("{} != {}", chainSets.size(), multiplyCoordTypes.size());
                 return {};
@@ -656,15 +667,54 @@ namespace rocRoller::KernelGraph
             return rv;
         }
 
+        std::map<DataType, int> getMultiplyHeadStarts(KernelGraph&            graph,
+                                                      ParallelChainSet const& chainSet)
+        {
+            // Give the multiply nodes a head start so we can cover the extra
+            // ops at the beginning of the loop. This should be replaced with a
+            // more robust heuristic.
+            std::map<DataType, int> totals;
+
+            for(auto const& types : chainSet.multiplyTagTypes)
+            {
+                for(auto const& [type, count] : types)
+                    totals[type] += count;
+            }
+
+            std::map<DataType, int> rv;
+
+            for(auto [inputType, inputCount] : totals)
+            {
+                if(inputType == DataType::None)
+                    continue;
+
+                auto const& info = DataTypeInfo::Get(inputType);
+
+                auto packed = info.packedVariableType();
+
+                auto outputType = packed.value_or(inputType).dataType;
+
+                if(info.isIntegral)
+                {
+                    rv[outputType] = inputCount / 4;
+                }
+                else
+                {
+                    rv[outputType] = (inputCount * 3) / 8;
+                }
+            }
+
+            Log::debug("Multiply head starts: {{{}}}", toString(rv));
+
+            return rv;
+        }
+
         void distributeChains(KernelGraph& graph, std::vector<ParallelChainSet> const& chainSets)
         {
             for(auto const& chainSet : chainSets)
             {
-                std::map<DataType, int> multiplyTypeCounts, ldsTypeCounts;
-
-                multiplyTypeCounts[DataType::FP4x8]  = 6;
-                multiplyTypeCounts[DataType::FP8x4]  = 6;
-                multiplyTypeCounts[DataType::E8M0x4] = 4;
+                std::map<DataType, int> multiplyTypeCounts = getMultiplyHeadStarts(graph, chainSet);
+                std::map<DataType, int> ldsTypeCounts;
 
                 AssertFatal(chainSet.multiplyChain.size() == chainSet.multiplyTagTypes.size(),
                             ShowValue(chainSet.multiplyChain.size()),
