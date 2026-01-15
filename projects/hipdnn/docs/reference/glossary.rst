@@ -4,9 +4,9 @@
 
 .. _guidelines:
 
-******************************************
+***************
 hipDNN glossary
-******************************************
+***************
 
 - **DAG (Directed Acyclic Graph)**: A graph structure representing tensor operations where edges indicate data flow and no cycles exist
 - **Engine**: A component capable of executing one or more types of operation graphs

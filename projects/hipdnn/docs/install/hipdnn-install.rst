@@ -10,8 +10,13 @@ hipDNN installation
 
 This guide shows you how to install hipDNN on Linux. Before you begin, ensure you've installed the required dependencies outlined in :ref:`prerequisites`. 
 
-Build and install hipDNN
-========================
+Build hipDNN from TheROCK
+=========================
+
+You can install hipDNN and all the dependencies from `TheROCK <https://github.com/ROCm/TheRock/blob/main/RELEASES.md>`_
+
+Build and install hipDNN from source
+====================================
 
 1. Clone the rocm-libraries repository with ``git sparse-checkout``:
 
@@ -37,7 +42,7 @@ Build and install hipDNN
       # Note that some tests may take several minutes to complete
       ninja check
 
-   Refer to the :ref:`target` section below for fore info on additional build targets.
+   Refer to the :ref:`target` section below for info on additional build targets.
 
 3. Install hipDNN.
 
@@ -102,6 +107,7 @@ Build-specific components
    # Build without backend
    cmake -GNinja -DHIP_DNN_BUILD_BACKEND=OFF ..
 
+.. _rocm-path:
 
 ``ROCM_PATH``, ``ROCM_CMAKE_PATH``, and ``CMAKE_INSTALL_PREFIX``
 ----------------------------------------------------------------
@@ -231,7 +237,7 @@ Common build issues
       sudo usermod -a -G video,render $USER
       # Log out and back in for changes to take effect
 
-Verifying Installation
-======================
+Verify the installation
+=======================
 
-See [samples README](../samples/README.md) for detailed instructions on building test sample programs using hipDNN.
+See `hipDNN Samples <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/samples/README.md>`_ for detailed instructions on building test sample programs using hipDNN.

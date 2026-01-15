@@ -125,7 +125,7 @@ Create C++ classes to expose the operation to users:
 Plugin integration
 -------------------
 
-Refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement the operation execution in target plugins.
+See :ref:`develop-plugins` to implement the operation execution in target plugins.
 
 Troubleshooting
 ===============
