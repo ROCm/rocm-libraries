@@ -139,11 +139,12 @@ private:
     std::chrono::time_point<std::chrono::steady_clock> et;
 };
 
-class RNNCombTimeLoger
+class RNNCombTimeLogger
 {
 public:
-    RNNCombTimeLoger(hipStream_t main_stream, size_t size, int mode)
-        : stream(main_stream), clockMode(static_cast<ClockMode>(mode))
+    RNNCombTimeLogger(hipStream_t main_stream, size_t size, int enabled, int mode)
+        : stream(main_stream),
+          clockMode(enabled == 0 ? ClockMode::Disabled : static_cast<ClockMode>(mode))
     {
         if(clockMode != ClockMode::Disabled)
         {
@@ -162,7 +163,9 @@ public:
     void Start()
     {
         if(clockMode == ClockMode::Disabled)
+        {
             return;
+        }
 
         auto launchCount = hostTimePerLaunch.size();
 
@@ -178,7 +181,9 @@ public:
     void StopAndPush()
     {
         if(clockMode == ClockMode::Disabled)
+        {
             return;
+        }
 
         auto end         = std::chrono::steady_clock::now();
         auto launchCount = hostTimePerLaunch.size();
@@ -221,7 +226,9 @@ public:
     {
         auto n_iter = hostTimePerLaunch.size();
         if(clockMode == ClockMode::Disabled || n_iter == 0)
+        {
             return;
+        }
 
         float gpu_avg  = 0.0f;
         float host_avg = 0.0f;
@@ -234,7 +241,8 @@ public:
         {
             hipEventElapsedTime(&gpu_time, startEvent[i].get(), endEvent[i].get());
 
-            if(clockMode != ClockMode::OldWallClock)
+            if(clockMode == ClockMode::SeparateClocksNotSynced ||
+               clockMode == ClockMode::SeparateClocksSynced)
             {
                 printf("launch#%llu, host_time= %f ms, gpu_time= %f ms\n",
                        i,

@@ -468,7 +468,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     const bool ignore_user_distances = !plan->ionembed.get_nembed(fft_io::fft_io_in)
                                        && !plan->ionembed.get_nembed(fft_io::fft_io_out);
     std::vector<size_t> i_strides, o_strides;
-    size_t              inDist, outDist;
+    size_t              inDist = 0, outDist = 0;
     for(auto dft_type : iotype.transform_types())
     {
         for(auto placement : {rocfft_placement_inplace, rocfft_placement_notinplace})
@@ -1707,7 +1707,7 @@ try
     if(!plan || plan->initialized())
         return HIPFFT_INVALID_PLAN;
     int dev_count = 0;
-    if(hipGetDeviceCount(&dev_count) != HIP_SUCCESS || dev_count <= 0)
+    if(hipGetDeviceCount(&dev_count) != hipSuccess || dev_count <= 0)
         return HIPFFT_INTERNAL_ERROR;
     if(std::any_of(
            gpus, gpus + count, [=](int gpu_id) { return gpu_id < 0 || gpu_id >= dev_count; }))

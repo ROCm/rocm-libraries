@@ -160,7 +160,7 @@ constexpr int
     // There is an error with smaller tile sizes and larger prefetchInFlight.
     // Unroll is 2 when wgt.k is greater or equal to 256, otherwise 4
     if(typeA == rocRoller::DataType::FP4 && typeB == rocRoller::DataType::FP4 && wgt.m > 32
-       && wgt.n > 32 && wgt.k < 256)
+       && wgt.n > 32)
         return 4;
     else
         return 2;

@@ -181,6 +181,33 @@ enum class reduction_t : std::uint32_t {
 };
 
 /**
+ * @brief Prediction mode types for latency estimation.
+ *
+ * Different approaches for predicting kernel performance.
+ */
+enum class prediction_modes_t : std::uint32_t {
+  estimation = 0,     ///< Fast analytical estimation-based prediction (typically faster)
+  simulation = 1,     ///< Slow simulation-like prediction (typically more accurate)
+  count,              ///< Count of prediction modes
+  none = 0xFFFFFFFFu  ///< Explicitly invalid
+};
+
+/**
+ * @brief Target backend types for kernel execution.
+ *
+ * Different backends that kernels can target.
+ */
+enum class target_t : std::uint32_t {
+  generic           = 0,  ///< Generic backend (backend agnostic, not supported yet)
+  tensilelite       = 1,  ///< hipBLASLt (tensilelite) backend
+  rocroller         = 2,  ///< hipBLASLt (rocroller) backend
+  triton            = 3,  ///< Triton backend
+  composable_kernel = 4,  ///< Composable Kernel backend (Not supported yet)
+  count,                  ///< Count of target types
+  none = 0xFFFFFFFFu      ///< Explicitly invalid
+};
+
+/**
  * @brief Convert integer to reduction_t enum.
  *
  * @param rt Integer value to convert
@@ -261,7 +288,7 @@ struct runtime_options {
 
   /**
    * @brief Get the global runtime options instance.
-   * 
+   *
    * Inline to prevent ODR violations when included in multiple shared libraries.
    * Static local variable ensures only one instance exists across all translation units. (PR#1862)
    */
@@ -324,16 +351,27 @@ struct config_t {
   /// Reduction strategy.
   reduction_t reduction_strategy = reduction_t::none;
 
+  /// Prediction mode for latency estimation.
+  prediction_modes_t prediction_mode = prediction_modes_t::estimation;
+
+  /// Target backend for kernel execution.
+  target_t target = target_t::tensilelite;
+  /// Grid selection algorithm.
+  grid_selection_t grid_selection = grid_selection_t::k_split_aware;
+
   constexpr bool operator==(const config_t& o) const noexcept {
     return mt == o.mt && mi == o.mi && cache_hints_a == o.cache_hints_a &&
-           cache_hints_b == o.cache_hints_b && workgroup_mapping == o.workgroup_mapping;
+           cache_hints_b == o.cache_hints_b && workgroup_mapping == o.workgroup_mapping &&
+           prediction_mode == o.prediction_mode && target == o.target;
   }
 
   std::size_t hash() const {
     return std::hash<size_t>()(mt.m) ^ std::hash<size_t>()(mt.n) ^ std::hash<size_t>()(mt.k) ^
            std::hash<size_t>()(mi.m) ^ std::hash<size_t>()(mi.n) ^ std::hash<size_t>()(mi.k) ^
            std::hash<int>()(cache_hints_a) ^ std::hash<int>()(cache_hints_b) ^
-           std::hash<int>()(workgroup_mapping);
+           std::hash<int>()(workgroup_mapping) ^
+           std::hash<std::uint32_t>()(static_cast<std::uint32_t>(prediction_mode)) ^
+           std::hash<std::uint32_t>()(static_cast<std::uint32_t>(target));
   }
 
   void validate() const {
@@ -387,6 +425,22 @@ struct problem_t {
 };
 
 /**
+ * @brief Struct to define various workgroup mapping parameters.
+ *
+ * Contains all the parameters needed to describe various workgroup mapping parameters.
+ */
+struct workgroup_mapping_t {
+  /// Workgroup mapping chunk size.
+  std::size_t wgmxccchunk = 0;
+
+  /// Workgroup mapping size.
+  std::size_t wgmxcc = 8;
+
+  /// Workgroup mapping size.
+  int32_t wgm = 1;
+};
+
+/**
  * @brief Get runtime options (always uses global singleton).
  *
  * @param config Configuration struct (unused, kept for API compatibility)
@@ -410,6 +464,9 @@ struct hash<origami::matrix_instruction> {
 
 template <>
 struct hash<origami::config_t> {
-  inline std::size_t operator()(const origami::config_t& config) const noexcept { return config.hash(); }
+  inline std::size_t operator()(const origami::config_t& config) const noexcept {
+    return config.hash();
+  }
 };
 }  // namespace std
+
