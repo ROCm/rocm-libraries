@@ -432,12 +432,18 @@ public:
     template <typename T>
     void setChoice(const T& value)
     {
+        _hasChoice = true;
         _choice = value;
     }
 
     const std::variant<KNOB_TYPES>& getChoice() const override
     {
         return _choice;
+    }
+
+    bool hasChoice() const
+    {
+        return _hasChoice;
     }
 
     // Get constraint
@@ -524,6 +530,7 @@ private:
     std::variant<KNOB_TYPES> _defaultValue;
     std::variant<KNOB_TYPES> _choice;
     bool _deprecated;
+    bool _hasChoice = false;
 
     // Constraint (polymorphic)
     std::unique_ptr<IConstraint> _constraint;

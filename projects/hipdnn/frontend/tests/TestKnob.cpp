@@ -295,6 +295,98 @@ TEST(TestKnob, UpdateChoice)
 }
 
 // ============================================================================
+// hasChoice Tests
+// ============================================================================
+
+TEST(TestKnob, HasChoiceInitialStateInt)
+{
+    auto buffer = createIntKnobFlatbuffer("int_knob", "Integer knob", 10);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    // Newly created knob should not have a choice set
+    EXPECT_FALSE(knob.hasChoice());
+}
+
+TEST(TestKnob, HasChoiceInitialStateFloat)
+{
+    auto buffer = createFloatKnobFlatbuffer("float_knob", "Float knob", 1.0);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    EXPECT_FALSE(knob.hasChoice());
+}
+
+TEST(TestKnob, HasChoiceInitialStateString)
+{
+    auto buffer = createStringKnobFlatbuffer("string_knob", "String knob", "default");
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    EXPECT_FALSE(knob.hasChoice());
+}
+
+TEST(TestKnob, HasChoiceAfterSetInt)
+{
+    auto buffer = createIntKnobFlatbuffer("int_knob", "Integer knob", 10);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    EXPECT_FALSE(knob.hasChoice());
+
+    knob.setChoice<int64_t>(42);
+
+    EXPECT_TRUE(knob.hasChoice());
+}
+
+TEST(TestKnob, HasChoiceAfterSetFloat)
+{
+    auto buffer = createFloatKnobFlatbuffer("float_knob", "Float knob", 1.0);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    EXPECT_FALSE(knob.hasChoice());
+
+    knob.setChoice<double>(2.718);
+
+    EXPECT_TRUE(knob.hasChoice());
+}
+
+TEST(TestKnob, HasChoiceAfterSetString)
+{
+    auto buffer = createStringKnobFlatbuffer("string_knob", "String knob", "default");
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    EXPECT_FALSE(knob.hasChoice());
+
+    knob.setChoice<std::string>("custom");
+
+    EXPECT_TRUE(knob.hasChoice());
+}
+
+TEST(TestKnob, HasChoiceAfterMultipleUpdates)
+{
+    auto buffer = createIntKnobFlatbuffer("int_knob", "Integer knob", 10);
+    auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
+    auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
+
+    EXPECT_FALSE(knob.hasChoice());
+
+    // Set choice first time
+    knob.setChoice<int64_t>(42);
+    EXPECT_TRUE(knob.hasChoice());
+
+    // Update choice - should still be true
+    knob.setChoice<int64_t>(100);
+    EXPECT_TRUE(knob.hasChoice());
+
+    // Update again
+    knob.setChoice<int64_t>(200);
+    EXPECT_TRUE(knob.hasChoice());
+}
+
+// ============================================================================
 // Constraint Tests
 // ============================================================================
 

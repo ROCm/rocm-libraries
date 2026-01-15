@@ -237,6 +237,49 @@ private:
         return {ErrorCode::OK, ""};
     }
 
+    Error initializeEngineConfig(int64_t engineId)
+    {
+        auto engineDesc
+            = std::make_unique<ScopedHipdnnBackendDescriptor>(HIPDNN_BACKEND_ENGINE_DESCRIPTOR);
+
+        RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendSetAttribute(engineDesc->get(),
+                                                 HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
+                                                 HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                 1,
+                                                 &_graphDesc->get()),
+            "Failed to set operation graph on the engine descriptor.");
+
+        RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendSetAttribute(engineDesc->get(),
+                                                 HIPDNN_ATTR_ENGINE_GLOBAL_INDEX,
+                                                 HIPDNN_TYPE_INT64,
+                                                 1,
+                                                 &engineId),
+            "Failed to set engine id on the engine descriptor.");
+
+        RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineDesc->get()),
+                                  "Failed to finalize engine descriptor");
+
+        auto engineConfigDesc
+            = std::make_unique<ScopedHipdnnBackendDescriptor>(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
+
+        RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendSetAttribute(engineConfigDesc->get(),
+                                                 HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                                 HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                 1,
+                                                 &engineDesc->get()),
+            "Failed to set engine on the engine config descriptor.");
+
+        RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineConfigDesc->get()),
+                                  "Failed to finalize engine config descriptor");
+
+        _engineConfigDesc = std::move(engineConfigDesc);
+
+        return {ErrorCode::OK, ""};
+    }
+
     GraphStructure buildAdjacencyList(const std::unordered_map<std::shared_ptr<TensorAttributes>,
                                                                size_t>& tensorToOriginNode) const
     {
@@ -790,7 +833,7 @@ public:
     }
 
     // Get knobs for a specific engine
-    // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
+    // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_knobs_for_engine(int64_t engineId, std::vector<Knob>& knobs) const
     {
         // 1. Get engine descriptor
@@ -905,44 +948,96 @@ public:
     }
 
     // Create execution plan with int64 knobs (compatibility method)
-    // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
+    // NOLINTNEXTLINE(readability-identifier-naming)
     Error create_execution_plan(int64_t engineId,
-                                const std::unordered_map<KnobType_t, int64_t>& knobs) const
+                                const std::unordered_map<KnobType_t, int64_t>& knobs)
     {
-        // Convert int64 knobs to KnobSetting objects
-        // std::unordered_map<int64_t, KnobSetting> knobSettings;
-        // for(const auto& [knobId, value] : knobs)
-        // {
-        //     knobSettings.emplace(knobId, KnobSetting(knobId, value));
-        // }
+        std::unordered_map<int64_t, Knob> existingKnobs;
+        Error status = get_knob_lookup_for_engine(engineId, existingKnobs);
 
-        // return create_execution_plan(engineId, knobSettings, false);
+        std::unordered_map<int64_t, Knob> sentKnobs;
+        for(const auto& [knobId, knobValue] : knobs)
+        {
+            auto found = existingKnobs.find(knobId);
+            if(found == existingKnobs.end())
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        fmt::format("Knob {} does not exist for engine id {}.", knobId, engineId)};
+            }
 
-        (void)engineId;
-        (void)knobs;
+            if(found->second.getValueType() != KnobValueType::INT64)
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        "create_execution_plan only supports INT64 knob types.  Use "
+                        "create_execution_plan_ext for other knob types."};
+            }
 
-        return {ErrorCode::OK, ""};
+            sentKnobs.try_emplace(knobId, std::move(found->second));
+            sentKnobs.at(knobId).setChoice(knobValue);
+        }
+
+        return create_execution_plan_ext(engineId, sentKnobs);
     }
 
     // Create execution plan with typed knob settings
-    // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
-    Error create_execution_plan(int64_t engineId,
-                                const std::unordered_map<int64_t, Knob>& userKnobs,
-                                bool filterByKnobs = false) const
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error create_execution_plan_ext(int64_t engineId, std::unordered_map<int64_t, Knob>& userKnobs)
     {
-        // TODO: Implement once flatbuffer schemas and backend support are available
-        // This method will:
-        // 1. Validate knob settings against engine's supported knobs
-        // 2. Apply default values for any knobs not specified by the user
-        // 3. Create an EngineConfig with the engine ID and knob settings
-        // 4. Serialize the EngineConfig to flatbuffer
-        // 5. Create and finalize an execution plan with the engine config
 
-        (void)engineId; // Suppress unused parameter warning
-        (void)userKnobs; // Suppress unused parameter warning
-        (void)filterByKnobs; // Suppress unused parameter warning
+        HIPDNN_FE_LOG_INFO("Creating execution plans for graph {}", graph_attributes.get_name());
 
-        return {ErrorCode::OK, "create_execution_plan with knobs not yet implemented"};
+        if(!_graphDesc || !_graphDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Graph has not been built, build the operation graph first. Cannot create "
+                    "execution plan."};
+        }
+
+        std::unordered_map<int64_t, Knob> existingKnobs;
+        Error status = get_knob_lookup_for_engine(engineId, existingKnobs);
+
+        status = initializeEngineConfig(engineId);
+        HIPDNN_CHECK_ERROR(status);
+
+        std::vector<Knob> userChoiceKnobs;
+        for(auto& [knobId, knob] : userKnobs)
+        {
+            if(existingKnobs.count(knobId) == 0)
+            {
+                HIPDNN_FE_LOG_WARN("Ignoring knob {} when creating execution plan for graph {}.  "
+                                   "Engine doesn't support chosen knob.",
+                                   knob.getKnobIdStr(),
+                                   graph_attributes.get_name());
+            }
+
+            if(knob.hasChoice())
+            {
+                status = knob.validate();
+                HIPDNN_CHECK_ERROR(status);
+
+                userChoiceKnobs.emplace_back(std::move(knob));
+            }
+            else
+            {
+                HIPDNN_FE_LOG_WARN("Ignoring knob {} when creating execution plan for graph {}.  "
+                                   "Knob contains no choices.",
+                                   knob.getKnobIdStr(),
+                                   graph_attributes.get_name());
+            }
+        }
+
+        // TODO: Set userChoiceKnobs on engineConfig
+
+        _executionPlanDesc = std::make_unique<ScopedHipdnnBackendDescriptor>(
+            HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
+
+        if(!_executionPlanDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Failed to create backend execution descriptor."};
+        }
+
+        return {ErrorCode::OK, ""};
     }
 
     Error check_support() // NOLINT(readability-identifier-naming)
