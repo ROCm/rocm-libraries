@@ -627,14 +627,17 @@ namespace rocRoller
                                 {
                                     // Insert new barrier before secondOp
                                     auto newBarrier = graph.control.addElement(Barrier());
-                                    insertBefore(graph, secondOpTag, newBarrier, newBarrier);
+                                    // Either the op itself or its top containing SetCoordinate
+                                    const auto insertPosition
+                                        = getTopSetCoordinate(graph, secondOpTag);
+                                    insertBefore(graph, insertPosition, newBarrier, newBarrier);
                                     graph.mapper.connect<LDS>(newBarrier, ldsCoord);
                                     barriersConnectedToLDS.insert(newBarrier);
                                     forwardBarriers[pairKey] = newBarrier;
                                     Log::debug("  Inserted new Barrier({}) before {} for forward "
                                                "dependency between {} & {} and LDS({})",
                                                newBarrier,
-                                               secondOpTag,
+                                               insertPosition,
                                                firstOpTag,
                                                secondOpTag,
                                                ldsCoord);
@@ -686,18 +689,23 @@ namespace rocRoller
                                     {
                                         // Insert new barrier before firstOp
                                         auto newBarrier = graph.control.addElement(Barrier());
-                                        insertBefore(graph, firstOpTag, newBarrier, newBarrier);
+                                        // Either the op itself or its top containing SetCoordinate
+                                        const auto insertPosition
+                                            = getTopSetCoordinate(graph, firstOpTag);
+                                        insertBefore(graph, insertPosition, newBarrier, newBarrier);
                                         graph.mapper.connect<LDS>(newBarrier, ldsCoord);
                                         barriersConnectedToLDS.insert(newBarrier);
                                         loopCarriedBarriers[loopKey] = newBarrier;
-                                        Log::debug("  Inserted new Barrier({}) before {} for "
-                                                   "loop-carried dependency from {} in loop {} for "
-                                                   "LDS({})",
-                                                   newBarrier,
-                                                   firstOpTag,
-                                                   secondOpTag,
-                                                   commonAncestorLoop.value(),
-                                                   ldsCoord);
+                                        Log::debug(
+                                            "  Inserted new Barrier({}) before {} for "
+                                            "loop-carried dependency from {} to {} in loop {} for "
+                                            "LDS({})",
+                                            newBarrier,
+                                            insertPosition,
+                                            secondOpTag,
+                                            firstOpTag,
+                                            commonAncestorLoop.value(),
+                                            ldsCoord);
                                     }
                                 }
                             }
