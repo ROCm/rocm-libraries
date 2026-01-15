@@ -2275,7 +2275,7 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
     if isNN(kernel) and not useLDSTr and TLDS==1:
         # TODO: Add NN schedule in upcoming PR
         return False, None
-    elif isTN(kernel) and not useLDSTr and TLDS==1:
+    elif isTN(kernel) and not useLDSTr and TLDS==1 and kernel["UseDirect32XEmulation"]:
         kernel["UsePLRPack"] = True
         syncTable = [
             5,  SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Before PackA0. Wait for all LRA0. Skip 1*LRB0.") ,
@@ -2338,7 +2338,7 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
     syncCode = []
     mfmaReorder = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
-    if isTN(kernel) and not useLDSTr and TLDS==1:
+    if isTN(kernel) and not useLDSTr and TLDS==1 and kernel["UseDirect32XEmulation"]:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
 
@@ -2470,7 +2470,7 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
         }
 
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
-    elif isNN(kernel) and TLDS==1:
+    elif isNN(kernel) and TLDS==1 and kernel["UseDirect32XEmulation"]:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
         
@@ -2668,7 +2668,7 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
-    if isTN(kernel) and not useLDSTr and TLDS == 1:
+    if isTN(kernel) and not useLDSTr and TLDS == 1 and kernel["UseDirect32XEmulation"]:
         kernel["UsePLRPack"] = True
         numPackInstr = 24 
         numPackIndices = numPackInstr // 2 # Assign 2 pack instructions per mfma index
@@ -2769,7 +2769,7 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0
-    if isTN(kernel) and not useLDSTr and TLDS==1:
+    if isTN(kernel) and not useLDSTr and TLDS==1 and kernel["UseDirect32XEmulation"]:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
         # This schedule follows similar pattern as 192x256x32 TF32 schedule
@@ -2906,7 +2906,7 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
-    if isTN(kernel) and useLDSTr and TLDS==1:
+    if isTN(kernel) and useLDSTr and TLDS==1 and kernel["UseDirect32XEmulation"]:
 
         kernel["UsePLRPack"] = True
         # Used the following constrains to create schedule
@@ -3000,7 +3000,7 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
     snopCode = []
     S4 = SNop(4)
 
-    if isTN(kernel) and not useLDSTr and TLDS==1:
+    if isTN(kernel) and not useLDSTr and TLDS==1 and kernel["UseDirect32XEmulation"]:
         kernel["UseMFMAF32XEmulation"] = True
 
         lra0 = [0,0,1,1]
@@ -3088,7 +3088,7 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     syncCode = []   
     gr_inc_step = 1
 
-    if isTN(kernel) and not useLDSTr and TLDS==1:
+    if isTN(kernel) and not useLDSTr and TLDS==1 and kernel["UseDirect32XEmulation"]:
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UsePLRPack"] = True
 
@@ -3175,7 +3175,7 @@ def _get_schedule_128x256x32_TF32(kernel, useLDSTr, TLDS):
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0
-    if isTN(kernel) and not useLDSTr and TLDS==1:
+    if isTN(kernel) and not useLDSTr and TLDS==1 and kernel["UseDirect32XEmulation"]:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
 
@@ -3374,7 +3374,7 @@ def _get_schedule_128x160x64_TF32(kernel, useLDSTr, TLDS):
     syncCode = []
     gr_inc_step = 0
 
-    if isTN(kernel) and not useLDSTr and TLDS==1:
+    if isTN(kernel) and not useLDSTr and TLDS==1 and kernel["UseDirect32XEmulation"]:
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UsePLRPack"] = True
 
@@ -3465,7 +3465,7 @@ def _get_schedule_256x128x32_TF32(kernel, useLDSTr, TLDS):
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
 
-    if isTN(kernel) and useLDSTr and TLDS==1:
+    if isTN(kernel) and useLDSTr and TLDS==1 and kernel["UseDirect32XEmulation"]:
         kernel["UsePLRPack"] = True
         numPackInstr = 24 
         numPackIndices = numPackInstr // 2 # Assign 2 pack instructions per mfma index
