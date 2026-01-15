@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 
-#include <dataTypeInfo.hpp>
+#include <mxDataGenerator/dataTypeInfo.hpp>
 
 #include "float_16_data_gen.hpp"
 #include "scale.hpp"

@@ -44,7 +44,9 @@ bool Softmax::IsApplicable(
     [[maybe_unused]] const ExecutionContext& context,
     [[maybe_unused]] const miopen::softmax::ProblemDescription& problem) const
 {
-    if(!(problem.GetYDesc().GetType() == miopenFloat || problem.GetYDesc().GetType() == miopenHalf))
+    if(!(problem.GetYDesc().GetType() == miopenFloat ||
+         problem.GetYDesc().GetType() == miopenHalf ||
+         problem.GetYDesc().GetType() == miopenBFloat16))
     {
         return false;
     }
@@ -92,13 +94,12 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
-    auto lengths      = problem.GetXDesc().GetLengths();
-    auto strides      = problem.GetXDesc().GetStrides();
-    auto dtype        = problem.GetXDesc().GetType();
-    auto input_dtype  = miopen::GetDataType(problem.GetXDesc().GetType());
-    auto output_dtype = miopen::GetDataType(problem.GetYDesc().GetType());
-    auto algorithm    = problem.GetAlgorithm();
-    auto mode         = problem.GetMode();
+    auto lengths    = problem.GetXDesc().GetLengths();
+    auto strides    = problem.GetXDesc().GetStrides();
+    auto dtype      = problem.GetXDesc().GetType();
+    auto data_dtype = miopen::GetDataType(problem.GetXDesc().GetType());
+    auto algorithm  = problem.GetAlgorithm();
+    auto mode       = problem.GetMode();
 
     auto grid_size =
         mode == MIOPEN_SOFTMAX_MODE_INSTANCE ? lengths[0] : lengths[0] * lengths[2] * lengths[3];
@@ -127,8 +128,8 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
     const auto build_params =
         KernelBuildParameters{{"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
                               {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
-                              {"INPUT_TYPE", input_dtype},
-                              {"OUTPUT_TYPE", output_dtype},
+                              {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
+                              {"DATA_TYPE", data_dtype == "bfloat16" ? "ushort" : data_dtype},
                               {"USE_SOFTMAX_FAST", algorithm == MIOPEN_SOFTMAX_FAST},
                               {"USE_SOFTMAX_ACCURATE", algorithm == MIOPEN_SOFTMAX_ACCURATE},
                               {"USE_SOFTMAX_LOG", algorithm == MIOPEN_SOFTMAX_LOG},

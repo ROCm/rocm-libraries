@@ -37,8 +37,7 @@
 #include <rocRoller/Utilities/Utils.hpp>
 
 #include "client/BenchmarkSolution.hpp"
-#include <DataGenerator.hpp>
-#include <common/SourceMatcher.hpp>
+#include <mxDataGenerator/DataGenerator.hpp>
 
 namespace rocRoller
 {
