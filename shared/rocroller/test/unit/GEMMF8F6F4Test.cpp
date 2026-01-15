@@ -54,6 +54,8 @@ namespace GEMMTests
         : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
                                                    int,
                                                    std::pair<std::string, std::string>,
+                                                   int,
+                                                   int,
                                                    SolutionParams::LoadPath,
                                                    SolutionParams::LoadPath,
                                                    rocRoller::StreamKMode>>
@@ -639,14 +641,15 @@ namespace GEMMTests
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 
-        auto [typeAB, MFMAK, transOp, loadPathA, loadPathB, mode] = std::get<1>(GetParam());
+        auto [typeAB, MFMAK, transOp, waveConfigX, swizzleK, loadPathA, loadPathB, mode]
+            = std::get<1>(GetParam());
 
         if((typeAB == DataType::FP6 || typeAB == DataType::BF6)
            && (loadPathA == SolutionParams::LoadPath::BufferToLDS
                || loadPathB == SolutionParams::LoadPath::BufferToLDS))
             GTEST_SKIP() << "Direct2LDS not yet supported for FP6/BF6" << std::endl;
 
-        // TODO: enable the test when not run of registers and fix Direct2LDS for BufferToLDS
+        // TODO: enable the test when not run out of registers and fix Direct2LDS for BufferToLDS
         if(typeAB != DataType::FP4
            && (mode == rocRoller::StreamKMode::TwoTile
                || mode == rocRoller::StreamKMode::TwoTileDPFirst)
@@ -687,8 +690,8 @@ namespace GEMMTests
         problem.macN = 128;
         problem.macK = 128;
 
-        problem.workgroupSizeX = 2 * problem.wavefrontSize;
-        problem.workgroupSizeY = 2;
+        problem.workgroupSizeX = waveConfigX * problem.wavefrontSize;
+        problem.workgroupSizeY = 4 / waveConfigX;
 
         problem.m = problem.macM * 4;
         problem.n = problem.macN * problem.numWGs / 2 + problem.macN * 2;
@@ -708,7 +711,7 @@ namespace GEMMTests
         problem.prefetchInFlight  = 2;
         problem.prefetchLDSFactor = 2;
 
-        // TODO: remove this condition when SwizzleScale supports non-TN data layout
+        // TODO: remove both if/else conditions when SwizzleScale supports non-TN data layout
         if(problem.transA == "T" && problem.transB == "N")
         {
             problem.loadScalePathA = SolutionParams::LoadPath::BufferToVGPR;
@@ -723,11 +726,17 @@ namespace GEMMTests
             problem.swizzleScale  = true;
             problem.swizzleM      = 64;
             problem.swizzleN      = 64;
-            problem.swizzleK      = 8;
+            problem.swizzleK      = swizzleK;
             problem.prefetchScale = true;
 
             problem.scaleBlockSize = m_context->targetArchitecture().GetCapability(
                 GPUCapability::DefaultScaleBlockSize);
+        }
+        else
+        {
+            if(swizzleK != 4)
+                GTEST_SKIP() << "skip repeated test due to unrelated options : non-TN and swizzleK"
+                             << std::endl;
         }
 
         uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
@@ -897,6 +906,8 @@ namespace GEMMTests
                                   std::pair<std::string, std::string>("N", "T"),
                                   std::pair<std::string, std::string>("T", "N"),
                                   std::pair<std::string, std::string>("T", "T")),
+                ::testing::Values(1, 2, 4),
+                ::testing::Values(4, 8),
                 ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
                                   SolutionParams::LoadPath::BufferToLDS),
                 ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
