@@ -12,6 +12,7 @@ Documentation for rocSPARSE is available at
 * gfx1150, gfx1152 and gfx1153 enabled.
 * Added brain half float mixed precision to `rocsparse_spmv` where A, X, and Y use bfloat16 and the compute type use float.
 * Added half float mixed precision to `rocsparse_spmv` where A, X, and Y use float16 and the compute type use float.
+* Added float16 and bfloat16 output support for level 3 functions (`rocsparse_spmm`, `rocsparse_csrmm`, `rocsparse_coomm`, `rocsparse_spgemm`). This enables mixed precision workflows where the output matrix C can use float16 or bfloat16 types.
 
 ## rocSPARSE 4.2.0 for ROCm 7.2.0
 

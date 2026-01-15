@@ -28,6 +28,7 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CodeGen/Utils.hpp>
 #include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/GPUArchitecture/GPUCapability.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
 #include "CustomMatchers.hpp"
@@ -606,9 +607,13 @@ namespace TransposeLoadsTest
 
         auto wavetile = GENERATE(std::make_pair(16, 128), std::make_pair(32, 64));
         auto context  = TestContext::ForTestDevice();
-        if(context->targetArchitecture().target().gfx != GPUArchitectureGFX::GFX950)
+        if(!(context->targetArchitecture().HasCapability(GPUCapability::ds_read_b64_tr_b16)
+             || context->targetArchitecture().HasCapability(GPUCapability::ds_read_b64_tr_b8)
+             || context->targetArchitecture().HasCapability(GPUCapability::ds_read_b96_tr_b6)
+             || context->targetArchitecture().HasCapability(GPUCapability::ds_read_b64_tr_b4)))
         {
-            SKIP("Test only supported on GFX950");
+            SKIP("Architecture " + context->targetArchitecture().target().toString()
+                 + " does not support transpose loads");
         }
 
         SECTION("For each datatype and unalignedVGPRs option")

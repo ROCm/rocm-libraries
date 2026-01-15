@@ -460,13 +460,6 @@ namespace rocRollerTest
 
     TEST_P(F6Test, GPU_F6TiledLoadStore)
     {
-        auto const& arch = m_context->targetArchitecture().target();
-        if(!arch.isCDNAGPU())
-        {
-            GTEST_SKIP() << "Test not yet supported on "
-                         << m_context->targetArchitecture().target().toString() << std::endl;
-        }
-
         int workitemsPerWorkgroup = 64;
         int elementsPerWorkitem   = 16;
 

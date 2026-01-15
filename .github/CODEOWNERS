@@ -16,6 +16,7 @@
 **/library/include/                                 @ROCm/rocm-documentation
 
 # Project-specific ownership
+/dnn-providers/miopen-provider/                     @ROCm/hipdnn-reviewers
 /projects/composablekernel/                         @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @tenpercent @ThomasNing @coderfeli
 /projects/hipblas/                                  @ROCm/hipblas-reviewers
 /projects/hipblas-common/                           @ROCm/hipblas-common-reviewers
