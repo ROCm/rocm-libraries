@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
-    message(STATUS "Building miopen legacy plugin standalone")
+    message(STATUS "Building miopen provider plugin standalone")
     cmake_minimum_required(VERSION 3.25.2)
     add_compile_definitions(__HIP_PLATFORM_AMD__)
 
@@ -84,7 +84,7 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     include(Tests)
 
 else()
-    message(STATUS "Building miopen legacy plugin as a dependency")
+    message(STATUS "Building miopen provider plugin as a dependency")
 endif()
 
 if(WIN32)
