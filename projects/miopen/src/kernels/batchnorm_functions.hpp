@@ -151,23 +151,26 @@ __forceinline__ __device__ __host__ void _accumulate_mad(T& a, T const& b, T con
 }
 
 template <typename FpAccumType, typename FpAccumType_C, typename FpPrecType_C>
-__forceinline__ __device__ void running_stash(FpPrecType_C* __restrict resultRunningMean,
-                                              FpPrecType_C* __restrict resultRunningVariance,
-                                              double expAvgFactor,
-                                              FpAccumType_C mean,
-                                              FpAccumType_C variance,
-                                              uint channel)
+__forceinline__ __device__ void
+running_stash(const FpPrecType_C* __restrict prevResultRunningMean,
+              const FpPrecType_C* __restrict prevResultRunningVariance,
+              FpPrecType_C* __restrict nextResultRunningMean,
+              FpPrecType_C* __restrict nextResultRunningVariance,
+              double expAvgFactor,
+              FpAccumType_C mean,
+              FpAccumType_C variance,
+              uint channel)
 {
     static_assert(miopen::batchnorm::config::variant != 4,
                   "running_stash is only compiled when MIO_BN_VARIANT != 4.");
 
-    const auto pvt_runMean = static_cast<FpAccumType_C>(resultRunningMean[channel]);
+    const auto pvt_runMean = static_cast<FpAccumType_C>(prevResultRunningMean[channel]);
 
     const auto pvt_newRunMean = fma(static_cast<FpAccumType_C>(-expAvgFactor),
                                     static_cast<FpAccumType_C>(pvt_runMean),
                                     static_cast<FpAccumType_C>(pvt_runMean)); // tmp = oldRunMean
 
-    resultRunningMean[channel] = static_cast<FpPrecType_C>(
+    nextResultRunningMean[channel] = static_cast<FpPrecType_C>(
         fma(static_cast<FpAccumType_C>(mean),
             static_cast<FpAccumType_C>(expAvgFactor),
             static_cast<FpAccumType_C>(pvt_newRunMean))); // newMean*factor + tmp
@@ -179,10 +182,10 @@ __forceinline__ __device__ void running_stash(FpPrecType_C* __restrict resultRun
                   (static_cast<FpAccumType>(miopen::batchnorm::config::nhw) /
                    (static_cast<FpAccumType>(miopen::batchnorm::config::nhw) - FpAccumType{1.0})));
 
-    resultRunningVariance[channel] =
-        static_cast<FpPrecType_C>((FpAccumType{1.0} - static_cast<FpAccumType>(expAvgFactor)) *
-                                      static_cast<FpAccumType_C>(resultRunningVariance[channel]) +
-                                  static_cast<FpAccumType>(expAvgFactor) * adjust);
+    nextResultRunningVariance[channel] = static_cast<FpPrecType_C>(
+        (FpAccumType{1.0} - static_cast<FpAccumType>(expAvgFactor)) *
+            static_cast<FpAccumType_C>(prevResultRunningVariance[channel]) +
+        static_cast<FpAccumType>(expAvgFactor) * adjust);
 }
 
 template <typename FpAccumType_C, typename FpPrecType_C>

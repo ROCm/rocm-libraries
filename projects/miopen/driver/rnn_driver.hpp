@@ -30,10 +30,8 @@
 #include "driver.hpp"
 #include "gru_verify_gemm.hpp"
 #include "lstm_verify_gemm.hpp"
-#include "mloConvHost.hpp"
 #include "random.hpp"
 #include "rnn_verify_gemm.hpp"
-#include "tensor_driver.hpp"
 #include "timer.hpp"
 #include "util_driver.hpp"
 #include "util_file.hpp"
@@ -49,7 +47,6 @@
 #include <cfloat>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
 #include <memory>
 #include <numeric>
 #include <sstream>
@@ -254,16 +251,13 @@ int RNNDriver<Tgpu, Tref>::AddCmdLineArgs()
                          "Use specified directory to cache verification data. Off by default.",
                          "string");
     */
-    inflags.AddInputFlag(
-        "wall",
-        'w',
-        "0",
-        "Wall-clock, for host and gpu, Time Each Layer,       Disabled                = 0,\
-        OldWallClock            = 1,\
-        SeparateClocksSynced    = 2,\
-        SeparateClocksNotSynced = 3 \
-        (Default = 0) ",
-        "int");
+    inflags.AddInputFlag("time", 't', "0", "Time Each Layer (Default=0)", "int");
+    inflags.AddInputFlag("wall",
+                         'w',
+                         "1",
+                         "Wall-clock mode, for host and gpu, Time Each Layer. OldWallClock = 1, "
+                         "SeparateClocksSynced = 2, SeparateClocksNotSynced = 3 (Default = 1) ",
+                         "int");
     inflags.AddInputFlag("dump_output", 'o', "0", "Dumps the output buffers (Default=0)", "int");
     /*  // DL: These have not been implemented. Removing them for now.
         inflags.AddInputFlag("in_data", 'd', "", "Input data filename (Default=)", "string");
@@ -794,7 +788,10 @@ int RNNDriver<Tgpu, Tref>::RunForwardGPU()
     if(inflags.GetValueInt("forw") != 0 && !(inflags.GetValueInt("forw") & 1))
         return miopenStatusSuccess;
 
-    RNNCombTimeLoger t(GetStream(), inflags.GetValueInt("iter"), inflags.GetValueInt("wall"));
+    RNNCombTimeLogger time_logger(GetStream(),
+                                  inflags.GetValueInt("iter"),
+                                  inflags.GetValueInt("time"),
+                                  inflags.GetValueInt("wall"));
 
     for(int i = 0; i < inflags.GetValueInt("iter"); i++)
     {
@@ -809,7 +806,7 @@ int RNNDriver<Tgpu, Tref>::RunForwardGPU()
             workspace_dev->ToGPU(q, workspace.data());
             reservespace_dev->ToGPU(q, reservespace.data());
         }
-        t.Start();
+        time_logger.Start();
         if(inflags.GetValueInt("fwdtype") == 0)
         {
             miopenRNNForwardTraining(GetHandle(),
@@ -862,13 +859,14 @@ int RNNDriver<Tgpu, Tref>::RunForwardGPU()
                                       workspace_dev->GetSize());
         }
 
-        t.StopAndPush();
+        time_logger.StopAndPush();
     }
+
     miopen::deref(GetHandle()).Finish();
-    if(WALL_CLOCK)
+    if(inflags.GetValueInt("time") == 1)
     {
         printf("Forward RNN time results:\n");
-        t.Print();
+        time_logger.Print();
     }
 
     out_dev->FromGPU(GetStream(), out.data());
@@ -1101,12 +1099,15 @@ int RNNDriver<Tgpu, Tref>::RunBackwardGPU()
 
     if((inflags.GetValueInt("forw") & 2) || (inflags.GetValueInt("forw") == 0))
     {
-        RNNCombTimeLoger t(GetStream(), inflags.GetValueInt("iter"), inflags.GetValueInt("wall"));
+        RNNCombTimeLogger time_logger(GetStream(),
+                                      inflags.GetValueInt("iter"),
+                                      inflags.GetValueInt("time"),
+                                      inflags.GetValueInt("wall"));
         workspace_dev->ToGPU(q, workspace.data());
 
         for(int i = 0; i < inflags.GetValueInt("iter"); i++)
         {
-            t.Start();
+            time_logger.Start();
             ret = miopenRNNBackwardData(GetHandle(),
                                         rnnDesc,
                                         adjustedSeqLen,
@@ -1134,13 +1135,14 @@ int RNNDriver<Tgpu, Tref>::RunBackwardGPU()
                                         workspace_dev->GetSize(),
                                         reservespace_dev->GetMem(),
                                         reservespace_dev->GetSize());
-            t.StopAndPush();
+            time_logger.StopAndPush();
         }
+
         miopen::deref(GetHandle()).Finish();
-        if(WALL_CLOCK)
+        if(inflags.GetValueInt("time") == 1)
         {
             printf("Backward Data RNN time results:\n");
-            t.Print();
+            time_logger.Print();
         }
 
         din_dev->FromGPU(GetStream(), din.data());
@@ -1151,11 +1153,14 @@ int RNNDriver<Tgpu, Tref>::RunBackwardGPU()
 
     if((inflags.GetValueInt("forw") & 4) || (inflags.GetValueInt("forw") == 0))
     {
-        RNNCombTimeLoger t(GetStream(), inflags.GetValueInt("iter"), inflags.GetValueInt("wall"));
+        RNNCombTimeLogger time_logger(GetStream(),
+                                      inflags.GetValueInt("iter"),
+                                      inflags.GetValueInt("time"),
+                                      inflags.GetValueInt("wall"));
 
         for(int i = 0; i < inflags.GetValueInt("iter"); i++)
         {
-            t.Start();
+            time_logger.Start();
             ret = miopenRNNBackwardWeights(GetHandle(),
                                            rnnDesc,
                                            adjustedSeqLen,
@@ -1171,14 +1176,14 @@ int RNNDriver<Tgpu, Tref>::RunBackwardGPU()
                                            workspace_dev->GetSize(),
                                            reservespace_dev->GetMem(),
                                            reservespace_dev->GetSize());
-            t.StopAndPush();
+            time_logger.StopAndPush();
         }
         miopen::deref(GetHandle()).Finish();
 
-        if(WALL_CLOCK)
+        if(inflags.GetValueInt("time") == 1)
         {
             printf("Backward Weights RNN time results:\n");
-            t.Print();
+            time_logger.Print();
         }
 
         dwei_dev->FromGPU(GetStream(), dwei.data());
@@ -1628,22 +1633,24 @@ int RNNDriver<Tgpu, Tref>::VerifyForward()
 
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << std::string("Forward RNN FAILED: ") << error << std::endl;
+        std::cout << std::string("Forward RNN FAILED: ") << error << std::string(" > ") << tolerance
+                  << std::endl;
     }
     else
     {
-        printf("Forward RNN Verifies on CPU and GPU\n");
+        printf("Forward RNN Verifies on CPU and GPU (%e < %e)\n", error, tolerance);
     }
 
     auto error2 = miopen::rms_range(hy_host, hy);
 
     if(!std::isfinite(error2) || error2 > tolerance)
     {
-        std::cout << std::string("final hidden state FAILED: ") << error2 << std::endl;
+        std::cout << std::string("final hidden state FAILED: ") << error2 << std::string(" > ")
+                  << tolerance << std::endl;
     }
     else
     {
-        printf("final hidden Verifies on CPU and GPU\n");
+        printf("final hidden Verifies on CPU and GPU (%e < %e)\n", error2, tolerance);
     }
 
     if((inflags.GetValueStr("mode")) == "lstm")
@@ -1652,11 +1659,12 @@ int RNNDriver<Tgpu, Tref>::VerifyForward()
 
         if(!std::isfinite(error3) || error3 > tolerance)
         {
-            std::cout << std::string("final cell state FAILED: ") << error3 << std::endl;
+            std::cout << std::string("final cell state FAILED: ") << error3 << std::string(" > ")
+                      << tolerance << std::endl;
         }
         else
         {
-            printf("final cell Verifies on CPU and GPU\n");
+            printf("final cell Verifies on CPU and GPU (%e < %e)\n", error3, tolerance);
         }
     }
 
@@ -1725,11 +1733,12 @@ int RNNDriver<Tgpu, Tref>::VerifyBackward()
 
         if(!std::isfinite(error_data) || error_data > tolerance)
         {
-            std::cout << std::string("Backward RNN Data FAILED: ") << error_data << std::endl;
+            std::cout << std::string("Backward RNN Data FAILED: ") << error_data
+                      << std::string(" > ") << tolerance << std::endl;
         }
         else
         {
-            printf("Backward RNN Data Verifies on CPU and GPU\n");
+            printf("Backward RNN Data Verifies on CPU and GPU (%e < %e)\n", error_data, tolerance);
         }
 
         auto error_data2 = miopen::rms_range(dhx_host, dhx);
@@ -1737,11 +1746,12 @@ int RNNDriver<Tgpu, Tref>::VerifyBackward()
         if(!std::isfinite(error_data2) || error_data2 > tolerance)
         {
             std::cout << std::string("difference at inital hidden state FAILED: ") << error_data2
-                      << std::endl;
+                      << std::string(" > ") << tolerance << std::endl;
         }
         else
         {
-            printf("initial hidden state Verifies on CPU and GPU\n");
+            printf(
+                "initial hidden state Verifies on CPU and GPU (%e < %e)\n", error_data2, tolerance);
         }
 
         if((inflags.GetValueStr("mode")) == "lstm")
@@ -1751,11 +1761,13 @@ int RNNDriver<Tgpu, Tref>::VerifyBackward()
             if(!std::isfinite(error_data3) || error_data3 > tolerance)
             {
                 std::cout << std::string("difference at inital cell state FAILED: ") << error_data3
-                          << std::endl;
+                          << std::string(" > ") << tolerance << std::endl;
             }
             else
             {
-                printf("inital cell state Verifies on CPU and GPU\n");
+                printf("inital cell state Verifies on CPU and GPU (%e < %e)\n",
+                       error_data3,
+                       tolerance);
             }
         }
     }
@@ -1770,11 +1782,14 @@ int RNNDriver<Tgpu, Tref>::VerifyBackward()
         auto error_weights = miopen::rms_range(dwei_host, dwei);
         if(!std::isfinite(error_weights) || error_weights > tolerance)
         {
-            std::cout << std::string("Backward RNN Weights FAILED: ") << error_weights << std::endl;
+            std::cout << std::string("Backward RNN Weights FAILED: ") << error_weights
+                      << std::string(" > ") << tolerance << std::endl;
         }
         else
         {
-            printf("Backward RNN Weights Verifies on CPU and GPU\n");
+            printf("Backward RNN Weights Verifies on CPU and GPU (%e < %e)\n",
+                   error_weights,
+                   tolerance);
         }
     }
 
