@@ -408,14 +408,14 @@ class LocalReadMFMA(LocalRead):
                                     vHi1 = vgpr("Valu%s_X%u_I%u+%u+1"%(tc, bufferIdx, iui, (valuiIdx-baseValuiIdx)/2 + baseValuiIdx))
 
                                     if kernel["UseMFMAF32XEmulation"]:
-                                        vTBase = str(v0t.regName)
+                                        vBaseRegs = vgpr(str(v0t.regName),4) if v0t.regName else vgpr(str(v0t.regIdx),4)
                                         vHiBase = str(vHi0.regName)
                                         idMat = vgpr(writer.states.startVgprIdentityMatrix,2)
                                         tmpDelay = writer.vgprPool.checkOut(1)
                                         # We use a single MFMA 4x4x4_16b to perform 4 `vT - vHi` operations. 
                                         # - A is set to negative identity matrix
                                         # - no need for DPP as B has the same layout as C & D
-                                        packCodeT.add(MFMAInstruction(instType=InstType.INST_BF16, accType=InstType.INST_F32, variant=[4,4,4,16], mfma1k=False,acc=vgpr(vTBase,4), a=idMat, b=vgpr(vHiBase,2), acc2=vgpr(vTBase,4), 
+                                        packCodeT.add(MFMAInstruction(instType=InstType.INST_BF16, accType=InstType.INST_F32, variant=[4,4,4,16], mfma1k=False,acc=vBaseRegs, a=idMat, b=vgpr(vHiBase,2), acc2=vBaseRegs, 
                                         comment="Calculate low bits for TF32 emulation"))
                                         writer.vgprPool.checkIn(tmpDelay)
                                     else:
