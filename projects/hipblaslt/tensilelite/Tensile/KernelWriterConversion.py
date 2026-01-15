@@ -298,9 +298,9 @@ class KernelWriterConversion(KernelWriterBase):
     self.num_dword_store = int(self.num_elements_load * self.state["ProblemType"]["DestDataType"].numBytes() / 4)
     if self.num_dword_store == 0:
       self.num_dword_store = self.num_elements_load * self.state["ProblemType"]["DestDataType"].numBytes() / 4
-    if self.state["ProblemType"]["DataType"].isDouble() or self.state["ProblemType"]["DataType"].isComplex():
+    if self.state["ProblemType"]["DataType"].numBytes() > 4:
       self.num_dword_load  = self.num_elements_load
-    if self.state["ProblemType"]["DestDataType"].isDouble() or self.state["ProblemType"]["DestDataType"].isComplex():
+    if self.state["ProblemType"]["DestDataType"].numBytes() > 4:
       self.num_dword_store = self.num_elements_load
     kStr += "#define NUM_ELEMENT_LOAD %d%s" % ( self.num_elements_load, self.endLine)
     kStr += "#define NUM_GSU %d%s" % (self.state["GlobalSplitU"], self.endLine)
