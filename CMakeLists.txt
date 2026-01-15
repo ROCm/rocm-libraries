@@ -1,6 +1,6 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.21)
 
-project(hipthreads)
+project(hipthreads LANGUAGES CXX HIP)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
@@ -21,10 +21,6 @@ set(CMAKE_SHARED_LINKER_FLAGS_INIT "-fuse-ld=lld")
 
 list(APPEND CMAKE_PREFIX_PATH /opt/rocm /opt/rocm/hip)
 find_package(hip REQUIRED)
-
-# Set compiler and linker
-set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
-set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
 
 # # Used for automatic generation of LLVM IR (by dissasembling bitcode generated during compilation from the "-save-temps" option)
 # find_program(LLVM_DIS llvm-dis REQUIRED HINTS /opt/rocm/llvm/bin)

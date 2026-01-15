@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.21)
 
 # can't figure out how to get clang-tidy to use hipcc/recognize HIP code
 # set(CMAKE_CXX_CLANG_TIDY clang-tidy "-checks=                                                                          \
@@ -21,6 +21,7 @@ endif()
 
 # Generate static lib libhipthreads.a
 add_library(hipthreads STATIC hip/thread.cxx)
+set_source_files_properties(hip/thread.cxx PROPERTIES LANGUAGE HIP)
 target_include_directories(hipthreads PRIVATE ${CMAKE_SOURCE_DIR}/inc)
 
 if(NOT DISABLE_WERROR)
