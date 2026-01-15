@@ -31,12 +31,15 @@ set(TABLEGEN_GENERATED_FILES "")
 
 # Define the list of hardware YAML files as dependencies
 set(HARDWARE_YAML_FILES "")
+# Also depend on the C++ files that define instruction mappings
+set(HARDWARE_SOURCE_FILES "")
 
 foreach(arch ${STINKYTOFU_ARCHS_TO_BUILD})
     list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/hardware/${arch}Isa.inc")
     list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/rocisa/Rocisa${arch}Mappings.inc")
 
     list(APPEND HARDWARE_YAML_FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/data/${arch}.yaml")
+    list(APPEND HARDWARE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/src/gfx/${arch}.cpp")
 endforeach()
 
 # Add pattern-generated files
@@ -66,7 +69,7 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/ir/logical"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/ir/rocisa"
     COMMAND $<TARGET_FILE:tablegen> "${TABLEGEN_OUTPUT_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware"
-    DEPENDS tablegen ${HARDWARE_YAML_FILES} ${PATTERN_FILE} ${HLIR_PATTERN_FILE}
+    DEPENDS tablegen ${HARDWARE_YAML_FILES} ${HARDWARE_SOURCE_FILES} ${PATTERN_FILE} ${HLIR_PATTERN_FILE}
     COMMENT "Generating ISA definitions, IR classes, and pattern matchers with tablegen..."
     VERBATIM
 )

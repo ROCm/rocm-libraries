@@ -29,12 +29,10 @@ intrinsic ReluF32 {
   arguments {
     dest: vgpr
     src: vgpr
-    temp: vgpr
   }
   
   body {
-    temp = v_cmp_gt_f32(src, 0.0)
-    dest = v_select_f32(temp, src, 0.0)
+    dest = v_max_f32(src, 0.0)
   }
   
   comment "ReLU F32 activation: max(x, 0)"
@@ -135,7 +133,7 @@ intrinsic ClampedReluF32 {
   }
   
   body {
-    call ReluF32(dest=temp1, src=src, temp=temp2)
+    call ReluF32(dest=temp1, src=src)
     call ClampF32(dest=dest, src=temp1, min_val=min_val, max_val=max_val, temp=temp2)
   }
   

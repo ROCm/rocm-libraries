@@ -25,11 +25,11 @@
  * @file intrinsic-compiler.cpp
  * @brief Intrinsic Compiler Tool
  *
- * This tool compiles intrinsic definitions from Intrinsics.def to optimized
+ * This tool compiles intrinsic definitions from Intrinsics.intrinsic to optimized
  * .st.bc bitcode files.
  *
  * Pipeline:
- *   1. Parse Intrinsics.def (high-level IR syntax)
+ *   1. Parse Intrinsics.intrinsic (high-level IR syntax)
  *   2. Convert to LogicalModule (high-level IR, with function inlining)
  *   3. Run high-level IR peephole optimization
  *   4. Convert back to pattern format
@@ -37,7 +37,7 @@
  *   6. Verify round-trip conversion
  *
  * Usage:
- *   intrinsic-compiler [--verbose|-v] <input.def> <output.st.bc>
+ *   intrinsic-compiler [--verbose|-v] <input.intrinsic> <output.st.bc>
  */
 
 #include "ir/IRSerializer.hpp"
@@ -53,17 +53,17 @@ void printUsage(const char* progName)
 {
     std::cout << "StinkyTofu Intrinsic Compiler\n";
     std::cout << "==============================\n\n";
-    std::cout << "Usage: " << progName << " [--verbose|-v] <input.def> <output.st.bc>\n\n";
+    std::cout << "Usage: " << progName << " [--verbose|-v] <input.intrinsic> <output.st.bc>\n\n";
     std::cout << "Arguments:\n";
-    std::cout << "  input.def      Input intrinsic definition file (high-level IR)\n";
-    std::cout << "  output.st.bc   Output bitcode file\n\n";
+    std::cout << "  input.intrinsic   Input intrinsic definition file (high-level IR)\n";
+    std::cout << "  output.st.bc      Output bitcode file\n\n";
     std::cout << "Options:\n";
-    std::cout << "  --verbose, -v  Show detailed compilation progress\n\n";
+    std::cout << "  --verbose, -v     Show detailed compilation progress\n\n";
     std::cout << "Example:\n";
     std::cout << "  " << progName
-              << " lib/Dialect/Intrinsics/Intrinsics.def build/intrinsics.st.bc\n";
+              << " lib/Intrinsics/Intrinsics.intrinsic build/intrinsics.st.bc\n";
     std::cout << "  " << progName
-              << " -v lib/Dialect/Intrinsics/Intrinsics.def build/intrinsics.st.bc\n";
+              << " -v lib/Intrinsics/Intrinsics.intrinsic build/intrinsics.st.bc\n";
 }
 
 int main(int argc, char** argv)

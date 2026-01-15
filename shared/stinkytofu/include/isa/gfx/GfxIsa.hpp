@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -75,6 +75,7 @@ namespace stinkytofu
 
     using IsaOpcode     = uint16_t;
     using UnifiedOpcode = uint16_t;
+    using InstFlagSet   = std::bitset<flagCapacity>;
 
     // General hardware instruction description for all ISAs.
     struct HwInstDesc

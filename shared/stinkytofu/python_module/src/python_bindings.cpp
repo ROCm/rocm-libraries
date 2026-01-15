@@ -26,7 +26,6 @@
 #include "ir/IntrinsicRegistry.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/asm/StinkyAsmModule.hpp"
-#include "ir/logical/LogicalInstructionFactory.hpp"
 #include "ir/logical/LogicalInstructions.hpp"
 #include "ir/python/PyLogicalModule.hpp"
 #include "isa/gfx/GfxIsa.hpp"
@@ -41,6 +40,9 @@
 
 namespace nb = nanobind;
 using namespace stinkytofu;
+
+// Forward declaration for logical count bindings
+void init_logical_count(nb::module_& m);
 
 NB_MODULE(_stinkytofu, m)
 {
@@ -285,19 +287,19 @@ NB_MODULE(_stinkytofu, m)
            std::optional<StinkyRegister> acc2,
            bool                          neg,
            const std::string&            comment) {
-            return std::shared_ptr<LogicalInstruction>(createMFMA(instType,
-                                                                  accType,
-                                                                  m,
-                                                                  n,
-                                                                  k,
-                                                                  blocks,
-                                                                  mfma1k,
-                                                                  acc,
-                                                                  a,
-                                                                  b,
-                                                                  acc2 ? &(*acc2) : nullptr,
-                                                                  neg,
-                                                                  comment));
+            return std::shared_ptr<LogicalInstruction>(MFMA(instType,
+                                                            accType,
+                                                            m,
+                                                            n,
+                                                            k,
+                                                            blocks,
+                                                            mfma1k,
+                                                            acc,
+                                                            a,
+                                                            b,
+                                                            acc2 ? &(*acc2) : nullptr,
+                                                            neg,
+                                                            comment));
         },
         nb::arg("instType"),
         nb::arg("accType"),
@@ -334,23 +336,23 @@ NB_MODULE(_stinkytofu, m)
            bool                  reuseA,
            bool                  reuseB,
            const std::string&    comment) {
-            return std::shared_ptr<LogicalInstruction>(createMXMFMA(instType,
-                                                                    accType,
-                                                                    mxScaleATypeStr,
-                                                                    mxScaleBTypeStr,
-                                                                    m,
-                                                                    n,
-                                                                    k,
-                                                                    block,
-                                                                    acc,
-                                                                    a,
-                                                                    b,
-                                                                    acc2,
-                                                                    mxsa,
-                                                                    mxsb,
-                                                                    reuseA,
-                                                                    reuseB,
-                                                                    comment));
+            return std::shared_ptr<LogicalInstruction>(MXMFMA(instType,
+                                                              accType,
+                                                              mxScaleATypeStr,
+                                                              mxScaleBTypeStr,
+                                                              m,
+                                                              n,
+                                                              k,
+                                                              block,
+                                                              acc,
+                                                              a,
+                                                              b,
+                                                              acc2,
+                                                              mxsa,
+                                                              mxsb,
+                                                              reuseA,
+                                                              reuseB,
+                                                              comment));
         },
         nb::arg("instType"),
         nb::arg("accType"),
@@ -387,7 +389,7 @@ NB_MODULE(_stinkytofu, m)
            const StinkyRegister& metadata,
            bool                  neg,
            const std::string&    comment) {
-            return std::shared_ptr<LogicalInstruction>(createSMFMA(
+            return std::shared_ptr<LogicalInstruction>(SMFMA(
                 instType, accType, m, n, k, blocks, mfma1k, acc, a, b, metadata, neg, comment));
         },
         nb::arg("instType"),
@@ -414,11 +416,11 @@ NB_MODULE(_stinkytofu, m)
            std::optional<StinkyRegister> group3,
            const std::string&            comment) {
             return std::shared_ptr<LogicalInstruction>(
-                createTensorLoadToLds(group0,
-                                      group1,
-                                      group2 ? &(*group2) : nullptr,
-                                      group3 ? &(*group3) : nullptr,
-                                      comment));
+                TensorLoadToLds(group0,
+                                group1,
+                                group2 ? &(*group2) : nullptr,
+                                group3 ? &(*group3) : nullptr,
+                                comment));
         },
         nb::arg("group0"),
         nb::arg("group1"),
@@ -431,7 +433,7 @@ NB_MODULE(_stinkytofu, m)
     m.def(
         "Label",
         [](const std::string& labelName) {
-            return std::shared_ptr<LogicalInstruction>(createLabel(labelName));
+            return std::shared_ptr<LogicalInstruction>(Label(labelName));
         },
         nb::arg("labelName"),
         "Create a Label");
@@ -548,7 +550,7 @@ NB_MODULE(_stinkytofu, m)
                 }
             }
 
-            return std::shared_ptr<LogicalInstruction>(createIntrinsicCall(name, args));
+            return std::shared_ptr<LogicalInstruction>(new IntrinsicCall(name, args));
         },
         "Create an intrinsic call with named arguments\n\n"
         "Example:\n"
@@ -562,4 +564,9 @@ NB_MODULE(_stinkytofu, m)
         "    - float literals (0.0, 1.0, 3.14, etc.)\n"
         "    - string literals (for special values)\n\n"
         "The intrinsic will be expanded during optimization by IntrinsicExpansionPass.");
+
+    // ========================================================================
+    // Logical Instruction Counting (ported from rocisa)
+    // ========================================================================
+    init_logical_count(m);
 }

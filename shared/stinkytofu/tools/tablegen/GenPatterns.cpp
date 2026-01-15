@@ -594,8 +594,8 @@ public:
         const auto& lastMatch = pattern.match.back();
 
         oss << "        // Match pattern root: " << lastMatch.opcode << "\n";
-        oss << "        if (inst->getOpcode() != HLIR::" << mnemonicToIRClassName(lastMatch.opcode)
-            << ")\n";
+        oss << "        if (inst->getOpcode() != logical::"
+            << mnemonicToIRClassName(lastMatch.opcode) << ")\n";
         oss << "            return std::nullopt;\n\n";
 
         // Assign the root instruction to its variable name
@@ -643,7 +643,7 @@ public:
 
                 oss << "        // Check opcode: " << matchStmt.opcode << "\n";
                 oss << "        if (" << matchStmt.instVar
-                    << "->getOpcode() != HLIR::" << mnemonicToIRClassName(matchStmt.opcode)
+                    << "->getOpcode() != logical::" << mnemonicToIRClassName(matchStmt.opcode)
                     << ")\n";
                 oss << "            return std::nullopt;\n\n";
 

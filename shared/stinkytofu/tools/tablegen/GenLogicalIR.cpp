@@ -54,18 +54,18 @@ namespace stinkytofu
         bool        supportsDPP; // Whether this instruction supports DPP modifiers
         bool        supportsSDWA; // Whether this instruction supports SDWA modifiers
         bool        hasDS; // Whether this instruction has DS modifiers (for LDS operations)
-        bool        isCommutative; // Whether src0 and src1 can be swapped
+        std::string flags; // Instruction flags (e.g., "IF_DSRead|IF_Commutative|IF_VALU")
 
         IRInstDef(const std::string& cls,
                   const std::string& mn,
                   const std::string& cmt,
                   int                srcs,
-                  bool               dest        = true,
-                  const std::string& cat         = "",
-                  bool               dpp         = false,
-                  bool               sdwa        = false,
-                  bool               ds          = false,
-                  bool               commutative = false)
+                  bool               dest  = true,
+                  const std::string& cat   = "",
+                  bool               dpp   = false,
+                  bool               sdwa  = false,
+                  bool               ds    = false,
+                  const std::string& flags = "")
             : className(cls)
             , mnemonic(mn)
             , comment(cmt)
@@ -75,7 +75,7 @@ namespace stinkytofu
             , supportsDPP(dpp)
             , supportsSDWA(sdwa)
             , hasDS(ds)
-            , isCommutative(commutative)
+            , flags(flags)
         {
         }
     };
@@ -90,208 +90,142 @@ namespace stinkytofu
         };
     }
 
-    // Generate special MFMA instruction classes (these have custom constructors)
+    // Generate special instruction factory functions (pure enum design with specialData_)
     bool genSpecialMFMAClasses(std::ofstream& out)
     {
-        // MFMA class
+        // Factory functions for special instructions (MFMA, Label, etc.)
         out << "    // "
                "========================================================================\n";
-        out << "    // Special Matrix Instructions\n";
+        out << "    // Special Instruction Factory Functions (Pure Enum Design)\n";
         out << "    // "
                "========================================================================\n\n";
 
         out << "    /**\n";
-        out << "     * @brief MFMA (Matrix Fused Multiply-Add) instruction\n";
+        out << "     * @brief MFMA (Matrix Fused Multiply-Add) factory function\n";
+        out << "     * \n";
+        out << "     * Registers stored in: dests[0]=acc, srcs[0]=a, srcs[1]=b, srcs[2]=acc2 "
+               "(optional)\n";
+        out << "     * Metadata stored in: specialData_ as MFMAData*\n";
         out << "     */\n";
-        out << "    class MFMA : public LogicalInstruction\n";
+        out << "    inline LogicalInstruction* MFMA(\n";
+        out << "        const std::string& instType,\n";
+        out << "        const std::string& accType,\n";
+        out << "        int m,\n";
+        out << "        int n,\n";
+        out << "        int k,\n";
+        out << "        int blocks,\n";
+        out << "        bool mfma1k,\n";
+        out << "        const StinkyRegister& acc,\n";
+        out << "        const StinkyRegister& a,\n";
+        out << "        const StinkyRegister& b,\n";
+        out << "        const StinkyRegister* acc2 = nullptr,\n";
+        out << "        bool neg = false,\n";
+        out << "        const std::string& comment = \"\")\n";
         out << "    {\n";
-        out << "    public:\n";
-        out << "        std::string instType;      ///< Input data type (bf16, f16, i8, etc.)\n";
-        out << "        std::string accType;       ///< Accumulator type (f32, i32)\n";
-        out << "        int         m;             ///< Matrix M dimension\n";
-        out << "        int         n;             ///< Matrix N dimension\n";
-        out << "        int         k;             ///< Matrix K dimension\n";
-        out << "        int         blocks;        ///< Number of blocks\n";
-        out << "        bool        mfma1k;        ///< Whether this is a _1k variant\n";
-        out << "        StinkyRegister acc;        ///< Accumulator destination\n";
-        out << "        StinkyRegister a;          ///< Matrix A source\n";
-        out << "        StinkyRegister b;          ///< Matrix B source\n";
-        out << "        std::optional<StinkyRegister> acc2; ///< Optional accumulator source\n";
-        out << "        bool        neg;           ///< Negate operands\n";
-        out << "\n";
-        out << "        MFMA(const std::string& instType,\n";
-        out << "             const std::string& accType,\n";
-        out << "             int m,\n";
-        out << "             int n,\n";
-        out << "             int k,\n";
-        out << "             int blocks,\n";
-        out << "             bool mfma1k,\n";
-        out << "             const StinkyRegister& acc,\n";
-        out << "             const StinkyRegister& a,\n";
-        out << "             const StinkyRegister& b,\n";
-        out << "             const StinkyRegister* acc2 = nullptr,\n";
-        out << "             bool neg = false,\n";
-        out << "             const std::string& comment_ = \"\")\n";
-        out << "            : LogicalInstruction()\n";
-        out << "            , instType(instType)\n";
-        out << "            , accType(accType)\n";
-        out << "            , m(m)\n";
-        out << "            , n(n)\n";
-        out << "            , k(k)\n";
-        out << "            , blocks(blocks)\n";
-        out << "            , mfma1k(mfma1k)\n";
-        out << "            , acc(acc)\n";
-        out << "            , a(a)\n";
-        out << "            , b(b)\n";
-        out << "            , acc2(acc2 ? std::optional<StinkyRegister>(*acc2) : std::nullopt)\n";
-        out << "            , neg(neg)\n";
-        out << "        {\n";
-        out << "            this->comment = comment_;\n";
-        out << "        }\n";
-        out << "\n";
-        out << "        const char* getLogicalName() const override { return \"MFMA\"; }\n";
-        out << "\n";
-        out << "        void dump(std::ostream& out) const override\n";
-        out << "        {\n";
-        out << "            out << \"MFMA (IR)\";\n";
-        out << "            if(!comment.empty())\n";
-        out << "                out << \"  // \" << comment;\n";
-        out << "        }\n";
-        out << "    };\n\n";
+        out << "        auto* inst = new LogicalInstruction(logical::MFMA);\n";
+        out << "        \n";
+        out << "        // Populate registers\n";
+        out << "        inst->dests.push_back(acc);\n";
+        out << "        inst->srcs.push_back(a);\n";
+        out << "        inst->srcs.push_back(b);\n";
+        out << "        if (acc2) inst->srcs.push_back(*acc2);\n";
+        out << "        \n";
+        out << "        // Create and set special data\n";
+        out << "        auto* data = new MFMAData(instType, accType, m, n, k, blocks, mfma1k, "
+               "neg);\n";
+        out << "        inst->setSpecialData(data);\n";
+        out << "        inst->comment = comment;\n";
+        out << "        \n";
+        out << "        return inst;\n";
+        out << "    }\n\n";
 
-        // MXMFMA class
+        // MXMFMA factory
         out << "    /**\n";
-        out << "     * @brief MXMFMA (MX format MFMA with scale factors) instruction\n";
+        out << "     * @brief MXMFMA (MX format MFMA with scale factors) factory function\n";
+        out << "     * \n";
+        out << "     * Registers: dests[0]=acc, srcs[0]=a, srcs[1]=b, srcs[2]=acc2, srcs[3]=mxsa, "
+               "srcs[4]=mxsb\n";
+        out << "     * Metadata stored in: specialData_ as MXMFMAData*\n";
         out << "     */\n";
-        out << "    class MXMFMA : public LogicalInstruction\n";
+        out << "    inline LogicalInstruction* MXMFMA(\n";
+        out << "        const std::string& instType,\n";
+        out << "        const std::string& accType,\n";
+        out << "        const std::string& mxScaleATypeStr,\n";
+        out << "        const std::string& mxScaleBTypeStr,\n";
+        out << "        int m,\n";
+        out << "        int n,\n";
+        out << "        int k,\n";
+        out << "        int block,\n";
+        out << "        const StinkyRegister& acc,\n";
+        out << "        const StinkyRegister& a,\n";
+        out << "        const StinkyRegister& b,\n";
+        out << "        const StinkyRegister& acc2,\n";
+        out << "        const StinkyRegister& mxsa,\n";
+        out << "        const StinkyRegister& mxsb,\n";
+        out << "        bool reuseA = false,\n";
+        out << "        bool reuseB = false,\n";
+        out << "        const std::string& comment = \"\")\n";
         out << "    {\n";
-        out << "    public:\n";
-        out << "        std::string instType;         ///< Input data type (f8, f4, bf8, etc.)\n";
-        out << "        std::string accType;          ///< Accumulator type (f32)\n";
-        out << "        std::string mxScaleATypeStr;  ///< Scale format for matrix A\n";
-        out << "        std::string mxScaleBTypeStr;  ///< Scale format for matrix B\n";
-        out << "        int         m;                ///< Matrix M dimension\n";
-        out << "        int         n;                ///< Matrix N dimension\n";
-        out << "        int         k;                ///< Matrix K dimension\n";
-        out << "        int         block;            ///< Block size\n";
-        out << "        StinkyRegister acc;           ///< Accumulator destination\n";
-        out << "        StinkyRegister a;             ///< Matrix A source\n";
-        out << "        StinkyRegister b;             ///< Matrix B source\n";
-        out << "        StinkyRegister acc2;          ///< Accumulator source\n";
-        out << "        StinkyRegister mxsa;          ///< Scale factor A register\n";
-        out << "        StinkyRegister mxsb;          ///< Scale factor B register\n";
-        out << "        bool        reuseA;           ///< Matrix A reuse flag\n";
-        out << "        bool        reuseB;           ///< Matrix B reuse flag\n";
-        out << "\n";
-        out << "        MXMFMA(const std::string& instType,\n";
-        out << "               const std::string& accType,\n";
-        out << "               const std::string& mxScaleATypeStr,\n";
-        out << "               const std::string& mxScaleBTypeStr,\n";
-        out << "               int m,\n";
-        out << "               int n,\n";
-        out << "               int k,\n";
-        out << "               int block,\n";
-        out << "               const StinkyRegister& acc,\n";
-        out << "               const StinkyRegister& a,\n";
-        out << "               const StinkyRegister& b,\n";
-        out << "               const StinkyRegister& acc2,\n";
-        out << "               const StinkyRegister& mxsa,\n";
-        out << "               const StinkyRegister& mxsb,\n";
-        out << "               bool reuseA = false,\n";
-        out << "               bool reuseB = false,\n";
-        out << "               const std::string& comment_ = \"\")\n";
-        out << "            : LogicalInstruction()\n";
-        out << "            , instType(instType)\n";
-        out << "            , accType(accType)\n";
-        out << "            , mxScaleATypeStr(mxScaleATypeStr)\n";
-        out << "            , mxScaleBTypeStr(mxScaleBTypeStr)\n";
-        out << "            , m(m)\n";
-        out << "            , n(n)\n";
-        out << "            , k(k)\n";
-        out << "            , block(block)\n";
-        out << "            , acc(acc)\n";
-        out << "            , a(a)\n";
-        out << "            , b(b)\n";
-        out << "            , acc2(acc2)\n";
-        out << "            , mxsa(mxsa)\n";
-        out << "            , mxsb(mxsb)\n";
-        out << "            , reuseA(reuseA)\n";
-        out << "            , reuseB(reuseB)\n";
-        out << "        {\n";
-        out << "            this->comment = comment_;\n";
-        out << "        }\n";
-        out << "\n";
-        out << "        const char* getLogicalName() const override { return \"MXMFMA\"; }\n";
-        out << "\n";
-        out << "        void dump(std::ostream& out) const override\n";
-        out << "        {\n";
-        out << "            out << \"MXMFMA (IR)\";\n";
-        out << "            if(!comment.empty())\n";
-        out << "                out << \"  // \" << comment;\n";
-        out << "        }\n";
-        out << "    };\n\n";
+        out << "        auto* inst = new LogicalInstruction(logical::MXMFMA);\n";
+        out << "        \n";
+        out << "        // Populate registers\n";
+        out << "        inst->dests.push_back(acc);\n";
+        out << "        inst->srcs.push_back(a);\n";
+        out << "        inst->srcs.push_back(b);\n";
+        out << "        inst->srcs.push_back(acc2);\n";
+        out << "        inst->srcs.push_back(mxsa);\n";
+        out << "        inst->srcs.push_back(mxsb);\n";
+        out << "        \n";
+        out << "        // Create and set special data\n";
+        out << "        auto* data = new MXMFMAData(instType, accType, mxScaleATypeStr, "
+               "mxScaleBTypeStr,\n";
+        out << "                                    m, n, k, block, reuseA, reuseB);\n";
+        out << "        inst->setSpecialData(data);\n";
+        out << "        inst->comment = comment;\n";
+        out << "        \n";
+        out << "        return inst;\n";
+        out << "    }\n\n";
 
-        // SMFMA class
+        // SMFMA factory
         out << "    /**\n";
-        out << "     * @brief SMFMA (Sparse MFMA) instruction\n";
+        out << "     * @brief SMFMA (Sparse MFMA) factory function\n";
+        out << "     * \n";
+        out << "     * Registers: dests[0]=acc, srcs[0]=a, srcs[1]=b, srcs[2]=metadata\n";
+        out << "     * Metadata stored in: specialData_ as SMFMAData*\n";
         out << "     */\n";
-        out << "    class SMFMA : public LogicalInstruction\n";
+        out << "    inline LogicalInstruction* SMFMA(\n";
+        out << "        const std::string& instType,\n";
+        out << "        const std::string& accType,\n";
+        out << "        int m,\n";
+        out << "        int n,\n";
+        out << "        int k,\n";
+        out << "        int blocks,\n";
+        out << "        bool mfma1k,\n";
+        out << "        const StinkyRegister& acc,\n";
+        out << "        const StinkyRegister& a,\n";
+        out << "        const StinkyRegister& b,\n";
+        out << "        const StinkyRegister& metadata,\n";
+        out << "        bool neg = false,\n";
+        out << "        const std::string& comment = \"\")\n";
         out << "    {\n";
-        out << "    public:\n";
-        out << "        std::string instType;      ///< Input data type (bf16, f16, i8, etc.)\n";
-        out << "        std::string accType;       ///< Accumulator type (f32, i32)\n";
-        out << "        int         m;             ///< Matrix M dimension\n";
-        out << "        int         n;             ///< Matrix N dimension\n";
-        out << "        int         k;             ///< Matrix K dimension\n";
-        out << "        int         blocks;        ///< Number of blocks\n";
-        out << "        bool        mfma1k;        ///< Whether this is a _1k variant\n";
-        out << "        StinkyRegister acc;        ///< Accumulator destination\n";
-        out << "        StinkyRegister a;          ///< Matrix A source\n";
-        out << "        StinkyRegister b;          ///< Matrix B source\n";
-        out << "        StinkyRegister metadata;   ///< Sparsity metadata register\n";
-        out << "        bool        neg;           ///< Negate operands\n";
-        out << "\n";
-        out << "        SMFMA(const std::string& instType,\n";
-        out << "              const std::string& accType,\n";
-        out << "              int m,\n";
-        out << "              int n,\n";
-        out << "              int k,\n";
-        out << "              int blocks,\n";
-        out << "              bool mfma1k,\n";
-        out << "              const StinkyRegister& acc,\n";
-        out << "              const StinkyRegister& a,\n";
-        out << "              const StinkyRegister& b,\n";
-        out << "              const StinkyRegister& metadata,\n";
-        out << "              bool neg = false,\n";
-        out << "              const std::string& comment_ = \"\")\n";
-        out << "            : LogicalInstruction()\n";
-        out << "            , instType(instType)\n";
-        out << "            , accType(accType)\n";
-        out << "            , m(m)\n";
-        out << "            , n(n)\n";
-        out << "            , k(k)\n";
-        out << "            , blocks(blocks)\n";
-        out << "            , mfma1k(mfma1k)\n";
-        out << "            , acc(acc)\n";
-        out << "            , a(a)\n";
-        out << "            , b(b)\n";
-        out << "            , metadata(metadata)\n";
-        out << "            , neg(neg)\n";
-        out << "        {\n";
-        out << "            this->comment = comment_;\n";
-        out << "        }\n";
-        out << "\n";
-        out << "        const char* getLogicalName() const override { return \"SMFMA\"; }\n";
-        out << "\n";
-        out << "        void dump(std::ostream& out) const override\n";
-        out << "        {\n";
-        out << "            out << \"SMFMA (IR)\";\n";
-        out << "            if(!comment.empty())\n";
-        out << "                out << \"  // \" << comment;\n";
-        out << "        }\n";
-        out << "    };\n\n";
+        out << "        auto* inst = new LogicalInstruction(logical::SMFMA);\n";
+        out << "        \n";
+        out << "        // Populate registers\n";
+        out << "        inst->dests.push_back(acc);\n";
+        out << "        inst->srcs.push_back(a);\n";
+        out << "        inst->srcs.push_back(b);\n";
+        out << "        inst->srcs.push_back(metadata);\n";
+        out << "        \n";
+        out << "        // Create and set special data\n";
+        out << "        auto* data = new SMFMAData(instType, accType, m, n, k, blocks, mfma1k, "
+               "neg);\n";
+        out << "        inst->setSpecialData(data);\n";
+        out << "        inst->comment = comment;\n";
+        out << "        \n";
+        out << "        return inst;\n";
+        out << "    }\n\n";
 
-        // TensorLoadToLds class
+        // TensorLoadToLds factory
         out << "    // "
                "========================================================================\n";
         out << "    // Tensor Memory Instructions\n";
@@ -299,41 +233,33 @@ namespace stinkytofu
                "========================================================================\n\n";
 
         out << "    /**\n";
-        out << "     * @brief TensorLoadToLds instruction\n";
+        out << "     * @brief TensorLoadToLds factory function\n";
         out << "     * \n";
         out << "     * Loads tensor data to LDS (Local Data Share). Takes 2-4 SGPR groups.\n";
         out << "     * All groups must be scalar registers (SGPRs).\n";
+        out << "     * Registers: srcs[0-3] = group0-3\n";
+        out << "     * No special data needed (simple instruction)\n";
         out << "     */\n";
-        out << "    class TensorLoadToLds : public LogicalInstruction\n";
+        out << "    inline LogicalInstruction* TensorLoadToLds(\n";
+        out << "        const StinkyRegister& group0,\n";
+        out << "        const StinkyRegister& group1,\n";
+        out << "        const StinkyRegister* group2 = nullptr,\n";
+        out << "        const StinkyRegister* group3 = nullptr,\n";
+        out << "        const std::string& comment = \"\")\n";
         out << "    {\n";
-        out << "    public:\n";
-        out << "        TensorLoadToLds(const StinkyRegister& group0,\n";
-        out << "                        const StinkyRegister& group1,\n";
-        out << "                        const StinkyRegister* group2 = nullptr,\n";
-        out << "                        const StinkyRegister* group3 = nullptr,\n";
-        out << "                        const std::string& comment_ = \"\")\n";
-        out << "            : LogicalInstruction()\n";
-        out << "        {\n";
-        out << "            // No destination register for this instruction\n";
-        out << "            srcs.push_back(group0);\n";
-        out << "            srcs.push_back(group1);\n";
-        out << "            if (group2) srcs.push_back(*group2);\n";
-        out << "            if (group3) srcs.push_back(*group3);\n";
-        out << "            this->comment = comment_;\n";
-        out << "        }\n";
-        out << "\n";
-        out << "        const char* getLogicalName() const override { return "
-               "\"TensorLoadToLds\"; }\n";
-        out << "\n";
-        out << "        void dump(std::ostream& out) const override\n";
-        out << "        {\n";
-        out << "            out << \"TensorLoadToLds (IR)\";\n";
-        out << "            if(!comment.empty())\n";
-        out << "                out << \"  // \" << comment;\n";
-        out << "        }\n";
-        out << "    };\n\n";
+        out << "        auto* inst = new LogicalInstruction(logical::TensorLoadToLds);\n";
+        out << "        \n";
+        out << "        // No destination register for this instruction\n";
+        out << "        inst->srcs.push_back(group0);\n";
+        out << "        inst->srcs.push_back(group1);\n";
+        out << "        if (group2) inst->srcs.push_back(*group2);\n";
+        out << "        if (group3) inst->srcs.push_back(*group3);\n";
+        out << "        inst->comment = comment;\n";
+        out << "        \n";
+        out << "        return inst;\n";
+        out << "    }\n\n";
 
-        // Label class
+        // Label factory
         out << "    // "
                "========================================================================\n";
         out << "    // Control Flow Instructions\n";
@@ -341,30 +267,24 @@ namespace stinkytofu
                "========================================================================\n\n";
 
         out << "    /**\n";
-        out << "     * @brief Label instruction for control flow\n";
+        out << "     * @brief Label factory function for control flow\n";
         out << "     * \n";
         out << "     * Defines a label that can be used as a branch target.\n";
         out << "     * Labels have no operands and do not produce output.\n";
+        out << "     * Metadata stored in: specialData_ as LogicalLabelData*\n";
         out << "     */\n";
-        out << "    class Label : public LogicalInstruction\n";
+        out << "    inline LogicalInstruction* Label(const std::string& labelName)\n";
         out << "    {\n";
-        out << "    public:\n";
-        out << "        std::string label_name;\n";
-        out << "\n";
-        out << "        explicit Label(const std::string& name)\n";
-        out << "            : LogicalInstruction()\n";
-        out << "            , label_name(name)\n";
-        out << "        {\n";
-        out << "            // Labels have no operands\n";
-        out << "        }\n";
-        out << "\n";
-        out << "        const char* getLogicalName() const override { return \"Label\"; }\n";
-        out << "\n";
-        out << "        void dump(std::ostream& out) const override\n";
-        out << "        {\n";
-        out << "            out << label_name << \":\";\n";
-        out << "        }\n";
-        out << "    };\n\n";
+        out << "        auto* inst = new LogicalInstruction(logical::Label);\n";
+        out << "        \n";
+        out << "        // Labels have no operands\n";
+        out << "        \n";
+        out << "        // Create and set special data\n";
+        out << "        auto* data = new LogicalLabelData(labelName);\n";
+        out << "        inst->setSpecialData(data);\n";
+        out << "        \n";
+        out << "        return inst;\n";
+        out << "    }\n\n";
 
         return true;
     }
@@ -417,7 +337,7 @@ namespace stinkytofu
         out << "#include \"ir/logical/LogicalOpcode.hpp\"\n\n";
         out << "namespace stinkytofu\n";
         out << "{\n";
-        out << "namespace HLIR\n";
+        out << "namespace logical\n";
         out << "{\n\n";
 
         // Generate getOpcodeName function
@@ -433,6 +353,20 @@ namespace stinkytofu
             out << "    case " << inst.className << ":\n";
             out << "        return \"" << inst.className << "\";\n";
         }
+
+        // Special opcodes (not auto-generated)
+        out << "    case MFMA:\n";
+        out << "        return \"MFMA\";\n";
+        out << "    case MXMFMA:\n";
+        out << "        return \"MXMFMA\";\n";
+        out << "    case SMFMA:\n";
+        out << "        return \"SMFMA\";\n";
+        out << "    case Label:\n";
+        out << "        return \"Label\";\n";
+        out << "    case IntrinsicCall:\n";
+        out << "        return \"IntrinsicCall\";\n";
+        out << "    case TensorLoadToLds:\n";
+        out << "        return \"TensorLoadToLds\";\n";
 
         out << "    default:\n";
         out << "        return \"INVALID\";\n";
@@ -453,12 +387,26 @@ namespace stinkytofu
             out << "        return \"" << inst.mnemonic << "\";\n";
         }
 
+        // Special opcodes (not auto-generated)
+        out << "    case MFMA:\n";
+        out << "        return \"mfma\";\n";
+        out << "    case MXMFMA:\n";
+        out << "        return \"mxmfma\";\n";
+        out << "    case SMFMA:\n";
+        out << "        return \"smfma\";\n";
+        out << "    case Label:\n";
+        out << "        return \"label\";\n";
+        out << "    case IntrinsicCall:\n";
+        out << "        return \"intrinsic_call\";\n";
+        out << "    case TensorLoadToLds:\n";
+        out << "        return \"tensor_load_to_lds\";\n";
+
         out << "    default:\n";
         out << "        return \"invalid\";\n";
         out << "    }\n";
         out << "}\n\n";
 
-        out << "} // namespace HLIR\n";
+        out << "} // namespace logical\n";
         out << "} // namespace stinkytofu\n";
 
         std::cout << "Generated opcode mapping functions -> LogicalOpcode.cpp\n";
@@ -538,37 +486,18 @@ namespace stinkytofu
                 currentCategory = inst.category;
             }
 
+            // Generate factory function instead of subclass
             out << "    /**\n";
-            out << "     * @brief " << inst.comment << "\n";
+            out << "     * @brief Factory function for " << inst.comment << "\n";
             out << "     */\n";
-            out << "    class " << inst.className << " : public LogicalInstruction\n";
-            out << "    {\n";
-            out << "    public:\n";
+            out << "    inline LogicalInstruction* " << inst.className << "(";
 
-            // Add modifier member variables based on instruction definition
-            if(inst.supportsDPP || inst.supportsSDWA)
-            {
-                if(inst.supportsDPP)
-                    out << "        std::optional<DPPModifiers>  dpp;  ///< Optional DPP "
-                           "modifier\n";
-                if(inst.supportsSDWA)
-                    out << "        std::optional<SDWAModifiers> sdwa; ///< Optional SDWA "
-                           "modifier\n";
-                out << "\n";
-            }
-            if(inst.hasDS)
-            {
-                out << "        std::optional<DSModifiers> ds; ///< Optional DS modifier\n\n";
-            }
-
-            out << "        " << inst.className << "(";
-
-            // Constructor parameters
+            // Function parameters
             if(inst.hasDest)
             {
                 out << "const StinkyRegister& dst";
                 if(inst.numSrcs > 0)
-                    out << ",\n" << std::string(inst.className.length() + 9, ' ');
+                    out << ",\n" << std::string(inst.className.length() + 12, ' ');
             }
 
             for(int i = 0; i < inst.numSrcs; ++i)
@@ -577,302 +506,149 @@ namespace stinkytofu
                 {
                     out << "const StinkyRegister& src" << i;
                     if(i < inst.numSrcs - 1)
-                        out << ",\n" << std::string(inst.className.length() + 9, ' ');
+                        out << ",\n" << std::string(inst.className.length() + 12, ' ');
                 }
                 else
                 {
                     out << "const StinkyRegister& src" << i;
                     if(i < inst.numSrcs - 1)
-                        out << ",\n" << std::string(inst.className.length() + 9, ' ');
+                        out << ",\n" << std::string(inst.className.length() + 12, ' ');
                 }
             }
 
             if(inst.hasDest || inst.numSrcs > 0)
             {
-                out << ",\n" << std::string(inst.className.length() + 9, ' ');
+                out << ",\n" << std::string(inst.className.length() + 12, ' ');
             }
 
-            // Add modifier parameters based on instruction definition
+            // Add modifier parameters
             if(inst.supportsDPP)
             {
-                out << "std::optional<DPPModifiers> dpp_ = std::nullopt,\n"
-                    << std::string(inst.className.length() + 9, ' ');
+                out << "std::optional<DPPModifiers> dpp = std::nullopt,\n"
+                    << std::string(inst.className.length() + 12, ' ');
             }
             if(inst.supportsSDWA)
             {
-                out << "std::optional<SDWAModifiers> sdwa_ = std::nullopt,\n"
-                    << std::string(inst.className.length() + 9, ' ');
+                out << "std::optional<SDWAModifiers> sdwa = std::nullopt,\n"
+                    << std::string(inst.className.length() + 12, ' ');
             }
             if(inst.hasDS)
             {
-                out << "std::optional<DSModifiers> ds_ = std::nullopt,\n"
-                    << std::string(inst.className.length() + 9, ' ');
+                out << "std::optional<DSModifiers> ds = std::nullopt,\n"
+                    << std::string(inst.className.length() + 12, ' ');
             }
 
             out << "const std::string& comment = \"\")\n";
-            out << "            : LogicalInstruction()\n";
+            out << "    {\n";
 
-            // Add initializer list for modifiers
-            if(inst.supportsDPP)
-            {
-                out << "            , dpp(dpp_)\n";
-            }
-            if(inst.supportsSDWA)
-            {
-                out << "            , sdwa(sdwa_)\n";
-            }
-            if(inst.hasDS)
-            {
-                out << "            , ds(ds_)\n";
-            }
+            // Function body: create LogicalInstruction with opcode
+            out << "        auto* inst = new LogicalInstruction(logical::" << inst.className
+                << ");\n";
 
-            out << "        {\n";
-
-            // Constructor body
+            // Set destinations
             if(inst.hasDest)
             {
-                out << "            dests.push_back(dst);\n";
+                out << "        inst->dests.push_back(dst);\n";
             }
+
+            // Set sources
             for(int i = 0; i < inst.numSrcs; ++i)
             {
-                out << "            srcs.push_back(src" << i << ");\n";
-            }
-            out << "            this->comment = comment;\n";
-            out << "        }\n\n";
-
-            // getLogicalName method
-            out << "        const char* getLogicalName() const override\n";
-            out << "        {\n";
-            out << "            return \"" << inst.className << "\";\n";
-            out << "        }\n\n";
-
-            // getOpcode method
-            out << "        HLIR::Opcode getOpcode() const override\n";
-            out << "        {\n";
-            out << "            return HLIR::" << inst.className << ";\n";
-            out << "        }\n\n";
-
-            // isCommutative method (override if instruction is commutative)
-            if(inst.isCommutative)
-            {
-                out << "        bool isCommutative() const override\n";
-                out << "        {\n";
-                out << "            return true;\n";
-                out << "        }\n\n";
+                out << "        inst->srcs.push_back(src" << i << ");\n";
             }
 
-            // Modifier accessor overrides (only if instruction has modifiers)
+            // Set modifiers
             if(inst.supportsDPP)
             {
-                out << "        std::optional<DPPModifiers> getDPP() const override\n";
-                out << "        {\n";
-                out << "            return dpp;\n";
-                out << "        }\n\n";
+                out << "        inst->dpp = dpp;\n";
             }
             if(inst.supportsSDWA)
             {
-                out << "        std::optional<SDWAModifiers> getSDWA() const override\n";
-                out << "        {\n";
-                out << "            return sdwa;\n";
-                out << "        }\n\n";
+                out << "        inst->sdwa = sdwa;\n";
             }
             if(inst.hasDS)
             {
-                out << "        std::optional<DSModifiers> getDS() const override\n";
-                out << "        {\n";
-                out << "            return ds;\n";
-                out << "        }\n\n";
+                out << "        inst->ds = ds;\n";
             }
 
-            // dump method
-            out << "        void dump(std::ostream& out) const override\n";
-            out << "        {\n";
-            out << "            out << \"" << inst.className << " (IR)\";\n";
-            out << "            if(!comment.empty())\n";
-            out << "                out << \"  // \" << comment;\n";
-            out << "        }\n";
-            out << "    };\n\n";
+            // Set comment
+            out << "        inst->comment = comment;\n";
+
+            // Set flags (parse from flags string)
+            if(!inst.flags.empty())
+            {
+                out << "        // Set instruction flags\n";
+                out << "        InstFlagSet flags;\n";
+
+                // Split flags by '|' and generate set() calls
+                std::string flagsStr = inst.flags;
+                size_t      pos      = 0;
+                while((pos = flagsStr.find('|')) != std::string::npos)
+                {
+                    std::string flag = flagsStr.substr(0, pos);
+                    // Trim whitespace
+                    flag.erase(0, flag.find_first_not_of(" \t"));
+                    flag.erase(flag.find_last_not_of(" \t") + 1);
+                    if(!flag.empty())
+                    {
+                        out << "        flags.set(" << flag << ");\n";
+                    }
+                    flagsStr.erase(0, pos + 1);
+                }
+                // Handle last flag
+                flagsStr.erase(0, flagsStr.find_first_not_of(" \t"));
+                flagsStr.erase(flagsStr.find_last_not_of(" \t") + 1);
+                if(!flagsStr.empty())
+                {
+                    out << "        flags.set(" << flagsStr << ");\n";
+                }
+
+                out << "        inst->setFlags(flags);\n";
+            }
+
+            out << "        return inst;\n";
+            out << "    }\n\n";
         }
 
         // Generate special MFMA classes
         genSpecialMFMAClasses(out);
 
+        // Generate helper implementations
+        out << "\n// "
+               "============================================================================\n";
+        out << "// Helper implementations (auto-generated)\n";
+        out << "// "
+               "============================================================================\n\n";
+
+        // Note: isCommutative() is now inline in LogicalInstructions.hpp using flags_.test(IF_Commutative)
+
+        // Generate isComposite() implementation
+        // Note: Composite instructions are determined by CompositeInstructionLoweringPass
+        out << "inline bool LogicalInstruction::isComposite() const\n";
+        out << "{\n";
+        out << "    switch (opcode_) {\n";
+        out << "        case logical::VAddPKF32:\n";
+        out << "        case logical::VMulPKF32:\n";
+        out << "        case logical::VMovB64:\n";
+        out << "        case logical::VLShiftLeftOrB32:\n";
+        out << "            return true;\n";
+        out << "        default:\n";
+        out << "            return false;\n";
+        out << "    }\n";
+        out << "}\n\n";
+
         // Close namespace
-        out << "\n} // namespace stinkytofu\n";
+        out << "} // namespace stinkytofu\n";
 
         std::cout << "Generated " << getIRInstructions().size()
-                  << " LogicalInstruction classes + 5 special classes "
+                  << " LogicalInstruction factory functions + 5 special instruction factories "
                      "(MFMA/MXMFMA/SMFMA/TensorLoadToLds/Label) -> "
                      "LogicalInstructions_generated.hpp\n";
         return true;
     }
 
     // Generate builder method forward declarations
-    bool genBuilderDecls(const std::string& outdir)
-    {
-        std::ofstream out(outdir + "/StinkyBuilder_decls_generated.inc");
-        if(!out)
-        {
-            std::cerr << "Failed to open StinkyBuilder_decls_generated.inc for writing\n";
-            return false;
-        }
-
-        out << "// Auto-generated by TableGen - DO NOT EDIT\n";
-        out << "// Builder method declarations for IR instruction classes\n\n";
-
-        std::string currentCategory = "";
-        for(const auto& inst : getIRInstructions())
-        {
-            if(inst.category != currentCategory)
-            {
-                if(!currentCategory.empty())
-                {
-                    out << "\n";
-                }
-                out << "        // " << inst.category << "\n";
-                currentCategory = inst.category;
-            }
-
-            // Generate method declaration with proper return type
-            out << "        stinkytofu::" << inst.className << "* " << inst.className << "(";
-
-            // Parameters
-            bool hasParams = false;
-            if(inst.hasDest)
-            {
-                out << "const StinkyRegister& dst";
-                hasParams = true;
-            }
-
-            for(int i = 0; i < inst.numSrcs; ++i)
-            {
-                if(hasParams)
-                    out << ",\n" << std::string(inst.className.length() + 10, ' ');
-                out << "const StinkyRegister& src" << i;
-                hasParams = true;
-            }
-
-            if(hasParams)
-                out << ",\n" << std::string(inst.className.length() + 10, ' ');
-
-            out << "const std::string& comment = \"\");\n\n";
-        }
-
-        std::cout << "Generated builder method declarations -> StinkyBuilder_decls_generated.inc\n";
-        return true;
-    }
-
     // Generate builder method implementations
-    bool genBuilderImpls(const std::string& outdir)
-    {
-        std::ofstream out(outdir + "/StinkyBuilder_impls_generated.inc");
-        if(!out)
-        {
-            std::cerr << "Failed to open StinkyBuilder_impls_generated.inc for writing\n";
-            return false;
-        }
-
-        out << "// Auto-generated by TableGen - DO NOT EDIT\n";
-        out << "// Builder method implementations for IR instruction classes\n\n";
-
-        std::string currentCategory = "";
-        for(const auto& inst : getIRInstructions())
-        {
-            if(inst.category != currentCategory)
-            {
-                if(!currentCategory.empty())
-                {
-                    out << "\n";
-                }
-                out << "    // "
-                       "========================================================================\n";
-                out << "    // " << inst.category << "\n";
-                out << "    // "
-                       "========================================================================"
-                       "\n\n";
-                currentCategory = inst.category;
-            }
-
-            // Method signature
-            out << "    stinkytofu::" << inst.className << "* StinkyTofu::" << inst.className
-                << "(";
-
-            // Parameters
-            if(inst.hasDest)
-            {
-                out << "const StinkyRegister& dst";
-                if(inst.numSrcs > 0)
-                    out << ",\n" << std::string(inst.className.length() + 26, ' ');
-            }
-
-            for(int i = 0; i < inst.numSrcs; ++i)
-            {
-                if(i > 0 || inst.hasDest)
-                {
-                    out << "const StinkyRegister& src" << i;
-                    if(i < inst.numSrcs - 1)
-                        out << ",\n" << std::string(inst.className.length() + 26, ' ');
-                }
-                else
-                {
-                    out << "const StinkyRegister& src" << i;
-                    if(i < inst.numSrcs - 1)
-                        out << ",\n" << std::string(inst.className.length() + 26, ' ');
-                }
-            }
-
-            if(inst.hasDest || inst.numSrcs > 0)
-            {
-                out << ",\n" << std::string(inst.className.length() + 26, ' ');
-            }
-
-            out << "const std::string& comment)\n";
-            out << "    {\n";
-
-            // Method body - construct and return IR instruction
-            out << "        return new stinkytofu::" << inst.className << "(";
-
-            // Arguments to IR constructor
-            if(inst.hasDest)
-            {
-                out << "dst";
-                if(inst.numSrcs > 0)
-                    out << ", ";
-            }
-
-            for(int i = 0; i < inst.numSrcs; ++i)
-            {
-                out << "src" << i;
-                if(i < inst.numSrcs - 1)
-                    out << ", ";
-            }
-
-            // Add std::nullopt for modifiers
-            if(inst.numSrcs > 0 || inst.hasDest)
-                out << ", ";
-
-            if(inst.supportsDPP)
-            {
-                out << "std::nullopt, ";
-            }
-            if(inst.supportsSDWA)
-            {
-                out << "std::nullopt, ";
-            }
-            if(inst.hasDS)
-            {
-                out << "std::nullopt, ";
-            }
-
-            out << "comment);\n";
-            out << "    }\n\n";
-        }
-
-        std::cout << "Generated " << getIRInstructions().size()
-                  << " builder method implementations -> StinkyBuilder_impls_generated.inc\n";
-        return true;
-    }
-
     // Generate mnemonic mappings for ToStinkyAsmPass
     bool genMnemonicMappings(const std::string& outdir)
     {
@@ -907,186 +683,6 @@ namespace stinkytofu
     }
 
     // Generate C++ factory functions for all IR instructions
-    bool genFactoryFunctions(const std::string& outdir)
-    {
-        std::ofstream out(outdir + "/ir/LogicalInstructionFactory_generated.inc");
-        if(!out)
-        {
-            std::cerr << "Failed to open LogicalInstructionFactory_generated.inc for writing\n";
-            return false;
-        }
-
-        out << "// Auto-generated C++ factory functions for LogicalInstructions\n";
-        out << "// DO NOT EDIT - Generated by GenLogicalIR.cpp\n";
-        out << "//\n";
-        out << "// These factory functions return raw pointers for use by:\n";
-        out << "// 1. C++ projects - add directly to IRList\n";
-        out << "// 2. Python bindings - wrap in shared_ptr\n\n";
-
-        int count = 0;
-
-        // Generate factory functions for all regular IR instructions
-        for(const auto& inst : getIRInstructions())
-        {
-            std::string className = inst.className;
-
-            // Function signature
-            out << "inline LogicalInstruction* create" << className << "(";
-
-            // Parameter list
-            std::vector<std::string> paramTypes;
-            std::vector<std::string> paramNames;
-
-            // Add destination register (if instruction has one)
-            if(inst.hasDest)
-            {
-                paramTypes.push_back("const StinkyRegister&");
-                paramNames.push_back("dest");
-            }
-
-            // Add source operands
-            for(int i = 0; i < inst.numSrcs; i++)
-            {
-                paramTypes.push_back("const StinkyRegister&");
-                paramNames.push_back("src" + std::to_string(i));
-            }
-
-            // Add optional modifiers
-            if(inst.supportsDPP && inst.supportsSDWA)
-            {
-                paramTypes.push_back("std::optional<DPPModifiers>");
-                paramNames.push_back("dpp");
-
-                paramTypes.push_back("std::optional<SDWAModifiers>");
-                paramNames.push_back("sdwa");
-            }
-            else if(inst.hasDS)
-            {
-                paramTypes.push_back("std::optional<DSModifiers>");
-                paramNames.push_back("ds");
-            }
-
-            // Add comment parameter
-            paramTypes.push_back("const std::string&");
-            paramNames.push_back("comment");
-
-            // Output parameter list
-            for(size_t i = 0; i < paramTypes.size(); i++)
-            {
-                out << paramTypes[i] << " " << paramNames[i];
-                if(i + 1 < paramTypes.size())
-                    out << ", ";
-            }
-            out << ")\n";
-            out << "{\n";
-
-            // Return new instance
-            out << "    return new " << className << "(";
-            for(size_t i = 0; i < paramNames.size(); i++)
-            {
-                out << paramNames[i];
-                if(i + 1 < paramNames.size())
-                    out << ", ";
-            }
-            out << ");\n";
-            out << "}\n\n";
-
-            count++;
-        }
-
-        // Generate factory functions for special instructions
-        // These have complex constructors that don't follow the regular pattern
-
-        // MFMA
-        out << "inline LogicalInstruction* createMFMA(\n";
-        out << "    const std::string& instType,\n";
-        out << "    const std::string& accType,\n";
-        out << "    int m, int n, int k, int blocks, bool mfma1k,\n";
-        out << "    const StinkyRegister& acc,\n";
-        out << "    const StinkyRegister& a,\n";
-        out << "    const StinkyRegister& b,\n";
-        out << "    const StinkyRegister* acc2 = nullptr,\n";
-        out << "    bool neg = false,\n";
-        out << "    const std::string& comment = \"\")\n";
-        out << "{\n";
-        out << "    return new MFMA(instType, accType, m, n, k, blocks, mfma1k, acc, a, b, acc2, "
-               "neg, comment);\n";
-        out << "}\n\n";
-        count++;
-
-        // MXMFMA
-        out << "inline LogicalInstruction* createMXMFMA(\n";
-        out << "    const std::string& instType,\n";
-        out << "    const std::string& accType,\n";
-        out << "    const std::string& mxScaleATypeStr,\n";
-        out << "    const std::string& mxScaleBTypeStr,\n";
-        out << "    int m, int n, int k, int block,\n";
-        out << "    const StinkyRegister& acc,\n";
-        out << "    const StinkyRegister& a,\n";
-        out << "    const StinkyRegister& b,\n";
-        out << "    const StinkyRegister& acc2,\n";
-        out << "    const StinkyRegister& mxsa,\n";
-        out << "    const StinkyRegister& mxsb,\n";
-        out << "    bool reuseA = false,\n";
-        out << "    bool reuseB = false,\n";
-        out << "    const std::string& comment = \"\")\n";
-        out << "{\n";
-        out << "    return new MXMFMA(instType, accType, mxScaleATypeStr, mxScaleBTypeStr, m, n, "
-               "k, block, acc, a, b, acc2, mxsa, mxsb, reuseA, reuseB, comment);\n";
-        out << "}\n\n";
-        count++;
-
-        // SMFMA
-        out << "inline LogicalInstruction* createSMFMA(\n";
-        out << "    const std::string& instType,\n";
-        out << "    const std::string& accType,\n";
-        out << "    int m, int n, int k, int blocks, bool mfma1k,\n";
-        out << "    const StinkyRegister& acc,\n";
-        out << "    const StinkyRegister& a,\n";
-        out << "    const StinkyRegister& b,\n";
-        out << "    const StinkyRegister& metadata,\n";
-        out << "    bool neg = false,\n";
-        out << "    const std::string& comment = \"\")\n";
-        out << "{\n";
-        out << "    return new SMFMA(instType, accType, m, n, k, blocks, mfma1k, acc, a, b, "
-               "metadata, neg, comment);\n";
-        out << "}\n\n";
-        count++;
-
-        // TensorLoadToLds
-        out << "inline LogicalInstruction* createTensorLoadToLds(\n";
-        out << "    const StinkyRegister& group0,\n";
-        out << "    const StinkyRegister& group1,\n";
-        out << "    const StinkyRegister* group2 = nullptr,\n";
-        out << "    const StinkyRegister* group3 = nullptr,\n";
-        out << "    const std::string& comment = \"\")\n";
-        out << "{\n";
-        out << "    return new TensorLoadToLds(group0, group1, group2, group3, comment);\n";
-        out << "}\n\n";
-        count++;
-
-        // Label
-        out << "inline LogicalInstruction* createLabel(const std::string& labelName)\n";
-        out << "{\n";
-        out << "    return new Label(labelName);\n";
-        out << "}\n\n";
-        count++;
-
-        // IntrinsicCall
-        out << "inline LogicalInstruction* createIntrinsicCall(\n";
-        out << "    const std::string& name,\n";
-        out << "    const std::vector<StinkyRegister>& args)\n";
-        out << "{\n";
-        out << "    return new IntrinsicCall(name, args);\n";
-        out << "}\n\n";
-        count++;
-
-        std::cout << "Generated " << count
-                  << " C++ factory functions (including 6 special instructions) -> "
-                     "LogicalInstructionFactory_generated.inc\n";
-        return true;
-    }
-
     // Generate Python bindings for all IR instructions
     bool genPythonBindings(const std::string& outdir)
     {
@@ -1164,7 +760,7 @@ namespace stinkytofu
             out << ") {\n";
 
             // Return factory function wrapped in shared_ptr
-            out << "        return std::shared_ptr<LogicalInstruction>(create" << className << "(";
+            out << "        return std::shared_ptr<LogicalInstruction>(" << className << "(";
             for(size_t i = 0; i < paramNames.size(); i++)
             {
                 out << paramNames[i];
@@ -1205,10 +801,9 @@ namespace stinkytofu
         success &= genOpcodeEnum(outdir);
         success &= genOpcodeMappings(outdir);
         success &= genIRClasses(outdir);
-        success &= genBuilderDecls(outdir);
-        success &= genBuilderImpls(outdir);
+        // Obsolete: genBuilderDecls, genBuilderImpls, genFactoryFunctions
+        // These are replaced by inline factory functions in LogicalInstructions_generated.hpp
         success &= genMnemonicMappings(outdir);
-        success &= genFactoryFunctions(outdir);
         success &= genPythonBindings(outdir);
 
         if(success)

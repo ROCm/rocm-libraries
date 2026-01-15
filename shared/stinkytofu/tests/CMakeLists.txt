@@ -60,6 +60,7 @@ set(UNIT_LOGICAL_TEST_FILES
 set(UNIT_COMMON_TEST_FILES
     unit/ErrorHandlingTest.cpp
     unit/IntrusiveListTest.cpp
+    unit/ir/IntrinsicExpansionPassTest.cpp
 )
 
 # Combine all unit tests

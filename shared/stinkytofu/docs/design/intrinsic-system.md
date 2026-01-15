@@ -17,7 +17,7 @@ StinkyTofu's intrinsic system provides automatic loading and management of pre-d
 
 ```
 +-----------------------------------------------------+
-| Intrinsics.def (source)                             |
+| Intrinsics.intrinsic (source)                       |
 | - Human-readable intrinsic definitions              |
 | - Config-style syntax                               |
 +----------------+------------------------------------+
@@ -25,7 +25,7 @@ StinkyTofu's intrinsic system provides automatic loading and management of pre-d
                  v
 +-----------------------------------------------------+
 | intrinsic-compiler (build tool)                     |
-| - Parses Intrinsics.def                             |
+| - Parses Intrinsics.intrinsic                       |
 | - Validates syntax                                  |
 | - Serializes to binary                              |
 +----------------+------------------------------------+
@@ -208,7 +208,7 @@ This happens **before** lowering to assembly IR, allowing cross-module optimizat
 
 ### Source Files
 
-- `lib/Intrinsics/Intrinsics.def` - Source definitions
+- `lib/Intrinsics/Intrinsics.intrinsic` - Source definitions
 - `tools/intrinsic-compiler/intrinsic-compiler.cpp` - Compiler tool
 
 ### Build Artifacts
@@ -261,7 +261,7 @@ Lowering to assembly happens later in the pipeline.
 
 ```bash
 ninja intrinsics_compiled
-# Verifies: Intrinsics.def -> intrinsics.st.bc
+# Verifies: Intrinsics.intrinsic -> intrinsics.st.bc
 ```
 
 ### Runtime Test

@@ -4,12 +4,14 @@ This directory contains documentation for developers and contributors working on
 
 ## Available Guides
 
-### [Adding New ASM IR](adding-new-asm-ir.md)
-Learn how to extend the StinkyTofu library with new assembly IR instructions. This guide covers:
-- Adding instruction flags
-- Creating instruction type definitions
-- Defining instructions for architectures
-- Hardware mapping for Rocisa
+### [Adding New Instructions](adding-new-ir.md)
+Complete guide for adding instructions from bottom to top (Assembly IR -> Logical IR). This guide covers:
+- Adding assembly-level hardware definitions
+- Mapping to Rocisa
+- Adding latency/cycle info for scheduling
+- Auto-generating Logical IR with tablegen
+- Testing instructions end-to-end
+- Note: Python API uses a separate decoupled wrapper
 
 ### [Adding New Instructions to WaitCntPass](adding-waitcnt-instructions.md)
 Learn how to extend the WaitCntPass to support new load and store instructions. This guide covers:
@@ -71,7 +73,7 @@ Before working on library development, you should be familiar with:
 
 ## Getting Started
 
-- **To add new instruction types**: Start with the [Adding New ASM IR](adding-new-asm-ir.md) guide
+- **To add new instructions**: Start with the [Adding New Instructions](adding-new-ir.md) guide
 - **To add WaitCnt support for new instructions**: See [Adding New Instructions to WaitCntPass](adding-waitcnt-instructions.md)
 - **To add peephole optimizations**: See [Adding Peephole Optimization Patterns](adding-peephole-patterns.md)
 - **To use the Operation Registry**: See [Operation Registry How-To](operation-registry-howto.md)

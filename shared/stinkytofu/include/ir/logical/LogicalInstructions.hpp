@@ -24,6 +24,7 @@
 
 #include "ir/asm/StinkyAsmIR.hpp" // For StinkyRegister definition
 #include "ir/asm/StinkyModifiers.hpp"
+#include "ir/logical/LogicalInstructionData.hpp"
 #include "ir/logical/LogicalOpcode.hpp"
 #include "stinkytofu.hpp"
 #include <iostream>
@@ -43,23 +44,52 @@ namespace stinkytofu
      * - Will be lowered to StinkyAsmIR (StinkyInstruction) by passes
      *
      * Design philosophy:
-     * - Simple structs like rocisa (not heavy class hierarchies)
+     * - Simple enum-based design (no inheritance hierarchy)
      * - Holds operands, modifiers, and metadata
-     * - No virtual dispatch for lowering (use visitor pattern or type switch)
+     * - Fast opcode-based pattern matching (no virtual dispatch or string comparison)
+     *
+     * New enum-based design (Phase 2 refactoring):
+     * - Single class with logical::Opcode field (no subclasses)
+     * - Factory functions for type-safe construction: VAddF32(dest, src0, src1)
+     * - Backward compatible with existing code
      */
     class LogicalInstruction : public IRBase
     {
+    private:
+        logical::Opcode opcode_; ///< Opcode identifying the instruction type
+        void*           specialData_; ///< Special data for MFMA/Label/IntrinsicCall (owned)
+        InstFlagSet     flags_; ///< Instruction flags (matches Assembly IR flags)
+
     public:
         std::vector<StinkyRegister> dests; ///< Destination registers
         std::vector<StinkyRegister> srcs; ///< Source registers
         std::string                 comment; ///< Optional comment
 
-        LogicalInstruction()
+        // Instruction modifiers (optional, only used by specific instructions)
+        std::optional<DPPModifiers>  dpp; ///< Data parallel processing modifier
+        std::optional<SDWAModifiers> sdwa; ///< Sub-dword addressing modifier
+        std::optional<DSModifiers>   ds; ///< LDS/GDS modifier
+
+        // Constructor taking opcode
+        explicit LogicalInstruction(logical::Opcode opcode)
             : IRBase(IRType::LogicalIR)
+            , opcode_(opcode)
+            , specialData_(nullptr)
         {
         }
 
-        virtual ~LogicalInstruction() = default;
+        // Default constructor (for backward compatibility during migration)
+        LogicalInstruction()
+            : IRBase(IRType::LogicalIR)
+            , opcode_(logical::UNKNOWN)
+            , specialData_(nullptr)
+        {
+        }
+
+        virtual ~LogicalInstruction()
+        {
+            freeSpecialData();
+        }
 
         /// LLVM-style casting support
         static bool classof(const IRBase* ir)
@@ -73,30 +103,58 @@ namespace stinkytofu
          */
         virtual const char* getLogicalName() const
         {
-            return "LogicalInstruction";
+            return logical::getOpcodeName(opcode_);
         }
 
         /**
-         * @brief Get the unified opcode of this instruction (for pattern matching)
-         * @return HLIR opcode enum value
+         * @brief Get the opcode of this instruction (for pattern matching)
+         * @return Logical IR opcode enum value
          *
-         * Similar to StinkyInstruction::getUnifiedOpcode() for assembly IR.
-         * Enables fast integer comparison in pattern matching instead of string comparison.
-         * Each IR instruction class overrides this to return its specific opcode.
+         * Enables fast integer comparison in pattern matching:
+         *   if (inst->getOpcode() == logical::VAddF32) { ... }
+         *   switch (inst->getOpcode()) { case logical::VMaxF32: ... }
          */
-        virtual HLIR::Opcode getOpcode() const
+        logical::Opcode getOpcode() const
         {
-            return HLIR::UNKNOWN;
+            return opcode_;
+        }
+
+        /**
+         * @brief Check if instruction has a specific flag set
+         * @param flag The flag to check (e.g., IF_DSRead, IF_MFMA, IF_Commutative)
+         * @return true if the flag is set
+         *
+         * Enables fast flag-based checks (same as Assembly IR):
+         *   if (inst->is(IF_DSRead)) { ... }
+         *   if (inst->is(IF_Commutative)) { ... }
+         */
+        bool is(InstFlag flag) const
+        {
+            return flags_.test(flag);
+        }
+
+        /**
+         * @brief Get the instruction flags
+         * @return Reference to the flag set
+         */
+        const InstFlagSet& getFlags() const
+        {
+            return flags_;
+        }
+
+        /**
+         * @brief Set instruction flags (for tablegen-generated factory functions)
+         */
+        void setFlags(const InstFlagSet& flags)
+        {
+            flags_ = flags;
         }
 
         /**
          * @brief Check if this is a composite instruction that needs expansion
          * @return true if composite (expands to multiple instructions)
          */
-        virtual bool isComposite() const
-        {
-            return false;
-        }
+        bool isComposite() const; // Auto-generated implementation
 
         /**
          * @brief Check if this instruction is commutative (src0 and src1 can be swapped)
@@ -105,38 +163,194 @@ namespace stinkytofu
          * Commutative instructions allow pattern matching to work regardless of
          * operand order. For example, a pattern for `a + 1.0` will also match `1.0 + a`.
          */
-        virtual bool isCommutative() const
+        bool isCommutative() const
         {
-            return false;
+            return is(IF_Commutative);
         }
 
         /**
-         * @brief Virtual accessors for AMDGPU instruction modifiers
+         * @brief Accessors for AMDGPU instruction modifiers
          *
-         * These accessors allow safe access to instruction-specific modifiers
-         * without dynamic_cast (works with -fno-rtti). These are instruction
-         * semantics (how the instruction operates), not assembly scheduling hints.
+         * These accessors provide access to instruction-specific modifiers.
+         * These are instruction semantics (how the instruction operates),
+         * not assembly scheduling hints.
          *
          * Examples:
          * - DPP: Data parallel processing (row shuffle, broadcast)
          * - SDWA: Sub-dword operand selection
          * - DS: LDS/GDS offsets and flags
-         *
-         * Generated instruction classes override these to return their modifiers.
          */
-        virtual std::optional<DPPModifiers> getDPP() const
+        std::optional<DPPModifiers> getDPP() const
         {
-            return std::nullopt;
+            return dpp;
         }
 
-        virtual std::optional<SDWAModifiers> getSDWA() const
+        std::optional<SDWAModifiers> getSDWA() const
         {
-            return std::nullopt;
+            return sdwa;
         }
 
-        virtual std::optional<DSModifiers> getDS() const
+        std::optional<DSModifiers> getDS() const
         {
-            return std::nullopt;
+            return ds;
+        }
+
+        /**
+         * @brief Dump instruction to output stream
+         */
+        void dump(std::ostream& out) const override
+        {
+            out << getLogicalName() << " (IR)";
+            if(!comment.empty())
+                out << "  // " << comment;
+        }
+
+        // ====================================================================
+        // Special Data Accessors (for pure enum design)
+        // ====================================================================
+        //
+        // Pure enum design with specialData_ for metadata-rich instructions:
+        //
+        // Regular instructions (e.g., VAddF32):
+        //   - Only use opcode_ and dests/srcs vectors
+        //   - specialData_ is nullptr
+        //
+        // Special instructions (e.g., MFMA, Label):
+        //   - Use opcode_ to identify instruction
+        //   - Store registers in dests/srcs vectors (like regular instructions)
+        //   - Store metadata in specialData_ (dimensions, types, flags, etc.)
+        //
+        // Usage example:
+        //   auto* inst = MFMA("bf16", "f32", 16, 16, 4, 1, false, acc, a, b);
+        //
+        //   // Later in a pass:
+        //   if (inst->getOpcode() == logical::MFMA) {
+        //       auto* mfmaData = inst->asMFMA();
+        //       int m = mfmaData->m;
+        //       std::string type = mfmaData->instType;
+        //
+        //       // Registers are still in standard locations:
+        //       StinkyRegister dest = inst->dests[0];
+        //       StinkyRegister src0 = inst->srcs[0];
+        //   }
+        //
+        // ====================================================================
+
+        /**
+         * @brief Set special data (takes ownership)
+         */
+        void setSpecialData(void* data)
+        {
+            freeSpecialData(); // Free any existing data
+            specialData_ = data;
+        }
+
+        /**
+         * @brief Get MFMA data (returns nullptr if not MFMA)
+         */
+        MFMAData* asMFMA()
+        {
+            return (opcode_ == logical::MFMA) ? static_cast<MFMAData*>(specialData_) : nullptr;
+        }
+
+        const MFMAData* asMFMA() const
+        {
+            return (opcode_ == logical::MFMA) ? static_cast<const MFMAData*>(specialData_)
+                                              : nullptr;
+        }
+
+        /**
+         * @brief Get MXMFMA data (returns nullptr if not MXMFMA)
+         */
+        MXMFMAData* asMXMFMA()
+        {
+            return (opcode_ == logical::MXMFMA) ? static_cast<MXMFMAData*>(specialData_) : nullptr;
+        }
+
+        const MXMFMAData* asMXMFMA() const
+        {
+            return (opcode_ == logical::MXMFMA) ? static_cast<const MXMFMAData*>(specialData_)
+                                                : nullptr;
+        }
+
+        /**
+         * @brief Get SMFMA data (returns nullptr if not SMFMA)
+         */
+        SMFMAData* asSMFMA()
+        {
+            return (opcode_ == logical::SMFMA) ? static_cast<SMFMAData*>(specialData_) : nullptr;
+        }
+
+        const SMFMAData* asSMFMA() const
+        {
+            return (opcode_ == logical::SMFMA) ? static_cast<const SMFMAData*>(specialData_)
+                                               : nullptr;
+        }
+
+        /**
+         * @brief Get Label data (returns nullptr if not Label)
+         */
+        LogicalLabelData* asLabel()
+        {
+            return (opcode_ == logical::Label) ? static_cast<LogicalLabelData*>(specialData_)
+                                               : nullptr;
+        }
+
+        const LogicalLabelData* asLabel() const
+        {
+            return (opcode_ == logical::Label) ? static_cast<const LogicalLabelData*>(specialData_)
+                                               : nullptr;
+        }
+
+        /**
+         * @brief Get IntrinsicCall data (returns nullptr if not IntrinsicCall)
+         */
+        IntrinsicCallData* asIntrinsicCall()
+        {
+            return (opcode_ == logical::IntrinsicCall)
+                       ? static_cast<IntrinsicCallData*>(specialData_)
+                       : nullptr;
+        }
+
+        const IntrinsicCallData* asIntrinsicCall() const
+        {
+            return (opcode_ == logical::IntrinsicCall)
+                       ? static_cast<const IntrinsicCallData*>(specialData_)
+                       : nullptr;
+        }
+
+    private:
+        /**
+         * @brief Free special data based on opcode
+         */
+        void freeSpecialData()
+        {
+            if(!specialData_)
+                return;
+
+            switch(opcode_)
+            {
+            case logical::MFMA:
+                delete static_cast<MFMAData*>(specialData_);
+                break;
+            case logical::MXMFMA:
+                delete static_cast<MXMFMAData*>(specialData_);
+                break;
+            case logical::SMFMA:
+                delete static_cast<SMFMAData*>(specialData_);
+                break;
+            case logical::Label:
+                delete static_cast<LogicalLabelData*>(specialData_);
+                break;
+            case logical::IntrinsicCall:
+                delete static_cast<IntrinsicCallData*>(specialData_);
+                break;
+            default:
+                // No special data for regular instructions
+                break;
+            }
+
+            specialData_ = nullptr;
         }
     };
 

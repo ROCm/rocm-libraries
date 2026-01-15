@@ -38,34 +38,40 @@ TEST(CommutativeTest, VectorArithmeticCommutative)
 
     // Test vector add operations (should be commutative)
     {
-        VAddF32 add(dst, src0, src1);
-        EXPECT_TRUE(add.isCommutative()) << "VAddF32 should be commutative";
+        auto* add = VAddF32(dst, src0, src1);
+        EXPECT_TRUE(add->isCommutative()) << "VAddF32 should be commutative";
+        delete add;
     }
 
     {
-        VAddF16 add(dst, src0, src1);
-        EXPECT_TRUE(add.isCommutative()) << "VAddF16 should be commutative";
+        auto* add = VAddF16(dst, src0, src1);
+        EXPECT_TRUE(add->isCommutative()) << "VAddF16 should be commutative";
+        delete add;
     }
 
     {
-        VAddU32 add(dst, src0, src1);
-        EXPECT_TRUE(add.isCommutative()) << "VAddU32 should be commutative";
+        auto* add = VAddU32(dst, src0, src1);
+        EXPECT_TRUE(add->isCommutative()) << "VAddU32 should be commutative";
+        delete add;
     }
 
     {
-        VAddI32 add(dst, src0, src1);
-        EXPECT_TRUE(add.isCommutative()) << "VAddI32 should be commutative";
+        auto* add = VAddI32(dst, src0, src1);
+        EXPECT_TRUE(add->isCommutative()) << "VAddI32 should be commutative";
+        delete add;
     }
 
     // Test vector mul operations (should be commutative)
     {
-        VMulF32 mul(dst, src0, src1);
-        EXPECT_TRUE(mul.isCommutative()) << "VMulF32 should be commutative";
+        auto* mul = VMulF32(dst, src0, src1);
+        EXPECT_TRUE(mul->isCommutative()) << "VMulF32 should be commutative";
+        delete mul;
     }
 
     {
-        VMulF16 mul(dst, src0, src1);
-        EXPECT_TRUE(mul.isCommutative()) << "VMulF16 should be commutative";
+        auto* mul = VMulF16(dst, src0, src1);
+        EXPECT_TRUE(mul->isCommutative()) << "VMulF16 should be commutative";
+        delete mul;
     }
 }
 
@@ -80,24 +86,28 @@ TEST(CommutativeTest, VectorMinMaxCommutative)
 
     // Test vector min operations (should be commutative)
     {
-        VMinF32 min(dst, src0, src1);
-        EXPECT_TRUE(min.isCommutative()) << "VMinF32 should be commutative";
+        auto* min = VMinF32(dst, src0, src1);
+        EXPECT_TRUE(min->isCommutative()) << "VMinF32 should be commutative";
+        delete min;
     }
 
     {
-        VMinF16 min(dst, src0, src1);
-        EXPECT_TRUE(min.isCommutative()) << "VMinF16 should be commutative";
+        auto* min = VMinF16(dst, src0, src1);
+        EXPECT_TRUE(min->isCommutative()) << "VMinF16 should be commutative";
+        delete min;
     }
 
     // Test vector max operations (should be commutative)
     {
-        VMaxF32 max(dst, src0, src1);
-        EXPECT_TRUE(max.isCommutative()) << "VMaxF32 should be commutative";
+        auto* max = VMaxF32(dst, src0, src1);
+        EXPECT_TRUE(max->isCommutative()) << "VMaxF32 should be commutative";
+        delete max;
     }
 
     {
-        VMaxF16 max(dst, src0, src1);
-        EXPECT_TRUE(max.isCommutative()) << "VMaxF16 should be commutative";
+        auto* max = VMaxF16(dst, src0, src1);
+        EXPECT_TRUE(max->isCommutative()) << "VMaxF16 should be commutative";
+        delete max;
     }
 }
 
@@ -112,18 +122,18 @@ TEST(CommutativeTest, VectorBitwiseCommutative)
 
     // Test vector bitwise operations (should be commutative)
     {
-        VAndB32 and_op(dst, src0, src1);
-        EXPECT_TRUE(and_op.isCommutative()) << "VAndB32 should be commutative";
+        auto* and_op = VAndB32(dst, src0, src1);
+        EXPECT_TRUE(and_op->isCommutative()) << "VAndB32 should be commutative";
     }
 
     {
-        VOrB32 or_op(dst, src0, src1);
-        EXPECT_TRUE(or_op.isCommutative()) << "VOrB32 should be commutative";
+        auto* or_op = VOrB32(dst, src0, src1);
+        EXPECT_TRUE(or_op->isCommutative()) << "VOrB32 should be commutative";
     }
 
     {
-        VXorB32 xor_op(dst, src0, src1);
-        EXPECT_TRUE(xor_op.isCommutative()) << "VXorB32 should be commutative";
+        auto* xor_op = VXorB32(dst, src0, src1);
+        EXPECT_TRUE(xor_op->isCommutative()) << "VXorB32 should be commutative";
     }
 }
 
@@ -138,46 +148,46 @@ TEST(CommutativeTest, ScalarCommutative)
 
     // Test scalar add operations (should be commutative)
     {
-        SAddU32 add(dst, src0, src1);
-        EXPECT_TRUE(add.isCommutative()) << "SAddU32 should be commutative";
+        auto* add = SAddU32(dst, src0, src1);
+        EXPECT_TRUE(add->isCommutative()) << "SAddU32 should be commutative";
     }
 
     {
-        SAddI32 add(dst, src0, src1);
-        EXPECT_TRUE(add.isCommutative()) << "SAddI32 should be commutative";
+        auto* add = SAddI32(dst, src0, src1);
+        EXPECT_TRUE(add->isCommutative()) << "SAddI32 should be commutative";
     }
 
     // Test scalar mul operations (should be commutative)
     {
-        SMulI32 mul(dst, src0, src1);
-        EXPECT_TRUE(mul.isCommutative()) << "SMulI32 should be commutative";
+        auto* mul = SMulI32(dst, src0, src1);
+        EXPECT_TRUE(mul->isCommutative()) << "SMulI32 should be commutative";
     }
 
     // Test scalar min/max operations (should be commutative)
     {
-        SMinU32 min(dst, src0, src1);
-        EXPECT_TRUE(min.isCommutative()) << "SMinU32 should be commutative";
+        auto* min = SMinU32(dst, src0, src1);
+        EXPECT_TRUE(min->isCommutative()) << "SMinU32 should be commutative";
     }
 
     {
-        SMaxU32 max(dst, src0, src1);
-        EXPECT_TRUE(max.isCommutative()) << "SMaxU32 should be commutative";
+        auto* max = SMaxU32(dst, src0, src1);
+        EXPECT_TRUE(max->isCommutative()) << "SMaxU32 should be commutative";
     }
 
     // Test scalar bitwise operations (should be commutative)
     {
-        SAndB32 and_op(dst, src0, src1);
-        EXPECT_TRUE(and_op.isCommutative()) << "SAndB32 should be commutative";
+        auto* and_op = SAndB32(dst, src0, src1);
+        EXPECT_TRUE(and_op->isCommutative()) << "SAndB32 should be commutative";
     }
 
     {
-        SOrB32 or_op(dst, src0, src1);
-        EXPECT_TRUE(or_op.isCommutative()) << "SOrB32 should be commutative";
+        auto* or_op = SOrB32(dst, src0, src1);
+        EXPECT_TRUE(or_op->isCommutative()) << "SOrB32 should be commutative";
     }
 
     {
-        SXorB32 xor_op(dst, src0, src1);
-        EXPECT_TRUE(xor_op.isCommutative()) << "SXorB32 should be commutative";
+        auto* xor_op = SXorB32(dst, src0, src1);
+        EXPECT_TRUE(xor_op->isCommutative()) << "SXorB32 should be commutative";
     }
 }
 
@@ -192,29 +202,30 @@ TEST(CommutativeTest, NonCommutativeOperations)
 
     // Test subtraction (NOT commutative)
     {
-        VSubF32 sub(dst, src0, src1);
-        EXPECT_FALSE(sub.isCommutative()) << "VSubF32 should NOT be commutative";
+        auto* sub = VSubF32(dst, src0, src1);
+        EXPECT_FALSE(sub->isCommutative()) << "VSubF32 should NOT be commutative";
     }
 
     {
-        VSubI32 sub(dst, src0, src1);
-        EXPECT_FALSE(sub.isCommutative()) << "VSubI32 should NOT be commutative";
+        auto* sub = VSubI32(dst, src0, src1);
+        EXPECT_FALSE(sub->isCommutative()) << "VSubI32 should NOT be commutative";
     }
 
     // Test shift operations (NOT commutative)
     {
-        VLShiftLeftB32 lsl(dst, src0, src1);
-        EXPECT_FALSE(lsl.isCommutative()) << "VLShiftLeftB32 should NOT be commutative";
+        auto* lsl = VLShiftLeftB32(dst, src0, src1);
+        EXPECT_FALSE(lsl->isCommutative()) << "VLShiftLeftB32 should NOT be commutative";
     }
 
     {
-        VLShiftRightB32 lsr(dst, src0, src1);
-        EXPECT_FALSE(lsr.isCommutative()) << "VLShiftRightB32 should NOT be commutative";
+        auto* lsr = VLShiftRightB32(dst, src0, src1);
+        EXPECT_FALSE(lsr->isCommutative()) << "VLShiftRightB32 should NOT be commutative";
     }
 
     // Test move operation (NOT commutative, only has 1 operand)
     {
-        VMovB32 mov(dst, src0);
-        EXPECT_FALSE(mov.isCommutative()) << "VMovB32 should NOT be commutative";
+        auto* mov = VMovB32(dst, src0);
+        EXPECT_FALSE(mov->isCommutative()) << "VMovB32 should NOT be commutative";
+        delete mov;
     }
 }

@@ -146,89 +146,82 @@ namespace
             // ================================================================
             // VAddPKF32: Packed add F32
             // ================================================================
-            if(logicalName == "VAddPKF32")
+            if(irInst->getOpcode() == logical::VAddPKF32)
             {
-                auto* pkAdd = static_cast<VAddPKF32*>(irInst);
-
                 if(isInstructionSupported("VAddPKF32", arch))
                 {
                     // Keep as-is (architecture supports it)
-                    result.push_back(pkAdd);
+                    result.push_back(irInst);
                 }
                 else
                 {
                     // Expand to v_add_f32 (simplified - only low part)
-                    const auto& dst  = pkAdd->dests[0];
-                    const auto& src0 = pkAdd->srcs[0];
-                    const auto& src1 = pkAdd->srcs[1];
+                    const auto& dst  = irInst->dests[0];
+                    const auto& src0 = irInst->srcs[0];
+                    const auto& src1 = irInst->srcs[1];
 
-                    auto* addLow = new VAddF32(dst,
-                                               src0,
-                                               src1,
-                                               std::nullopt,
-                                               std::nullopt,
-                                               pkAdd->comment + " (expanded)");
+                    auto* addLow = VAddF32(dst,
+                                           src0,
+                                           src1,
+                                           std::nullopt,
+                                           std::nullopt,
+                                           irInst->comment + " (expanded)");
                     result.push_back(addLow);
                 }
             }
             // ================================================================
             // VMulPKF32: Packed multiply F32
             // ================================================================
-            else if(logicalName == "VMulPKF32")
+            else if(irInst->getOpcode() == logical::VMulPKF32)
             {
-                auto* pkMul = static_cast<VMulPKF32*>(irInst);
-
                 if(isInstructionSupported("VMulPKF32", arch))
                 {
-                    result.push_back(pkMul);
+                    result.push_back(irInst);
                 }
                 else
                 {
-                    const auto& dst  = pkMul->dests[0];
-                    const auto& src0 = pkMul->srcs[0];
-                    const auto& src1 = pkMul->srcs[1];
+                    const auto& dst  = irInst->dests[0];
+                    const auto& src0 = irInst->srcs[0];
+                    const auto& src1 = irInst->srcs[1];
 
-                    auto* mulLow = new VMulF32(dst,
-                                               src0,
-                                               src1,
-                                               std::nullopt,
-                                               std::nullopt,
-                                               pkMul->comment + " (expanded)");
+                    auto* mulLow = VMulF32(dst,
+                                           src0,
+                                           src1,
+                                           std::nullopt,
+                                           std::nullopt,
+                                           irInst->comment + " (expanded)");
                     result.push_back(mulLow);
                 }
             }
             // ================================================================
             // VMovB64: 64-bit move
             // ================================================================
-            else if(logicalName == "VMovB64")
+            else if(irInst->getOpcode() == logical::VMovB64)
             {
-                auto* movB64 = static_cast<VMovB64*>(irInst);
-
                 if(isInstructionSupported("VMovB64", arch))
                 {
-                    result.push_back(movB64);
+                    result.push_back(irInst);
                 }
                 else
                 {
                     // For now, keep as-is (TODO: implement proper 64-bit lowering)
-                    result.push_back(movB64);
+                    result.push_back(irInst);
                 }
             }
             // ================================================================
             // VLShiftLeftOrB32: (src0 << shift) | src1
             // ================================================================
-            else if(logicalName == "VLShiftLeftOrB32")
+            else if(irInst->getOpcode() == logical::VLShiftLeftOrB32)
             {
-                auto* lshlOr = static_cast<VLShiftLeftOrB32*>(irInst);
 
                 if(isInstructionSupported("VLShiftLeftOrB32", arch))
                 {
-                    result.push_back(lshlOr);
+                    result.push_back(irInst);
                 }
                 else
                 {
                     // For now, keep as-is (TODO: expand to lshlrev + or)
-                    result.push_back(lshlOr);
+                    result.push_back(irInst);
                 }
             }
             else

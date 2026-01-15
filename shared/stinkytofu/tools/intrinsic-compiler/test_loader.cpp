@@ -26,7 +26,7 @@
  * @brief Test program to verify IntrinsicLibrary loading
  *
  * This program tests the complete intrinsic compilation flow:
- *   1. intrinsic-compiler: Intrinsics.def -> intrinsics.st.bc
+ *   1. intrinsic-compiler: Intrinsics.intrinsic -> intrinsics.st.bc
  *   2. IntrinsicLibrary: Load intrinsics.st.bc
  *   3. Query and display intrinsic definitions
  */
