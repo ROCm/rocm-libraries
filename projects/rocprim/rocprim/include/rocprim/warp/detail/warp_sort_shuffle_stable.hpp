@@ -115,8 +115,6 @@ public:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_value, BinaryFunction compare_function)
     {
-        Key temp_arr[1] = {thread_value};
-
         stable_key_t item;
         item.key   = thread_value;
         item.index = detail::logical_lane_id<VirtualWaveSize>();
@@ -198,51 +196,16 @@ public:
             thread_keys[i] = stable_items[i].key;
         }
 
-        // Create a copy of 'thread_values' so we can swizzle them around without overwriting.
-        V source_values[ItemsPerThread];
-        ROCPRIM_UNROLL
-        for(unsigned int i = 0; i < ItemsPerThread; ++i)
-        {
-            source_values[i] = thread_values[i];
-        }
-
-        // We will now write into 'thread_values' from 'copy'. We do this by checking for
-        // the matrix between destination and source index, since we cannot dynamically
-        // index registers.
-        //
-        // This requires IPT^2 shuffles because both need index lane and item offset.
-        ROCPRIM_UNROLL
-        for(unsigned int dst_item = 0; dst_item < ItemsPerThread; ++dst_item)
-        {
-            unsigned int src_idx         = stable_items[dst_item].index;
-            unsigned int src_lane        = src_idx / ItemsPerThread;
-            unsigned int src_item_offset = src_idx % ItemsPerThread;
-
-            ROCPRIM_UNROLL
-            for(unsigned int k = 0; k < ItemsPerThread; ++k)
-            {
-                // This shuffle can potentially be moved into the branch. We can then
-                // trade the extra masking for in-place shuffle which may potentially
-                // be faster. This may require an extra memory fence since the previous
-                // duplication into 'copy' must be finalized and we can't reuse
-                // registers as freely.
-                V val = warp_shuffle(source_values[k], src_lane, VirtualWaveSize);
-
-                if(k == src_item_offset)
-                {
-                    thread_values[dst_item] = val;
-                }
-            }
-        }
+        warp_shuffle_sort_impl<VirtualWaveSize, ItemsPerThread>::apply_permutation(
+            thread_values,
+            [&](unsigned int i) { return stable_items[i].index; }
+        );
     }
 
     template<class BinaryFunction, class V = Value>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_key, Value& thread_value, BinaryFunction compare_function)
     {
-        Key   k_arr[1] = {thread_key};
-        Value v_arr[1] = {thread_value};
-
         stable_key_t item;
         item.key   = thread_key;
         item.index = detail::logical_lane_id<VirtualWaveSize>();

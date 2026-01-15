@@ -41,12 +41,12 @@ BEGIN_ROCPRIM_NAMESPACE
 enum class warp_sort_stable_algorithm
 {
     /// \brief A merge-path based algorithm using Shared Memory (LDS).
-    using_merge_path,
+    merge_path,
 
     /// \brief A bitonic-sort based algorithm using Register Shuffles.
     /// This implementation tracks original indices to maintain stability.
     /// It consumes no Shared Memory but may have higher register pressure.
-    using_shuffle
+    shuffle
 };
 
 namespace detail
@@ -61,8 +61,8 @@ struct default_warp_sort_stable_algo
 {
     static constexpr warp_sort_stable_algorithm value
         = std::is_same<Value, ::rocprim::empty_type>::value
-              ? warp_sort_stable_algorithm::using_merge_path
-              : warp_sort_stable_algorithm::using_shuffle;
+              ? warp_sort_stable_algorithm::merge_path
+              : warp_sort_stable_algorithm::shuffle;
 };
 
 // Selector for warp_sort_stable algorithm which gives implementation
@@ -71,7 +71,7 @@ template<warp_sort_stable_algorithm Algorithm>
 struct select_warp_sort_stable_impl;
 
 template<>
-struct select_warp_sort_stable_impl<warp_sort_stable_algorithm::using_merge_path>
+struct select_warp_sort_stable_impl<warp_sort_stable_algorithm::merge_path>
 {
     template<class Key,
              unsigned int BlockSize,
@@ -82,7 +82,7 @@ struct select_warp_sort_stable_impl<warp_sort_stable_algorithm::using_merge_path
 };
 
 template<>
-struct select_warp_sort_stable_impl<warp_sort_stable_algorithm::using_shuffle>
+struct select_warp_sort_stable_impl<warp_sort_stable_algorithm::shuffle>
 {
     template<class Key,
              unsigned int BlockSize,
@@ -188,7 +188,7 @@ public:
     /// \brief Stable sort for Key Array with storage and valid input size.
     ///
     /// \param input_size The number of valid items in the warp.
-    /// Note: If Algorithm is using_shuffle, input_size < VirtualWaveSize * ItemsPerThread may not be strictly supported without manual padding.
+    /// Note: If Algorithm is shuffle, input_size < VirtualWaveSize * ItemsPerThread may not be strictly supported without manual padding.
     template<class BinaryFunction = ::rocprim::less<Key>>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key (&thread_keys)[ItemsPerThread],

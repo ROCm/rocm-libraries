@@ -572,7 +572,7 @@ class segmented_warp_sort_helper<
                                       logical_warp_size,
                                       items_per_thread,
                                       Value,
-                                      ::rocprim::warp_sort_stable_algorithm::using_merge_path>;
+                                      ::rocprim::warp_sort_stable_algorithm::merge_path>;
 
     static constexpr bool with_values = !std::is_same<Value, ::rocprim::empty_type>::value;
 
