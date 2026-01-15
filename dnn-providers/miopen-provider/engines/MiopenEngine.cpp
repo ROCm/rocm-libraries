@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "MiopenEngine.hpp"
+#include "MiopenKnobDefines.hpp"
 #include "plans/MiopenBatchnormPlanBuilder.hpp"
 
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
@@ -41,22 +42,8 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
 {
     flatbuffers::FlatBufferBuilder builder;
 
-    auto knobIdStr = builder.CreateString("benchmarking");
-    auto description = builder.CreateString("Enable benchmarking");
-    auto defaultValue
-        = hipdnn_data_sdk::data_objects::CreateIntValue(builder, static_cast<int64_t>(0));
-    auto constraint = hipdnn_data_sdk::data_objects::CreateIntConstraint(builder, 0, 1, 1);
-
-    auto knob = hipdnn_data_sdk::data_objects::CreateKnob(
-        builder,
-        static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash("benchmarking")),
-        knobIdStr,
-        description,
-        hipdnn_data_sdk::data_objects::KnobValue::IntValue,
-        defaultValue.Union(),
-        hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint,
-        constraint.Union(),
-        false);
+    auto knob = hipdnn_plugin_sdk::KnobFactory::createIntKnob(
+        builder, benchmarking_KNOB_ID, benchmarking_KNOB_NAME, "Enable benchmarking", 0, 0, 1, 1);
 
     std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobsVector;
     knobsVector.push_back(knob);
@@ -96,16 +83,15 @@ void MiopenEngine::initializeExecutionContext(
         auto& config = engineConfig.getEngineConfig();
         if(config.knobs() != nullptr)
         {
-            auto benchmarkingId = hipdnn_data_sdk::utilities::fnv1aHash("benchmarking");
             for(const auto* knobSetting : *config.knobs())
             {
-                if(knobSetting->knob_id() == static_cast<int64_t>(benchmarkingId))
+                if(knobSetting->knob_id() == benchmarking_KNOB_ID)
                 {
                     if(knobSetting->value_type()
                        == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
                     {
                         auto value = knobSetting->value_as_IntValue()->value();
-                        executionContext.benchmarkingEnabled = (value != 0);
+                        executionContext.setBenchmarkingEnabled(value != 0);
                     }
                 }
             }

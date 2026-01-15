@@ -225,7 +225,7 @@ TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingEnabled)
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
 
-    EXPECT_TRUE(ctx.benchmarkingEnabled);
+    EXPECT_TRUE(ctx.benchmarkingEnabled());
 }
 
 TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingDisabled)
@@ -260,7 +260,7 @@ TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingDisabled)
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
 
-    EXPECT_FALSE(ctx.benchmarkingEnabled);
+    EXPECT_FALSE(ctx.benchmarkingEnabled());
 }
 
 TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhenConfigInvalid)
@@ -275,7 +275,7 @@ TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhe
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
 
-    EXPECT_FALSE(ctx.benchmarkingEnabled);
+    EXPECT_FALSE(ctx.benchmarkingEnabled());
 }
 
 TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhenNoKnobs)
@@ -298,7 +298,7 @@ TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhe
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
 
-    EXPECT_FALSE(ctx.benchmarkingEnabled);
+    EXPECT_FALSE(ctx.benchmarkingEnabled());
 }
 
 TEST(TestMiopenEngine, InitializeExecutionContextSkipsNonApplicableBuilders)

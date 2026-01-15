@@ -617,7 +617,8 @@ void buildPlanInferenceSingleNode([[maybe_unused]] const HipdnnEnginePluginHandl
         = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>();
 
     BatchnormFwdInferenceParams params(attr, opGraph.getTensorMap());
-    auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params));
+    auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params),
+                                                            executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -631,7 +632,8 @@ void buildPlanInferenceWithVarianceSingleNode(
         hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
 
     BatchnormFwdInferenceWithVarianceParams params(attr, opGraph.getTensorMap());
-    auto plan = std::make_unique<BatchnormFwdInferenceWithVariancePlan>(std::move(params));
+    auto plan = std::make_unique<BatchnormFwdInferenceWithVariancePlan>(
+        std::move(params), executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -644,7 +646,8 @@ void buildPlanFwdTrainingSingleNode([[maybe_unused]] const HipdnnEnginePluginHan
         = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormAttributes>();
 
     BatchnormFwdTrainingParams params(attr, opGraph.getTensorMap());
-    auto plan = std::make_unique<BatchnormFwdTrainingPlan>(std::move(params));
+    auto plan = std::make_unique<BatchnormFwdTrainingPlan>(std::move(params),
+                                                           executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -657,7 +660,8 @@ void buildPlanBwdSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& han
         = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes>();
 
     BatchnormBwdParams params(attr, opGraph.getTensorMap());
-    auto plan = std::make_unique<BatchnormBwdPlan>(std::move(params));
+    auto plan = std::make_unique<BatchnormBwdPlan>(std::move(params),
+                                                   executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -669,7 +673,8 @@ void buildPlanFusedBackwardsActivation([[maybe_unused]] const HipdnnEnginePlugin
     batchnormBwdFusionCheckTensors(bnInfAttr, actAttr, bnBwdAttr, opGraph.getTensorMap());
 
     BatchnormBwdParams params(bnBwdAttr, actAttr, bnInfAttr, opGraph.getTensorMap());
-    auto plan = std::make_unique<BatchnormBwdPlan>(std::move(params));
+    auto plan = std::make_unique<BatchnormBwdPlan>(std::move(params),
+                                                   executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -686,7 +691,8 @@ void buildPlanFusedFwdInferenceActivation([[maybe_unused]] const HipdnnEnginePlu
         = node1.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
 
     BatchnormFwdInferenceParams params(fwdInference, activation, opGraph.getTensorMap());
-    auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params));
+    auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params),
+                                                            executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -705,7 +711,8 @@ void buildPlanFusedFwdInferenceWithVarianceActivation(
 
     BatchnormFwdInferenceWithVarianceParams params(
         fwdInference, activation, opGraph.getTensorMap());
-    auto plan = std::make_unique<BatchnormFwdInferenceWithVariancePlan>(std::move(params));
+    auto plan = std::make_unique<BatchnormFwdInferenceWithVariancePlan>(
+        std::move(params), executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
 }
 
