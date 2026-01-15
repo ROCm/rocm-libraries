@@ -56,7 +56,7 @@ ninja integration-check
 | `public_hipdnn_backend_tests` | Backend API tests | Public C API black-box tests |
 | `public_hipdnn_frontend_tests` | Frontend integration tests | E2E frontend tests |
 | `miopen_plugin_tests` | MIOpen plugin unit tests | Plugin-specific tests |
-| `miopen_plugin_integration_test` | MIOpen integration tests | GPU-required E2E tests |
+| `miopen_plugin_integration_tests` | MIOpen integration tests | GPU-required E2E tests |
 
 ### Running Specific Tests with `--gtest_filter`
 **Use `--gtest_filter` when iterating on specific functionality:**
