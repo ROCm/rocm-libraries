@@ -8,12 +8,11 @@ rocBLAS documentation is available at
 ### Added
 * Level 3 `herk_ex` function for both C and FORTRAN but without support for the ILP64 API.
 
-### Optimized
-
-* Improved the performance of Level 2 trsv batched for the problem sizes where `batch_count` is larger than `8*n`.
-
 ### Changed
 * Client build system now automatically builds AOCL 5.2 (AMD Optimizing CPU Libraries) from source on Linux for improved CPU BLAS performance. New `--skip-aocl` and `--clean-deps` flags added to `install.sh` for build control. New `LINK_BLIS` CMake option to control AOCL BLAS linking in client binaries.
+
+### Optimized
+* Improved the performance of Level 2 trsv batched for the problem sizes where `batch_count` is larger than `8*n`.
 
 ## rocBLAS 5.2.0 for ROCm 7.2
 
