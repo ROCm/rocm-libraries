@@ -8,7 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
+// Modifications Copyright (c) 2024-2026 Advanced Micro Devices, Inc.
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -1378,23 +1378,30 @@ __sanitizer_annotate_contiguous_container(const void*, const void*, const void*,
 // gfx940 gfx941,gfx942 and gfx950: 100 MHz TSC for wall_clock64 -> 1*1e9/100*1e6 ns/cycle = 10 ns/cycle
 #      elif defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__)
 #        define _LIBCUDACXX_HIP_TSC_CLOCKRATE 100000000
+#        define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE 10 // (1/_LIBCUDACXX_HIP_TSC_CLOCKRATE)
+// other gfx9 arch: we assume 100 MHz TSC for wall_clock64 -> 1*1e9/100*1e6 ns/cycle = 10 ns/cycle
+#      elif defined(__GFX9__)
+#        ifndef NDEBUG
+#          warning Assuming 100 MHz realtime clock rate (TSC) for this gfx9 architecture. Timing-related APIs (e.g., chrono) or sleep instructions may behave incorrectly!
+#        endif
+#        define _LIBCUDACXX_HIP_TSC_CLOCKRATE 100000000
 #        define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE 10 // (1/_LIBCUDACXX_HIP_TSC_CLOCKRATE)  
 // gfx1030 : no info from the RDNA2 ISA docs
-#      elif defined(__gfx1030__)
+#      elif defined(__GFX10__)
 #        ifndef NDEBUG
 #          warning Assuming 100 MHz realtime clock rate (TSC) for gfx1030. Timing-related APIs (e.g., chrono) or sleep instructions may behave incorrectly!
 #        endif
 #        define _LIBCUDACXX_HIP_TSC_CLOCKRATE 100000000
 #        define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE 10 // (1/_LIBCUDACXX_HIP_TSC_CLOCKRATE)
 // gfx1100 and gfx1101 : from the RDNA3 ISA docs: "constantly running clock (typically 100MHz)"
-#      elif defined(__gfx1100__) || defined(__gfx1101__)
+#      elif defined(__GFX11__)
 #        ifndef NDEBUG
 #          warning Assuming 100 MHz realtime clock rate (TSC) for gfx1100/gfx1101 (according to the RDNA3 ISA). Timing-related APIs (e.g., chrono) or sleep instructions may behave incorrectly!
 #        endif
 #        define _LIBCUDACXX_HIP_TSC_CLOCKRATE 100000000
 #        define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE 10 // (1/_LIBCUDACXX_HIP_TSC_CLOCKRATE)
 // gfx1200 and gfx1201: ASSUMED: 100 MHz TSC for wall_clock64 -> 1*1e9/100*1e6 ns/cycle = 10 ns/cycle
-#      elif defined(__gfx1200__) || defined(__gfx1201__)
+#      elif defined(__GFX12__)
 #        ifndef NDEBUG
 #          warning Assuming 100 MHz realtime clock rate (TSC) for gfx1200/gfx1201 (from the RDNA4 ISA). Timing-related APIs (e.g., chrono) or sleep instructions may behave incorrectly!
 #        endif
