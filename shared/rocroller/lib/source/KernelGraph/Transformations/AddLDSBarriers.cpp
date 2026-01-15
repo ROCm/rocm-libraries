@@ -55,6 +55,16 @@ namespace rocRoller
                 return graph.mapper.get<LDS>(barrierTag) != -1;
             }
 
+            /**
+             * @brief Collect all LDS coordinates that appear in the RW trace records.
+             *
+             * Iterates through all trace records and identifies coordinates that correspond
+             * to LDS memory accesses.
+             *
+             * @param graph The kernel graph
+             * @param allRecords All control flow RW tracer records
+             * @return A set of coordinate tags for all LDS coordinates found in the trace
+             */
             inline std::set<int> collectAllLDSCoordinatesInRWTrace(KernelGraph const&    graph,
                                                                    RWTraceRecords const& allRecords)
             {
@@ -72,6 +82,17 @@ namespace rocRoller
                 return ldsCoordinates;
             }
 
+            /**
+             * @brief Find the index of a control operation in the trace records.
+             *
+             * Searches through the trace records to find the position of the specified
+             * control operation. This position is used to determine execution order.
+             *
+             * @param controlTag The tag of the control operation to find
+             * @param allRecords All control flow RW tracer records
+             * @return The index of the control operation in allRecords
+             * @throws AssertFatal if the control tag is not found in the records
+             */
             inline size_t getCrontrolOpIndexInAllRecords(int                   controlTag,
                                                          RWTraceRecords const& allRecords)
             {
@@ -86,6 +107,18 @@ namespace rocRoller
                 return 0;
             };
 
+            /**
+             * @brief Collect all read and write operations for a specific coordinate.
+             *
+             * Iterates through the trace records for a coordinate and separates them into
+             * read operations and write operations. Barrier nodes are excluded from the
+             * results since they are used to synchronize other operations.
+             *
+             * @param graph The kernel graph
+             * @param recordsForCoord Trace records filtered for a specific coordinate
+             * @return A pair of vectors: first contains write operations (tag, recordIndex),
+             *         second contains read operations (tag, recordIndex)
+             */
             inline std::pair<std::vector<std::pair<int, size_t>>,
                              std::vector<std::pair<int, size_t>>>
                 collectReadAndWritesToCoordinate(KernelGraph const&    graph,
