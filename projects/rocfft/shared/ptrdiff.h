@@ -20,18 +20,26 @@
 
 #pragma once
 
+#include "./arithmetic.h"
+
 #include <numeric>
 #include <vector>
 
-// Compute the farthest point from the original pointer.
-static size_t compute_ptrdiff(const std::vector<size_t>& length, const std::vector<size_t>& stride)
+// Compute the farthest point from the original pointer for a C-style array.
+template <typename intT1,
+          class = typename std::enable_if<std::is_integral<intT1>::value>::type,
+          typename intT2,
+          class = typename std::enable_if<std::is_integral<intT2>::value>::type>
+static size_t compute_ptrdiff(const std::vector<intT1>& length, const std::vector<intT2>& stride)
 {
     // 1 + sum_i [ ( length_i - 1 ) * stride_i
     // = 1 + dot(length, stride) - sum(stride)
     // Since length is the one-past-the-end, we subtract the strides.
     // The length-zero vector is a scalar, so the buffer size is 1.
+    if(std::any_of(length.begin(), length.end(), [](const intT1& l){ return l < 1;}))
+        return 0;
     return std::inner_product(length.begin(), length.end(), stride.begin(), 1)
-           - std::accumulate(stride.begin(), stride.end(), 1, std::plus<size_t>());
+        - sum(stride.begin(), stride.end());
 }
 
 static size_t compute_ptrdiff(const std::vector<size_t>& length,
