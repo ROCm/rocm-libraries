@@ -6,7 +6,6 @@ find_package(Boost COMPONENTS program_options filesystem REQUIRED)
 
 add_executable(tensilelite-client "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
 
-# TODO(newling) consider making this optional with a cmake flag.
 add_executable(cpu-gemm-driver "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_driver.cpp")
 
 set(COMMON_CLIENT_LIBS
