@@ -376,11 +376,10 @@ defaultBenchmarkCommonParameters = [
     # When >0, the solution requires tiles1=(SizeJ/value) to have lowbit(tiles1)>1 (i.e. G>1),
     # where value is typically MT1.
     {"AssertFree1DivByMT1LowbitGT1": [0]},
-    # KRingShift restriction (default disabled):
-    # Encodes a runtime predicate that requires (K * BPE * G) % cachelineBytes == 0, where:
-    #   - G = min(lowbit(SizeJ/MT1), LVCB)
-    # Packed as a single integer for serialization.
-    {"AssertKRingShiftAlignedK": [0]},
+    # KRingShift wrap restriction (default disabled):
+    # Encodes a runtime predicate that ensures (k + KRingShift) does not wrap in main loop
+    # (wrap is allowed only in tail loop where codegen applies the correction).
+    {"AssertKRingShiftTailWrapOnly": [0]},
     {"AssertAIGreaterThanEqual": [-1]},
     {"AssertAILessThanEqual": [-1]},
     {"StaggerU": [32]},  # recommend [0,32]

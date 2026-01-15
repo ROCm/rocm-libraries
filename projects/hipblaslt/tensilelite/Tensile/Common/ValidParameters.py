@@ -440,9 +440,11 @@ validParameters = { # we need to make sure this matches develop
     #   - compute lowbit(tiles1)
     #   - enable only if min(lowbit, LVCB) > 1
     "AssertFree1DivByMT1LowbitGT1": -1,
-    # KRingShift restriction (packed integer; see Solution.py for encoding):
-    # If >0, require (K * BPE * G) % cachelineBytes == 0, where G=min(lowbit(SizeJ/MT1), LVCB).
-    "AssertKRingShiftAlignedK": -1,
+    # KRingShift wrap restriction (packed integer; see Solution.py for encoding):
+    # If >0, require any (k + KRingShift) wrap to occur only in tail loop (no main-loop wrap).
+    # KRingShift wrap restriction (packed integer; see Solution.py for encoding):
+    # If >0, require any (k + KRingShift) wrap to occur only in tail loop (no main-loop wrap).
+    "AssertKRingShiftTailWrapOnly": -1,
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.

@@ -448,10 +448,10 @@ class ProblemPredicate(Properties.Predicate):
         if key == "AssertFree1DivByMT1LowbitGT1":
             return cls("Free1SizeDivByValueLowbitGT1", index=0, value=value) if value > 0 else None
 
-        # KRingShift restriction (packed value; see Solution.py):
-        # Require (K * BPE * G) % cachelineBytes == 0, with G=min(lowbit(SizeJ/MT1), LVCB).
-        if key == "AssertKRingShiftAlignedK":
-            return cls("KRingShiftAlignedK", index=-1, value=value) if value > 0 else None
+        # KRingShift wrap restriction (packed value; see Solution.py):
+        # Require that any (k + KRingShift) wrap occurs only in tail loop (no main-loop wrap).
+        if key == "AssertKRingShiftTailWrapOnly":
+            return cls("KRingShiftTailWrapOnly", index=-1, value=value) if value > 0 else None
 
         if key.endswith('Multiple'):
             if value == 1:

@@ -199,15 +199,24 @@ namespace TensileLite
                 }
             };
 
-            // KRingShift restriction:
-            // Require (K * BPE(B) * G) % cacheLineBytes == 0, where:
-            //   tiles1 = Free1Size / MT1
-            //   G = min(lowbit(tiles1), LVCB)
+            // KRingShift wrap restriction:
+            // Require that any (k + KRingShift) wrap occurs only in tail loop (no main-loop wrap fix).
             //
-            // The packed 'value' format (size_t) is:
-            //   [63:48]=cacheLineBytes, [47:40]=bpeB, [39:32]=lvcb, [31:0]=mt1
-            struct KRingShiftAlignedK
-                : public Predicate_CRTP<KRingShiftAlignedK, ContractionProblemGemm>
+            // We model the exact KRS enable/shift computation used in initKRingShift:
+            //   rem = StrideB1J % cacheLineElements
+            //   if ((G * rem) % cacheLineElements != 0) or rem==0 => shift disabled (shift=0) => always safe
+            //   shift = (-WorkGroup1 * rem) mod cacheLineElements
+            //
+            // mainLoopElems = k - (k % DepthU)
+            // tailSize      = k % DepthU
+            //
+            // To guarantee no wrap in main loop for any WG1, require:
+            //   maxShift(wg1 in [0, tiles1-1]) <= tailSize
+            //
+            // Packed value format (size_t):
+            //   [63:48]=cacheLineBytes, [47:32]=depthU, [31:16]=mt1, [15:8]=lvcb, [7:0]=bpeB
+            struct KRingShiftTailWrapOnly
+                : public Predicate_CRTP<KRingShiftTailWrapOnly, ContractionProblemGemm>
             {
                 enum
                 {
@@ -217,8 +226,8 @@ namespace TensileLite
                 ssize_t index;
                 size_t  value;
 
-                KRingShiftAlignedK() = default;
-                KRingShiftAlignedK(size_t index, size_t value)
+                KRingShiftTailWrapOnly() = default;
+                KRingShiftTailWrapOnly(size_t index, size_t value)
                     : index(static_cast<ssize_t>(index))
                     , value(value)
                 {
@@ -226,7 +235,7 @@ namespace TensileLite
 
                 static std::string Type()
                 {
-                    return "KRingShiftAlignedK";
+                    return "KRingShiftTailWrapOnly";
                 }
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
@@ -234,13 +243,21 @@ namespace TensileLite
                     if(value == 0)
                         return false;
 
-                    size_t mt1           = (value & 0xFFFFFFFFu);
-                    size_t lvcb          = ((value >> 32) & 0xFFu);
-                    size_t bpeB          = ((value >> 40) & 0xFFu);
+                    size_t bpeB          = (value & 0xFFu);
+                    size_t lvcb          = ((value >> 8) & 0xFFu);
+                    size_t mt1           = ((value >> 16) & 0xFFFFu);
+                    size_t depthU        = ((value >> 32) & 0xFFFFu);
                     size_t cacheLineByte = ((value >> 48) & 0xFFFFu);
 
-                    if(mt1 == 0 || lvcb == 0 || bpeB == 0 || cacheLineByte == 0)
+                    if(mt1 == 0 || lvcb == 0 || bpeB == 0 || depthU == 0 || cacheLineByte == 0)
                         return false;
+
+                    // Compute cacheline elements and validate (match codegen behavior: shift stays 0 if invalid).
+                    if(cacheLineByte % bpeB != 0)
+                        return true; // shift disabled => safe
+                    size_t cacheLineElems = cacheLineByte / bpeB;
+                    if(cacheLineElems == 0 || (cacheLineElems & (cacheLineElems - 1)) != 0)
+                        return true; // shift disabled => safe
 
                     // Compute runtime G from Free1 size and MT1.
                     size_t free1 = (!problem.transposeC01() ? problem.freeSizeB(0)
@@ -255,6 +272,23 @@ namespace TensileLite
                     if(G <= 1)
                         return false;
 
+                    // StrideB1J: stride of B along Free1 (J) in elements.
+                    auto const& freeB = problem.freeIndicesB();
+                    if(freeB.empty())
+                        return false;
+                    size_t bDim = freeB[0].i;
+                    if(bDim >= problem.b().strides().size())
+                        return false;
+                    size_t strideB1J = problem.b().strides()[bDim];
+
+                    // Determine whether KRS shift can be enabled at runtime.
+                    size_t mask = cacheLineElems - 1;
+                    size_t rem  = strideB1J & mask; // mod cacheLineElems (pow2)
+                    if(rem == 0)
+                        return true; // aligned => shift=0 => safe
+                    if(((G * rem) & mask) != 0)
+                        return true; // not congruent => shift disabled => safe
+
                     // K is the (last) bound index (typically the summation dimension).
                     size_t k = 0;
                     if(index < 0)
@@ -262,42 +296,32 @@ namespace TensileLite
                     else
                         k = problem.boundSize(index);
 
-                    // Check congruence in bytes:
-                    // (K * bpeB * G) % cacheLineBytes == 0
-                    // Use 64-bit to avoid overflow.
-                    uint64_t prod = static_cast<uint64_t>(k) * static_cast<uint64_t>(bpeB)
-                                    * static_cast<uint64_t>(G);
-                    return (prod % static_cast<uint64_t>(cacheLineByte)) == 0;
+                    // tailSize = k % depthU. If depthU>k, tailSize=k and mainloop is empty => safe.
+                    size_t tailSize = (depthU != 0) ? (k % depthU) : 0;
+
+                    // Compute maxShift over wg1 in [0, tiles1-1] (cycle length <= cacheLineElems <= 256 typically, <=64 on gfx950).
+                    size_t wgCount = tiles1;
+                    size_t limit   = (wgCount < cacheLineElems) ? wgCount : cacheLineElems;
+                    size_t maxShift = 0;
+                    for(size_t wg1 = 0; wg1 < limit; ++wg1)
+                    {
+                        // shift = (-wg1*rem) mod cacheLineElems
+                        size_t prod  = (wg1 * rem) & mask;
+                        size_t shift = (prod == 0) ? 0 : ((cacheLineElems - prod) & mask);
+                        if(shift > maxShift)
+                            maxShift = shift;
+                    }
+
+                    return tailSize >= maxShift;
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    size_t mt1           = (value & 0xFFFFFFFFu);
-                    size_t lvcb          = ((value >> 32) & 0xFFu);
-                    size_t bpeB          = ((value >> 40) & 0xFFu);
-                    size_t cacheLineByte = ((value >> 48) & 0xFFFFu);
-
-                    size_t free1 = (!problem.transposeC01() ? problem.freeSizeB(0)
-                                                           : problem.freeSizeA(0));
-                    size_t tiles1 = (mt1 && (free1 % mt1 == 0)) ? (free1 / mt1) : 0;
-                    size_t lowbit = tiles1 ? (tiles1 & (~tiles1 + 1)) : 0;
-                    size_t G      = (lowbit && (lowbit <= lvcb)) ? lowbit : lvcb;
-
-                    int index_mod = index < 0 ? problem.boundIndices().size() + index : index;
-                    size_t k      = problem.boundSize(index_mod);
-
-                    uint64_t prod = static_cast<uint64_t>(k) * static_cast<uint64_t>(bpeB)
-                                    * static_cast<uint64_t>(G);
-                    bool ok = (cacheLineByte != 0) && ((prod % static_cast<uint64_t>(cacheLineByte)) == 0);
-
-                    return debugEvalCmp(problem,
-                                        stream,
-                                        "K*bpe*G%CL",
-                                        ok ? size_t(1) : size_t(0),
-                                        "==",
-                                        "sol",
-                                        size_t(1));
+                    // Reuse operator() and print a single boolean result for simplicity.
+                    bool ok = (*this)(problem);
+                    return debugEvalCmp(problem, stream, "KRingShiftTailWrapOnly", size_t(ok), "==", "true", size_t(1))
+                           && ok;
                 }
             };
 
