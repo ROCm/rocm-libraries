@@ -35,7 +35,6 @@
 #if MIOPEN_EMBED_DB
 #include <miopen_data.hpp>
 #endif
-#include <boost/date_time/posix_time/posix_time_types.hpp>
 
 #include <memory>
 #include <algorithm>
