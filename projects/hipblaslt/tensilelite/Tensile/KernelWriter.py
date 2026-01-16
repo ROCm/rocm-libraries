@@ -4580,7 +4580,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       if kernel["EnableMatrixInstruction"]:
-        self.states.numReadsIterCoalescedMetadata = int(kernel["MIInputPerThreadMetadata"] * self.states.bpr)
+        self.states.numReadsIterCoalescedMetadata = ceil(kernel["MIInputPerThreadMetadata"] / self.states.bpr)
       else:
         self.states.numReadsIterCoalescedMetadata = 1
     else:
