@@ -115,7 +115,7 @@ jobs:
                      "title": "GitHub CI Notification",
                      "text": "✅ Build completed on branch: '${GITHUB_REF}'"
                    }' \
-               ${{ secrets.MIOPEN_CI_ERRORS_WEBHOOK_URL }}
+               ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
 
   therock-ci-linux:
     name: Linux (${{ matrix.projects.project_to_test }} | ${{ matrix.target_bundle.amdgpu_family }})
