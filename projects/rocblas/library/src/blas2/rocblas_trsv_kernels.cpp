@@ -870,8 +870,8 @@ rocblas_status rocblas_internal_trsv_substitution_template(rocblas_handle    han
             return rocblas_internal_trsv_substitution_big_batch_template<ZTRSV_BB_NB, T>(
                 TRSV_BATCHED_TEMPLATE_PARAMS);
         }
-    
-    #undef TRSV_BATCHED_TEMPLATE_PARAMS
+
+#undef TRSV_BATCHED_TEMPLATE_PARAMS
 
         return rocblas_status_internal_error;
     }
@@ -1093,8 +1093,6 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
 
 #undef TRSV_TEMPLATE_PARAMS
 }
-
-
 
 template <typename T>
 ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
