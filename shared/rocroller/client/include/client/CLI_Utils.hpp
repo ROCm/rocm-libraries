@@ -42,7 +42,8 @@ namespace CLI
             return true;
         }
 
-        inline bool lexical_cast(const std::string& s, rocRoller::Parameters::Solution::StorePath& v)
+        inline bool lexical_cast(const std::string&                          s,
+                                 rocRoller::Parameters::Solution::StorePath& v)
         {
             v = rocRoller::Parameters::Solution::storePathFromString(s);
             return true;

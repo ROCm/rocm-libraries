@@ -1729,8 +1729,10 @@ int main(int argc, const char* argv[])
         SN(&SP::loadPathB),
         "How to load B (BufferToVGPR, BufferToLDSViaVGPR, BufferToLDS). Default: BufferToLDS");
     app.add_option(SN(&SP::storePath),
-                   "How to store D (VGPRToGlobalMemoryWithBuffer, VGPRToGlobal, VGPRToGlobalMemoryViaLDSWithBuffer, "
-                   "VGPRToGlobalMemoryViaLDSWithGlobal, LDSToGlobalMemoryWithBuffer). Default: VGPRToGlobalMemoryViaLDSWithBuffer");
+                   "How to store D (VGPRToGlobalMemoryWithBuffer, VGPRToGlobal, "
+                   "VGPRToGlobalMemoryViaLDSWithBuffer, "
+                   "VGPRToGlobalMemoryViaLDSWithGlobal, LDSToGlobalMemoryWithBuffer). Default: "
+                   "VGPRToGlobalMemoryViaLDSWithBuffer");
     app.add_option("--lds", "Use LDS for A/B/D.");
     app.add_option("--d2lds", "Use direct-to-LDS for A/B.");
 

@@ -491,13 +491,13 @@ namespace rocRollerTest::Graphs
             = MacroTile({m_problem.macM, m_problem.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {m_problem.waveM, m_problem.waveN, m_problem.waveK, m_problem.waveB});
-        auto macTileD
-            = MacroTile({m_problem.macM, m_problem.macN},
-                        LayoutType::MATRIX_ACCUMULATOR,
-                        {m_problem.waveM, m_problem.waveN, m_problem.waveK, m_problem.waveB},
-                        m_problem.storePath == SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer
-                            ? MemoryType::WAVE_LDS
-                            : MemoryType::WAVE);
+        auto macTileD = MacroTile(
+            {m_problem.macM, m_problem.macN},
+            LayoutType::MATRIX_ACCUMULATOR,
+            {m_problem.waveM, m_problem.waveN, m_problem.waveK, m_problem.waveB},
+            m_problem.storePath == SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer
+                ? MemoryType::WAVE_LDS
+                : MemoryType::WAVE);
 
         params->setDimensionInfo(m_tagA, macTileA);
 

@@ -601,7 +601,11 @@ def cast_missing_parameters(result):
     if "storeLDS_D" in result:
         storeLDS_D = result["storeLDS_D"]
         del result["storeLDS_D"]
-        result["store"] = "VGPRToGlobalMemoryViaLDSWithBuffer" if storeLDS_D else "VGPRToGlobalMemoryWithBuffer"
+        result["store"] = (
+            "VGPRToGlobalMemoryViaLDSWithBuffer"
+            if storeLDS_D
+            else "VGPRToGlobalMemoryWithBuffer"
+        )
 
 
 def load_results(path: pathlib.Path):

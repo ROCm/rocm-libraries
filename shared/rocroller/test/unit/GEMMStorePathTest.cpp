@@ -74,11 +74,12 @@ namespace GEMMTests
     INSTANTIATE_TEST_SUITE_P(
         GEMMStorePathTest,
         GEMMStorePathTestGPU,
-        ::testing::Combine(currentGPUISA(),
-                           ::testing::Values(SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer,
-                                             SolutionParams::StorePath::VGPRToGlobalMemoryWithGlobal,
-                                             SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer,
-                                             SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithGlobal,
-                                             SolutionParams::StorePath::LDSToGlobalMemoryWithBuffer)));
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Values(SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer,
+                              SolutionParams::StorePath::VGPRToGlobalMemoryWithGlobal,
+                              SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer,
+                              SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithGlobal,
+                              SolutionParams::StorePath::LDSToGlobalMemoryWithBuffer)));
 
 } // namespace GEMMTests

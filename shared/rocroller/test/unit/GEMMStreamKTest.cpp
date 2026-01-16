@@ -266,8 +266,9 @@ namespace GEMMTests
                                   SolutionParams::LoadPath::BufferToVGPR,
                                   SolutionParams::LoadPath::GlobalToVGPR,
                                   SolutionParams::LoadPath::GlobalToLDSViaVGPR), /* loadPathB */
-                ::testing::Values(SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer,
-                                  SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer) /* storePath */
+                ::testing::Values(
+                    SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer,
+                    SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer) /* storePath */
                 )));
 
     using StreamKParamGenerator = ::testing::internal::ParamGenerator<StreamKTestGPU::ParamType>;
@@ -337,8 +338,9 @@ namespace GEMMTests
                                   SolutionParams::LoadPath::BufferToLDSViaVGPR),
                 ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
                                   SolutionParams::LoadPath::BufferToLDSViaVGPR),
-                ::testing::Values(SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer,
-                                  SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer), // storePath
+                ::testing::Values(
+                    SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer,
+                    SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer), // storePath
                 ::testing::Values(rocRoller::StreamKMode::Standard,
                                   rocRoller::StreamKMode::TwoTile,
                                   rocRoller::StreamKMode::TwoTileDPFirst),
