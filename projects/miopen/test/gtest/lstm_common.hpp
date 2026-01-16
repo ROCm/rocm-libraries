@@ -420,9 +420,12 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
 
     std::vector<T> cpu() const
     {
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+    // clang-format off
+    #if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
-#endif
+    #endif
+    // clang-format on
+
         auto&& handle = get_handle();
 
         int bi        = dirMode != 0 ? 2 : 1;
@@ -490,33 +493,32 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
                          nohx,
                          nocx);
 
-#if (MIO_LSTM_TEST_DEBUG == 2)
+    #if (MIO_LSTM_TEST_DEBUG == 2)
         for(int i = 0; i < output.size(); i++)
         {
             std::cout << "CPU outdata[" << i << "]: " << output[i] << std::endl;
         }
-#endif
-
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+    #endif
+    #if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
         std::cout << "Wall clock: CPU forward inference LSTM pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
-#endif
-#if (MIO_LSTM_TEST_DEBUG > 0)
+    #endif
+    #if (MIO_LSTM_TEST_DEBUG > 0)
         std::cout << "Done with LSTM forward inference CPU" << std::endl;
         std::cout << "---------------------------------\n" << std::endl;
-#endif
+    #endif
         return output;
     }
 
     std::vector<T> gpu() const
     {
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+    #if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
-#endif
-        auto&& handle = get_handle();
+    #endif
 
+        auto&& handle = get_handle();
         size_t out_sz = 0;
 
         std::vector<miopen::TensorDescriptor> inputCPPDescs;
@@ -582,24 +584,23 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
                                   wspace.ptr(),
                                   wspace.size());
 
-#if (MIO_LSTM_TEST_DEBUG == 2)
+    #if (MIO_LSTM_TEST_DEBUG == 2)
         auto outdata = handle.Read<T>(output_dev, output.size());
         for(int i = 0; i < outdata.size(); i++)
         {
             std::cout << "GPU outdata[" << i << "]: " << outdata[i] << std::endl;
         }
-#endif
-
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+    #endif
+    #if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU forward_infer LSTM pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
-#endif
-#if (MIO_LSTM_TEST_DEBUG > 0)
+    #endif
+    #if (MIO_LSTM_TEST_DEBUG > 0)
         std::cout << "Done with LSTM forward inference GPU" << std::endl;
-#endif
+    #endif
         return (handle.Read<T>(output_dev, output.size()));
     }
 
@@ -723,10 +724,9 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
 
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> cpu() const
     {
-
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+    #if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
-#endif
+    #endif
 
         auto&& handle = get_handle();
 
@@ -827,19 +827,19 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
                          nohx,
                          nocx);
 
-#if (MIO_LSTM_TEST_DEBUG == 2)
+    #if (MIO_LSTM_TEST_DEBUG == 2)
         for(int i = 0; i < output.size(); i++)
         {
             std::cout << "CPU outdata[" << i << "]: " << output[i] << std::endl;
         }
-#endif
+    #endif
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+    #if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
         std::cout << "Wall clock: CPU forward train LSTM pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
-#endif
+    #endif
 
         if(use_seqPadding)
         {
@@ -855,19 +855,18 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
         auto retSet = std::make_tuple(
             output, (nohy ? initHidden : hiddenState), (nocy ? initCell : cellState));
 
-#if (MIO_LSTM_TEST_DEBUG > 0)
+    #if (MIO_LSTM_TEST_DEBUG > 0)
         std::cout << "Done with LSTM forward train CPU" << std::endl;
         std::cout << "---------------------------------\n" << std::endl;
-#endif
+    #endif
         return retSet;
     }
 
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> gpu() const
     {
-
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+    #if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
-#endif
+    #endif
 
         auto&& handle = get_handle();
 
@@ -949,13 +948,13 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
                                  rspace.ptr(),
                                  rspace.size());
 
-#if (MIO_LSTM_TEST_DEBUG == 2)
+    #if (MIO_LSTM_TEST_DEBUG == 2)
         auto outdata = handle.Read<T>(output_dev, output.size());
         for(int i = 0; i < outdata.size(); i++)
         {
             std::cout << "GPU outdata[" << i << "]:" << outdata[i] << std::endl;
         }
-#endif
+    #endif
         rspace.ReadTo(RSVgpu);
 
         std::vector<T> output_gpu = handle.Read<T>(output_dev, output.size());
@@ -964,16 +963,15 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
                                       (nohy ? initHidden : handle.Read<T>(hy_dev, hy.size())),
                                       (nocy ? initCell : handle.Read<T>(cy_dev, cy.size())));
 
-#if (MIO_RNN_TIME_EVERYTHING == 1)
+    #if (MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
-
         std::cout << "Wall clock: GPU forward_train LSTM pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
-#endif
-#if (MIO_LSTM_TEST_DEBUG > 0)
+    #endif
+    #if (MIO_LSTM_TEST_DEBUG > 0)
         std::cout << "Done with RNN forward train GPU" << std::endl;
-#endif
+    #endif
         return retSet;
     }
 
@@ -1023,7 +1021,6 @@ template <class T>
 std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>>
 verify_backward_data_lstm<T>::cpu() const
 {
-
 #if (MIO_RNN_TIME_EVERYTHING == 1)
     auto t_start = std::chrono::high_resolution_clock::now();
 #endif
@@ -1154,7 +1151,6 @@ verify_backward_data_lstm<T>::cpu() const
 
 #if (MIO_RNN_TIME_EVERYTHING == 1)
     auto t_end = std::chrono::high_resolution_clock::now();
-
     std::cout << "Wall clock: CPU backward data LSTM pass time: "
               << std::chrono::duration<double>(t_end - t_start).count() << " seconds." << std::endl;
 #endif
@@ -1192,7 +1188,6 @@ template <class T>
 std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>>
 verify_backward_data_lstm<T>::gpu() const
 {
-
 #if (MIO_RNN_TIME_EVERYTHING == 1)
     auto t_start = std::chrono::high_resolution_clock::now();
 #endif
@@ -1320,7 +1315,6 @@ verify_backward_data_lstm<T>::gpu() const
 template <class T>
 std::vector<T> verify_backward_weights_lstm<T>::cpu() const
 {
-
 #if (MIO_RNN_TIME_EVERYTHING == 1)
     auto t_start = std::chrono::high_resolution_clock::now();
 #endif
@@ -1411,7 +1405,6 @@ std::vector<T> verify_backward_weights_lstm<T>::cpu() const
 template <class T>
 std::vector<T> verify_backward_weights_lstm<T>::gpu() const
 {
-
 #if (MIO_RNN_TIME_EVERYTHING == 1)
     auto t_start = std::chrono::high_resolution_clock::now();
 #endif
@@ -1467,7 +1460,6 @@ std::vector<T> verify_backward_weights_lstm<T>::gpu() const
 
 #if (MIO_RNN_TIME_EVERYTHING == 1)
     auto t_end = std::chrono::high_resolution_clock::now();
-
     std::cout << "Wall clock: GPU backwards_weights LSTM pass time: "
               << std::chrono::duration<double>(t_end - t_start).count() << " seconds." << std::endl;
 #endif
@@ -1513,7 +1505,7 @@ struct lstm_basic_driver : test_driver
     {
         const double Data_scale = 0.001;
 #if (MIOPEN_BACKEND_OPENCL == 1)
-#if WORKAROUND_ISSUE_692 == 1
+#if (WORKAROUND_ISSUE_692 == 1)
         std::cout << "Skip test for Issue #692: " << std::endl;
         exit(EXIT_SUCCESS); // NOLINT (concurrency-mt-unsafe)
 #endif
@@ -1543,12 +1535,12 @@ struct lstm_basic_driver : test_driver
             std::abort();
         }
 
-#if (MIO_LSTM_TEST_DEBUG == 2)
+    #if (MIO_LSTM_TEST_DEBUG == 2)
         for(int i = 0; i < seqLength; i++)
         {
             std::cout << "batch seq[" << i << "]: " << batchSeq.at(i) << std::endl;
         }
-#endif
+    #endif
 
         auto&& handle = get_handle();
 
@@ -1564,10 +1556,10 @@ struct lstm_basic_driver : test_driver
         {
 // Workaround for issue #2335.
 // OpenCL error creating buffer: 0 Invalid Buffer Size
-#if MIOPEN_BACKEND_OPENCL
+    #if MIOPEN_BACKEND_OPENCL
             std::cout << "Skip test for Issue #2335: " << std::endl;
             return;
-#endif
+    #endif
             miopenHandle_t mio_handle;
             miopenCreateWithStream(&mio_handle, handle.GetStream());
 
@@ -1575,16 +1567,16 @@ struct lstm_basic_driver : test_driver
             unsigned long long dropout_seed = 0ULL;
             miopenDropoutGetStatesSize(mio_handle, &statesSizeInBytes);
 
-#if MIOPEN_BACKEND_OPENCL
+    #if MIOPEN_BACKEND_OPENCL
             cl_context ctx;
             clGetCommandQueueInfo(
                 handle.GetStream(), CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
             cl_mem dropout_state_buf =
                 clCreateBuffer(ctx, CL_MEM_READ_WRITE, statesSizeInBytes, nullptr, nullptr);
-#elif MIOPEN_BACKEND_HIP
+    #elif MIOPEN_BACKEND_HIP
             void* dropout_state_buf;
             hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
-#endif
+    #endif
 
             miopenSetDropoutDescriptor(DropoutDesc,
                                        mio_handle,
@@ -1665,7 +1657,7 @@ struct lstm_basic_driver : test_driver
             weights[i] = prng::gen_descreet_uniform_sign<T>(Data_scale, 100);
         }
 
-#if (MIO_LSTM_TEST_DEBUG > 0)
+    #if (MIO_LSTM_TEST_DEBUG > 0)
         printf("inputMode: %d, biasMode: %d, dirMode: %d\n", inputMode, biasMode, dirMode);
         printf("hz: %d, batch_n: %d, seqLength: %d, inputLen: %d, numLayers: %d\n",
                hiddenSize,
@@ -1681,7 +1673,7 @@ struct lstm_basic_driver : test_driver
         std::cout << ", nocy: " << nocy;
         std::cout << ", nodhx: " << nodhx;
         std::cout << ", nodcx: " << nodcx << std::endl;
-#endif
+    #endif
 
         if(!nohx)
         {
@@ -1802,9 +1794,9 @@ struct lstm_basic_driver : test_driver
             dyin[i] = prng::gen_descreet_unsigned<T>(Data_scale, 100);
         }
 
-#if (MIO_LSTM_TEST_DEBUG > 0)
+    #if (MIO_LSTM_TEST_DEBUG > 0)
         printf("Running backward data LSTM.\n");
-#endif
+    #endif
         auto bwdDataOutputPair =
             verify(verify_backward_data_lstm<T>{rnnDesc,   yin,       dyin,
                                                 dhyin,     hx,        dcyin,
@@ -1820,14 +1812,14 @@ struct lstm_basic_driver : test_driver
         // RETURNS:  std::make_tuple(dx, dhx, dcx, reserveSpace, workSpace);
         auto workSpaceBwdData = std::get<3>(bwdDataOutputPair.second);
 
-#if (MIO_LSTM_TEST_DEBUG > 0)
+    #if (MIO_LSTM_TEST_DEBUG > 0)
         printf("Running backward weights LSTM.\n");
         printf("reserve sz: %zu, workSpace sz: %zu, weight sz: %d\n",
                rsvcpu.size(),
                workSpaceBwdData.size(),
                wei_sz);
         fflush(nullptr);
-#endif
+    #endif
         // auto dweights_pair =
         verify(verify_backward_weights_lstm<T>{
             rnnDesc,  input,      dyin,      hx,      rsvgpu,    rsvcpu,           workSpaceBwdData,
@@ -1838,7 +1830,7 @@ struct lstm_basic_driver : test_driver
 /// ROCm3.3, Radeon VII: Many test cases always fail with:
 /// "Forward Inference LSTM:"
 /// "Output tensor output failed verification."
-#if 0
+    #if 0
         if(useDropout == 0)
         {
             verify(verify_forward_infer_lstm<T>{rnnDesc,
@@ -1861,7 +1853,7 @@ struct lstm_basic_driver : test_driver
                                                 nohy,
                                                 nocy});
         }
-#endif
+    #endif
         /* normal hx/cx/dhy/dcy input test end */
 
         // DLOWELL: Subtracting delta weights may produce NAN and infinities. Further investigation
