@@ -49,7 +49,7 @@ bool IsWorkspaceTestSupportedForDevice()
 {
     using e_mask = enabled<Gpu::gfx94X>;
     // requires ConvCKIgemmGrpFwdBiasActivFused solver
-    using d_mask = disabled<Gpu::None>;
+    using d_mask = disabled<Gpu::gfx900, Gpu::gfx906>;
     return ::IsTestSupportedForDevMask<d_mask, e_mask>();
 }
 
@@ -213,7 +213,6 @@ bool IsOnlyConvCKIgemmGrpFwdBiasActivFusedSolverApplicable(
     // find all fusion solvers that are applicable but not expected
     for(auto id : ids)
     {
-        std::cout << id.ToString() << "\n";
         if(id.Value() != target_id.Value())
             return false;
     }
