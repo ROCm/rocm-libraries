@@ -45,46 +45,6 @@ namespace rocRoller::KernelGraph
 
     namespace AddDeallocateDetail
     {
-        void addDownstreamBarrierInLoop(std::set<int>&       dependencies,
-                                        int                  coordinate,
-                                        std::set<int> const& lastRWOps,
-                                        KernelGraph const&   original)
-        {
-            auto               compare = TopologicalCompare(original);
-            std::optional<int> maybeForLoop;
-            for(auto control : lastRWOps)
-            {
-                maybeForLoop = findContainingOperation<ForLoopOp>(control, original);
-                if(maybeForLoop)
-                    break;
-            }
-            if(not maybeForLoop)
-                return;
-
-            auto lastDependency = std::ranges::max(lastRWOps, compare);
-
-            auto isBarrierInSameLoopPredicate = [&](int barrier) {
-                auto isBarrier = original.control.get<Barrier>(barrier).has_value();
-                if(!isBarrier)
-                    return false;
-                auto maybeBarrierForLoop = findContainingOperation<ForLoopOp>(barrier, original);
-                // We know maybeForLoop has a value, so...
-                return maybeBarrierForLoop && (maybeBarrierForLoop.value() == maybeForLoop.value());
-            };
-
-            auto downstreamBarriers = filter(isBarrierInSameLoopPredicate,
-                                             original.control.depthFirstVisit(lastDependency))
-                                          .to<std::vector>();
-
-            if(downstreamBarriers.empty())
-            {
-                dependencies = {*maybeForLoop};
-                return;
-            }
-
-            dependencies.insert(std::ranges::min(downstreamBarriers, compare));
-        }
-
         std::set<int> getContainingForLoops(std::set<int> controls, KernelGraph const& graph)
         {
             std::set<int> rv;
@@ -275,12 +235,6 @@ namespace rocRoller::KernelGraph
         for(auto& [coordinate, controls] : locations)
         {
             auto dependencies = controls;
-
-            auto maybeLDS = graph.coordinates.get<LDS>(coordinate);
-            if(maybeLDS)
-            {
-                addDownstreamBarrierInLoop(dependencies, coordinate, controls, graph);
-            }
 
             simplifyDependencies(graph, dependencies);
 
