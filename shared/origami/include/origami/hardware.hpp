@@ -159,8 +159,7 @@ class hardware_t {
         // TODO: Fill with correct values
         return {0, 0, 0, 0, 0, std::make_tuple(0, 0, 0), 0};
       case architecture_t::gfx1153:
-        // TODO: Fill with correct values
-        return {0, 0, 0, 0, 0, std::make_tuple(0, 0, 0), 0};
+        return {1, 0.240, 1.21875121875121875122 * 1000 /*Bigger?*/, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5};
       default: return {0, 0, 0, 0, 0, std::make_tuple(0, 0, 0), 0};
     }
   }
