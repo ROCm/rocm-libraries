@@ -132,10 +132,17 @@ extern "C" __global__ __launch_bounds__(MLO_POOLING_GROUP_SZ0) //
 
                     const bool vis = vis_x;
 
+#if MIOPEN_USE_BFP16
+                    bot_data[h][j][i] = vis ? bot[bot_gbl_off]
+                                        : MLO_POOLING_OP_ID == MLO_POOLING_OP_MAX
+                                            ? /* MAX */ FLOAT{0xFF7F} // -max bf16
+                                            : /* AVG */ FLOAT{0};
+#else
                     bot_data[h][j][i] = vis ? bot[bot_gbl_off]
                                         : MLO_POOLING_OP_ID == MLO_POOLING_OP_MAX
                                             ? /* MAX */ FLOAT{-MAX_VAL}
                                             : /* AVG */ FLOAT{0};
+#endif
                 }
             }
         }

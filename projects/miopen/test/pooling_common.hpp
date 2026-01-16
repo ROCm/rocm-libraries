@@ -610,8 +610,8 @@ struct pooling_driver : test_driver
                 dim_strides);
             input.desc = miopen::TensorDescriptor(miopen_type<T>{}, dim_lens, dim_strides);
         }
-        auto out   = verify(verify_forward_pooling<SptDim>{}, input, filter, indices);
-        auto dout  = out.first;
+        auto out  = verify(verify_forward_pooling<SptDim>{}, input, filter, indices);
+        auto dout = out.first;
         dout.generate(tensor_elem_gen_integer{2503});
         verify(verify_backward_pooling<SptDim>{},
                input,

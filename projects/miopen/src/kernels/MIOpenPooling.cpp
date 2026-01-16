@@ -127,10 +127,17 @@ extern "C" __global__ __launch_bounds__(block_size) void mloPoolingG(const FLOAT
             bool vis_x = run_x >= 0 && run_x < mlo_bot_width;
             bool vis   = vis_x && vis_y;
 
+#if MIOPEN_USE_BFP16
+            bot_data[j][i] = vis ? bot[bot_gbl_off]
+                             : MLO_POOLING_OP_ID == MLO_POOLING_OP_MAX //
+                                 ? /* MAX */ FLOAT{0xFF7F}             // -max bf16
+                                 : /* AVG */ FLOAT{0};
+#else
             bot_data[j][i] = vis ? bot[bot_gbl_off]
                              : MLO_POOLING_OP_ID == MLO_POOLING_OP_MAX //
                                  ? /* MAX */ FLOAT{-MAX_VAL}
                                  : /* AVG */ FLOAT{0};
+#endif
         }
     }
 
