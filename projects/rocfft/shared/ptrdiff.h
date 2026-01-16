@@ -20,26 +20,36 @@
 
 #pragma once
 
-#include "./arithmetic.h"
-
 #include <numeric>
 #include <vector>
 
 // Compute the farthest point from the original pointer for a C-style array.
+// This provides the mininmal buffer allocation size for the array.
 template <typename intT1,
           class = typename std::enable_if<std::is_integral<intT1>::value>::type,
           typename intT2,
           class = typename std::enable_if<std::is_integral<intT2>::value>::type>
 static size_t compute_ptrdiff(const std::vector<intT1>& length, const std::vector<intT2>& stride)
 {
+    // Strides and lengths must have the same dimension:
+    if(length.size() != stride.size())
+        return 0;
+    // Negative strides and/or lengths are not allowed:
+    if(std::any_of(stride.begin(), stride.end(), [](const intT1& s) { return s < 0; }))
+        return 0;
+    if(std::any_of(length.begin(), length.end(), [](const intT1& l) { return l < 0; }))
+        return 0;
+
     // 1 + sum_i [ ( length_i - 1 ) * stride_i
     // = 1 + dot(length, stride) - sum(stride)
     // Since length is the one-past-the-end, we subtract the strides.
     // The length-zero vector is a scalar, so the buffer size is 1.
-    if(std::any_of(length.begin(), length.end(), [](const intT1& l) { return l < 1; }))
-        return 0;
-    return std::inner_product(length.begin(), length.end(), stride.begin(), 1)
-           - sum(stride.begin(), stride.end());
+    // Computation is done as size_t to ensure large values are captured.
+    return std::inner_product(length.begin(), length.end(), stride.begin(),
+                              static_cast<size_t>(1),
+                              std::plus<size_t>(), std::multiplies<size_t>())
+        - std::accumulate(stride.begin(), stride.end(), static_cast<size_t>(0),
+                          std::plus<size_t>());
 }
 
 static size_t compute_ptrdiff(const std::vector<size_t>& length,
