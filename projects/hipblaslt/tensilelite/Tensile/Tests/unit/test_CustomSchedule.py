@@ -633,6 +633,33 @@ class TestCustomScheduleTF32:
         valid, message = isValid(schedule_info, {"kernel": kernel})
         assert valid, message
 
+    def test_schedule_256x192x32_TF32(self):
+        """Tests the 256x192x32 TF32 NN schedule."""
+        kernel = create_base_kernel()
+        kernel["ProblemType"].update({
+            "TransposeA": False, "TransposeB": False
+        })
+        kernel.update({
+            "UseF32XEmulation": True,
+            "ForceUnrollSubIter": True,
+            "MacroTile0": 256, "MacroTile1": 192, "DepthU": 32,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
+            "DirectToLds": True,
+            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
+            "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
+            "LDSTrInst": False, "TransposeLDS": 1, "MIWaveTileA": 8, "MIWaveTileB": 6,
+        })
+
+        has_schedule, schedule_info = hasCustomSchedule(kernel)
+        assert has_schedule
+        assert isinstance(schedule_info, ScheduleInfo)
+        assert schedule_info.numCodePaths == 2
+        assert schedule_info.numMfma == 144
+        assert kernel["UsePLRPack"]
+        assert kernel["UseMFMAF32XEmulation"]
+        valid, message = isValid(schedule_info, {"kernel": kernel})
+        assert valid, message
+
     def test_schedule_192x128x32_TF32(self):
         """Tests the 192x128x32 TF32 TN schedule."""
         kernel = create_base_kernel()
