@@ -333,11 +333,11 @@ public:
                   fbKnob->deprecated());
 
         // Set constraint if present
-        switch(fbKnob->constraints_type())
+        switch(fbKnob->constraint_type())
         {
         case hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint:
         {
-            auto fbConstraint = fbKnob->constraints_as_IntConstraint();
+            auto fbConstraint = fbKnob->constraint_as_IntConstraint();
             if(fbConstraint != nullptr)
             {
                 std::unordered_set<int64_t> validValues
@@ -353,7 +353,7 @@ public:
         }
         case hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint:
         {
-            auto fbConstraint = fbKnob->constraints_as_FloatConstraint();
+            auto fbConstraint = fbKnob->constraint_as_FloatConstraint();
             if(fbConstraint != nullptr)
             {
                 knob._constraint = std::make_unique<FloatConstraint>(fbConstraint->min_value(),
@@ -363,7 +363,7 @@ public:
         }
         case hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint:
         {
-            auto fbConstraint = fbKnob->constraints_as_StringConstraint();
+            auto fbConstraint = fbKnob->constraint_as_StringConstraint();
             if(fbConstraint != nullptr)
             {
                 std::unordered_set<std::string> validValues

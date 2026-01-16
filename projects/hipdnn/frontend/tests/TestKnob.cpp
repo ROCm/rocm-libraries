@@ -39,8 +39,6 @@ flatbuffers::DetachedBuffer createIntKnobFlatbuffer(const std::string& knobIdStr
                                      descriptionOffset,
                                      fb::KnobValue::IntValue,
                                      defaultValueOffset.Union(),
-                                     fb::KnobValue::IntValue,
-                                     defaultValueOffset.Union(),
                                      constraintType,
                                      constraintOffset,
                                      deprecated);
@@ -78,8 +76,6 @@ flatbuffers::DetachedBuffer createFloatKnobFlatbuffer(const std::string& knobIdS
                                      descriptionOffset,
                                      fb::KnobValue::FloatValue,
                                      defaultValueOffset.Union(),
-                                     fb::KnobValue::FloatValue,
-                                     defaultValueOffset.Union(),
                                      constraintType,
                                      constraintOffset,
                                      deprecated);
@@ -114,8 +110,6 @@ flatbuffers::DetachedBuffer createStringKnobFlatbuffer(const std::string& knobId
                                      hipdnn_frontend::Knob::makeKnobId(knobIdStr),
                                      knobIdStrOffset,
                                      descriptionOffset,
-                                     fb::KnobValue::StringValue,
-                                     defaultValueOffset.Union(),
                                      fb::KnobValue::StringValue,
                                      defaultValueOffset.Union(),
                                      constraintType,
