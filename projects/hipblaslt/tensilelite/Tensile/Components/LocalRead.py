@@ -640,13 +640,14 @@ class LocalReadMFMA(LocalRead):
         blockOffsetSMFMA = 1
         if kernel["ProblemType"]["Sparse"] != 0:
             if kernel["MIInputPerThread"] * kernel["ProblemType"]["DataTypeB"].numBytes() > 16: # double K
-                isSparseTrack = (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or (kernel["ProblemType"]["Sparse"] == 2 and  tP["isB"]) or tP["isM"]
+                isSparseTrack = (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or tP["isM"]
                 # gfx950 sparse track only has one block for each thread group.
                 # TODO adjust this value for other arch.
                 blocksPerTGroupSMFMA = 1 if isSparseTrack else 2
+                if writer.states.asmCaps["HasSWMMA_gfx1250"] and not tP["isM"]: blocksPerTGroupSMFMA = 2
                 if blocksPerTGroupSMFMA > 1:
                     threadGroups = kernel["MatrixInstK"] // kernel["MIInputPerThread"]
-                    elementsPerBlockSMFMA = kernel["MIInputPerThread"] // blocksPerTGroupSMFMA  # need adjust if blocks > 1 and is sparse track.
+                    elementsPerBlockSMFMA = kernel["MIInputPerThread%s"%tc] // blocksPerTGroupSMFMA  # need adjust if blocks > 1 and is sparse track.
                     blockStride = elementsPerBlockSMFMA * threadGroups
                     blockOffsetSMFMA = blockStride - elementsPerBlockSMFMA
 
@@ -1181,11 +1182,11 @@ class LocalReadMFMA(LocalRead):
                                 perpStrideInv = permBlock // perpStride
                                 offset_val = (eIdx * (perpStrideInv) + ((vIdx) * numOffsets+oIdx) * MIWaveGroupShape[tile01]) * tileStride
                             else:
-                                offset_val = (eIdx + (vIdx * numOffsets+oIdx) * MIWaveGroupShape[tile01]) * tileStride
+                                offset_val = (eIdx + (vIdx * numOffsets + oIdx) * MIWaveGroupShape[tile01]) * tileStride
 
                             if kernel["ProblemType"]["Sparse"] != 0:
                                 if blocksPerTGroupSMFMA > 1:
-                                    blockId = (rIdx * numElementPerRead) // elementsPerBlockSMFMA  #block 0 or block 1
+                                    blockId = (rIdx * numElementPerRead) // elementsPerBlockSMFMA  # block 0 or block 1
                                     if kernel["UnrollMajorLDS%s"%(tc)]:
                                         offset_val = offset_val + (blockOffsetSMFMA * blockId)
                                     else:
