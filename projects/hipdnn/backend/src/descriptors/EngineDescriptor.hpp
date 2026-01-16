@@ -5,6 +5,8 @@
 
 #include "BackendDescriptor.hpp"
 
+#include <flatbuffers/detached_buffer.h>
+
 namespace hipdnn_backend
 {
 
@@ -40,6 +42,14 @@ private:
                      int64_t requestedElementCount,
                      int64_t* elementCount,
                      void* arrayOfElements) const;
+
+    void getKnobInfo(hipdnnBackendAttributeType_t attributeType,
+                     int64_t requestedElementCount,
+                     int64_t* elementCount,
+                     void* arrayOfElements) const;
+
+    // Cached serialized knob buffers - lazily populated on first getKnobInfo call
+    mutable std::vector<flatbuffers::DetachedBuffer> _knobSerializedBuffers;
 
 public:
     void finalize() override;
