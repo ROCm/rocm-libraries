@@ -492,7 +492,7 @@ if(MIOPEN_USE_HIPRTC)
 endif()
 
 option(Boost_USE_STATIC_LIBS "Use boost static libraries" ON)
-dd_definitions(-DBOOST_ALL_NO_LIB=1)
+add_definitions(-DBOOST_ALL_NO_LIB=1)
 find_package(Boost REQUIRED COMPONENTS filesystem CONFIG)
 
 find_path(HALF_INCLUDE_DIR half/half.hpp)
