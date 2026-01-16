@@ -159,6 +159,23 @@ public:
             epsilon->get_uid());
     }
 
+    static BatchnormInferenceAttributesVarianceExt fromFlatBuffer(
+        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt* fb,
+        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    {
+        BatchnormInferenceAttributesVarianceExt attr;
+
+        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
+        attr.set_mean(tensorMap.at(fb->mean_tensor_uid()));
+        attr.set_variance(tensorMap.at(fb->variance_tensor_uid()));
+        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
+        attr.set_bias(tensorMap.at(fb->bias_tensor_uid()));
+        attr.set_epsilon(tensorMap.at(fb->epsilon_tensor_uid()));
+        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
+
+        return attr;
+    }
+
 private:
     std::shared_ptr<TensorAttributes> getInput(InputNames name) const
     {

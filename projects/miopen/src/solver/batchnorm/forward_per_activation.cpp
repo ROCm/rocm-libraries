@@ -146,8 +146,10 @@ BnFwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
             decltype(auto) params = raw_params.CastTo<miopen::batchnorm::FwdTrainInvokeParams>();
             const auto resultsave =
                 params.resultSaveMean != nullptr && params.resultSaveInvVariance != nullptr;
-            const auto resultrunning =
-                params.resultRunningMean != nullptr && params.resultRunningVariance != nullptr;
+            const auto resultrunning = params.prevResultRunningMean != nullptr &&
+                                       params.prevResultRunningVariance != nullptr &&
+                                       params.nextResultRunningMean != nullptr &&
+                                       params.nextResultRunningVariance != nullptr;
 
             if(resultsave && resultrunning)
             {
@@ -158,8 +160,10 @@ BnFwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
                        params.bnScale,
                        params.bnBias,
                        params.expAvgFactor,
-                       params.resultRunningMean,
-                       params.resultRunningVariance,
+                       params.prevResultRunningMean,
+                       params.prevResultRunningVariance,
+                       params.nextResultRunningMean,
+                       params.nextResultRunningVariance,
                        params.epsilon,
                        params.resultSaveMean,
                        params.resultSaveInvVariance);
@@ -185,8 +189,10 @@ BnFwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
                        params.bnScale,
                        params.bnBias,
                        params.expAvgFactor,
-                       params.resultRunningMean,
-                       params.resultRunningVariance,
+                       params.prevResultRunningMean,
+                       params.prevResultRunningVariance,
+                       params.nextResultRunningMean,
+                       params.nextResultRunningVariance,
                        params.epsilon);
             }
             else
