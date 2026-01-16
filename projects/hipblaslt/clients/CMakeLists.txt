@@ -58,6 +58,13 @@ if(HIPBLASLT_ENABLE_OPENMP)
     target_link_libraries(hipblaslt-bench PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
+if( CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  # GCC or hip-clang needs specific flags to turn on f16c intrinsics
+  target_compile_options( hipblaslt-bench PRIVATE -mf16c )
+  # FIXME: workaround to emulator
+  target_compile_options( hipblaslt-bench PRIVATE -mf16c -mno-avx )
+endif( )
+
 add_subdirectory(common)
 add_subdirectory(bench)
 
@@ -112,6 +119,13 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER)
     endif()
+
+    if( CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      # GCC or hip-clang needs specific flag to turn on f16c intrinsics
+      # FIXME: workaround for emulator
+      target_compile_options( hipblaslt-test PRIVATE -mf16c -mno-avx )
+    endif( )
+
     add_subdirectory(tests)
 endif()
 
