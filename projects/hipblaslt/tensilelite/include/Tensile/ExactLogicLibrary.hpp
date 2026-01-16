@@ -149,14 +149,16 @@ namespace TensileLite
 
                 auto rowSolutions = row.second->findAllSolutions(problem, hardware, searchType);
 
-                if(debug)
+                // hipblaslt_ext::matmulIsTuned() -> rocblaslt_matmul_is_tuned() needs this Equal test
+                if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(row.first.value.get()))
                 {
-                    if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(row.first.value.get()))
-                    {
-                        for(auto& sol : rowSolutions)
-                            sol->tag = MySolution::MatchingTag::Equal;
-                    }
-                    else if(dynamic_cast<Predicates::Contraction::GridBasedMatching*>(row.first.value.get()))
+                    for(auto& sol : rowSolutions)
+                        sol->tag = MySolution::MatchingTag::Equal;
+                }
+                // except for Equal, we test others only when debug mode.
+                else if(debug)
+                {
+                    if(dynamic_cast<Predicates::Contraction::GridBasedMatching*>(row.first.value.get()))
                     {
                         for(auto& sol : rowSolutions)
                             sol->tag = MySolution::MatchingTag::GridBased;
@@ -237,14 +239,16 @@ namespace TensileLite
                     solutions
                         = row.second->findTopSolutions(problem, hardware, numSolutions - rv.size());
 
-                    if(debug)
+                    // hipblaslt_ext::matmulIsTuned() -> rocblaslt_matmul_is_tuned() needs this Equal test
+                    if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(row.first.value.get()))
                     {
-                        if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(row.first.value.get()))
-                        {
-                            for(auto& sol : solutions)
-                                sol->tag = MySolution::MatchingTag::Equal;
-                        }
-                        else if(dynamic_cast<Predicates::Contraction::GridBasedMatching*>(row.first.value.get()))
+                        for(auto& sol : solutions)
+                            sol->tag = MySolution::MatchingTag::Equal;
+                    }
+                    // except for Equal, we test others only when debug mode.
+                    else if(debug)
+                    {
+                        if(dynamic_cast<Predicates::Contraction::GridBasedMatching*>(row.first.value.get()))
                         {
                             for(auto& sol : solutions)
                                 sol->tag = MySolution::MatchingTag::GridBased;
