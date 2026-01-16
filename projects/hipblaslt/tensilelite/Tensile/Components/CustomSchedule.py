@@ -2694,7 +2694,6 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
-    # print('kernel', kernel)
     kernel["MfmaInitCVgprs"] = True
     numMfma = 144
     optSchedule = dict()
@@ -2794,16 +2793,16 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
         # mfma Reordering
         mfmaReorder = [i for i in range(0,numMfma//4)] + [i for i in range(numMfma//2,3*numMfma//4)]+[i for i in range(numMfma//4,numMfma//2)]+[i for i in range(3*numMfma//4,numMfma)]
 
-        # Interleaving of LBR0 and GRINCB to hide LRB0 latency
+        # Interleave LBR0 and GRINCB
         lrb0 = create_range(min_val = 0, num = 6, step = 1, repeat = 1)
         grIncB = create_range(min_val = 0, num = 6, step = 1, repeat = 1)
         grIncB += create_range(min_val = max(lrb0)+1, num = 1, step = 1, repeat = 3)
         
+        # Interleave GRINCA and PACKB0
         grIncA = create_range(min_val = max(grIncB)+1, num = 2, step = 1, repeat = 3)
         waitLRB0 = max(grIncA)
         grIncA += create_range(min_val = max(grIncA)+2, num = 3, step = 1, repeat = 1)
 
-        # PackB0 using mfma4x4x4_16b
         startPACKB0 = waitLRB0
         packBOffset = [ 
                    0, 0, 1, 1, 
@@ -2864,13 +2863,13 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
         lra3 = [create_range(min_val = startLRA3+1, num = numLrReadA // 2, step = 2, repeat = 2),
                 create_range(min_val = startLRA3, num = numLrReadA // 2, step = 2, repeat = 2)]
 
+        # M0 update before barrier to prevent bad interleaving between the 2 codepaths
         grB[0] += [startLRA3-2,startLRA3]
         grB[1] += [startLRA3-2,startLRA3+1]
 
         grB[0] += create_range(min_val = startLRA3+2,num = 2,step = 2, repeat = 2)
         grB[1] += create_range(min_val = startLRA3+3,num = 2,step = 2, repeat = 2)
-        # waitLRA3 = max(lra3[1])+6  
-    
+        
         # LRB3 + PACKA3 & PACKB3
         startLRB3 = (3*numMfma)//4 - 4 # Starts 4 indexes before 3/4 MFMAs to accommodate LRB3 latency
         lrb3 = create_range(min_val = startLRB3,num=numLrReadB - 2,step=1,repeat=1)
@@ -2914,19 +2913,16 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
                     waitLRB0+6, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LRB0 to complete"),
                     waitLRB0+6, SBarrier(comment="Barrier before GRB"), 
 
-                    
+                    # incremental wait on LRA0
                     waitLRA0, SWaitCnt(dscnt=min(15,numLrReadA-4), vlcnt=-1, vscnt=-1, comment="Wait for 4 LRA0 to complete"),
-                    # waitLRA0+1, SWaitCnt(dscnt=min(15,numLrReadA-8), vlcnt=-1, vscnt=-1, comment="Wait for 8 LRA0 to complete"),
-                    # waitLRA0+2, SWaitCnt(dscnt=min(15,numLrReadA-12), vlcnt=-1, vscnt=-1, comment="Wait for 12 LRA0 to complete"),
-                    # waitLRA0+3, SWaitCnt(dscnt=min(15,numLrReadA-16), vlcnt=-1, vscnt=-1, comment="Wait for 16 LRA0 to complete"),
-                    waitLRA0+4, SWaitCnt(dscnt=min(15,numLrReadA-20), vlcnt=-1, vscnt=-1, comment="Wait for 20 LRA0 to complete"),
-                    waitLRA0+5, SWaitCnt(dscnt=min(15,numLrReadA-24), vlcnt=-1, vscnt=-1, comment="Wait for 24 LRA0 to complete"),
+                    waitLRA0+4, SWaitCnt(dscnt=numLrReadA-20, vlcnt=-1, vscnt=-1, comment="Wait for 20 LRA0 to complete"),
+                    waitLRA0+5, SWaitCnt(dscnt=numLrReadA-24, vlcnt=-1, vscnt=-1, comment="Wait for 24 LRA0 to complete"),
                     waitLRA0+6, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
 
                     startLRA3-1,SWaitCnt(dscnt=-1, vlcnt=3, vscnt=-1, comment="Wait for previous GRA&B"),
                     startLRA3-1,SBarrier(comment="Sync before GRA, LRA3 & LRB3"),
 
-                    # incremental wait on LRA3
+                    # incremental wait on LRA3 & LRB3
                     waitLRA3, SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="Wait for half LRA3 to complete"),                    
                     waitLRA3+7, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA3/LRB3 to complete"),                    
 
@@ -2941,7 +2937,7 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
             'GRIncB': [grIncB],
             'LRA0': [*lra0],
             'LRB0': [lrb0],
-            'LRSA': [[packA0[4]]],
+            'LRSA': [[packA0[4]]],#Use slot between MFMA 16x16x32 & 4x4x4 for LRSA
             'LRSB': [[packA0[4]]],
             'PackA0' : [packA0],
             'PackB0' : [packB0],
@@ -2959,7 +2955,6 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
 
         nglshift = nllshift = 14
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder=mfmaReorder)
-        # opt1.disableValidation()
     
     else:
         return False, None
