@@ -238,7 +238,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
-        - MIArchVgpr: [0,1]
+        - MIArchVgpr: [0]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
