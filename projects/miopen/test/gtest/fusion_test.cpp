@@ -26,6 +26,9 @@
 #include <gtest/gtest.h>
 #include <gtest/gtest_common.hpp>
 #include <miopen/miopen.h>
+#include <miopen/fusion.hpp>
+#include <miopen/fusion/solvers.hpp>
+#include <miopen/find_solution.hpp>
 
 #include "tensor_holder.hpp"
 #include "get_handle.hpp"
@@ -176,7 +179,46 @@ TEST(CPU_FusionCreateOpConvForward_FP32, TestInvalidConvLayout)
     EXPECT_EQUAL(status, miopenStatusUnknownError);
 }
 
-MIOPEN_LIB_ENV_VAR(MIOPEN_FIND_MODE_FUSION)
+MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1)
+
+// The test uses a specific fusion configuration that triggers the solver.
+// ConvCKIgemmGrpFwdBiasActivFused
+// The test runs two cases:
+// 1) with exact or larger workspace size than required (expected to pass)
+// 2) with smaller workspace size than required (expected to return error)
+
+// check if ConvCKIgemmGrpFwdBiasActivFused solver is supported on the device
+bool IsConvCKIgemmGrpFwdBiasActivFusedSolverSupported(miopen::FusionPlanDescriptor& fusion_plan)
+{
+    const auto fusion_problem = miopen::FusionDescription{&fusion_plan};
+    auto fusion_ctx           = miopen::FusionContext{get_handle()};
+
+    miopen::solver::fusion::ConvCKIgemmGrpFwdBiasActivFused solv{};
+    return solv.IsApplicable(fusion_ctx, fusion_problem);
+}
+
+//
+// Check that only ConvCKIgemmGrpFwdBiasActivFused solver is applicable for the fusion problem
+// This is to ensure that no other solver interferes with the test
+//
+bool IsOnlyConvCKIgemmGrpFwdBiasActivFusedSolverApplicable(
+    miopen::FusionPlanDescriptor& fusion_plan)
+{
+    const auto fusion_problem = miopen::FusionDescription{&fusion_plan};
+    auto ctx                  = miopen::FusionContext{get_handle()};
+
+    const auto target_id = miopen::solver::Id("ConvCKIgemmGrpFwdBiasActivFused");
+    std::vector<miopen::solver::Id> ids =
+        miopen::debug::GetAllApplicableFusionSolutions(ctx, fusion_problem);
+    // find all fusion solvers that are applicable but not expected
+    for(auto id : ids)
+    {
+        std::cout << id.ToString() << "\n";
+        if(id.Value() != target_id.Value())
+            return false;
+    }
+    return true;
+}
 
 template <typename T>
 class GPU_CBAFind2FusionWorkspace : public ConvBiasActivInferTest<T>
@@ -189,20 +231,25 @@ public:
         cba_base::SetUp();
         fusion_args = static_cast<miopenOperatorArgs_t>(&(cba_base::params));
         fusion_plan = static_cast<miopenFusionPlanDescriptor_t>(&(cba_base::fusePlanDesc));
+        miopen::deref(fusion_plan).findMode.Set(miopen::FindMode::Values::Normal);
     }
 
     void RunTest(bool PositiveTest)
     {
-
+        if(IsConvCKIgemmGrpFwdBiasActivFusedSolverSupported(cba_base::fusePlanDesc) == false)
+        {
+            this->test_skipped = true;
+            GTEST_SKIP()
+                << "ConvCKIgemmGrpFwdBiasActivFused solver is not supported on this device";
+        }
         miopen::solver::debug::TuningIterationScopedLimiter tuning_limit{5};
-
         auto&& handle = get_handle();
         {
-            ScopedEnvironment<std::string> find_mode_env1(MIOPEN_FIND_MODE_FUSION,
-                                                          std::string("normal"));
-            ScopedEnvironment<std::string> find_mode_env2(
-                MIOPEN_DEBUG_FIND_ONLY_SOLVER, std::string("ConvCKIgemmGrpFwdBiasActivFused"));
-
+            ScopedEnvironment<bool> find_mode_env1(MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1, false);
+            ASSERT_TRUE(
+                IsOnlyConvCKIgemmGrpFwdBiasActivFusedSolverApplicable(cba_base::fusePlanDesc))
+                << "Test configuration is invalid as other solvers are applicable. Please update "
+                   "the test case.";
             EXPECT_EQ(miopenCompileFusionPlan(&handle, fusion_plan), miopenStatusSuccess);
         }
 
@@ -214,7 +261,8 @@ public:
         // This test requires a case with a non-zero workspace size.
         // If this check fails, the test configuration needs to be updated
         // to a case that requires workspace.
-        EXPECT_TRUE(workspace_size > 0);
+        ASSERT_TRUE(workspace_size > 0)
+            << "Test configuration does not require workspace. Please update the test case.";
 
         if(PositiveTest)
         {

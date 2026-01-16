@@ -775,6 +775,20 @@ static auto GetAllFusionSolvers()
            GetFusedWinogradSolvers();
 }
 
+namespace debug {
+std::vector<solver::Id> GetAllApplicableFusionSolutions(const FusionContext& ctx,
+                                                        const FusionDescription& fusion_problem)
+{
+    std::vector<solver::Id> ids;
+    GetAllFusionSolvers().Foreach([&](auto solver) {
+        if(!solver.IsApplicable(ctx, fusion_problem))
+            return;
+        const auto id = miopen::solver::Id(solver.SolverDbId());
+        ids.push_back(id);
+    });
+    return ids;
+}
+} // namespace debug
 solver::ConvSolution MakeFusedSolution(const FusionContext& ctx,
                                        solver::Id id,
                                        const std::optional<std::string>& perf_cfg_override,
@@ -1061,7 +1075,6 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
     std::vector<Solution> find_results = [&]() {
         std::vector<Solution> find_results;
 
-        FindMode findMode(solver::Primitive::Fusion);
         auto sol = std::optional<miopenConvSolution_t>{};
         if(findMode.IsFast(fusion_problem) || findMode.IsHybrid(fusion_problem))
         {

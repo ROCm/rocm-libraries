@@ -87,7 +87,7 @@ struct MIOPEN_INTERNALS_EXPORT FusionPlanDescriptor : miopenFusionPlanDescriptor
     bool fp_contains_bn;
     miopenDataType_t data_type;
     std::vector<Exec_arg_t> arg_list;
-
+    FindMode findMode{solver::Primitive::Fusion};
     std::optional<std::pair<size_t, Invoker>> compiled_invoker;
     std::optional<miopenConvFwdAlgorithm_t> conv_fwd_algo;
 };
