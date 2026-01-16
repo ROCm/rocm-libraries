@@ -1135,7 +1135,8 @@ using TestCase = std::vector<int>;
 auto NameGenerator(const ::testing::TestParamInfo<TestCase>& info)
 {
     std::stringstream name{};
-    name << "n" << info.param[0] << "c" << info.param[1] << "h" << info.param[2] << "w" << info.param[3];
+    name << "n" << info.param[0] << "c" << info.param[1] << "h" << info.param[2] << "w"
+         << info.param[3];
     return name.str();
 }
 } // namespace
@@ -1215,8 +1216,8 @@ public:
 
         tolerance = 80 * input.desc.GetElementSize();
 
-        test_helpers::CompareResults(verify_forward_infer_bn_spatial_recalc<T, PREC_TYPE>{input, scale, shift},
-                       tolerance);
+        test_helpers::CompareResults(
+            verify_forward_infer_bn_spatial_recalc<T, PREC_TYPE>{input, scale, shift}, tolerance);
 
         // inference use estimated running values
         auto estMean = std::get<1>(outpair.second);
@@ -1302,8 +1303,8 @@ public:
             if constexpr(MIO_BN_SP_TEST_DEBUG == 1)
                 std::cout << "Running back propagation spatial recalc." << std::endl;
             tolerance = 80 * input.desc.GetElementSize();
-            test_helpers::CompareResults(verify_backward_bn_spatial_recalc<T, PREC_TYPE>{input, dy_input, scale},
-                           tolerance);
+            test_helpers::CompareResults(
+                verify_backward_bn_spatial_recalc<T, PREC_TYPE>{input, dy_input, scale}, tolerance);
         }
 
         // backprop use saved values
@@ -1384,8 +1385,16 @@ using GPU_BN_Spatial_FP32 = batch_norm_spatial_test<float>;
 TEST_P(GPU_BN_Spatial_FP16, TestFloat16) { Run(); }
 TEST_P(GPU_BN_Spatial_FP32, TestFloat32) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_BN_Spatial_FP16, GetCases(), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Full, GPU_BN_Spatial_FP32, GetCases(), [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Full, GPU_BN_Spatial_FP16, GetCases(), [](const auto& info) {
+    return NameGenerator(info);
+});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_BN_Spatial_FP32, GetCases(), [](const auto& info) {
+    return NameGenerator(info);
+});
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_FP16, GetCases(false), [](const auto& info) { return NameGenerator(info); });
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_FP32, GetCases(false), [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_FP16, GetCases(false), [](const auto& info) {
+    return NameGenerator(info);
+});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_FP32, GetCases(false), [](const auto& info) {
+    return NameGenerator(info);
+});
