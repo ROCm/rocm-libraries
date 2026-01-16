@@ -561,7 +561,7 @@ namespace TensileLite
 
         auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK] = calculateAutoWGM(problem, hardware, sk.grid);
         auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
-            = calculateAutoStaggerU(problem, hardware, sk.grid);
+            = calculateAutoStaggerU(problem, hardware, sk.grid, autoWGM);
         uint32_t autoGsuVal = calculateAutoGSU(problem, hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
 
@@ -1070,7 +1070,7 @@ namespace TensileLite
     }
 
     std::tuple<size_t, size_t, size_t> ContractionSolution::calculateAutoStaggerU(
-        Problem const& problem, Hardware const* hardware, uint32_t const skgrid) const
+        Problem const& problem, Hardware const* hardware, uint32_t skgrid, int32_t autoWGM) const
     {
         // Hardware
         AMDGPU const*         pAMDGPU   = dynamic_cast<AMDGPU const*>(hardware);
@@ -1108,7 +1108,7 @@ namespace TensileLite
                     };
 
                     origami::staggerU_t prediction_results = origami::select_staggerU(
-                        origami_problem, *(hipAMDGPU->analyticalHardware), origami_config, skgrid);
+                        origami_problem, *(hipAMDGPU->analyticalHardware), origami_config, skgrid, autoWGM);
 
                     defaultStaggerUMapping     = prediction_results.staggerUMapping;
                     defaultStaggerU            = prediction_results.staggerU;
@@ -1450,7 +1450,7 @@ namespace TensileLite
             auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK]
                 = calculateAutoWGM(problem, &hardware, sk.grid);
             auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
-                = calculateAutoStaggerU(problem, &hardware, sk.grid);
+                = calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM);
             if(T_Debug)
             {
                 std::cout << "WGM: " << autoWGM << ", WGMXCC: " << autoWGMXCC
@@ -1639,7 +1639,7 @@ namespace TensileLite
             auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK]
                 = calculateAutoWGM(problems[0], &hardware, 0);
             auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
-                = calculateAutoStaggerU(problems[0], &hardware, 0);
+                = calculateAutoStaggerU(problems[0], &hardware, 0, autoWGM);
 
             if(internalArgsSupport.useUniversalArgs)
             {

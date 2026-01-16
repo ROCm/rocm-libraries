@@ -34,10 +34,10 @@ std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
  * @brief Selects the best workgroup mapping parameters (maximizing cache hits) given fixed macro
  * tile sizes.
  *
- * @param[in] problem Problem description (M, N, K, etc.)
- * @param[in] hardware Hardware characteristics
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics
  * @param config Kernel configuration.
- *
+ * @param skGrid SK grid.
  * @return A workgroup_mapping_t struct: best predicted (wgmxccchunk, wgmxcc, wgm).
  */
 workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
@@ -291,16 +291,18 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
 /**
  * @brief Selects the best staggerU parameters (maximizing cache hits) given fixed macro tile sizes.
  *
- * @param[in] problem Problem description (M, N, K, etc.)
- * @param[in] hardware Hardware characteristics
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics
  * @param config Kernel configuration.
- *
+ * @param skGrid SK grid.
+ * @param autoWGM Auto-selected WGM.
  * @return A staggerU_t struct: best predicted (staggerUMapping, staggerU, staggerUStrideShift).
  */
 staggerU_t select_staggerU(const problem_t& problem,
                            const hardware_t& hardware,
                            const config_t& config,
-                           size_t skGrid) {
+                           size_t skGrid,
+                           int32_t wgm) {
   // Extract parameters from structured types
   size_t M     = problem.size.m;
   size_t N     = problem.size.n;
@@ -345,11 +347,33 @@ staggerU_t select_staggerU(const problem_t& problem,
 
   // -------------------
   // General Cases
-  // -------------------
-  // Early exit cases
-  if(numMT_K > 36) // If MainLoop is substantial, we don't need to use staggerU
+  // -------------------  
+  // Early Exit: If K is substantial, StaggerU effect is negligible
+  if(numMT_K > 36)
     return staggerU_t{0, 0, 0};
   
+  // // Early Exit: If there is not a lot of L2 tiles, StaggerU effect is negligible
+  // if(batch == 1 && split_factor == 1 && numMTs < numCUsPerXCD)
+  //   return staggerU_t{0, 0, 0};
+
+  // In a typicall GEMM, CUs compete to access the first K-slice.
+  // While the first K-slice is in MALL, CUs on the same XCD compete to access the K-slice in L2.
+  // Thus, there are two tiers of contention:
+  // 1. XCDs compete to access the first K-slice in MALL (MALL -> L2).
+  // 2. CUs on the same XCD compete to access the K-slice in L2 (L2 -> L1).
+  // The first one is not critical. GFX950 has 8 XCDs, so the contention is not severe.
+  // The second tier is the more critical one, as it determines the latency of accessing the K-slice in L2.
+  // To minimize the contention, we can stagger the K-slice in L2.
+  // For that, we need to know the size of the L2 tile which is determined by the WGM.
+  // Note that not all L2 tiles residing on the same XCD always have the same size (becuase of wrapping that usually happens
+  // in for the last XCD L2 tile).
+  // In those cases, the performance is affected by inefficient use of L2 (for the last XCD) and the L2 contention is masked,
+  // but the MALL contention is not masked.
+  
+  // Find the dimension with the least number of MTs
+  size_t min_MTs = std::min(numMT_M, numMT_N);
+
+
   
   size_t out_staggerUMapping     = defaultStaggerUMapping;
   size_t out_staggerU            = defaultStaggerU;
