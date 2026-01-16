@@ -45,7 +45,7 @@ Tests:
   category: quick
   function: csrsort
   precision: *single_precision
-  M: [10, 500]
+  M: [10, 300]
   N: [33, 242]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]

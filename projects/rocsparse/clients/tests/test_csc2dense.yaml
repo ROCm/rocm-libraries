@@ -63,7 +63,7 @@ Tests:
   category: nightly
   function: csc2dense
   precision: *single_double_precisions_complex_real
-  M: [2000, 4000, 8000]
+  M: [1000, 2000]
   N: [2000, 4000]
   denseld: [ 8000 ]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]

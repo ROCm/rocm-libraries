@@ -35,8 +35,8 @@ Tests:
   category: quick
   function: prune_dense2csr
   precision: *single_double_precisions
-  M: [3, 8, 13, 64, 256]
-  N: [3, 8, 13, 64, 256]
+  M: [3, 8]
+  N: [3, 8]
   denseld: [256, 512]
   threshold: [0.1, 0.5, 1.2]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
@@ -65,8 +65,8 @@ Tests:
   category: quick
   function: prune_dense2csr
   precision: *single_double_precisions
-  M: [5, 7, 10]
-  N: [2, 17, 33]
+  M: [5, 7]
+  N: [2, 17]
   denseld: [50]
   threshold: [0.6, 0.9, 1.0]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]

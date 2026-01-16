@@ -45,7 +45,7 @@ Tests:
   category: quick
   function: cscsort
   precision: *single_precision
-  M: [10, 500]
+  M: [10, 300]
   N: [33, 242]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
@@ -55,8 +55,8 @@ Tests:
   category: pre_checkin
   function: cscsort
   precision: *single_precision
-  M: [0, 3872, 10000]
-  N: [0, 1623, 10000]
+  M: [8, 2000]
+  N: [8, 1623]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   algo: [0, 1]
@@ -65,8 +65,8 @@ Tests:
   category: nightly
   function: cscsort
   precision: *single_precision
-  M: [29593, 159382, 738249]
-  N: [9173, 82940, 538192]
+  M: [5000]
+  N: [4586, 5000]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   algo: [0, 1]

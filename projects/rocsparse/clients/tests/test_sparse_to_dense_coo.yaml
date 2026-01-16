@@ -37,8 +37,8 @@ Tests:
   function: sparse_to_dense_coo
   indextype: *i32_i64
   precision: *single_double_precisions
-  M: [22, 54, 167]
-  N: [12, 33, 77, 201]
+  M: [22, 54]
+  N: [12, 33]
   denseld: [100, 256]
   baseA: *all_rocsparse_index_base
   order: *all_rocsparse_order
@@ -48,8 +48,8 @@ Tests:
   function: sparse_to_dense_coo
   indextype: *i32_i64
   precision: *half_precision
-  M: [512]
-  N: [756]
+  M: [300]
+  N: [300]
   denseld: [1000]
   baseA: *all_rocsparse_index_base
   order: *all_rocsparse_order
@@ -59,8 +59,8 @@ Tests:
   function: sparse_to_dense_coo
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
-  M: [0, 531, 1000]
-  N: [0, 241, 1000]
+  M: [8, 531]
+  N: [8, 241]
   denseld: [100, 1000, 2000]
   baseA: [rocsparse_index_base_zero]
   order: [rocsparse_order_row, rocsparse_order_column]

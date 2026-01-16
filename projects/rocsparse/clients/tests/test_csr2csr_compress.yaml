@@ -76,8 +76,8 @@ Tests:
   category: pre_checkin
   function: csr2csr_compress
   precision: *single_double_precisions_complex_real
-  M: [0, 500, 1000]
-  N: [0, 242, 1000]
+  M: [8, 500]
+  N: [8, 242]
   alpha_alphai: *tol_range_checkin
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]

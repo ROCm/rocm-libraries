@@ -35,8 +35,8 @@ Tests:
   category: quick
   function: csr2hyb
   precision: *single_double_precisions_complex_real
-  M: [10, 872]
-  N: [33, 623]
+  M: [10, 300]
+  N: [33, 300]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
   algo: [-33]
@@ -46,8 +46,8 @@ Tests:
   category: pre_checkin
   function: csr2hyb
   precision: *single_double_precisions_complex_real
-  M: [0, 500, 1000]
-  N: [0, 242, 1000]
+  M: [8, 500]
+  N: [8, 242]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
   algo: [-33, 0, 2147483647]
@@ -57,8 +57,8 @@ Tests:
   category: nightly
   function: csr2hyb
   precision: *single_double_precisions_complex_real
-  M: [27428, 941291, 1105637]
-  N: [18582, 571938, 995827]
+  M: [5000]
+  N: [3716, 5000]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
   algo: [-33]

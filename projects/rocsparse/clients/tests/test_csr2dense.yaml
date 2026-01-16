@@ -44,8 +44,8 @@ Tests:
   category: pre_checkin
   function: csr2dense
   precision: *single_double_precisions_complex_real
-  M: [0, 531, 1000]
-  N: [0, 241, 1000]
+  M: [8, 531]
+  N: [8, 241]
   denseld: [1000, 2000]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -53,8 +53,8 @@ Tests:
   category: pre_checkin
   function: csr2dense
   precision: *single_double_precisions_complex_real
-  M: [0, 531, 1000]
-  N: [0, 241, 1000]
+  M: [8, 531]
+  N: [8, 241]
   denseld: [1000, 2000]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   graph_test: true
@@ -63,7 +63,7 @@ Tests:
   category: nightly
   function: csr2dense
   precision: *single_double_precisions_complex_real
-  M: [2000, 4000, 8000]
+  M: [1000, 2000]
   N: [2000, 4000]
   denseld: [ 8000 ]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]

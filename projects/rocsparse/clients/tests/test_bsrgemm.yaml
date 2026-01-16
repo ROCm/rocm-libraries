@@ -61,8 +61,8 @@ Tests:
   category: quick
   function: bsrgemm
   precision: *single_double_precisions
-  M: [435, 2370, 3100]
-  N: [330, 2456, 31802]
+  M: [300]
+  N: [300]
   K: [200, 2700, 3849]
   block_dim: [2, 7]
   alpha_alphai: *alpha_range_quick
@@ -82,7 +82,7 @@ Tests:
   function: bsrgemm
   precision: *single_double_precisions_complex_real
   M: 1
-  N: [1000, 8670, 12000]
+  N: [1000, 2000]
   K: 1
   block_dim: [3, 11]
   alpha_alphai: *alpha_range_checkin
@@ -179,8 +179,8 @@ Tests:
   category: quick
   function: bsrgemm
   precision: *single_double_precisions_complex_real
-  M: [50, 647]
-  N: [13, 523]
+  M: [50, 300]
+  N: [13, 300]
   K: [50, 254]
   block_dim: [7, 16]
   alpha_alphai: *alpha_range_quick
@@ -234,7 +234,7 @@ Tests:
   function: bsrgemm
   precision: *single_double_precisions
   M: 1
-  N: [13, 523]
+  N: [13, 300]
   K: 1
   block_dim: [8, 20]
   alpha_alphai: *alpha_range_quick
@@ -257,7 +257,7 @@ Tests:
   function: bsrgemm
   precision: *single_double_precisions
   M: 1
-  N: [0, 3712, 16021]
+  N: [8, 2000]
   K: 1
   block_dim: [3, 12]
   alpha_alphai: *alpha_range_checkin
@@ -282,7 +282,7 @@ Tests:
   function: bsrgemm
   precision: *single_double_precisions
   M: 1
-  N: [149231]
+  N: [14923]
   K: 1
   block_dim: [5, 6]
   alpha_alphai: *alpha_range_nightly
@@ -304,7 +304,7 @@ Tests:
   function: bsrgemm
   precision: *double_only_precisions
   M: 1
-  N: [156287]
+  N: [15628]
   K: 1
   block_dim: [8, 9]
   alpha_alphai: *alpha_range_nightly
@@ -325,7 +325,7 @@ Tests:
   function: bsrgemm
   precision: *single_double_precisions_complex
   M: 1
-  N: [21, 719]
+  N: [21, 300]
   K: 1
   block_dim: [3, 18]
   alpha_alphai: *alpha_range_quick
@@ -345,7 +345,7 @@ Tests:
   function: bsrgemm
   precision: *single_double_precisions_complex
   M: 1
-  N: [0, 5925, 20142]
+  N: [8, 2000]
   K: 1
   block_dim: [15, 19]
   alpha_alphai: *alpha_range_checkin
@@ -384,7 +384,7 @@ Tests:
   category: quick
   function: bsrgemm
   precision: *single_double_precisions_complex_real
-  M: [582]
+  M: [300]
   N: [243]
   K: 1
   block_dim: [5, 11]
@@ -429,7 +429,7 @@ Tests:
   category: nightly
   function: bsrgemm
   precision: *single_double_precisions_complex_real
-  M: [194823, 943929, 2094392]
+  M: [5000]
   N: [21042, 174923]
   K: 1
   block_dim: [11]

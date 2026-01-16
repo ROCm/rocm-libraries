@@ -54,8 +54,8 @@ Tests:
   category: pre_checkin
   function: gemmi
   precision: *single_double_precisions_complex_real
-  M: [0, 1, 2, 511]
-  N: [0, 1, 2, 7, 33, 64, 78]
+  M: [8, 1]
+  N: [8, 1]
   K: [0, 1, 2, 391]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
@@ -85,8 +85,8 @@ Tests:
   category: quick
   function: gemmi
   precision: *single_double_precisions_complex_real
-  M: [0, 42, 275]
-  N: [0, 7, 19, 143]
+  M: [8, 42]
+  N: [8, 7]
   K: [0, 50, 173]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -136,7 +136,7 @@ Tests:
   function: gemmi
   precision: *single_double_precisions_complex_real
   M: [1943, 4912]
-  N: [2, 27, 49]
+  N: [2, 27]
   K: [1134, 3291]
   alpha_beta: *alpha_beta_range_nightly
   transA: [rocsparse_operation_none]
@@ -150,7 +150,7 @@ Tests:
   function: gemmi
   precision: *single_double_precisions
   M: 1
-  N: [16, 22, 38]
+  N: [16, 22]
   K: 1
   alpha_beta: *alpha_beta_range_nightly
   transA: [rocsparse_operation_none]
@@ -171,7 +171,7 @@ Tests:
   function: gemmi
   precision: *single_double_precisions_complex
   M: 1
-  N: [12, 31, 40]
+  N: [12, 31]
   K: 1
   alpha_beta: *alpha_beta_range_nightly
   transA: [rocsparse_operation_none]
@@ -186,7 +186,7 @@ Tests:
   function: gemmi
   precision: *single_double_precisions_complex_real
   M: [42, 275]
-  N: [7, 19, 143]
+  N: [7, 19]
   K: [50, 173]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]

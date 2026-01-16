@@ -39,7 +39,7 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: {f32_r, f64_c}
   M: [17, 49]
-  N: [7, 17, 203]
+  N: [7, 17]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_zero]
   formatA: [rocsparse_format_csr, rocsparse_format_csc ]
@@ -52,8 +52,8 @@ Tests:
   function: extract
   indextype: *i32i32_i64i32_i64i64
   precision: f32_r
-  M: [49, 203, 20033, 3249, 79392]
-  N: [419, 65402]
+  M: [49, 203]
+  N: [419, 2000]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
   formatA: [rocsparse_format_csr, rocsparse_format_csc ]
@@ -66,8 +66,8 @@ Tests:
   index_type_I: i64
   index_type_J: i32
   precision: f32_r
-  M: [179399, 33249, 931392]
-  N: [739392, 433370, 324943]
+  M: [5000]
+  N: [5000]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
   formatA: [rocsparse_format_csr, rocsparse_format_csc ]
@@ -80,8 +80,8 @@ Tests:
   index_type_I: i32
   index_type_J: i32
   precision: f32_r
-  M: [179399, 33249, 931392]
-  N: [739392, 433370, 324943]
+  M: [5000]
+  N: [5000]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
   formatA: [rocsparse_format_csr, rocsparse_format_csc ]

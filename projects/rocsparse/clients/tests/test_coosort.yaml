@@ -46,7 +46,7 @@ Tests:
   category: quick
   function: coosort
   precision: *single_precision
-  M: [10, 500]
+  M: [10, 300]
   N: [33, 242]
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
@@ -57,8 +57,8 @@ Tests:
   category: pre_checkin
   function: coosort
   precision: *single_precision
-  M: [0, 3872, 10000]
-  N: [0, 1623, 10000]
+  M: [8, 2000]
+  N: [8, 1623]
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]

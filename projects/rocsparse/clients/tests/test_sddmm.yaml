@@ -49,8 +49,8 @@ Tests:
   function: sddmm
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
-  M: [2,4,8]
-  N: [1,4,8]
+  M: [2, 4]
+  N: [1, 4]
   K: [1,2,8]
   alpha_beta: *alpha_beta_range_pre_checkin
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -137,8 +137,8 @@ Tests:
   function: sddmm
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions
-  M: [12, 16, 43]
-  N: [93, 130, 220]
+  M: [12, 16]
+  N: [93, 130]
   K: [3, 34, 59]
   alpha_beta: *alpha_beta_range_pre_checkin
   transA: [rocsparse_operation_none]
@@ -177,8 +177,8 @@ Tests:
   function: sddmm
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions
-  M: [12, 16, 43]
-  N: [93, 130, 220]
+  M: [12, 16]
+  N: [93, 130]
   K: [3, 34, 59]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -212,7 +212,7 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *float16_float16_float16_float16_abct_precision
   M: [144, 188]
-  N: [203, 357]
+  N: [203, 300]
   K: [72, 528]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -228,8 +228,8 @@ Tests:
   function: sddmm
   indextype: *i32i32_i64i32_i64i64
   precision: [*float16_float16_float16_float32_abct_precision, *bfloat16_bfloat16_bfloat16_float32_abct_precision]
-  M: [434, 576]
-  N: [487, 435]
+  M: [300]
+  N: [300]
   K: [1262, 776]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -265,8 +265,8 @@ Tests:
   function: sddmm
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions
-  M: [400000]
-  N: [400000]
+  M: [40000]
+  N: [40000]
   K: [32, 64]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]

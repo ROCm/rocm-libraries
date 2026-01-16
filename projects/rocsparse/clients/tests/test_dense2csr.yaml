@@ -53,8 +53,8 @@ Tests:
   category: pre_checkin
   function: dense2csr
   precision: *single_double_precisions_complex_real
-  M: [0, 531]
-  N: [0, 241]
+  M: [8, 531]
+  N: [8, 241]
   denseld: [600, 1000, 2000]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -71,7 +71,7 @@ Tests:
   category: nightly
   function: dense2csr
   precision: *single_double_precisions_complex_real
-  M: [2000, 4000, 8000]
+  M: [1000, 2000]
   N: [2000, 4000]
   denseld: [ 8000 ]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]

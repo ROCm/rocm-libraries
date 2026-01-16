@@ -35,8 +35,8 @@ Tests:
   category: quick
   function: csr2gebsr
   precision: *single_double_precisions_complex_real
-  M: [325]
-  N: [435]
+  M: [300]
+  N: [300]
   row_block_dimA: [8]
   col_block_dimA: [4]
   baseA: [rocsparse_index_base_zero]

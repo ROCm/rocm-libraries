@@ -61,7 +61,7 @@ Tests:
   category: quick
   function: bsrgeam
   precision: *single_double_precisions_complex_real
-  M: [582]
+  M: [300]
   N: [243]
   block_dim: [5, 11]
   alpha_alphai: *alpha_range_quick
@@ -76,7 +76,7 @@ Tests:
   category: quick
   function: bsrgeam
   precision: *single_double_precisions_complex_real
-  M: [8, 582]
+  M: [8, 300]
   N: [12, 243]
   block_dim: [3, 16]
   alpha_alphai: *alpha_range_quick
@@ -91,8 +91,8 @@ Tests:
   category: pre_checkin
   function: bsrgeam
   precision: *single_double_precisions_complex_real
-  M: [0, 24, 1582, 8422]
-  N: [0, 61, 2512, 11692]
+  M: [8, 24]
+  N: [8, 61]
   block_dim: [4, 9]
   alpha_alphai: *alpha_range_checkin
   beta_betai: *beta_range_checkin

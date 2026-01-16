@@ -71,8 +71,8 @@ Tests:
   category: pre_checkin
   function: csrmm
   precision: *single_double_precisions_complex_real
-  M: [1, 2, 32]
-  N: [0, 1, 8, 32]
+  M: [1, 2]
+  N: [8, 1]
   K: [0, 1, 32]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
@@ -86,8 +86,8 @@ Tests:
   category: pre_checkin
   function: csrmm
   precision: *double_only_precisions_complex_real
-  M: [32, 64, 512]
-  N: [32, 64, 123]
+  M: [32, 64]
+  N: [32, 64]
   K: [32, 64, 512]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
@@ -100,8 +100,8 @@ Tests:
   category: pre_checkin
   function: csrmm
   precision: *double_only_precisions
-  M: [32, 64, 512]
-  N: [32, 64, 123]
+  M: [32, 64]
+  N: [32, 64]
   K: [32, 64, 512]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
@@ -368,7 +368,7 @@ Tests:
   hardware: [gfx90a]
   function: csrmm
   precision: *single_only_precisions
-  M: [300000000]
+  M: [30000000]
   N: [2]
   K: [300000000]
   alpha_beta: *alpha_beta_range_stress

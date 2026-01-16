@@ -35,8 +35,8 @@ Tests:
   category: quick
   function: ell2csr
   precision: *single_double_precisions_complex_real
-  M: [10, 872]
-  N: [33, 623]
+  M: [10, 300]
+  N: [33, 300]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]

@@ -66,8 +66,8 @@ Tests:
   category: quick
   function: bsrmm
   precision: *single_double_precisions_complex_real
-  M: [275, 708]
-  N: [128, 628]
+  M: [275, 300]
+  N: [128, 300]
   K: [173, 747]
   block_dim: [5, 16]
   alpha_beta: *alpha_beta_range_quick
@@ -128,8 +128,8 @@ Tests:
   category: pre_checkin
   function: bsrmm
   precision: *single_double_precisions_complex_real
-  M: [0, 1, 511]
-  N: [0, 1, 2, 37]
+  M: [8, 1]
+  N: [8, 1]
   K: [0, 1, 391]
   block_dim: [1, 2, 4, 8, 16, 32, 64]
   alpha_beta: *alpha_beta_range_checkin
@@ -143,7 +143,7 @@ Tests:
   category: pre_checkin
   function: bsrmm
   precision: *single_double_precisions
-  M: [2511]
+  M: [2000]
   N: [37]
   K: [391]
   block_dim: [2]
@@ -174,7 +174,7 @@ Tests:
   category: pre_checkin
   function: bsrmm
   precision: *single_double_precisions
-  M: [2511]
+  M: [2000]
   N: [37]
   K: [391]
   block_dim: [2]

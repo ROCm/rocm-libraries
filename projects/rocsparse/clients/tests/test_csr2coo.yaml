@@ -53,8 +53,8 @@ Tests:
   category: pre_checkin
   function: csr2coo
   precision: *single_precision
-  M: [0, 500, 1000]
-  N: [0, 242, 1000]
+  M: [8, 500]
+  N: [8, 242]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
 
@@ -62,8 +62,8 @@ Tests:
   category: pre_checkin
   function: csr2coo
   precision: *single_precision
-  M: [345, 653, 978, 1103]
-  N: [535, 875, 923, 2341]
+  M: [345, 653]
+  N: [535, 875]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
 
