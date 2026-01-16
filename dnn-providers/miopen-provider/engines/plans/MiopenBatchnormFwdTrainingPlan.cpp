@@ -402,24 +402,24 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
         }
         else
         {
-            THROW_ON_MIOPEN_FAILURE(
-                miopenBatchNormalizationForwardTraining(handle.miopenHandle,
-                                                        MIOPEN_BATCHNORM_MODE_TRAINING,
-                                                        &alpha,
-                                                        &beta,
-                                                        _trainingParams.x().tensorDescriptor(),
-                                                        xBuffer.ptr,
-                                                        _trainingParams.y().tensorDescriptor(),
-                                                        yBuffer.ptr,
-                                                        _trainingParams.scale().tensorDescriptor(),
-                                                        scaleBuffer.ptr,
-                                                        biasBuffer.ptr,
-                                                        expAvgFactor,
-                                                        nullptr, // resultRunningMean: nullptr means running mean is not saved
-                                                        nullptr, // resultRunningVariance: nullptr means running variance is not saved
-                                                        epsilon,
-                                                        resultSaveMeanPtr,
-                                                        resultSaveInvVariancePtr));
+            THROW_ON_MIOPEN_FAILURE(miopenBatchNormalizationForwardTraining(
+                handle.miopenHandle,
+                MIOPEN_BATCHNORM_MODE_TRAINING,
+                &alpha,
+                &beta,
+                _trainingParams.x().tensorDescriptor(),
+                xBuffer.ptr,
+                _trainingParams.y().tensorDescriptor(),
+                yBuffer.ptr,
+                _trainingParams.scale().tensorDescriptor(),
+                scaleBuffer.ptr,
+                biasBuffer.ptr,
+                expAvgFactor,
+                nullptr, // resultRunningMean: nullptr means running mean is not saved
+                nullptr, // resultRunningVariance: nullptr means running variance is not saved
+                epsilon,
+                resultSaveMeanPtr,
+                resultSaveInvVariancePtr));
         }
     }
 }

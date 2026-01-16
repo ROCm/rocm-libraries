@@ -62,6 +62,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::shared_ptr<graph::TensorAttributes> prevRunningMean;
     std::shared_ptr<graph::TensorAttributes> prevRunningVar;
 
+    double momentumVal = 0.1;
+
     // Conditionally setup running statistics inputs
     if(config.useRunningStats)
     {
@@ -70,7 +72,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
         // Momentum: use pass-by-value with double (matches MIOpen API)
         auto momentum = std::make_shared<graph::TensorAttributes>();
-        momentum->set_value(0.1);
+        momentum->set_value(momentumVal);
 
         bnAttributes.set_previous_running_stats(prevRunningMean, prevRunningVar, momentum);
     }
