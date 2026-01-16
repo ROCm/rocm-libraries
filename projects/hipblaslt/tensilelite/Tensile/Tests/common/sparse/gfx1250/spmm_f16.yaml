@@ -11,18 +11,18 @@ GlobalParameters:
   ValidationPrintValids: False # print matches too
   # DataInitValueActivationArgs: [0.5, -1]
   Architecture: gfx1250
-  DataInitTypeBeta: 0
-  DataInitTypeAlpha: 1
-  DataInitTypeBias: 0
-  DataInitTypeA: 3
-  DataInitTypeB: 3
-  DataInitTypeScaleAlphaVec: 1
-  PruneSparseMode: 1
-  PrintTensorA: 1
-  PrintTensorB: 1
-  PrintTensorC: 0
-  PrintTensorD: 1
-  PrintTensorRef: 1
+  # DataInitTypeBeta: 0
+  # DataInitTypeAlpha: 1
+  # DataInitTypeBias: 0
+  # DataInitTypeA: 3
+  # DataInitTypeB: 3
+  # DataInitTypeScaleAlphaVec: 1
+  # PruneSparseMode: 1
+  # PrintTensorA: 1
+  # PrintTensorB: 1
+  # PrintTensorC: 0
+  # PrintTensorD: 1
+  # PrintTensorRef: 1
   # GenerateSourcesAndExit: True
   AMDGPUArchPath: rocm_agent_enumerator
 

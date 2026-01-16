@@ -225,6 +225,11 @@ inline std::map<std::string, int>
                                     "v_swmmac_f32_16x16x64_f16 v[0:7], v[8:15], v[16:31], v[44]",
                                     isDebug, 
                                     true);
+    rv["HasSWMMA_gfx1250"] = tryAssembler(isaVersion,
+                                          assemblerPath,
+                                          "v_swmmac_f32_16x16x64_f16 v[0:7], v[8:15], v[16:31], v[44]",
+                                          isDebug,
+                                          true);
 
     rv["v_mac_f16"] = tryAssembler(isaVersion, assemblerPath, "v_mac_f16 v47, v36, v34", isDebug);
 
