@@ -36,6 +36,7 @@
  * Scale parameters for a matrix (A or B).
  * - preSwizzleTile: Pre-swizzle tile configuration {tileMN, tileK, subTileK}
  *   Similar to scaleShuffleTileA/B in rocRoller's TypeParameters.
+ * - preTile: Pre-tile configuration {tileM, tileK} for A or {tileK, tileN} for B
  */
 struct ScaleType
 {
@@ -44,6 +45,7 @@ struct ScaleType
     size_t                           blockColSize = 1u;
     rocRoller::DataType              type         = rocRoller::DataType::E8M0;
     std::vector<size_t> preSwizzleTile; // {tileMN, tileK, subTileK} for pre-swizzled scale data
+    std::vector<size_t> preTile;        
 
     auto operator<=>(const ScaleType& other) const = default;
 };
@@ -70,8 +72,15 @@ struct std::hash<ScaleType>
                                   + (preSwizzleTileHash >> 2);
         }
 
+        size_t preTileHash = 0;
+        for(const auto& elem : s.preTile)
+        {
+            preTileHash ^= std::hash<size_t>{}(elem) + 0x9e3779b9 + (preTileHash << 6)
+                           + (preTileHash >> 2);
+        }
+
         return modeHash ^ (blockRowSizeHash << 1) ^ (blockColSizeHash << 2) ^ (typeHash << 3)
-               ^ (preSwizzleTileHash << 4);
+               ^ (preSwizzleTileHash << 4) ^ (preTileHash << 5);
     }
 };
 

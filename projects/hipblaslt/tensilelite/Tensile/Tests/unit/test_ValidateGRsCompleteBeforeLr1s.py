@@ -22,18 +22,14 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-import unittest
-import pytest
-
 from rocisa.instruction import SWaitCnt, SBarrier
 
-from Tensile.Components.CMSValidator import verify_lrs_and_grs
-from test_CustomSchedule import create_base_kernel, ScheduleInfo
+from Tensile.Components.CMSValidator import verify_grs_finish_before_lrs
+from cms_validation_base import CMSValidationTestBase
 
-class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
-    def setUp(self):
-        self.kernel = create_base_kernel()
-        self.num_vmfma = 2 * self.kernel["MIWaveTileA"] * self.kernel["MIWaveTileB"]
+class TestValidateGRsCompleteBeforeLr1s(CMSValidationTestBase):
+    def validation_function(self, sched, kernel_dict, codePathIdx):
+        return verify_grs_finish_before_lrs(sched, kernel_dict, codePathIdx)
 
     def test_simple_case_success(self):
         """
@@ -57,9 +53,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
-        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
-        assert status, f"Schedule should have passed validation but did not. {message}"
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
 
     def test_grs_not_swait(self):
         """
@@ -83,10 +77,10 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
-        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
-        assert not status, f"Schedule should have failed (GRA is not guaranteed before LRA1), but passed. {message}"
-        assert message == "Code path 0: GRA at index 0 is not valid. There are no guarantees on when it will be done."
+        self.validate(
+            optSchedule, syncCode, 1, 2, 2, 0,
+            "GRA at index 0 is not valid. There are no guarantees on when it will be done."
+        )
 
     def test_no_sbarrier(self): 
         """
@@ -109,10 +103,10 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SWaitCnt(dscnt=-1, vlcnt=2, vscnt=-1, comment="Wait for GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
-        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
-        assert not status, f"Schedule should have failed (GRA is not guaranteed before LRA1), but passed. {message}"
-        assert message == "Code path 0: GRA at index 0 is not valid. There is no SBarrier acting on it."
+        self.validate(
+            optSchedule, syncCode, 1, 2, 2, 0,
+            "GRA at index 0 is not valid. There is no SBarrier acting on it."
+        )
 
     def test_swait_after_sbarrier(self):
         """
@@ -136,10 +130,10 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SWaitCnt(dscnt=-1, vlcnt=2, vscnt=-1, comment="Wait for GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
-        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
-        assert not status, f"Schedule should have failed (no barrier between GRA and LRA1), but passed. {message}"
-        assert message == "Code path 0: GRA at index 0 is not valid. No SBarrier between SWait @ idx=3 and LR1 @ idx=6. Order must be GR -> SWait -> SBarrier -> LR1."
+        self.validate(
+            optSchedule, syncCode, 1, 2, 2, 0,
+            "GRA at index 0 is not valid. No SBarrier between SWait @ idx=3 and LR1 @ idx=6. Order must be GR -> SWait -> SBarrier -> LR1."
+        )
 
     def test_guaranteed_after_first_lr1(self):
         """
@@ -164,10 +158,10 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
 
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 4, 4)
-        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
-        assert not status, f"Schedule should have failed (first LRA1 before last GRA), but passed. {message}"
-        assert message == "Code path 0: GRA at index 0 is not valid. It is guaranteed by the SWait @ idx=4 which is after the first corresponding LR1 @ idx=3. Order must be GR -> SWait -> SBarrier -> LR1."
+        self.validate(
+            optSchedule, syncCode, 1, 4, 4, 0,
+            "GRA at index 0 is not valid. It is guaranteed by the SWait @ idx=4 which is after the first corresponding LR1 @ idx=3. Order must be GR -> SWait -> SBarrier -> LR1."
+        )
 
     def test_less_than_1_full_iteration_to_complete(self):
         """
@@ -191,9 +185,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
-        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
-        assert status, f"Schedule should have passed validation but did not. {message}"
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
 
     def test_some_grs_less_than_1_full_iteration_to_complete(self):
         """
@@ -217,9 +209,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 6, 6)
-        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
-        assert status, f"Schedule should have passed validation but did not. {message}"
+        self.validate(optSchedule, syncCode, 1, 6, 6, 0, None)
 
     def test_swait_and_sbarrier_in_preloop(self):
         """
@@ -243,9 +233,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
-        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
-        assert status, f"Schedule should have passed validation but did not. {message}"
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
 
     def test_grs_in_preloop(self):
         """
@@ -268,9 +256,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
-        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
-        assert status, f"Schedule should have passed validation but did not. {message}"
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
 
     def test_last_gr_swait_sbarrier_in_same_index(self):
         """
@@ -295,9 +281,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
-        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
-        assert status, f"Schedule should have passed validation but did not. {message}"
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
 
     def test_swait_sbarrier_first_lr1_in_same_index(self):
         """
@@ -322,9 +306,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
-        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
-        assert status, f"Schedule should have passed validation but did not. {message}"
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
 
     def test_swap_global_read_order_success(self):
         """
@@ -351,9 +333,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRAs (loading B)"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
-        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
-        assert status, f"Schedule should have passed validation but did not. {message}"
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
 
     def test_swap_global_read_order_failure(self):
         """
@@ -381,10 +361,10 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRBs (loading A)"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
-        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
-        assert not status, f"Schedule should have failed validation but passed. {message}"
-        assert message == "Code path 0: GRB (Swapped, loading A) at index 3 is not valid. It is guaranteed by the SWait @ idx=4 which is after the first corresponding LR1 @ idx=2. Order must be GR -> SWait -> SBarrier -> LR1."
+        self.validate(
+            optSchedule, syncCode, 1, 2, 2, 0,
+            "GRB (Swapped, loading A) at index 3 is not valid. It is guaranteed by the SWait @ idx=4 which is after the first corresponding LR1 @ idx=2. Order must be GR -> SWait -> SBarrier -> LR1."
+        )
 
     def test_fail_with_odd_number_of_grs(self):
         """
@@ -408,9 +388,10 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
 
-        with pytest.raises(AssertionError) as excinfo:
-            verify_lrs_and_grs(sched, {"kernel": self.kernel})
-        
-        assert str(excinfo.value) == "Code path 0: GRA has an odd number of indices. Must be even if DirectToLds is True."
+        self.kernel["DirectToLds"] = True
+        expected_message = "Code path 0: GRA has an odd number of indices. Must be even if DirectToLds is True."
+        try:
+            self.validate(optSchedule, syncCode, 1, 2, 2, 0, expected_message)
+        except AssertionError as e:
+            assert str(e) == expected_message, f"Expected: {expected_message}, Got: {str(e)}"
