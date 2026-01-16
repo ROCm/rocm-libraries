@@ -263,10 +263,19 @@ TEST_CASE("GEMM: calculate_work_utilization unit test", "[gemm]") {
       auto result_very_small  = origami::calculate_work_utilization(problem_very_small, config);
       REQUIRE(result_very_small == Approx(0.0007152).epsilon(1e-4));
 
-      // Test 4: Test with very large problems
+      // Test 5: Test with very large problems
       auto problem_very_large = make_problem(409601, 409601, 4095);
       auto result_very_large  = origami::calculate_work_utilization(problem_very_large, config);
       REQUIRE(result_very_large == Approx(0.998).epsilon(1e-3));
+
+      // Test 6: Test with skinny matrices
+      auto problem_skinny = make_problem(128, 81920, 1024);  // Small M, Big N
+      auto result_skinny  = origami::calculate_work_utilization(problem_skinny, config);
+      REQUIRE(result_skinny == 0.5);
+
+      problem_skinny = make_problem(81920, 128, 1024);  // Small N, Big M
+      result_skinny  = origami::calculate_work_utilization(problem_skinny, config);
+      REQUIRE(result_skinny == 0.5);
     }
   }
 }
@@ -291,23 +300,30 @@ TEST_CASE("GEMM: calculate_output_utilization unit test", "[gemm]") {
       auto result_with_vector_elems = origami::calculate_output_utilization(problem, config, 23UL);
       REQUIRE(result_with_vector_elems == Approx(1.010).epsilon(1e-3));
 
-      // Test 3: Test with zero dimensions (should return 1.0)
+      // Test 4: Test with zero dimensions (should return 1.0)
       auto problem_zero_dimensions = make_problem(0, 3839, 959);
       auto result_zero_dimensions =
           origami::calculate_output_utilization(problem_zero_dimensions, config, 1UL);
       REQUIRE(result_zero_dimensions == 1.0);
 
-      // Test 4: Test with very small problems
+      // Test 5: Test with different problem sizes
       auto problem_very_small = make_problem(10, 20, 15);
       auto result_very_small =
           origami::calculate_output_utilization(problem_very_small, config, 1UL);
       REQUIRE(result_very_small == Approx(0.003051).epsilon(1e-3));
 
-      // Test 4: Test with very large problems
       auto problem_very_large = make_problem(409601, 409601, 4095);
       auto result_very_large =
           origami::calculate_output_utilization(problem_very_large, config, 1UL);
       REQUIRE(result_very_large == Approx(0.998).epsilon(1e-3));
+
+      auto problem_skinny = make_problem(64, 81920, 1024);  // Small M, Big N
+      auto result_skinny  = origami::calculate_output_utilization(problem_skinny, config, 1UL);
+      REQUIRE(result_skinny == 0.25);
+
+      problem_skinny = make_problem(81920, 64, 1024);  // Small N, Big M
+      result_skinny  = origami::calculate_output_utilization(problem_skinny, config, 1UL);
+      REQUIRE(result_skinny == 0.25);
     }
   }
 }
@@ -428,8 +444,44 @@ TEST_CASE("GEMM: compute_cu_occupancy unit test", "[gemm]") {
         REQUIRE(std::get<1>(result_max_cus) == 150);
         REQUIRE(std::get<2>(result_max_cus) == 1);
         REQUIRE(std::get<3>(result_max_cus) == 1);
-      }
-      if (gpu_arch == 950) {
+
+        // Test 5: Test with multiple split parameter
+        auto result_multiple_split_parameter =
+            origami::compute_cu_occupancy(problem,
+                                          hardware,
+                                          config,
+                                          origami::grid_selection_t::k_split_aware,
+                                          hardware.N_CU,
+                                          10UL);
+        REQUIRE(std::get<0>(result_multiple_split_parameter) == 2560);
+        REQUIRE(std::get<1>(result_multiple_split_parameter) == 304);
+        REQUIRE(std::get<2>(result_multiple_split_parameter) == 9);
+        REQUIRE(std::get<3>(result_multiple_split_parameter) == 10);
+
+        result_multiple_split_parameter =
+            origami::compute_cu_occupancy(problem,
+                                          hardware,
+                                          config,
+                                          origami::grid_selection_t::k_split_aware,
+                                          hardware.N_CU,
+                                          100UL);
+        REQUIRE(std::get<0>(result_multiple_split_parameter) == 25600);
+        REQUIRE(std::get<1>(result_multiple_split_parameter) == 304);
+        REQUIRE(std::get<2>(result_multiple_split_parameter) == 85);
+        REQUIRE(std::get<3>(result_multiple_split_parameter) == 100);
+
+        result_multiple_split_parameter =
+            origami::compute_cu_occupancy(problem,
+                                          hardware,
+                                          config,
+                                          origami::grid_selection_t::k_split_aware,
+                                          hardware.N_CU,
+                                          423UL);
+        REQUIRE(std::get<0>(result_multiple_split_parameter) == 108288);
+        REQUIRE(std::get<1>(result_multiple_split_parameter) == 304);
+        REQUIRE(std::get<2>(result_multiple_split_parameter) == 357);
+        REQUIRE(std::get<3>(result_multiple_split_parameter) == 423);
+      } else if (gpu_arch == 950) {
         // Test 1: Test with split parameter provided
         auto result_with_split =
             origami::compute_cu_occupancy(problem,
@@ -538,8 +590,44 @@ TEST_CASE("GEMM: compute_cu_occupancy unit test", "[gemm]") {
         REQUIRE(std::get<1>(result_max_cus) == 150);
         REQUIRE(std::get<2>(result_max_cus) == 1);
         REQUIRE(std::get<3>(result_max_cus) == 1);
-      }
 
+        // Test 5: Test with multiple split parameter
+        auto result_multiple_split_parameter =
+            origami::compute_cu_occupancy(problem,
+                                          hardware,
+                                          config,
+                                          origami::grid_selection_t::k_split_aware,
+                                          hardware.N_CU,
+                                          10UL);
+        REQUIRE(std::get<0>(result_multiple_split_parameter) == 2560);
+        REQUIRE(std::get<1>(result_multiple_split_parameter) == 256);
+        REQUIRE(std::get<2>(result_multiple_split_parameter) == 10);
+        REQUIRE(std::get<3>(result_multiple_split_parameter) == 10);
+
+        result_multiple_split_parameter =
+            origami::compute_cu_occupancy(problem,
+                                          hardware,
+                                          config,
+                                          origami::grid_selection_t::k_split_aware,
+                                          hardware.N_CU,
+                                          100UL);
+        REQUIRE(std::get<0>(result_multiple_split_parameter) == 25600);
+        REQUIRE(std::get<1>(result_multiple_split_parameter) == 256);
+        REQUIRE(std::get<2>(result_multiple_split_parameter) == 100);
+        REQUIRE(std::get<3>(result_multiple_split_parameter) == 100);
+
+        result_multiple_split_parameter =
+            origami::compute_cu_occupancy(problem,
+                                          hardware,
+                                          config,
+                                          origami::grid_selection_t::k_split_aware,
+                                          hardware.N_CU,
+                                          423UL);
+        REQUIRE(std::get<0>(result_multiple_split_parameter) == 108288);
+        REQUIRE(std::get<1>(result_multiple_split_parameter) == 256);
+        REQUIRE(std::get<2>(result_multiple_split_parameter) == 423);
+        REQUIRE(std::get<3>(result_multiple_split_parameter) == 423);
+      }
       // Test 5: Verify logger metrics are set correctly (TODO)
       // Test 6: Test reduction_strategy selection (TODO)
     }
@@ -572,9 +660,29 @@ TEST_CASE("GEMM: compute_mem_bw_from_occupancy unit test", "[gemm]") {
           origami::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
       REQUIRE(result_different_mem_bw_per_wg_coefficients == 1.0);
 
+      // Test 3: Test with values less than 1
+      hardware.mem_bw_per_wg_coefficients = std::make_tuple(0.000001, 0.001, 0);
+      auto result_value_less_than_one =
+          origami::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
+      if (gpu_arch == 942)
+        REQUIRE(result_value_less_than_one == Approx(0.3964).epsilon(1e-3));
+      else if (gpu_arch == 950)
+        REQUIRE(result_value_less_than_one == Approx(0.32153).epsilon(1e-3));
+
+      hardware.mem_bw_per_wg_coefficients = std::make_tuple(0.000002, 0.002, 0);
+      result_value_less_than_one = origami::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
+      if (gpu_arch == 942)
+        REQUIRE(result_value_less_than_one == Approx(0.7928).epsilon(1e-3));
+      else if (gpu_arch == 950)
+        REQUIRE(result_value_less_than_one == Approx(0.64307).epsilon(1e-3));
+
       // Reset the value of mem_bw_per_wg_coefficients back
-      hardware.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.015, 0);
-      // Test 3: Verify calculation correctness (TODO)
+      if (gpu_arch == 942)
+        hardware.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.015, 0);
+      else if (gpu_arch == 950)
+        hardware.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.008, 0);
+
+      // Test 4: Verify calculation correctness (TODO)
     }
   }
 }
@@ -648,35 +756,50 @@ TEST_CASE("GEMM: compute_cvt_overhead unit test", "[gemm]") {
       auto problem  = make_problem(2047, 2047, 4096);
       auto config   = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
-      // Test 1: Test with XFloat32 data type
-      origami::problem_t problem_Xfloat32 = {
+      // Test 1: Test with Float data type
+      origami::problem_t problem_Float = {
           .size            = {4097, 8001, 4096},
           .batch           = 1,
           .a_transpose     = origami::transpose_t::N,
           .b_transpose     = origami::transpose_t::T,
-          .a_dtype         = origami::data_type_t::XFloat32,  // element_size_A = 32
-          .b_dtype         = origami::data_type_t::XFloat32,
+          .a_dtype         = origami::data_type_t::Float,
+          .b_dtype         = origami::data_type_t::Float,
+          .mi_dtype        = origami::data_type_t::Float,
+          .a_mx_block_size = 0,
+          .b_mx_block_size = 0,
+      };
+      auto result_test_with_Float = origami::compute_cvt_overhead(problem_Float, hardware, config);
+      REQUIRE(result_test_with_Float == 0.0);
+
+      // Test 2: Test with XFloat32 as mi_dtype and BFloat16 as a_dtype and b_dtype
+      origami::problem_t problem_XFloat32 = {
+          .size            = {8097, 8001, 4096},
+          .batch           = 1,
+          .a_transpose     = origami::transpose_t::N,
+          .b_transpose     = origami::transpose_t::T,
+          .a_dtype         = origami::data_type_t::BFloat16,
+          .b_dtype         = origami::data_type_t::BFloat16,
           .mi_dtype        = origami::data_type_t::XFloat32,
           .a_mx_block_size = 0,
           .b_mx_block_size = 0,
       };
-      auto result_test_with_Xfloat32 =
-          origami::compute_cvt_overhead(problem_Xfloat32, hardware, config);
-      REQUIRE(result_test_with_Xfloat32 == 0.0);
+      auto result_test_with_XFloat32 =
+          origami::compute_cvt_overhead(problem_XFloat32, hardware, config);
+      REQUIRE(result_test_with_XFloat32 == 0.0);
 
-      // Test 2: Test conversion overhead calculation (TODO) (Need more clarification)
-      // Test 3: Test with different tile sizes
+      // Test 3: Test conversion overhead calculation (TODO) (Need more clarification)
+      // Test 4: Test with different tile sizes
       auto result_with_different_tile_sizes =
           origami::compute_cvt_overhead(problem, hardware, config);
-      REQUIRE(result_test_with_Xfloat32 == 0.0);
+      REQUIRE(result_with_different_tile_sizes == 0.0);
 
       config                           = make_config(128, 128, 64, 32, 32, 8, false, 1);
       result_with_different_tile_sizes = origami::compute_cvt_overhead(problem, hardware, config);
-      REQUIRE(result_test_with_Xfloat32 == 0.0);
+      REQUIRE(result_with_different_tile_sizes == 0.0);
 
       config                           = make_config(64, 64, 256, 32, 32, 8, false, 1);
       result_with_different_tile_sizes = origami::compute_cvt_overhead(problem, hardware, config);
-      REQUIRE(result_test_with_Xfloat32 == 0.0);
+      REQUIRE(result_with_different_tile_sizes == 0.0);
     }
   }
 }
@@ -752,24 +875,23 @@ TEST_CASE("GEMM: check_lds_capacity unit test", "[gemm]") {
         REQUIRE(result_tiles_exceed_LDS_capacity == false);
 
         // Test 2: Test with different data type combinations
-        auto result_different_data_type =
-            origami::check_lds_capacity(hardware,
-                                        {64, 64, 256},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::BFloat16);
-        REQUIRE(result_different_data_type == true);
-
-        result_different_data_type = origami::check_lds_capacity(hardware,
-                                                                 {128, 128, 64},
-                                                                 origami::data_type_t::XFloat32,
-                                                                 origami::data_type_t::XFloat32);
+        auto result_different_data_type = origami::check_lds_capacity(
+            hardware, {64, 64, 256}, origami::data_type_t::Half, origami::data_type_t::Half);
         REQUIRE(result_different_data_type == true);
 
         result_different_data_type = origami::check_lds_capacity(
-            hardware, {256, 256, 64}, origami::data_type_t::Float8, origami::data_type_t::Float8);
+            hardware, {256, 256, 512}, origami::data_type_t::Double, origami::data_type_t::Double);
+        REQUIRE(result_different_data_type == false);
+
+        result_different_data_type = origami::check_lds_capacity(
+            hardware, {128, 128, 64}, origami::data_type_t::Int8, origami::data_type_t::Int8);
         REQUIRE(result_different_data_type == true);
 
-        // Test 3: Test with XFloat32 (element_size = 16) (TODO: Need more clarification)
+        result_different_data_type = origami::check_lds_capacity(
+            hardware, {128, 128, 32}, origami::data_type_t::Int64, origami::data_type_t::Int64);
+        REQUIRE(result_different_data_type == true);
+
+        // Test 3: Test with Float (element_size = 16) (TODO: Need more clarification)
 
         // Test 4: Test edge cases (exactly at capacity, just over)
         auto result_exactly_at_capacity =
@@ -809,24 +931,23 @@ TEST_CASE("GEMM: check_lds_capacity unit test", "[gemm]") {
         REQUIRE(result_tiles_exceed_LDS_capacity == false);
 
         // Test 2: Test with different data type combinations
-        auto result_different_data_type =
-            origami::check_lds_capacity(hardware,
-                                        {64, 64, 256},
-                                        origami::data_type_t::BFloat16,
-                                        origami::data_type_t::BFloat16);
-        REQUIRE(result_different_data_type == true);
-
-        result_different_data_type = origami::check_lds_capacity(hardware,
-                                                                 {256, 256, 64},
-                                                                 origami::data_type_t::XFloat32,
-                                                                 origami::data_type_t::XFloat32);
+        auto result_different_data_type = origami::check_lds_capacity(
+            hardware, {64, 64, 256}, origami::data_type_t::Half, origami::data_type_t::Half);
         REQUIRE(result_different_data_type == true);
 
         result_different_data_type = origami::check_lds_capacity(
-            hardware, {512, 512, 64}, origami::data_type_t::Float8, origami::data_type_t::Float8);
+            hardware, {256, 256, 512}, origami::data_type_t::Double, origami::data_type_t::Double);
+        REQUIRE(result_different_data_type == false);
+
+        result_different_data_type = origami::check_lds_capacity(
+            hardware, {256, 256, 64}, origami::data_type_t::Int8, origami::data_type_t::Int8);
         REQUIRE(result_different_data_type == true);
 
-        // Test 3: Test with XFloat32 (element_size = 16) (TODO: Need more clarification)
+        result_different_data_type = origami::check_lds_capacity(
+            hardware, {256, 256, 32}, origami::data_type_t::Int64, origami::data_type_t::Int64);
+        REQUIRE(result_different_data_type == true);
+
+        // Test 3: Test with Float (element_size = 16) (TODO: Need more clarification)
 
         // Test 4: Test edge cases (exactly at capacity, just over)
         auto result_exactly_at_capacity =
@@ -879,33 +1000,44 @@ TEST_CASE("GEMM: estimate_l2_hit and  estimate_mall_hit unit test", "[gemm]") {
           origami::estimate_mall_hit(problem, hardware, config, 200, -1);
       REQUIRE(result_different_splitting_factors == 0.875);
 
-      // Test 3: Test with different problem sizes
+      // Test 3: Test with different problem sizes and different config
       problem                             = make_problem(8193, 2047, 4096);
+      config                              = make_config(128, 128, 128, 32, 32, 8, 1);
       auto result_different_problem_sizes = origami::estimate_l2_hit(problem, hardware, config, 1);
-      REQUIRE(result_different_problem_sizes == Approx(0.4848).epsilon(1e-3));
-
-      problem                        = make_problem(8193, 4093, 1024);
-      result_different_problem_sizes = origami::estimate_l2_hit(problem, hardware, config, 1);
       if (gpu_arch == 942)
-        REQUIRE(result_different_problem_sizes == Approx(0.7348).epsilon(1e-3));
+        REQUIRE(result_different_problem_sizes == Approx(0.4868).epsilon(1e-3));
       else if (gpu_arch == 950)
         REQUIRE(result_different_problem_sizes == Approx(0.484).epsilon(1e-3));
 
-      problem = make_problem(8193, 2047, 4096);
-      result_different_problem_sizes =
-          origami::estimate_mall_hit(problem, hardware, config, hardware.N_CU, 1);
-      REQUIRE(result_different_problem_sizes == Approx(0.922).epsilon(1e-3));
+      problem                        = make_problem(8193, 4093, 1024);
+      config                         = make_config(64, 128, 128, 32, 32, 8, 1);
+      result_different_problem_sizes = origami::estimate_l2_hit(problem, hardware, config, 1);
+      if (gpu_arch == 942)
+        REQUIRE(result_different_problem_sizes == Approx(0.649).epsilon(1e-3));
+      else if (gpu_arch == 950)
+        REQUIRE(result_different_problem_sizes == Approx(0.6458).epsilon(1e-3));
 
-      problem = make_problem(8193, 4093, 1024);
+      problem = make_problem(8193, 2047, 4096);
+      config  = make_config(256, 128, 64, 32, 32, 8, 1);
       result_different_problem_sizes =
           origami::estimate_mall_hit(problem, hardware, config, hardware.N_CU, 1);
       if (gpu_arch == 942)
-        REQUIRE(result_different_problem_sizes == Approx(0.9348).epsilon(1e-3));
+        REQUIRE(result_different_problem_sizes == Approx(0.923).epsilon(1e-3));
       else if (gpu_arch == 950)
-        REQUIRE(result_different_problem_sizes == Approx(0.922).epsilon(1e-3));
+        REQUIRE(result_different_problem_sizes == Approx(0.9065).epsilon(1e-3));
+
+      problem = make_problem(8193, 4093, 1024);
+      config  = make_config(128, 256, 128, 32, 32, 8, 1);
+      result_different_problem_sizes =
+          origami::estimate_mall_hit(problem, hardware, config, hardware.N_CU, 1);
+      if (gpu_arch == 942)
+        REQUIRE(result_different_problem_sizes == Approx(0.923).epsilon(1e-3));
+      else if (gpu_arch == 950)
+        REQUIRE(result_different_problem_sizes == Approx(0.906).epsilon(1e-3));
 
       // Test 4: Test edge cases (very small/large problems)
       problem                = make_problem(10, 11, 253);
+      config                 = make_config(256, 256, 64, 32, 32, 8, 1);
       auto result_edge_cases = origami::estimate_l2_hit(problem, hardware, config, 1);
       REQUIRE(result_edge_cases == 0.0);
 
