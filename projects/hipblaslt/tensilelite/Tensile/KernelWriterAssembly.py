@@ -4404,7 +4404,7 @@ class KernelWriterAssembly(KernelWriter):
 
     # TBD: optimize MfmaInitCVgprs case when using both VALU and ACC VGPRs (needs to init vgprs and acc separately)
     # Alternatively, allow MFMAInstruction to accept acc2=0
-    if kernel["MfmaInitCVgprs"] == True and self.states.asmCaps["HasMFMA_f8f6f4"] and self.states.maxLimitAgprs > numCVgpr >= 32:
+    if kernel["MfmaInitCVgprs"] == True and self.states.asmCaps["HasMFMA_f8f6f4"] and self.states.maxLimitAgprs >= numCVgpr >= 32:
       tmpVgpr = self.vgprPool.checkOutAligned(2,2,"tmp vgpr for lds init C registers")
       module.add(VMovB64(dst=vgpr(tmpVgpr,2), src=0, comment="A/B=0"))
 
