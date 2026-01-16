@@ -472,8 +472,6 @@ rocblas_status rocblas_internal_trsv_substitution_big_batch_template(rocblas_han
     if(!n || !batch_count)
         return rocblas_status_success;
 
-    auto saved_device_id = handle->push_device_id();
-
     // Initialize completion tracking
     ROCBLAS_LAUNCH_KERNEL(
         rocblas_trsv_init, dim3(batch_count), dim3(1), 0, handle->get_stream(), w_completed_sec);

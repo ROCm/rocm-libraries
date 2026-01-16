@@ -846,7 +846,7 @@ rocblas_status rocblas_internal_trsv_substitution_template(rocblas_handle    han
         constexpr rocblas_int ZTRSV_BB_NB   = 8;
 
 #define TRSV_BATCHED_TEMPLATE_PARAMS                                                         \
-    handle, uplo, transA, diag, n, dA, offset_A, lda, stride_A, nullptr, dx, offset_x, incx, \
+    handle, uplo, transA, diag, n, dA, offset_A, lda, stride_A, alpha, dx, offset_x, incx,   \
         stride_x, batch_count, w_completed_sec
 
         // Use z-dimension batched kernel for high batch count scenarios
