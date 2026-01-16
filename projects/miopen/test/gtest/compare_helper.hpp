@@ -36,8 +36,7 @@
 #include "verify.hpp"
 #include "../tensor_holder.hpp"
 
-namespace test_helpers
-{
+namespace test_helpers {
 template <typename T>
 constexpr bool is_floating_point_tensor =
     (std::is_same_v<typename T::value_type, half_float::half> ||
@@ -49,25 +48,25 @@ constexpr bool any_float_tensors()
     return (is_floating_point_tensor<Ts> || ...);
 }
 
-template<class T>
+template <class T>
 auto const& GetResultData(std::vector<T> const& result)
 {
     return result;
 }
 
-template<class T>
+template <class T>
 std::vector<T> const& GetResultData(tensor<T> const& result)
 {
     return result.data;
 }
 
-template<class T>
+template <class T>
 constexpr double GetResultDataErrorMargin(std::vector<T> const& result, double tolerance)
 {
     return (std::numeric_limits<T>::epsilon() * tolerance);
 }
 
-template<class T>
+template <class T>
 constexpr double GetResultDataErrorMargin(tensor<T> const& result, double tolerance)
 {
     return (std::numeric_limits<T>::epsilon() * tolerance);
@@ -79,13 +78,16 @@ bool CompareFloatTensorTuples(LeftTuple const& left,
                               double tolerance,
                               std::index_sequence<I...>)
 {
-    return ((miopen::rms_range(GetResultData(std::get<I>(left)), GetResultData(std::get<I>(right))) <=
-             (GetResultDataErrorMargin(std::get<I>(left), tolerance))) &&
-            ...);
+    return (
+        (miopen::rms_range(GetResultData(std::get<I>(left)), GetResultData(std::get<I>(right))) <=
+         (GetResultDataErrorMargin(std::get<I>(left), tolerance))) &&
+        ...);
 }
 
-template<typename... CpuT, typename... GpuT>
-bool Compare(std::tuple<CpuT...> const& cpu_result, std::tuple<GpuT...> const& gpu_result, double tolerance)
+template <typename... CpuT, typename... GpuT>
+bool Compare(std::tuple<CpuT...> const& cpu_result,
+             std::tuple<GpuT...> const& gpu_result,
+             double tolerance)
 {
     if constexpr(any_float_tensors<CpuT...>() || any_float_tensors<GpuT...>())
     {
@@ -96,7 +98,6 @@ bool Compare(std::tuple<CpuT...> const& cpu_result, std::tuple<GpuT...> const& g
     {
         return cpu_result == gpu_result;
     }
-
 }
 
 template <typename T>
