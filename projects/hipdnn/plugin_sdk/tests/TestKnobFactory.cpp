@@ -20,11 +20,11 @@ TEST(TestKnobFactory, CreateIntKnob)
     EXPECT_STREQ(root->description()->c_str(), "description");
     EXPECT_EQ(root->default_value_type(), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
     EXPECT_EQ(root->default_value_as_IntValue()->value(), 10);
-    EXPECT_EQ(root->constraints_type(),
+    EXPECT_EQ(root->constraint_type(),
               hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint);
-    EXPECT_EQ(root->constraints_as_IntConstraint()->min_value(), 0);
-    EXPECT_EQ(root->constraints_as_IntConstraint()->max_value(), 100);
-    EXPECT_EQ(root->constraints_as_IntConstraint()->step(), 1);
+    EXPECT_EQ(root->constraint_as_IntConstraint()->min_value(), 0);
+    EXPECT_EQ(root->constraint_as_IntConstraint()->max_value(), 100);
+    EXPECT_EQ(root->constraint_as_IntConstraint()->step(), 1);
 }
 
 TEST(TestKnobFactory, CreateFloatKnob)
@@ -42,10 +42,10 @@ TEST(TestKnobFactory, CreateFloatKnob)
     EXPECT_STREQ(root->description()->c_str(), "description");
     EXPECT_EQ(root->default_value_type(), hipdnn_data_sdk::data_objects::KnobValue::FloatValue);
     EXPECT_FLOAT_EQ(root->default_value_as_FloatValue()->value(), 1.5f);
-    EXPECT_EQ(root->constraints_type(),
+    EXPECT_EQ(root->constraint_type(),
               hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint);
-    EXPECT_FLOAT_EQ(root->constraints_as_FloatConstraint()->min_value(), 0.0f);
-    EXPECT_FLOAT_EQ(root->constraints_as_FloatConstraint()->max_value(), 10.0f);
+    EXPECT_FLOAT_EQ(root->constraint_as_FloatConstraint()->min_value(), 0.0f);
+    EXPECT_FLOAT_EQ(root->constraint_as_FloatConstraint()->max_value(), 10.0f);
 }
 
 TEST(TestKnobFactory, CreateStringKnob)
@@ -64,10 +64,10 @@ TEST(TestKnobFactory, CreateStringKnob)
     EXPECT_STREQ(root->description()->c_str(), "description");
     EXPECT_EQ(root->default_value_type(), hipdnn_data_sdk::data_objects::KnobValue::StringValue);
     EXPECT_STREQ(root->default_value_as_StringValue()->value()->c_str(), "option1");
-    EXPECT_EQ(root->constraints_type(),
+    EXPECT_EQ(root->constraint_type(),
               hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint);
 
-    auto validValues = root->constraints_as_StringConstraint()->valid_values();
+    auto validValues = root->constraint_as_StringConstraint()->valid_values();
     ASSERT_EQ(validValues->size(), 2);
     EXPECT_STREQ(validValues->Get(0)->c_str(), "option1");
     EXPECT_STREQ(validValues->Get(1)->c_str(), "option2");

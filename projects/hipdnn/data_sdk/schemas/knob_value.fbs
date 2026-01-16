@@ -39,7 +39,7 @@ table StringConstraint {
     valid_values: [string];       // Optional: enum-like string choices
 }
 
-// Type-specific constraints
+// Type-specific constraint
 union KnobConstraint {
     IntConstraint,
     FloatConstraint,
@@ -52,6 +52,6 @@ table Knob {
     knob_id_str: string;          // Unique identifier (namespaced by plugin)
     description: string;          // Help text
     default_value: KnobValue;     // Default setting
-    constraints: KnobConstraint;  // Validation rules
+    constraint: KnobConstraint;   // Validation rules
     deprecated: bool;             // Allow knob deprecation
 }
