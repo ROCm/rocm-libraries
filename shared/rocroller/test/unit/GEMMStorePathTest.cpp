@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -45,9 +45,9 @@ namespace GEMMTests
         GEMMProblem gemm;
         gemm.storePath = storePath;
 
-        // For VGPRToBuffer and VGPRToGlobal, we should not use LDS
-        if(storePath == SolutionParams::StorePath::VGPRToBuffer
-           || storePath == SolutionParams::StorePath::VGPRToGlobal)
+        // For VGPRToGlobalMemoryWithBuffer and VGPRToGlobal, we should not use LDS
+        if(storePath == SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer
+           || storePath == SolutionParams::StorePath::VGPRToGlobalMemoryWithGlobal)
         {
             EXPECT_FALSE(SolutionParams::IsLDSStore(storePath));
         }
@@ -75,10 +75,10 @@ namespace GEMMTests
         GEMMStorePathTest,
         GEMMStorePathTestGPU,
         ::testing::Combine(currentGPUISA(),
-                           ::testing::Values(SolutionParams::StorePath::VGPRToBuffer,
-                                             SolutionParams::StorePath::VGPRToGlobal,
-                                             SolutionParams::StorePath::LDSViaVGPRToBuffer,
-                                             SolutionParams::StorePath::LDSViaVGPRToGlobal,
-                                             SolutionParams::StorePath::LDSToBuffer)));
+                           ::testing::Values(SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer,
+                                             SolutionParams::StorePath::VGPRToGlobalMemoryWithGlobal,
+                                             SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer,
+                                             SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithGlobal,
+                                             SolutionParams::StorePath::LDSToGlobalMemoryWithBuffer)));
 
 } // namespace GEMMTests

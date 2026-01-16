@@ -70,7 +70,7 @@ struct GEMMProblem
     unsigned int unrollY = 0;
     unsigned int unrollK = 0;
 
-    SolutionParams::StorePath storePath{SolutionParams::StorePath::LDSViaVGPRToBuffer};
+    SolutionParams::StorePath storePath{SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer};
     SolutionParams::LoadPath  loadPathA{SolutionParams::LoadPath::BufferToLDSViaVGPR};
     SolutionParams::LoadPath  loadPathB{SolutionParams::LoadPath::BufferToLDSViaVGPR};
 

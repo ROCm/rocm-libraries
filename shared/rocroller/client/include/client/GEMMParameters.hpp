@@ -180,7 +180,7 @@ namespace rocRoller
                 Parameters::Solution::LoadPath loadPathB{
                     Parameters::Solution::LoadPath::BufferToLDSViaVGPR};
                 Parameters::Solution::StorePath storePath{
-                    Parameters::Solution::StorePath::LDSViaVGPRToBuffer};
+                    Parameters::Solution::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer};
 
                 bool prefetch          = false;
                 int  prefetchInFlight  = 2;

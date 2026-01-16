@@ -610,7 +610,7 @@ namespace GEMMTests
                     {gemm.macM, gemm.macN},
                     LayoutType::MATRIX_ACCUMULATOR,
                     {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB},
-                    gemm.storePath == SolutionParams::StorePath::LDSViaVGPRToBuffer
+                    gemm.storePath == SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer
                         ? MemoryType::WAVE_LDS
                         : MemoryType::WAVE);
                 params->setDimensionInfo(tagStoreD, macTileD);

@@ -221,7 +221,7 @@ class GEMMSolution:
 
     load_A: str = "BufferToLDSViaVGPR"
     load_B: str = "BufferToLDSViaVGPR"
-    store_path: str = "LDSViaVGPRToBuffer"
+    store: str = "VGPRToGlobalMemoryViaLDSWithBuffer"
     betaInFma: bool = True
 
     scheduler: str = "Priority"
@@ -411,7 +411,7 @@ class GEMMResult(GEMM, RRPerfResult):
             "WG": str(self.workgroup_size_x) + "/" + str(self.workgroup_size_y),
             "Load_A": TF(self.load_A),
             "Load_B": TF(self.load_B),
-            "Store_D": self.store_path,
+            "Store_D": self.store,
             "PF": TF(self.prefetch)
             + "/"
             + str(self.prefetchInFlight)
@@ -601,7 +601,7 @@ def cast_missing_parameters(result):
     if "storeLDS_D" in result:
         storeLDS_D = result["storeLDS_D"]
         del result["storeLDS_D"]
-        result["store_path"] = "LDSViaVGPRToBuffer" if storeLDS_D else "VGPRToBuffer"
+        result["store"] = "VGPRToGlobalMemoryViaLDSWithBuffer" if storeLDS_D else "VGPRToGlobalMemoryWithBuffer"
 
 
 def load_results(path: pathlib.Path):

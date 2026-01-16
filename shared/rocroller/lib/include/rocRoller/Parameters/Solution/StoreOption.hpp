@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 202 AMD ROCm(TM) Software
+ * Copyright 2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,11 +37,11 @@ namespace rocRoller
         {
             enum class StorePath : int
             {
-                VGPRToBuffer, // Store from VGPR to buffer using buffer_store_X
-                VGPRToGlobal, // Store from VGPR to global using global_store_X
-                LDSViaVGPRToBuffer, // Store to LDS first, then to buffer (former storeLDSD=true)
-                LDSViaVGPRToGlobal, // Store to LDS first, then to global
-                LDSToBuffer, // Direct LDS to buffer store
+                VGPRToGlobalMemoryWithBuffer, // Store from VGPR to buffer using buffer_store_X
+                VGPRToGlobalMemoryWithGlobal, // Store from VGPR to global using global_store_X
+                VGPRToGlobalMemoryViaLDSWithBuffer, // Store to LDS first, then to buffer (former storeLDSD=true)
+                VGPRToGlobalMemoryViaLDSWithGlobal, // Store to LDS first, then to global
+                LDSToGlobalMemoryWithBuffer, // Direct LDS to buffer store
                 Count,
             };
 

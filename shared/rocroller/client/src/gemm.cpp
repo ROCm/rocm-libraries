@@ -1248,7 +1248,7 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::make_pair("--prefetchScale", &SolutionParameters::prefetchScale),
         std::make_pair("--load_A", &SolutionParameters::loadPathA),
         std::make_pair("--load_B", &SolutionParameters::loadPathB),
-        std::make_pair("--store_path", &SolutionParameters::storePath),
+        std::make_pair("--store", &SolutionParameters::storePath),
         std::make_pair("--prefetch", &SolutionParameters::prefetch),
         std::make_pair("--prefetchInFlight", &SolutionParameters::prefetchInFlight),
         std::make_pair("--prefetchLDSFactor", &SolutionParameters::prefetchLDSFactor),
@@ -1380,20 +1380,14 @@ namespace rocRoller::Client::GEMMClient::CLI
             if(arg.find('B') != std::string::npos)
                 solution.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
 
-            solution.storePath = SolutionParams::StorePath::VGPRToBuffer;
+            solution.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
             if(arg.find('D') != std::string::npos)
-                solution.storePath = SolutionParams::StorePath::LDSViaVGPRToBuffer;
+                solution.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer;
         }
 
-        if(app.get_option(SN(&SP::loadPathA))->count())
-            solution.loadPathA = SolutionParams::loadPathFromString(
-                app.get_option(SN(&SP::loadPathA))->as<std::string>());
-        if(app.get_option(SN(&SP::loadPathB))->count())
-            solution.loadPathB = SolutionParams::loadPathFromString(
-                app.get_option(SN(&SP::loadPathB))->as<std::string>());
-        if(app.get_option(SN(&SP::storePath))->count())
-            solution.storePath = SolutionParams::storePathFromString(
-                app.get_option(SN(&SP::storePath))->as<std::string>());
+        update(SN(&SP::loadPathA), solution.loadPathA);
+        update(SN(&SP::loadPathB), solution.loadPathB);
+        update(SN(&SP::storePath), solution.storePath);
 
         if(app.get_option("--d2lds")->count())
         {
@@ -1408,12 +1402,8 @@ namespace rocRoller::Client::GEMMClient::CLI
                 solution.loadPathB = SolutionParams::LoadPath::BufferToLDS;
         }
 
-        if(app.get_option(SN(&SP::loadPathAScale))->count())
-            solution.loadPathAScale = SolutionParams::loadPathFromString(
-                app.get_option(SN(&SP::loadPathAScale))->as<std::string>());
-        if(app.get_option(SN(&SP::loadPathBScale))->count())
-            solution.loadPathBScale = SolutionParams::loadPathFromString(
-                app.get_option(SN(&SP::loadPathBScale))->as<std::string>());
+        update(SN(&SP::loadPathAScale), solution.loadPathAScale);
+        update(SN(&SP::loadPathBScale), solution.loadPathBScale);
 
         if(app.get_option("--mxlds")->count())
         {
@@ -1518,7 +1508,7 @@ int main(int argc, const char* argv[])
 
         .loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR,
         .loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR,
-        .storePath = SolutionParams::StorePath::LDSViaVGPRToBuffer,
+        .storePath = SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer,
 
         .prefetch          = false,
         .prefetchInFlight  = 0,
@@ -1739,8 +1729,8 @@ int main(int argc, const char* argv[])
         SN(&SP::loadPathB),
         "How to load B (BufferToVGPR, BufferToLDSViaVGPR, BufferToLDS). Default: BufferToLDS");
     app.add_option(SN(&SP::storePath),
-                   "How to store D (VGPRToBuffer, VGPRToGlobal, LDSViaVGPRToBuffer, "
-                   "LDSViaVGPRToGlobal, LDSToBuffer). Default: LDSViaVGPRToBuffer");
+                   "How to store D (VGPRToGlobalMemoryWithBuffer, VGPRToGlobal, VGPRToGlobalMemoryViaLDSWithBuffer, "
+                   "VGPRToGlobalMemoryViaLDSWithGlobal, LDSToGlobalMemoryWithBuffer). Default: VGPRToGlobalMemoryViaLDSWithBuffer");
     app.add_option("--lds", "Use LDS for A/B/D.");
     app.add_option("--d2lds", "Use direct-to-LDS for A/B.");
 

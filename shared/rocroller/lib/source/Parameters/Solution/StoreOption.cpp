@@ -38,15 +38,15 @@ namespace rocRoller
             {
                 switch(mode)
                 {
-                case StorePath::VGPRToBuffer:
+                case StorePath::VGPRToGlobalMemoryWithBuffer:
                     return MemoryType::WAVE;
-                case StorePath::VGPRToGlobal:
+                case StorePath::VGPRToGlobalMemoryWithGlobal:
                     return MemoryType::WAVE_FROM_GLOBAL;
-                case StorePath::LDSViaVGPRToBuffer:
+                case StorePath::VGPRToGlobalMemoryViaLDSWithBuffer:
                     return MemoryType::WAVE_LDS;
-                case StorePath::LDSViaVGPRToGlobal:
+                case StorePath::VGPRToGlobalMemoryViaLDSWithGlobal:
                     return MemoryType::WAVE_LDS_FROM_GLOBAL;
-                case StorePath::LDSToBuffer:
+                case StorePath::LDSToGlobalMemoryWithBuffer:
                     return MemoryType::WAVE_Direct2LDS;
                 case StorePath::Count:
                     Throw<FatalError>(
@@ -58,9 +58,9 @@ namespace rocRoller
             {
                 switch(mode)
                 {
-                case StorePath::LDSViaVGPRToBuffer:
-                case StorePath::LDSViaVGPRToGlobal:
-                case StorePath::LDSToBuffer:
+                case StorePath::VGPRToGlobalMemoryViaLDSWithBuffer:
+                case StorePath::VGPRToGlobalMemoryViaLDSWithGlobal:
+                case StorePath::LDSToGlobalMemoryWithBuffer:
                     return true;
                 default:
                     break;
@@ -72,16 +72,16 @@ namespace rocRoller
             {
                 switch(mode)
                 {
-                case StorePath::VGPRToBuffer:
-                    return "VGPRToBuffer";
-                case StorePath::VGPRToGlobal:
-                    return "VGPRToGlobal";
-                case StorePath::LDSViaVGPRToBuffer:
-                    return "LDSViaVGPRToBuffer";
-                case StorePath::LDSViaVGPRToGlobal:
-                    return "LDSViaVGPRToGlobal";
-                case StorePath::LDSToBuffer:
-                    return "LDSToBuffer";
+                case StorePath::VGPRToGlobalMemoryWithBuffer:
+                    return "VGPRToGlobalMemoryWithBuffer";
+                case StorePath::VGPRToGlobalMemoryWithGlobal:
+                    return "VGPRToGlobalMemoryWithGlobal";
+                case StorePath::VGPRToGlobalMemoryViaLDSWithBuffer:
+                    return "VGPRToGlobalMemoryViaLDSWithBuffer";
+                case StorePath::VGPRToGlobalMemoryViaLDSWithGlobal:
+                    return "VGPRToGlobalMemoryViaLDSWithGlobal";
+                case StorePath::LDSToGlobalMemoryWithBuffer:
+                    return "LDSToGlobalMemoryWithBuffer";
                 default:
                     break;
                 }
@@ -95,16 +95,16 @@ namespace rocRoller
 
             StorePath storePathFromString(std::string const& str)
             {
-                if(str == "VGPRToBuffer")
-                    return StorePath::VGPRToBuffer;
-                if(str == "VGPRToGlobal")
-                    return StorePath::VGPRToGlobal;
-                if(str == "LDSViaVGPRToBuffer")
-                    return StorePath::LDSViaVGPRToBuffer;
-                if(str == "LDSViaVGPRToGlobal")
-                    return StorePath::LDSViaVGPRToGlobal;
-                if(str == "LDSToBuffer")
-                    return StorePath::LDSToBuffer;
+                if(str == "VGPRToGlobalMemoryWithBuffer")
+                    return StorePath::VGPRToGlobalMemoryWithBuffer;
+                if(str == "VGPRToGlobalMemoryWithGlobal")
+                    return StorePath::VGPRToGlobalMemoryWithGlobal;
+                if(str == "VGPRToGlobalMemoryViaLDSWithBuffer")
+                    return StorePath::VGPRToGlobalMemoryViaLDSWithBuffer;
+                if(str == "VGPRToGlobalMemoryViaLDSWithGlobal")
+                    return StorePath::VGPRToGlobalMemoryViaLDSWithGlobal;
+                if(str == "LDSToGlobalMemoryWithBuffer")
+                    return StorePath::LDSToGlobalMemoryWithBuffer;
                 Throw<FatalError>(fmt::format("Invalid StorePath: {}", str));
             }
 

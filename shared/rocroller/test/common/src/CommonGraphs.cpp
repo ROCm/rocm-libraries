@@ -363,8 +363,8 @@ namespace rocRollerTest::Graphs
                                 : SolutionParams::LoadPath::BufferToVGPR;
         m_problem.loadPathB = b ? SolutionParams::LoadPath::BufferToLDSViaVGPR
                                 : SolutionParams::LoadPath::BufferToVGPR;
-        m_problem.storePath = d ? SolutionParams::StorePath::LDSViaVGPRToBuffer
-                                : SolutionParams::StorePath::VGPRToBuffer;
+        m_problem.storePath = d ? SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer
+                                : SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
     }
 
     void GEMM::setPrefetch(bool prefetch,
@@ -495,7 +495,7 @@ namespace rocRollerTest::Graphs
             = MacroTile({m_problem.macM, m_problem.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {m_problem.waveM, m_problem.waveN, m_problem.waveK, m_problem.waveB},
-                        m_problem.storePath == SolutionParams::StorePath::LDSViaVGPRToBuffer
+                        m_problem.storePath == SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer
                             ? MemoryType::WAVE_LDS
                             : MemoryType::WAVE);
 
