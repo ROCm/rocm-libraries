@@ -179,6 +179,13 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
     set(HIPBLASLT_PYTHON_DEPS "rocisa")
     set(hipblaslt_python_dev Development.Module)
     hipblaslt_find_python("${hipblaslt_python_dev}")
+    
+    # Set up Python virtual environment with all required dependencies
+    hipblaslt_setup_python_venv(
+        "${CMAKE_BINARY_DIR}/python-venv"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite/requirements.txt"
+    )
+    
     hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa/lib" "${asan_opts}")
 else()
     hipblaslt_find_python("${hipblaslt_python_dev}")
