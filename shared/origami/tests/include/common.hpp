@@ -66,21 +66,23 @@ inline origami::config_t make_config(size_t mt_m,
                                      size_t mi_m        = 16,
                                      size_t mi_n        = 16,
                                      size_t mi_k        = 16,
+                                     bool custom_mainloop_scheduling = false,
                                      int wgm            = 1,
                                      int occupancy      = 1,
                                      int non_temporal_a = 0,
                                      int non_temporal_b = 0) {
   origami::config_t config;
-  config.mt.m              = mt_m;
-  config.mt.n              = mt_n;
-  config.mt.k              = mt_k;
-  config.mi.m              = mi_m;
-  config.mi.n              = mi_n;
-  config.mi.k              = mi_k;
-  config.occupancy         = occupancy;
-  config.workgroup_mapping = wgm;
-  config.cache_hints_a     = non_temporal_a;
-  config.cache_hints_b     = non_temporal_b;
+  config.mt.m                       = mt_m;
+  config.mt.n                       = mt_n;
+  config.mt.k                       = mt_k;
+  config.mi.m                       = mi_m;
+  config.mi.n                       = mi_n;
+  config.mi.k                       = mi_k;
+  config.custom_mainloop_scheduling = custom_mainloop_scheduling;
+  config.occupancy                  = occupancy;
+  config.workgroup_mapping          = wgm;
+  config.cache_hints_a              = non_temporal_a;
+  config.cache_hints_b              = non_temporal_b;
   return config;
 }
 
