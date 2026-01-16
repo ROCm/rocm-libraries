@@ -50,12 +50,6 @@ namespace rocisa
             }
         }
 
-        if(isaVersion == std::array<int, 3>{9, 5, 0} && numBytes == 2)
-        {
-            mi_divisor     = 2;
-            miIssueLatency = 2;
-        }
-
         // need some way to distinguish between sparse and non-sparse
         // for F32Xdl we can use InstType::XFloat32
         if(isSparse || dataType == DataType::XFloat32)

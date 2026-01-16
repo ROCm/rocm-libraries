@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -269,8 +269,12 @@ Real precisions: &real_precisions
     { a_type: i8_r, x_type: i8_r, y_type: f32_r, compute_type: f32_r }
   - &float16_float16_float32_float32_axyt_precision
     { a_type: f16_r, x_type: f16_r, y_type: f32_r, compute_type: f32_r }
+  - &float16_float16_float16_float32_axyt_precision
+    { a_type: f16_r, x_type: f16_r, y_type: f16_r, compute_type: f32_r }
   - &bfloat16_bfloat16_float32_float32_axyt_precision
     { a_type: bf16_r, x_type: bf16_r, y_type: f32_r, compute_type: f32_r }
+  - &bfloat16_bfloat16_bfloat16_float32_axyt_precision
+    { a_type: bf16_r, x_type: bf16_r, y_type: bf16_r, compute_type: f32_r }
   - &int8_int8_int32_int32_abct_precision
     { a_type: i8_r, b_type: i8_r, c_type: i32_r, compute_type: i32_r }
   - &int8_int8_float32_float32_abct_precision
@@ -283,6 +287,8 @@ Real precisions: &real_precisions
     { a_type: f16_r, b_type: f16_r, c_type: f16_r, compute_type: f16_r }
   - &bfloat16_bfloat16_float32_float32_abct_precision
     { a_type: bf16_r, b_type: bf16_r, c_type: f32_r, compute_type: f32_r }
+  - &bfloat16_bfloat16_bfloat16_float32_abct_precision
+    { a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, compute_type: f32_r }
   - &int8_precision
     { a_type: i8_r, b_type: i8_r, c_type: i8_r, x_type: i8_r, y_type: i8_r, compute_type: i8_r }
   - &half_precision
@@ -595,6 +601,8 @@ Arguments:
   - boostval: c_double
   - boostvali: c_double
   - tolm: c_double
+  - rand_gen_min: c_double
+  - rand_gen_max: c_double
   - graph_test: c_bool
   - skip_reproducibility: c_bool
   - sparsity_pattern_statistics: c_bool
@@ -606,7 +614,8 @@ Arguments:
   - category: c_char*32
   - hardware: c_char*32
   - skip_hardware: c_char*32
-  - req_memory: c_uint
+  - host_memory_gb: c_uint
+  - device_memory_gb: c_uint
 
 # These named dictionary lists [ {dict1}, {dict2}, etc. ] supply subsets of
 # test arguments in a structured way. The dictionaries are applied to the test
@@ -746,6 +755,8 @@ Defaults:
   boostval: 1.0
   boostvali: 0.0
   tolm: 1.0
+  rand_gen_min: 0.0
+  rand_gen_max: 1.0
   graph_test: false
   skip_reproducibility: false
   sparsity_pattern_statistics: false
@@ -755,6 +766,7 @@ Defaults:
   category: nightly
   hardware: all
   skip_hardware: none
-  req_memory: 4
+  host_memory_gb: 4
+  device_memory_gb: 4
   filename: '*'
   name: '*'

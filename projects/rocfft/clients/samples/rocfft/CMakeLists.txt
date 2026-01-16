@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -61,7 +61,7 @@ set( sample_list rocfft_example_complexcomplex rocfft_example_realcomplex rocfft
 
 foreach( sample ${sample_list} )
 
-  add_executable( ${sample} ${sample}.cpp )
+  add_executable( ${sample} ${sample}.cpp ../../../shared/data_gen_device.cpp )
 
   target_include_directories(
     ${sample}
@@ -86,7 +86,7 @@ foreach( sample ${sample_list} )
   target_compile_options( ${sample} PRIVATE ${WARNING_FLAGS} -Wno-cpp )
 
   set_target_properties( ${sample} PROPERTIES
-    CXX_STANDARD 17
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
   )
 

@@ -130,6 +130,8 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->boostval                    = static_cast<double>(0);
         this->boostvali                   = static_cast<double>(0);
         this->tolm                        = static_cast<double>(0);
+        this->rand_gen_min                = static_cast<double>(0);
+        this->rand_gen_max                = static_cast<double>(1);
         this->graph_test                  = false;
         this->skip_reproducibility        = false;
         this->sparsity_pattern_statistics = false;

@@ -328,6 +328,11 @@ namespace std
         return z.x;
     }
 
+    __device__ __host__ constexpr rocfft_fp16 real(const rocfft_fp16 x)
+    {
+        return x;
+    }
+
     template <typename Treal>
     __device__ __host__ constexpr Treal imag(const rocfft_complex<Treal>& z)
     {

@@ -282,6 +282,9 @@ try
                        (temp_buffer == nullptr && buffer_size == nullptr),
                        rocsparse_status_invalid_pointer);
 
+    ROCSPARSE_CHECKARG(1, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(2, mat_B, (mat_B->batch_count != 1), rocsparse_status_not_implemented);
+
     rocsparse::sparse_to_dense_t f;
     if(mat_A->format == rocsparse_format_csc)
     {

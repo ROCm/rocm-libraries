@@ -31,6 +31,7 @@
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 
+#include <atomic>
 #include <algorithm>
 #include <map>
 
@@ -64,6 +65,8 @@ namespace TensileLite
         gfx1103,
         gfx1150,
         gfx1151,
+        gfx1152,
+        gfx1153,
         gfx1200,
         gfx1201,
         All
@@ -122,6 +125,10 @@ namespace TensileLite
             return "TensileLibrary_*_gfx1150";
         case LazyLoadingInit::gfx1151:
             return "TensileLibrary_*_gfx1151";
+        case LazyLoadingInit::gfx1152:
+            return "TensileLibrary_*_gfx1152";
+        case LazyLoadingInit::gfx1153:
+            return "TensileLibrary_*_gfx1153";
         case LazyLoadingInit::gfx1200:
             return "TensileLibrary_*_gfx1200";
         case LazyLoadingInit::gfx1201:
@@ -143,6 +150,7 @@ namespace TensileLite
         std::string                                                     filePrefix;
         std::string                                                     suffix;
         std::string                                                     libraryDirectory;
+        mutable std::atomic<bool>                                       lastFindTopRetAll = false;
 
         mutable std::map<std::string, std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>>*
             indexLoadedLibraries;
@@ -297,7 +305,15 @@ namespace TensileLite
             {
                 solution->codeObjectFilename = getCodeObjectFileName();
             }
+
+            // can't reach the requested number, means findTop already done its best
+            lastFindTopRetAll = (solutions.size() < numSolutions);
             return solutions;
+        }
+
+        virtual bool lastFindTopAlreadyRetAll() const override
+        {
+            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>

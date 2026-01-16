@@ -1,0 +1,23 @@
+# Build directory
+build/
+
+# CMake cache
+CMakeCache.txt
+
+# IDE files
+.vscode/
+.vs/
+
+# Python bindings build
+__pycache__/
+*.pyc
+*.pyo
+*.so
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# Python package
+*.egg-info/

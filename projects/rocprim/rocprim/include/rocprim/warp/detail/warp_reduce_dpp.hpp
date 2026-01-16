@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -49,12 +49,14 @@ public:
     {
         output = input;
 
-        // Temporary fix: issue with dpp bound_ctrl on Windows
-        #ifndef _WIN32
-        bool constexpr bndCtrl = true;
-        #else
+// Temporary fix: issue with dpp bound_ctrl on Windows, GFX10, GFX11, GFX12 and SPIR-V
+// RDNA encounters compile issues in hipCUB and rocThrust.
+#if defined(_WIN32) || defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__) \
+    || defined(__SPIRV__)
         bool constexpr bndCtrl = false;
-        #endif
+#else
+        bool constexpr bndCtrl = true;
+#endif
 
         if(VirtualWaveSize > 1)
         {
@@ -92,16 +94,21 @@ public:
             }
 
 #if !ROCPRIM_TARGET_SPIRV
-            static_assert(VirtualWaveSize <= 32,
-                          "VirtualWaveSize > 32 is not supported without DPP broadcasts");
-#else
-            if constexpr(VirtualWaveSize > 32)
+            if constexpr(!ROCPRIM_IS_GENERIC())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "VirtualWaveSize > 32 is not supported without DPP broadcasts");
-                return;
+                static_assert(VirtualWaveSize <= 32,
+                              "VirtualWaveSize > 32 is not supported without DPP broadcasts");
             }
+            else
 #endif
+            {
+                if constexpr(VirtualWaveSize > 32)
+                {
+                    ROCPRIM_PRINT_ERROR_ONCE(
+                        "VirtualWaveSize > 32 is not supported without DPP broadcasts");
+                    return;
+                }
+            }
         }
         else
         {
@@ -118,12 +125,6 @@ public:
 
 #if !ROCPRIM_TARGET_SPIRV
             static_assert(VirtualWaveSize <= 64, "VirtualWaveSize > 64 is not supported");
-#else
-            if constexpr(VirtualWaveSize > 64)
-            {
-                ROCPRIM_PRINT_ERROR_ONCE("VirtualWaveSize > 64 is not supported");
-                return;
-            }
 #endif
         }
         // Read the result from the last lane of the logical warp

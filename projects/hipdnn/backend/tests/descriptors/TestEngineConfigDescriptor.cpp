@@ -18,6 +18,7 @@
 
 using namespace hipdnn_backend;
 using namespace plugin;
+using namespace hipdnn_backend::test_utilities;
 using namespace ::testing;
 
 using ::testing::Return;
@@ -85,14 +86,11 @@ protected:
 
     void SetUp() override
     {
-        _engineConfigWrapper
-            = hipdnn_sdk::test_utilities::createDescriptor<EngineConfigDescriptor>();
-        _mockEngineWrapper = hipdnn_sdk::test_utilities::createDescriptor<MockEngineDescriptor>();
-        _mockEngineBadTypeWrapper
-            = hipdnn_sdk::test_utilities::createDescriptor<MockEngineDescriptor>();
-        _mockWrongTypeWrapper = hipdnn_sdk::test_utilities::createDescriptor<
-            MockDescriptor<EngineConfigDescriptor>>();
-        _mockGraphWrapper = hipdnn_sdk::test_utilities::createDescriptor<MockGraphDescriptor>();
+        _engineConfigWrapper = createDescriptor<EngineConfigDescriptor>();
+        _mockEngineWrapper = createDescriptor<MockEngineDescriptor>();
+        _mockEngineBadTypeWrapper = createDescriptor<MockEngineDescriptor>();
+        _mockWrongTypeWrapper = createDescriptor<MockDescriptor<EngineConfigDescriptor>>();
+        _mockGraphWrapper = createDescriptor<MockGraphDescriptor>();
         _mockHandle = std::make_unique<MockHandle>();
         _mockEnginePluginResourceManager = std::make_shared<MockEnginePluginResourceManager>();
     }

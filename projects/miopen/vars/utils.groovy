@@ -70,7 +70,7 @@ def cmake_build(Map conf=[:]){
     def build_envs = "CTEST_PARALLEL_LEVEL=4 " + conf.get("build_env","")
     def prefixpath = conf.get("prefixpath","/opt/rocm")
     def build_type_debug = (conf.get("build_type",'release') == 'debug')
-    def miopen_install_path = conf.get("miopen_install_path", "${env.WORKSPACE}/${env.REPO_DIR}/install")
+    def miopen_install_path = conf.get("miopen_install_path", "${env.WORKSPACE}/${env.MIOPEN_DIR}/install")
 
     def mlir_args = " -DMIOPEN_USE_MLIR=" + conf.get("mlir_build", "ON")
     // WORKAROUND_ISSUE_3192 Disabling MLIR for debug builds since MLIR generates sanitizer errors.
@@ -144,7 +144,7 @@ def cmake_build(Map conf=[:]){
     def pre_setup_cmd = """
             echo \$HSA_ENABLE_SDMA
             ulimit -c unlimited
-            cd ${env.WORKSPACE}/${env.REPO_DIR}
+            cd ${env.WORKSPACE}/${env.MIOPEN_DIR}
             rm -rf build
             mkdir build
             rm -rf install
@@ -170,7 +170,7 @@ def cmake_build(Map conf=[:]){
         def fin_build_cmd = cmake_fin_build_cmd(miopen_install_path)
         cmd += """
             export RETDIR=\$PWD
-            cd ${env.WORKSPACE}/${env.REPO_DIR}/fin
+            cd ${env.WORKSPACE}/${env.MIOPEN_DIR}/fin
             ${fin_build_cmd}
             cd \$RETDIR
         """
@@ -219,7 +219,31 @@ def getDockerImageName(dockerArgs)
 {
     sh "echo ${dockerArgs} > ${env.WORKSPACE}/factors.txt"
     def image = "${env.MIOPEN_DOCKER_IMAGE_URL}"
-    sh "cd ${env.WORKSPACE}/${env.REPO_DIR}/ && md5sum Dockerfile requirements.txt dev-requirements.txt >> ${env.WORKSPACE}/factors.txt"
+    // Note: The following files and directories from the CK repo are used to generate a hash for 
+    // the docker image build. To ensure that we rebuild the docker image only when necessary.
+    // Add any other files or directories that should trigger a rebuild of the docker image when changed.
+    sh """
+        cd ${env.WORKSPACE}/${env.CK_DIR} && \
+        { \
+            find cmake experimental include library -type f -print0; \
+            find . -maxdepth 1 -type f \\( \
+                -name 'CMakeLists.txt' -o \
+                -name 'Config.cmake.in' -o \
+                -name 'dev-requirements.txt' -o \
+                -name 'pyproject.toml' -o \
+                -name 'rbuild.ini' -o \
+                -name 'requirements.txt' \
+            \\) -print0; \
+        } \
+        | tr '\\0' '\\n' \
+        | LC_ALL=C sort \
+        | xargs -d '\\n' md5sum \
+        | LC_ALL=C sort \
+        | md5sum \
+        | awk '{print \$1}' >> "${env.WORKSPACE}/factors.txt"
+    """
+    
+    sh "cd ${env.WORKSPACE}/${env.MIOPEN_DIR}/ && md5sum Dockerfile requirements.txt dev-requirements.txt >> ${env.WORKSPACE}/factors.txt"
     def docker_hash = sh(script: "cd ${env.WORKSPACE} && md5sum factors.txt | awk '{print \$1}' | head -c 6", returnStdout: true)
     sh "rm ${env.WORKSPACE}/factors.txt"
     echo "Docker tag hash: ${docker_hash}"
@@ -237,10 +261,11 @@ def getDockerImage(Map conf=[:])
     env.DOCKER_BUILDKIT=1
     def prefixpath = conf.get("prefixpath", "/opt/rocm") // one image for each prefix 1: /usr/local 2:/opt/rocm
     // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
-    def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1151" // prebuilt dockers should have all the architectures enabled so one image can be used for all stages
+    def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx11-generic;gfx12-generic" // prebuilt dockers should have all the architectures enabled so one image can be used for all stages
 
-    def dockerArgs = "--build-arg BUILDKIT_INLINE_CACHE=1 " +
-                     "--build-arg PREFIX=${prefixpath} " +
+    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache"
+
+    def dockerArgs = "--build-arg PREFIX=${prefixpath} " +
                      "--build-arg GPU_ARCHS=\"${gpu_arch}\" "
     if(env.CCACHE_HOST)
     {
@@ -261,9 +286,12 @@ def getDockerImage(Map conf=[:])
     {
         dockerArgs = dockerArgs + " --build-arg MIOPEN_SCCACHE=${env.MIOPEN_SCCACHE} --build-arg COMPILER_LAUNCHER=sccache"
     }
-    echo "Docker Args: ${dockerArgs}"
 
     def image = getDockerImageName(dockerArgs)
+
+    // Append Dockerfile path after image name is generated to avoid affecting the hash.
+    dockerArgs = dockerArgs + " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
+    echo "Docker Args: ${dockerArgs}"
 
     def dockerImage
     try{
@@ -280,17 +308,42 @@ def getDockerImage(Map conf=[:])
     catch(Exception ex)
     {
         echo "Building image..."
-        dockerImage = docker.build("${image}", "${dockerArgs} ${env.WORKSPACE}/${env.REPO_DIR}/.")
-        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-            dockerImage.push()
+        def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
+        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd " +
+                              "--cache-from type=registry,ref=${cacheRef} "
+
+        try {
+            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                sh """
+                    docker buildx inspect ci-builder >/dev/null 2>&1 || \
+                    docker buildx create --name ci-builder --driver docker-container --use
+                    docker buildx use ci-builder
+                    docker buildx inspect --bootstrap
+                """.stripIndent()
+            
+                sh """
+                    DOCKER_BUILDKIT=1 docker buildx build \
+                    --push \
+                    --tag ${image} \
+                    ${dockerCacheArgs} \
+                    ${dockerArgs} \
+                    ${buildContext}
+                """.stripIndent()
+            }
+            dockerImage = docker.image("${image}")
+        } catch (Exception bex) {
+            echo "Buildx not available or failed, falling back to docker.build"
+            dockerImage = docker.build("${image}", "${dockerArgs} ${buildContext}")
+            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                dockerImage.push()
+            }
         }
     }
-
 
     if(params.INSTALL_MIOPEN == 'ON')
     {
         def freckle = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-        dockerArgs = " --build-arg BASE_DOCKER=${image} --build-arg FRECKLE=${freckle} -f ${env.WORKSPACE}/${env.REPO_DIR}/Dockerfile.perftests"
+        dockerArgs = " --build-arg BASE_DOCKER=${image} --build-arg FRECKLE=${freckle} -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile.perftests"
 
         // Get updated image name for perf tests.
         image = getDockerImageName(dockerArgs)
@@ -309,7 +362,7 @@ def getDockerImage(Map conf=[:])
         }
         catch(Exception ex)
         {
-            dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.REPO_DIR}/.")
+            dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile ")
             withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
                 dockerImage.push()
             }
@@ -317,6 +370,26 @@ def getDockerImage(Map conf=[:])
     }
 
     return [dockerImage, image]
+}
+
+// New wrapper function to add gitStatusWrapper around getDockerImage
+def getDockerImageWithStatus(Map conf=[:]) {
+    def stageName = env.STAGE_NAME ?: "Docker Image"  
+    def credentialsID = env.monorepo_status_wrapper_creds
+    
+    gitStatusWrapper(credentialsId: "${credentialsID}", gitHubContext: "${stageName}", account: 'ROCm', repo: 'rocm-libraries') {
+        try {
+            return getDockerImage(conf) 
+        }
+        catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
+                echo "The job was cancelled or aborted"
+                throw e
+        }
+        catch (Exception ex) {
+            echo "Error in getDockerImageWithStatus: ${ex.message}"
+            throw ex
+        }
+    }
 }
 
 def buildHipClangJob(Map conf=[:]){
@@ -347,10 +420,8 @@ def buildHipClangJob(Map conf=[:]){
 
         def retimage
         def credentialsID = env.monorepo_status_wrapper_creds
-        if (env.REPO_NAME == "MIOpen") {
-            credentialsID = env.miopen_git_creds
-        }
-        gitStatusWrapper(credentialsId: "${credentialsID}", gitHubContext: "${variant}", account: 'ROCm', repo: "${env.REPO_NAME}") {
+
+        gitStatusWrapper(credentialsId: "${credentialsID}", gitHubContext: "${variant}", account: 'ROCm', repo: 'rocm-libraries') {
             try {
                 (retimage, image) = getDockerImage(conf)
                 if (needs_gpu) {
@@ -392,7 +463,7 @@ def buildHipClangJob(Map conf=[:]){
                     // https://docs.python.org/3/library/getpass.html#getpass.getuser
                     if (dvc_pull) {
                         sh """
-                            cd ${env.WORKSPACE}/${env.REPO_DIR}
+                            cd ${env.WORKSPACE}/${env.MIOPEN_DIR}
                             LOGNAME=temp-user dvc pull -v
                            """.stripIndent()
                     }
@@ -408,7 +479,7 @@ def RunPerfTest(Map conf=[:]){
     try {
         def docker_image = conf.get("docker_image")
         def miopen_install_path = conf.get("miopen_install_path", "/opt/rocm")
-        def results_dir = conf.get("results_dir", "${env.WORKSPACE}/${env.REPO_DIR}/results")
+        def results_dir = conf.get("results_dir", "${env.WORKSPACE}/${env.MIOPEN_DIR}/results")
         withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
             docker_image.pull()
         }

@@ -41,7 +41,6 @@ endif()
 # The superbuild does not build anything itself; all compiling is done in external projects
 project( rocfft-dependencies NONE )
 
-option( BUILD_BOOST "Download and build boost library" ON )
 # option( BUILD_VERBOSE "Print helpful build debug information" OFF )
 
 # if( BUILD_VERBOSE )
@@ -59,14 +58,6 @@ include( get-cli-arguments )
 
 # The following is a series of super-build projects; this cmake project will download and build
 
-if( BUILD_BOOST )
-  set(ext.BUILD_BOOST "static")
-  include( external-boost )
-
-  list( APPEND rocfft_dependencies boost )
-  set( boost_custom_target COMMAND cd ${BOOST_BINARY_ROOT}$<SEMICOLON> ${Boost.Command} install )
-endif( )
-
 # POLICY CMP0037 - "Target names should not be reserved and should match a validity pattern"
 # Familiar target names like 'install' should be OK at the super-build level
 if( POLICY CMP0037 )
@@ -74,7 +65,6 @@ if( POLICY CMP0037 )
 endif( )
 
 add_custom_target( install
-  ${boost_custom_target}
   ${gtest_custom_target}
   ${lapack_custom_target}
   DEPENDS ${rocfft_dependencies}

@@ -31,6 +31,7 @@
 
 #include "../../shared/CLI11.hpp"
 #include "../../shared/arithmetic.h"
+#include "../../shared/device_properties.h"
 #include "../../shared/gpubuf.h"
 #include "../../shared/hip_object_wrapper.h"
 #include "device/generator/stockham_gen.h"
@@ -159,7 +160,8 @@ std::string test_kernel_src(const std::string&               kernel_name,
 {
     StockhamGeneratorSpecs specs{factorization,
                                  {},
-                                 {static_cast<unsigned int>(rocfft_precision_single)},
+                                 static_cast<unsigned int>(rocfft_precision_single),
+                                 get_curr_gcn_arch_name(),
                                  wgs,
                                  PrintScheme(compute_scheme)};
 
@@ -490,7 +492,14 @@ int main(int argc, char** argv)
                                                                   direct_to_from_reg);
 
                                 auto code = compile_inprocess(kernel_src, device_prop.gcnArchName);
-                                RTCKernelStockham kernel(kernel_name, code);
+                                hipModule_wrapper_t module;
+                                module.alloc(code.data());
+                                std::promise<hipModule_wrapper_t>       module_promise;
+                                std::shared_future<hipModule_wrapper_t> module_future
+                                    = module_promise.get_future();
+                                module_promise.set_value(std::move(module));
+
+                                RTCKernelStockham kernel(kernel_name, module_future);
 
                                 float time = launch_kernel(
                                     kernel,
@@ -607,8 +616,13 @@ int main(int argc, char** argv)
                                               half_lds,
                                               direct_to_from_reg);
 
-            auto              code = compile_inprocess(kernel_src, device_prop.gcnArchName);
-            RTCKernelStockham kernel(kernel_name, code);
+            auto                code = compile_inprocess(kernel_src, device_prop.gcnArchName);
+            hipModule_wrapper_t module;
+            module.alloc(code.data());
+            std::promise<hipModule_wrapper_t>       module_promise;
+            std::shared_future<hipModule_wrapper_t> module_future = module_promise.get_future();
+            module_promise.set_value(std::move(module));
+            RTCKernelStockham kernel(kernel_name, module_future);
 
             float time
                 = launch_kernel(kernel,

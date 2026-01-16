@@ -84,7 +84,7 @@ using hipblasLt_handle_ptr = MIOPEN_MANAGE_PTR(hipblasLtHandle_t, hipblasLtDestr
 
 struct MIOPEN_EXPORT Handle : miopenHandle
 {
-    friend struct TargetProperties;
+    friend class TargetProperties;
 
     Handle();
     Handle(miopenAcceleratorQueue_t stream);
@@ -259,7 +259,14 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     {
         invokers.Register({config, solver}, invoker);
         if(algo.has_value())
-            invokers.SetAsFound1_0(config, *algo, solver);
+            SetAsFound1_0(config, *algo, solver);
+    }
+
+    void SetAsFound1_0(const NetworkConfig& config,
+                       const AlgorithmName& algo,
+                       const std::string& solver) const
+    {
+        invokers.SetAsFound1_0(config, algo, solver);
     }
 
     std::optional<Invoker> GetInvoker(const NetworkConfig& config,

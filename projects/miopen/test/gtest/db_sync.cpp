@@ -173,7 +173,6 @@ void ParseProblemKey(const std::string& key_, conv::ProblemDescription& prob_des
     TensorDescriptor wei{};
     TensorDescriptor out{};
     ConvolutionDescriptor conv;
-    bool use_tf32 = false;
     if(opt.size() >= 2)
     {
         key = opt[0];
@@ -294,12 +293,7 @@ void ParseProblemKey(const std::string& key_, conv::ProblemDescription& prob_des
         conv::ProblemDescription tmp{in, wei, out, conv, dir};
     }
     conv.group_count = group_cnt;
-    if(precision == miopenFloat)
-    {
-        const auto math_type_ = use_tf32 ? miopenMathDefault : miopenMathPedantic;
-        conv.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, static_cast<int>(math_type_));
-    }
-    prob_desc = conv::ProblemDescription{in, wei, out, conv, dir};
+    prob_desc        = conv::ProblemDescription{in, wei, out, conv, dir};
 }
 
 struct FDBVal
@@ -633,7 +627,6 @@ void CheckDynamicFDBEntry(size_t thread_index,
         miopen::conv::ProblemDescription problem;
         miopen::ParseProblemKey(kinder.first, problem);
         problem.SetupFloats(ctx); // TODO: Check if this is necessary
-        problem.SetupComputeType(ctx);
         std::stringstream ss;
         problem.Serialize(ss);
         ASSERT_TRUE(ss.str() == kinder.first)
@@ -739,7 +732,6 @@ void CheckFDBEntry(size_t thread_index,
         miopen::conv::ProblemDescription problem;
         miopen::ParseProblemKey(kinder.first, problem);
         problem.SetupFloats(ctx); // TODO: Check if this is necessary
-        problem.SetupComputeType(ctx);
         std::stringstream ss;
         problem.Serialize(ss);
         // moment of truth

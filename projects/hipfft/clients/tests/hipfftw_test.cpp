@@ -982,6 +982,10 @@ namespace
                     gtest_info << "\nContent of error log :\n " << log_content;
                 GTEST_FAIL() << gtest_info.str();
             }
+            catch(const std::bad_alloc&)
+            {
+                GTEST_SKIP() << "host memory allocation failure";
+            }
             catch(...)
             {
                 std::ostringstream gtest_info;
@@ -1223,7 +1227,7 @@ namespace
                 // plan cannot be created and arguments were invalid...
                 // We may however have a mixed bag of some invalid and other unsupported args.
                 // In such cases, the specific exception to expect would be ill-defined
-                if(!plan_helper.has_unsupported_args_for(creation_options))
+                if(!plan_helper.has_unsupported_args())
                     return hipfftw_internal_exception::invalid_args;
                 else
                     return hipfftw_internal_exception::ill_defined;
@@ -1286,14 +1290,13 @@ namespace
         }
     };
 
+    template <int min_unsupported = 4, std::enable_if_t<(min_unsupported > 1), bool> = true>
     std::vector<int> arg_validation_runtime_rank_range()
     {
-        constexpr int min_unsupported_rank = 4;
-
         std::vector<int> ret = {
             get_random_rank<!valid_value>(), // invalid
-            get_random_rank<valid_value, min_unsupported_rank>(), // valid but unsupported
-            get_random_rank<valid_value, 1, min_unsupported_rank - 1>() // valid and supported
+            get_random_rank<valid_value, min_unsupported>(), // valid but unsupported
+            get_random_rank<valid_value, 1, min_unsupported - 1>() // valid and supported
         };
         return ret;
     }
@@ -1395,7 +1398,6 @@ namespace
         {
             ret.push_back(1);
         }
-
         return ret;
     }
 
@@ -1581,6 +1583,170 @@ namespace
         return ret;
     }
 
+    void shuffle_vectors(std::vector<ptrdiff_t>& len,
+                         std::vector<ptrdiff_t>& is,
+                         std::vector<ptrdiff_t>& os,
+                         bool                    all_but_last_dim = false)
+    {
+        if(len.size() != is.size() || len.size() != os.size())
+            throw std::invalid_argument("shuffle_vectors: inconsistent vector sizes.");
+        if(len.size() <= 1 || (len.size() == 2 && all_but_last_dim))
+            return;
+        std::vector<fftw_iodim64> layout(len.size());
+        for(auto idx = len.size(); idx-- > 0;)
+        {
+            layout[idx].n  = len[idx];
+            layout[idx].is = is[idx];
+            layout[idx].os = os[idx];
+        }
+        std::shuffle(layout.begin(), layout.end() - (all_but_last_dim ? 1 : 0), get_pseudo_rng());
+        for(auto idx = layout.size(); idx-- > 0;)
+        {
+            len[idx] = layout[idx].n;
+            is[idx]  = layout[idx].is;
+            os[idx]  = layout[idx].os;
+        }
+    }
+
+    template <fft_precision prec, bool use_guru64>
+    std::vector<hipfftw_helper<prec>> test_scope_for_arg_validation_of_plan_guru_dft()
+    {
+        constexpr int       min_unsupported_batch_rank = 2;
+        constexpr ptrdiff_t max_guru_val
+            = use_guru64 ? static_cast<ptrdiff_t>(std::numeric_limits<int>::max())
+                         : std::numeric_limits<ptrdiff_t>::max();
+
+        auto range_of_strides = [](const std::vector<ptrdiff_t>& lengths,
+                                   fft_transform_type            dft_kind,
+                                   fft_result_placement          placement,
+                                   fft_io                        io) {
+            std::vector<std::vector<ptrdiff_t>> ret;
+            if(lengths.empty())
+            {
+                ret.emplace_back(std::vector<ptrdiff_t>());
+                return ret;
+            }
+            std::vector<ptrdiff_t> abs_len = lengths;
+            std::for_each(abs_len.begin(), abs_len.end(), [](ptrdiff_t& x) { x = std::abs(x); });
+            auto strides_to_add = default_strides(dft_kind, placement, io, abs_len);
+            ret.push_back(strides_to_add);
+            // add some invalid strides (for nontrivial corresponding lengths)
+            decltype(strides_to_add)::value_type tmp      = 0;
+            auto                                 rand_idx = get_random_idx(strides_to_add.size());
+            std::swap(strides_to_add[rand_idx], tmp);
+            ret.push_back(strides_to_add);
+            std::swap(strides_to_add[rand_idx], tmp);
+            // add some unsupported strides
+            rand_idx = get_random_idx(strides_to_add.size());
+            strides_to_add[rand_idx] *= -1;
+            ret.push_back(strides_to_add);
+            return ret;
+        };
+
+        auto range_of_distances = [](const std::vector<ptrdiff_t>& batches,
+                                     const std::vector<ptrdiff_t>& lengths,
+                                     fft_transform_type            dft_kind,
+                                     fft_result_placement          placement,
+                                     fft_io                        io) {
+            std::vector<std::vector<ptrdiff_t>> ret;
+            if(batches.empty())
+            {
+                ret.emplace_back(std::vector<ptrdiff_t>());
+                return ret;
+            }
+            std::vector<ptrdiff_t> abs_batches = batches;
+            std::vector<ptrdiff_t> abs_lengths = lengths;
+            std::for_each(
+                abs_lengths.begin(), abs_lengths.end(), [](ptrdiff_t& x) { x = std::abs(x); });
+            std::for_each(
+                abs_batches.begin(), abs_batches.end(), [](ptrdiff_t& x) { x = std::abs(x); });
+            auto distances_to_add
+                = default_distances(dft_kind, placement, io, abs_lengths, abs_batches);
+            ret.push_back(distances_to_add);
+            // add some invalid distances (for nontrivial corresponding batch sizes)
+            decltype(distances_to_add)::value_type tmp = 0;
+            auto rand_idx                              = get_random_idx(distances_to_add.size());
+            std::swap(distances_to_add[rand_idx], tmp);
+            ret.push_back(distances_to_add);
+            std::swap(distances_to_add[rand_idx], tmp);
+            // add some unsupported distances
+            rand_idx = get_random_idx(distances_to_add.size());
+            distances_to_add[rand_idx] *= -1;
+            ret.push_back(distances_to_add);
+            return ret;
+        };
+
+        std::vector<hipfftw_helper<prec>> ret;
+
+        while(ret.size() < max_num_arg_validation_tests_per_hipfftw_plan_type)
+        {
+            const auto dft_kind   = get_random_element_in(trans_type_range_full);
+            const auto rank       = get_random_element_in(arg_validation_runtime_rank_range());
+            const auto batch_rank = get_random_element_in(
+                arg_validation_runtime_rank_range<min_unsupported_batch_rank>());
+            // rough limit for product(batches.begin(), batches.end()) <= max_nbatch_for_hipfftw_test
+            const auto batch_max_val = std::min(
+                max_guru_val,
+                std::max(static_cast<ptrdiff_t>(1),
+                         static_cast<ptrdiff_t>(std::pow(max_nbatch_for_hipfftw_test,
+                                                         1.0 / std::max(batch_rank, 1)))));
+            auto batches_range
+                = arg_validation_strictly_positive_vec_range(batch_rank, batch_max_val);
+            // --> test for empty batches/distances, too
+            batches_range.emplace_back(std::vector<ptrdiff_t>());
+            auto       batches = get_random_element_in(batches_range);
+            const auto nbatch_bound
+                = std::accumulate(batches.begin(),
+                                  batches.end(),
+                                  static_cast<ptrdiff_t>(1),
+                                  [](ptrdiff_t acc, ptrdiff_t x) {
+                                      return acc * std::max(ptrdiff_t(1), std::abs(x));
+                                  });
+            const auto placement = get_random_element_in(place_range);
+            ptrdiff_t  max_len   = std::min(max_guru_val / nbatch_bound,
+                                         static_cast<ptrdiff_t>(max_length_for_hipfftw_test));
+            if(rank_is_valid_for_hipfftw(rank))
+            {
+                max_len = std::min(
+                    max_len,
+                    find_threshold_length_for_byte_size<prec>(
+                        max_byte_size_for_hipfftw_tests() / nbatch_bound, rank, is_real(dft_kind)));
+            }
+            auto len_range = arg_validation_strictly_positive_vec_range(rank, max_len);
+            // --> test for empty lengths/strides, too
+            len_range.emplace_back(std::vector<ptrdiff_t>());
+            auto lengths  = get_random_element_in(len_range);
+            auto istrides = get_random_element_in(
+                range_of_strides(lengths, dft_kind, placement, fft_io::fft_io_in));
+            auto ostrides = get_random_element_in(
+                range_of_strides(lengths, dft_kind, placement, fft_io::fft_io_out));
+            auto idist = get_random_element_in(
+                range_of_distances(batches, lengths, dft_kind, placement, fft_io::fft_io_in));
+            auto odist = get_random_element_in(
+                range_of_distances(batches, lengths, dft_kind, placement, fft_io::fft_io_out));
+            const auto sign  = get_random_element_in(arg_validation_sign_range(dft_kind));
+            const auto flags = get_random_element_in(arg_validation_flags_range(dft_kind, rank));
+
+            shuffle_vectors(lengths, istrides, ostrides, is_real(dft_kind));
+            shuffle_vectors(batches, idist, odist);
+            hipfftw_helper<prec> helper_to_add;
+            helper_to_add.set_creation_args(dft_kind,
+                                            rank,
+                                            lengths,
+                                            placement,
+                                            sign,
+                                            flags,
+                                            istrides,
+                                            ostrides,
+                                            batch_rank,
+                                            batches,
+                                            idist,
+                                            odist);
+            ret.emplace_back(helper_to_add);
+        }
+        return ret;
+    }
+
     // broad scope of hipfftw_helpers structs compatible with using a specific
     // plan creation function and configured with (zero or possibly many)
     // invalid/unsupported parameter value(s)
@@ -1588,6 +1754,7 @@ namespace
     std::vector<hipfftw_helper<prec>>
         test_scope_for_arg_validation_of(hipfftw_plan_creation_func creation_func)
     {
+        constexpr bool use_guru64 = true; // for readability
         switch(creation_func)
         {
         case hipfftw_plan_creation_func::PLAN_DFT_ND:
@@ -1597,10 +1764,9 @@ namespace
         case hipfftw_plan_creation_func::PLAN_MANY:
             return test_scope_for_arg_validation_of_plan_many_dft<prec>();
         case hipfftw_plan_creation_func::PLAN_GURU:
-            [[fallthrough]];
+            return test_scope_for_arg_validation_of_plan_guru_dft<prec, !use_guru64>();
         case hipfftw_plan_creation_func::PLAN_GURU64:
-            throw std::runtime_error("PLAN_GURU, and PLAN_GURU64 are not implemented yet for "
-                                     "test_scope_for_arg_validation_of");
+            return test_scope_for_arg_validation_of_plan_guru_dft<prec, use_guru64>();
         default:
             throw std::invalid_argument(
                 "creation_func unknown to test_scope_for_arg_validation_of");
@@ -1666,7 +1832,9 @@ namespace
 
         for(auto creation_func : {hipfftw_plan_creation_func::PLAN_DFT_ND,
                                   hipfftw_plan_creation_func::PLAN_DFT,
-                                  hipfftw_plan_creation_func::PLAN_MANY})
+                                  hipfftw_plan_creation_func::PLAN_MANY,
+                                  hipfftw_plan_creation_func::PLAN_GURU,
+                                  hipfftw_plan_creation_func::PLAN_GURU64})
         {
             for(const auto& helper : test_scope_for_arg_validation_of<prec>(creation_func))
             {
@@ -1819,6 +1987,10 @@ namespace
             {
                 GTEST_SKIP() << e.what();
             }
+            catch(const std::bad_alloc&)
+            {
+                GTEST_SKIP() << "host memory allocation failure";
+            }
         }
         void TearDown() override
         {
@@ -1918,7 +2090,7 @@ namespace
             {
                 GTEST_FAIL() << "undefined function pointers detected. Error info: " << e.what();
             }
-            catch(const std::runtime_error e)
+            catch(const std::runtime_error& e)
             {
                 if(log_content.empty() && exception_logger)
                     log_content = exception_logger->get_log();
@@ -1927,6 +2099,10 @@ namespace
                 if(!log_content.empty())
                     gtest_info << "\nContent of error log:\n" << log_content;
                 GTEST_FAIL() << gtest_info.str();
+            }
+            catch(const std::bad_alloc&)
+            {
+                GTEST_SKIP() << "host memory allocation failure";
             }
             catch(...)
             {
@@ -2334,20 +2510,29 @@ namespace
         if(helper.get_rank() == 3 && is_complex(dft_kind) && !helper.is_using_default_strides())
         {
             // rocfft can't create some plans with non-default strides for lengths
-            // AxBxC wherein B, C are in
-            const std::vector<std::array<ptrdiff_t, 2>> symptomatic_sub_len
-                = {{16, 4},  {4, 16},  {16, 16}, {27, 4}, {4, 27},  {25, 4},  {4, 25},
-                   {16, 25}, {25, 16}, {25, 25}, {8, 9},  {9, 8},   {8, 4},   {4, 8},
-                   {8, 8},   {4, 9},   {9, 4},   {4, 4},  {20, 10}, {10, 20}, {27, 27}};
-            // (Note: failing lengths usually have a value of A involving a prime factor > 17.
-            // See adhoc tokens in rocfft's disabled suite of adhoc accuracy tests)
-            ret = ret
-                  || std::any_of(symptomatic_sub_len.begin(),
-                                 symptomatic_sub_len.end(),
-                                 [&](const std::array<ptrdiff_t, 2>& sub_len) {
-                                     return std::equal(
-                                         sub_len.begin(), sub_len.end(), len.begin() + 1);
-                                 });
+            // AxBxC wherein the two lengths of smallest input or output strides are in
+            const std::vector<std::vector<ptrdiff_t>> symptomatic_sub_len
+                = {{16, 4},  {4, 16},  {16, 16}, {27, 4},  {4, 27},  {25, 4},  {4, 25},
+                   {16, 25}, {25, 16}, {25, 25}, {8, 9},   {9, 8},   {8, 4},   {4, 8},
+                   {8, 8},   {4, 9},   {9, 4},   {4, 4},   {20, 10}, {10, 20}, {27, 27},
+                   {32, 9},  {9, 32},  {32, 4},  {4, 32},  {32, 8},  {8, 32},  {27, 9},
+                   {9, 27},  {16, 9},  {9, 16},  {25, 32}, {32, 25}, {9, 9},   {25, 9},
+                   {9, 25},  {16, 8},  {8, 16},  {16, 32}, {32, 16}, {25, 8},  {8, 25}};
+            // (Note: failing lengths usually have a value of length involving a prime factor > 17
+            // along the slowest dimension.  See adhoc tokens in rocfft's disabled suite of adhoc
+            // accuracy tests)
+            for(auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
+            {
+                const auto& strides = helper.get_strides(io);
+                // get the sub-lengths corresponding of the fastest-varying dimensions
+                auto sub_len = len;
+                sub_len.erase(sub_len.begin()
+                              + std::distance(strides.begin(),
+                                              std::max_element(strides.begin(), strides.end())));
+                ret = ret
+                      || std::find(symptomatic_sub_len.begin(), symptomatic_sub_len.end(), sub_len)
+                             != symptomatic_sub_len.end();
+            }
         }
         if(helper.get_rank() > 1 && is_real(dft_kind) && !helper.is_using_default_strides())
         {
@@ -2357,25 +2542,10 @@ namespace
             // - 3D size Ax1xB
             ret = ret || (helper.get_rank() == 3 && len[1] == 1);
             // - 2D sizes in the following set
-            const std::vector<std::vector<ptrdiff_t>> symptomatic_real_lengths = {{25, 8},
-                                                                                  {9, 54},
-                                                                                  {81, 18},
-                                                                                  {25, 16},
-                                                                                  {8, 18},
-                                                                                  {64, 8},
-                                                                                  {64, 16},
-                                                                                  {27, 16},
-                                                                                  {25, 32},
-                                                                                  {9, 16},
-                                                                                  {8, 8},
-                                                                                  {9, 32},
-                                                                                  {20, 20},
-                                                                                  {16, 8},
-                                                                                  {32, 8},
-                                                                                  {81, 64},
-                                                                                  {16, 16},
-                                                                                  {4, 18},
-                                                                                  {9, 8}};
+            const std::vector<std::vector<ptrdiff_t>> symptomatic_real_lengths
+                = {{25, 8},  {9, 54},  {81, 18}, {25, 16}, {8, 18}, {64, 8},  {64, 16},
+                   {27, 16}, {25, 32}, {9, 16},  {8, 8},   {9, 32}, {20, 20}, {16, 8},
+                   {32, 8},  {81, 64}, {16, 16}, {4, 18},  {9, 8},  {32, 18}};
 
             ret = ret
                   || std::any_of(symptomatic_real_lengths.begin(),
@@ -2389,17 +2559,20 @@ namespace
            && helper.get_strides(fft_io::fft_io_in).back() == 1
            && helper.get_strides(fft_io::fft_io_out).back() == 1)
         {
-            // rocfft can't handle odd values of strides/distances between rows
-            // with even values of lengths.back() for real transforms.
+            // rocfft can't handle odd values of (non-elementary) strides/distances
+            // in real domain, with even values of lengths.back() for real transforms.
             // Incorrect results are generated
-            const auto rank = helper.get_rank();
-            const auto fwd_strides
+            auto tmp
                 = helper.get_strides(is_fwd(dft_kind) ? fft_io::fft_io_in : fft_io::fft_io_out);
-            const auto fwd_dist
-                = helper.get_distance(is_fwd(dft_kind) ? fft_io::fft_io_in : fft_io::fft_io_out);
-            const auto fwd_row_dist = rank > 1 ? fwd_strides[rank - 2] : fwd_dist;
+            tmp.erase(tmp.end() - 1); // remove elementary strides from considerations
+            tmp.push_back(
+                helper.get_distance(is_fwd(dft_kind) ? fft_io::fft_io_in : fft_io::fft_io_out));
 
-            ret = ret || fwd_row_dist % 2 == 1;
+            ret = ret
+                  || std::any_of(
+                      tmp.begin(), tmp.end(), [](const typename decltype(tmp)::value_type& val) {
+                          return val % 2 == 1;
+                      });
         }
         // incorrect results may be produced by rocfft for some of the following cases
         if(is_complex(dft_kind))
@@ -2569,6 +2742,10 @@ namespace
             catch(const HOSTBUF_MEM_USAGE& e)
             {
                 GTEST_SKIP() << e.what();
+            }
+            catch(const std::bad_alloc&)
+            {
+                GTEST_SKIP() << "host memory allocation failure";
             }
         }
         void TearDown() override
@@ -2815,16 +2992,20 @@ namespace
             {
                 GTEST_FAIL() << "undefined function pointers detected. Error info: " << e.what();
             }
-            catch(const hip_runtime_error e)
+            catch(const hip_runtime_error& e)
             {
                 if(skip_runtime_fails)
                     GTEST_SKIP() << e.what() << "\nError code: " << e.hip_error << ".";
                 else
                     GTEST_FAIL() << e.what() << "\nError code: " << e.hip_error << ".";
             }
-            catch(const std::runtime_error e)
+            catch(const std::runtime_error& e)
             {
                 GTEST_FAIL() << e.what();
+            }
+            catch(const std::bad_alloc&)
+            {
+                GTEST_SKIP() << "host memory allocation failure";
             }
             catch(...)
             {
@@ -2868,7 +3049,6 @@ namespace
             batches,
             default_distances(dft_kind, placement, fft_io::fft_io_in, lengths, batches),
             default_distances(dft_kind, placement, fft_io::fft_io_out, lengths, batches));
-        return;
     }
 
     template <fft_precision prec>
@@ -2897,7 +3077,7 @@ namespace
             = std::min(static_cast<ptrdiff_t>(max_length_for_hipfftw_test),
                        find_threshold_length_for_byte_size<prec>(
                            max_data_size_per_batch, rank, is_real(dft_kind)));
-        // The generation of random, contraints-abiding-yet-nembed-compliant data
+        // The generation of random, constraints-abiding-yet-nembed-compliant data
         // layouts may sometimes run into deadends (catch a valid_values_cannot_be_created
         // exception) --> try again until a valid (random) configuration is found, if so
         bool found_one = false;
@@ -2992,6 +3172,151 @@ namespace
                                  dist);
     }
 
+    // guru-/guru64-compatible plan (only).
+    // plan configurations with packed layouts but shuffling the natural
+    // dimension ordering, e.g., using column-major layouts
+    template <fft_precision prec>
+    void setup_nondefault_dim_ordering_plan(hipfftw_helper<prec>& helper)
+    {
+        constexpr int batch_rank = 1; // nothing else is supported
+
+        auto get_random_shuffling_indices = [](int rank, bool is_real_in_place) {
+            if(rank < 1)
+                throw std::invalid_argument("setup_nondefault_dim_ordering_plan::get_random_"
+                                            "shuffling_indices: unexpected rank.");
+            // shuffle the natural ordering:
+            std::vector<size_t> dimension_ordering(rank);
+            std::iota(dimension_ordering.begin(), dimension_ordering.end(), 0);
+            std::shuffle(dimension_ordering.begin(),
+                         dimension_ordering.end() - (is_real_in_place ? 1 : 0),
+                         get_pseudo_rng());
+            return dimension_ordering;
+        };
+
+        // 1D cases are never guru-only cases
+        const int  rank     = get_random_rank<valid_value, 2, 3>();
+        const auto dft_kind = get_random_element_in(trans_type_range_full);
+        // real in-place requires unit elementary strides, so rule it out for 2D real cases
+        const auto placement  = rank == 2 && is_real(dft_kind) ? fft_placement_notinplace
+                                                               : get_random_element_in(place_range);
+        const auto is_real_ip = is_real(dft_kind) && placement == fft_placement_inplace;
+        const auto batches
+            = get_random_vector<valid_value, ptrdiff_t>(batch_rank, max_nbatch_for_hipfftw_test, 1);
+        const size_t    max_data_size_per_batch = max_byte_size_for_hipfftw_tests() / batches[0];
+        const ptrdiff_t max_len = std::min(static_cast<ptrdiff_t>(max_length_for_hipfftw_test),
+                                           find_threshold_length_for_byte_size<prec>(
+                                               max_data_size_per_batch, rank, is_real(dft_kind)));
+        const auto      lengths = get_random_vector<valid_value, ptrdiff_t>(rank, max_len, 1);
+        auto            shuffling_indices = get_random_shuffling_indices(rank, is_real_ip);
+        const auto      istrides
+            = default_strides(dft_kind, placement, fft_io::fft_io_in, lengths, shuffling_indices);
+        const auto idist = default_distances(
+            dft_kind, placement, fft_io::fft_io_in, lengths, batches, shuffling_indices);
+        if(placement == fft_placement_notinplace)
+        {
+            // can use different shuffling on output
+            shuffling_indices = get_random_shuffling_indices(rank, is_real_ip);
+        }
+        const auto ostrides
+            = default_strides(dft_kind, placement, fft_io::fft_io_out, lengths, shuffling_indices);
+        const auto odist = default_distances(
+            dft_kind, placement, fft_io::fft_io_out, lengths, batches, shuffling_indices);
+
+        helper.set_creation_args(dft_kind,
+                                 rank,
+                                 lengths,
+                                 placement,
+                                 is_fwd(dft_kind) ? FFTW_FORWARD : FFTW_BACKWARD,
+                                 FFTW_ESTIMATE,
+                                 istrides,
+                                 ostrides,
+                                 batch_rank,
+                                 batches,
+                                 idist,
+                                 odist);
+    }
+
+    // guru-/guru64-compatible plan (only).
+    // plan configurations with not-quite-default 3D layouts: slowest-dimension's stride is
+    // added some arbitrary values making the layout nembed-incompatible (3D only since lesser
+    // similar rank cases are always nembed-compatible)
+    template <fft_precision prec>
+    void setup_tweaked_default_batched_plan(hipfftw_helper<prec>& helper)
+    {
+        constexpr int rank       = 3;
+        constexpr int batch_rank = 1;
+        const auto    dft_kind   = get_random_element_in(trans_type_range_full);
+        const auto    placement  = get_random_element_in(place_range);
+        const bool    is_real_ip = is_real(dft_kind) && placement == fft_placement_inplace;
+        // min original batch value of 2 (halved afterwards)
+        auto batches
+            = get_random_vector<valid_value, int>(batch_rank, max_nbatch_for_hipfftw_test, 2);
+        const size_t    max_data_size_per_batch = max_byte_size_for_hipfftw_tests() / batches[0];
+        const ptrdiff_t max_len = std::min(static_cast<ptrdiff_t>(max_length_for_hipfftw_test),
+                                           find_threshold_length_for_byte_size<prec>(
+                                               max_data_size_per_batch, rank, is_real(dft_kind)));
+        auto            lengths = get_random_vector<valid_value, int>(rank, max_len);
+        while(lengths[rank - 1] == 1)
+        {
+            // AxBx1 cannot be made nembed-incompatible by simply
+            // tweaking the slowest dimension's (A's) stride
+            lengths = get_random_vector<valid_value, int>(rank, max_len);
+        }
+        // parameters to tweak (initialized to default values)
+        auto istrides = default_strides(dft_kind, placement, fft_io::fft_io_in, lengths);
+        auto ostrides = default_strides(dft_kind, placement, fft_io::fft_io_out, lengths);
+        auto idist    = default_distances(dft_kind, placement, fft_io::fft_io_in, lengths, batches);
+        auto odist = default_distances(dft_kind, placement, fft_io::fft_io_out, lengths, batches);
+        // buy some wiggle room: double distances and halve the batch size
+        idist[0] *= 2;
+        odist[0] *= 2;
+        batches[0] /= 2;
+        // tweak slowest dimension's stride
+        const auto min_slow_dim_istride
+            = istrides.front() + (is_real_ip && is_fwd(dft_kind) ? 2 : 1);
+        const auto min_slow_dim_ostride
+            = ostrides.front() + (is_real_ip && is_bwd(dft_kind) ? 2 : 1);
+        const auto                    max_slow_dim_istride = 2 * istrides.front();
+        const auto                    max_slow_dim_ostride = 2 * ostrides.front();
+        std::uniform_int_distribution i_stride_gen(min_slow_dim_istride, max_slow_dim_istride);
+        std::uniform_int_distribution o_stride_gen(min_slow_dim_ostride, max_slow_dim_ostride);
+        while(istrides[0] % istrides[1] == 0 && ostrides[0] % ostrides[1] == 0)
+        {
+            istrides[0] = i_stride_gen(get_pseudo_rng());
+            if(placement == fft_placement_inplace)
+            {
+                if(is_real(dft_kind))
+                {
+                    if(is_fwd(dft_kind))
+                    {
+                        if(istrides[0] % 2 == 1)
+                            istrides[0]--;
+                        ostrides[0] = istrides[0] / 2;
+                    }
+                    else
+                        ostrides[0] = 2 * istrides[0];
+                }
+                else
+                    ostrides[0] = istrides[0];
+            }
+            else
+                ostrides[0] = o_stride_gen(get_pseudo_rng());
+        }
+
+        helper.set_creation_args(dft_kind,
+                                 rank,
+                                 lengths,
+                                 placement,
+                                 is_fwd(dft_kind) ? FFTW_FORWARD : FFTW_BACKWARD,
+                                 FFTW_ESTIMATE,
+                                 istrides,
+                                 ostrides,
+                                 batch_rank,
+                                 batches,
+                                 idist,
+                                 odist);
+    }
+
     template <fft_precision prec>
     std::vector<hipfftw_functional_validation_params<prec>>
         params_for_functional_tests(size_t desired_full_suite_size, const std::string& manual_token)
@@ -3004,13 +3329,17 @@ namespace
             default_unbatched,
             default_batched,
             random_nembed_compatible,
-            inner_batched
+            inner_batched,
+            nondefault_dim_ordering,
+            tweaked_default_batched
         };
         const std::vector<test_layout> possible_test_layouts
             = {test_layout::default_unbatched,
                test_layout::default_batched,
                test_layout::random_nembed_compatible,
-               test_layout::inner_batched};
+               test_layout::inner_batched,
+               test_layout::nondefault_dim_ordering,
+               test_layout::tweaked_default_batched};
         std::uniform_int_distribution<int> coin_toss(0, 1);
         const auto&                        possible_mem_types = get_possible_data_mem_types();
         while(full_list.size() < desired_full_suite_size)
@@ -3032,6 +3361,12 @@ namespace
                 break;
             case test_layout::inner_batched:
                 setup_inner_batched_plan(to_add.plan_helper);
+                break;
+            case test_layout::nondefault_dim_ordering:
+                setup_nondefault_dim_ordering_plan(to_add.plan_helper);
+                break;
+            case test_layout::tweaked_default_batched:
+                setup_tweaked_default_batched_plan(to_add.plan_helper);
                 break;
             default:
                 throw std::runtime_error(
@@ -3070,7 +3405,17 @@ namespace
             }
             // skip params if they can't be tested for some reason
             if(!to_add.can_be_tested())
+            {
+                if(verbose)
+                {
+                    // Likely some bug/mistake in one of the above setup_* functions.
+                    // That should be avoided as it can slow down test generation if
+                    // the failure to generate testable parameters happens frequently
+                    std::cout << to_add.to_string()
+                              << " rejected as a functional test (cannot be tested)." << std::endl;
+                }
                 continue;
+            }
             insert_into_unique_sorted_params(full_list, to_add);
         }
         std::vector<hipfftw_functional_validation_params<prec>> ret;
@@ -3092,8 +3437,7 @@ namespace
         }
         // always add the manually-provided test, if matching target test's precision
         if(!manual_token.empty()
-           && manual_token.find(prec == fft_precision_single ? "single" : "double")
-                  != std::string::npos)
+           && manual_token.find(hipfftw_trait<prec>::prec_label) != std::string::npos)
         {
             insert_into_unique_sorted_params(
                 ret, hipfftw_functional_validation_params<prec>(manual_token));

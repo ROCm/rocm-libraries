@@ -277,7 +277,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::ModelApplyToken(
         if(idx == 13)
             idx += 1; // skip
     }
-    if(arch == "gfx942")
+    if(arch == "gfx942" || arch == "gfx950")
     {
         if(idx < 3)
             idx += 0;
@@ -390,7 +390,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsModelApplicable(
     const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
     if(ctx.GetStream().GetDeviceName() != "gfx90a" && ctx.GetStream().GetDeviceName() != "gfx942" &&
-       !StartsWith(ctx.GetStream().GetDeviceName(), "gfx95"))
+       ctx.GetStream().GetDeviceName() != "gfx950")
         return false;
     if(problem.GetInDataType() != miopenFloat && problem.GetInDataType() != miopenHalf &&
        problem.GetInDataType() != miopenBFloat16)
@@ -596,6 +596,10 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
         return false;
     if(!ck_utility::is_ck_whitelist(ctx.GetStream().GetDeviceName()))
         return false;
+    // CK support disabled on Navi3 and Navi4 due to missing instances for BWD
+    if(StartsWith(ctx.GetStream().GetDeviceName(), "gfx12") ||
+       StartsWith(ctx.GetStream().GetDeviceName(), "gfx11"))
+        return false;
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
@@ -620,7 +624,7 @@ ConvSolution ConvHipImplicitGemmGroupBwdXdlops::GetSolution(
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     return MakeSolutionGroupConvImplicitGemmXdlops(
         problem,
-        [&](auto data_type_val, [[maybe_unused]] auto compute_type_val) {
+        [&](auto data_type_val) {
             using T = decltype(data_type_val);
             return InitInvokerFactoryBwdNCHW<2,
                                              false,
@@ -629,7 +633,7 @@ ConvSolution ConvHipImplicitGemmGroupBwdXdlops::GetSolution(
                                              miopen::conv::DataInvokeParams>(
                 ctx, problem, config.kernel_id);
         },
-        [&](auto data_type_val, [[maybe_unused]] auto compute_type_val) {
+        [&](auto data_type_val) {
             using T = decltype(data_type_val);
             return InitInvokerFactoryNHWC<false,
                                           DeviceOpGBwdPtrs<T>,

@@ -86,6 +86,12 @@ template <>
 inline constexpr double
     sum_error_tolerance_for_gfx11<rocblas_half, rocblas_half, rocblas_half> = 1 / 100.0;
 
+template <> // syrk_ex use
+inline constexpr double sum_error_tolerance_for_gfx11<double, float, float> = get_epsilon<float>();
+
+template <> // syrk_ex use
+inline constexpr double sum_error_tolerance_for_gfx11<double, float, double> = get_epsilon<float>();
+
 template <>
 inline constexpr double sum_error_tolerance_for_gfx11<rocblas_float_complex,
                                                       rocblas_float_complex,

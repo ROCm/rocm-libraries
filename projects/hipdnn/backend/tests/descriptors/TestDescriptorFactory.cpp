@@ -15,6 +15,7 @@
 #include "gtest/gtest.h"
 
 using namespace hipdnn_backend;
+using namespace hipdnn_backend::test_utilities;
 
 TEST(TestDescriptorFactory, CreateEngineConfigDescriptor)
 {
@@ -73,7 +74,7 @@ TEST(TestDescriptorFactory, NullDescriptorPointer)
 
 TEST(TestDescriptorFactory, CreateGraphExtValidInput)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidGraph();
+    auto builder = createValidGraph();
     auto serializedGraph = builder.Release();
 
     hipdnnBackendDescriptor_t descriptor = nullptr;
@@ -87,7 +88,7 @@ TEST(TestDescriptorFactory, CreateGraphExtValidInput)
 
 TEST(TestDescriptorFactory, CreateGraphExtNullDescriptorPointer)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidGraph();
+    auto builder = createValidGraph();
     auto serializedGraph = builder.Release();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -106,7 +107,7 @@ TEST(TestDescriptorFactory, CreateGraphExtNullSerializedGraph)
 
 TEST(TestDescriptorFactory, CreateGraphExtZeroByteSize)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidGraph();
+    auto builder = createValidGraph();
     auto serializedGraph = builder.Release();
 
     hipdnnBackendDescriptor_t descriptor = nullptr;
@@ -134,16 +135,16 @@ TEST(TestDescriptorFactory, HandleFactory)
 {
     hipdnnHandle_t handleT = nullptr;
 
-    ASSERT_NO_THROW(hipdnn_backend::HandleFactory::createHandle(&handleT));
+    ASSERT_NO_THROW(HandleFactory::createHandle(&handleT));
     EXPECT_NE(handleT, nullptr);
 
-    hipdnn_backend::HandleFactory::destroyHandle(handleT);
+    HandleFactory::destroyHandle(handleT);
     handleT = nullptr;
 
-    ASSERT_THROW_HIPDNN_STATUS(hipdnn_backend::HandleFactory::destroyHandle(nullptr),
+    ASSERT_THROW_HIPDNN_STATUS(HandleFactory::destroyHandle(nullptr),
                                HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
-    ASSERT_THROW_HIPDNN_STATUS(hipdnn_backend::HandleFactory::createHandle(nullptr),
+    ASSERT_THROW_HIPDNN_STATUS(HandleFactory::createHandle(nullptr),
                                HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 

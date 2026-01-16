@@ -178,13 +178,15 @@ int main()
      * Optional (but recommended): ensure that the scalar type is correct.
      *****************************/
 
-    // hiptensorDataType_t scalarType;
-    // CHECK_HIPTENSOR_ERROR(hiptensorOperationDescriptorGetAttribute(handle, desc,
-    // HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE,
-    // (void*)&scalarType,
-    // sizeof(scalarType)));
-    //
-    // assert(scalarType == CUTENSOR_R_32F);
+    hiptensorDataType_t scalarType;
+    CHECK_HIPTENSOR_ERROR(
+        hiptensorOperationDescriptorGetAttribute(handle,
+                                                 desc,
+                                                 HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE,
+                                                 (void*)&scalarType,
+                                                 sizeof(scalarType)));
+
+    assert(scalarType == HIPTENSOR_R_32F);
 
     /***************************
      * Set the algorithm to use

@@ -3,11 +3,31 @@
 Documentation for hipSPARSE is available at
 [https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 
-## hipSPARSE 4.2.0 for ROCm 7.2.0
+## (Unreleased) hipSPARSE 4.3.0
 
 ### Added
 
 * Added sliced ELL format support to the `hipsparseSpMV` routine.
+* Added the `debian`, `almalinux`, `rockylinux`, and `oraclelinux` OS names to install script.
+* Added brain half float mixed precision to `hipsparseSpMV` where A, X, and Y use bfloat16 and the compute type uses float.
+* Added half float mixed precision to `hipsparseSpMV` where A, X, and Y use float16 and the compute type uses float.
+* Added brain half float mixed precision to `hipsparseSpMM` where A, B, and C use bfloat16 and the compute type use float.
+* Added half float mixed precision to `hipsparseSpMM` where A, B, and C use float16 and the compute type use float.
+
+
+### Resolved issues
+* In `hipsparseSpSM_solve()`, the external buffer is passed as a parameter, which does not match the NVIDIA CUDA cuSPARSE API. The `hipsparseSpSM_solve_ex()` routine has been added to properly match the
+NVIDIA CUDA cuSPARSE `cusparseSpSM_solve()` API. The original `hipsparseSpSM_solve()` routine has been 
+deprecated and will be removed in a future release.
+
+### Upcoming changes
+* The routine `hipsparseSpSM_solve()` has been deprecated and will be removed in a future release. 
+Users should use `hipsparseSpSM_solve_ex()` instead.
+
+## hipSPARSE 4.2.0 for ROCm 7.2.0
+
+### Added
+
 * Added `--clients-only` option to the `install.sh` and `rmake.py` scripts to allow building only the clients while using an already installed version of hipSPARSE.
 
 ### Optimized

@@ -2,7 +2,7 @@
 # Copyright 2019-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
-cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 
 # --------------------------------------
 # Update these variables at release time
@@ -64,7 +64,22 @@ cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON
 cmake_dependent_option(USE_SYSTEM_LIB "Use existing system ROCm library installation when building tests" OFF BUILD_TEST OFF)
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Force download of non-ROCm dependencies (eg. Google Test, Google Benchmark)" OFF)
 
-check_language(HIP)
+set(DEVICE_SYSTEM_OPTIONS "HIP" "CUDA" "CPP" "OpenMP" "TBB")
+set(ROCTHRUST_DEVICE_SYSTEM "HIP" CACHE STRING "Set device system for thrust (options are ${DEVICE_SYSTEM_OPTIONS})")
+
+if(NOT ${ROCTHRUST_DEVICE_SYSTEM} IN_LIST DEVICE_SYSTEM_OPTIONS)
+  message(FATAL_ERROR "Unrecognized ROCTHRUST_DEVICE_SYSTEM option \"${ROCTHRUST_DEVICE_SYSTEM}\". Valid options are: ${DEVICE_SYSTEM_OPTIONS}")
+endif()
+
+if((BUILD_TEST OR BUILD_BENCHMARK OR BUILD_EXAMPLE) AND
+    NOT (${ROCTHRUST_DEVICE_SYSTEM} STREQUAL "HIP" OR $ROCTHRUST_DEVICE_SYSTEM STREQUAL "CUDA"))
+    message(FATAL_ERROR "rocThrust tests, benchmarks, and examples must be built with ROCTHRUST_DEVICE_SYSTEM=HIP|CUDA since they require device acceleration.")
+endif()
+
+if(${ROCTHRUST_DEVICE_SYSTEM} STREQUAL "HIP")
+  check_language(HIP)
+endif()
+
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
 
 include(CheckCXXCompilerFlag)
@@ -132,7 +147,7 @@ else()
       )
     else()
       rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
+        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
       )
     endif()
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
@@ -244,6 +259,9 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
     enable_testing()
   endif()
 
+  # Used by tests to define their RESOURCE_GROUPS
+  set(DEFAULT_GPU_RESOURCE "gpus")
+  
   # We still want the testing to be compiled to catch some errors
   #TODO: Get testing folder working with HIP on Windows
   if (NOT WIN32 AND BUILD_TEST)

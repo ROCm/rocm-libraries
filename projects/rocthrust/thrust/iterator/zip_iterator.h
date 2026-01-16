@@ -131,6 +131,7 @@ THRUST_NAMESPACE_BEGIN
  *  \see tuple
  *  \see get
  */
+
 template <typename IteratorTuple>
 class THRUST_DECLSPEC_EMPTY_BASES zip_iterator : public detail::zip_iterator_base<IteratorTuple>::type
 {

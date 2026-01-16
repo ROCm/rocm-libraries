@@ -40,9 +40,9 @@ MockTargetProperties::MockTargetProperties(const TargetProperties& target_proper
 
 const std::string& MockTargetProperties::Name() const { return name; }
 
-boost::optional<bool> MockTargetProperties::Xnack() const
+bool MockTargetProperties::isXnackEnabled() const
 {
-    return xnack_disabled ? boost::none : TargetProperties::Xnack();
+    return xnack_disabled ? false : TargetProperties::isXnackEnabled();
 }
 
 MockHandle::MockHandle(const DevDescription& dev_description, bool disable_xnack)
@@ -131,6 +131,7 @@ const std::multimap<Gpu, DevDescription>& GetAllKnownDevices()
         {Gpu::gfx115X, {"gfx1150", 24}},
         {Gpu::gfx115X, {"gfx1151", 40}},
         {Gpu::gfx115X, {"gfx1152", 8}},
+        {Gpu::gfx115X, {"gfx1153", 2}},
         {Gpu::gfx120X, {"gfx1201", 32}},
         {Gpu::gfx120X, {"gfx1201", 28}}
         // clang-format on

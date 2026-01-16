@@ -1909,7 +1909,7 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-                    stream << rv << ": " << this->type() << std::endl;
+                    stream << "Searching " << this->type() << " Library..." << std::endl;
                     return rv;
                 }
             };
@@ -1939,7 +1939,7 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-                    stream << rv << ": " << this->type() << std::endl;
+                    stream << "Searching " << this->type() << " Library..." << std::endl;
                     return rv;
                 }
             };
@@ -1959,6 +1959,65 @@ namespace TensileLite
                 static std::string Type()
                 {
                     return "FreeSizeMatching";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return true;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    stream << "Searching " << this->type() << " Library..." << std::endl;
+                    return rv;
+                }
+            };
+
+            struct PredictionMatching : public Predicate_CRTP<PredictionMatching, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+
+                PredictionMatching() = default;
+
+                static std::string Type()
+                {
+                    return "PredictionMatching";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return true;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    stream << rv << ": " << this->type() << std::endl;
+                    return rv;
+                }
+            };
+
+            struct GridBasedMatching
+                : public Predicate_CRTP<GridBasedMatching, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+
+                GridBasedMatching() = default;
+
+                static std::string Type()
+                {
+                    return "GridBasedMatching";
                 }
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override

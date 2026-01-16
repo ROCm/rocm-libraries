@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <iostream>
+
 #include "data_types.hpp"
 
 namespace hiptensor
@@ -220,4 +222,3 @@ namespace hiptensor
     // @endcond
 
 } // namespace hiptensor
-

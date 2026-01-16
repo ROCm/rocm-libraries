@@ -169,7 +169,7 @@ void testing_her_batched(const Arguments& arg)
 
     size_t A_size = lda * N;
 
-    double hipblas_error_host, hipblas_error_device;
+    double hipblas_error_host{0}, hipblas_error_device{0};
 
     U h_alpha = arg.get_alpha<U>();
 
@@ -271,7 +271,7 @@ void testing_her_batched(const Arguments& arg)
 
     if(arg.timing)
     {
-        double gpu_time_used;
+        double gpu_time_used{0};
         CHECK_HIP_ERROR(dA.transfer_from(hA));
         hipStream_t stream;
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));

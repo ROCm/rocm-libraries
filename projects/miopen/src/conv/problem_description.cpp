@@ -164,6 +164,35 @@ void ProblemDescription::HeuristicUpdateLayouts()
     // If we did not find consistent layout, leave them as-is
 }
 
+template <typename in_desc, typename out_desc, typename wei_desc>
+void SerializeStrides(
+    std::ostringstream& stream, in_desc& in, out_desc& out, wei_desc& wei, const char delim)
+{
+
+    auto join_v = [](std::ostringstream& stream, const auto& vec, const char delim) {
+        stream << *vec.begin();
+        std::for_each(std::next(vec.begin()), vec.end(), [&](const auto& value) {
+            stream << delim << value;
+        });
+    };
+
+    if(!in.IsPacked())
+    {
+        stream << "_si_";
+        join_v(stream, in.GetStrides(), delim);
+    }
+    if(!out.IsPacked())
+    {
+        stream << "_so_";
+        join_v(stream, out.GetStrides(), delim);
+    }
+    if(!wei.IsPacked())
+    {
+        stream << "_sw_";
+        join_v(stream, wei.GetStrides(), delim);
+    }
+}
+
 void ProblemDescription::MakeNetworkConfig(std::string& conf_key) const
 {
     std::ostringstream ss;
@@ -186,14 +215,9 @@ void ProblemDescription::MakeNetworkConfig(std::string& conf_key) const
         ss << 'x' << GetWeightsLayout();
         ss << 'x' << GetOutLayout();
     }
-    const auto data_type =
-        EncodeDataTypesForKey(GetInDataType(), GetWeightsDataType(), GetOutDataType());
-    ss << 'x' << data_type;
+    ss << 'x' << EncodeDataTypesForKey(GetInDataType(), GetWeightsDataType(), GetOutDataType());
 
     std::ostringstream optional;
-    if(data_type == "FP32" && UseTF32())
-        optional << "TF32" << 'x';
-
     if(const auto ct = GetInCastType())
         optional << "ci" << GetDataTypeName(*ct);
     if(const auto ct = GetWeightsCastType())
@@ -204,6 +228,9 @@ void ProblemDescription::MakeNetworkConfig(std::string& conf_key) const
     {
         ss << 'x' << optional.str();
     }
+
+    const auto sep = 'x';
+    SerializeStrides(optional, in, out, weights, sep);
 
     ss << 'x' << PrintDHW('x', GetSpatialDims(), GetPadD(), GetPadH(), GetPadW());
     ss << 'x'
@@ -244,12 +271,10 @@ void ProblemDescription::Serialize(std::ostream& stream) const
         stream << sep << GetWeightsLayout();
         stream << sep << GetOutLayout();
     }
-    // clang-format on
-    const auto data_type =
-        EncodeDataTypesForKey(GetInDataType(), GetWeightsDataType(), GetOutDataType());
-    stream << sep << data_type;
+    stream << sep << EncodeDataTypesForKey(GetInDataType(), GetWeightsDataType(), GetOutDataType());
     stream << sep << GetDirectionStr();
 
+    // clang-format on
     // New performance config entries shall come into variable/optional part of db key.
     // This is to support backward compatibility with previous versions of databases.
     std::ostringstream optional;
@@ -265,9 +290,7 @@ void ProblemDescription::Serialize(std::ostream& stream) const
         if(const auto ct = GetOutCastType())
             optional << "_co" << GetDataTypeName(*ct);
 
-        // cx indicates compute datatype
-        if(data_type == "FP32" && UseTF32())
-            optional << "_cxTF32";
+        SerializeStrides(optional, in, out, weights, sep);
     }
     if(!optional.str().empty())
     {
@@ -325,14 +348,6 @@ void ProblemDescription::SetupFloats(ExecutionContext& ctx) const
     MIOPEN_LOG_W("Unsupported data types configuration: "
                  << GetDataTypeName(GetInDataType()) << "x" << GetDataTypeName(GetWeightsDataType())
                  << "x" << GetDataTypeName(GetOutDataType()));
-}
-
-void ProblemDescription::SetupComputeType(const ExecutionContext& ctx) const
-{
-    if(ctx.GetStream().GetDeviceName() == "gfx942" && conv.EnableTF32())
-    {
-        use_tf32 = true;
-    }
 }
 
 std::string ProblemDescription::ComputeLayout(const TensorDescriptor& td) const

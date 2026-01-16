@@ -30,7 +30,9 @@
 #include <miopen/config.hpp>
 #include <miopen/target_properties.hpp>
 #include <miopen/filesystem.hpp>
+
 #include <string>
+#include <vector>
 
 namespace miopen {
 

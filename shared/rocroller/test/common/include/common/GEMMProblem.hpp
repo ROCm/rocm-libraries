@@ -100,8 +100,8 @@ struct GEMMProblem
 
     bool splitStoreTileIntoWaveBlocks = false;
 
-    bool loadLDSScaleA = false;
-    bool loadLDSScaleB = false;
+    SolutionParams::LoadPath loadScalePathA{SolutionParams::LoadPath::BufferToVGPR};
+    SolutionParams::LoadPath loadScalePathB{SolutionParams::LoadPath::BufferToVGPR};
 
     int  workgroupMappingDim   = -1;
     int  workgroupMappingValue = -1;

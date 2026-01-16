@@ -25,15 +25,9 @@
  *******************************************************************************/
 #include <gtest/gtest.h>
 
-#include <cstdlib>
-#include <ctime>
-#include <vector>
-
-#include <boost/optional.hpp>
 #include "../../driver/conv_common.hpp"
 #include <miopen/batched_transpose_sol.hpp>
 #include <miopen/handle.hpp>
-#include <miopen/invoke_params.hpp>
 #include <miopen/invoker.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
@@ -41,7 +35,8 @@
 #include <miopen/tensor_layout.hpp>
 
 #include "driver.hpp"
-#include "random.hpp"
+
+#include <vector>
 
 namespace {
 

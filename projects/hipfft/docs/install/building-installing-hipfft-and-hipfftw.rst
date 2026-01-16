@@ -50,7 +50,7 @@ To build hipFFT and hipFFTW from source, follow these steps:
 #. Install the client build dependencies for the clients:
 
    The clients that are included with the source code, including samples and tests,
-   depend on :doc:`hipRAND <hiprand:index>`, `FFTW <https://fftw.org/>`_, `boost <https://www.boost.org/>`_, and GoogleTest.
+   depend on :doc:`hipRAND <hiprand:index>`, `FFTW <https://fftw.org/>`_, and GoogleTest.
 
 #. Build hipFFT and hipFFTW:
 

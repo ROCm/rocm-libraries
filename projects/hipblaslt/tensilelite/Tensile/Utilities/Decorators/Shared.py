@@ -34,3 +34,18 @@ def envVariableIsSet(varName: str) -> bool:
     """
     value = os.environ.get(varName, "").upper()
     return True if value in ["YES", "ON", "TRUE", "1"] else False
+
+class CallableGuard:
+    """Disallow 'truthy' evaluation of the decorated callable.
+    Adds safety for `isABC` style functions.
+    """
+    def __init__(self, func):
+        self._func = func
+        self.__name__ = func.__name__
+        self.__doc__ = func.__doc__
+
+    def __call__(self, *args, **kwargs):
+        return self._func(*args, **kwargs)
+
+    def __bool__(self):
+        raise TypeError(f"Function '{self.__name__}' was used in a boolean context without being called. Did you mean to call it, e.g., '{self.__name__}(kernel)'?")

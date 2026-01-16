@@ -96,7 +96,6 @@ namespace rocRoller
                               ControlGraph::Assign,
                               ControlGraph::Barrier,
                               ControlGraph::Block,
-                              ControlGraph::ComputeIndex,
                               ControlGraph::ConditionalOp,
                               ControlGraph::Deallocate,
                               ControlGraph::DoWhileOp,

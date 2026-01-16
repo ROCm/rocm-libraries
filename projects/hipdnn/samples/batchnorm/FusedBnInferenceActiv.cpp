@@ -5,27 +5,28 @@
 #include <string>
 #include <unordered_map>
 
+#include <hipdnn_data_sdk/utilities/Constants.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
-#include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <hipdnn_sdk/utilities/Workspace.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include "../utils/Helpers.hpp"
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_sdk;
+using namespace hipdnn_data_sdk;
 
 template <typename InputType, typename IntermediateType>
-void SampleRunner::operator()(const TensorLayout& layout)
+bool SampleRunner::operator()(const TensorLayout& layout)
 {
     auto inputType = getDataTypeEnumFromType<InputType>();
     auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
 
-    std::cout << "Running batch normalization inference + activation graph " << inputType << " ["
-              << layout << "]" << (config.cpuValidation ? " (with CPU validation)" : "")
-              << " [activation: " << config.activationType << "]...\n";
+    std::cout << "Running batch normalization inference + ReLU activation graph " << inputType
+              << " [" << layout << "]" << (config.cpuValidation ? " (with CPU validation)" : "")
+              << "...\n";
 
     int64_t n = 16; // BATCH SIZE
     int64_t c = 16; // CHANNELS (FEATURES)
@@ -43,53 +44,30 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto mean = createTensor({1, c, 1, 1}, intermediateType);
     auto invVariance = createTensor({1, c, 1, 1}, intermediateType);
 
+    // Epsilon is a pass-by-value scalar, not a buffer
+    auto epsilon = std::make_shared<graph::TensorAttributes>();
+    epsilon->set_value(utilities::BATCHNORM_DEFAULT_EPSILON);
+
     // Step 1: Batchnorm Inference
     auto bnAttributes = graph::BatchnormInferenceAttributes();
     bnAttributes.set_name("bn_inference_node");
+    bnAttributes.set_epsilon(epsilon);
 
     auto y = graph->batchnorm_inference(x, mean, invVariance, scale, bias, bnAttributes);
 
-    // Mark BN output as virtual to enable fusion with activation
-    y->set_is_virtual(true);
+    y->set_data_type(inputType);
 
-    // Step 2: Pointwise Activation
+    // Step 2: Pointwise ReLU Activation
     auto pwAttributes = graph::PointwiseAttributes();
     pwAttributes.set_name("activation_node");
     pwAttributes.set_mode(PointwiseMode::RELU_FWD);
 
-    // Configure activation based on type
-    if(config.activationType == "relu6")
-    {
-        // Clipped ReLU with upper clip at 6.0
-        pwAttributes.set_relu_upper_clip(6.0f);
-    }
-    else if(config.activationType == "clamp")
-    {
-        // CLAMP with both lower and upper clips
-        pwAttributes.set_relu_lower_clip(0.1f);
-        pwAttributes.set_relu_upper_clip(0.5f);
-    }
-    // For "relu", no additional parameters needed
-
     auto activatedY = graph->pointwise(y, pwAttributes);
     activatedY->set_name("activated_y");
     activatedY->set_output(true);
-    activatedY->set_is_virtual(false);
 
-    HIPDNN_FE_CHECK(graph->validate());
-    std::cout << "Graph validation successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
-    std::cout << "Operation graph build successful.\n";
-
-    HIPDNN_FE_CHECK(graph->create_execution_plans());
-    std::cout << "Execution plans created successfully.\n";
-
-    HIPDNN_FE_CHECK(graph->check_support());
-    std::cout << "Graph support check successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_plans());
-    std::cout << "Plans build successful.\n";
+    HIPDNN_FE_CHECK(graph->build(handle));
+    std::cout << "Graph build successful.\n";
 
     // Allocate tensors
     utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
@@ -128,6 +106,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
     activatedYTensor.memory().markDeviceModified();
     auto activatedYHostPtr = activatedYTensor.memory().hostData();
 
+    bool validationPassed = true;
+
     if(config.cpuValidation)
     {
         std::cout << "Running CPU reference validation using CpuReferenceGraphExecutor...\n";
@@ -146,16 +126,19 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         // Execute on CPU using graph executor
         auto serializedGraph = graph->buildFlatbufferOperationGraph();
-        test_utilities::CpuReferenceGraphExecutor cpuExecutor;
+        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor cpuExecutor;
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 
-        auto tolerance = test_utilities::batchnorm::getToleranceInference<InputType>();
-        auto yValidator = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
+        auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceInference<InputType>();
+        auto yValidator
+            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
         bool yValid = yValidator.allClose(activatedYRefTensor, activatedYTensor);
 
         std::cout << "CPU reference validation:\n";
         std::cout << "  activated_y: " << (yValid ? "successful" : "failed") << "\n";
+
+        validationPassed = yValid;
     }
 
     std::cout << "First 10 activated_y values: ";
@@ -166,6 +149,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     std::cout << "\nBatch normalization inference + activation graph execution complete for "
               << inputType << ".\n\n";
+    return validationPassed;
 }
 
 int main(int argc, char* argv[])
@@ -178,9 +162,20 @@ int main(int argc, char* argv[])
     hipdnnHandle_t handle;
     HIPDNN_CHECK(backend->create(&handle));
 
-    run(SampleRunner{handle, config});
+    bool allPassed = run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(backend->destroy(handle));
-    std::cout << "All batch normalization inference + activation runs completed.\n";
-    return 0;
+
+    if(allPassed)
+    {
+        std::cout
+            << "All batch normalization inference + activation runs completed successfully.\n";
+        return 0;
+    }
+    else
+    {
+        std::cout
+            << "One or more batch normalization inference + activation runs failed validation.\n";
+        return 1;
+    }
 }

@@ -3,18 +3,16 @@
 #pragma once
 
 #include <functional>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 class INode
 {
@@ -46,7 +44,7 @@ public:
     {
     }
 
-    virtual flatbuffers::Offset<hipdnn_sdk::data_objects::Node>
+    virtual flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
         pack_node([[maybe_unused]] flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
         return {};
@@ -166,6 +164,12 @@ public:
             return {ErrorCode::ATTRIBUTE_NOT_SET,
                     "Node " + self().attributes.name + " does not have a compute_data_type set"};
         }
+
+        for(const auto& tensorAttr : getNodeOutputTensorAttributes())
+        {
+            HIPDNN_CHECK_ERROR(tensorAttr->validate());
+        }
+
         return {ErrorCode::OK, ""};
     }
 
@@ -203,5 +207,4 @@ protected:
 
 template <typename DerivedT>
 using NodeCRTP = BaseNode<DerivedT>; // NOLINT
-}
-}
+} // namespace hipdnn_frontend::graph

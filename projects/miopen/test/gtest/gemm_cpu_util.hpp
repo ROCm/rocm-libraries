@@ -76,7 +76,6 @@ void CallGemm(miopen::GemmDescriptor gemm_desc,
                           gemm_desc.m,
                           gemm_desc.ldc,
                           gemm_desc.strideC,
-                          0,
                           gemm_desc.batch_count,
                           gemm_desc.alpha,
                           gemm_desc.beta);

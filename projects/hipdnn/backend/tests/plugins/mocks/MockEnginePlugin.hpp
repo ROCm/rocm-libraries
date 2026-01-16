@@ -11,9 +11,7 @@
 #include <string_view>
 #include <vector>
 
-namespace hipdnn_backend
-{
-namespace plugin
+namespace hipdnn_backend::plugin
 {
 
 class MockEnginePlugin : public EnginePlugin
@@ -77,5 +75,4 @@ public:
     MOCK_METHOD(hipdnnPluginStatus_t, setLoggingCallback, (hipdnnCallback_t callback), (const));
 };
 
-} // namespace plugin
-} // namespace hipdnn_backend
+} // namespace hipdnn_backend::plugin
