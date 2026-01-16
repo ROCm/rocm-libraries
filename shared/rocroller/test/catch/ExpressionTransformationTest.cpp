@@ -544,7 +544,7 @@ TEST_CASE("ConvertPropagation", "[expression][expression-transformation]")
             ->expression()};
 
     std::vector<Expression::ExpressionPtr> r32{
-        4,
+        3,
         Register::Value::Placeholder(context.get(), Register::Type::Vector, Int32, 1)
             ->expression()};
 
