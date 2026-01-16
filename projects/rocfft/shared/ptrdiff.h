@@ -34,16 +34,15 @@ static size_t compute_ptrdiff(const std::vector<intT1>& length, const std::vecto
     // Strides and lengths must have the same dimension:
     if(length.size() != stride.size())
         return 0;
-    // Negative lengths are not allowed:
-    if(std::any_of(length.begin(), length.end(), [](const intT1& l) { return l < 0; }))
+    // If any lengths are zero or negative, no memory is allocated:
+    if(std::any_of(length.begin(), length.end(), [](const intT1& l) { return l < 1; }))
         return 0;
-    // Strides associated with non-unit lengths must be strictly positive:
-    for(size_t idx = 0; idx < stride.size(); ++idx)
-    {
-        if(length[idx] > 0 && stride[idx] < 1)
-            return 0;
-    }
+    // Negative strides are not permitted (so as to avoid underflow):
+    if(std::any_of(stride.begin(), stride.end(), [](const intT1& s) { return s < 0; }))
+        return 0;
 
+    // We allow for weird data layouts with self-aliasing; this is not an array validator.
+    
     // 1 + sum_i [ ( length_i - 1 ) * stride_i
     // = 1 + dot(length, stride) - sum(stride)
     // Since length is the one-past-the-end, we subtract the strides.
