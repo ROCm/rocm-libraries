@@ -2796,10 +2796,12 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
 
         # Interleaving of LBR0 and GRINCB to hide LRB0 latency
         lrb0 = create_range(min_val = 0, num = 6, step = 1, repeat = 1)
-        grIncB = create_range(min_val = max(lrb0)+1, num = 3, step = 1, repeat = 3)
+        grIncB = create_range(min_val = 0, num = 6, step = 1, repeat = 1)
+        grIncB += create_range(min_val = max(lrb0)+1, num = 1, step = 1, repeat = 3)
         
-        grIncA = create_range(min_val = max(grIncB)+1, num = 3, step = 1, repeat = 3)
+        grIncA = create_range(min_val = max(grIncB)+1, num = 2, step = 1, repeat = 3)
         waitLRB0 = max(grIncA)
+        grIncA += create_range(min_val = max(grIncA)+2, num = 3, step = 1, repeat = 1)
 
         # PackB0 using mfma4x4x4_16b
         startPACKB0 = waitLRB0
@@ -2832,7 +2834,7 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
                 create_range(min_val = max(packB0)+2, num = numLrReadA // 2, step = 2, repeat = 2)]
        
         # PackA0
-        waitLRA0 = max(lra0[1])
+        waitLRA0 = max(lra0[1])+1
         startPACKA0 = waitLRA0
 
         packAOffset = [ 
@@ -2861,13 +2863,18 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
         startLRA3 = halfMFMA
         lra3 = [create_range(min_val = startLRA3+1, num = numLrReadA // 2, step = 2, repeat = 2),
                 create_range(min_val = startLRA3, num = numLrReadA // 2, step = 2, repeat = 2)]
-        grB[0] += create_range(min_val = startLRA3,num = 3,step = 2, repeat = 2)
-        grB[1] += create_range(min_val = startLRA3+1,num = 3,step = 2, repeat = 2)
+
+        grB[0] += [startLRA3-2,startLRA3]
+        grB[1] += [startLRA3-2,startLRA3+1]
+
+        grB[0] += create_range(min_val = startLRA3+2,num = 2,step = 2, repeat = 2)
+        grB[1] += create_range(min_val = startLRA3+3,num = 2,step = 2, repeat = 2)
         # waitLRA3 = max(lra3[1])+6  
     
         # LRB3 + PACKA3 & PACKB3
         startLRB3 = (3*numMfma)//4 - 4 # Starts 4 indexes before 3/4 MFMAs to accommodate LRB3 latency
         lrb3 = create_range(min_val = startLRB3,num=numLrReadB - 2,step=1,repeat=1)
+        
         grA = [create_range(min_val = max(lra3[0])+1, num = 8, step = 1,repeat = 1),
                create_range(min_val = max(lra3[1])+1, num = 8, step = 1,repeat = 1)]
         lrb3 += create_range(min_val = max(lrb3)+3,num=2,step=1,repeat=1)
@@ -2880,19 +2887,19 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
         waitLRA3 = max(lrb3)+1
         packA3 = [ 
                    *create_range(min_val = waitLRA3, num = 2, step = 1, repeat = 2),
-                   start_4x4x4,start_4x4x4,
+                   start_4x4x4, start_4x4x4,
                    *create_range(min_val = max(packB3)+1, num = 2, step = 1, repeat = 2),
 
                    *create_range(min_val = waitLRA3+2, num = 2, step = 1, repeat = 2),
-                   start_4x4x4,start_4x4x4,
+                   start_4x4x4, start_4x4x4,
                    *create_range(min_val = max(packB3)+3, num = 2, step = 1, repeat = 2),
 
                    *create_range(min_val = waitLRA3+4, num = 2, step = 1, repeat = 2),
-                   start_4x4x4,start_4x4x4,
+                   start_4x4x4, start_4x4x4,
                    *create_range(min_val = max(packB3)+5, num = 2, step = 1, repeat = 2),
 
                    *create_range(min_val = waitLRA3+6, num = 2, step = 1, repeat = 2),
-                   start_4x4x4,start_4x4x4,
+                   start_4x4x4, start_4x4x4,
                    *create_range(min_val = max(packB3)+7, num = 2, step = 1, repeat = 2),
                    ]
 
@@ -2901,9 +2908,11 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
         grA[1] += create_range(min_val = max(packB3)+1, num = 4, step = 1,repeat = 2)
 
         syncTable = [                                      
-                    waitLRB0, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for 4/8 LRB0 to complete"),
-                    waitLRB0+4, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LRB0 to complete"),
-                    waitLRB0+4, SBarrier(comment="Barrier before GRB"), 
+                    waitLRB0, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for 4/8 LRB0 to complete"),
+                    waitLRB0+4, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for all LRB0 to complete"),
+                    waitLRB0+5, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for all LRB0 to complete"),
+                    waitLRB0+6, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LRB0 to complete"),
+                    waitLRB0+6, SBarrier(comment="Barrier before GRB"), 
 
                     
                     waitLRA0, SWaitCnt(dscnt=min(15,numLrReadA-4), vlcnt=-1, vscnt=-1, comment="Wait for 4 LRA0 to complete"),
@@ -2932,12 +2941,12 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
             'GRIncB': [grIncB],
             'LRA0': [*lra0],
             'LRB0': [lrb0],
+            'LRSA': [[packA0[4]]],
+            'LRSB': [[packA0[4]]],
             'PackA0' : [packA0],
             'PackB0' : [packB0],
             'GRA': [*grA],
             'GRB': [*grB],              
-            'LRSA': [[max(lra0[1])+1]],
-            'LRSB': [[max(lra0[1])+1]],
             'LWSA': [[numMfma-2]],
             'LWSB': [[numMfma-2]],
             'LCC': [[numMfma-1, numMfma-1]],
