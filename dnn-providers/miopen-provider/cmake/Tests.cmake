@@ -162,14 +162,21 @@ endfunction() # finalize_test_targets
 #   WORKING_DIR - Working directory for test execution
 # ~~~
 function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
-    message(STATUS "Appending unclassified check target: ${TARGET} in working directory: ${WORKING_DIR}")
+    set(TARGET_EXE ${TARGET})
+
+    # Add executable suffix if needed (e.g., .exe on Windows)
+    if(CMAKE_EXECUTABLE_SUFFIX)
+        set(TARGET_EXE "${TARGET_EXE}${CMAKE_EXECUTABLE_SUFFIX}")
+    endif()
+
+    message(STATUS "Appending ${APPEND_FUNCTION_SUFFIX} check target: ${TARGET} -> ${TARGET_EXE} in working directory: ${WORKING_DIR}")
 
     # Track the dependencies for test name validation
     set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} ${TARGET}
         CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE
     )
     # Track the binary paths for test name validation
-    set(CHECK_EXECUTABLE_PATHS_GLOBAL ${CHECK_EXECUTABLE_PATHS_GLOBAL} "${CMAKE_INSTALL_BINDIR}/${TARGET}"
+    set(CHECK_EXECUTABLE_PATHS_GLOBAL ${CHECK_EXECUTABLE_PATHS_GLOBAL} "${CMAKE_INSTALL_BINDIR}/${TARGET_EXE}"
         CACHE INTERNAL "Accumulated global check executable paths" FORCE
     )
 

@@ -55,7 +55,7 @@ inline __HOST_DEVICE__ hip_bfloat16 hmax(const hip_bfloat16 a, const hip_bfloat1
         return aNan ? b : a;
     }
 
-    return a.data > b.data ? a : b;
+    return a > b ? a : b;
 }
 
 } // namespace hipdnn_data_sdk::utilities::bfp16
