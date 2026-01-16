@@ -670,6 +670,8 @@ rocblas_trsv_device(rocblas_int    n,
                     ;
             }
 
+            // Few intermittent failures without this. Needed to wait for updated x values, I guess?
+            __threadfence();
             __syncthreads();
 
             // Store x val (of previous block) into shared memory
@@ -776,6 +778,8 @@ rocblas_trsv_device(rocblas_int    n,
         __syncthreads(); // for windows instability
         if(tid == 0)
             w_completed_sec[batch]++;
+
+        __threadfence();
 
 #if DEVICE_GRID_YZ_16BIT
     }
