@@ -1116,9 +1116,7 @@ namespace TensileLite
                                                              problem.getParams().activationEnum(),
                                                              actArgs);
                                     }
-
-                                    // TODO(newling) should I use 'sature cast' here, like the legacy path?
-
+                                    current = SaturateCast<float>(current);
                                     curBatchD[idxD] = current;
                                 }
                             }
