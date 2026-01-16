@@ -402,7 +402,7 @@ class Pack(ValidatorInstruction):
     def done_idx(self) -> Union[int, float]:
         return self.issued_at
 
-    def validate(self) -> str | None:
+    def validate(self) -> Optional[str]:
         issued_at = floor(self.issued_at) % self.num_vmfma
 
         if (
