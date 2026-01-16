@@ -151,8 +151,7 @@ class hardware_t {
       case architecture_t::gfx1100:
         return {1, 7.12, 1.21875121875121875122 * 3.48, 0.732, 2, std::make_tuple(0, 0.11, 0), 1.5};
       case architecture_t::gfx1150:
-        // TODO: Fill with correct values
-        return {0, 0, 0, 0, 0, std::make_tuple(0, 0, 0), 0};
+        return {1, 1.497, 1.21875121875121875122 * 1000 /*Bigger*/, 0.077, 16, std::make_tuple(0, 0.18, 0), 1.5};
       case architecture_t::gfx1151:
         return {1, 2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 1.5};
       case architecture_t::gfx1152:
