@@ -1323,7 +1323,7 @@ def _hook_up_packs_f32_mfma(packs: list[Pack], local_reads: list[LocalRead]) -> 
     The first 4 output registers hold the bf16 approximations (packed in pairs).
     The second 4 output registers hold the error terms (packed in pairs).
 
-    Pack instructions in order (24 instructions total):
+    Pack instructions in order (10 instructions total):
     - 4 `v_cvt_pk_bf16_f32` to calculate and pack the bf16 approximations.
     - 2 `v_mfma_f32_4x4x4_16b_bf16` to calculate the error terms.
     - 4 `v_cvt_pk_bf16_f32` to pack the error terms into final registers.
@@ -1341,8 +1341,8 @@ def _hook_up_packs_f32_mfma(packs: list[Pack], local_reads: list[LocalRead]) -> 
     # NOTE: Assuming that all LRs are of the same width.
     vgprs_per_local_read = 8 // n_lrs_per_group
 
-    # Partial Pack->Pack dependency graph within a group of 24.
-    # Key: pack index (0-23), Value: list of pack indices it depends on.
+    # Partial Pack->Pack dependency graph within a group of 10.
+    # Key: pack index (0-9), Value: list of pack indices it depends on.
     # Empty list means it has no dependencies on other packs.
     # NOTE: Does not handle the quad-cycle spacing dependencies between packs and MFMAs.
     pack_dependencies: dict[int, list[int]] = {
