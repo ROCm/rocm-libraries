@@ -83,7 +83,7 @@ endif()
 
 if(HIPBLASLT_ENABLE_HOST)
     option(HIPBLASLT_BUILD_SHARED_LIBS "Build the hipblaslt library as shared vs static" ON)
-    option(HIPBLASLT_ENABLE_ROCROLLER "Use RocRoller library." ON)
+    option(HIPBLASLT_ENABLE_ROCROLLER "Use RocRoller library." OFF)
     cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
     option(HIPBLASLT_ENABLE_HIPBLAS_DIRECT "Use the hipblas header directly." OFF)
 endif()
