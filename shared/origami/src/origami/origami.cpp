@@ -325,6 +325,7 @@ staggerU_t select_staggerU(const problem_t& problem,
   // Number of output MTs per split and batch
   size_t numMT_M = math::safe_ceil_div(M, MT_M);
   size_t numMT_N = math::safe_ceil_div(N, MT_N);
+  size_t numMT_K = math::safe_ceil_div(K, MT_K);
   size_t numMTs  = numMT_M * numMT_N;
 
   // What SK does -- we already have skGrid so just compute num_timesteps and split_factor
@@ -345,6 +346,11 @@ staggerU_t select_staggerU(const problem_t& problem,
   // -------------------
   // General Cases
   // -------------------
+  // Early exit cases
+  if(numMT_K > 36) // If MainLoop is substantial, we don't need to use staggerU
+    return staggerU_t{0, 0, 0};
+  
+  
   size_t out_staggerUMapping     = defaultStaggerUMapping;
   size_t out_staggerU            = defaultStaggerU;
   size_t out_staggerUStrideShift = defaultStaggerUStrideShift;

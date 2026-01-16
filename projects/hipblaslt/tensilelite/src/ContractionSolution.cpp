@@ -1138,7 +1138,7 @@ namespace TensileLite
             defaultStaggerU            = sizeMapping.staggerU;
             defaultStaggerUStrideShift = sizeMapping.staggerStrideShift;
         }
-
+        
         // If values are explicitly specified at runtime, they override predictions and default values
         if(pAMDGPU->fixedStaggerUMapping != std::numeric_limits<size_t>::max())
             defaultStaggerUMapping = pAMDGPU->fixedStaggerUMapping;
@@ -1153,6 +1153,9 @@ namespace TensileLite
         assert(defaultStaggerU & (defaultStaggerU - 1) == 0 && defaultStaggerU < 65);
         // StaggerUStride should be in this range: [-1, 0, 16, 32, 64, 128, 256, 512, 1024, 2048]
         // StaggerUStrideShift = (math.ceil(math.log(StaggerUStride / DepthU * bpeAB), 2)))
+        // Given StaggerUStrideShift, StaggerUStride can be calculated as: StaggerUStride = 2^StaggerUStrideShift * DepthU * bpeAB
+        // auto StaggerUStride = std::pow(2, defaultStaggerUStrideShift) * sizeMapping.depthU * sizeMapping.bpeAB;
+        // assert(StaggerUStride & (StaggerUStride - 1) == 0 && StaggerUStride < 4096 && StaggerUStride > 8);
 
         return std::make_tuple(defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift);
     }
@@ -1319,15 +1322,15 @@ namespace TensileLite
         // StaggerU
         if(internalArgsSupport.staggerU)
         {
-            const uint32_t staggerMask1    = 0x1F00;
-            uint32_t       staggerUMapping = (staggerUMapping << 13);
-            uint32_t       staggerUShift   = staggerMask1 & ((staggerUStrideShift) << 8);
-            uint32_t       staggerU        = mask8 & staggerU;
+            constexpr size_t staggerMask1 = 0x1F00;
+            size_t           sum          = staggerUMapping << 13;
+            size_t           sus          = staggerMask1 & (staggerUStrideShift << 8);
+            size_t           su           = mask8 & staggerU;
             if(Debug::Instance().disableStaggerU())
-                staggerU = 0;
-            staggerU     = staggerU | staggerUShift;
-            staggerU     = staggerU | staggerUMapping;
-            internalArg0 = internalArg0 | (staggerU << 16);
+                su = 0;
+            su = su | sus;
+            su = su | sum;
+            internalArg0 = internalArg0 | (su << 16);
         }
         else if(T_Debug && Debug::Instance().disableStaggerU())
             std::cout << "solution doesn't support configurable staggerU" << std::endl;
