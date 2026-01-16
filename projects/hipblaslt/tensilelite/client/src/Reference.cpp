@@ -924,9 +924,9 @@ namespace TensileLite
             auto mTiles = (sizeM / BLOCK_M + (sizeM % BLOCK_M != 0));
             auto kTiles = (sizeK / BLOCK_K + (sizeK % BLOCK_K != 0));
 
-            // Perform the contraction.
-            // Parallelize over the 3 non-reduction dimensions: batch, M, and N.
-            // Each thread computes a BLOCK_M x BLOCK_N tile.
+// Perform the contraction.
+// Parallelize over the 3 non-reduction dimensions: batch, M, and N.
+// Each thread computes a BLOCK_M x BLOCK_N tile.
 #pragma omp parallel for collapse(3)
             for(size_t b = 0; b < sizeBatch; ++b)
             {
@@ -1063,18 +1063,22 @@ namespace TensileLite
 
                                     if(problem.useBias() && inputs.bias)
                                     {
+
                                         assert(!problem.useGradient()
                                                && "Bias gradient not supported on this path.");
 
-                                        auto const&          bias = problem.bias();
-                                        auto const&          d    = problem.d();
+                                        size_t dNum
+                                            = global_m + (global_n * sizeM) + (b * sizeM * sizeN);
+                                        auto const&          d = problem.d();
                                         std::vector<int64_t> dCoord(d.dimensions());
-                                        std::vector<int64_t> biasCoord(bias.dimensions());
-                                        CoordNumbered(idxD,
+                                        CoordNumbered(dNum,
                                                       dCoord.begin(),
                                                       dCoord.end(),
                                                       d.sizes().begin(),
                                                       d.sizes().end());
+
+                                        auto const&          bias = problem.bias();
+                                        std::vector<int64_t> biasCoord(bias.dimensions());
                                         for(size_t i = 0; i < problem.batchIndices().size(); i++)
                                         {
                                             auto const& idx   = problem.batchIndices()[i];
@@ -1084,16 +1088,25 @@ namespace TensileLite
                                                 biasCoord[2] = coord;
                                             }
                                         }
-                                        size_t d0 = problem.d().sizes()[0];
-                                        size_t d1 = problem.d().sizes()[1];
+                                        auto biasIndex = problem.bias().index(biasCoord);
 
-                                        int pos       = problem.bias().index(biasCoord);
-                                        int factorDim = problem.getParams().factorDim();
-                                        pos += factorDim ? int(int(idxD / d0) % d1)
-                                                         : int(idxD % d0);
+                                        int pos = 0;
+                                        if(problem.getParams().factorDim())
+                                            pos = int(int(dNum / problem.d().sizes()[0])
+                                                      % problem.d().sizes()[1])
+                                                  + biasIndex;
+                                        else
+                                            pos = int(dNum % problem.d().sizes()[0]) + biasIndex;
 
-                                        rocisa::DataType type = problem.bias().dataType();
-                                        current += GetValue<float>(type, inputs.bias, pos, false);
+                                        bool aConjugate   = false;
+                                        using Accumulator = float;
+                                        Accumulator biasVal
+                                            = GetValue<Accumulator>(problem.bias().dataType(),
+                                                                    inputs.bias,
+                                                                    pos,
+                                                                    aConjugate);
+
+                                        current += biasVal;
                                     }
 
                                     if(doActivation)
@@ -1103,6 +1116,8 @@ namespace TensileLite
                                                              problem.getParams().activationEnum(),
                                                              actArgs);
                                     }
+
+                                    // TODO(newling) should I use 'sature cast' here, like the legacy path?
 
                                     curBatchD[idxD] = current;
                                 }
@@ -1483,8 +1498,10 @@ namespace TensileLite
                               + biasIndex;
                     else
                         pos = int(dNum % problem.d().sizes()[0]) + biasIndex;
+
                     Accumulator bias = GetValue<Accumulator>(
                         problem.bias().dataType(), inputs.bias, pos, aConjugate);
+
                     resultD += bias;
                 }
                 // E
