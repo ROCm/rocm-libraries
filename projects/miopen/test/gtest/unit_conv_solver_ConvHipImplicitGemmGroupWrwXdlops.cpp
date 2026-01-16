@@ -12,8 +12,7 @@ auto GetConvSmokeTestCases()
 {
     static std::vector<TestCase> test_cases = {
         // clang-format off
-        TestCase{{1, 64, 8, 8}, {96, 64, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 1}
-        // clang-format on
+        TestCase{{1, 64, 8, 8}, {96, 64, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 1} // clang-format on
     };
 
     return test_cases;
@@ -29,7 +28,7 @@ auto GetConvFullTestCases()
         // Group count = 2 and 4
         TestCase{{1, 64, 8, 8}, {96, 32, 1, 1}, {0, 0}, {1, 1}, {2, 2}, 2}, // dilation > 1
         TestCase{{1, 64, 8, 8}, {96, 16, 1, 1}, {0, 0}, {2, 2}, {1, 1}, 4}, // stride > 1
-                                                                            // clang-format on
+                                                              // clang-format on
     };
 
     return test_cases;
@@ -71,6 +70,15 @@ const auto& GetTestParams()
         return p;
     }();
     return params;
+}
+
+Gpu GetDeterministicSupportedDevices()
+{
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL && !defined(_WIN32)
+    return Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
+#else
+    return Gpu::None;
+#endif
 }
 
 const auto& GetTestParamsFP16() { return GetTestParams<miopenHalf>(); }
@@ -173,5 +181,5 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDeterministicApplicability_NONE,
-    testing::Combine(testing::Values(Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950),
+    testing::Combine(testing::Values(GetDeterministicSupportedDevices()),
                      testing::Values(GetDeterministicConvCase())));
