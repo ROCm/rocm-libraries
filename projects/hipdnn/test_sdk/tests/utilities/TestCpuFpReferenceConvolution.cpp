@@ -1174,7 +1174,7 @@ TEST(TestCpuFpReferenceConvolutionBfp8, ConvolutionBwdDataBasic)
     outputTensor.setHostValue(4.0_bfp8, 0, 0, 1, 1);
 
     // Weight values: simple 3x3 kernel
-    for(size_t i = 0; i < 9; ++i)
+    for(int i = 0; i < 9; ++i)
     {
         weightTensor.memory().hostData()[i] = static_cast<hip_fp8_e5m2>(i + 1);
     }

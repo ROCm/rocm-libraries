@@ -8,7 +8,8 @@
 #include <string>
 #include <type_traits>
 
-#define HIPDNN_NAN_FP8 uchar_as_fp8(static_cast<unsigned char>(0x7F))
+#define HIPDNN_NAN_FP8 \
+    hipdnn_data_sdk::utilities::fp8::uchar_as_fp8(static_cast<unsigned char>(0x7F))
 
 using hip_fp8_e4m3 = __hip_fp8_e4m3;
 

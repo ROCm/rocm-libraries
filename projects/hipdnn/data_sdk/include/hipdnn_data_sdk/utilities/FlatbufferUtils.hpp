@@ -5,6 +5,7 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_data_sdk/utilities/UtilsBfp8.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp8.hpp>
 #include <stdexcept>
 #include <string>
@@ -93,7 +94,8 @@ TargetType extractValueFromTensorValue(const data_objects::TensorAttributesT& te
     case data_objects::DataType::FP8_E5M2:
         if(auto val = tensorAttr.value.AsFloat8Value())
         {
-            return static_cast<TargetType>(val->value());
+            auto bfp8 = hipdnn_data_sdk::utilities::bfp8::uchar_as_bfp8(val->value());
+            return static_cast<TargetType>(static_cast<float>(bfp8));
         }
         break;
     case data_objects::DataType::UNSET:
