@@ -2607,7 +2607,7 @@ class KernelWriterAssembly(KernelWriter):
     """
     Compute per-workgroup K ring-shift amount (in elements) for cacheline congruence.
 
-      shift = (-WorkGroup1 * (StrideB1J % cacheLineElements)) mod cacheLineElements
+      shift = (-baseOffsetElems) mod cacheLineElements
 
     where:
       cacheLineElements = vL1DCacheLineBytes / bpe
@@ -2615,18 +2615,18 @@ class KernelWriterAssembly(KernelWriter):
     Stored in:
       sgprKRingShift (elements)
 
-    When StrideB1J is cacheline-aligned, shift=0.
+    NOTE:
+      Here baseOffsetElems is derived from sgprSrdB (the per-WG B SRD base, i.e. AddressB + tileStart),
+      so it already reflects the WG-dependent starting address. Do not add an extra WG term again.
     """
     module = Module("initKRingShift")
     module.addComment1("KRS: KRingShift init per-WG K shift (elements) for cacheline congruence")
-
-    # Default disabled: shift=0.
-    module.add(SMovB32(dst=sgpr("KRingShift"), src=0, comment="KRS: disabled (shift=0)"))
 
     # vL1DCacheLineBytes is provided by rocisa archCaps (see rocisa/include/hardware_caps.hpp).
     cacheLineBytes = int(self.states.archCaps["vL1DCacheLineBytes"])
     if cacheLineBytes <= 0:
       module.addComment0("KRingShift: no arch cacheline info; keep shift=0")
+      module.add(SMovB32(dst=sgpr("KRingShift"), src=0, comment="KRS: disabled (shift=0)"))
       return module
 
     # bpe of B elements (bytes/element)
@@ -2634,12 +2634,14 @@ class KernelWriterAssembly(KernelWriter):
     bpe = int(kernel["ProblemType"]["DataTypeB"].numBytes())
     if bpe <= 0 or (cacheLineBytes % bpe) != 0:
       module.addComment0("KRingShift: cacheLineBytes%bpe!=0; keep shift=0")
+      module.add(SMovB32(dst=sgpr("KRingShift"), src=0, comment="KRS: disabled (shift=0)"))
       return module
 
     cacheLineElements = cacheLineBytes // bpe
     # Require power-of-two for cheap modulo.
     if cacheLineElements & (cacheLineElements - 1):
       module.addComment0("KRingShift: cacheLineElements not pow2; keep shift=0")
+      module.add(SMovB32(dst=sgpr("KRingShift"), src=0, comment="KRS: disabled (shift=0)"))
       return module
 
     mask = cacheLineElements - 1
@@ -2647,27 +2649,33 @@ class KernelWriterAssembly(KernelWriter):
     labelDone = Label(self.labels.getNameInc("KRingShift_done"), "")
     labelDone.comment = "KRS: KRingShift done"
     with self.allocTmpSgpr(2) as tS:
-      sRem = tS.idx
-      sTmp = tS.idx + 1
+      sTmp  = tS.idx
+      sBase = tS.idx + 1
 
-      # rem = StrideB1J % cacheLineElements (pow2 => AND mask)
-      module.add(SAndB32(dst=sgpr(sRem), src0=sgpr("StrideB1J"), src1=mask, comment=f"rem = StrideB1J & {mask}"))
-      # Runtime restriction requested:
-      #   if ((K * bpe * BInterleaveG) % cachelineBytes != 0) => disable KRS (shift=0)
-      # In elements (cacheLineElements = cachelineBytes/bpe), this becomes:
-      #   if ((StrideB1J * BInterleaveG) % cacheLineElements != 0) => disable.
-      if kernel["BAddrInterleave"]:
-        module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr("BInterleaveG"), src1=sgpr(sRem), comment="KRS: tmp = (G * (K%CL))"))
-        module.add(SAndB32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=mask, comment="KRS: (G*K)%cacheLineElements"))
-        module.add(SCmpEQU32(src0=sgpr(sTmp), src1=0, comment="KRS: (K*bpe*G)%cacheline == 0 ?"))
-        module.add(SCBranchSCC0(labelName=labelDone.getLabelName(), comment="KRS: disable (not congruent)"))
+      # Include current B tile base address (SRD base) misalignment in the shift.
+      # We want:
+      #   (baseOffsetElems + shift) % cacheLineElements == 0
+      # => shift = -baseOffsetElems mod cacheLineElements
+      baseMaskBytes = cacheLineBytes - 1
+      # NOTE: AddressB is pre-padded (see "pre-pad to make room for possible pointer shift"),
+      # so SrdB.base includes that subtraction. Add the pre-pad back to recover the true base.
+      prePadBytes = int(self.states.srdShiftLeft["B"]) * int(kernel["ProblemType"]["DataTypeB"].numBytes())
+      if prePadBytes:
+        module.add(SAddU32(dst=sgpr(sBase), src0=sgpr("SrdB+0"), src1=prePadBytes, comment="KRS: unpad B base (lo)"))
+      else:
+        module.add(SMovB32(dst=sgpr(sBase), src=sgpr("SrdB+0"), comment="KRS: B base (lo)"))
+      module.add(SAndB32(dst=sgpr(sBase), src0=sgpr(sBase), src1=baseMaskBytes,
+                         comment=f"KRS: baseBytes = (SrdB.base + prePad) & {baseMaskBytes}"))
+      if bpe > 0 and (bpe & (bpe - 1)) == 0:
+        module.add(SLShiftRightB32(dst=sgpr(sBase), src=sgpr(sBase), shiftHex=hex(log2(bpe)),
+                                   comment="KRS: baseOffsetElems = baseBytes >> log2(bpe)"))
+      else:
+        # Should not happen for supported datatypes, but keep behavior safe.
+        module.addComment0("KRingShift: bpe not pow2; keep baseOffsetElems=0")
+        module.add(SMovB32(dst=sgpr(sBase), src=0, comment="KRS: baseOffsetElems = 0"))
 
-      module.add(SCmpEQU32(src0=sgpr(sRem), src1=0, comment="KRS: StrideB1J cacheline-aligned?"))
-      module.add(SCBranchSCC1(labelName=labelDone.getLabelName(), comment="KRS: aligned => shift=0"))
-
-      # tmp = (WorkGroup1 * rem) & mask
-      module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr("WorkGroup1"), src1=sgpr(sRem), comment="wg1*rem"))
-      module.add(SAndB32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=mask, comment="(wg1*rem) mod cacheLineElements"))
+      # tmp = baseOffsetElems & mask
+      module.add(SAndB32(dst=sgpr(sTmp), src0=sgpr(sBase), src1=mask, comment="KRS: baseOffsetElems mod cacheLineElements"))
 
       # shift = (-tmp) & mask
       module.add(SSubU32(dst=sgpr("KRingShift"), src0=0, src1=sgpr(sTmp), comment="KRS: shift = -tmp"))
