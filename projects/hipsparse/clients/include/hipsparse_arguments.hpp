@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -119,6 +119,8 @@ struct Arguments
     int timing;
     int iters;
 
+    bool graph_test;
+
     char filename[192]; // nos2.bin, bmwcra_1.bin, etc
     char function[64]; // axpby, spmv_csr, etc
     char category[32]; // quick, pre_checkin, etc
@@ -198,6 +200,8 @@ struct Arguments
         this->unit_check = 1;
         this->timing     = 0;
         this->iters      = 10;
+
+        this->graph_test = false;
 
         this->filename[0] = '\0';
         this->function[0] = '\0';
@@ -327,6 +331,7 @@ struct Arguments
         HIPSPARSE_FORMAT_CHECK(unit_check);
         HIPSPARSE_FORMAT_CHECK(timing);
         HIPSPARSE_FORMAT_CHECK(iters);
+        HIPSPARSE_FORMAT_CHECK(graph_test);
         HIPSPARSE_FORMAT_CHECK(filename);
         HIPSPARSE_FORMAT_CHECK(function);
         HIPSPARSE_FORMAT_CHECK(category);
@@ -479,6 +484,7 @@ private:
         print("unit_check", arg.unit_check);
         print("timing", arg.timing);
         print("iters", arg.iters);
+        print("graph_test", arg.graph_test);
         return str << " }\n";
     }
 };
