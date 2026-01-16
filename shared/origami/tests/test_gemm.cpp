@@ -59,7 +59,7 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
       auto hardware = make_hardware(gpu_arch);
       auto problem =
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N);
-      auto config = make_config(128, 128, 64, 32, 32, 8, 1);
+      auto config = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
       auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
       REQUIRE(latency == 4096);
@@ -69,7 +69,7 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
       auto hardware = make_hardware(gpu_arch);
       auto problem =
           make_problem(4096, 4096, 1024, origami::transpose_t::N, origami::transpose_t::T);
-      auto config = make_config(128, 128, 64, 32, 32, 8, 1);
+      auto config = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
       auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
       REQUIRE(latency == 4096);
@@ -79,7 +79,7 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
       auto hardware = make_hardware(gpu_arch);
       auto problem =
           make_problem(4096, 4096, 1024, origami::transpose_t::N, origami::transpose_t::N);
-      auto config = make_config(128, 128, 64, 32, 32, 8, 1);
+      auto config = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
       auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
       REQUIRE(latency == 4096);
@@ -89,7 +89,7 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
       auto hardware = make_hardware(gpu_arch);
       auto problem =
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::T);
-      auto config = make_config(128, 128, 64, 32, 32, 8, 1);
+      auto config = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
       auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
       REQUIRE(latency == 4096);
@@ -98,7 +98,7 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - different MT_K") {
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(4096, 4096, 1024);
-      auto config   = make_config(128, 128, 32, 32, 32, 8, 1);
+      auto config   = make_config(128, 128, 32, 32, 32, 8, false, 1);
 
       auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
       REQUIRE(latency == 2048);
@@ -107,7 +107,7 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - larger tile") {
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(4096, 4096, 1024);
-      auto config   = make_config(224, 224, 64, 32, 32, 8, 1);
+      auto config   = make_config(224, 224, 64, 32, 32, 8, false, 1);
 
       auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
       REQUIRE(latency > 12543);
@@ -121,8 +121,8 @@ TEST_CASE("GEMM: compute_memory_latency", "[gemm]") {
       auto hardware = make_hardware(gpu_arch);
       auto problem =
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 1);
-      auto config_small = make_config(128, 128, 64, 32, 32, 8, 8);
-      auto config_large = make_config(256, 256, 128, 32, 32, 8, 8);
+      auto config_small = make_config(128, 128, 64, 32, 32, 8, false, 8);
+      auto config_large = make_config(256, 256, 128, 32, 32, 8, false, 8);
 
       auto mem_latency_small =
           origami::compute_memory_latency(problem, hardware, config_small, 304, 2);
@@ -140,8 +140,8 @@ TEST_CASE("GEMM: compute_tile_latency", "[gemm]") {
       auto hardware = make_hardware(gpu_arch);
       auto problem =
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
-      auto config_small = make_config(128, 128, 64, 32, 32, 8, 6);
-      auto config_large = make_config(256, 256, 128, 32, 32, 8, 6);
+      auto config_small = make_config(128, 128, 64, 32, 32, 8, false, 6);
+      auto config_large = make_config(256, 256, 128, 32, 32, 8, false, 6);
 
       auto tile_latency_small =
           origami::compute_tile_latency(problem, hardware, config_small, 304, 3);
@@ -159,7 +159,7 @@ TEST_CASE("GEMM: compute_timestep_latency", "[gemm]") {
       auto hardware = make_hardware(gpu_arch);
       auto problem =
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
-      auto config = make_config(128, 128, 64, 32, 32, 8, 8);
+      auto config = make_config(128, 128, 64, 32, 32, 8, false, 8);
 
       auto tile_latency = origami::compute_tile_latency(problem, hardware, config, 304, 4);
       auto timestep_latency = origami::compute_timestep_latency(problem, hardware, config, 304, 4);
@@ -177,7 +177,7 @@ TEST_CASE("GEMM: compute_total_latency", "[gemm]") {
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
       auto problem_large =
           make_problem(8192, 8192, 2048, origami::transpose_t::T, origami::transpose_t::N, 2);
-      auto config = make_config(128, 128, 64, 32, 32, 8, 1);
+      auto config = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
       auto latency_small =
           origami::compute_total_latency(problem_small, hardware, config, hardware.N_CU);
@@ -208,7 +208,7 @@ TEST_CASE("GEMM: estimate_l2_hit", "[gemm]") {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - L2 hit rate in valid range") {
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(4096, 4096, 1024);
-      auto config   = make_config(256, 256, 64, 32, 32, 8, 1);
+      auto config   = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
       for (int wgm = 1; wgm < 1025; wgm++) {
         config.workgroup_mapping = wgm;
@@ -225,7 +225,7 @@ TEST_CASE("GEMM: estimate_mall_hit", "[gemm]") {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - Mall hit rate is positive") {
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(4096, 4096, 1024);
-      auto config   = make_config(256, 256, 64, 32, 32, 8, 1);
+      auto config   = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
       for (int wgm = 1; wgm < 1025; wgm++) {
         config.workgroup_mapping = wgm;

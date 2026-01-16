@@ -8,14 +8,27 @@ hipDNN is a graph-based deep learning library that enables multi-operation fusio
 ## Core Design Principles
 
 - **Graph-based API**: Operations are expressed as computational graphs rather than individual function calls, enabling optimization opportunities
-- **Plugin Architecture**: Backend engines, heuristics, and benchmarking are implemented as plugins, allowing extensibility without modifying the core library
+- **Plugin Architecture**: Backend kernel engines, and heuristics are implemented through plugins, allowing extensibility without modifying the core library
 - **Performance through Fusion**: Multiple operations can be fused into single kernels for better performance
-- **Engine Selection**: Heuristics and benchmarking will be implemented as plugins, allowing extensibility without modifying the core library
+- **Engine Selection**: Heuristics will be implemented as plugins, allowing extensibility without modifying the core library, and benchmarking will be implemented as an extensible frontend API allowing customized engine selection logic
 - **Industry Standard API**: Provides a familiar interface that matches established deep learning library conventions
+
+## Memory Management
+
+hipDNN adopts a caller-owned memory model:
+
+1.  **Tensor Data**: The user is responsible for allocating and managing device memory for input and output tensors. These pointers are passed to the backend via the **Variant Pack**.
+2.  **Workspace Memory**: Some graph executions require temporary scratch memory. The Backend calculates the required size during the Execution Plan phase (`HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE`). The user must allocate this memory and pass the pointer during execution.
+3.  **Host Memory**: API descriptors and graph structures manage their own host resources. Backend API users must explicitly destroy descriptors using `hipdnnBackendDestroyDescriptor`.
+
+## Thread Safety
+
+- **Library Handle (`hipdnnHandle_t`)**: This handle is **not thread-safe**. Users should create a unique handle for each thread or use external synchronization locks when sharing a handle across threads.
+- **Descriptors**: Read-only access to finalized descriptors is thread-safe. Modifying a descriptor while it is being used in another thread is undefined behavior.
 
 ## High-Level Architecture
 
-hipDNN has a plugin-based architecture in order to allow contributors and users to extend hipDNN without modifying the core library. Currently, hipDNN has support for engine plugins which provide the kernels to solve graphs. In the future hipDNN will support both heuristic and benchmarking plugins to allow for improved engine selection. Benchmarking plugins will provide exhaustive tuning capabilities, but will require collecting samples from existing engines to do so. Heuristic plugins will provide better default engine selection given a graph, and shouldn't require collecting samples from existing engines to do so.
+hipDNN has a plugin-based architecture in order to allow contributors and users to extend hipDNN without modifying the core library. Currently, hipDNN has support for engine plugins which provide the kernels to solve graphs. In the future hipDNN will support heuristic plugins to allow for improved automatic engine selection. Benchmarking with an extensible selection API will be added to the frontend to provide exhaustive tuning capabilities, but will require collecting samples from applicable engines to do so. Heuristic plugins will provide better default engine selection given a graph, and shouldn't require collecting samples from existing engines to do so.
 
 ![hipDNN Architecture](./images/hipDNN_Architecture.png)
 
@@ -26,11 +39,17 @@ hipDNN has a plugin-based architecture in order to allow contributors and users 
 
 **SDKs**: Header-only libraries that provide shared utilities and interfaces. hipDNN provides three SDKs: Data SDK (graph schemas and data structures), Plugin SDK (plugin API and utilities), and Test SDK (testing utilities and CPU reference implementations).
 
-**MIOpen Legacy Plugin**: A plugin that wraps MIOpen and provides access to the existing API through hipDNN. In the future, the MIOpen Legacy Plugin will be its own separate project from hipDNN.
-
-**Other Plugins**: Plugins will be added over time to provide additional operational support, or performance improvements. Plugins should be external projects to hipDNN.
+**Plugins**: Plugins will be added over time to provide additional operational support, or performance improvements. Plugins should be external projects to hipDNN.
 
 ## Component Details
+
+### Error Handling Strategy
+
+hipDNN uses a layered error handling approach designed to be robust across C/C++ boundaries:
+
+1.  **Plugins**: Plugin entry points return `hipdnnPluginStatus_t` codes. Internal exceptions are caught at the plugin boundary and converted to status codes. Error strings are stored in thread-local storage via `PluginLastErrorManager`.
+2.  **Backend (C API)**: All public API functions return `hipdnnStatus_t` codes. The backend catches any internal C++ exceptions, converts them to the appropriate status code, and stores the exception message. Users can retrieve descriptive error messages using `hipdnnGetLastErrorString`.
+3.  **Frontend (C++ API)**: The C++ frontend checks `hipdnnStatus_t` codes from the backend. On failure, it retrieves the detailed error message via `hipdnnGetLastErrorString` and returns an `Error` object containing the error code and description. The frontend utilizes **value-based error handling** rather than throwing exceptions.
 
 ### SDKs
 
@@ -246,7 +265,7 @@ hipdnnEnginePluginExecuteOpGraph(handle, context, workspace, buffers, num_buffer
 ##### 1. Static Kernel Engines
 - Provide pre-compiled kernels for specific operations
 - Narrow support: Only handle specific configurations
-- Example: MIOpen Legacy Plugin
+- Example: MIOpen Provider Plugin
 - **Advantages:**
   - Highly optimized for supported cases
   - Predictable performance
