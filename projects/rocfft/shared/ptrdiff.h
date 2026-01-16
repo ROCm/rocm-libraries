@@ -45,11 +45,14 @@ static size_t compute_ptrdiff(const std::vector<intT1>& length, const std::vecto
     // Since length is the one-past-the-end, we subtract the strides.
     // The length-zero vector is a scalar, so the buffer size is 1.
     // Computation is done as size_t to ensure large values are captured.
-    return std::inner_product(length.begin(), length.end(), stride.begin(),
+    return std::inner_product(length.begin(),
+                              length.end(),
+                              stride.begin(),
                               static_cast<size_t>(1),
-                              std::plus<size_t>(), std::multiplies<size_t>())
-        - std::accumulate(stride.begin(), stride.end(), static_cast<size_t>(0),
-                          std::plus<size_t>());
+                              std::plus<size_t>(),
+                              std::multiplies<size_t>())
+           - std::accumulate(
+               stride.begin(), stride.end(), static_cast<size_t>(0), std::plus<size_t>());
 }
 
 static size_t compute_ptrdiff(const std::vector<size_t>& length,
