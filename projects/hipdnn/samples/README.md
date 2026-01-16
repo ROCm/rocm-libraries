@@ -80,6 +80,27 @@ Executes the forward pass of a batch normalization training graph on a 4D input 
     ```
 - The graph outputs the normalized tensor `y`, along with the batch mean/variance (`mean`, `inv_variance`) required for the backward pass, and the updated population statistics (`next_running_mean`, `next_running_variance`) required for inference.
 
+### [**`FusedBnTrainingActiv`**](./batchnorm/FusedBnTrainingActiv.cpp)
+
+Executes a fused batch normalization training and activation graph.
+
+The fused graph consists of two operations:
+
+1. **Batchnorm Training**: Normalizes input `x` using batch statistics, updates running statistics (optional), and outputs saved mean and inverse variance.
+   ```python
+   y_bn = scale * ((x - mean) * inv_variance) + bias
+   ```
+
+2. **Activation (ReLU)**: Applies ReLU activation
+   ```python
+   y = relu(y_bn) = max(y_bn, 0)
+   ```
+
+**Key Features:**
+- Demonstrates fusion of batch normalization training and activation
+- Supports both full training (updating running stats) and batch-stats-only modes
+- Uses `CpuReferenceGraphExecutor` for validation
+
 ### [**`BnBackward`**](./batchnorm/BnBackward.cpp)
 
 Executes the backward pass of a batch normalization graph to compute gradients of the loss function.
