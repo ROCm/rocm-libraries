@@ -1203,8 +1203,8 @@ public:
         // std::fill(shift.begin(), shift.end(), 1);
         tolerance = 80 * input.desc.GetElementSize();
 
-        test_helpers::CompareResults(verify_forward_infer_bn_spatial_recalc<T, PREC_TYPE>{input, scale, shift},
-                       tolerance);
+        test_helpers::CompareResults(
+            verify_forward_infer_bn_spatial_recalc<T, PREC_TYPE>{input, scale, shift}, tolerance);
 
         // inference use estimated running values
         auto estMean = std::get<1>(outpair.second);
@@ -1290,8 +1290,8 @@ public:
             if constexpr(MIO_BN_SP_TEST_DEBUG == 1)
                 std::cout << "Running back propagation spatial recalc." << std::endl;
             tolerance = 80 * input.desc.GetElementSize();
-            test_helpers::CompareResults(verify_backward_bn_spatial_recalc<T, PREC_TYPE>{input, dy_input, scale},
-                           tolerance);
+            test_helpers::CompareResults(
+                verify_backward_bn_spatial_recalc<T, PREC_TYPE>{input, dy_input, scale}, tolerance);
         }
 
         // backprop use saved values
