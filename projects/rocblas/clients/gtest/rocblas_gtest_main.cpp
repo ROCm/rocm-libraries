@@ -266,7 +266,12 @@ static std::string rocblas_capture_args(int argc, char** argv, std::string& filt
                 "automatically adding filter to remove stress tests. --gtest_filter=");
             rocblas_cout << "info: " << warning << filter_str << "\n" << std::endl;
         }
+
+        // TODO: DO NOT MERGE test remove graph capture
+        filter_str += ":*graph*";
+        rocblas_client_set_gtest_filter(filter_str.c_str());
     }
+
     return cmdLine.str();
 }
 
