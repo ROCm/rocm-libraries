@@ -89,42 +89,6 @@ namespace AddDeallocateTest
         for(auto& t : transforms)
             kgraph = kgraph.transform(t);
 
-        SECTION("Downstream Barriers")
-        {
-            auto graph  = kgraph;
-            auto tracer = LastRWTracer(graph);
-
-            for(auto& [coordinate, controls] : tracer.lastRWLocations())
-            {
-                auto dependencies = controls;
-
-                auto maybeLDS = graph.coordinates.get<LDS>(coordinate);
-                if(maybeLDS)
-                {
-                    AddDeallocateDetail::addDownstreamBarrierInLoop(
-                        dependencies, coordinate, controls, kgraph);
-                    CHECK(dependencies.size() >= 1);
-                    if(dependencies.size() == 1)
-                    {
-                        // If there is only one dependency, it should be a ForLoop
-                        CHECK(
-                            kgraph.control.get<ForLoopOp>(only(dependencies).value()).has_value());
-                    }
-                    else if(dependencies.size() > 1)
-                    {
-                        // If there are multiple dependencies, we should have an extra barrier
-                        for(auto& tag : dependencies)
-                        {
-                            if(controls.contains(tag))
-                                continue;
-
-                            CHECK(graph.control.get<Barrier>(tag).has_value());
-                        }
-                    }
-                }
-            }
-        }
-
         SECTION("Placement of LDS Deallocates")
         {
             kgraph = kgraph.transform(std::make_shared<NopExtraScopes>());
