@@ -56,3 +56,10 @@ if(BUILD_PLUGIN_AS_DEPENDENCY)
 endif()
 
 add_unit_test_target(miopen_plugin_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+# Backwards compatibility symlink for TheRock until submodule is bumped
+install(CODE "
+    execute_process(COMMAND \${CMAKE_COMMAND} -E create_symlink
+        miopen_plugin_tests
+        \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/miopen_legacy_plugin_tests)
+")
