@@ -1570,7 +1570,7 @@ def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
     v_mfma_f32_4x4x4_16b_bf16 v[0:3], ..., ..., ...
     v_cvt_pk_bf16_f32 v[3], v[2], v[3]
 
-    As listed above, the sequence of instructions is incorrect since (they reference the same VGPRs and) there must be a minimum of 5 quad-cycles between when v_mfma_f32_4x4x4_16b_bf16 has been issued and when v_cvt_pk_bf16_f32 starts issuing. As written there is a 0 quad-cycle gap (the v_cvt issues and completes in parallel with the v_mfma completing.) One way to write a correct sequency would be A correct sequence would be:
+    As listed above, the sequence of instructions is incorrect since (they reference the same VGPRs and) there must be a minimum of 5 quad-cycles between when v_mfma_f32_4x4x4_16b_bf16 has been issued and when v_cvt_pk_bf16_f32 starts issuing. As written there is a 0 quad-cycle gap (the v_cvt issues and completes in parallel with the v_mfma completing.) One way to write a correct sequency would be:
     v_mfma_f32_4x4x4_16b_bf16 v[0:3], ..., ..., ...
     s_nop 4
     v_cvt_pk_bf16_f32 v[3], v[2], v[3]
