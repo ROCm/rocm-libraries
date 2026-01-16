@@ -990,21 +990,39 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataSanityValidation)
     EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 1, 1), 8.0f);
 }
 
-TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataBasic)
+template <typename T>
+class CpuFpReferenceConvolutionBwdDataBasic : public ::testing::Test
+{
+};
+
+using TypesConvolutionBwdDataBasic = ::testing::Types<float, half, hip_bfloat16, double>;
+
+TYPED_TEST_SUITE(CpuFpReferenceConvolutionBwdDataBasic, TypesConvolutionBwdDataBasic, );
+
+TYPED_TEST(CpuFpReferenceConvolutionBwdDataBasic, ConvolutionBwdDataBasic)
 {
     // Basic convolution: 1x1x4x4 input, 1x1x3x3 weight -> 1x1x2x2 output
-    Tensor<float> inputTensor({1, 1, 4, 4});
-    Tensor<float> weightTensor({1, 1, 3, 3});
-    Tensor<float> outputTensor({1, 1, 2, 2});
+    Tensor<TypeParam> inputTensor({1, 1, 4, 4});
+    Tensor<TypeParam> weightTensor({1, 1, 3, 3});
+    Tensor<TypeParam> outputTensor({1, 1, 2, 2});
 
     // gradOutput values: simple pattern
-    outputTensor.setHostValue(1.0f, 0, 0, 0, 0);
-    outputTensor.setHostValue(2.0f, 0, 0, 0, 1);
-    outputTensor.setHostValue(3.0f, 0, 0, 1, 0);
-    outputTensor.setHostValue(4.0f, 0, 0, 1, 1);
+    outputTensor.setHostValue(static_cast<TypeParam>(1.0), 0, 0, 0, 0);
+    outputTensor.setHostValue(static_cast<TypeParam>(2.0), 0, 0, 0, 1);
+    outputTensor.setHostValue(static_cast<TypeParam>(3.0), 0, 0, 1, 0);
+    outputTensor.setHostValue(static_cast<TypeParam>(4.0), 0, 0, 1, 1);
 
     // Weight values: simple 3x3 kernel
-    std::array<float, 9> weightData = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f};
+    std::array<TypeParam, 9> weightData = {static_cast<TypeParam>(1.0),
+                                           static_cast<TypeParam>(2.0),
+                                           static_cast<TypeParam>(3.0),
+                                           static_cast<TypeParam>(4.0),
+                                           static_cast<TypeParam>(5.0),
+                                           static_cast<TypeParam>(6.0),
+                                           static_cast<TypeParam>(7.0),
+                                           static_cast<TypeParam>(8.0),
+                                           static_cast<TypeParam>(9.0)};
+
     for(size_t i = 0; i < 9; ++i)
     {
         weightTensor.memory().hostData()[i] = weightData[i];
@@ -1014,93 +1032,11 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataBasic)
     std::vector<int64_t> dilations = {1, 1};
     std::vector<int64_t> padding = {0, 0};
 
-    CpuFpReferenceConvolution::dgrad<float, float, float, float>(
-        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
-}
-
-TEST(TestCpuFpReferenceConvolutionFp16, ConvolutionBwdDataBasic)
-{
-    // Basic convolution: 1x1x4x4 input, 1x1x3x3 weight -> 1x1x2x2 output
-    Tensor<half> inputTensor({1, 1, 4, 4});
-    Tensor<half> weightTensor({1, 1, 3, 3});
-    Tensor<half> outputTensor({1, 1, 2, 2});
-
-    // gradOutput values: simple pattern
-    outputTensor.setHostValue(1.0_h, 0, 0, 0, 0);
-    outputTensor.setHostValue(2.0_h, 0, 0, 0, 1);
-    outputTensor.setHostValue(3.0_h, 0, 0, 1, 0);
-    outputTensor.setHostValue(4.0_h, 0, 0, 1, 1);
-
-    // Weight values: simple 3x3 kernel
-    std::array<half, 9> weightData
-        = {1.0_h, 2.0_h, 3.0_h, 4.0_h, 5.0_h, 6.0_h, 7.0_h, 8.0_h, 9.0_h};
-    for(size_t i = 0; i < 9; ++i)
-    {
-        weightTensor.memory().hostData()[i] = weightData[i];
-    }
-
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
-
-    CpuFpReferenceConvolution::dgrad<half, half, half, float>(
-        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
-}
-
-TEST(TestCpuFpReferenceConvolutionBfp16, ConvolutionBwdDataBasic)
-{
-    // Basic convolution: 1x1x4x4 input, 1x1x3x3 weight -> 1x1x2x2 output
-    Tensor<hip_bfloat16> inputTensor({1, 1, 4, 4});
-    Tensor<hip_bfloat16> weightTensor({1, 1, 3, 3});
-    Tensor<hip_bfloat16> outputTensor({1, 1, 2, 2});
-
-    // gradOutput values: simple pattern
-    outputTensor.setHostValue(1.0_bf, 0, 0, 0, 0);
-    outputTensor.setHostValue(2.0_bf, 0, 0, 0, 1);
-    outputTensor.setHostValue(3.0_bf, 0, 0, 1, 0);
-    outputTensor.setHostValue(4.0_bf, 0, 0, 1, 1);
-
-    // Weight values: simple 3x3 kernel
-    std::array<hip_bfloat16, 9> weightData
-        = {1.0_bf, 2.0_bf, 3.0_bf, 4.0_bf, 5.0_bf, 6.0_bf, 7.0_bf, 8.0_bf, 9.0_bf};
-    for(size_t i = 0; i < 9; ++i)
-    {
-        weightTensor.memory().hostData()[i] = weightData[i];
-    }
-
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
-
-    CpuFpReferenceConvolution::dgrad<hip_bfloat16, hip_bfloat16, hip_bfloat16, float>(
-        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
-}
-
-TEST(TestCpuFpReferenceConvolutionFp64, ConvolutionBwdDataBasic)
-{
-    // Basic convolution: 1x1x4x4 input, 1x1x3x3 weight -> 1x1x2x2 output
-    Tensor<double> inputTensor({1, 1, 4, 4});
-    Tensor<double> weightTensor({1, 1, 3, 3});
-    Tensor<double> outputTensor({1, 1, 2, 2});
-
-    // gradOutput values: simple pattern
-    outputTensor.setHostValue(1.0, 0, 0, 0, 0);
-    outputTensor.setHostValue(2.0, 0, 0, 0, 1);
-    outputTensor.setHostValue(3.0, 0, 0, 1, 0);
-    outputTensor.setHostValue(4.0, 0, 0, 1, 1);
-
-    // Weight values: simple 3x3 kernel
-    std::array<double, 9> weightData = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0};
-    for(size_t i = 0; i < 9; ++i)
-    {
-        weightTensor.memory().hostData()[i] = weightData[i];
-    }
-
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
-
-    CpuFpReferenceConvolution::dgrad<double, double, double, double>(
+    CpuFpReferenceConvolution::dgrad<
+        TypeParam,
+        TypeParam,
+        TypeParam,
+        std::conditional_t<std::is_same_v<double, TypeParam>, double, float>>(
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
 }
 
@@ -1796,184 +1732,64 @@ TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataPaddingZero)
     EXPECT_FLOAT_EQ(inputTensor.getHostValue(0, 0, 2, 2), 4.0f);
 }
 
-TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionWrwBasic)
+template <typename T>
+class CpuFpReferenceConvolutionWrwBasic : public ::testing::Test
+{
+};
+
+using TypesConvolutionWrwBasic = ::testing::Types<float, half, hip_bfloat16, double, int8_t>;
+
+TYPED_TEST_SUITE(CpuFpReferenceConvolutionWrwBasic, TypesConvolutionWrwBasic, );
+
+TYPED_TEST(CpuFpReferenceConvolutionWrwBasic, TypesConvolutionWrwBasic)
 {
     // Minimal sanity test for wgrad using smallest possible tensor sizes
     // Input: 1x1x2x2 (1 batch, 1 input channel, 2x2 spatial)
     // Weight: 1x1x1x1 (1 output channel, 1 input channel, 1x1 kernel)
     // GradOutput: 1x1x2x2 (1 batch, 1 output channel, 2x2 spatial)
-    Tensor<float> inputTensor({1, 1, 2, 2});
-    Tensor<float> gradWeightTensor({1, 1, 1, 1});
-    Tensor<float> gradOutputTensor({1, 1, 2, 2});
+    Tensor<TypeParam> inputTensor({1, 1, 2, 2});
+    Tensor<TypeParam> gradWeightTensor({1, 1, 1, 1});
+    Tensor<TypeParam> gradOutputTensor({1, 1, 2, 2});
 
     // Set input values: [1, 2; 3, 4]
-    inputTensor.setHostValue(1.0f, 0, 0, 0, 0);
-    inputTensor.setHostValue(2.0f, 0, 0, 0, 1);
-    inputTensor.setHostValue(3.0f, 0, 0, 1, 0);
-    inputTensor.setHostValue(4.0f, 0, 0, 1, 1);
+    inputTensor.setHostValue(static_cast<TypeParam>(1.0), 0, 0, 0, 0);
+    inputTensor.setHostValue(static_cast<TypeParam>(2.0), 0, 0, 0, 1);
+    inputTensor.setHostValue(static_cast<TypeParam>(3.0), 0, 0, 1, 0);
+    inputTensor.setHostValue(static_cast<TypeParam>(4.0), 0, 0, 1, 1);
 
-    // Set gradient output values: [0.5, 0.5; 0.5, 0.5]
-    gradOutputTensor.setHostValue(0.5f, 0, 0, 0, 0);
-    gradOutputTensor.setHostValue(0.5f, 0, 0, 0, 1);
-    gradOutputTensor.setHostValue(0.5f, 0, 0, 1, 0);
-    gradOutputTensor.setHostValue(0.5f, 0, 0, 1, 1);
+    // Set gradient output values: [1; 1; 1; 1]
+    gradOutputTensor.setHostValue(static_cast<TypeParam>(1.0), 0, 0, 0, 0);
+    gradOutputTensor.setHostValue(static_cast<TypeParam>(1.0), 0, 0, 0, 1);
+    gradOutputTensor.setHostValue(static_cast<TypeParam>(1.0), 0, 0, 1, 0);
+    gradOutputTensor.setHostValue(static_cast<TypeParam>(1.0), 0, 0, 1, 1);
 
     // Initialize weight to zero
-    gradWeightTensor.setHostValue(0.0f, 0, 0, 0, 0);
+    gradWeightTensor.setHostValue(static_cast<TypeParam>(0.0), 0, 0, 0, 0);
 
     std::vector<int64_t> strides = {1, 1};
     std::vector<int64_t> dilations = {1, 1};
     std::vector<int64_t> padding = {0, 0};
 
-    CpuFpReferenceConvolution::wgrad<float, float, float, float>(
+    CpuFpReferenceConvolution::wgrad<
+        TypeParam,
+        TypeParam,
+        TypeParam,
+        std::conditional_t<std::is_same_v<double, TypeParam>, double, float>>(
         inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
 
     // Expected weight gradient: sum of (input * gradOutput) = (1+2+3+4) * 0.5 = 5.0
-    EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(0, 0, 0, 0), 5.0f);
-}
-
-TEST(TestCpuFpReferenceConvolutionFp16, ConvolutionWrwBasic)
-{
-    // Minimal sanity test for wgrad using smallest possible tensor sizes
-    // Input: 1x1x2x2 (1 batch, 1 input channel, 2x2 spatial)
-    // Weight: 1x1x1x1 (1 output channel, 1 input channel, 1x1 kernel)
-    // GradOutput: 1x1x2x2 (1 batch, 1 output channel, 2x2 spatial)
-    Tensor<half> inputTensor({1, 1, 2, 2});
-    Tensor<half> gradWeightTensor({1, 1, 1, 1});
-    Tensor<half> gradOutputTensor({1, 1, 2, 2});
-
-    // Set input values: [1, 2; 3, 4]
-    inputTensor.setHostValue(1.0_h, 0, 0, 0, 0);
-    inputTensor.setHostValue(2.0_h, 0, 0, 0, 1);
-    inputTensor.setHostValue(3.0_h, 0, 0, 1, 0);
-    inputTensor.setHostValue(4.0_h, 0, 0, 1, 1);
-
-    // Set gradient output values: [0.5, 0.5; 0.5, 0.5]
-    gradOutputTensor.setHostValue(0.5_h, 0, 0, 0, 0);
-    gradOutputTensor.setHostValue(0.5_h, 0, 0, 0, 1);
-    gradOutputTensor.setHostValue(0.5_h, 0, 0, 1, 0);
-    gradOutputTensor.setHostValue(0.5_h, 0, 0, 1, 1);
-
-    // Initialize weight to zero
-    gradWeightTensor.setHostValue(0.0_h, 0, 0, 0, 0);
-
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
-
-    CpuFpReferenceConvolution::wgrad<half, half, half, float>(
-        inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
-
-    // Expected weight gradient: sum of (input * gradOutput) = (1+2+3+4) * 0.5 = 5.0
-    EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(0, 0, 0, 0), 5.0f);
-}
-
-TEST(TestCpuFpReferenceConvolutionBfp16, ConvolutionWrwBasic)
-{
-    // Minimal sanity test for wgrad using smallest possible tensor sizes
-    // Input: 1x1x2x2 (1 batch, 1 input channel, 2x2 spatial)
-    // Weight: 1x1x1x1 (1 output channel, 1 input channel, 1x1 kernel)
-    // GradOutput: 1x1x2x2 (1 batch, 1 output channel, 2x2 spatial)
-    Tensor<hip_bfloat16> inputTensor({1, 1, 2, 2});
-    Tensor<hip_bfloat16> gradWeightTensor({1, 1, 1, 1});
-    Tensor<hip_bfloat16> gradOutputTensor({1, 1, 2, 2});
-
-    // Set input values: [1, 2; 3, 4]
-    inputTensor.setHostValue(1.0_bf, 0, 0, 0, 0);
-    inputTensor.setHostValue(2.0_bf, 0, 0, 0, 1);
-    inputTensor.setHostValue(3.0_bf, 0, 0, 1, 0);
-    inputTensor.setHostValue(4.0_bf, 0, 0, 1, 1);
-
-    // Set gradient output values: [0.5, 0.5; 0.5, 0.5]
-    gradOutputTensor.setHostValue(0.5_bf, 0, 0, 0, 0);
-    gradOutputTensor.setHostValue(0.5_bf, 0, 0, 0, 1);
-    gradOutputTensor.setHostValue(0.5_bf, 0, 0, 1, 0);
-    gradOutputTensor.setHostValue(0.5_bf, 0, 0, 1, 1);
-
-    // Initialize weight to zero
-    gradWeightTensor.setHostValue(0.0_bf, 0, 0, 0, 0);
-
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
-
-    CpuFpReferenceConvolution::wgrad<hip_bfloat16, hip_bfloat16, hip_bfloat16, float>(
-        inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
-
-    // Expected weight gradient: sum of (input * gradOutput) = (1+2+3+4) * 0.5 = 5.0
-    EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(0, 0, 0, 0), 5.0f);
-}
-
-TEST(TestCpuFpReferenceConvolutionFp64, ConvolutionWrwBasic)
-{
-    // Minimal sanity test for wgrad using smallest possible tensor sizes
-    // Input: 1x1x2x2 (1 batch, 1 input channel, 2x2 spatial)
-    // Weight: 1x1x1x1 (1 output channel, 1 input channel, 1x1 kernel)
-    // GradOutput: 1x1x2x2 (1 batch, 1 output channel, 2x2 spatial)
-    Tensor<double> inputTensor({1, 1, 2, 2});
-    Tensor<double> gradWeightTensor({1, 1, 1, 1});
-    Tensor<double> gradOutputTensor({1, 1, 2, 2});
-
-    // Set input values: [1, 2; 3, 4]
-    inputTensor.setHostValue(1.0, 0, 0, 0, 0);
-    inputTensor.setHostValue(2.0, 0, 0, 0, 1);
-    inputTensor.setHostValue(3.0, 0, 0, 1, 0);
-    inputTensor.setHostValue(4.0, 0, 0, 1, 1);
-
-    // Set gradient output values: [0.5, 0.5; 0.5, 0.5]
-    gradOutputTensor.setHostValue(0.5, 0, 0, 0, 0);
-    gradOutputTensor.setHostValue(0.5, 0, 0, 0, 1);
-    gradOutputTensor.setHostValue(0.5, 0, 0, 1, 0);
-    gradOutputTensor.setHostValue(0.5, 0, 0, 1, 1);
-
-    // Initialize weight to zero
-    gradWeightTensor.setHostValue(0.0, 0, 0, 0, 0);
-
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
-
-    CpuFpReferenceConvolution::wgrad<double, double, double, double>(
-        inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
-
-    // Expected weight gradient: sum of (input * gradOutput) = (1+2+3+4) * 0.5 = 5.0
-    EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(0, 0, 0, 0), 5.0);
-}
-
-TEST(TestCpuFpReferenceConvolutionInt8, ConvolutionWrwBasic)
-{
-    // Minimal sanity test for wgrad using smallest possible tensor sizes
-    // Input: 1x1x2x2 (1 batch, 1 input channel, 2x2 spatial)
-    // Weight: 1x1x1x1 (1 output channel, 1 input channel, 1x1 kernel)
-    // GradOutput: 1x1x2x2 (1 batch, 1 output channel, 2x2 spatial)
-    Tensor<int8_t> inputTensor({1, 1, 2, 2});
-    Tensor<int8_t> gradWeightTensor({1, 1, 1, 1});
-    Tensor<int8_t> gradOutputTensor({1, 1, 2, 2});
-
-    // Set input values: [1, 2; 3, 4]
-    inputTensor.setHostValue(1, 0, 0, 0, 0);
-    inputTensor.setHostValue(2, 0, 0, 0, 1);
-    inputTensor.setHostValue(3, 0, 0, 1, 0);
-    inputTensor.setHostValue(4, 0, 0, 1, 1);
-
-    // Set gradient output values: [1, 1; 1, 1]
-    gradOutputTensor.setHostValue(1, 0, 0, 0, 0);
-    gradOutputTensor.setHostValue(1, 0, 0, 0, 1);
-    gradOutputTensor.setHostValue(1, 0, 0, 1, 0);
-    gradOutputTensor.setHostValue(1, 0, 0, 1, 1);
-
-    // Initialize weight to zero
-    gradWeightTensor.setHostValue(0, 0, 0, 0, 0);
-
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
-
-    CpuFpReferenceConvolution::wgrad<int8_t, int8_t, int8_t, int32_t>(
-        inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
-
-    // Expected weight gradient: sum of (input * gradOutput) = (1+2+3+4) * 1 = 10
-    EXPECT_EQ(gradWeightTensor.getHostValue(0, 0, 0, 0), 10);
+    if constexpr(std::is_same_v<double, TypeParam>)
+    {
+        EXPECT_DOUBLE_EQ(gradWeightTensor.getHostValue(0, 0, 0, 0), 10.0);
+    }
+    else if constexpr(std::is_integral_v<TypeParam>)
+    {
+        EXPECT_EQ(gradWeightTensor.getHostValue(0, 0, 0, 0), 10);
+    }
+    else
+    {
+        EXPECT_FLOAT_EQ(gradWeightTensor.getHostValue(0, 0, 0, 0), static_cast<TypeParam>(10.0));
+    }
 }
 
 TEST(TestCpuFpReferenceConvolutionFp32, ConvBwdWeightMultiBatch)

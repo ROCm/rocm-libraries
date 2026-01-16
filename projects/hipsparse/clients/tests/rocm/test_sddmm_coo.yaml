@@ -95,3 +95,24 @@ Tests:
   baseC: [HIPSPARSE_INDEX_BASE_ONE]
   sddmm_alg: [HIPSPARSE_SDDMM_ALG_DEFAULT]
   filename: [Chebyshev4]
+
+- name: sddmm_coo
+  category: pre_checkin
+  function: sddmm_coo
+  indextype: *i64
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  K: [17]
+  alpha: [1.5]
+  alphai: [0.0]
+  beta: [-1.0]
+  betai: [2.0]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  orderA: [HIPSPARSE_ORDER_ROW]
+  orderB: [HIPSPARSE_ORDER_ROW]
+  baseC: [HIPSPARSE_INDEX_BASE_ONE]
+  sddmm_alg: [HIPSPARSE_SDDMM_ALG_DEFAULT]
+  filename: [shipsec1]
+  graph_test: true
