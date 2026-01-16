@@ -41,6 +41,7 @@ add_hipdnn_sample(bn_training batchnorm/BnTraining.cpp)
 add_hipdnn_sample(fused_bn_training_activ batchnorm/FusedBnTrainingActiv.cpp)
 add_hipdnn_sample(bn_backward batchnorm/BnBackward.cpp)
 add_hipdnn_sample(fused_bn_inference_activ batchnorm/FusedBnInferenceActiv.cpp)
+add_hipdnn_sample(fused_bn_inference_variance_activ batchnorm/FusedBnInferenceVarianceActiv.cpp)
 add_hipdnn_sample(fused_bn_inference_drelu_bn_backward batchnorm/FusedBnInfDReluBnBwd.cpp)
 
 add_hipdnn_sample(conv_dgrad convolution/ConvDgrad.cpp)
@@ -93,6 +94,7 @@ add_hipdnn_sample_test(bn_training)
 add_hipdnn_sample_test(fused_bn_training_activ)
 add_hipdnn_sample_test(bn_backward)
 add_hipdnn_sample_test(fused_bn_inference_drelu_bn_backward)
+add_hipdnn_sample_test(fused_bn_inference_variance_activ)
 
 # Register serialization samples as tests
 add_hipdnn_sample_test(serialization_roundtrip)
