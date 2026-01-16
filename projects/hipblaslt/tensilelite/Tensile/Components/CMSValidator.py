@@ -407,6 +407,7 @@ class Pack(ValidatorInstruction):
 
     # The minimum number of quad-cycles that must pass before the result of this pack is used.
     # Measure from the point that this Pack is finished being issued.
+    # See section 7.6 of the CDNA 4 ISA
     min_quad_cycles_before_result_used: int = 0
     # The estimated number of quad-cycles that passed between the pack being issued and the result being used.
     # This is a lower bound estimate (does not account for most stalls and such).
@@ -956,14 +957,24 @@ def set_gr_needed_by_from_lrs(timeline: Timeline, swap_global_read_order: bool) 
             for _, gr in grs:
                 gr.needed_by = LR_target.issued_at
 
-def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reorder: list[int], mfmas_by_index: dict[int, MFMA], num_vmfma: int,kernel: 'Solution') -> None:
+def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reorder: list[int], mfmas_by_index: dict[int, MFMA], num_vmfma: int, kernel: 'Solution') -> None:
     """
     Set the needed_by field for Pack instructions.
     This function handles all cases (BF16 and TF32).
     
-    For BF16: Each pack's needed_by is calculated based on its position in the pack sequence.
-    For TF32: Only the first 4 and last 4 packs in each group of 24 have needed_by set.
-        The middle 16 packs (indices 4-19) are depended on by the last 4 packs implicitly.
+    For BF16:
+        - The packs are only ever needed by the VMFMA instructions.
+    For regular TF32:
+        - The first and last 4 packs are needed by the VMFMA instructions.
+          There is a minimum number of quad-cycle restriction on the spacing between these packs and their VMFMAs.
+        - The middle-16 packs are handled implicitly.
+    For 4x4 MFMA TF32: 
+        - The first 4 packs are needed by the 5th and 6th packs (which are VMFMAs) as well as the regular VMFMs.
+          Both must be accounted, and both are subject to a minimum number of quad-cycle spacing restrictions.
+        - The 5th and 6th packs (middle 2) are needed by the last 4 packs.
+          These are subject to a minimum number of quad-cycle spacing restrictions.
+        - The last 4 packs are needed by regular VMFMs.
+          These are subject to a minimum number of quad-cycle spacing restrictions.
     
     Args:
         packs: List of Pack instructions to set needed_by for.
@@ -1410,6 +1421,7 @@ def _get_lrs_for_pack(timeline: Timeline, use_plr_pack: bool, pack_name: str, lo
 
 def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int]) -> None:
     """
+    Set the needed_by fields 
     Set the needed_by and must_start_after fields of Packs based on the LR(s) they depend on.
 
     Args:
@@ -1552,6 +1564,17 @@ def estimate_quad_cycles_precomputed(i_start: int, i_end: int, issue_times: list
 def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
     """
     Perform a rough estimate on the number of quad-cycles that pass between when a instruction is issued and when its result is used.
+    Needed to ensure the restrictions laied out in section 7.6 of the CDNA 4 ISA are met. Failing to meet these restrictions will result in deterministic errors.
+    
+    E.g. for the 4x4 MFMA TF32 route the 6th and 7th pack instructions map to:
+    v_mfma_f32_4x4x4_16b_bf16 v[0:3], ..., ..., ...
+    v_cvt_pk_bf16_f32 v[3], v[2], v[3]
+
+    As listed above, the sequency of instructions is incorrect since (they reference the same VGPRs and) there must be a minimum of 5 quad-cycles between when v_mfma_f32_4x4x4_16b_bf16 has been issued and when v_cvt_pk_bf16_f32 starts issuing. As written there is a 0 quad-cycle gap (the v_cvt issues and completes in parallel with the v_mfma completing.) One way to write a correct sequency would be A correct sequence would be:
+    v_mfma_f32_4x4x4_16b_bf16 v[0:3], ..., ..., ...
+    s_nop 4
+    v_cvt_pk_bf16_f32 v[3], v[2], v[3]
+
     Only operates on instructions which have a set needed_by field and a set min_quad_cycles_before_result_used field.
 
     All instructions take 1 quad-cycles to issue minimum.
@@ -1986,6 +2009,13 @@ def verify_lrs_finished_before_vmfma(schedule_info: 'ScheduleInfo', context: dic
 def verify_packs_start_and_end_at_correct_indices(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
     """
     Ensure that the Packs start and end at the correct indices.
+    The pack commands take the data loaded into registers by LR commands and manipulate it in various ways to prepare it for the VMFMA instructions.
+
+    There are several restrictions placed on Pack instructions:
+    1. For all gemm types (tf32, bf16, etc.) the Pack instructions must be issued after the data is guaranteed to be loaded into the registers (guaranteed by SWaitCnt instructions). And they must finish before the first VMFMA that uses their results.
+    2. For fp32 GEMMs, there are additional restrictions on:
+        1. The ordering of the Pack instructions.
+        2. The minimum number of quad-cycles that must pass between issuing certain pack instructions and when their results get used. These restrictions are defined in section 7.6 of the CDNA 4 ISA.
     """
     relevant_names = ["SYNC", "SNOP"]
     for num in [0, 1, 3]:
