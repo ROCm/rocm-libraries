@@ -173,16 +173,6 @@ typedef enum rocblas_pivot_
     rocblas_pivot_bottom = 283, /**< The i-th rotation is applied on plane (i,m) or (i,n). */
 } rocblas_pivot;
 
-/*! \brief Used to specify the type of matrix norm to compute.
- ********************************************************************************/
-typedef enum rocsolver_norm_type_
-{
-    rocsolver_norm_type_one = 301, /**< One-norm (maximum column sum). */
-    rocsolver_norm_type_frobenius = 302, /**< Frobenius norm (square root of sum of squares). */
-    rocsolver_norm_type_infinity = 303, /**< Infinity-norm (maximum row sum). */
-    rocsolver_norm_type_max = 304, /**< Maximum absolute value of any element. */
-} rocsolver_norm_type;
-
 /*! \brief Used by specific functions to specify the algorithm mode.
  ********************************************************************************/
 typedef enum rocsolver_alg_mode_
@@ -192,6 +182,16 @@ typedef enum rocsolver_alg_mode_
     rocsolver_alg_mode_hybrid = 292, /**< Computations are performed on the CPU and GPU. */
     rocsolver_alg_mode_mixed = 293, /**< Nested functions use a mixture of hybrid and GPU-only modes. */
 } rocsolver_alg_mode;
+
+/*! \brief Used to specify the type of matrix norm to compute.
+ ********************************************************************************/
+typedef enum rocsolver_norm_type_
+{
+    rocsolver_norm_type_one = 301, /**< One-norm (maximum column sum). */
+    rocsolver_norm_type_frobenius = 302, /**< Frobenius norm (square root of sum of squares). */
+    rocsolver_norm_type_infinity = 303, /**< Infinity-norm (maximum row sum). */
+    rocsolver_norm_type_max = 304, /**< Maximum absolute value of any element. */
+} rocsolver_norm_type;
 
 /*! \brief Used to specify a function with multiple supported algorithm modes.
  ********************************************************************************/
@@ -203,5 +203,7 @@ typedef enum rocsolver_function_
     rocsolver_function_steqr = 404,
     rocsolver_function_syev_heev = 405, /**< Affected by sterf and steqr. */
 } rocsolver_function;
+
+
 
 #endif /* ROCSOLVER_EXTRA_TYPES_H */
