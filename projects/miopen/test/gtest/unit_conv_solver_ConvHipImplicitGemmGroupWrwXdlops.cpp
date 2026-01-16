@@ -12,7 +12,8 @@ auto GetConvSmokeTestCases()
 {
     static std::vector<TestCase> test_cases = {
         // clang-format off
-        TestCase{{1, 64, 8, 8}, {96, 64, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 1} // clang-format on
+        TestCase{{1, 64, 8, 8}, {96, 64, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 1}
+        // clang-format on
     };
 
     return test_cases;
@@ -28,7 +29,7 @@ auto GetConvFullTestCases()
         // Group count = 2 and 4
         TestCase{{1, 64, 8, 8}, {96, 32, 1, 1}, {0, 0}, {1, 1}, {2, 2}, 2}, // dilation > 1
         TestCase{{1, 64, 8, 8}, {96, 16, 1, 1}, {0, 0}, {2, 2}, {1, 1}, 4}, // stride > 1
-                                                              // clang-format on
+        // clang-format on
     };
 
     return test_cases;

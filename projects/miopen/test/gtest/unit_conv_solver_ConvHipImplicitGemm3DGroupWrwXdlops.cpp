@@ -12,7 +12,8 @@ auto GetConvSmokeTestCases()
 {
     std::vector<TestCase> test_cases = {
         // clang-format off
-        TestCase {{1, 4, 8, 28, 28}, {4, 4, 3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, 1} // clang-format on
+        TestCase {{1, 4, 8, 28, 28}, {4, 4, 3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, 1}
+        // clang-format on
     };
 
     return test_cases;
