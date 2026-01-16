@@ -42,7 +42,7 @@ static size_t compute_ptrdiff(const std::vector<intT1>& length, const std::vecto
         return 0;
 
     // We allow for weird data layouts with self-aliasing; this is not an array validator.
-    
+
     // 1 + sum_i [ ( length_i - 1 ) * stride_i
     // = 1 + dot(length, stride) - sum(stride)
     // Since length is the one-past-the-end, we subtract the strides.
