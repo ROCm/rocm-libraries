@@ -12,7 +12,7 @@ These are functions that support more :ref:`advanced LAPACK routines <lapackfunc
 The auxiliary functions are divided into the following categories:
 
 * :ref:`vecmat`: Basic operations with vectors and matrices that are not part of the BLAS standard.
-* :ref:`normcon`: Different matrix norms and Condition number estimators.
+* :ref:`normcon`: Different matrix norms and condition number estimators.
 * :ref:`householder`: Generation and application of Householder matrices.
 * :ref:`rotations`: Generation and application of Givens (plane) rotations.
 * :ref:`bidiag`: Computations specialized in bidiagonal matrices.
@@ -92,7 +92,7 @@ rocsolver_<type>lauum()
 
 .. _normcon:
 
-Norms and Condition numbers
+Norms and condition numbers
 ==================================
 
 .. contents:: List of norms and condition number estimators
