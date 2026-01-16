@@ -53,14 +53,14 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         optSchedule["LRA0"] = [[1, 6]]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRA0 at index 6 is not valid. Needed before index 5, but only guaranteed at index 3."
+            "LRA0 @ idx=6 issued too late, must be guaranteed before MFMA @ idx=5 but only guaranteed @ idx=3."
         )
 
         optSchedule["LRA0"] = [[1, 2]]
         optSchedule["LRB0"] = [[3, 6]]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRB0 at index 3 is not valid. Needed before index 4, but only guaranteed at index 3."
+            "LRB0 @ idx=3 issued too late, must be guaranteed before MFMA @ idx=4 but only guaranteed @ idx=3."
         )
 
     def test_simple_LR0_w_LR1(self):
@@ -169,7 +169,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRA1 at index 4 is not valid. Needed before index 0, but only guaranteed at index 1."
+            "LRA1 @ idx=4 issued too late, must be guaranteed before MFMA @ idx=0 but only guaranteed @ idx=1."
         )
 
     def test_complex_LR1(self):
@@ -196,7 +196,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         optSchedule["LRA1"] = [[4, 5]]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRA1 at index 5 is not valid. Needed before index 1 (of next iteration), but only guaranteed at index 1."
+            "LRA1 @ idx=5 issued too late, must be guaranteed before MFMA @ idx=1 (of next iteration) but only guaranteed @ idx=1."
         )
 
     def test_more_LRs(self):
@@ -243,7 +243,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         # Failure case 1: Don't wait for any LRA0
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRA0 at index 1 is not valid. Needed before index 4, but only guaranteed at index 4."
+            "LRA0 @ idx=1 issued too late, must be guaranteed before MFMA @ idx=4 but only guaranteed @ idx=4."
         )
 
         # Failure case 2: Wait for only 1/4 LRA0 (need at least 2/4 LRA0) to do VMFMA 4.
@@ -251,7 +251,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         syncCode[0].comment = "Wait for LRB0 and 1/4 LRA0"
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRA0 at index 1 is not valid. Needed before index 4, but only guaranteed at index 4."
+            "LRA0 @ idx=1 issued too late, must be guaranteed before MFMA @ idx=4 but only guaranteed @ idx=4."
         )
 
         # Passing case: Correctly SWaitCnt for 2/4 LRA0 (i.e. 1/2 As) in time for VMFMA 4.
@@ -288,7 +288,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         optSchedule["SYNC"][0][0] = 8
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRB1 at index 19 is not valid. Needed before index 8 (of next iteration), but only guaranteed at index 8."
+            "LRB1 @ idx=19 issued too late, must be guaranteed before MFMA @ idx=8 (of next iteration) but only guaranteed @ idx=8."
         )
 
     def test_handling_instruction_order(self):
@@ -313,7 +313,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         }
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRA0 at index 3 is not valid. Needed before index 4, but only guaranteed at index 7."
+            "LRA0 @ idx=3 issued too late, must be guaranteed before MFMA @ idx=4 but only guaranteed @ idx=7."
         )
 
         # 2. SwaitCnt after LR0s but before LR1s
@@ -327,7 +327,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         }
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRA1 at index 7 is not valid. Needed before index 0, but only guaranteed at index 3."
+            "LRA1 @ idx=7 issued too late, must be guaranteed before MFMA @ idx=0 but only guaranteed @ idx=3."
         )
 
         # 3. SwaitCnt after all LRs
@@ -396,7 +396,7 @@ class TestValidateLRsCompleteBeforeVMFMA_tf32(CMSValidationTestBase):
             SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="LRA0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LRB0"),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRA0 at index 0 is not valid. Needed before index 3, but only guaranteed at index 3.")
+        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRA0 @ idx=0 issued too late, must be guaranteed before MFMA @ idx=3 but only guaranteed @ idx=3.")
     
     def test_LR0s_fail2(self):
         """
@@ -413,7 +413,7 @@ class TestValidateLRsCompleteBeforeVMFMA_tf32(CMSValidationTestBase):
             SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="LRA0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LRB0"),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRB0 at index 1 is not valid. Needed before index 6, but only guaranteed at index 6.")
+        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRB0 @ idx=1 issued too late, must be guaranteed before MFMA @ idx=6 but only guaranteed @ idx=6.")
 
     def test_LR3s_pass(self):
         """
@@ -592,7 +592,7 @@ class TestValidateLRsCompleteBeforeVMFMA_ForceUnrollSubIter(CMSValidationTestBas
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="For LR0s"),
         ]
 
-        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRA3 at index 7 is not valid. Needed before index 0, but only guaranteed at index 3.")
+        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRA3 @ idx=7 issued too late, must be guaranteed before MFMA @ idx=0 but only guaranteed @ idx=3.")
 
 
 class TestIndexForForceUnrollSubIter:
