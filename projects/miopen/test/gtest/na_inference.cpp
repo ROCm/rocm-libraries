@@ -37,8 +37,7 @@
 #define PREC_TYPE T
 #endif
 
-namespace
-{
+namespace {
 using ptr_FusionPlanDesc = MIOPEN_MANAGE_PTR(miopenFusionPlanDescriptor_t, miopenDestroyFusionPlan);
 using ptr_FusionPlanArgs = MIOPEN_MANAGE_PTR(miopenOperatorArgs_t, miopenDestroyOperatorArgs);
 using ptr_ActivationDesc = MIOPEN_MANAGE_PTR(miopenActivationDescriptor_t,
@@ -187,27 +186,26 @@ static std::string transform_mode(std::string s)
 
 using TestCase = std::tuple<std::vector<int>, double, double, double, std::string, int>;
 
-auto GenCases(bool full=false)
+auto GenCases(bool full = false)
 {
     if(!full)
     {
-        return ::testing::Combine(
-                    ::testing::ValuesIn(std::set<std::vector<int>>{{16, 32, 8, 8}}),
-                    ::testing::ValuesIn({double{0.5}}),
-                    ::testing::ValuesIn({double{0.5}}),
-                    ::testing::ValuesIn({double{0.5}}),
-                    ::testing::ValuesIn({std::string{"MIOPENACTIVATIONRELU"}}),
-                    ::testing::ValuesIn({/*0, */ 1})
-                );
+        return ::testing::Combine(::testing::ValuesIn(std::set<std::vector<int>>{{16, 32, 8, 8}}),
+                                  ::testing::ValuesIn({double{0.5}}),
+                                  ::testing::ValuesIn({double{0.5}}),
+                                  ::testing::ValuesIn({double{0.5}}),
+                                  ::testing::ValuesIn({std::string{"MIOPENACTIVATIONRELU"}}),
+                                  ::testing::ValuesIn({/*0, */ 1}));
     }
     return ::testing::Combine(
         ::testing::ValuesIn(get_inputs(batch_factor)),
         ::testing::ValuesIn({double{0.5}}),
         ::testing::ValuesIn({double{0.5}}),
         ::testing::ValuesIn({double{0.5}}),
-        ::testing::ValuesIn({std::string{"MIOPENACTIVATIONRELU", /*, "std::string{MIOPENACTIVATIONLOGISTIC}", "std::string{MIOPENACTIVATIONABS}"*/}}),
-        ::testing::ValuesIn({/*0, */ 1})
-    );
+        ::testing::ValuesIn({std::string{
+            "MIOPENACTIVATIONRELU",
+            /*, "std::string{MIOPENACTIVATIONLOGISTIC}", "std::string{MIOPENACTIVATIONABS}"*/}}),
+        ::testing::ValuesIn({/*0, */ 1}));
 }
 
 template <class T>
@@ -232,7 +230,7 @@ struct na_fusion_inference_test : public ::testing::TestWithParam<TestCase>
     {
         std::vector<int> nchw{};
         std::tie(nchw, alpha, beta, gamma, amode, batchnormMode) = GetParam();
-        input                = tensor<T>{nchw[0], nchw[1], nchw[2], nchw[3]};
+        input = tensor<T>{nchw[0], nchw[1], nchw[2], nchw[3]};
         input.generate(tensor_elem_gen_integer{max_value});
 
         amode = transform_mode(amode);
@@ -321,16 +319,17 @@ struct na_fusion_inference_test : public ::testing::TestWithParam<TestCase>
         }
         else
         {
-            test_helpers::CompareResults(verify_inference_batchnorm_activ<T, PREC_TYPE>{ptr_fusionplan.get(),
-                                                                  input,
-                                                                  ptr_activdesc.get(),
-                                                                  scale,
-                                                                  shift,
-                                                                  estMean,
-                                                                  estVariance,
-                                                                  bnmode,
-                                                                  bNormOp,
-                                                                  activOp});
+            test_helpers::CompareResults(
+                verify_inference_batchnorm_activ<T, PREC_TYPE>{ptr_fusionplan.get(),
+                                                               input,
+                                                               ptr_activdesc.get(),
+                                                               scale,
+                                                               shift,
+                                                               estMean,
+                                                               estVariance,
+                                                               bnmode,
+                                                               bNormOp,
+                                                               activOp});
         }
     }
 };
@@ -349,8 +348,7 @@ struct TestNameGenerator
             return str;
         };
 
-        auto print_nchw = [](std::vector<int> const& vec)
-        {
+        auto print_nchw = [](std::vector<int> const& vec) {
             std::stringstream vec_ss{};
             for(auto el : vec)
             {
@@ -359,23 +357,22 @@ struct TestNameGenerator
             return vec_ss.str();
         };
 
-        ss <<   "nchw_" << print_nchw(std::get<0>(param_info.param)) <<
-                "_alpha_" << replace_dot(std::get<1>(param_info.param)) <<
-                "_beta_" << replace_dot(std::get<2>(param_info.param)) <<
-                "_gamma_" << replace_dot(std::get<3>(param_info.param)) <<
-                "_amode_" << std::get<4>(param_info.param) <<
-                "_batchnormMode_" << std::get<5>(param_info.param);
+        ss << "nchw_" << print_nchw(std::get<0>(param_info.param)) << "_alpha_"
+           << replace_dot(std::get<1>(param_info.param)) << "_beta_"
+           << replace_dot(std::get<2>(param_info.param)) << "_gamma_"
+           << replace_dot(std::get<3>(param_info.param)) << "_amode_"
+           << std::get<4>(param_info.param) << "_batchnormMode_" << std::get<5>(param_info.param);
         return ss.str();
     }
 };
 
 } // namespace
 
-using GPU_na_fusion_inference_test_I8 = na_fusion_inference_test<int8_t>;
-using GPU_na_fusion_inference_test_FP16 = na_fusion_inference_test<half_float::half>;
+using GPU_na_fusion_inference_test_I8    = na_fusion_inference_test<int8_t>;
+using GPU_na_fusion_inference_test_FP16  = na_fusion_inference_test<half_float::half>;
 using GPU_na_fusion_inference_test_BFP16 = na_fusion_inference_test<bfloat16>;
-using GPU_na_fusion_inference_test_FP32 = na_fusion_inference_test<float>;
-using GPU_na_fusion_inference_test_FP64 = na_fusion_inference_test<double>;
+using GPU_na_fusion_inference_test_FP32  = na_fusion_inference_test<float>;
+using GPU_na_fusion_inference_test_FP64  = na_fusion_inference_test<double>;
 
 TEST_P(GPU_na_fusion_inference_test_I8, TestInt8) { Run(); }
 TEST_P(GPU_na_fusion_inference_test_FP16, TestFloat16) { Run(); }
@@ -385,13 +382,30 @@ TEST_P(GPU_na_fusion_inference_test_FP64, TestFloat64) { Run(); }
 
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_I8, GenCases(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_FP16, GenCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_BFP16, GenCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_na_fusion_inference_test_BFP16,
+                         GenCases(),
+                         TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_FP32, GenCases(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_FP64, GenCases(), TestNameGenerator{});
 
-
-INSTANTIATE_TEST_SUITE_P(Full, GPU_na_fusion_inference_test_I8, GenCases(true), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_na_fusion_inference_test_FP16, GenCases(true), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_na_fusion_inference_test_BFP16, GenCases(true), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_na_fusion_inference_test_FP32, GenCases(true), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_na_fusion_inference_test_FP64, GenCases(true), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_na_fusion_inference_test_I8,
+                         GenCases(true),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_na_fusion_inference_test_FP16,
+                         GenCases(true),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_na_fusion_inference_test_BFP16,
+                         GenCases(true),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_na_fusion_inference_test_FP32,
+                         GenCases(true),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_na_fusion_inference_test_FP64,
+                         GenCases(true),
+                         TestNameGenerator{});

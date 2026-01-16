@@ -38,11 +38,10 @@
 #define PREC_TYPE T
 #endif
 
-namespace
-{
+namespace {
 constexpr float MIO_BN_TEST_EXPAVGFACTOR = 0.99f;
-constexpr float MIO_BN_TEST_EPSILON = 1e-5; // FLT_EPSILON
-constexpr int batch_factor = 4;
+constexpr float MIO_BN_TEST_EPSILON      = 1e-5; // FLT_EPSILON
+constexpr int batch_factor               = 4;
 
 using ptr_FusionPlanDesc = MIOPEN_MANAGE_PTR(miopenFusionPlanDescriptor_t, miopenDestroyFusionPlan);
 using ptr_FusionPlanArgs = MIOPEN_MANAGE_PTR(miopenOperatorArgs_t, miopenDestroyOperatorArgs);
@@ -373,10 +372,7 @@ struct verify_bwd_batchnorm_spatial_activ
         return std::make_tuple(dx, dgamma, dbeta);
     }
 
-    void fail() const
-    {
-        GTEST_FAIL();
-    }
+    void fail() const { GTEST_FAIL(); }
 };
 
 template <class T, class U>
@@ -524,7 +520,8 @@ struct verify_fwd_batchnorm_peract_activ
 
     void fail() const
     {
-        GTEST_FAIL() << "Forward Train Per Activation Batch Normalization + Activation: " << std::endl
+        GTEST_FAIL() << "Forward Train Per Activation Batch Normalization + Activation: "
+                     << std::endl
                      << "Input tensor: " << x.desc.ToString() << std::endl;
     }
 };
@@ -680,10 +677,7 @@ struct verify_bwd_batchnorm_peract_activ
         return std::make_tuple(dx, dgamma, dbeta);
     }
 
-    void fail() const
-    {
-        GTEST_FAIL();
-    }
+    void fail() const { GTEST_FAIL(); }
 };
 
 static std::string transform_mode(std::string s)
@@ -695,16 +689,18 @@ using TestCase = std::tuple<int, std::vector<int>, double, double, double, std::
 
 auto GenCases(int batchNormMode, bool full = false)
 {
-    if (full)
+    if(full)
     {
         return ::testing::Combine(::testing::ValuesIn({batchNormMode}),
-                                  ::testing::ValuesIn((batchNormMode == 1) ? get_bn_spatial_inputs(batch_factor)
-                                                                           : get_bn_peract_inputs(batch_factor)),
+                                  ::testing::ValuesIn((batchNormMode == 1)
+                                                          ? get_bn_spatial_inputs(batch_factor)
+                                                          : get_bn_peract_inputs(batch_factor)),
                                   ::testing::ValuesIn({double{0.5}}),
                                   ::testing::ValuesIn({double{0.5}}),
                                   ::testing::ValuesIn({double{0.5}}),
-                                  ::testing::ValuesIn({std::string{"MIOPENACTIVATIONRELU"}, std::string{"MIOPENACTIVATIONLOGISTIC"}, std::string{"MIOPENACTIVATIONABS"}})
-                                );
+                                  ::testing::ValuesIn({std::string{"MIOPENACTIVATIONRELU"},
+                                                       std::string{"MIOPENACTIVATIONLOGISTIC"},
+                                                       std::string{"MIOPENACTIVATIONABS"}}));
     }
     return ::testing::Combine(::testing::ValuesIn({0}),
                               ::testing::ValuesIn(std::set<std::vector<int>>{{16, 32, 8, 8}}),
@@ -734,7 +730,7 @@ struct na_fusion_test : public testing::TestWithParam<TestCase>
     {
         std::vector<int> nchw{};
         std::tie(batchnormMode, nchw, alpha, beta, gamma, amode) = GetParam();
-        input                = tensor<T>{nchw[0], nchw[1], nchw[2], nchw[3]};
+        input = tensor<T>{nchw[0], nchw[1], nchw[2], nchw[3]};
         input.generate(tensor_elem_gen_integer{max_value});
         // NOLINTBEGIN(*-braces-around-statements)
         if(amode == "PASSTHRU")
@@ -766,9 +762,9 @@ struct na_fusion_test : public testing::TestWithParam<TestCase>
 
         std::size_t input_n, input_c, input_h, input_w;
         std::tie(input_n, input_c, input_h, input_w) = miopen::tien<4>(input.desc.GetLengths());
-        tolerance = std::min(80 * double(input.desc.GetElementSize()),
-                                   1280 * sqrt(double(input.desc.GetElementSize())));
-        ptr_activdesc   = GetManagedActivDesc();
+        tolerance     = std::min(80 * double(input.desc.GetElementSize()),
+                             1280 * sqrt(double(input.desc.GetElementSize())));
+        ptr_activdesc = GetManagedActivDesc();
         miopenSetActivationDescriptor(ptr_activdesc.get(), activ_mode, alpha, beta, gamma);
         auto&& handle = get_handle();
 
@@ -803,14 +799,15 @@ struct na_fusion_test : public testing::TestWithParam<TestCase>
                 return;
             }
 
-            auto fwdTrain =
-                test_helpers::CompareResults(verify_fwd_batchnorm_spatial_activ<T, PREC_TYPE>{ptr_fwdfusionplan.get(),
-                                                                        input,
-                                                                        ptr_activdesc.get(),
-                                                                        scale,
-                                                                        shift,
-                                                                        bNormFwdOp,
-                                                                        activFwdOp}, tolerance);
+            auto fwdTrain = test_helpers::CompareResults(
+                verify_fwd_batchnorm_spatial_activ<T, PREC_TYPE>{ptr_fwdfusionplan.get(),
+                                                                 input,
+                                                                 ptr_activdesc.get(),
+                                                                 scale,
+                                                                 shift,
+                                                                 bNormFwdOp,
+                                                                 activFwdOp},
+                tolerance);
             //        Tuple returns: (aout, runMean, runVar, savedMean, savedInvVar);
             auto y_in        = std::get<0>(fwdTrain.second);
             auto savedMean   = std::get<3>(fwdTrain.second);
@@ -828,17 +825,19 @@ struct na_fusion_test : public testing::TestWithParam<TestCase>
                           << std::endl;
                 return;
             }
-            test_helpers::CompareResults(verify_bwd_batchnorm_spatial_activ<T, PREC_TYPE>{ptr_bwdfusionplan.get(),
-                                                                    dyin,
-                                                                    input,
-                                                                    y_in,
-                                                                    ptr_activdesc.get(),
-                                                                    scale,
-                                                                    shift,
-                                                                    savedMean,
-                                                                    savedInvVar,
-                                                                    bNormBwdOp,
-                                                                    activBwdOp}, tolerance);
+            test_helpers::CompareResults(
+                verify_bwd_batchnorm_spatial_activ<T, PREC_TYPE>{ptr_bwdfusionplan.get(),
+                                                                 dyin,
+                                                                 input,
+                                                                 y_in,
+                                                                 ptr_activdesc.get(),
+                                                                 scale,
+                                                                 shift,
+                                                                 savedMean,
+                                                                 savedInvVar,
+                                                                 bNormBwdOp,
+                                                                 activBwdOp},
+                tolerance);
         }
         else if(batchnormMode == 0)
         {
@@ -862,14 +861,15 @@ struct na_fusion_test : public testing::TestWithParam<TestCase>
                 return;
             }
 
-            auto fwdTrain =
-                test_helpers::CompareResults(verify_fwd_batchnorm_peract_activ<T, PREC_TYPE>{ptr_fwdfusionplan.get(),
-                                                                       input,
-                                                                       ptr_activdesc.get(),
-                                                                       scale,
-                                                                       shift,
-                                                                       bNormFwdOp,
-                                                                       activFwdOp}, tolerance);
+            auto fwdTrain = test_helpers::CompareResults(
+                verify_fwd_batchnorm_peract_activ<T, PREC_TYPE>{ptr_fwdfusionplan.get(),
+                                                                input,
+                                                                ptr_activdesc.get(),
+                                                                scale,
+                                                                shift,
+                                                                bNormFwdOp,
+                                                                activFwdOp},
+                tolerance);
             auto y_in        = std::get<0>(fwdTrain.second);
             auto savedMean   = std::get<3>(fwdTrain.second);
             auto savedInvVar = std::get<4>(fwdTrain.second);
@@ -887,17 +887,19 @@ struct na_fusion_test : public testing::TestWithParam<TestCase>
                     << std::endl;
                 return;
             }
-            test_helpers::CompareResults(verify_bwd_batchnorm_peract_activ<T, PREC_TYPE>{ptr_bwdfusionplan.get(),
-                                                                   dyin,
-                                                                   input,
-                                                                   y_in,
-                                                                   ptr_activdesc.get(),
-                                                                   scale,
-                                                                   shift,
-                                                                   savedMean,
-                                                                   savedInvVar,
-                                                                   bNormBwdOp,
-                                                                   activBwdOp}, tolerance);
+            test_helpers::CompareResults(
+                verify_bwd_batchnorm_peract_activ<T, PREC_TYPE>{ptr_bwdfusionplan.get(),
+                                                                dyin,
+                                                                input,
+                                                                y_in,
+                                                                ptr_activdesc.get(),
+                                                                scale,
+                                                                shift,
+                                                                savedMean,
+                                                                savedInvVar,
+                                                                bNormBwdOp,
+                                                                activBwdOp},
+                tolerance);
         }
     }
 };
@@ -916,8 +918,7 @@ struct TestNameGenerator
             return str;
         };
 
-        auto print_nchw = [](std::vector<int> const& vec)
-        {
+        auto print_nchw = [](std::vector<int> const& vec) {
             std::stringstream vec_ss{};
             for(auto el : vec)
             {
@@ -926,25 +927,24 @@ struct TestNameGenerator
             return vec_ss.str();
         };
 
-        ss <<   "nchw_" << print_nchw(std::get<1>(param_info.param)) <<
-                "_alpha_" << replace_dot(std::get<2>(param_info.param)) <<
-                "_beta_" << replace_dot(std::get<3>(param_info.param)) <<
-                "_gamma_" << replace_dot(std::get<4>(param_info.param)) <<
-                "_amode_" << std::get<5>(param_info.param);
+        ss << "nchw_" << print_nchw(std::get<1>(param_info.param)) << "_alpha_"
+           << replace_dot(std::get<2>(param_info.param)) << "_beta_"
+           << replace_dot(std::get<3>(param_info.param)) << "_gamma_"
+           << replace_dot(std::get<4>(param_info.param)) << "_amode_"
+           << std::get<5>(param_info.param);
         return ss.str();
     }
 };
-template<typename T>
+template <typename T>
 class na_fusion_test_peract : public na_fusion_test<T>
 {
 };
 
-template<typename T>
+template <typename T>
 class na_fusion_test_spatial : public na_fusion_test<T>
 {
 };
 } // namespace
-
 
 using GPU_na_fusion_test_bn_peract_FP16 = na_fusion_test_peract<half_float::half>;
 using GPU_na_fusion_test_bn_peract_FP32 = na_fusion_test_peract<float>;
@@ -952,11 +952,22 @@ using GPU_na_fusion_test_bn_peract_FP32 = na_fusion_test_peract<float>;
 TEST_P(GPU_na_fusion_test_bn_peract_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_na_fusion_test_bn_peract_FP16, TestFloat16) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_test_bn_peract_FP32, GenCases(0), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_test_bn_peract_FP16, GenCases(0), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_na_fusion_test_bn_peract_FP32, GenCases(0, true), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_na_fusion_test_bn_peract_FP16, GenCases(0, true), TestNameGenerator{});
-
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_na_fusion_test_bn_peract_FP32,
+                         GenCases(0),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_na_fusion_test_bn_peract_FP16,
+                         GenCases(0),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_na_fusion_test_bn_peract_FP32,
+                         GenCases(0, true),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_na_fusion_test_bn_peract_FP16,
+                         GenCases(0, true),
+                         TestNameGenerator{});
 
 using GPU_na_fusion_test_bn_spatial_FP16 = na_fusion_test_spatial<half_float::half>;
 using GPU_na_fusion_test_bn_spatial_FP32 = na_fusion_test_spatial<float>;
@@ -964,7 +975,19 @@ using GPU_na_fusion_test_bn_spatial_FP32 = na_fusion_test_spatial<float>;
 TEST_P(GPU_na_fusion_test_bn_spatial_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_na_fusion_test_bn_spatial_FP16, TestFloat16) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_test_bn_spatial_FP32, GenCases(1), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_test_bn_spatial_FP16, GenCases(1), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_na_fusion_test_bn_spatial_FP32, GenCases(1, true), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_na_fusion_test_bn_spatial_FP16, GenCases(1, true), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_na_fusion_test_bn_spatial_FP32,
+                         GenCases(1),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_na_fusion_test_bn_spatial_FP16,
+                         GenCases(1),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_na_fusion_test_bn_spatial_FP32,
+                         GenCases(1, true),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_na_fusion_test_bn_spatial_FP16,
+                         GenCases(1, true),
+                         TestNameGenerator{});

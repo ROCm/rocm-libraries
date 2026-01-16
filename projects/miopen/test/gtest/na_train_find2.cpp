@@ -36,11 +36,10 @@
 #include "compare_helper.hpp"
 #include <miopen/stringutils.hpp>
 
-namespace
-{
+namespace {
 constexpr double MIO_BN_TEST_EXPAVGFACTOR = 0.99;
-constexpr double MIO_BN_TEST_EPSILON = 1e-5; // FLT_EPSILON
-constexpr int batch_factor = 4;
+constexpr double MIO_BN_TEST_EPSILON      = 1e-5; // FLT_EPSILON
+constexpr int batch_factor                = 4;
 
 using ptr_FusionPlanDesc = MIOPEN_MANAGE_PTR(miopenFusionPlanDescriptor_t, miopenDestroyFusionPlan);
 using ptr_FusionPlanArgs = MIOPEN_MANAGE_PTR(miopenOperatorArgs_t, miopenDestroyOperatorArgs);
@@ -415,9 +414,9 @@ struct verify_bwd_batchnorm_spatial_activ
     void fail() const
     {
         GTEST_FAIL() << "Backward Train Spatial Batch Normalization + Activation: " << std::endl
-                     <<   "Input x tensor: " << x.desc.ToString() << std::endl
-                     <<   "Input y tensor: " << y.desc.ToString() << std::endl
-                     <<   "Input dy tensor: " << dy.desc.ToString() << std::endl;
+                     << "Input x tensor: " << x.desc.ToString() << std::endl
+                     << "Input y tensor: " << y.desc.ToString() << std::endl
+                     << "Input dy tensor: " << dy.desc.ToString() << std::endl;
     }
 };
 
@@ -584,7 +583,8 @@ struct verify_fwd_batchnorm_peract_activ
 
     void fail() const
     {
-        GTEST_FAIL() << "Forward Train Per Activation Batch Normalization + Activation: " << std::endl
+        GTEST_FAIL() << "Forward Train Per Activation Batch Normalization + Activation: "
+                     << std::endl
                      << "Input tensor: " << x.desc.ToString() << std::endl;
     }
 };
@@ -756,10 +756,10 @@ struct verify_bwd_batchnorm_peract_activ
     void fail() const
     {
         GTEST_FAIL() << "Backward Train Per Activation Batch Normalization + Activation: "
-                  << std::endl
-                  << "Input x tensor: " << x.desc.ToString() << std::endl
-                  << "Input y tensor: " << y.desc.ToString() << std::endl
-                  << "Input dy tensor: " << dy.desc.ToString() << std::endl;
+                     << std::endl
+                     << "Input x tensor: " << x.desc.ToString() << std::endl
+                     << "Input y tensor: " << y.desc.ToString() << std::endl
+                     << "Input dy tensor: " << dy.desc.ToString() << std::endl;
     }
 };
 
@@ -781,16 +781,18 @@ using TestCase = std::tuple<int, std::vector<int>, double, double, double, std::
 
 auto GenCases(int batchNormMode, bool full = false)
 {
-    if (full)
+    if(full)
     {
         return ::testing::Combine(::testing::ValuesIn({batchNormMode}),
-                                  ::testing::ValuesIn((batchNormMode == 1) ? get_bn_spatial_inputs(batch_factor)
-                                                                           : get_bn_peract_inputs(batch_factor)),
+                                  ::testing::ValuesIn((batchNormMode == 1)
+                                                          ? get_bn_spatial_inputs(batch_factor)
+                                                          : get_bn_peract_inputs(batch_factor)),
                                   ::testing::ValuesIn({double{0.5}}),
                                   ::testing::ValuesIn({double{0.5}}),
                                   ::testing::ValuesIn({double{0.5}}),
-                                  ::testing::ValuesIn({std::string{"MIOPENACTIVATIONRELU"}, std::string{"MIOPENACTIVATIONLOGISTIC"}, std::string{"MIOPENACTIVATIONABS"}})
-                                );
+                                  ::testing::ValuesIn({std::string{"MIOPENACTIVATIONRELU"},
+                                                       std::string{"MIOPENACTIVATIONLOGISTIC"},
+                                                       std::string{"MIOPENACTIVATIONABS"}}));
     }
     return ::testing::Combine(::testing::ValuesIn({0}),
                               ::testing::ValuesIn(std::set<std::vector<int>>{{16, 32, 8, 8}}),
@@ -820,7 +822,7 @@ struct na_train_find2 : public ::testing::TestWithParam<TestCase>
     {
         std::vector<int> nchw{};
         std::tie(batchnormMode, nchw, alpha, beta, gamma, amode) = GetParam();
-        input                = tensor<T>{nchw[0], nchw[1], nchw[2], nchw[3]};
+        input = tensor<T>{nchw[0], nchw[1], nchw[2], nchw[3]};
         input.generate(tensor_elem_gen_integer{max_value});
         amode = transform_mode(amode);
 
@@ -853,8 +855,8 @@ struct na_train_find2 : public ::testing::TestWithParam<TestCase>
         std::size_t input_n, input_c, input_h, input_w;
         std::tie(input_n, input_c, input_h, input_w) = miopen::tien<4>(input.desc.GetLengths());
         auto tolerance = std::min(80 * double(input.desc.GetElementSize()),
-                                   1280 * sqrt(double(input.desc.GetElementSize())));
-        ptr_activdesc   = GetManagedActivDesc();
+                                  1280 * sqrt(double(input.desc.GetElementSize())));
+        ptr_activdesc  = GetManagedActivDesc();
         miopenSetActivationDescriptor(ptr_activdesc.get(), activ_mode, alpha, beta, gamma);
         auto&& handle = get_handle();
 
@@ -928,8 +930,10 @@ struct na_train_find2 : public ::testing::TestWithParam<TestCase>
                 return ManagedProblem{problem, &miopenDestroyProblem};
             }();
 
-            auto fwdTrain = test_helpers::CompareResults(verify_fwd_batchnorm_spatial_activ<T, PREC_TYPE>{
-                fwd_problem.get(), input, ptr_activdesc.get(), scale, shift}, tolerance);
+            auto fwdTrain = test_helpers::CompareResults(
+                verify_fwd_batchnorm_spatial_activ<T, PREC_TYPE>{
+                    fwd_problem.get(), input, ptr_activdesc.get(), scale, shift},
+                tolerance);
 
             auto y_in        = std::get<0>(fwdTrain.second);
             auto savedMean   = std::get<3>(fwdTrain.second);
@@ -937,17 +941,19 @@ struct na_train_find2 : public ::testing::TestWithParam<TestCase>
             auto dyin        = tensor<T>{input_n, input_c, input_h, input_w}.generate(
                 tensor_elem_gen_integer{max_value});
 
-            test_helpers::CompareResults(verify_bwd_batchnorm_spatial_activ<T, PREC_TYPE>{
-                bwd_problem.get(),
-                dyin,
-                input,
-                y_in,
-                ptr_activdesc.get(),
-                scale,
-                shift,
-                savedMean,
-                savedInvVar,
-            }, tolerance);
+            test_helpers::CompareResults(
+                verify_bwd_batchnorm_spatial_activ<T, PREC_TYPE>{
+                    bwd_problem.get(),
+                    dyin,
+                    input,
+                    y_in,
+                    ptr_activdesc.get(),
+                    scale,
+                    shift,
+                    savedMean,
+                    savedInvVar,
+                },
+                tolerance);
         }
         else if(batchnormMode == 0)
         {
@@ -967,8 +973,8 @@ struct na_train_find2 : public ::testing::TestWithParam<TestCase>
             const auto fwd_problem = [&]() {
                 miopenProblem_t problem;
                 EXPECT_EQ(miopenStatusSuccess,
-                             miopenCreateBatchnormProblem(
-                                 &problem, bnmode, true, miopenProblemDirectionForward));
+                          miopenCreateBatchnormProblem(
+                              &problem, bnmode, true, miopenProblemDirectionForward));
 
                 // clang-format off
                 EXPECT_EQ(miopenStatusSuccess, miopenSetProblemTensorDescriptor(problem, miopenTensorBatchnormX, &input.desc));
@@ -982,15 +988,14 @@ struct na_train_find2 : public ::testing::TestWithParam<TestCase>
 
                 AddAndFuse(problem, [&](auto activation) {
                     EXPECT_EQ(miopenStatusSuccess,
-                                 miopenCreateActivationProblem(activation,
-                                                               ptr_activdesc.get(),
-                                                               miopenProblemDirectionForward));
+                              miopenCreateActivationProblem(
+                                  activation, ptr_activdesc.get(), miopenProblemDirectionForward));
                     EXPECT_EQ(miopenStatusSuccess,
-                                 miopenSetProblemTensorDescriptor(
-                                     *activation, miopenTensorActivationX, &input.desc));
+                              miopenSetProblemTensorDescriptor(
+                                  *activation, miopenTensorActivationX, &input.desc));
                     EXPECT_EQ(miopenStatusSuccess,
-                                 miopenSetProblemTensorDescriptor(
-                                     *activation, miopenTensorActivationY, &input.desc));
+                              miopenSetProblemTensorDescriptor(
+                                  *activation, miopenTensorActivationY, &input.desc));
                 });
 
                 return ManagedProblem{problem, &miopenDestroyProblem};
@@ -999,8 +1004,8 @@ struct na_train_find2 : public ::testing::TestWithParam<TestCase>
             const auto bwd_problem = [&]() {
                 miopenProblem_t problem;
                 EXPECT_EQ(miopenStatusSuccess,
-                             miopenCreateBatchnormProblem(
-                                 &problem, bnmode, true, miopenProblemDirectionBackward));
+                          miopenCreateBatchnormProblem(
+                              &problem, bnmode, true, miopenProblemDirectionBackward));
 
                 // clang-format off
                 miopenSetProblemTensorDescriptor(problem, miopenTensorBatchnormDY, &input.desc);
@@ -1025,8 +1030,10 @@ struct na_train_find2 : public ::testing::TestWithParam<TestCase>
                 return ManagedProblem{problem, &miopenDestroyProblem};
             }();
 
-            auto fwdTrain    = test_helpers::CompareResults(verify_fwd_batchnorm_peract_activ<T, PREC_TYPE>{
-                fwd_problem.get(), input, ptr_activdesc.get(), scale, shift}, tolerance);
+            auto fwdTrain = test_helpers::CompareResults(
+                verify_fwd_batchnorm_peract_activ<T, PREC_TYPE>{
+                    fwd_problem.get(), input, ptr_activdesc.get(), scale, shift},
+                tolerance);
             auto y_in        = std::get<0>(fwdTrain.second);
             auto savedMean   = std::get<3>(fwdTrain.second);
             auto savedInvVar = std::get<4>(fwdTrain.second);
@@ -1044,15 +1051,17 @@ struct na_train_find2 : public ::testing::TestWithParam<TestCase>
                     << std::endl;
                 return;
             }
-            test_helpers::CompareResults(verify_bwd_batchnorm_peract_activ<T, PREC_TYPE>{bwd_problem.get(),
-                                                                   dyin,
-                                                                   input,
-                                                                   y_in,
-                                                                   ptr_activdesc.get(),
-                                                                   scale,
-                                                                   shift,
-                                                                   savedMean,
-                                                                   savedInvVar}, tolerance);
+            test_helpers::CompareResults(
+                verify_bwd_batchnorm_peract_activ<T, PREC_TYPE>{bwd_problem.get(),
+                                                                dyin,
+                                                                input,
+                                                                y_in,
+                                                                ptr_activdesc.get(),
+                                                                scale,
+                                                                shift,
+                                                                savedMean,
+                                                                savedInvVar},
+                tolerance);
         }
     }
 };
@@ -1071,8 +1080,7 @@ struct TestNameGenerator
             return str;
         };
 
-        auto print_nchw = [](std::vector<int> const& vec)
-        {
+        auto print_nchw = [](std::vector<int> const& vec) {
             std::stringstream vec_ss{};
             for(auto el : vec)
             {
@@ -1081,22 +1089,22 @@ struct TestNameGenerator
             return vec_ss.str();
         };
 
-        ss <<   "nchw_" << print_nchw(std::get<1>(param_info.param)) <<
-                "_alpha_" << replace_dot(std::get<2>(param_info.param)) <<
-                "_beta_" << replace_dot(std::get<3>(param_info.param)) <<
-                "_gamma_" << replace_dot(std::get<4>(param_info.param)) <<
-                "_amode_" << std::get<5>(param_info.param);
+        ss << "nchw_" << print_nchw(std::get<1>(param_info.param)) << "_alpha_"
+           << replace_dot(std::get<2>(param_info.param)) << "_beta_"
+           << replace_dot(std::get<3>(param_info.param)) << "_gamma_"
+           << replace_dot(std::get<4>(param_info.param)) << "_amode_"
+           << std::get<5>(param_info.param);
         return ss.str();
     }
 };
 
-template<typename T>
+template <typename T>
 struct na_train_find2_peract : public na_train_find2<T>
 {
 };
 
-template<typename T>
-struct na_train_find2_spatial: public na_train_find2<T>
+template <typename T>
+struct na_train_find2_spatial : public na_train_find2<T>
 {
 };
 } // namespace
@@ -1119,8 +1127,20 @@ INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_train_find2_peract_FP32, GenCases(0), Tes
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_train_find2_spatial_FP16, GenCases(1), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_train_find2_spatial_FP32, GenCases(1), TestNameGenerator{});
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_na_train_find2_peract_FP16, GenCases(0, true), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_na_train_find2_peract_FP32, GenCases(0, true), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_na_train_find2_peract_FP16,
+                         GenCases(0, true),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_na_train_find2_peract_FP32,
+                         GenCases(0, true),
+                         TestNameGenerator{});
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_na_train_find2_spatial_FP16, GenCases(1, true), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_na_train_find2_spatial_FP32, GenCases(1, true), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_na_train_find2_spatial_FP16,
+                         GenCases(1, true),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_na_train_find2_spatial_FP32,
+                         GenCases(1, true),
+                         TestNameGenerator{});
