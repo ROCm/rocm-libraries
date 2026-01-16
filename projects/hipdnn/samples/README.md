@@ -135,6 +135,46 @@ Inputs: x, dy, scale, bias, mean, inv_variance
 Outputs: dx, dscale, dbias
 ```
 
+### [**`FusedBnInferenceActiv`**](./batchnorm/FusedBnInferenceActiv.cpp)
+
+Executes a fused batch normalization inference and activation graph.
+
+The fused graph consists of two operations:
+
+1. **Batchnorm Inference**: Normalizes input `x` using saved statistics (mean and inverse variance)
+   ```python
+   bn_y = scale * ((x - mean) * inv_variance) + bias
+   ```
+
+2. **Activation (ReLU)**: Applies ReLU activation
+   ```python
+   y = relu(bn_y) = max(bn_y, 0)
+   ```
+
+**Key Features:**
+- Demonstrates fusion of batch normalization inference and activation
+- Uses `CpuReferenceGraphExecutor` for validation
+
+### [**`FusedBnInferenceVarianceActiv`**](./batchnorm/FusedBnInferenceVarianceActiv.cpp)
+
+Executes a fused batch normalization inference (with variance) and activation graph.
+
+The fused graph consists of two operations:
+
+1. **Batchnorm Inference (with Variance)**: Normalizes input `x` using saved statistics (mean and variance)
+   ```python
+   bn_y = scale * ((x - mean) / sqrt(variance + epsilon)) + bias
+   ```
+
+2. **Activation (ReLU)**: Applies ReLU activation
+   ```python
+   y = relu(bn_y) = max(bn_y, 0)
+   ```
+
+**Key Features:**
+- Demonstrates fusion of batch normalization inference (using variance input) and activation
+- Uses `CpuReferenceGraphExecutor` for validation
+
 ### [**`ConvFprop`**](./convolution/ConvFprop.cpp)
 
 Executes the forward pass of a 2D convolution operation on a 4D input tensor.
