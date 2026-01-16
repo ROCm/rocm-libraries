@@ -450,23 +450,24 @@ class hardware_t {
   static hardware_t get_hardware_for_device(int deviceId);
 
   /**
-   * @brief Create hardware_t instance from architecture name string with default parameters.
+   * @brief Create hardware_t instance for a specific architecture with specified parameters.
    *
-   * Creates a hardware instance using typical/default values for the specified
-   * architecture. Useful for analytical modeling when actual hardware is not available.
-   * Uses representative values based on common SKUs for each architecture:
-   * - gfx90a: MI250X (110 CUs)
-   * - gfx942: MI300X (304 CUs)
-   * - gfx950: MI350X (256 CUs)
-   * - gfx1201: Radeon 7900 XTX (96 CUs)
-   * - gfx1100: Radeon 7900 XT (84 CUs)
-   * - gfx1151: Radeon 780M (12 CUs)
+   * Creates a hardware instance using the specified architecture and hardware parameters.
+   * Useful for analytical modeling when actual hardware is not available.
    *
-   * @param arch_name Architecture name as string (e.g., "gfx942", "gfx950")
-   * @return hardware_t Configured hardware instance with default parameters
+   * @param arch Architecture enum value
+   * @param N_CU Number of compute units
+   * @param lds_capacity LDS capacity in bytes
+   * @param L2_capacity L2 cache capacity in bytes
+   * @param compute_clock_khz Compute clock in KHz
+   * @return hardware_t Configured hardware instance
    * @throws std::runtime_error if architecture is not supported
    */
-  static hardware_t get_hardware_for_arch_name(const std::string& arch_name);
+  static hardware_t get_hardware_for_arch(architecture_t arch,
+                                          size_t N_CU,
+                                          size_t lds_capacity,
+                                          size_t L2_capacity,
+                                          int compute_clock_khz);
 
   /**
    * @brief Check if the hardware described by properties is supported.

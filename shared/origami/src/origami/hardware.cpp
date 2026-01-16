@@ -82,57 +82,38 @@ hardware_t hardware_t::get_hardware_for_device(int deviceId) {
   return get_hardware_for_properties(prop);
 }
 
-hardware_t hardware_t::get_hardware_for_arch_name(const std::string& arch_name) {
-  // Map of architecture names to their typical hardware properties
-  struct ArchProps {
-    int multiProcessorCount;
-    size_t sharedMemPerBlock;
-    size_t l2CacheSize;
-    int clockRate;  // in KHz
-  };
-
-  // These can not be obtained from hipDeviceProperties without a device but we may want to use
-  // origami Without having a device present. Therefore, encode relevant properties for architecture
-  // lookup
-  // In a map
-  static const std::unordered_map<std::string, ArchProps> arch_properties = {
-      //{NUM_CUS,LDS_SIZE,L2_cache_size,}
-      {"gfx90a", {110, 65536, 8388608, 1700000}},   // MI250X
-      {"gfx942", {304, 65536, 33554432, 2100000}},  // MI300X
-      {"gfx950", {256, 65536, 33554432, 2200000}},  // MI350X
-      {"gfx1201", {96, 65536, 6291456, 2500000}},   // Radeon 7900 XTX
-      {"gfx1100", {84, 65536, 5242880, 2400000}},   // Radeon 7900 XT
-      {"gfx1151", {12, 65536, 2097152, 2700000}}    // Radeon 780M
-  };
-
-  auto it = arch_properties.find(arch_name);
-  if (it == arch_properties.end()) {
-    throw std::runtime_error(
-        std::string("Attempting to create hardware for unsupported architecture: ") + arch_name);
+hardware_t hardware_t::get_hardware_for_arch(architecture_t arch,
+                                             size_t N_CU,
+                                             size_t lds_capacity,
+                                             size_t L2_capacity,
+                                             int compute_clock_khz) {
+  if (arch == architecture_t::Count) {
+    throw std::runtime_error("Attempting to create hardware for unsupported architecture");
   }
 
-  // Validate architecture is recognized
-  auto arch_enum = arch_name_to_enum(arch_name);
-  if (arch_enum == architecture_t::Count) {
-    throw std::runtime_error(
-        std::string("Attempting to create hardware for unsupported architecture: ") + arch_name);
-  }
+  auto constants = get_arch_constants(arch);
 
-  // Create hipDeviceProp_t with typical values for this architecture
-  hipDeviceProp_t prop = {};
-  const auto& props    = it->second;
+  // Calculate memory performance ratios
+  double clockRate       = compute_clock_khz;
+  double memoryClockRate = clockRate / constants.mem_clock_ratio;
 
-  strncpy(prop.gcnArchName, arch_name.c_str(), sizeof(prop.gcnArchName) - 1);
-  prop.multiProcessorCount = props.multiProcessorCount;
-  prop.sharedMemPerBlock   = props.sharedMemPerBlock;
-  prop.l2CacheSize         = props.l2CacheSize;
-  prop.clockRate           = props.clockRate;
+  double mem1_perf_ratio = 1e9 * constants.mem1_perf_ratio / clockRate;
+  double mem2_perf_ratio =
+      1e9 * constants.mem2_perf_ratio / (memoryClockRate * constants.mem_clock_ratio);
+  double mem3_perf_ratio = 1e9 * constants.mem3_perf_ratio / memoryClockRate;
 
-  auto constants       = get_arch_constants(arch_enum);
-  prop.memoryClockRate = prop.clockRate / constants.mem_clock_ratio;
-
-  // Use the existing constructor that takes hipDeviceProp_t
-  return hardware_t(prop);
+  // Use the direct constructor
+  return hardware_t(arch,
+                    N_CU,
+                    lds_capacity,
+                    constants.num_xcds,
+                    mem1_perf_ratio,
+                    mem2_perf_ratio,
+                    mem3_perf_ratio,
+                    L2_capacity,
+                    clockRate / 1e6,  // Convert KHz to GHz
+                    constants.parallel_mi_cu,
+                    constants.mem_bw_per_wg_coefficients);
 }
 
 bool hardware_t::is_hardware_supported(hipDeviceProp_t properties) {

@@ -43,8 +43,12 @@ using namespace nb::literals;
 
 NB_MODULE(origami, m) {
   nanobind::enum_<hardware_t::architecture_t>(m, "architecture_t")
+      .value("gfx90a", hardware_t::architecture_t::gfx90a)
       .value("gfx942", hardware_t::architecture_t::gfx942)
       .value("gfx950", hardware_t::architecture_t::gfx950)
+      .value("gfx1201", hardware_t::architecture_t::gfx1201)
+      .value("gfx1100", hardware_t::architecture_t::gfx1100)
+      .value("gfx1151", hardware_t::architecture_t::gfx1151)
       .export_values();
 
   nanobind::enum_<origami::data_type_t>(m, "data_type_t")
@@ -170,10 +174,14 @@ NB_MODULE(origami, m) {
         &hardware_t::get_hardware_for_device,
         "This gets a hardware object for a device.");
 
-  m.def("get_hardware_for_arch_name",
-        &hardware_t::get_hardware_for_arch_name,
-        "arch_name"_a,
-        "Create hardware object from architecture name string with default parameters.");
+  m.def("_get_hardware_for_arch_impl",
+        &hardware_t::get_hardware_for_arch,
+        "arch"_a,
+        "N_CU"_a,
+        "lds_capacity"_a,
+        "L2_capacity"_a,
+        "compute_clock_khz"_a,
+        "Internal function - use get_hardware_for_arch() wrapper instead.");
 
   m.def("datatype_to_bits", &origami::datatype_to_bits, "Return the number of bits in a datatype");
   m.def("string_to_datatype",
