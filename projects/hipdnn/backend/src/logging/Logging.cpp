@@ -4,12 +4,12 @@
 #include "Logging.hpp"
 #include "PlatformUtils.hpp"
 
+#include <hipdnn_data_sdk/logging/CallbackTypes.h>
 #include <hipdnn_data_sdk/logging/ComponentFormatter.hpp>
 #include <hipdnn_data_sdk/logging/LoggingUtils.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <iostream>
 
-#include <hipdnn_data_sdk/logging/CallbackTypes.h>
 #include <spdlog/async.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>

@@ -163,6 +163,8 @@ namespace TensileLite
 
         int nonTemporalA = 0;
         int nonTemporalB = 0;
+
+        bool customMainLoopScheduling = false;
     };
 
     struct StreamKSettings
@@ -184,7 +186,7 @@ namespace TensileLite
         using Problem       = ContractionProblemGemm;
         using Inputs        = ContractionInputs;
         using GroupedInputs = ContractionGroupedInputs;
-        using ParamsCache  = CacheMap<std::pair<int32_t, int32_t>, Problem>;
+        using ParamsCache   = CacheMap<std::tuple<int32_t, uint32_t, uint32_t>, Problem>;
 
         /**
          * Indicate a solution's matching type
@@ -405,8 +407,9 @@ namespace TensileLite
                         uint32_t                            numWorkGroups,
                         Hardware const*                     hardware,
                         const ContractionProblemParameters& param,
-                        int32_t                             defaultWGM,
-                        uint32_t                            defaultWGMXCC,
+                        int32_t                             autoWGM,
+                        uint32_t                            autoWGMXCC,
+                        uint32_t                            autoWGMXCCCHUNK,
                         uint32_t                            autoGsuVal) const;
 
         template <typename KA>
@@ -556,7 +559,7 @@ namespace TensileLite
         bool                         debugKernel     = false;
         bool                         kernelArgsLog   = false;
         mutable int                  isFallbackCUSol = -1; // -1:unset, 0:false, 1:true
-        mutable ParamsCache paramsCache = ParamsCache(std::make_pair(0,0));
+        mutable ParamsCache paramsCache = ParamsCache(std::make_tuple(0, 0, 0));
 
         std::shared_ptr<Predicates::Predicate<Task>> taskPredicate
             = std::make_shared<Predicates::True<Task>>();
@@ -586,9 +589,9 @@ namespace TensileLite
         uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
 
-        std::pair<int32_t, int32_t> calculateAutoWGM(Problem const&  problem,
-                                                     Hardware const* hardware,
-                                                     uint32_t        skgrid) const;
+        std::tuple<int32_t, uint32_t, uint32_t> calculateAutoWGM(Problem const&  problem, 
+                                                                Hardware const* hardware, 
+                                                                uint32_t        skgrid) const;
         uint32_t calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
     };
 

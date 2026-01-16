@@ -71,3 +71,14 @@ Tests:
   nnz: [928576]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: spvv
+  category: pre_checkin
+  function: spvv
+  indextype: *i64
+  precision: *double_only_precisions
+  N: [57463]
+  nnz: [28475]
+  transA: [HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  graph_test: true
