@@ -7,6 +7,7 @@
 
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 namespace miopen_legacy_plugin
@@ -80,22 +81,25 @@ void MiopenEngine::initializeExecutionContext(
 {
     if(engineConfig.isValid())
     {
-        auto& config = engineConfig.getEngineConfig();
-        if(config.knobs() != nullptr)
+        if(engineConfig.hasKnobSetting(benchmarking_KNOB_ID))
         {
-            for(const auto* knobSetting : *config.knobs())
+            const auto& knobSetting = engineConfig.getKnobSettingById(benchmarking_KNOB_ID);
+            if(knobSetting.valueType() == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
             {
-                if(knobSetting->knob_id() == benchmarking_KNOB_ID)
-                {
-                    if(knobSetting->value_type()
-                       == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
-                    {
-                        auto value = knobSetting->value_as_IntValue()->value();
-                        executionContext.setBenchmarkingEnabled(value != 0);
-                    }
-                }
+                auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
+                executionContext.setBenchmarkingEnabled(value != 0);
+            }
+            else
+            {
+                HIPDNN_LOG_WARN(
+                    "Benchmarking knob setting value is not an integer. Type: {}",
+                    hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
             }
         }
+    }
+    else
+    {
+        HIPDNN_LOG_WARN("Engine config is invalid");
     }
 
     for(const auto& planBuilder : _planBuilders)

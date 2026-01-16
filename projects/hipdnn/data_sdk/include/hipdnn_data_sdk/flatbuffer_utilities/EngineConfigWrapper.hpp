@@ -33,6 +33,9 @@ public:
     virtual const hipdnn_data_sdk::flatbuffer_utilities::IKnobSetting&
         getKnobSettingByName(const std::string& knobName) const
         = 0;
+
+    virtual bool hasKnobSetting(int64_t knobId) const = 0;
+    virtual bool hasKnobSetting(const std::string& knobName) const = 0;
 };
 
 class EngineConfigWrapper : public IEngineConfig
@@ -110,6 +113,19 @@ public:
     {
         auto knobId = static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash(knobName));
         return getKnobSettingById(knobId);
+    }
+
+    bool hasKnobSetting(int64_t knobId) const override
+    {
+        throwIfNotValid();
+        populateKnobSettingWrappers();
+        return _knobSettingIdToIndex.find(knobId) != _knobSettingIdToIndex.end();
+    }
+
+    bool hasKnobSetting(const std::string& knobName) const override
+    {
+        auto knobId = static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash(knobName));
+        return hasKnobSetting(knobId);
     }
 
 private:
