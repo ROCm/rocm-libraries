@@ -67,6 +67,7 @@ def create_base_kernel():
         "SwapGlobalReadOrder": False, # For asserting it gets set
         "UsePLRPack": False, # For asserting it gets set
         "UseF32XEmulation": False,
+        "UseDirect32XEmulation" : False,
         "MIWaveTileA": 2,
         "MIWaveTileB": 2,
     }
