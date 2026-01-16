@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -520,7 +520,7 @@ validParameters = { # we need to make sure this matches develop
     "WorkGroupMapping": list(
         range(-1024, 1024 + 1)
     ),  # change a workgroup's id so that the all the workgroups on the gpu at a time are hitting L2 cache the best
-    # 0: WorkGroupMapping is predicted at runtime. 
+    # 0: WorkGroupMapping is predicted at runtime.
     # 1: No mapping
     "WorkGroupMappingXCC": [
         -1,
@@ -868,7 +868,13 @@ validParameters = { # we need to make sure this matches develop
     # 0  : Fetch from workgroup dim -> elements dim. (default)
     # 1  : Fetch from elements dim -> workgroup dim. Has better prefetch pattern when # store elements is large.
     "MbskPrefetchMethod": [-1, 0, 1],
-    "UseCustomMainLoopSchedule" : [0, 1],
+    # Select whether to enable CMS
+    # CMS is supported for a given solution if there exists a CMS schedule in Components/CustomSchedule.py
+    #
+    # -1 : 0 if CMS is not supported, 1 if CMS is supported
+    # 0  : disable CMS even if supported
+    # 1  : enable  CMS, is set to 0 if not supported
+    "UseCustomMainLoopSchedule" : [-1, 0, 1],
     "AdaptiveGemm": [0, 1],
     # Add extra latency to calculate number of MFMA to insert between local read and wait
     # Negative value means reduce interval between local read and wait (for DirectToVgpr only)
@@ -876,7 +882,12 @@ validParameters = { # we need to make sure this matches develop
     # Add extra miLatencyLeft to improve local read scheduling
     # Adding more room for scheduling local read instructions
     # Tentative: setting >=0 value will invalidate miLatency/miIssueLatency adjustment for gfx950 + 2Byte
-    "ExtraMiLatencyLeft": [-1,0,1,2,3,4,6,8]
+    "ExtraMiLatencyLeft": [-1,0,1,2,3,4,6,8],
+    # TailLoop in NoLoadLoop optimization
+    # generate TailLoop code in NoLoadLoop to take advantage of prefetch and wider globalLoad plus instruction scheduling
+    # Need certain conditions to use TailloopInNll optimization
+    # - NT transpose or AssertSummationElementMultiple * bpeGR is multiple of 4 (with BufferLoad + ShiftPtr)
+    "TailloopInNll": [False, True]
 }
 
 newMIValidParameters = {

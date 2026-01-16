@@ -371,7 +371,8 @@ double estimate_l2_hit(const problem_t& problem,
 
   // Number of CUs that might share the same K-tiles, adjusted for K-splitting.
   // This affects contention on the L2 cache partitions (XCDs).
-  const size_t effective_cus = math::safe_ceil_div(concurrent_workgroups, splitting_factor * problem.batch);
+  const size_t effective_cus =
+      math::safe_ceil_div(concurrent_workgroups, splitting_factor * problem.batch);
   const size_t cu_per_xcd =
       std::max(math::safe_ceil_div(effective_cus, hardware.NUM_XCD), static_cast<size_t>(1));
 
@@ -657,8 +658,9 @@ double compute_memory_latency(const problem_t& problem,
   mall_m = std::max(std::min(grid_m, mall_m), static_cast<size_t>(1));
   mall_n = std::max(std::min(grid_n, mall_n), static_cast<size_t>(1));
   // This is the minimum unique bytes needed from HBM to feed the concurrent workgroups.
-  double concurrent_batches = std::min(static_cast<double>(problem.batch),
-      std::max(static_cast<double>(num_active_cus) / (grid_m * grid_n), 1.));
+  double concurrent_batches =
+      std::min(static_cast<double>(problem.batch),
+               std::max(static_cast<double>(num_active_cus) / (grid_m * grid_n), 1.));
   double min_load = static_cast<double>((mall_m * config.mt.mk() * a_bytes) +
                                         (mall_n * config.mt.nk() * b_bytes)) *
                     concurrent_batches;  // Apply batching to the minimum load itself.
@@ -778,16 +780,22 @@ double compute_tile_latency(const problem_t& problem,
     L_cvt = compute_cvt_overhead_x1(problem, hardware, config);
   }
 
-  // 5) Single-tile latency (always additive)
-  // Calculate the fraction of the work that is useful (not padding).
-
-  // 5) Single-tile latency (apply penalty after finding the bottleneck)
-  double L_tile_single = (std::max(L_compute, L_mem) * effective_tile_penalty) + L_cvt;
+  // 5)
+  // 5-0) Look up main_loop_efficiency from hardware map
+  double main_loop_efficiency = 1.0;
+  if (config.custom_mainloop_scheduling) {
+    main_loop_efficiency = hardware.get_adjusted_main_loop_efficiency(problem.a_transpose, 
+                                                                      problem.b_transpose, 
+                                                                      config.mt.m, 
+                                                                      config.mt.n, 
+                                                                      config.mt.k, 
+                                                                      problem.mi_dtype);
+  }
+  // 5-1) Single-tile latency (apply penalty after finding the bottleneck)
+  double L_tile_single = (std::max(L_compute, L_mem) * main_loop_efficiency * effective_tile_penalty) + L_cvt;
   L_prologue *= effective_tile_penalty;
+
   // 6) Number of K-iterations (excluding epilogue), at least 1
-  // long num_iter = static_cast<long>(((K + MT_K - 1) / MT_K)) - 1;
-  // num_iter      = std::ceil(num_iter / splitting_factor);
-  // num_iter      = std::max(num_iter, 1L);
   const long k_per_split = static_cast<long>(math::safe_ceil_div(K, splitting_factor));
   long num_iter =
       std::max(static_cast<long>(math::safe_ceil_div(static_cast<size_t>(k_per_split), MT_K) - 1),
@@ -816,7 +824,8 @@ double compute_timestep_latency(const problem_t& problem,
                                 size_t num_active_cus,
                                 size_t splitting_factor) {
   // Assume latency of a timestep is latency of a single K-complete output tile computed on one CU.
-  double L_timestep = compute_tile_latency(problem, hardware, config, num_active_cus, splitting_factor);
+  double L_timestep =
+      compute_tile_latency(problem, hardware, config, num_active_cus, splitting_factor);
 
   return L_timestep;
 }
@@ -883,13 +892,14 @@ double compute_total_latency(const problem_t& problem,
   }
 
   // 1-1) To compute the latency, use default WGM. And WGM can't be greater than one
-  int defaultWGM = batch > 1 ? 1 : static_cast<int>(ceil(std::sqrt(hardware.N_CU / hardware.NUM_XCD)));
+  int defaultWGM =
+      batch > 1 ? 1 : static_cast<int>(ceil(std::sqrt(hardware.N_CU / hardware.NUM_XCD)));
   auto config_with_default_wgm              = config;
   config_with_default_wgm.workgroup_mapping = std::max(defaultWGM, 1);
 
   // 1-2) Find CU occupancy
   auto [num_wgs, num_active_cus, num_timesteps, splitting_factor] = compute_cu_occupancy(
-      problem, hardware, config_with_default_wgm, grid_selection_t::k_split_aware, max_cus);
+      problem, hardware, config_with_default_wgm, config_with_default_wgm.grid_selection, max_cus);
 
   // 2) Compute latency of a timestep
   double L_timestep = compute_timestep_latency(
