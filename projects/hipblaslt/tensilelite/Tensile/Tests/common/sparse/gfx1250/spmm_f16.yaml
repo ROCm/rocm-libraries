@@ -52,6 +52,11 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 64, 1, 1, 1, 1, 1, 1] # m, n = 16, k = 64
+          - [16, 16, 64, 1, 1, 1, 1, 2, 2] # m, n = 16, k = 64
+          - [16, 16, 64, 1, 1, 2, 2, 1, 1] # m, n = 16, k = 64
+          - [16, 16, 64, 1, 1, 2, 2, 2, 2] # m, n = 16, k = 64
+          - [16, 16, 64, 1, 1, 1, 3, 2, 2] # m, n = 16, k = 64
+          - [16, 16, 64, 1, 1, 3, 1, 2, 2] # m, n = 16, k = 64
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - DepthU: [64]
@@ -76,10 +81,12 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          # - Exact: [16, 16, 1, 32] # classic format
-          - Exact: [16, 16, 1, 64] # classic format
-          # - Exact: [24, 24, 1, 48] # classic format
-          # - Exact: [256, 256, 1, 16] # classic format
-          # - Exact: [256, 256, 1, 32] # classic format
+          - Exact: [8, 8, 1, 64] # classic format
+          - Exact: [8, 8, 1, 128] # classic format
+          - Exact: [8, 8, 1, 256] # classic format
+          - Exact: [256, 256, 1, 64] # classic format
+          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [256, 256, 1, 256] # classic format
+          - Exact: [1024, 1024, 1, 1024] # classic format
         - ActivationArgs:
           - [Enum: none]
