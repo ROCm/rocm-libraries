@@ -836,7 +836,6 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_knobs_for_engine(int64_t engineId, std::vector<Knob>& knobs) const
     {
-        // 1. Get engine descriptor
         auto engineDesc
             = std::make_unique<ScopedHipdnnBackendDescriptor>(HIPDNN_BACKEND_ENGINE_DESCRIPTOR);
 
@@ -859,25 +858,8 @@ public:
         RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineDesc->get()),
                                   "Failed to finalize engine descriptor");
 
-        // 2. get HIPDNN_ATTR_ENGINE_KNOB_INFO from engine descriptor
-        // int64_t count = 0;
-        // RETURN_ON_BACKEND_FAILURE(
-        //     hipdnnBackend()->backendGetAttribute(_engineHeuristicDesc->get(),
-        //                                          HIPDNN_ATTR_ENGINE_KNOB_INFO,
-        //                                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-        //                                          static_cast<int64_t>(engineConfigsShallow.size()),
-        //                                          &count,
-        //                                          engineConfigsShallow.data()),
-        //     "Failed to get engine configurations from the heuristic descriptor.");
-
-        // if(count == 0)
-        // {
-        //     return {ErrorCode::HIPDNN_BACKEND_ERROR,
-        //             "No engine configurations retrieved from the heuristic desc."};
-        // }
-
-        // 3. Convert knob flatbuffers to frontend Knobs vector
-        // TODO
+        // TODO - ALMIOPEN-844 - Fetch knobs from engineDesc, deserialize flatbuffers, and then
+        //                       create frontend objects using Knob::fromFlatbuffer()
 
         (void)knobs; // Suppress unused parameter warning
 
@@ -1026,7 +1008,7 @@ public:
             }
         }
 
-        // TODO: Set userChoiceKnobs on engineConfig
+        // TODO - ALMIOPEN-844 - pack userChoiceKnobs to flatbuffer, and set them on the engineConfigDesc
 
         _executionPlanDesc = std::make_unique<ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);

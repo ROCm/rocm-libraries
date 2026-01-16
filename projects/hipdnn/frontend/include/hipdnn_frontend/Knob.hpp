@@ -6,6 +6,7 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 
+#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
@@ -451,6 +452,47 @@ public:
     static int64_t makeKnobId(const std::string& strID)
     {
         return static_cast<int64_t>(std::hash<std::string>{}(strID));
+    }
+
+    // Pack knob choice into a flatbuffer KnobSetting
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>
+        packKnob(flatbuffers::FlatBufferBuilder& builder) const
+    {
+        // Determine which value to pack (choice if set, otherwise default)
+        const auto& valueToPack = _hasChoice ? _choice : _defaultValue;
+
+        // Create the appropriate KnobValue based on the variant type
+        flatbuffers::Offset<void> valueOffset = 0;
+        hipdnn_data_sdk::data_objects::KnobValue valueType
+            = hipdnn_data_sdk::data_objects::KnobValue::NONE;
+
+        std::visit(
+            [&builder, &valueOffset, &valueType](auto&& value) {
+                using T = std::decay_t<decltype(value)>;
+                if constexpr(std::is_same_v<T, int64_t>)
+                {
+                    valueOffset
+                        = hipdnn_data_sdk::data_objects::CreateIntValue(builder, value).Union();
+                    valueType = hipdnn_data_sdk::data_objects::KnobValue::IntValue;
+                }
+                else if constexpr(std::is_same_v<T, double>)
+                {
+                    valueOffset
+                        = hipdnn_data_sdk::data_objects::CreateFloatValue(builder, value).Union();
+                    valueType = hipdnn_data_sdk::data_objects::KnobValue::FloatValue;
+                }
+                else if constexpr(std::is_same_v<T, std::string>)
+                {
+                    valueOffset = hipdnn_data_sdk::data_objects::CreateStringValueDirect(
+                                      builder, value.c_str())
+                                      .Union();
+                    valueType = hipdnn_data_sdk::data_objects::KnobValue::StringValue;
+                }
+            },
+            valueToPack);
+
+        return hipdnn_data_sdk::data_objects::CreateKnobSetting(
+            builder, _knobId, valueType, valueOffset);
     }
 
     // String representation for logging
