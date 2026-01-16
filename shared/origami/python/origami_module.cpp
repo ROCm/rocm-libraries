@@ -174,14 +174,14 @@ NB_MODULE(origami, m) {
         &hardware_t::get_hardware_for_device,
         "This gets a hardware object for a device.");
 
-  m.def("_get_hardware_for_arch_impl",
+  m.def("get_hardware_for_arch",
         &hardware_t::get_hardware_for_arch,
         "arch"_a,
         "N_CU"_a,
         "lds_capacity"_a,
         "L2_capacity"_a,
         "compute_clock_khz"_a,
-        "Internal function - use get_hardware_for_arch() wrapper instead.");
+        "Create hardware object for a specific architecture with specified parameters.");
 
   m.def("datatype_to_bits", &origami::datatype_to_bits, "Return the number of bits in a datatype");
   m.def("string_to_datatype",
