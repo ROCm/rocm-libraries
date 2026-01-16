@@ -46,7 +46,7 @@ jobs:
           sparse-checkout-cone-mode: true
           fetch-depth: 2
       - name: Notify Microsoft Teams
-        if: ${{ contains(inputs.project_to_test, 'miopen') || contains(inputs.project_to_test, 'miopen_plugin') }}
+        if: always() #${{ contains(inputs.project_to_test, 'miopen') || contains(inputs.project_to_test, 'miopen_plugin') }}
         run: |
           curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" -H 'Content-Type: application/json' \
                -d '{
