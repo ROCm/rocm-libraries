@@ -24,6 +24,7 @@ private:
     int64_t _engineId;
     bool _engineIdSet = false;
     std::shared_ptr<const plugin::EngineDetailsWrapper> _engineDetails;
+    std::vector<flatbuffers::DetachedBuffer> _knobSerializedBuffers;
 
     void setGraph(hipdnnBackendAttributeType_t attributeType,
                   int64_t elementCount,
@@ -47,9 +48,6 @@ private:
                      int64_t requestedElementCount,
                      int64_t* elementCount,
                      void* arrayOfElements) const;
-
-    // Cached serialized knob buffers - lazily populated on first getKnobInfo call
-    mutable std::vector<flatbuffers::DetachedBuffer> _knobSerializedBuffers;
 
 public:
     void finalize() override;

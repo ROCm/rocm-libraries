@@ -43,6 +43,28 @@ void EngineDescriptor::finalize()
     _engineDetails = plugin::EnginePluginResourceManager::getEngineDetails(
         pluginResourceManager, _engineId, _graph.get());
 
+    auto engineDetailsPtr = _engineDetails->get();
+    if(engineDetailsPtr != nullptr)
+    {
+        hipdnn_plugin_sdk::EngineDetailsWrapper detailsWrapper(engineDetailsPtr);
+        auto knobCount = detailsWrapper.knobCount();
+
+        if(knobCount > 0)
+        {
+            const auto& knobWrappers = detailsWrapper.knobWrappers();
+            _knobSerializedBuffers.reserve(knobCount);
+
+            for(const auto& knobWrapper : knobWrappers)
+            {
+                flatbuffers::FlatBufferBuilder builder;
+                auto knobOffset = hipdnn_data_sdk::data_objects::Knob::Pack(
+                    builder, knobWrapper->getKnob().UnPack());
+                builder.Finish(knobOffset);
+                _knobSerializedBuffers.push_back(builder.Release());
+            }
+        }
+    }
+
     HipdnnBackendDescriptorImpl<EngineDescriptor>::finalize();
 }
 
@@ -248,16 +270,7 @@ void EngineDescriptor::getKnobInfo(hipdnnBackendAttributeType_t attributeType,
                 HIPDNN_STATUS_BAD_PARAM,
                 "EngineDescriptor failed to get knob info: Invalid attribute type.");
 
-    // Get the EngineDetails pointer from the wrapper
-    auto engineDetailsPtr = _engineDetails->get();
-    THROW_IF_NULL(engineDetailsPtr,
-                  HIPDNN_STATUS_INTERNAL_ERROR,
-                  "EngineDescriptor failed to get knob info: Engine details is null.");
-
-    // Create a wrapper to access the knobs
-    hipdnn_plugin_sdk::EngineDetailsWrapper detailsWrapper(engineDetailsPtr);
-
-    auto knobCount = static_cast<int64_t>(detailsWrapper.knobCount());
+    auto knobCount = static_cast<int64_t>(_knobSerializedBuffers.size());
 
     // If requestedElementCount is 0, just return the count
     if(requestedElementCount == 0)
@@ -272,22 +285,6 @@ void EngineDescriptor::getKnobInfo(hipdnnBackendAttributeType_t attributeType,
     THROW_IF_NULL(arrayOfElements,
                   HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                   "EngineDescriptor failed to get knob info: Null pointer.");
-
-    // Lazily serialize the knobs if not already done
-    if(_knobSerializedBuffers.empty() && knobCount > 0)
-    {
-        const auto& knobWrappers = detailsWrapper.knobWrappers();
-        _knobSerializedBuffers.reserve(static_cast<size_t>(knobCount));
-
-        for(const auto& knobWrapper : knobWrappers)
-        {
-            flatbuffers::FlatBufferBuilder builder;
-            auto knobOffset = hipdnn_data_sdk::data_objects::Knob::Pack(
-                builder, knobWrapper->getKnob().UnPack());
-            builder.Finish(knobOffset);
-            _knobSerializedBuffers.push_back(builder.Release());
-        }
-    }
 
     // Fill the output array with hipdnnBackendFlatbufferData_t structs
     auto* outputArray = static_cast<hipdnnBackendFlatbufferData_t*>(arrayOfElements);
