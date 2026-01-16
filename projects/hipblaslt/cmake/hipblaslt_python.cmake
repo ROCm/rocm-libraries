@@ -151,7 +151,7 @@ function(hipblaslt_configure_bundled_python_command python_binary_dir asan_optio
             # moved to the root.
             "${hipblaslt_SOURCE_DIR}/tensilelite"
         )
-    else
+    else()
         set(_python_exe "${Python3_EXECUTABLE}")
         set(_python_path
             "${python_binary_dir}"
