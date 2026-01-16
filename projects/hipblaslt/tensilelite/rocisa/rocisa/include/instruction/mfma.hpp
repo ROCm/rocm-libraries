@@ -321,6 +321,8 @@ namespace rocisa
                 return "bf16";
             case InstType::INST_I8:
                 return "i8";
+            case InstType::INST_U8:
+                return "iu8";
             case InstType::INST_I32:
                 return "i32";
             case InstType::INST_F8:
@@ -345,16 +347,18 @@ namespace rocisa
         {
             if(variant.size() == 4)
             {
+                bool is_smfma = getAsmCaps()["HasSMFMA"];
+                std::string instructionName = is_smfma ? "smfmac" : "swmmac";
                 std::string variantStr = std::to_string(variant[0]) + "x"
                                          + std::to_string(variant[1]) + "x"
                                          + std::to_string(variant[2]);
                 std::string strB = variant[3] > 1 ? std::to_string(variant[3]) + "ub_" : "";
-                return "v_smfmac_" + typeConvert(accType) + "_" + variantStr + "_" + strB
+                return "v_" + instructionName + "_" + typeConvert(accType) + "_" + variantStr + "_" + strB
                        + typeConvert(instType);
             }
             else
             {
-                throw std::runtime_error("Currently only support smfma variant 4");
+                throw std::runtime_error("Currently only support smfma and swmma variant 4");
             }
         }
 

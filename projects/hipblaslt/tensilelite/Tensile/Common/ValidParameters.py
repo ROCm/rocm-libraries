@@ -86,6 +86,9 @@ def makeValidWMMA():
     # TODO- add back [16, 16, 128, 1] when the toolchain is ready.
     return [[16, 16, 4, 1], [16, 16, 8, 1], [16, 16, 16, 1], [16, 16, 32, 1], [16, 16, 64, 1]]
 
+def makeValidSWMMA():
+    return [[16, 16, 32, 1], [16, 16, 64, 1]]
+
 @lru_cache
 def makeValidMFMA():
     validMFMA = {}
@@ -159,7 +162,7 @@ def makeValidSMFMA():
     validSMFMA["F8B8N"] = validSMFMA["F8N"]
     validSMFMA["B8F8N"] = validSMFMA["F8N"]
     validSMFMA["_format9"] = []
-    for SMFMA in [validSMFMA["H"], validSMFMA["B"], validSMFMA["4xi8"], validSMFMA["F8N"]]:
+    for SMFMA in [validSMFMA["H"], validSMFMA["B"], validSMFMA["4xi8"], validSMFMA["F8N"], makeValidSWMMA()]:
         for MI in SMFMA:
             for bm in range(int(math.log(MI[3], 2)) + 1):
                 for tt0 in range(1, validTT + 1):
