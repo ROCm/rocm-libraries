@@ -18,11 +18,11 @@ GlobalParameters:
   # DataInitTypeB: 8
   # DataInitTypeScaleAlphaVec: 1
   # PruneSparseMode: 1
-  PrintTensorA: 1
-  PrintTensorB: 1
-  PrintTensorC: 0
-  PrintTensorD: 1
-  PrintTensorRef: 1
+  # PrintTensorA: 1
+  # PrintTensorB: 1
+  # PrintTensorC: 0
+  # PrintTensorD: 1
+  # PrintTensorRef: 1
   # GenerateSourcesAndExit: True
   AMDGPUArchPath: rocm_agent_enumerator
 
@@ -51,7 +51,14 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 128, 1, 1, 1, 1, 1, 1] # m, n = 16, k = 128
+          - [16, 16, 128, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
+          - [16, 16, 128, 1, 1, 2, 2, 1, 1]
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 128, 1, 1, 2, 1, 1, 4]
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 8, 8, 2, 2]
+          - [16, 16, 128, 1, 1, 7, 2, 2, 2]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - DepthU: [128]
@@ -79,8 +86,10 @@ BenchmarkProblems:
           # - Exact: [16, 16, 1, 32] # classic format
           # - Exact: [16, 16, 1, 64] # classic format
           - Exact: [16, 16, 1, 128] # classic format
-          # - Exact: [24, 24, 1, 48] # classic format
-          # - Exact: [256, 256, 1, 16] # classic format
-          # - Exact: [256, 256, 1, 32] # classic format
+          - Exact: [64, 64, 1, 128] # classic format
+          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [256, 256, 1, 256] # classic format
+          - Exact: [256, 256, 1, 384] # classic format
+          - Exact: [256, 256, 1, 512] # classic format
         - ActivationArgs:
           - [Enum: none]
