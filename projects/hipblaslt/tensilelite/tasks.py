@@ -12,9 +12,9 @@ def detect_gpu_arch():
             target = next((line.strip() for line in result.stdout.splitlines() if line.startswith("gfx") and line.strip() != "gfx000"), None)
             if target:
                 return target
-    except Exception:
-        pass
-    return "gfx90a"
+    except Exception as e:
+        print(f"Error during GPU architecture detection: {e}")
+    assert False, "Failed to detect a valid GPU architecture (gfx target not found)."
 
 @task
 def get_gpu_arch(c):
