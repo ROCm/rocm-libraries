@@ -423,7 +423,7 @@ defaultBenchmarkCommonParameters = [
     {"LDSTrInst": [False]},
     {"WaveSplitK": [ False ]},
     {"MbskPrefetchMethod": [-1]},
-    {"UseCustomMainLoopSchedule": [1]},
+    {"UseCustomMainLoopSchedule": [-1]},
     {"SpaceFillingAlgo": [[]]},
     {"SFCWGM": [[[1,1],[1,1]]]},
     {"AdaptiveGemm": [0]},

@@ -252,33 +252,8 @@ try
     if(handle->layer_mode & rocblas_layer_mode_log_trace)
         logger.log_trace(handle, "rocblas_set_stream", stream);
 
-    // If the stream is unchanged, return immediately
-    if(stream == handle->stream)
-        return rocblas_status_success;
-
-    //Verify if the new stream is in capture mode
-    hipStreamCaptureStatus stream_status = hipStreamCaptureStatusNone;
-    if(stream != 0)
-    {
-        bool status = hipStreamIsCapturing(stream, &stream_status) == hipSuccess;
-
-        if(!status)
-            return rocblas_status_invalid_value;
-    }
-
-    // Stream capture does not allow use of hipStreamQuery
-    // If the current stream or new stream is in capture mode, skip use of hipStreamQuery()
-    if((handle->stream == 0 || !handle->is_stream_in_capture_mode())
-       && stream_status == hipStreamCaptureStatusNone)
-    {
-        // The new stream must be valid
-        if(stream != 0 && hipStreamQuery(stream) == hipErrorInvalidHandle)
-            return rocblas_status_invalid_value;
-    }
-
     // Set the new stream
-    handle->stream = stream;
-    return rocblas_status_success;
+    return handle->set_stream(stream);
 }
 catch(...)
 {
@@ -300,6 +275,7 @@ try
     rocblas_internal_logger logger;
     if(handle->layer_mode & rocblas_layer_mode_log_trace)
         logger.log_trace(handle, "rocblas_get_stream", *stream_id);
+
     *stream_id = handle->get_stream();
     return rocblas_status_success;
 }
