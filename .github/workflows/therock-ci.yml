@@ -110,12 +110,11 @@ jobs:
       - name: Notify Microsoft Teams
         if: ${{ contains(inputs.project_to_test, 'miopen') || contains(inputs.project_to_test, 'miopen_plugin') }}
         run: |
-          curl -H 'Content-Type: application/json' \
+          curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" -H 'Content-Type: application/json' \
                -d '{
                      "title": "GitHub CI Notification",
                      "text": "✅ Build completed on branch: '${GITHUB_REF}'"
-                   }' \
-               ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+                   }'
 
   therock-ci-linux:
     name: Linux (${{ matrix.projects.project_to_test }} | ${{ matrix.target_bundle.amdgpu_family }})
