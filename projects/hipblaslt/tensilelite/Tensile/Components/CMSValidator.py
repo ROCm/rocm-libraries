@@ -1577,7 +1577,7 @@ def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
 
     Only operates on instructions which have a set needed_by field and a set min_quad_cycles_before_result_used field.
 
-    All instructions take 1 quad-cycles to issue minimum.
+    All instructions take 1 quad-cycle to issue minimum.
     Swaits will stall everything else for 1 + wait_state number of quad-cycles.
     SWait is assumed to be only 1 quad-cycle, have no easy way to determine stalls.
     SBarrier is assumed to be only 1 quad-cycle, have no easy way to determine stalls.
