@@ -2,6 +2,9 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
+#include <HipdnnBackendFlatbufferData.h>
+#include <hipdnn_backend.h>
+#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_frontend/Knob.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
@@ -836,6 +839,13 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_knobs_for_engine(int64_t engineId, std::vector<Knob>& knobs) const
     {
+        if(!_graphDesc || !_graphDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Graph has not been built, build the operation graph first. Cannot create "
+                    "execution plan."};
+        }
+
         auto engineDesc
             = std::make_unique<ScopedHipdnnBackendDescriptor>(HIPDNN_BACKEND_ENGINE_DESCRIPTOR);
 
@@ -858,12 +868,73 @@ public:
         RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineDesc->get()),
                                   "Failed to finalize engine descriptor");
 
-        // TODO - ALMIOPEN-844 - Fetch knobs from engineDesc, deserialize flatbuffers, and then
-        //                       create frontend objects using Knob::fromFlatbuffer()
+        int64_t knobCount = 0;
+        RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendGetAttribute(engineDesc->get(),
+                                                 HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                                 HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                                 0,
+                                                 &knobCount,
+                                                 nullptr),
+            "Failed to get knob count from engine descriptor.");
 
-        (void)knobs; // Suppress unused parameter warning
+        if(knobCount == 0)
+        {
+            knobs.clear();
+            return {ErrorCode::OK, ""};
+        }
 
-        return {ErrorCode::OK, "get_knobs_for_engine not yet implemented"};
+        std::vector<hipdnnBackendFlatbufferData_t> flatbufferDataArray(
+            static_cast<size_t>(knobCount));
+
+        int64_t actualCount = 0;
+        RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendGetAttribute(engineDesc->get(),
+                                                 HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                                 HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                                 knobCount,
+                                                 &actualCount,
+                                                 flatbufferDataArray.data()),
+            "Failed to get knob flatbuffer data from engine descriptor.");
+
+        if(actualCount != knobCount)
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Mismatch between expected and actual knob count."};
+        }
+
+        knobs.clear();
+        knobs.reserve(static_cast<size_t>(actualCount));
+
+        for(size_t i = 0; i < static_cast<size_t>(actualCount); ++i)
+        {
+            const auto& fbData = flatbufferDataArray[i];
+            if(fbData.ptr == nullptr || fbData.size == 0)
+            {
+                return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                        "Invalid flatbuffer data for knob at index " + std::to_string(i)};
+            }
+
+            auto fbKnob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(
+                static_cast<const uint8_t*>(fbData.ptr));
+            if(fbKnob == nullptr)
+            {
+                return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                        "Failed to deserialize knob flatbuffer at index " + std::to_string(i)};
+            }
+
+            try
+            {
+                knobs.emplace_back(Knob::fromFlatbuffer(fbKnob));
+            }
+            catch(const std::exception& e)
+            {
+                return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                        std::string("Failed to create Knob from flatbuffer: ") + e.what()};
+            }
+        }
+
+        return {ErrorCode::OK, ""};
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
@@ -990,25 +1061,36 @@ public:
                                    "Engine doesn't support chosen knob.",
                                    knob.getKnobIdStr(),
                                    graph_attributes.get_name());
+                continue;
             }
 
-            if(knob.hasChoice())
-            {
-                status = knob.validate();
-                HIPDNN_CHECK_ERROR(status);
-
-                userChoiceKnobs.emplace_back(std::move(knob));
-            }
-            else
+            if(!knob.hasChoice())
             {
                 HIPDNN_FE_LOG_WARN("Ignoring knob {} when creating execution plan for graph {}.  "
                                    "Knob contains no choices.",
                                    knob.getKnobIdStr(),
                                    graph_attributes.get_name());
+                continue;
             }
+
+            if(knob.isDeprecated())
+            {
+                HIPDNN_FE_LOG_WARN("Knob {} has been marked as deprecated.", knob.getKnobIdStr());
+            }
+
+            status = knob.validate();
+            HIPDNN_CHECK_ERROR(status);
+
+            userChoiceKnobs.emplace_back(std::move(knob));
         }
 
         // TODO - ALMIOPEN-844 - pack userChoiceKnobs to flatbuffer, and set them on the engineConfigDesc
+
+        // 1. Use Knob::packKnob to pack into a flatbuffer.
+
+        // 2. Attach it to a vector of hipdnnBackendFlatbufferData_t
+
+        // 3. Set the vector on the engineConfigDesc with name 'HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT' and type 'HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT'
 
         _executionPlanDesc = std::make_unique<ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
