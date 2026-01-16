@@ -11,9 +11,7 @@ namespace miopen_legacy_plugin
 
 // We have made the intentional decision to hardcode the batchnorm mode to miopenBNSpatial
 // rather than making it configurable and adding extra complexity.
-
-// NOTE: BN inference temporarily disabled due to https://github.com/ROCm/rocm-libraries/issues/2459
-//const miopenBatchNormMode_t MIOPEN_BATCHNORM_MODE = miopenBNSpatial;
+const miopenBatchNormMode_t MIOPEN_BATCHNORM_MODE = miopenBNSpatial;
 
 BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
     const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& attributes,
@@ -104,73 +102,66 @@ void BatchnormFwdInferencePlan::execute(
     [[maybe_unused]] void* workspace) const
 {
     // Hardcoded values from bn_driver in miopen
-    // auto alpha = static_cast<float>(1);
-    // auto beta = static_cast<float>(0);
-    // double epsilon = hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON;
+    auto alpha = static_cast<float>(1);
+    auto beta = static_cast<float>(0);
 
-    // auto xBuffer = miopen_utils::findDeviceBuffer(
-    //     _inferenceParams.x().uid(), deviceBuffers, numDeviceBuffers);
-    // auto scaleBuffer = miopen_utils::findDeviceBuffer(
-    //     _inferenceParams.scale().uid(), deviceBuffers, numDeviceBuffers);
-    // auto biasBuffer = miopen_utils::findDeviceBuffer(
-    //     _inferenceParams.bias().uid(), deviceBuffers, numDeviceBuffers);
-    // auto estMeanBuffer = miopen_utils::findDeviceBuffer(
-    //     _inferenceParams.estMean().uid(), deviceBuffers, numDeviceBuffers);
-    // auto invVarianceBuffer = miopen_utils::findDeviceBuffer(
-    //     _inferenceParams.invVariance().uid(), deviceBuffers, numDeviceBuffers);
+    auto xBuffer = miopen_utils::findDeviceBuffer(
+        _inferenceParams.x().uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer = miopen_utils::findDeviceBuffer(
+        _inferenceParams.scale().uid(), deviceBuffers, numDeviceBuffers);
+    auto biasBuffer = miopen_utils::findDeviceBuffer(
+        _inferenceParams.bias().uid(), deviceBuffers, numDeviceBuffers);
+    auto estMeanBuffer = miopen_utils::findDeviceBuffer(
+        _inferenceParams.estMean().uid(), deviceBuffers, numDeviceBuffers);
+    auto invVarianceBuffer = miopen_utils::findDeviceBuffer(
+        _inferenceParams.invVariance().uid(), deviceBuffers, numDeviceBuffers);
 
-    // if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut().has_value())
-    // {
-    //     auto activationOutBuffer = miopen_utils::findDeviceBuffer(
-    //         _inferenceParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
+    if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut().has_value())
+    {
+        auto activationOutBuffer = miopen_utils::findDeviceBuffer(
+            _inferenceParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
 
-    //     THROW_ON_MIOPEN_FAILURE(miopenBatchNormForwardInferenceActivation(
-    //         handle.miopenHandle,
-    //         MIOPEN_BATCHNORM_MODE,
-    //         &alpha,
-    //         &beta,
-    //         _inferenceParams.x().tensorDescriptor(),
-    //         xBuffer.ptr,
-    //         _inferenceParams.activationOut().value().tensorDescriptor(),
-    //         activationOutBuffer.ptr,
-    //         _inferenceParams.scale().tensorDescriptor(),
-    //         _inferenceParams.bias().tensorDescriptor(),
-    //         _inferenceParams.estMean().tensorDescriptor(),
-    //         _inferenceParams.invVariance().tensorDescriptor(),
-    //         scaleBuffer.ptr,
-    //         biasBuffer.ptr,
-    //         estMeanBuffer.ptr,
-    //         invVarianceBuffer.ptr,
-    //         epsilon,
-    //         _inferenceParams.optActivation().value().activationDescriptor()));
-    // }
-    // else
-    // {
-    //     auto yBuffer = miopen_utils::findDeviceBuffer(
-    //         _inferenceParams.y().uid(), deviceBuffers, numDeviceBuffers);
-    //     THROW_ON_MIOPEN_FAILURE(miopenBatchNormalizationForwardInference_V2(
-    //         handle.miopenHandle,
-    //         MIOPEN_BATCHNORM_MODE,
-    //         &alpha,
-    //         &beta,
-    //         _inferenceParams.x().tensorDescriptor(),
-    //         xBuffer.ptr,
-    //         _inferenceParams.y().tensorDescriptor(),
-    //         yBuffer.ptr,
-    //         _inferenceParams.scale().tensorDescriptor(),
-    //         _inferenceParams.bias().tensorDescriptor(),
-    //         _inferenceParams.estMean().tensorDescriptor(),
-    //         _inferenceParams.invVariance().tensorDescriptor(),
-    //         scaleBuffer.ptr,
-    //         biasBuffer.ptr,
-    //         estMeanBuffer.ptr,
-    //         invVarianceBuffer.ptr,
-    //         epsilon));
-    // }
-    throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-        "BatchnormFwdInferencePlan execution is currently disabled due to implementation issues "
-        "with the BatchnormInference op.");
+        THROW_ON_MIOPEN_FAILURE(miopenBatchNormForwardInferenceActivationInvVariance(
+            handle.miopenHandle,
+            MIOPEN_BATCHNORM_MODE,
+            &alpha,
+            &beta,
+            _inferenceParams.x().tensorDescriptor(),
+            xBuffer.ptr,
+            _inferenceParams.activationOut().value().tensorDescriptor(),
+            activationOutBuffer.ptr,
+            _inferenceParams.scale().tensorDescriptor(),
+            _inferenceParams.bias().tensorDescriptor(),
+            _inferenceParams.estMean().tensorDescriptor(),
+            _inferenceParams.invVariance().tensorDescriptor(),
+            scaleBuffer.ptr,
+            biasBuffer.ptr,
+            estMeanBuffer.ptr,
+            invVarianceBuffer.ptr,
+            _inferenceParams.optActivation().value().activationDescriptor()));
+    }
+    else
+    {
+        auto yBuffer = miopen_utils::findDeviceBuffer(
+            _inferenceParams.y().uid(), deviceBuffers, numDeviceBuffers);
+        THROW_ON_MIOPEN_FAILURE(miopenBatchNormalizationForwardInferenceInvVariance(
+            handle.miopenHandle,
+            MIOPEN_BATCHNORM_MODE,
+            &alpha,
+            &beta,
+            _inferenceParams.x().tensorDescriptor(),
+            xBuffer.ptr,
+            _inferenceParams.y().tensorDescriptor(),
+            yBuffer.ptr,
+            _inferenceParams.scale().tensorDescriptor(),
+            _inferenceParams.bias().tensorDescriptor(),
+            _inferenceParams.estMean().tensorDescriptor(),
+            _inferenceParams.invVariance().tensorDescriptor(),
+            scaleBuffer.ptr,
+            biasBuffer.ptr,
+            estMeanBuffer.ptr,
+            invVarianceBuffer.ptr));
+    }
 }
 
 }
