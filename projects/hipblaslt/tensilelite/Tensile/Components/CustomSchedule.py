@@ -2797,6 +2797,7 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
         # Interleaving of LBR0 and GRINCB to hide LRB0 latency
         lrb0 = create_range(min_val = 0, num = 6, step = 1, repeat = 1)
         grIncB = create_range(min_val = max(lrb0)+1, num = 3, step = 1, repeat = 3)
+        
         grIncA = create_range(min_val = max(grIncB)+1, num = 3, step = 1, repeat = 3)
         waitLRB0 = max(grIncA)
 
@@ -2858,17 +2859,17 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
 
         # LRA3 interleaved with GRB (2nd half)
         startLRA3 = halfMFMA
-        lra3 = [create_range(min_val = startLRA3, num = numLrReadA // 2, step = 2, repeat = 2),
-                create_range(min_val = startLRA3+1, num = numLrReadA // 2, step = 2, repeat = 2)]
-        grB[0] += create_range(min_val = startLRA3+1,num = 3,step = 2, repeat = 2)
-        grB[1] += create_range(min_val = startLRA3,num = 3,step = 2, repeat = 2)
+        lra3 = [create_range(min_val = startLRA3+1, num = numLrReadA // 2, step = 2, repeat = 2),
+                create_range(min_val = startLRA3, num = numLrReadA // 2, step = 2, repeat = 2)]
+        grB[0] += create_range(min_val = startLRA3,num = 3,step = 2, repeat = 2)
+        grB[1] += create_range(min_val = startLRA3+1,num = 3,step = 2, repeat = 2)
         # waitLRA3 = max(lra3[1])+6  
     
         # LRB3 + PACKA3 & PACKB3
         startLRB3 = (3*numMfma)//4 - 4 # Starts 4 indexes before 3/4 MFMAs to accommodate LRB3 latency
         lrb3 = create_range(min_val = startLRB3,num=numLrReadB - 2,step=1,repeat=1)
-        grA = [create_range(min_val = min(lrb3)+1, num = 8, step = 1,repeat = 1),
-               create_range(min_val = min(lrb3)+3, num = 8, step = 1,repeat = 1)]
+        grA = [create_range(min_val = max(lra3[0])+1, num = 8, step = 1,repeat = 1),
+               create_range(min_val = max(lra3[1])+1, num = 8, step = 1,repeat = 1)]
         lrb3 += create_range(min_val = max(lrb3)+3,num=2,step=1,repeat=1)
         
         waitLRB3 = max(lrb3) + 9 
