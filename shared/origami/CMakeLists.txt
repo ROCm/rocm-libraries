@@ -21,16 +21,10 @@ include(dependencies)
 rocm_setup_version(VERSION ${PROJECT_VERSION})
 
 option(ORIGAMI_BUILD_SHARED_LIBS "Build shared libraries." ${ORIGAMI_STANDALONE})
-option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
-option(ORIGAMI_BUILD_TESTING "Enable Python binding tests." OFF)
 option(ORIGAMI_ENABLE_INSTALL "Configure origami installation" ON)
 option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
 
 find_package(hip REQUIRED)
-
-if(ORIGAMI_ENABLE_PYTHON)
-    find_package(Python3 COMPONENTS Interpreter Development)
-endif()
 
 if(ORIGAMI_BUILD_SHARED_LIBS OR (BUILD_SHARED_LIBS AND ORIGAMI_STANDALONE))
     add_library(origami SHARED)
@@ -83,27 +77,7 @@ endif()
 
 if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     enable_testing()
-
     add_subdirectory(tests)
-
-    if(ORIGAMI_ENABLE_PYTHON)
-        find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
-
-        # Run pytest tests
-        add_test(
-            NAME "Python: test_bindings"
-            COMMAND ${Python3_EXECUTABLE} -m pytest tests/ -v
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/python
-        )
-
-        set_tests_properties(
-            "Python: test_bindings"
-            PROPERTIES
-                ENVIRONMENT
-                "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python:${CMAKE_CURRENT_SOURCE_DIR}/python:$ENV{PYTHONPATH}"
-                DEPENDS _pyorigami
-        )
-    endif()
 endif()
 
 if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
