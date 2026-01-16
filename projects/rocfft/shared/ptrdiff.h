@@ -34,11 +34,15 @@ static size_t compute_ptrdiff(const std::vector<intT1>& length, const std::vecto
     // Strides and lengths must have the same dimension:
     if(length.size() != stride.size())
         return 0;
-    // Negative strides and/or lengths are not allowed:
-    if(std::any_of(stride.begin(), stride.end(), [](const intT1& s) { return s < 0; }))
-        return 0;
+    // Negative lengths are not allowed:
     if(std::any_of(length.begin(), length.end(), [](const intT1& l) { return l < 0; }))
         return 0;
+    // Strides associated with non-unit lengths must be strictly positive:
+    for(size_t idx = 0; idx < stride.size(); ++idx)
+    {
+        if(length[idx] > 0 && stride[idx] < 1)
+            return 0;
+    }
 
     // 1 + sum_i [ ( length_i - 1 ) * stride_i
     // = 1 + dot(length, stride) - sum(stride)
