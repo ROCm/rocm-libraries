@@ -493,7 +493,7 @@ rocblas_trsv_device(rocblas_int    n,
                     rocblas_stride offset_x,
                     int64_t        incx,
                     rocblas_stride stride_x,
-                    rocblas_int* volatile w_completed_sec,
+                    rocblas_int volatile* w_completed_sec,
                     rocblas_int batch_count)
 {
     // If we need to start at the bottom and work upwards (backwards substitution)
@@ -649,7 +649,6 @@ rocblas_trsv_device(rocblas_int    n,
         }
 
         // Once previously solved block is ready, apply this to other square blocks
-        rocblas_int       col_done = -1;
         const rocblas_int iters    = backwards_sub ? num_blocks - 1 - block_row : block_row;
         for(rocblas_int block_iter = 0; block_iter < iters; block_iter++)
         {
