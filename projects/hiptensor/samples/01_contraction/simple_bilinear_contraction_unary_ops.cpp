@@ -55,13 +55,6 @@ void bilinearContractionSampleUnaryOps(void* alpha, void* beta,
 
     std::unordered_map<int, int64_t> extent;
 
-    extent['m'] = 4;
-    extent['n'] = 3;
-    extent['u'] = 4;
-    extent['v'] = 3;
-    extent['h'] = 6;
-    extent['k'] = 5;
-
     extent['m'] = 256;
     extent['n'] = 20;
     extent['u'] = 128;
@@ -387,60 +380,57 @@ int main()
     f16TypeCompute    betaF16{1.0f};
     doubleTypeCompute betaDouble{1.0};
 
+    hiptensorOperator_t opA = HIPTENSOR_OP_SQRT;
+    hiptensorOperator_t opB = HIPTENSOR_OP_LOG;
+    hiptensorOperator_t opC = HIPTENSOR_OP_SIN;
+
     // Example 1: BF16 input tensors and F32 compute type
     std::cout << "Running bilinear contraction sample with unary ops, BF16 input tensors and F32 compute type ..." << std::endl;
     bilinearContractionSampleUnaryOps<DataType_BF16, DataType_BF16, DataType_BF16,
                                       typeInput_16BF, typeInput_16BF, typeInput_16BF,
-                                      typeCompute_32F>(
-        &alphaFloat, &betaFloat, HIPTENSOR_OP_SQRT, HIPTENSOR_OP_LOG, HIPTENSOR_OP_SIN);
+                                      typeCompute_32F>(&alphaFloat, &betaFloat, opA, opB, opC);
     std::cout << std::endl;
 
     // Example 2: F16 input tensors and F32 compute type
     std::cout << "Running bilinear contraction sample with unary ops, F16 input tensors and F32 compute type ..." << std::endl;
     bilinearContractionSampleUnaryOps<DataType_F16, DataType_F16, DataType_F16,
                                       typeInput_16F, typeInput_16F, typeInput_16F,
-                                      typeCompute_32F>(
-        &alphaFloat, &betaFloat, HIPTENSOR_OP_SQRT, HIPTENSOR_OP_LOG, HIPTENSOR_OP_SIN);
+                                      typeCompute_32F>(&alphaFloat, &betaFloat, opA, opB, opC);
     std::cout << std::endl;
 
     // Example 3: F32 input tensors and BF16 compute type
     std::cout << "Running bilinear contraction sample with unary ops, F32 input tensors and BF16 compute type ..." << std::endl;
     bilinearContractionSampleUnaryOps<DataType_F32, DataType_F32, DataType_F32,
                                       typeInput_32F, typeInput_32F, typeInput_32F,
-                                      typeCompute_16BF>(
-        &alphaBF16, &betaBF16, HIPTENSOR_OP_SQRT, HIPTENSOR_OP_LOG, HIPTENSOR_OP_SIN);
+                                      typeCompute_16BF>(&alphaBF16, &betaBF16, opA, opB, opC);
     std::cout << std::endl;
 
     // Example 4: F32 input tensors and F16 compute type
     std::cout << "Running bilinear contraction sample with unary ops, F32 input tensors and F16 compute type ..." << std::endl;
     bilinearContractionSampleUnaryOps<DataType_F32, DataType_F32, DataType_F32,
                                       typeInput_32F, typeInput_32F, typeInput_32F,
-                                      typeCompute_16F>(
-        &alphaF16, &betaF16, HIPTENSOR_OP_SQRT, HIPTENSOR_OP_LOG, HIPTENSOR_OP_SIN);
+                                      typeCompute_16F>(&alphaF16, &betaF16, opA, opB, opC);
     std::cout << std::endl;
 
-    // Example 3: F32 input tensors and F32 compute type
+    // Example 5: F32 input tensors and F32 compute type
     std::cout << "Running bilinear contraction sample with unary ops, F32 input tensors and F32 compute type ..." << std::endl;
     bilinearContractionSampleUnaryOps<DataType_F32, DataType_F32, DataType_F32,
                                       typeInput_32F, typeInput_32F, typeInput_32F,
-                                      typeCompute_32F>(
-        &alphaFloat, &betaFloat, HIPTENSOR_OP_SQRT, HIPTENSOR_OP_LOG, HIPTENSOR_OP_SIN);
+                                      typeCompute_32F>(&alphaFloat, &betaFloat, opA, opB, opC);
     std::cout << std::endl;
 
-    // Example 4: F64 input tensors and F32 compute type
+    // Example 6: F64 input tensors and F32 compute type
     std::cout << "Running bilinear contraction sample with unary ops, F64 input tensors and F32 compute type ..." << std::endl;
     bilinearContractionSampleUnaryOps<DataType_F64, DataType_F64, DataType_F64,
                                       typeInput_64F, typeInput_64F, typeInput_64F,
-                                      typeCompute_32F>(
-        &alphaFloat, &betaFloat, HIPTENSOR_OP_SQRT, HIPTENSOR_OP_LOG, HIPTENSOR_OP_SIN);    
+                                      typeCompute_32F>(&alphaFloat, &betaFloat, opA, opB, opC);
     std::cout << std::endl; 
 
-    // Example 4: F64 input tensors and F64 compute type
+    // Example 7: F64 input tensors and F64 compute type
     std::cout << "Running bilinear contraction sample with unary ops, F64 input tensors and F64 compute type ..." << std::endl;
     bilinearContractionSampleUnaryOps<DataType_F64, DataType_F64, DataType_F64,
                                       typeInput_64F, typeInput_64F, typeInput_64F,
-                                      typeCompute_64F>(
-        &alphaDouble, &betaDouble, HIPTENSOR_OP_SQRT, HIPTENSOR_OP_LOG, HIPTENSOR_OP_SIN);
+                                      typeCompute_64F>(&alphaDouble, &betaDouble, opA, opB, opC);
     std::cout << std::endl; 
     
     std::cout << "Finished!" << std::endl;

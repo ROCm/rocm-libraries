@@ -286,6 +286,15 @@ __host__ static inline void fillLaunchKernel(DataType* data, uint32_t elementSiz
     hipLaunchKernelGGL((fillKernel<DataType>), gridDim, blockDim, 0, 0, data, elementSize, seed);
 }
 
+// fill kernel for 'elementSize' elements with positive values
+template <typename DataType>
+__host__ static inline void fillPositiveValLaunchKernel(DataType* data, uint32_t elementSize, uint32_t seed)
+{
+    auto blockDim = dim3(1024, 1, 1);
+    auto gridDim  = dim3(ceilDiv(elementSize, blockDim.x), 1, 1);
+    hipLaunchKernelGGL((fillPositiveValKernel<DataType>), gridDim, blockDim, 0, 0, data, elementSize, seed);
+}
+
 // fill kernel wrapper for 'elementSize' elements with a specific value
 template <typename DataType>
 __host__ static inline void

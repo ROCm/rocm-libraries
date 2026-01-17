@@ -43,7 +43,7 @@ namespace hiptensor
         using DataTypesT = std::vector<hiptensorDataType_t>;
 
         using AlgorithmT    = hiptensorAlgo_t;
-        using OperatorT     = hiptensorOperator_t;
+        using OperatorT     = std::vector<hiptensorOperator_t>;
         using WorkSizePrefT = hiptensorWorksizePreference_t;
         using LogLevelT     = hiptensorLogLevel_t;
         using MemoryLayoutT = hiptensorMemoryLayout_t;

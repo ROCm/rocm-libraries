@@ -38,6 +38,10 @@ namespace hiptensor
     /*static*/ bool              ContractionTest::mHeaderPrinted = false;
     /*static*/ std::stringstream ContractionTest::sAPILogBuff    = std::stringstream();
 
+    template <typename DataType>
+    using FillLaunchKernelFn = void (*)(DataType* data, uint32_t elementSize, uint32_t seed);
+
+
     static void logMessage(int32_t logLevel, const char* funcName /*=""*/, const char* msg /*=""*/)
     {
         ContractionTest::sAPILogBuff << msg;
@@ -146,7 +150,7 @@ namespace hiptensor
         auto param        = Base::GetParam();
         auto testType     = std::get<0>(param);
         auto algorithm    = std::get<1>(param);
-        auto operatorType = std::get<2>(param);
+        auto operators    = std::get<2>(param);
         auto workSizePref = std::get<3>(param);
         auto logLevel     = std::get<4>(param);
         auto lengths      = std::get<5>(param);
@@ -166,7 +170,7 @@ namespace hiptensor
             << hipTypeToString(testType[3]) << ", "                           // 4
             << computeTypeToString(convertToComputeType(testType[4])) << ", " // 5
             << algoTypeToString(algorithm)  << ", "                           // 6
-            << opTypeToString(operatorType) << ", "                           // 7
+            << "[ " << opTypeToString(operators[0]) << " " << opTypeToString(operators[1]) << " " << opTypeToString(operators[2]) << "], "     // 7
             << workSizePrefToString(workSizePref) << ", "                     // 8
             << logLevelToString(logLevel) << ", ";                            // 9
         printVectorInCsv(lengths, stream) << ", ";                            // 10
@@ -217,7 +221,7 @@ namespace hiptensor
         auto param        = Base::GetParam();
         auto dataTypes    = std::get<0>(param);
         auto algorithm    = std::get<1>(param);
-        auto operatorType = std::get<2>(param);
+        auto operators    = std::get<2>(param);
         auto workSizePref = std::get<3>(param);
         auto logLevel     = std::get<4>(param);
         auto lengths      = std::get<5>(param);
@@ -399,16 +403,38 @@ namespace hiptensor
 
             uint32_t seed = static_cast<uint32_t>(256);
 
+            FillLaunchKernelFn<_Float16> fillFuncF16;
+            FillLaunchKernelFn<hip_bfloat16> fillFuncBF16;
+            FillLaunchKernelFn<float> fillFuncF32;
+            FillLaunchKernelFn<double> fillFuncF64;
+
+            if(operators[0] != HIPTENSOR_OP_IDENTITY || operators[1] != HIPTENSOR_OP_IDENTITY || operators[2] != HIPTENSOR_OP_IDENTITY)
+            {
+                // If all operators are identity, we can initialize tensors with signaling NaN to easily identify if any uninitialized values are used in computation
+                fillFuncF16 = fillPositiveValLaunchKernel<_Float16>;
+                fillFuncBF16 = fillPositiveValLaunchKernel<hip_bfloat16>;
+                fillFuncF32 = fillPositiveValLaunchKernel<float>;
+                fillFuncF64 = fillPositiveValLaunchKernel<double>;
+            }
+            else
+            {
+                // If any of the operators is not identity, we need to initialize tensors with positive values
+                fillFuncF16 = fillLaunchKernel<_Float16>;
+                fillFuncBF16 = fillLaunchKernel<hip_bfloat16>;
+                fillFuncF32 = fillLaunchKernel<float>;
+                fillFuncF64 = fillLaunchKernel<double>;
+            }     
+
             if(ADataType == HIPTENSOR_R_16F && BDataType == HIPTENSOR_R_16F
                && DDataType == HIPTENSOR_R_16F)
             {
                 // Initialize matrix data on device
-                fillLaunchKernel<_Float16>(
+                fillFuncF16(
                     (_Float16*)resource->deviceA().get(), elementsA, seed - 1);
-                fillLaunchKernel<_Float16>((_Float16*)resource->deviceB().get(), elementsB, seed);
+                fillFuncF16((_Float16*)resource->deviceB().get(), elementsB, seed);
                 if(CDataType == HIPTENSOR_R_16F)
                 {
-                    fillLaunchKernel<_Float16>(
+                    fillFuncF16(
                         (_Float16*)resource->deviceC().get(), elementsCD, seed + 1);
                 }
                 fillValLaunchKernel<_Float16>((_Float16*)resource->deviceD().get(),
@@ -419,13 +445,13 @@ namespace hiptensor
                     && DDataType == HIPTENSOR_R_16BF)
             {
                 // Initialize matrix data on device
-                fillLaunchKernel<hip_bfloat16>(
+                fillFuncBF16(
                     (hip_bfloat16*)resource->deviceA().get(), elementsA, seed - 1);
-                fillLaunchKernel<hip_bfloat16>(
+                fillFuncBF16(
                     (hip_bfloat16*)resource->deviceB().get(), elementsB, seed);
                 if(CDataType == HIPTENSOR_R_16BF)
                 {
-                    fillLaunchKernel<hip_bfloat16>(
+                    fillFuncBF16(
                         (hip_bfloat16*)resource->deviceC().get(), elementsCD, seed + 1);
                 }
                 fillValLaunchKernel<hip_bfloat16>(
@@ -437,11 +463,11 @@ namespace hiptensor
                     && DDataType == HIPTENSOR_R_32F)
             {
                 // Initialize matrix data on device
-                fillLaunchKernel<float>((float*)resource->deviceA().get(), elementsA, seed - 1);
-                fillLaunchKernel<float>((float*)resource->deviceB().get(), elementsB, seed);
+                fillFuncF32((float*)resource->deviceA().get(), elementsA, seed - 1);
+                fillFuncF32((float*)resource->deviceB().get(), elementsB, seed);
                 if(CDataType == HIPTENSOR_R_32F)
                 {
-                    fillLaunchKernel<float>(
+                    fillFuncF32(
                         (float*)resource->deviceC().get(), elementsCD, seed + 1);
                 }
                 fillValLaunchKernel<float>((float*)resource->deviceD().get(),
@@ -452,11 +478,11 @@ namespace hiptensor
                     && DDataType == HIPTENSOR_R_64F)
             {
                 // Initialize matrix data on device
-                fillLaunchKernel<double>((double*)resource->deviceA().get(), elementsA, seed - 1);
-                fillLaunchKernel<double>((double*)resource->deviceB().get(), elementsB, seed);
+                fillFuncF64((double*)resource->deviceA().get(), elementsA, seed - 1);
+                fillFuncF64((double*)resource->deviceB().get(), elementsB, seed);
                 if(CDataType == HIPTENSOR_R_64F)
                 {
-                    fillLaunchKernel<double>(
+                    fillFuncF64(
                         (double*)resource->deviceC().get(), elementsCD, seed + 1);
                 }
                 fillValLaunchKernel<double>((double*)resource->deviceD().get(),
@@ -507,13 +533,13 @@ namespace hiptensor
                 &desc,
                 a_ms_ks,
                 a_ms_ks_modes.data(),
-                HIPTENSOR_OP_IDENTITY,
+                operators[0],
                 b_ns_ks,
                 b_ns_ks_modes.data(),
-                HIPTENSOR_OP_IDENTITY,
+                operators[1],
                 (CDataType != NONE_TYPE) ? c_ms_ns : nullptr,
                 (CDataType != NONE_TYPE) ? cd_ms_ns_modes.data() : nullptr,
-                HIPTENSOR_OP_IDENTITY,
+                operators[2],
                 d_ms_ns,
                 cd_ms_ns_modes.data(),
                 computeType));
@@ -758,7 +784,7 @@ namespace hiptensor
         auto param        = Base::GetParam();
         auto dataTypes    = std::get<0>(param);
         auto algorithm    = std::get<1>(param);
-        auto operatorType = std::get<2>(param);
+        auto operators    = std::get<2>(param);
         auto workSizePref = std::get<3>(param);
         auto logLevel     = std::get<4>(param);
         auto lengths      = std::get<5>(param);

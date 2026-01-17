@@ -61,6 +61,20 @@ hiptensorStatus_t hiptensorContractionReference(const hiptensorPlan_t       plan
               typeA, typeB, hiptensor::NONE_TYPE, typeD, computeType)
                          : instances->allSolutions().query(typeA, typeB, typeC, typeD, computeType);
 
+    bool hasUnaryOp = false;
+    for(const auto& op : operators)
+    {
+        if(op != HIPTENSOR_OP_IDENTITY)
+        {
+            hasUnaryOp = true;
+            break;
+        }
+    }   
+    if(hasUnaryOp) 
+        candidates = candidates.query(HIPTENSOR_OP_UNKNOWN, HIPTENSOR_OP_UNKNOWN);
+    else
+        candidates = candidates.query(HIPTENSOR_OP_IDENTITY, HIPTENSOR_OP_IDENTITY);
+
     auto toCKVec
         = [](auto& inputVec) { return std::vector<ck::index_t>(inputVec.begin(), inputVec.end()); };
 

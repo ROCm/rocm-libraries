@@ -213,13 +213,11 @@ namespace ck
 
                 __host__ __device__ void operator()(double& y, const double& x) const
                 {
-                    //double_ops[op_type](y, x);
                     switch_op(y, x);
                 }
 
                 __host__ __device__ void operator()(float& y, const float& x) const
                 {
-                    //float_ops[op_type](y, x);
                     switch_op(y, x);
                 }
 
@@ -227,115 +225,20 @@ namespace ck
                 {
                     float tempX = static_cast<float>(x);
                     float tempY;
-                    //float_ops[op_type](tempY, tempX);
                     switch_op(tempY, tempX);
                     y = static_cast<float>(tempY);
                 }
 
                 __host__ __device__ void operator()(bhalf_t& y, const bhalf_t& x) const
                 {
-                    //float tempX = ck::type_convert<float, bhalf_t>(x);
-                    float tempX = static_cast<float>(x);
-                    
+                    float tempX = ck::type_convert<float, bhalf_t>(x);
                     float tempY;
-                    //float_ops[op_type](tempY, tempX);
                     switch_op(tempY, tempX);
                     y = type_convert<bhalf_t, float>(tempY);  
                 }
 
             public:
                 hiptensorOperator_t               op_type     = HIPTENSOR_OP_IDENTITY;
-                static constexpr FloatFunctionPtr float_ops[] = {
-                    hiptensor_identity<float>, // placeholder 0
-                    hiptensor_identity<
-                        float>, //HIPTENSOR_OP_IDENTITY = 1, ///< Identity operator (i.e., elements are not changed)
-                    hiptensor_sqrt<float>, //HIPTENSOR_OP_SQRT     = 2, ///< Square root
-                    hiptensor_identity<float>, // placeholder 3
-                    hiptensor_identity<float>, // placeholder 4
-                    hiptensor_identity<float>, // placeholder 5
-                    hiptensor_identity<float>, // placeholder 6
-                    hiptensor_identity<float>, // placeholder 7
-                    hiptensor_relu<float>, //HIPTENSOR_OP_RELU     = 8, ///< Rectified linear unit
-                    hiptensor_conj<float>, //HIPTENSOR_OP_CONJ     = 9, ///< Complex conjugate
-                    hiptensor_rcp<float>, //HIPTENSOR_OP_RCP      = 10, ///< Reciprocal
-                    hiptensor_sigmoid<float>, //HIPTENSOR_OP_SIGMOID  = 11, ///< y=1/(1+exp(-x))
-                    hiptensor_tanh<float>, //HIPTENSOR_OP_TANH     = 12, ///< y=tanh(x)
-                    hiptensor_identity<float>, // placeholder 13
-                    hiptensor_identity<float>, // placeholder 14
-                    hiptensor_identity<float>, // placeholder 15
-                    hiptensor_identity<float>, // placeholder 16
-                    hiptensor_identity<float>, // placeholder 17
-                    hiptensor_identity<float>, // placeholder 18
-                    hiptensor_identity<float>, // placeholder 19
-                    hiptensor_identity<float>, // placeholder 20
-                    hiptensor_identity<float>, // placeholder 21
-                    hiptensor_exp<float>, //HIPTENSOR_OP_EXP      = 22, ///< Exponentiation.
-                    hiptensor_log<float>, //HIPTENSOR_OP_LOG      = 23, ///< Log (base e).
-                    hiptensor_abs<float>, //HIPTENSOR_OP_ABS      = 24, ///< Absolute value.
-                    hiptensor_neg<float>, //HIPTENSOR_OP_NEG      = 25, ///< Negation.
-                    hiptensor_sin<float>, //HIPTENSOR_OP_SIN      = 26, ///< Sine.
-                    hiptensor_cos<float>, //HIPTENSOR_OP_COS      = 27, ///< Cosine.
-                    hiptensor_tan<float>, //HIPTENSOR_OP_TAN      = 28, ///< Tangent.
-                    hiptensor_sinh<float>, //HIPTENSOR_OP_SINH     = 29, ///< Hyperbolic sine.
-                    hiptensor_cosh<float>, //HIPTENSOR_OP_COSH     = 30, ///< Hyperbolic cosine.
-                    hiptensor_asin<float>, //HIPTENSOR_OP_ASIN     = 31, ///< Inverse sine.
-                    hiptensor_acos<float>, //HIPTENSOR_OP_ACOS     = 32, ///< Inverse cosine.
-                    hiptensor_atan<float>, //HIPTENSOR_OP_ATAN     = 33, ///< Inverse tangent.
-                    hiptensor_asinh<
-                        float>, //HIPTENSOR_OP_ASINH    = 34, ///< Inverse hyperbolic sine.
-                    hiptensor_acosh<
-                        float>, //HIPTENSOR_OP_ACOSH    = 35, ///< Inverse hyperbolic cosine.
-                    hiptensor_atanh<
-                        float>, //HIPTENSOR_OP_ATANH    = 36, ///< Inverse hyperbolic tangent.
-                    hiptensor_ceil<float>, //HIPTENSOR_OP_CEIL     = 37, ///< Ceiling.
-                    hiptensor_floor<float>, //HIPTENSOR_OP_FLOOR    = 38, ///< Floor.
-                };
-
-                static constexpr DoubleFunctionPtr double_ops[] = {
-                    hiptensor_identity<double>, // placeholder 0
-                    hiptensor_identity<
-                        double>, //HIPTENSOR_OP_IDENTITY = 1, ///< Identity operator (i.e., elements are not changed)
-                    hiptensor_sqrt<double>, //HIPTENSOR_OP_SQRT     = 2, ///< Square root
-                    hiptensor_identity<double>, // placeholder 3
-                    hiptensor_identity<double>, // placeholder 4
-                    hiptensor_identity<double>, // placeholder 5
-                    hiptensor_identity<double>, // placeholder 6
-                    hiptensor_identity<double>, // placeholder 7
-                    hiptensor_relu<double>, //HIPTENSOR_OP_RELU     = 8, ///< Rectified linear unit
-                    hiptensor_conj<double>, //HIPTENSOR_OP_CONJ     = 9, ///< Complex conjugate
-                    hiptensor_rcp<double>, //HIPTENSOR_OP_RCP      = 10, ///< Reciprocal
-                    hiptensor_sigmoid<double>, //HIPTENSOR_OP_SIGMOID  = 11, ///< y=1/(1+exp(-x))
-                    hiptensor_tanh<double>, //HIPTENSOR_OP_TANH     = 12, ///< y=tanh(x)
-                    hiptensor_identity<double>, // placeholder 13
-                    hiptensor_identity<double>, // placeholder 14
-                    hiptensor_identity<double>, // placeholder 15
-                    hiptensor_identity<double>, // placeholder 16
-                    hiptensor_identity<double>, // placeholder 17
-                    hiptensor_identity<double>, // placeholder 18
-                    hiptensor_identity<double>, // placeholder 19
-                    hiptensor_identity<double>, // placeholder 20
-                    hiptensor_identity<double>, // placeholder 21
-                    hiptensor_exp<double>, //HIPTENSOR_OP_EXP      = 22, ///< Exponentiation.
-                    hiptensor_log<double>, //HIPTENSOR_OP_LOG      = 23, ///< Log (base e).
-                    hiptensor_abs<double>, //HIPTENSOR_OP_ABS      = 24, ///< Absolute value.
-                    hiptensor_neg<double>, //HIPTENSOR_OP_NEG      = 25, ///< Negation.
-                    hiptensor_sin<double>, //HIPTENSOR_OP_SIN      = 26, ///< Sine.
-                    hiptensor_cos<double>, //HIPTENSOR_OP_COS      = 27, ///< Cosine.
-                    hiptensor_tan<double>, //HIPTENSOR_OP_TAN      = 28, ///< Tangent.
-                    hiptensor_sinh<double>, //HIPTENSOR_OP_SINH     = 29, ///< Hyperbolic sine.
-                    hiptensor_cosh<double>, //HIPTENSOR_OP_COSH     = 30, ///< Hyperbolic cosine.
-                    hiptensor_asin<double>, //HIPTENSOR_OP_ASIN     = 31, ///< Inverse sine.
-                    hiptensor_acos<double>, //HIPTENSOR_OP_ACOS     = 32, ///< Inverse cosine.
-                    hiptensor_atan<double>, //HIPTENSOR_OP_ATAN     = 33, ///< Inverse tangent.
-                    hiptensor_asinh<
-                        double>, //HIPTENSOR_OP_ASINH    = 34, ///< Inverse hyperbolic sine.
-                    hiptensor_acosh<
-                        double>, //HIPTENSOR_OP_ACOSH    = 35, ///< Inverse hyperbolic cosine.
-                    hiptensor_atanh<
-                        double>, //HIPTENSOR_OP_ATANH    = 36, ///< Inverse hyperbolic tangent.
-                    hiptensor_ceil<double>, //HIPTENSOR_OP_CEIL     = 37, ///< Ceiling.
-                    hiptensor_floor<double>, //HIPTENSOR_OP_FLOOR    = 38, ///< Floor.
-                };
             };
 
             struct HiptensorBinaryOp
@@ -430,7 +333,7 @@ namespace ck
                     : bilinear_op_(bilinear_op), unary_op_(unary_op) {}
 
                 template <typename Y, typename X0, typename X1>
-                __host__ __device__ __noinline__ void operator()(Y& y, const X0& x0, const X1& x1) const
+                __host__ __device__ void operator()(Y& y, const X0& x0, const X1& x1) const
                 {
                     X1 x1_tmp;
                     unary_op_(x1_tmp, x1);

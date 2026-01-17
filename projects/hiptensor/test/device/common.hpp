@@ -108,6 +108,20 @@ __global__ void fillKernel(DataType* data, uint32_t elementSize, uint32_t seed)
     }
 }
 
+// fill kernel wrapper for 'elementSize' elements with positive random values in range (0, range)
+template <typename DataType>
+__global__ void fillPositiveValKernel(DataType* data, uint32_t elementSize, uint32_t seed)
+{
+    uint32_t index = (blockIdx.x * blockDim.x + threadIdx.x);
+    uint32_t seededIndex = static_cast<uint32_t>(uint64_t(index + seed) % UINT_MAX);
+
+    if(index < elementSize)
+    {
+        auto value  = gen_random_float(seededIndex) + static_cast<float>(1.0001f);
+        data[index] = static_cast<DataType>(value);   
+    }
+}
+
 // fill kernel wrapper for 'elementSize' elements with a specific value
 template <typename DataType>
 __global__ void fillValKernel(DataType* data, uint32_t elementSize, DataType value)

@@ -339,22 +339,47 @@ namespace hiptensor
                 normal_e_ms_ns_strides = applyCKColMajorStridesOptimizationForContraction(normal_e_ms_ns_lengths);
 
             // Initialize the argument pointer
-            Base::mInvokerArgPtr
-                = std::move(deviceOp->MakeArgumentPointer(A,
-                                                          B,
-                                                          std::array<const void*, 0>{},
-                                                          E,
-                                                          toCKVec(normal_a_ms_ks_lengths),
-                                                          toCKVec(normal_a_ms_ks_strides),
-                                                          toCKVec(normal_b_ns_ks_lengths),
-                                                          toCKVec(normal_b_ns_ks_strides),
-                                                          std::array<std::vector<ck::index_t>, 0>{},
-                                                          std::array<std::vector<ck::index_t>, 0>{},
-                                                          toCKVec(normal_e_ms_ns_lengths),
-                                                          toCKVec(normal_e_ms_ns_strides),
-                                                          typename Traits::AOp{},
-                                                          typename Traits::BOp{},
-                                                          typename Traits::CDEOp(alphaF)));
+            if constexpr(std::is_same_v<typename Traits::AOp,
+                         ck::tensor_operation::element_wise::PassThrough> &&
+                         std::is_same_v<typename Traits::BOp,
+                         ck::tensor_operation::element_wise::PassThrough>)
+            {
+                Base::mInvokerArgPtr
+                    = std::move(deviceOp->MakeArgumentPointer(A,
+                                                              B,
+                                                              std::array<const void*, 0>{},
+                                                              E,
+                                                              toCKVec(normal_a_ms_ks_lengths),
+                                                              toCKVec(normal_a_ms_ks_strides),
+                                                              toCKVec(normal_b_ns_ks_lengths),
+                                                              toCKVec(normal_b_ns_ks_strides),
+                                                              std::array<std::vector<ck::index_t>, 0>{},
+                                                              std::array<std::vector<ck::index_t>, 0>{},
+                                                              toCKVec(normal_e_ms_ns_lengths),
+                                                              toCKVec(normal_e_ms_ns_strides),
+                                                              typename Traits::AOp{},
+                                                              typename Traits::BOp{},
+                                                              typename Traits::CDEOp(alphaF)));
+            }
+            else
+            {
+                Base::mInvokerArgPtr
+                    = std::move(deviceOp->MakeArgumentPointer(A,
+                                                              B,
+                                                              std::array<const void*, 0>{},
+                                                              E,
+                                                              toCKVec(normal_a_ms_ks_lengths),
+                                                              toCKVec(normal_a_ms_ks_strides),
+                                                              toCKVec(normal_b_ns_ks_lengths),
+                                                              toCKVec(normal_b_ns_ks_strides),
+                                                              std::array<std::vector<ck::index_t>, 0>{},
+                                                              std::array<std::vector<ck::index_t>, 0>{},
+                                                              toCKVec(normal_e_ms_ns_lengths),
+                                                              toCKVec(normal_e_ms_ns_strides),
+                                                              typename Traits::AOp{operators[0]},
+                                                              typename Traits::BOp{operators[1]},
+                                                              typename Traits::CDEOp(alphaF)));
+            }
 
             // Attach the workspace pointer
             deviceOp->SetWorkSpacePointer(Base::mInvokerArgPtr.get(), workspacePtr);
