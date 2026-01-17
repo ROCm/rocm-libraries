@@ -1003,38 +1003,22 @@ public:
     // Create execution plan with int64 knobs (compatibility method)
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error create_execution_plan(int64_t engineId,
-                                const std::unordered_map<KnobType_t, int64_t>& knobs)
+                                const std::unordered_map<KnobType_t, int64_t>& settings)
     {
-        std::unordered_map<int64_t, Knob> existingKnobs;
-        Error status = get_knob_lookup_for_engine(engineId, existingKnobs);
+        std::vector<KnobSetting> knobSettings;
 
-        std::unordered_map<int64_t, Knob> sentKnobs;
-        for(const auto& [knobId, knobValue] : knobs)
+        knobSettings.reserve(settings.size());
+        for(const auto& [knobId, knobValue] : settings)
         {
-            auto found = existingKnobs.find(knobId);
-            if(found == existingKnobs.end())
-            {
-                return {ErrorCode::INVALID_VALUE,
-                        fmt::format("Knob {} does not exist for engine id {}.", knobId, engineId)};
-            }
-
-            if(found->second.getValueType() != KnobValueType::INT64)
-            {
-                return {ErrorCode::INVALID_VALUE,
-                        "create_execution_plan only supports INT64 knob types.  Use "
-                        "create_execution_plan_ext for other knob types."};
-            }
-
-            sentKnobs.try_emplace(knobId, std::move(found->second));
-            sentKnobs.at(knobId).setChoice(knobValue);
+            knobSettings.emplace_back(knobId, knobValue);
         }
 
-        return create_execution_plan_ext(engineId, sentKnobs);
+        return create_execution_plan_ext(engineId, knobSettings);
     }
 
     // Create execution plan with typed knob settings
     // NOLINTNEXTLINE(readability-identifier-naming)
-    Error create_execution_plan_ext(int64_t engineId, std::unordered_map<int64_t, Knob>& userKnobs)
+    Error create_execution_plan_ext(int64_t engineId, std::vector<KnobSetting>& settings)
     {
 
         HIPDNN_FE_LOG_INFO("Creating execution plans for graph {}", graph_attributes.get_name());
@@ -1048,57 +1032,68 @@ public:
 
         std::unordered_map<int64_t, Knob> existingKnobs;
         Error status = get_knob_lookup_for_engine(engineId, existingKnobs);
+        HIPDNN_CHECK_ERROR(status);
 
         status = initializeEngineConfig(engineId);
         HIPDNN_CHECK_ERROR(status);
 
-        std::vector<Knob> userChoiceKnobs;
-        for(auto& [knobId, knob] : userKnobs)
+        std::vector<KnobSetting> validatedSettings;
+        for(auto& setting : settings)
         {
-            if(existingKnobs.count(knobId) == 0)
+            auto knobIt = existingKnobs.find(setting.getKnobId());
+            if(knobIt == existingKnobs.end())
             {
                 HIPDNN_FE_LOG_WARN("Ignoring knob {} when creating execution plan for graph {}.  "
                                    "Engine doesn't support chosen knob.",
-                                   knob.getKnobIdStr(),
+                                   setting.getKnobId(),
                                    graph_attributes.get_name());
                 continue;
             }
 
-            if(!knob.hasChoice())
-            {
-                HIPDNN_FE_LOG_WARN("Ignoring knob {} when creating execution plan for graph {}.  "
-                                   "Knob contains no choices.",
-                                   knob.getKnobIdStr(),
-                                   graph_attributes.get_name());
-                continue;
-            }
+            const auto& knob = knobIt->second;
 
             if(knob.isDeprecated())
             {
                 HIPDNN_FE_LOG_WARN("Knob {} has been marked as deprecated.", knob.getKnobIdStr());
             }
 
-            status = knob.validate();
+            status = knob.validate(setting);
             HIPDNN_CHECK_ERROR(status);
 
-            userChoiceKnobs.emplace_back(std::move(knob));
+            validatedSettings.emplace_back(std::move(setting));
         }
 
-        // TODO - ALMIOPEN-844 - pack userChoiceKnobs to flatbuffer, and set them on the engineConfigDesc
-
-        // 1. Use Knob::packKnob to pack into a flatbuffer.
-
-        // 2. Attach it to a vector of hipdnnBackendFlatbufferData_t
-
-        // 3. Set the vector on the engineConfigDesc with name 'HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT' and type 'HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT'
-
-        _executionPlanDesc = std::make_unique<ScopedHipdnnBackendDescriptor>(
-            HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
-
-        if(!_executionPlanDesc->valid())
+        if(!validatedSettings.empty())
         {
-            return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                    "Failed to create backend execution descriptor."};
+            std::vector<flatbuffers::DetachedBuffer> knobBuffers;
+            knobBuffers.reserve(validatedSettings.size());
+
+            for(const auto& setting : validatedSettings)
+            {
+                flatbuffers::FlatBufferBuilder builder;
+                auto knobSettingOffset = setting.packKnobSetting(builder);
+                builder.Finish(knobSettingOffset);
+                knobBuffers.push_back(builder.Release());
+            }
+
+            std::vector<hipdnnBackendFlatbufferData_t> flatbufferDataArray;
+            flatbufferDataArray.reserve(knobBuffers.size());
+
+            for(const auto& buffer : knobBuffers)
+            {
+                hipdnnBackendFlatbufferData_t fbData;
+                fbData.ptr = buffer.data();
+                fbData.size = buffer.size();
+                flatbufferDataArray.push_back(fbData);
+            }
+
+            RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendSetAttribute(
+                                          _engineConfigDesc->get(),
+                                          HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                          HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                          static_cast<int64_t>(flatbufferDataArray.size()),
+                                          flatbufferDataArray.data()),
+                                      "Failed to set knob settings on engine config.");
         }
 
         return {ErrorCode::OK, ""};
@@ -1324,7 +1319,6 @@ public:
                   std::unordered_map<std::shared_ptr<TensorAttributes>, void*>& tensorLookup,
                   void* workspace) const
     {
-
         std::unordered_map<int64_t, void*> variantPack;
         for(const auto& [tensor, ptr] : tensorLookup)
         {

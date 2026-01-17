@@ -30,13 +30,130 @@ namespace hipdnn_frontend
 // Type alias for knob IDs
 typedef int64_t KnobType_t; // NOLINT(readability-identifier-naming)
 
-// Abstract knob interface
-class IKnob
+// Forward declarations
+class KnobSetting;
+class Knob;
+
+// Helper to hash the string ID to the int ID
+inline int64_t makeKnobId(const std::string& strID)
+{
+    return static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash(strID));
+}
+
+// KnobSetting class - represents a knob value setting
+class KnobSetting
 {
 public:
-    virtual ~IKnob() = default;
+    // Constructors
+    KnobSetting(int64_t knobId, std::variant<KNOB_TYPES> value)
+        : _knobId(knobId)
+        , _value(std::move(value))
+    {
+    }
 
-    virtual const std::variant<KNOB_TYPES>& getChoice() const = 0;
+    KnobSetting(const std::string& knobIdStr, std::variant<KNOB_TYPES> value)
+        : _knobId(makeKnobId(knobIdStr))
+        , _value(std::move(value))
+    {
+    }
+
+    // Template constructors for convenience
+    template <typename T>
+    KnobSetting(int64_t knobId, const T& value)
+        : _knobId(knobId)
+        , _value(value)
+    {
+    }
+
+    template <typename T>
+    KnobSetting(const std::string& knobIdStr, const T& value)
+        : _knobId(makeKnobId(knobIdStr))
+        , _value(value)
+    {
+    }
+
+    // Accessors
+    int64_t getKnobId() const
+    {
+        return _knobId;
+    }
+
+    const std::variant<KNOB_TYPES>& getValue() const
+    {
+        return _value;
+    }
+
+    // Mutator
+    template <typename T>
+    void setValue(const T& value)
+    {
+        _value = value;
+    }
+
+    // Serialization
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>
+        packKnobSetting(flatbuffers::FlatBufferBuilder& builder) const
+    {
+        // Create the appropriate KnobValue based on the variant type
+        flatbuffers::Offset<void> valueOffset = 0;
+        hipdnn_data_sdk::data_objects::KnobValue valueType
+            = hipdnn_data_sdk::data_objects::KnobValue::NONE;
+
+        std::visit(
+            [&builder, &valueOffset, &valueType](auto&& value) {
+                using T = std::decay_t<decltype(value)>;
+                if constexpr(std::is_same_v<T, int64_t>)
+                {
+                    valueOffset
+                        = hipdnn_data_sdk::data_objects::CreateIntValue(builder, value).Union();
+                    valueType = hipdnn_data_sdk::data_objects::KnobValue::IntValue;
+                }
+                else if constexpr(std::is_same_v<T, double>)
+                {
+                    valueOffset
+                        = hipdnn_data_sdk::data_objects::CreateFloatValue(builder, value).Union();
+                    valueType = hipdnn_data_sdk::data_objects::KnobValue::FloatValue;
+                }
+                else if constexpr(std::is_same_v<T, std::string>)
+                {
+                    valueOffset = hipdnn_data_sdk::data_objects::CreateStringValueDirect(
+                                      builder, value.c_str())
+                                      .Union();
+                    valueType = hipdnn_data_sdk::data_objects::KnobValue::StringValue;
+                }
+            },
+            _value);
+
+        return hipdnn_data_sdk::data_objects::CreateKnobSetting(
+            builder, _knobId, valueType, valueOffset);
+    }
+
+    // String representation
+    std::string toString() const
+    {
+        std::ostringstream oss;
+        oss << "KnobSetting{knobId=" << _knobId << ", value=";
+
+        std::visit(
+            [&oss](auto&& value) {
+                if constexpr(std::is_same_v<std::decay_t<decltype(value)>, std::string>)
+                {
+                    oss << "\"" << value << "\"";
+                }
+                else
+                {
+                    oss << value;
+                }
+            },
+            _value);
+
+        oss << "}";
+        return oss.str();
+    }
+
+private:
+    int64_t _knobId;
+    std::variant<KNOB_TYPES> _value;
 };
 
 // Abstract constraint interface
@@ -46,7 +163,7 @@ public:
     virtual ~IConstraint() = default;
 
     // Validate a knob setting against this constraint
-    virtual Error validateKnobChoice(const IKnob& knob) const = 0;
+    virtual Error validateKnobSetting(const KnobSetting& setting) const = 0;
 
     // String representation for logging
     virtual std::string toString() const = 0;
@@ -67,9 +184,9 @@ public:
     {
     }
 
-    Error validateKnobChoice(const IKnob& knob) const override
+    Error validateKnobSetting(const KnobSetting& setting) const override
     {
-        auto value = std::get_if<int64_t>(&knob.getChoice());
+        auto value = std::get_if<int64_t>(&setting.getValue());
         if(value == nullptr)
         {
             return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain an integer value"};
@@ -159,9 +276,9 @@ public:
     {
     }
 
-    Error validateKnobChoice(const IKnob& knob) const override
+    Error validateKnobSetting(const KnobSetting& setting) const override
     {
-        auto value = std::get_if<double>(&knob.getChoice());
+        auto value = std::get_if<double>(&setting.getValue());
         if(value == nullptr)
         {
             return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain a float value"};
@@ -210,9 +327,9 @@ public:
     {
     }
 
-    Error validateKnobChoice(const IKnob& knob) const override
+    Error validateKnobSetting(const KnobSetting& setting) const override
     {
-        auto value = std::get_if<std::string>(&knob.getChoice());
+        auto value = std::get_if<std::string>(&setting.getValue());
         if(value == nullptr)
         {
             return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain a string value"};
@@ -277,19 +394,9 @@ private:
 };
 
 // Knob information class - describes available knobs for an engine
-class Knob : public IKnob
+class Knob
 {
 public:
-    // Move constructor
-    Knob(Knob&& other) noexcept = default;
-
-    // Move assignment operator
-    Knob& operator=(Knob&& other) noexcept = default;
-
-    // Delete copy constructor and copy assignment (Knob contains unique_ptr)
-    Knob(const Knob&) = delete;
-    Knob& operator=(const Knob&) = delete;
-
     // Factory function to create from flatbuffer
     static Knob fromFlatbuffer(const hipdnn_data_sdk::data_objects::Knob* fbKnob)
     {
@@ -413,23 +520,6 @@ public:
         return _defaultValue;
     }
 
-    template <typename T>
-    void setChoice(const T& value)
-    {
-        _hasChoice = true;
-        _choice = value;
-    }
-
-    const std::variant<KNOB_TYPES>& getChoice() const override
-    {
-        return _choice;
-    }
-
-    bool hasChoice() const
-    {
-        return _hasChoice;
-    }
-
     // Get constraint
     const IConstraint* getConstraint() const
     {
@@ -437,12 +527,12 @@ public:
     }
 
     // Validate a knob setting against this knob's constraints
-    Error validate() const
+    Error validate(const KnobSetting& setting) const
     {
         // Validate against constraint if present
         if(_constraint)
         {
-            return _constraint->validateKnobChoice(*this);
+            return _constraint->validateKnobSetting(setting);
         }
 
         return {ErrorCode::OK, ""};
@@ -451,48 +541,7 @@ public:
     // Helper to hash the string ID to the int ID
     static int64_t makeKnobId(const std::string& strID)
     {
-        return static_cast<int64_t>(std::hash<std::string>{}(strID));
-    }
-
-    // Pack knob choice into a flatbuffer KnobSetting
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>
-        packKnob(flatbuffers::FlatBufferBuilder& builder) const
-    {
-        // Determine which value to pack (choice if set, otherwise default)
-        const auto& valueToPack = _hasChoice ? _choice : _defaultValue;
-
-        // Create the appropriate KnobValue based on the variant type
-        flatbuffers::Offset<void> valueOffset = 0;
-        hipdnn_data_sdk::data_objects::KnobValue valueType
-            = hipdnn_data_sdk::data_objects::KnobValue::NONE;
-
-        std::visit(
-            [&builder, &valueOffset, &valueType](auto&& value) {
-                using T = std::decay_t<decltype(value)>;
-                if constexpr(std::is_same_v<T, int64_t>)
-                {
-                    valueOffset
-                        = hipdnn_data_sdk::data_objects::CreateIntValue(builder, value).Union();
-                    valueType = hipdnn_data_sdk::data_objects::KnobValue::IntValue;
-                }
-                else if constexpr(std::is_same_v<T, double>)
-                {
-                    valueOffset
-                        = hipdnn_data_sdk::data_objects::CreateFloatValue(builder, value).Union();
-                    valueType = hipdnn_data_sdk::data_objects::KnobValue::FloatValue;
-                }
-                else if constexpr(std::is_same_v<T, std::string>)
-                {
-                    valueOffset = hipdnn_data_sdk::data_objects::CreateStringValueDirect(
-                                      builder, value.c_str())
-                                      .Union();
-                    valueType = hipdnn_data_sdk::data_objects::KnobValue::StringValue;
-                }
-            },
-            valueToPack);
-
-        return hipdnn_data_sdk::data_objects::CreateKnobSetting(
-            builder, _knobId, valueType, valueOffset);
+        return hipdnn_frontend::makeKnobId(strID);
     }
 
     // String representation for logging
@@ -503,10 +552,6 @@ public:
             << _description << "\", defaultValue=";
 
         variantToStream(oss, _defaultValue);
-
-        oss << ", choice=";
-
-        variantToStream(oss, _choice);
 
         oss << ", deprecated=" << (_deprecated ? "true" : "false");
 
@@ -553,12 +598,10 @@ private:
     int64_t _knobId;
     std::string _description;
     std::variant<KNOB_TYPES> _defaultValue;
-    std::variant<KNOB_TYPES> _choice;
     bool _deprecated;
-    bool _hasChoice = false;
 
     // Constraint (polymorphic)
-    std::unique_ptr<IConstraint> _constraint;
+    std::shared_ptr<IConstraint> _constraint;
 };
 
 } // namespace hipdnn_frontend
@@ -570,5 +613,15 @@ struct fmt::formatter<hipdnn_frontend::Knob> : fmt::formatter<const char*>
     auto format(const hipdnn_frontend::Knob& knob, FormatContext& ctx) const
     {
         return fmt::formatter<const char*>::format(knob.toString().c_str(), ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<hipdnn_frontend::KnobSetting> : fmt::formatter<const char*>
+{
+    template <typename FormatContext>
+    auto format(const hipdnn_frontend::KnobSetting& setting, FormatContext& ctx) const
+    {
+        return fmt::formatter<const char*>::format(setting.toString().c_str(), ctx);
     }
 };
