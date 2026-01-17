@@ -116,13 +116,23 @@ TEST_P(GPU_FusionSetArg_FP16, TestSetArgApiCall)
                                          &(cba_float::beta),
                                          cba_float::wei_dev.get()),
               0);
-    EXPECT_EQ(miopenExecuteFusionPlan(&handle,
-                                      fusion_plan,
-                                      &(cba_float::input.desc),
-                                      cba_float::in_dev.get(),
-                                      &(cba_float::output.desc),
-                                      cba_float::out_dev.get(),
-                                      fusion_args),
+
+    size_t workspace_size = 0;
+    miopenConvFwdAlgorithm_t algo{}; // not used in GetWorkSpaceSize
+    EXPECT_EQ(miopenFusionPlanGetWorkSpaceSize(&handle, fusion_plan, &workspace_size, algo),
+              miopenStatusSuccess);
+
+    cba_float::wspace.resize(workspace_size);
+
+    EXPECT_EQ(miopenExecuteFusionPlan_v2(&handle,
+                                         fusion_plan,
+                                         &(cba_float::input.desc),
+                                         cba_float::in_dev.get(),
+                                         &(cba_float::output.desc),
+                                         cba_float::out_dev.get(),
+                                         fusion_args,
+                                         cba_float::wspace.ptr(),
+                                         cba_float::wspace.size()),
               0);
     handle.Finish();
     using ConvParam       = miopen::fusion::ConvolutionOpInvokeParam;

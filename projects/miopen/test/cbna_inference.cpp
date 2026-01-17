@@ -203,13 +203,24 @@ struct verify_forward_conv_bias_batchnorm_activ
             miopenSetOpArgsActivForward(
                 ptr_fusionargs.get(), activOp, &alpha, &beta, activ_alpha, activ_beta, activ_gamma);
         }
-        miopenExecuteFusionPlan(&handle,
-                                fusionplan,
-                                inputDesc,
-                                in_dev.get(),
-                                &rout.desc,
-                                out_dev.get(),
-                                ptr_fusionargs.get());
+
+        Workspace wspace{};
+        size_t workspace_size = 0;
+        miopenConvFwdAlgorithm_t algo{}; // not used in GetWorkSpaceSize
+        EXPECT_EQ(miopenFusionPlanGetWorkSpaceSize(&handle, fusion_plan, &workspace_size, algo),
+                  miopenStatusSuccess);
+
+        wspace.resize(workspace_size);
+
+        miopenExecuteFusionPlan_v2(&handle,
+                                   fusionplan,
+                                   inputDesc,
+                                   in_dev.get(),
+                                   &rout.desc,
+                                   out_dev.get(),
+                                   ptr_fusionargs.get(),
+                                   wspace.ptr(),
+                                   wspace.size());
         rout.data = handle.Read<T>(out_dev, rout.data.size());
         return rout;
     }
@@ -309,10 +320,9 @@ struct cbna_fusion_driver : test_driver
             {0, 0, 1, 1, 1, 1},
             //        {0, 0, 2, 2, 1, 1},
             //        {1, 1, 1, 1, 1, 1},
-            {1, 1, 2, 2, 1, 1}
-            //        {2, 2, 1, 1, 1, 1},
-            //        {2, 2, 2, 2, 1, 1},
-            //        {3, 3, 2, 2, 1, 1}
+            {1, 1, 2, 2, 1, 1} //        {2, 2, 1, 1, 1, 1},
+                               //        {2, 2, 2, 2, 1, 1},
+                               //        {3, 3, 2, 2, 1, 1}
         };
     };
 
@@ -479,7 +489,7 @@ struct cbna_fusion_driver : test_driver
                 input_w >= (2 * fpad_w + wei_w))
         {
             (void)ranonce;
-#if(MIOPEN_BACKEND_HIP == 1)
+#if (MIOPEN_BACKEND_HIP == 1)
             if(!ranonce)
             { // Compiled and ready to run, but once!
                 ranonce = true;
