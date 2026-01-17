@@ -76,6 +76,7 @@ namespace rocwmma
             bool isGfx11 = (deviceArch == Base::DeviceInfo::GFX1100
                             || deviceArch == Base::DeviceInfo::GFX1101
                             || deviceArch == Base::DeviceInfo::GFX1102
+                            || deviceArch == Base::DeviceInfo::GFX1103
                             || deviceArch == Base::DeviceInfo::GFX1150
                             || deviceArch == Base::DeviceInfo::GFX1151
                             || deviceArch == Base::DeviceInfo::GFX1152

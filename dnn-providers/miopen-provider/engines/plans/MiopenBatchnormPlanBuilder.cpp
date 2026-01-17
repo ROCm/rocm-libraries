@@ -423,13 +423,6 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             }
         }
 
-        if(node.attributes_type()
-           == hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes)
-        {
-            HIPDNN_LOG_WARN("Batchnorm inference support is temporarily disabled.");
-            return false;
-        }
-
         try
         {
             switch(node.attributes_type())

@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsFp8.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
@@ -107,7 +108,8 @@ using TypesFwdInferenceNchw = ::testing::Types<TypePair<float, float>,
                                                TypePair<half, float>,
                                                TypePair<hip_bfloat16, float>,
                                                TypePair<double, double>,
-                                               TypePair<int8_t, float>>;
+                                               TypePair<int8_t, float>,
+                                               TypePair<hip_fp8_e4m3, float>>;
 
 template <class T>
 class CpuFpReferenceBatchnormFwdInferenceNchw : public ::testing::Test
@@ -300,6 +302,7 @@ using TypesBackwardNchw = ::testing::Types<TypeTriplet<float, float, float>,
                                            TypeTriplet<hip_bfloat16, float, float>,
                                            TypeTriplet<half, float, float>,
                                            TypeTriplet<int8_t, float, float>,
+                                           TypeTriplet<hip_fp8_e4m3, float, float>,
                                            TypeTriplet<half, hip_bfloat16, float>,
                                            TypeTriplet<double, double, double>>;
 
@@ -956,6 +959,7 @@ using TypesFwdTrainingNhwc = ::testing::Types<TypeTriplet<hip_bfloat16, float, f
                                               TypeTriplet<half, float, float>,
                                               TypeTriplet<double, double, double>,
                                               TypeTriplet<int8_t, double, double>,
+                                              TypeTriplet<hip_fp8_e4m3, float, float>,
                                               TypeTriplet<half, hip_bfloat16, float>>;
 
 template <typename T>
