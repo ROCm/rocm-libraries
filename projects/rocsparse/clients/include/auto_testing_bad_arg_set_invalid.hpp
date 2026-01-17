@@ -352,3 +352,9 @@ inline void auto_testing_bad_arg_set_invalid(rocsparse_batchstorage& p)
 {
     p = (rocsparse_batchstorage)-1;
 }
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_idvec_prop& p)
+{
+    p = (rocsparse_idvec_prop)-1;
+}

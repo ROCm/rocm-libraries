@@ -34,6 +34,68 @@
 #include <hip/hip_runtime_api.h>
 #include <vector>
 
+struct rocsparse_idvec_prop_t
+{
+    using value_t                     = rocsparse_idvec_prop;
+    static constexpr uint32_t nvalues = 9;
+    // clang-format off
+  static constexpr value_t  values[nvalues] = { rocsparse_idvec_prop_indextype,
+    rocsparse_idvec_prop_size,
+    rocsparse_idvec_prop_size_in_bytes,
+    rocsparse_idvec_prop_inc,
+    rocsparse_idvec_prop_batchtype,
+    rocsparse_idvec_prop_batchstorage,
+    rocsparse_idvec_prop_batch_count,
+    rocsparse_idvec_prop_batch_dist,
+    rocsparse_idvec_prop_base
+  };
+    // clang-format on
+
+    static const char* to_string(rocsparse_idvec_prop prop)
+    {
+        switch(prop)
+        {
+        case rocsparse_idvec_prop_indextype:
+        {
+            return "rocsparse_idvec_prop_indextype";
+        }
+        case rocsparse_idvec_prop_base:
+        {
+            return "rocsparse_idvec_prop_base";
+        }
+        case rocsparse_idvec_prop_size:
+        {
+            return "rocsparse_idvec_prop_size";
+        }
+        case rocsparse_idvec_prop_size_in_bytes:
+        {
+            return "rocsparse_idvec_prop_size_in_bytes";
+        }
+        case rocsparse_idvec_prop_inc:
+        {
+            return "rocsparse_idvec_prop_size_inc";
+        }
+        case rocsparse_idvec_prop_batchtype:
+        {
+            return "rocsparse_idvec_prop_batchtype";
+        }
+        case rocsparse_idvec_prop_batchstorage:
+        {
+            return "rocsparse_idvec_prop_batchstorage";
+        }
+        case rocsparse_idvec_prop_batch_count:
+        {
+            return "rocsparse_idvec_prop_batch_count";
+        }
+        case rocsparse_idvec_prop_batch_dist:
+        {
+            return "rocsparse_idvec_prop_batch_dist";
+        }
+        }
+        return "unknown";
+    }
+};
+
 struct rocsparse_batchtype_t
 {
     using value_t                     = rocsparse_batchtype;

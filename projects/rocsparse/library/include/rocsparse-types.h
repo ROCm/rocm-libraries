@@ -176,6 +176,22 @@ typedef struct _rocsparse_spmat_descr const* rocsparse_const_spmat_descr;
 typedef struct _rocsparse_dnvec_descr* rocsparse_dnvec_descr;
 
 /*! \ingroup types_module
+ *  \brief Generic API descriptor of the dense indexing vector vector.
+ *
+ *  \details
+ *  The rocSPARSE dense indexing vector descriptor is a structure holding all properties of a dense indexing vector.
+ */
+typedef struct _rocsparse_idvec_descr* rocsparse_idvec_descr;
+
+/*! \ingroup types_module
+ *  \brief Generic API descriptor of the dense vector.
+ *
+ *  \details
+ *  The rocSPARSE constant dense indexing vector descriptor is a structure holding all properties of a dense indexing vector.
+ */
+typedef struct _rocsparse_idvec_descr const* rocsparse_const_idvec_descr;
+
+/*! \ingroup types_module
  *  \brief Generic API descriptor of the dense vector.
  *
  *  \details
@@ -1192,6 +1208,50 @@ typedef enum rocsparse_batchstorage_
     rocsparse_batchstorage_soa,
     rocsparse_batchstorage_aos
 } rocsparse_batchstorage;
+
+/*!
+ * @ingroup types_module
+ * @brief Properties of a dense indexing vector.
+ */
+typedef enum rocsparse_idvec_prop_
+{
+    /*!
+     * @brief The \ref rocsparse_indextype.
+     */
+    rocsparse_idvec_prop_indextype,
+    /*!
+     * @brief The number of elements, of type int64_t.
+     */
+    rocsparse_idvec_prop_size,
+    /*!
+     * @brief The size in bytes, of type size_t.
+     */
+    rocsparse_idvec_prop_size_in_bytes,
+    /*!
+     * @brief The increment, of type int64_t, default value is 1.
+     */
+    rocsparse_idvec_prop_inc,
+    /*!
+     * @brief \ref rocsparse_index_base.
+     */
+    rocsparse_idvec_prop_base,
+    /*!
+     * @brief The batch layout, \ref rocsparse_batchtype.
+     */
+    rocsparse_idvec_prop_batchtype,
+    /*!
+     * @brief The batch storage, \ref rocsparse_batchstorage.
+     */
+    rocsparse_idvec_prop_batchstorage,
+    /*!
+     * @brief The batch count, of type int64_t, default value is 1.
+     */
+    rocsparse_idvec_prop_batch_count,
+    /*!
+     * @brief The batch distance, default value is 0.
+     */
+    rocsparse_idvec_prop_batch_dist,
+} rocsparse_idvec_prop;
 
 #ifdef __cplusplus
 }

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,9 +28,9 @@
 #ifndef ROCSPARSE_AUXILIARY_H
 #define ROCSPARSE_AUXILIARY_H
 
+#include "internal/auxiliary/rocsparse_idvec_descr.h"
 #include "rocsparse-types.h"
 #include "rocsparse/rocsparse-export.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif

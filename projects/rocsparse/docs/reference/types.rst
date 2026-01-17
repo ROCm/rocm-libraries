@@ -85,6 +85,16 @@ rocsparse_const_dnvec_descr
 
 .. doxygentypedef:: rocsparse_const_dnvec_descr
 
+rocsparse_idvec_descr
+---------------------
+
+.. doxygentypedef:: rocsparse_idvec_descr
+
+rocsparse_const_idvec_descr
+---------------------------
+
+.. doxygentypedef:: rocsparse_const_idvec_descr
+
 rocsparse_dnmat_descr
 ---------------------
 

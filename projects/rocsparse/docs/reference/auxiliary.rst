@@ -537,3 +537,49 @@ rocsparse_dnmat_set_strided_batch
 ---------------------------------
 
 .. doxygenfunction:: rocsparse_dnmat_set_strided_batch
+
+rocsparse_idvec_create
+----------------------
+
+.. doxygenfunction:: rocsparse_idvec_create
+
+rocsparse_idvec_create_batched
+------------------------------
+
+.. doxygenfunction:: rocsparse_idvec_create_batched
+
+rocsparse_idvec_destroy
+-----------------------
+
+.. doxygenfunction:: rocsparse_idvec_destroy
+
+rocsparse_idvec_get_prop
+------------------------
+
+.. doxygenfunction:: rocsparse_idvec_get_prop
+
+rocsparse_idvec_set_prop
+------------------------
+
+.. doxygenfunction:: rocsparse_idvec_set_prop
+
+rocsparse_idvec_get_data
+------------------------
+
+.. doxygenfunction:: rocsparse_idvec_get_data
+
+rocsparse_idvec_set_data
+------------------------
+
+.. doxygenfunction:: rocsparse_idvec_set_data
+
+rocsparse_idvec_get_const_data
+------------------------------
+
+.. doxygenfunction:: rocsparse_idvec_get_const_data
+
+rocsparse_idvec_set_const_data
+------------------------------
+
+.. doxygenfunction:: rocsparse_idvec_set_const_data
+

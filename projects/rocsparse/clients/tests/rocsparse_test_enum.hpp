@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -97,6 +97,7 @@ static constexpr std::size_t countof2(T (&)[N])
   TRANSFORM_ROCSPARSE_TEST_ENUM(dense_to_sparse_csr)	        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(dnmat_descr)			        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(dnvec_descr)			        \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(idvec_descr)			        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(dotci)					        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(doti)					        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(ell2csr)				        \

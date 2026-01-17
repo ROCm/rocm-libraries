@@ -282,6 +282,24 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_dnmat_set_strided_batch`        |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_idvec_create`                   |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_idvec_create_batched`           |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_idvec_destroy`                  |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_idvec_get_prop`                 |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_idvec_set_prop`                 |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_idvec_get_data`                 |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_idvec_set_data`                 |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_idvec_get_const_data`           |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_idvec_set_const_data`           |
++-----------------------------------------------------+
 
 Sparse level 1 functions
 ------------------------
