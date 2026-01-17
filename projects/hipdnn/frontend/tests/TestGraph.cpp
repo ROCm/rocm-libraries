@@ -4026,6 +4026,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithKnobSettings)
     EXPECT_TRUE(buildResult.is_good());
 
     // Mock engine descriptor creation for get_knob_lookup_for_engine
+    // and during initializeEngineConfig(engineId)
     auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
         .Times(2)
@@ -4063,7 +4064,9 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithKnobSettings)
         hipdnn_data_sdk::data_objects::KnobValue::IntValue,
         hipdnn_data_sdk::data_objects::CreateIntValue(builder, static_cast<int64_t>(0)).Union(),
         hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint,
-        hipdnn_data_sdk::data_objects::CreateIntConstraint(builder, 0, 1, 1).Union(),
+        hipdnn_data_sdk::data_objects::CreateIntConstraint(
+            builder, static_cast<int64_t>(0), static_cast<int64_t>(1), static_cast<int64_t>(1))
+            .Union(),
         false);
     builder.Finish(knobOffset);
     auto knobBuffer = builder.Release();
@@ -4115,6 +4118,12 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithKnobSettings)
             *descriptor = engineConfigDesc;
             return HIPDNN_STATUS_SUCCESS;
         });
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            engineConfigDesc, HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     EXPECT_CALL(*_mockBackend, backendFinalize(engineConfigDesc))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
