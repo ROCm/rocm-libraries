@@ -106,4 +106,6 @@ def getRequiredParametersMin() -> set:
         'WaveSeparateGlobalReadB',
         'WavefrontSize',
         'WorkGroup',
+        'DtlPlusLdsBuf',
+        'MinGRIncPerMfma'
     })

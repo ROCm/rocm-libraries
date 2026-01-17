@@ -431,7 +431,9 @@ defaultBenchmarkCommonParameters = [
     {"ExtraLatencyForLR": [0]},
     {"TailloopInNll": [False]},
     {"SwapGlobalReadOrder": [0]},
-    {"ScheduleGROverBarrier": [-1]}
+    {"ScheduleGROverBarrier": [-1]},
+    {"DtlPlusLdsBuf": [-1]},
+    {"MinGRIncPerMfma": [-1]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter
