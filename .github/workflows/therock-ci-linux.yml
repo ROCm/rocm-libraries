@@ -142,6 +142,16 @@ jobs:
             --build-dir TheRock/build \
             --upload
 
+      - name: Notify Microsoft Teams
+        if: ${{ contains(inputs.project_to_test, 'miopen') || contains(inputs.project_to_test, 'miopen_plugin') }}
+        if: failure()
+        run: |
+          curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" -H 'Content-Type: application/json' \
+               -d '{
+                     "title": "MIOpen GitHub CI Notification",
+                     "text": "X Linux Build failure on branch: '${GITHUB_REF}'"
+                   }'
+
   therock-test-linux:
     name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]

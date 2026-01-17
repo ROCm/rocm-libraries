@@ -90,6 +90,16 @@ jobs:
         run: |
           ${{ fromJSON(inputs.component).test_script }}
 
+      - name: Notify Microsoft Teams
+        if: ${{ contains(inputs.project_to_test, 'miopen') || contains(inputs.project_to_test, 'miopen_plugin') }}
+        if: failure()
+        run: |
+          curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" -H 'Content-Type: application/json' \
+               -d '{
+                     "title": "MIOpen GitHub CI Notification",
+                     "text": "X Test failure on branch: '${GITHUB_REF}'"
+                   }'
+
       # GitHub's 'Complete job' step is unaware of launched executables
       # and will fail to clean up orphan processes.
       - name: Post-job cleanup processes on Windows
