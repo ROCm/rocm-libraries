@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -343,6 +343,18 @@ inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spgemm_stage& 
 
 template <>
 inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spgeam_stage& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_batchtype& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_batchstorage& p)
 {
     return rocsparse_status_invalid_value;
 }

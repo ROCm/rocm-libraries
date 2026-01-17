@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -339,4 +339,16 @@ template <>
 inline void auto_testing_bad_arg_set_invalid(rocsparse_spgeam_stage& p)
 {
     p = (rocsparse_spgeam_stage)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_batchtype& p)
+{
+    p = (rocsparse_batchtype)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_batchstorage& p)
+{
+    p = (rocsparse_batchstorage)-1;
 }

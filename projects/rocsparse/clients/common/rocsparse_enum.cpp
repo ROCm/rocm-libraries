@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2022 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,12 @@ constexpr rocsparse_operation_t::value_t
 
 constexpr rocsparse_storage_mode_t::value_t
     rocsparse_storage_mode_t::values[rocsparse_storage_mode_t::nvalues];
+
+constexpr rocsparse_batchtype_t::value_t
+    rocsparse_batchtype_t::values[rocsparse_batchtype_t::nvalues];
+
+constexpr rocsparse_batchstorage_t::value_t
+    rocsparse_batchstorage_t::values[rocsparse_batchstorage_t::nvalues];
 
 std::ostream& operator<<(std::ostream& out, const rocsparse_operation& v)
 {

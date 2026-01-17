@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1141,6 +1141,57 @@ typedef enum rocsparse_gpsv_interleaved_alg_
     rocsparse_gpsv_interleaved_alg_default = 0, /**< Default gpsv algorithm. */
     rocsparse_gpsv_interleaved_alg_qr      = 1 /**< QR algorithm */
 } rocsparse_gpsv_interleaved_alg;
+
+/*!
+ * @ingroup types_module
+ * @brief Specifies how a batch of dataset is laid out in memory.
+ *
+ * The goal is to support **two primary strategies** for representing a batch
+ * of datasets:
+ *
+ * - **Pointer-array type**: Each dataset in the batch is referenced by an individual pointer.
+ * - **Strided type**: All datasets are stored in a single contiguous buffer, with a fixed
+ *   stride (in elements) between the start of consecutive datasets.
+ *
+ * This enumeration enables **library-agnostic** batched APIs by abstracting the memory
+ * type, allowing runtime selection or template specialization.
+ */
+typedef enum rocsparse_batchtype_
+{
+    /*!
+     * @brief Array of device/host pointers, one per dataset.
+     *
+     * Each dataset is stored independently in memory. The batch is represented as:
+     * ```cpp
+     * float** array;  // array[i] points to i-th dataset
+     * ```
+     * @warning The array of pointers is required to be allocated on device.
+     */
+    rocsparse_batchtype_pointerarray,
+    /*!
+     * @brief Contiguous memory with fixed stride between data.
+     *
+     * All data are packed into a single buffer:
+     * ```cpp
+     * float* a;           // Base pointer
+     * int64_t stride_a;   // Elements between start of a_i and a_{i+1}, where i is the batch index.
+     * ```
+     * @note This is a more memory-efficient and cache-friendly when data are uniform.
+     */
+    rocsparse_batchtype_strided
+} rocsparse_batchtype;
+
+/*!
+ * @ingroup types_module
+ * @brief Specifies the memory layout of batched the datasets.
+ * - **Struct-Of-Array type: Each dataset in the batch is stored contiguously in memory.
+ * - **Array-Of-Struct type: All datasets are interleaved.
+ */
+typedef enum rocsparse_batchstorage_
+{
+    rocsparse_batchstorage_soa,
+    rocsparse_batchstorage_aos
+} rocsparse_batchstorage;
 
 #ifdef __cplusplus
 }

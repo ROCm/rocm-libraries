@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,57 @@
 #include "rocsparse_test.hpp"
 #include <hip/hip_runtime_api.h>
 #include <vector>
+
+struct rocsparse_batchtype_t
+{
+    using value_t                     = rocsparse_batchtype;
+    static constexpr uint32_t nvalues = 2;
+    // clang-format off
+  static constexpr value_t  values[nvalues] = {rocsparse_batchtype_pointerarray,
+    rocsparse_batchtype_strided};
+    // clang-format on
+
+    static const char* to_string(rocsparse_batchtype value)
+    {
+        switch(value)
+        {
+        case rocsparse_batchtype_pointerarray:
+        {
+            return "rocsparse_batchtype_pointerarray";
+        }
+        case rocsparse_batchtype_strided:
+        {
+            return "rocsparse_batchtype_strided";
+        }
+        }
+        return "unknown";
+    }
+};
+
+struct rocsparse_batchstorage_t
+{
+    using value_t                     = rocsparse_batchstorage;
+    static constexpr uint32_t nvalues = 2;
+    // clang-format off
+  static constexpr value_t  values[nvalues] = {rocsparse_batchstorage_soa,
+    rocsparse_batchstorage_aos};
+    // clang-format on
+    static const char* to_string(rocsparse_batchstorage value)
+    {
+        switch(value)
+        {
+        case rocsparse_batchstorage_soa:
+        {
+            return "rocsparse_batchstorage_soa";
+        }
+        case rocsparse_batchstorage_aos:
+        {
+            return "rocsparse_batchstorage_aos";
+        }
+        }
+        return "unknown";
+    }
+};
 
 struct rocsparse_itilu0_alg_t
 {

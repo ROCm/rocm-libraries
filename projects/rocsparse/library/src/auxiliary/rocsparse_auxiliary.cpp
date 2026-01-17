@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -365,6 +365,34 @@ const char* rocsparse::enum_utils::to_string(rocsparse_format value_)
     // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
     // LCOV_EXCL_STOP
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_batchtype value_)
+{
+    switch(value_)
+    {
+    case rocsparse_batchtype_pointerarray:
+    case rocsparse_batchtype_strided:
+    {
+        return false;
+    }
+    }
+    return true;
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_batchstorage value_)
+{
+    switch(value_)
+    {
+    case rocsparse_batchstorage_soa:
+    case rocsparse_batchstorage_aos:
+    {
+        return false;
+    }
+    }
+    return true;
 }
 
 template <>
