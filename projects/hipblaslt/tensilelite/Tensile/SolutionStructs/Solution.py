@@ -2945,7 +2945,7 @@ class Solution(collections.abc.Mapping):
       state["LdsOffsetB"] = state["LdsOffsetMetadata"] + state["LdsNumElementsAlignedMetadata"]
 
       offsetBlk = state["LdsOffsetB"] + ldsNumBytesAlignedB
-      roundupOffsetBlk = int(2**(math.ceil(math.log(offsetBlk, 2))))
+      roundupOffsetBlk = int(2**(math.ceil(math.log(offsetBlk, 2)))) if offsetBlk > 0 else 0
 
       state["StoreSwapAddr"] = (state["PrefetchGlobalRead"] == 2) and \
         (state["1LDSBuffer"] == 0) and numLdsBlk == 2 and \
