@@ -166,7 +166,6 @@ table IntConstraint {
 table FloatConstraint {
     min_value: float64;
     max_value: float64;
-    valid_values: [float64];      // Optional: explicit list
 }
 
 table StringConstraint {
@@ -429,7 +428,6 @@ public:
     struct FloatConstraint {
         double minValue;
         double maxValue;
-        std::vector<double> validValues;  // Optional explicit list
     };
 
     std::optional<IntConstraint> getIntConstraint() const;
