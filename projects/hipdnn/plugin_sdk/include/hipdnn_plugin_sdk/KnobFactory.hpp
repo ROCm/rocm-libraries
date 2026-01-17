@@ -13,10 +13,14 @@
 namespace hipdnn_plugin_sdk
 {
 
-#define DEFINE_HIPDNN_KNOB(NAME)                           \
-    static constexpr const char* NAME##_KNOB_NAME = #NAME; \
-    static const int64_t NAME##_KNOB_ID                    \
-        = static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash(#NAME));
+#define DEFINE_HIPDNN_KNOB_NAMED(VAR_NAME, STRING_NAME)              \
+    static constexpr const char* VAR_NAME##_KNOB_NAME = STRING_NAME; \
+    static const int64_t VAR_NAME##_KNOB_ID                          \
+        = static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash(STRING_NAME));
+
+#define DEFINE_HIPDNN_KNOB(NAME) DEFINE_HIPDNN_KNOB_NAMED(NAME, #NAME)
+
+DEFINE_HIPDNN_KNOB_NAMED(benchmarking, "global.benchmarking")
 
 class KnobFactory
 {
@@ -29,14 +33,16 @@ public:
                       int64_t defaultValue,
                       int64_t min,
                       int64_t max,
-                      int64_t step)
+                      int64_t step,
+                      const std::vector<int64_t>& options)
     {
         auto knobIdStr = builder.CreateString(name);
         auto descStr = builder.CreateString(description);
         auto defaultValOffset
             = hipdnn_data_sdk::data_objects::CreateIntValue(builder, defaultValue);
-        auto constraintOffset
-            = hipdnn_data_sdk::data_objects::CreateIntConstraint(builder, min, max, step);
+        auto optionsVector = builder.CreateVector(options);
+        auto constraintOffset = hipdnn_data_sdk::data_objects::CreateIntConstraint(
+            builder, min, max, step, optionsVector);
 
         return hipdnn_data_sdk::data_objects::CreateKnob(
             builder,

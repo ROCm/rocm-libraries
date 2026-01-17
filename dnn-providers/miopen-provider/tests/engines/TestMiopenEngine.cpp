@@ -205,7 +205,7 @@ TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingEnabled)
     auto knobValue = hipdnn_data_sdk::data_objects::CreateIntValue(builder, 1);
     auto knobSetting = hipdnn_data_sdk::data_objects::CreateKnobSetting(
         builder,
-        static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash("benchmarking")),
+        static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash("global.benchmarking")),
         hipdnn_data_sdk::data_objects::KnobValue::IntValue,
         knobValue.Union());
 
@@ -236,7 +236,7 @@ TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingDisabled)
         = hipdnn_data_sdk::data_objects::CreateIntValue(builder, static_cast<int64_t>(0));
     auto knobSetting = hipdnn_data_sdk::data_objects::CreateKnobSetting(
         builder,
-        static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash("benchmarking")),
+        static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash("global.benchmarking")),
         hipdnn_data_sdk::data_objects::KnobValue::IntValue,
         knobValue.Union());
 

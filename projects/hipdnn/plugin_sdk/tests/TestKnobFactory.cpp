@@ -9,7 +9,9 @@ using namespace hipdnn_plugin_sdk;
 TEST(TestKnobFactory, CreateIntKnob)
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto knob = KnobFactory::createIntKnob(builder, 1, "int_knob", "description", 10, 0, 100, 1);
+    std::vector<int64_t> options = {10, 20, 30};
+    auto knob
+        = KnobFactory::createIntKnob(builder, 1, "int_knob", "description", 10, 0, 100, 1, options);
     builder.Finish(knob);
 
     auto root
@@ -25,6 +27,12 @@ TEST(TestKnobFactory, CreateIntKnob)
     EXPECT_EQ(root->constraint_as_IntConstraint()->min_value(), 0);
     EXPECT_EQ(root->constraint_as_IntConstraint()->max_value(), 100);
     EXPECT_EQ(root->constraint_as_IntConstraint()->step(), 1);
+
+    auto validValues = root->constraint_as_IntConstraint()->valid_values();
+    ASSERT_EQ(validValues->size(), 3);
+    EXPECT_EQ(validValues->Get(0), 10);
+    EXPECT_EQ(validValues->Get(1), 20);
+    EXPECT_EQ(validValues->Get(2), 30);
 }
 
 TEST(TestKnobFactory, CreateFloatKnob)

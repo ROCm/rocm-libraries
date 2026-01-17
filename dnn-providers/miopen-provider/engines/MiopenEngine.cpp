@@ -2,13 +2,13 @@
 // SPDX-License-Identifier:  MIT
 
 #include "MiopenEngine.hpp"
-#include "MiopenKnobDefines.hpp"
 #include "plans/MiopenBatchnormPlanBuilder.hpp"
 
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_plugin_sdk/KnobFactory.hpp>
 
 namespace miopen_legacy_plugin
 {
@@ -43,8 +43,16 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
 {
     flatbuffers::FlatBufferBuilder builder;
 
-    auto knob = hipdnn_plugin_sdk::KnobFactory::createIntKnob(
-        builder, benchmarking_KNOB_ID, benchmarking_KNOB_NAME, "Enable benchmarking", 0, 0, 1, 1);
+    auto knob
+        = hipdnn_plugin_sdk::KnobFactory::createIntKnob(builder,
+                                                        hipdnn_plugin_sdk::benchmarking_KNOB_ID,
+                                                        hipdnn_plugin_sdk::benchmarking_KNOB_NAME,
+                                                        "Enable benchmarking",
+                                                        0,
+                                                        0,
+                                                        1,
+                                                        1,
+                                                        {});
 
     std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobsVector;
     knobsVector.push_back(knob);
@@ -81,9 +89,10 @@ void MiopenEngine::initializeExecutionContext(
 {
     if(engineConfig.isValid())
     {
-        if(engineConfig.hasKnobSetting(benchmarking_KNOB_ID))
+        if(engineConfig.hasKnobSetting(hipdnn_plugin_sdk::benchmarking_KNOB_ID))
         {
-            const auto& knobSetting = engineConfig.getKnobSettingById(benchmarking_KNOB_ID);
+            const auto& knobSetting
+                = engineConfig.getKnobSettingById(hipdnn_plugin_sdk::benchmarking_KNOB_ID);
             if(knobSetting.valueType() == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
             {
                 auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
