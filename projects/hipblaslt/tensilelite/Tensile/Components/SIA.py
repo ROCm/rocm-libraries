@@ -471,7 +471,7 @@ def prepareGRInstToSched(writer, kernel, isNGLL):
 
     # Add all loads from middle as individual schedulable items
     # when using PGR2, put global read instruction right after corresponding localWrite instruction
-    if isNGLL and kernel["UnrollLoopSwapGlobalReadOrder"] == 1:
+    if isNGLL and (kernel["UnrollLoopSwapGlobalReadOrder"] == 1 and not (kernel["DirectToLdsA"] and kernel["DirectToLdsB"])):
         itemsGRToSched =  []
         itemsGRToSchedLater = []
     elif kernel["PrefetchGlobalRead"] >= 2:
@@ -729,12 +729,8 @@ def assignLWSchedIndexSIA3(writer, kernel, numLocalWritesPerSched, localWriteEnd
     numMfmaPerIter = writer.states.numMfmaPerIter
     writer.states.lwStartMfmaIndex = writer.states.lwEndMfmaIndex - max(1,roundUp(numWritesToSched/numLocalWritesPerSched)) + 1
     if writer.states.lwStartMfmaIndex < writer.states.grEndMfmaIndex:
-        if kernel["PrefetchGlobalRead"] >= 2:
-            # adjust grEndMfmaIndex for PGR>=2
-            writer.states.grEndMfmaIndex = writer.states.lwStartMfmaIndex
-        else:
-            # adjust lwStartMfmaIndex for PGR1
-            writer.states.lwStartMfmaIndex = writer.states.grEndMfmaIndex
+          # adjust lwStartMfmaIndex for PGR1
+          writer.states.lwStartMfmaIndex = writer.states.grEndMfmaIndex
     if kernel["1LDSBuffer"] or kernel["DirectToLds"]:
         writer.states.sync1LdsMfmaIndex = max(writer.states.lwStartMfmaIndex - 1, 0)
     startIter = writer.states.lwStartMfmaIndex//numMfmaPerIter

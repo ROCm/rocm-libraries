@@ -2934,6 +2934,9 @@ class Solution(collections.abc.Mapping):
     # (cannot move 1LDSBuffer==-1 resolution code above because of referring ldsNumBytesAB)
     # Assuming larger buffer here
     numLdsBlk = 1 if state["1LDSBuffer"] == 1 else 2
+    if state["PrefetchGlobalRead"] >= 3:
+      # PGR>=3, number of LDS Block is set to PGR
+      numLdsBlk = state["PrefetchGlobalRead"]
     if state["PrefetchGlobalRead"] >= 2 and state["DtlPlusLdsBuf"]:
       # PGR>=2 + DtlPlusLdsBuf case, try to allocate PGR+1 LDSBlk to schedule GR over barrier
       numLdsBlk = state["PrefetchGlobalRead"] + 1
@@ -3391,9 +3394,6 @@ class Solution(collections.abc.Mapping):
       # does not work with PLR=0
       if state["PrefetchLocalRead"] == 0:
         reject(state, printRejectionReason, "PrefetchGlobalRead>=3 Supports only PrefetchLocalRead >= 1")
-      # does not work with UnrollLoopSwapGlobalReadOrder
-      if state["UnrollLoopSwapGlobalReadOrder"]:
-        reject(state, printRejectionReason, "PrefetchGlobalRead>=3 does not Supports UnrollLoopSwapGlobalReadOrder")
       # TODO: enable PGR>=3 for Sparse
       if state["ProblemType"]["Sparse"]:
         reject(state, printRejectionReason, "PrefetchGlobalRead>=3 + Sparse is not supported yet")
@@ -3439,8 +3439,8 @@ class Solution(collections.abc.Mapping):
         state["ULSGRODoubleG2L"] = 1
       if state["ExpandPointerSwap"] == 1:
         reject(state, printRejectionReason, "ExpandPointerSwap need to be 0 if UnrollLoopSwapGlobalReadOrder")
-      if state["PrefetchGlobalRead"] != 2:
-        reject(state, printRejectionReason, "PrefetchGlobalRead need to be 2 if UnrollLoopSwapGlobalReadOrder")
+      if state["PrefetchGlobalRead"] < 2:
+        reject(state, printRejectionReason, "PrefetchGlobalRead need to be >=2 if UnrollLoopSwapGlobalReadOrder")
       if state["ProblemType"]["DataTypeA"].numBytes() != state["ProblemType"]["DataTypeB"].numBytes():
         reject(state, printRejectionReason, "UnrollLoopSwapGlobalReadOrder doesn't support mixed precision.")
 

@@ -2147,6 +2147,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   def noLoadLoopBody( self, kernel, tensorParametersA, tensorParametersB, pack, isOptNLL, isNGLL, NLLfirst, NLLlast, NLLindex=0, NLLnum=1, \
                       useTailloopInNll=False, remainPgr=0):
+    UnrollLoopSwapGlobalReadOrder = kernel["UnrollLoopSwapGlobalReadOrder"]
+    if kernel["DirectToLdsA"] and kernel["DirectToLdsB"] and kernel["PrefetchGlobalRead"] >= 2:
+      # DTLA+DTLB code case, NGLL code is exactly same and no need to consider UnrollLoopSwapGlobalReadOrder
+      UnrollLoopSwapGlobalReadOrder = 0
     if kernel["UseCustomMainLoopSchedule"]:
       module = Module()
       if isNGLL:
@@ -2162,7 +2166,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     pflr     = self.states.numItersPLR
     localWriteEndIter = kernel["LoopIters"] - self.states.numItersPLR - 1
     dsWriteBA = False
-    if isNGLL and kernel["UnrollLoopSwapGlobalReadOrder"] == 1 and NLLindex == 0 and NLLnum == 2:
+    if isNGLL and UnrollLoopSwapGlobalReadOrder == 1 and NLLindex == 0 and NLLnum == 2:
       dsWriteBA = True
 
     # vregSetIdx for DTV GlobalRead
@@ -2212,7 +2216,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self.codes.localWriteA = Module()
           self.codes.localWriteB = Module()
 
-        if not isNGLL or kernel["ExpandPointerSwap"] or kernel["UnrollLoopSwapGlobalReadOrder"] or isDTVAB or \
+        if not isNGLL or kernel["ExpandPointerSwap"] or UnrollLoopSwapGlobalReadOrder or isDTVAB or \
           (kernel["PrefetchGlobalRead"] >= 3 and isNGLL):
           # PAP would have GlobalRead and GlobalInc, but no localWrite
           # Get the perIterGlobalReadCode code for PAP (if PAP=On), else would be empty
@@ -3216,8 +3220,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     loopCopies = 2 if expand else 1
     isDTV = (kernel["DirectToVgprA"] or kernel["DirectToVgprB"])
     isULSGRO = kernel["UnrollLoopSwapGlobalReadOrder"] == 1
+    # DTLA+DTLB+PGR2 case, NGLL code is same and no need to genenerate even/odd NGLL
+    isULSGROForNGLL = isULSGRO and (not (kernel["DirectToLdsA"] and kernel["DirectToLdsB"] and kernel["PrefetchGlobalRead"]>=2))
     needSecondLoop = (not expand) and (isULSGRO or isDTV) # need 2 MainLoop for 2 buffers (PGR1/2)
-    needSecondNGLL = (not expand) and (isULSGRO or isDTV) and kernel["PrefetchGlobalRead"] >= 2# need 2 NGLL for 2 buffers (PGR>=2)
+    needSecondNGLL = (not expand) and (isULSGROForNGLL or isDTV) and kernel["PrefetchGlobalRead"] >= 2# need 2 NGLL for 2 buffers (PGR>=2)
     if loopCopies == 1 and needSecondLoop:
       # force to generate 2 loop bodies
       loopCopies = 2
@@ -3226,6 +3232,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     module.addComment2("Unrolled Loop(s) - Begin")
     module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, beginLabelOnly=False))
 
+    loopLabelToNoGRloopAfterABLoop = Label("NoGRloopAfterABLoop", "" )
     if needSecondLoop and kernel["PrefetchGlobalRead"] >= 2:
       # force to generate 2 loop bodies (PGR2 only)
       # TODO: unify 2 loop bodies code generation with else case
@@ -3236,14 +3243,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       isDTVGRSecondBuf = True if isDTV else False
       module.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, 0, loopCopies, False , dsWriteBA=dsWriteBA, isDTVGRSecondBuf=isDTVGRSecondBuf, skipClose=True))
 
-      loopLabelToNoGRloopAfterABLoop = Label("NoGRloopAfterABLoop", "" )
       loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
       module.add(SSubU32(dst=loopCounter, src0=loopCounter, \
                          src1=1, \
                          comment="dec counterL"))
+      endCounter = kernel["PrefetchGlobalRead"]
       module.add(SCmpLeU32(src0=loopCounter, \
-                           src1=hex(2), \
-                          comment="counteL<=2"))
+                           src1=hex(endCounter), \
+                          comment="counteL<=%d"%endCounter))
       module.add(SCBranchSCC1(labelName=loopLabelToNoGRloopAfterABLoop.getLabelName(), comment="exit LoopL" ))
       # grBA check for UnrollLoopSwapGlobalReadOrder
       grBA = True if isULSGRO else False
@@ -3284,6 +3291,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if kernel["ExpertSchedulingMode"] > 0:
           module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="enable hardware dependency checking"))
         NGLLindex += 1
+      elif isULSGRO and not isULSGROForNGLL and remainPgr == kernel["PrefetchGlobalRead"]-1:
+        # generate loopLabelToNoGRloopAfterABLoop at first iteration of remainPgr
+        # This is to jump to the same NGLL from even and odd main loop
+        module.add(loopLabelToNoGRloopAfterABLoop)
       module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=True, pack=pack, NLLindex=NGLLindex, NLLnum=NGLLnum, \
                                  remainPgr=remainPgr))
 

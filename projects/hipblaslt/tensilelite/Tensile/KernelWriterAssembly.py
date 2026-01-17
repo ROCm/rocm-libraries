@@ -7480,13 +7480,14 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SSubU32(dst=loopCounter, src0=loopCounter, src1=1, comment="dec counter%s"%(loopChar)))
 
         toPGR1 = Label(self.labels.getName("toPGR1"), "")
-        if remainPgr >= 2:
+        if kernel["PrefetchGlobalRead"]-1 > remainPgr >= 2:
+          # generate early exit in NGLL (no need for the first NGLL(remainPgr==PGR-1))
           module.add(SCmpEQU32(
               src0=loopCounter, \
               src1=hex(1), \
               comment="LoopCounter%s == 1"%(loopChar) ))
           module.add(SCBranchSCC1(labelName=toPGR1.getLabelName(), comment="PGR>=3 in NGLL. Only 1 loop, toPGR1"))
-        else:
+        elif remainPgr <= 1:
           if isNotLast:
             module.add(SBranch(labelName=toPGR1.getLabelName(), comment="Branch to toPGR1"))
           else:

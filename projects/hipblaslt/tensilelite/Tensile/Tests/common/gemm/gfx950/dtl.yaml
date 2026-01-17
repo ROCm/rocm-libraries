@@ -263,7 +263,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - SourceSwap: [1]#[0, 1]
         - LocalReadVectorWidth: [8]
-        - DirectToLds: [1, 2]
+        - DirectToLds: [1]
         - AssertSummationElementMultiple: [1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -486,7 +486,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - SourceSwap: [1]#[0, 1]
         - LocalReadVectorWidth: [8]
-        - DirectToLds: [1, 2]
+        - DirectToLds: [1]
         - AssertSummationElementMultiple: [1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -605,7 +605,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - SourceSwap: [1]#[0, 1]
         - LocalReadVectorWidth: [8]
-        - DirectToLds: [1, 2]
+        - DirectToLds: [1]
         - AssertSummationElementMultiple: [1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -965,7 +965,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - DirectToLds: [1, 2, 3]
+        - DirectToLds: [1]
         - LdsPadA: [8]
         - LdsPadB: [8]
         - 1LDSBuffer: [-1]
@@ -1170,6 +1170,7 @@ BenchmarkProblems:
         - SwapGlobalReadOrder: [0, 1]
         - TailloopInNll: [0, 1]
         - DtlPlusLdsBuf: [0, 1]
+        - UnrollLoopSwapGlobalReadOrder: [0, 1]
         - WorkGroup:
            - [64, 4, 1]
            - [32, 4, 2]
