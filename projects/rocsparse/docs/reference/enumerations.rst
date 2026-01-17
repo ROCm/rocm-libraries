@@ -50,6 +50,27 @@ rocsparse_fill_mode
 
 .. doxygenenum:: rocsparse_fill_mode
 
+.. _rocsparse_batchtype_:
+
+rocsparse_batchtype
+-------------------
+
+.. doxygenenum:: rocsparse_batchtype
+
+.. _rocsparse_batchstorage_:
+
+rocsparse_batchstorage
+----------------------
+
+.. doxygenenum:: rocsparse_batchstorage
+
+.. _rocsparse_idvec_prop_:
+
+rocsparse_idvec_prop
+--------------------
+
+.. doxygenenum:: rocsparse_idvec_prop
+
 .. _rocsparse_storage_mode_:
 
 rocsparse_storage_mode
