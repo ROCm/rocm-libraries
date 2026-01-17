@@ -646,6 +646,9 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, MetadataEncodingValidation_AllCKInstances_
 
 TEST_F(GPU_Conv3DKernelTuningAI_FP32, FullSolverPathway_Wrw_Test)
 {
+#if !MIOPEN_USE_COMPOSABLEKERNEL
+    GTEST_SKIP() << "Composable Kernel is disabled, skipping CK-dependent solver test";
+#else
     auto problem =
         GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
     ConvHipImplicitGemm3DGroupWrwXdlops solver;
@@ -658,10 +661,14 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, FullSolverPathway_Wrw_Test)
     ASSERT_FALSE(solution.construction_params.empty());
     ASSERT_TRUE(solution.invoker_factory);
     ASSERT_GE(solution.workspace_sz, 0u);
+#endif
 }
 
 TEST_F(GPU_Conv3DKernelTuningAI_FP32, FullSolverPathway_Fwd_Test)
 {
+#if !MIOPEN_USE_COMPOSABLEKERNEL
+    GTEST_SKIP() << "Composable Kernel is disabled, skipping CK-dependent solver test";
+#else
     auto problem = GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::Forward);
     ConvHipImplicitGemm3DGroupFwdXdlops solver;
 
@@ -673,10 +680,14 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, FullSolverPathway_Fwd_Test)
     ASSERT_FALSE(solution.construction_params.empty());
     ASSERT_TRUE(solution.invoker_factory);
     ASSERT_GE(solution.workspace_sz, 0u);
+#endif
 }
 
 TEST_F(GPU_Conv3DKernelTuningAI_FP32, FullSolverPathway_Bwd_Test)
 {
+#if !MIOPEN_USE_COMPOSABLEKERNEL
+    GTEST_SKIP() << "Composable Kernel is disabled, skipping CK-dependent solver test";
+#else
     auto problem =
         GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardData);
     ConvHipImplicitGemm3DGroupBwdXdlops solver;
@@ -689,6 +700,7 @@ TEST_F(GPU_Conv3DKernelTuningAI_FP32, FullSolverPathway_Bwd_Test)
     ASSERT_FALSE(solution.construction_params.empty());
     ASSERT_TRUE(solution.invoker_factory);
     ASSERT_GE(solution.workspace_sz, 0u);
+#endif
 }
 
 // ------------------- Cross-Platform Diagnostic Tests -------------------
