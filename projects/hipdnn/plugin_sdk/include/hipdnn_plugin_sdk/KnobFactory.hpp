@@ -20,8 +20,6 @@ namespace hipdnn_plugin_sdk
 
 #define DEFINE_HIPDNN_KNOB(NAME) DEFINE_HIPDNN_KNOB_NAMED(NAME, #NAME)
 
-DEFINE_HIPDNN_KNOB_NAMED(benchmarking, "global.benchmarking")
-
 class KnobFactory
 {
 public:
