@@ -4738,10 +4738,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
         vgprIdx -= self.states.b.numVgprLocalReadAddr
 
     if self.states.IncLdsBufSwitch:
+      # Need backup for the first LocalReadAddr only (others will be calculated from the first one)
       self.states.a.startVgprLocalReadAddrOrig = vgprIdx
-      vgprIdx += self.states.a.numVgprLocalReadAddr
+      vgprIdx += 1 if self.states.a.numVgprLocalReadAddr > 0 else 0
       self.states.b.startVgprLocalReadAddrOrig = vgprIdx
-      vgprIdx += self.states.b.numVgprLocalReadAddr
+      vgprIdx += 1 if self.states.b.numVgprLocalReadAddr > 0 else 0
 
     # ----------------------------
     # TODO: alignment hack, figure out a better solution
@@ -5758,7 +5759,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # Local Read Addresses: Declare Addresses A/B
   ##############################################################################
   @abc.abstractmethod
-  def lraAddressesInitFor3LDSBlk(self, kernel, tP):
+  def lraAddressesInitFor3LDSBlk(self, kernel, tP, initSreg, initVreg):
     return ""
 
   ##############################################################################

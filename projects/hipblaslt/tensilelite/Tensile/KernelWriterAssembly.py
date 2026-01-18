@@ -606,8 +606,6 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.IncLdsBufSwitch:
       module.add(self.defineSgpr("LDSBufferReadInc", 1))
       module.add(self.defineSgpr("LDSBufferWriteInc", 1))
-      self.addSgprVarToPool("WrapUA")
-      self.addSgprVarToPool("WrapUB")
 
 
     needPackK16  = False
@@ -9963,12 +9961,11 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SCMovB32(
           dst=sgpr("LDSBufferReadInc"), \
           src=0, comment="LDSBufferReadInc loop back to 0"))
-      for i in range(0,numLra):
-        module.add(VAddU32(
-          dst=vgpr("LocalReadAddr%s+%u"%(tc,i)), \
-          src0=sgpr("LDSBufferReadInc"), \
-          src1=vgpr("LocalReadAddrOrig%s+%u"%(tc,i)), \
-          comment="LocalReadAddr = Inc + Orig"))
+      module.add(VAddU32(
+        dst=vgpr("LocalReadAddr%s"%(tc)), \
+        src0=sgpr("LDSBufferReadInc"), \
+        src1=vgpr("LocalReadAddrOrig%s"%(tc)), \
+        comment="LocalReadAddr = Inc + Orig"))
     elif internalPointerSwap or kernel["StoreSwapAddr"]:
       if not kernel["StoreSwapAddr"]:
         tP["localReadSwapByteOffset"] = 0 if tP["localReadSwapByteOffset"] else kernel["LdsOffsetA_Blk"]
@@ -10028,11 +10025,10 @@ class KernelWriterAssembly(KernelWriter):
         dst=sgpr("LDSBufferReadInc"), \
         src=0, \
         comment="reset incSgpr"))
-      for i in range(0,numLra):
-        module.add(VMovB32(
-          dst=vgpr("LocalReadAddr%s+%u"%(tc,i)), \
-          src=vgpr("LocalReadAddrOrig%s+%u"%(tc,i)), \
-          comment="set LocalReadAddrOrig to LocalReadAddr"))
+      module.add(VMovB32(
+        dst=vgpr("LocalReadAddr%s"%(tc)), \
+        src=vgpr("LocalReadAddrOrig%s"%(tc)), \
+        comment="set LocalReadAddrOrig to LocalReadAddr"))
     elif kernel["StoreSwapAddr"]:
       # Reset offset, by picking smaller of the two
       tmpvgpr = self.vgprPool.checkOut(1) # contains other offsets
