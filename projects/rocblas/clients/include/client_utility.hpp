@@ -116,8 +116,10 @@ class rocblas_local_handle
     void*          m_memory{nullptr};
     hipStream_t    m_graph_stream{nullptr};
     hipStream_t    m_old_stream{nullptr};
-    std::string    m_hipblaslt_saved_status = "";
+    std::string    m_hipblaslt_saved_status    = "";
+    std::string    m_stream_order_saved_status = "";
     bool           m_hipblaslt_env_set{false};
+    bool           m_stream_order_env_set{false};
 
     void rocblas_stream_begin_capture();
     void rocblas_stream_end_capture();

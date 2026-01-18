@@ -31,6 +31,9 @@
 #include <limits>
 #include <sstream>
 
+SchemeTreeVec EmptySchemeTreeVec;
+SchemeVec     EmptySchemeVec;
+
 struct rocfft_mp_request_t
 {
 #ifdef ROCFFT_MPI_ENABLE
