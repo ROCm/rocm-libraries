@@ -328,7 +328,7 @@ validParameters = { # we need to make sure this matches develop
     # This pushes lwStart below and ends up with very less room for GR scheduling.
     # For mid/small MT size case, we have chance to improve Global Read scheduling by putting more GRInc instructions
     # regardless of miLatencyLeft (overhead of GR inst is often more than the latency of GR inc inst)
-    "MinGRIncPerMfma": [-1] + list(range(2,7)),
+    "MinGRIncPerMfma": [-1] + list(range(1,10)),
     # Interleave alpha scale calculation with beta loads and address calcs - rather
     # than as a separate block of instructions
     "InterleaveAlpha": [0, 1],

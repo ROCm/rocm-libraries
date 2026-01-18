@@ -2872,14 +2872,15 @@ class Solution(collections.abc.Mapping):
 
     # number of minimum GR inc inst per MFMA
     # default 1
-    # Set at least 2 for gfx950
-    # For smaller MT + MI16 case, set 3 (for gfx950)
+    # Set at least 2 for gfx950 + MI16 + smaller MT case
     if state["MinGRIncPerMfma"] == -1:
       state["MinGRIncPerMfma"] = 1
       if isa == (9, 5, 0):
-        state["MinGRIncPerMfma"] = 2
-        if state["EnableMatrixInstruction"] and state["MatrixInstK"] == 16 and state["MatrixInstK"] == 1 and numMFMA<=32:
-          state["MinGRIncPerMfma"] = 3
+        if state["EnableMatrixInstruction"] and state["MatrixInstM"] == 16 and state["MatrixInstK"] == 1:
+          if numMFMA<=32:
+            state["MinGRIncPerMfma"] = 2
+          if numMFMA<=16:
+            state["MinGRIncPerMfma"] = 3
 
     # calculate ldsPad
     state["LdsPadA"], state["LdsPadB"], state["LdsPadMetadata"] = calcLdsPad(state["LocalReadVectorWidth"], isaInfoMap)
@@ -2966,9 +2967,9 @@ class Solution(collections.abc.Mapping):
         numLdsBlk -= 1
         # re-calculate LDS size
         ldsNumBytesAB = (numLdsBlk - 2) * offsetBlk + state["LdsOffsetB_Blk"] + ldsNumBytesB
-        # reject for PGR2
+        # continue with StoreSwapAddr for PGR2
         if state["PrefetchGlobalRead"] == 2:
-          reject(state, printRejectionReason, "PGR=2 + DtlPlusLdsBuf exceed LDS max size")
+          state["StoreSwapAddr"] = True
         # unset DtlPlusLdsBuf
         state["DtlPlusLdsBuf"] = 0
     else:
