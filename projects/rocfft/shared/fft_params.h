@@ -2305,28 +2305,71 @@ public:
         scale_factor = 1 / params_forward.scale_factor;
     }
 
-    // prepare for multi-GPU transform.  cpu_input has contiguous
-    // input on the host, ibuffer has device input, which can be
-    // discarded if it's turned into multi-GPU bricks.  pibuffer,
-    // pobuffer are the pointers that will be passed to the FFT
-    // library's "execute" API.
-    virtual void multi_gpu_prepare(std::vector<hostbuf>& cpu_input,
-                                   std::vector<gpubuf>&  ibuffer,
-                                   std::vector<void*>&   pibuffer,
-                                   std::vector<void*>&   pobuffer)
+    /**
+     * @brief initialize the I/O device buffers as required for multi-device
+     * transforms described by this object. Device buffers are determined (created
+     * and allocated, if needed), and input buffers are data-initialized using the
+     * provided host-residing (resp. device-residing) reference data for the
+     * `rocfft_params` (resp. `hipfft_params`) derived class.
+     *
+     * TODO: unify data-initialization logic across derived classes and make all arguments
+     * relevant in all cases (remove ignore ones).
+     * 
+     * @param[in] input_data_host vector of (at least) one host buffer containing the
+     * input-initialization data to be considered for data-initialization of the
+     * device input buffers (this is unused by `hipfft_params` objects). If used,
+     * the data layout of `input_data_host[0]` must be consistent with `cpu_params.istride`,
+     * `cpu_params.idist`, etc. wherein `cpu_params = this->make_params_for_reference_cpu()`.
+     * @param[in] input_data_gpu vector of (at least) one device buffer containing the
+     * input-initialization data to be considered for data-initialization of the
+     * device input buffers (this is unused by `rocfft_params` objects). If used,
+     * the data layout of `input_data_gpu[0]` must be consistent with `this->istride`,
+     * `this->idist`, etc.
+     * @param[out] mgpu_ibuffers vector of raw pointers to input device allocations as
+     * needed for the multi-device transform that this object describes. The content
+     * of these device allocations is initialized with the (transposed) content of
+     * `input_data_host` (resp. `input_data_gpu`) by `rocfft_params` (resp. `hipfft_params`)
+     * objects. Upon return, the data layout in these device allocations is
+     * - as described by the corresponding input brick's for `rocfft_params` objects;
+     * - as implicitly-defined for `hipfft_params` objects.
+     * @param[out] mgpu_obuffers vector of raw pointers to output device allocations as
+     * needed for the multi-device transform that this object describes.
+     */
+    virtual void multi_gpu_prepare(std::vector<hostbuf>& input_data_host,
+                                   std::vector<gpubuf>&  input_data_gpu,
+                                   std::vector<void*>&   mgpu_ibuffers,
+                                   std::vector<void*>&   mgpu_obuffers)
     {
     }
 
-    // finalize multi-GPU transform.  pobuffers are the pointers
-    // provided to the FFT library's "execute" API.  obuffer is the
-    // normal GPU buffer that is used for single-device FFTs.
-    // gpu_output is the host buffer where transform output needs to
-    // go for validation
-    // Field is distributed among ranks and then among the number
-    // of GPUs per rank (which defaults to 1).
-    virtual void multi_gpu_finalize(std::vector<hostbuf>& gpu_output,
-                                    std::vector<gpubuf>&  obuffer,
-                                    std::vector<void*>&   pobuffer)
+    /**
+     * @brief gather the results of a multi-device transform to a unique host-residing
+     * buffer for `rocfft_params` objects (resp. device-residing buffer for
+     * `hipfft_params` objects).
+     * 
+     * TODO: unify data-gathering logic across derived classes and make all arguments
+     * relevant in all cases (remove ignore ones).
+     * 
+     * @param[out] gathered_results_host vector of (at least) one host buffer (ignored by
+     * `hipfft_params` objects). If not ignored, `gathered_results_host[0]` contains the
+     * gathered output data of the multi-device transform upon return.
+     * @param[out] gathered_results_device vector of (at least) one device buffer (ignored
+     * by `rocfft_params` objects). If not ignored, `gathered_results_device[0]` contains
+     * the gathered output data of the multi-device transform upon return.
+     * @param[in] mgpu_obuffers vector of raw pointers to output device allocations
+     * considered by the (previously-executed) multi-device transform described by this
+     * object.
+     * 
+     * Note 1: whichever gathering buffer that is considered (`gathered_results_host[0]`
+     * or `gathered_results_device[0]`) must be large enough for containing the
+     * gathered results when passed to this function: this function does NOT resize it.
+     * Note 2: the data layout in the considered gathered results is defined
+     * by the calling object's output data layout parameter, i.e., defined by
+     * `this->ostride`, `this->odist`, `this->otype`, etc.
+     */
+    virtual void multi_gpu_finalize(std::vector<hostbuf>& gathered_results_host,
+                                    std::vector<gpubuf>&  gathered_results_device,
+                                    std::vector<void*>&   mgpu_obuffers)
     {
     }
 
@@ -2604,6 +2647,36 @@ public:
             abort();
         }
 #endif
+    }
+
+    fft_params make_params_for_reference_cpu() const
+    {
+        fft_params ret;
+        ret.length         = length;
+        ret.precision      = precision;
+        ret.placement      = fft_placement_notinplace;
+        ret.transform_type = transform_type;
+        ret.nbatch         = nbatch;
+        ret.itype          = is_real() ? (is_forward() ? fft_array_type_real
+                                                       : fft_array_type_hermitian_interleaved)
+                                       : fft_array_type_complex_interleaved;
+        ret.otype          = is_real() ? (is_inverse() ? fft_array_type_real
+                                                       : fft_array_type_hermitian_interleaved)
+                                       : fft_array_type_complex_interleaved;
+        ret.istride
+            = default_strides(transform_type, fft_placement_notinplace, fft_io::fft_io_in, length);
+        ret.ostride
+            = default_strides(transform_type, fft_placement_notinplace, fft_io::fft_io_out, length);
+        ret.idist = default_distance(
+            transform_type, fft_placement_notinplace, fft_io::fft_io_in, length, nbatch);
+        ret.odist = default_distance(
+            transform_type, fft_placement_notinplace, fft_io::fft_io_out, length, nbatch);
+        ret.compute_isize();
+        ret.compute_osize();
+
+        // other ret's members should be irrelevant for cpu reference calculations
+        // (default values)
+        return ret;
     }
 };
 

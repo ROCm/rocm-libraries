@@ -836,10 +836,10 @@ public:
     }
 
     // call the hipFFT APIs to distribute data to multiple GPUs
-    void multi_gpu_prepare(std::vector<hostbuf>& cpu_input,
-                           std::vector<gpubuf>&  ibuffer,
-                           std::vector<void*>&   pibuffer,
-                           std::vector<void*>&   pobuffer) override
+    void multi_gpu_prepare(std::vector<hostbuf>& /* unused */,
+                           std::vector<gpubuf>& ibuffer,
+                           std::vector<void*>&  pibuffer,
+                           std::vector<void*>&  pobuffer) override
     {
         if(multiGPU <= 1)
             return;
@@ -919,9 +919,9 @@ public:
     }
 
     // call the hipFFT APIs to gather the data back from the multiple GPUs
-    virtual void multi_gpu_finalize(std::vector<hostbuf>& gpu_output,
-                                    std::vector<gpubuf>&  obuffer,
-                                    std::vector<void*>&   pobuffer) override
+    void multi_gpu_finalize(std::vector<hostbuf>& /* unused*/,
+                            std::vector<gpubuf>& obuffer,
+                            std::vector<void*>&  pobuffer) override
     {
         if(multiGPU <= 1)
             return;
