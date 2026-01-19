@@ -23,6 +23,7 @@
  * SOFTWARE.
  *
  */
+#include "miopen_cstdint.hpp"
 
 #ifndef MIOPEN_USE_FP32
 #define MIOPEN_USE_FP32 0
