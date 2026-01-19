@@ -125,10 +125,9 @@ struct MatmulSignatureKey
               hipdnn_data_sdk::data_objects::DataType BDataTypeEnum,
               hipdnn_data_sdk::data_objects::DataType CDataTypeEnum,
               hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum>
-    static void addPlanBuilder(
-        std::unordered_map<MatmulSignatureKey,
-                           std::unique_ptr<IGraphNodePlanBuilder>,
-                           MatmulSignatureKey>& map)
+    static void addPlanBuilder(std::unordered_map<MatmulSignatureKey,
+                                                  std::unique_ptr<IGraphNodePlanBuilder>,
+                                                  MatmulSignatureKey>& map)
     {
         map[MatmulSignatureKey(ADataTypeEnum, BDataTypeEnum, CDataTypeEnum, ComputeDataTypeEnum)]
             = std::make_unique<MatmulPlanBuilder<ADataTypeEnum,

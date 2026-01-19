@@ -17,13 +17,8 @@ using namespace hipdnn_plugin_sdk;
 
 TEST(TestMatmulCpuGraphExecutor, MatmulFloatExecutesAndMatchesReference)
 {
-    auto builder = createValidMatmulGraph({4, 8},
-                                          {8, 1},
-                                          {8, 5},
-                                          {5, 1},
-                                          {4, 5},
-                                          {5, 1},
-                                          DataType::FLOAT);
+    auto builder
+        = createValidMatmulGraph({4, 8}, {8, 1}, {8, 5}, {5, 1}, {4, 5}, {5, 1}, DataType::FLOAT);
 
     GraphWrapper graphWrap(builder.GetBufferPointer(), builder.GetSize());
 
@@ -40,8 +35,10 @@ TEST(TestMatmulCpuGraphExecutor, MatmulFloatExecutesAndMatchesReference)
     auto aTensorAttrT = unpackTensorAttributes(*graphWrap.getTensorMap().at(1));
     auto bTensorAttrT = unpackTensorAttributes(*graphWrap.getTensorMap().at(2));
 
-    auto shallowA = createShallowTensor<float>(aTensorAttrT, tensorBundle.tensors.at(1)->rawHostData());
-    auto shallowB = createShallowTensor<float>(bTensorAttrT, tensorBundle.tensors.at(2)->rawHostData());
+    auto shallowA
+        = createShallowTensor<float>(aTensorAttrT, tensorBundle.tensors.at(1)->rawHostData());
+    auto shallowB
+        = createShallowTensor<float>(bTensorAttrT, tensorBundle.tensors.at(2)->rawHostData());
 
     CpuFpReferenceMatmul::matmul<float, float, float, float>(*shallowA, *shallowB, cRef);
 
@@ -58,13 +55,8 @@ TEST(TestMatmulCpuGraphExecutor, MatmulBatchBroadcastDivisibleExecutesAndMatches
     // A: [2, M=4, K=8]
     // B: [1, K=8, N=5] (broadcast along batch)
     // C: [2, M=4, N=5]
-    auto builder = createValidMatmulGraph({2, 4, 8},
-                                          {32, 8, 1},
-                                          {1, 8, 5},
-                                          {40, 5, 1},
-                                          {2, 4, 5},
-                                          {20, 5, 1},
-                                          DataType::FLOAT);
+    auto builder = createValidMatmulGraph(
+        {2, 4, 8}, {32, 8, 1}, {1, 8, 5}, {40, 5, 1}, {2, 4, 5}, {20, 5, 1}, DataType::FLOAT);
 
     GraphWrapper graphWrap(builder.GetBufferPointer(), builder.GetSize());
 
