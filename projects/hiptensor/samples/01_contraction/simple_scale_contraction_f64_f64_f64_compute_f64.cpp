@@ -30,7 +30,7 @@ int main(int argc, char* argv[])
     /***************************************
     * Check device support                 *
     **************************************/
-    if(!isF64Supported() || !isF64MatrixCoreSupported())
+    if(!isF64F64MatrixCoreSupported())
     {
         std::cout << "unsupported host device" << std::endl;
         exit(EXIT_FAILURE);

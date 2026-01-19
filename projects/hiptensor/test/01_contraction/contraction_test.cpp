@@ -62,27 +62,48 @@ namespace hiptensor
         switch(computeType)
         {
         case HIPTENSOR_COMPUTE_DESC_32F:
-            return (isF32MatrixCoreSupported()
-                    && ((isF16Supported() && isDataType16Bits(dataType))
-                        || (isF32Supported() && isDataType32Bits(dataType))
-                        || (isF64Supported() && isDataType64Bits(dataType)))
-                    && !isDataTypeComplex(dataType));
+            if(isDataType16Bits(dataType))
+            {
+                return isF16F32MatrixCoreSupported() && !isDataTypeComplex(dataType);
+            }
+            else if(isDataType32Bits(dataType))
+            {
+                return isF32F32MatrixCoreSupported() && !isDataTypeComplex(dataType);
+            }
+            return false;
         case HIPTENSOR_COMPUTE_DESC_64F:
-            return (isF64MatrixCoreSupported() && (isF64Supported() && isDataType64Bits(dataType))
-                    && !isDataTypeComplex(dataType));
+            if(isDataType64Bits(dataType))
+            {
+                return isF64F64MatrixCoreSupported() && !isDataTypeComplex(dataType);
+            }
+            return false;
         case HIPTENSOR_COMPUTE_DESC_16F:
         case HIPTENSOR_COMPUTE_DESC_16BF:
-            return (isF16MatrixCoreSupported() && (isF32Supported() && isDataType32Bits(dataType))
-                    && !isDataTypeComplex(dataType));
+            if(isDataType16Bits(dataType))
+            {
+                return isF16F16MatrixCoreSupported() && !isDataTypeComplex(dataType);
+            }
+            else if(isDataType32Bits(dataType))
+            {
+                return isF32F16MatrixCoreSupported() && !isDataTypeComplex(dataType);
+            }
+            return false;
         case HIPTENSOR_COMPUTE_DESC_C32F:
-            return (isF32MatrixCoreSupported()
-                    && ((isF16Supported() && isDataType16Bits(dataType))
-                        || (isF32Supported() && isDataType32Bits(dataType))
-                        || (isF64Supported() && isDataType64Bits(dataType)))
-                    && isDataTypeComplex(dataType));
+            if(isDataType16Bits(dataType))
+            {
+                return isF16F32MatrixCoreSupported() && isDataTypeComplex(dataType);
+            }
+            else if(isDataType32Bits(dataType))
+            {
+                return isF32F32MatrixCoreSupported() && isDataTypeComplex(dataType);
+            }
+            return false;
         case HIPTENSOR_COMPUTE_DESC_C64F:
-            return (isF64MatrixCoreSupported() && (isF64Supported() && isDataType64Bits(dataType))
-                    && isDataTypeComplex(dataType));
+            if(isDataType64Bits(dataType))
+            {
+                return isF64F64MatrixCoreSupported() && isDataTypeComplex(dataType);
+            }
+            return false;
         default:
             return false;
         }
@@ -286,9 +307,7 @@ namespace hiptensor
                     || (computeType == HIPTENSOR_COMPUTE_DESC_C32F)
                     || (computeType == HIPTENSOR_COMPUTE_DESC_C64F));
 
-        // FIXME
-        //mRunFlag &= checkDevice(DDataType, computeType);
-        mRunFlag = true;
+        mRunFlag &= checkDevice(DDataType, computeType);
 
         if(!mRunFlag)
         {

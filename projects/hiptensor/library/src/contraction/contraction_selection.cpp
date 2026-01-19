@@ -256,42 +256,38 @@ namespace hiptensor
             auto   rank      = getRank(a_ms_ks_strides);
             size_t unique_id = 0;
 
-            // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            // FIXME: Set proper unique ids here. DO NOT MERGE AS IS
-            // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
             {
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 12241437837959333440ull;
+                    unique_id = 16046312426561516674ull;
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 12241437837959333440ull;
+                    unique_id = 5651259715737336589ull;
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 12241437837959333440ull;
+                    unique_id = 5651259715737336589ull;
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 12241437837959333440ull;
+                    unique_id = 16046312426561516674ull;
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 12241437837959333440ull;
+                    unique_id = 17447143014665713887ull;
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 12241437837959333440ull;
+                    unique_id = 16046312426561516674ull;
                 }
             }
             else
@@ -299,32 +295,32 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 2317674114976786230ull;
+                    unique_id = 9021620837589482599ull;
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 2317674114976786230ull;
+                    unique_id = 6053663486226699267ull;
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 2317674114976786230ull;
+                    unique_id = 6053663486226699267ull;
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 12241437837959333440ull;
+                    unique_id = 6053663486226699267ull;
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 12241437837959333440ull;
+                    unique_id = 10097482900535040320ull;
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 11152060091307708334ull;
+                    unique_id = 6053663486226699267ull;
                 }
             }
 
@@ -372,84 +368,71 @@ namespace hiptensor
             auto   rank      = getRank(a_ms_ks_strides);
             size_t unique_id = 0;
 
-            // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            // FIXME: Set proper unique ids here. DO NOT MERGE AS IS
-            // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
             {
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 872672380373754190ull;
+                    unique_id = 16046312426561516674ull;
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 872672380373754190ull;
+                    unique_id = 16046312426561516674ull;
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 16476891743625221381ull;
+                    unique_id = 5651259715737336589ull;
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 16476891743625221381ull;
+                    unique_id = 16046312426561516674ull;
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 16476891743625221381ull;
+                    unique_id = 17447143014665713887ull;
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 16476891743625221381ull;
+                    unique_id = 16046312426561516674ull;
                 }
             }
             else
             {
-                bool dim1 = std::count(a_ms_ks_lengths.cbegin(), a_ms_ks_lengths.cend(), 1)
-                            || std::count(b_ns_ks_lengths.cbegin(), b_ns_ks_lengths.cend(), 1);
-
-                // rank2 dim1 case
-                if(rank == 2 && dim1)
-                {
-                    unique_id = 58303249112943560ull;
-                }
                 // m1n1k1
-                else if(rank == 1)
-                // if (rank == 1 || (rank == 1 && (a_ms_ks_lengths[3] == 1 || b_ns_ks_lengths[3] == 1)))
+                if(rank == 1)
                 {
-                    unique_id = 58303249112943560ull;
+                    unique_id = 6053663486226699267ull;
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 2303552229010777601ull;
+                    unique_id = 6053663486226699267ull;
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 58303249112943560ull;
+                    unique_id = 6053663486226699267ull;
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 58303249112943560ull;
+                    unique_id = 6053663486226699267ull;
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 58303249112943560ull;
+                    unique_id = 10097482900535040320ull;
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 2303552229010777601ull;
+                    unique_id = 6053663486226699267ull;
                 }
             }
 
@@ -464,7 +447,6 @@ namespace hiptensor
             }
         }
     };
-
 
     template <>
     struct ActorCriticSelection<_Float16,
@@ -731,42 +713,38 @@ namespace hiptensor
             auto   rank      = getRank(a_ms_ks_strides);
             size_t unique_id = 0;
 
-            // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            // FIXME: Set proper unique ids here. DO NOT MERGE AS IS
-            // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
             {
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 15452087623356707112ull;
+                    unique_id = 8024078432480148721ull;
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 15452087623356707112ull;
+                    unique_id = 12894894255582471185ull;
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 15452087623356707112ull;
+                    unique_id = 12894894255582471185ull;
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 15452087623356707112ull;
+                    unique_id = 12894894255582471185ull;
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 15452087623356707112ull;
+                    unique_id = 12894894255582471185ull;
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 15452087623356707112ull;
+                    unique_id = 12894894255582471185ull;
                 }
             }
             else
@@ -774,32 +752,32 @@ namespace hiptensor
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 9967477699864925937ull;
+                    unique_id = 9333825291905548205ull;
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 14071475272156866885ull;
+                    unique_id = 17760782256758115565ull;
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 14071475272156866885ull;
+                    unique_id = 9333825291905548205ull;
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 15452087623356707112ull;
+                    unique_id = 13058678487168027ull;
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 15452087623356707112ull;
+                    unique_id = 9333825291905548205ull;
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 8307633941691601884ull;
+                    unique_id = 9333825291905548205ull;
                 }
             }
 
@@ -847,83 +825,71 @@ namespace hiptensor
             auto   rank      = getRank(a_ms_ks_strides);
             size_t unique_id = 0;
 
-            // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            // FIXME: Set proper unique ids here. DO NOT MERGE AS IS
-            // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
             auto& options = HiptensorOptions::instance();
             if(options->isColMajorStrides())
             {
                 // m1n1k1
                 if(rank == 1)
                 {
-                    unique_id = 9344798352708026060ull;
+                    unique_id = 8024078432480148721ull;
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 9344798352708026060ull;
+                    unique_id = 12894894255582471185ull;
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 9344798352708026060ull;
+                    unique_id = 12894894255582471185ull;
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 9344798352708026060ull;
+                    unique_id = 12894894255582471185ull;
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 9344798352708026060ull;
+                    unique_id = 12894894255582471185ull;
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 9344798352708026060ull;
+                    unique_id = 12894894255582471185ull;
                 }
             }
             else
             {
-                bool dim1 = std::count(a_ms_ks_lengths.cbegin(), a_ms_ks_lengths.cend(), 1)
-                            || std::count(b_ns_ks_lengths.cbegin(), b_ns_ks_lengths.cend(), 1);
-
-                // rank2 dim1 case
-                if(rank == 2 && dim1)
-                {
-                    unique_id = 16299024124514902126ull;
-                }
                 // m1n1k1
-                else if(rank == 1)
+                if(rank == 1)
                 {
-                    unique_id = 378062791888302715ull;
+                    unique_id = 9333825291905548205ull;
                 }
                 // m2n2k2
                 else if(rank == 2)
                 {
-                    unique_id = 76527422265261696ull;
+                    unique_id = 17760782256758115565ull;
                 }
                 // m3n3k3
                 else if(rank == 3)
                 {
-                    unique_id = 378062791888302715ull;
+                    unique_id = 9333825291905548205ull;
                 }
                 // m4n4k4
                 else if(rank == 4)
                 {
-                    unique_id = 378062791888302715ull;
+                    unique_id = 13058678487168027ull;
                 }
                 // m5n5k5
                 else if(rank == 5)
                 {
-                    unique_id = 378062791888302715ull;
+                    unique_id = 9333825291905548205ull;
                 }
                 // m6n6k6
                 else if(rank == 6)
                 {
-                    unique_id = 378062791888302715ull;
+                    unique_id = 9333825291905548205ull;
                 }
             }
 
