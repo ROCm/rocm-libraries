@@ -20,7 +20,8 @@
 #include "MiopenHandleFactory.hpp"
 #include "MiopenLegacyPlugin.hpp"
 
-static const char* pluginName = "miopen_legacy_plugin";
+// Use the engine name constant created by HIPDNN_REGISTER_ENGINE macro
+static const char* pluginName = hipdnn_data_sdk::utilities::MIOPEN_ENGINE_NAME;
 static const char* pluginVersion = "1.0.0";
 
 using namespace hipdnn_plugin_sdk;
@@ -116,36 +117,15 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIdsImpl(int64_t* engineIds,
         }
         throwIfNull(numEngines);
 
-        // For now, we will just return a single engine ID.
-        auto allEngineIds = std::vector<int64_t>({1});
-        if(allEngineIds.size() > std::numeric_limits<uint32_t>::max())
-        {
-            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                        "Number of engines exceeds maximum uint32_t value.");
-        }
+        MiopenContainer::copyEngineIds(engineIds, maxEngines, numEngines);
 
-        if(maxEngines == 0)
+        // Log if we hit the max limit
+        if(maxEngines > 0 && maxEngines < *numEngines)
         {
-            *numEngines = static_cast<uint32_t>(allEngineIds.size());
-        }
-        else
-        {
-            *numEngines = 0;
-            for(auto engineId : allEngineIds)
-            {
-                if(*numEngines == maxEngines)
-                {
-                    *numEngines = static_cast<uint32_t>(allEngineIds.size());
-                    HIPDNN_LOG_INFO("Maximum number of engines reached ({}), ignoring additional "
-                                    "engines, numEngines count: {}",
-                                    maxEngines,
-                                    *numEngines);
-                    break;
-                }
-
-                engineIds[*numEngines] = engineId;
-                (*numEngines)++;
-            }
+            HIPDNN_LOG_INFO("Maximum number of engines reached ({}), ignoring additional "
+                            "engines, total available: {}",
+                            maxEngines,
+                            *numEngines);
         }
 
         LOG_API_SUCCESS(apiName, "numEngines={}", *numEngines);
