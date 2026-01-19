@@ -86,7 +86,7 @@
 //! _CCCL_ASSERT_IMPL_HOST should never be used directly
 #if _CCCL_OS(QNX)
 #  define _CCCL_ASSERT_IMPL_HOST(expression, message) ((void) 0)
-#elif _CCCL_COMPILER(NVRTC) // There is no host standard library in nvrtc
+#elif _CCCL_COMPILER(NVRTC) || defined(_CCCL_COMPILER_HIPRTC) // There is no host standard library in nvrtc
 #  define _CCCL_ASSERT_IMPL_HOST(expression, message) ((void) 0)
 #elif _CCCL_HAS_INCLUDE(<yvals.h>) && _CCCL_COMPILER(MSVC) // MSVC uses _STL_VERIFY from <yvals.h>
 #  include <yvals.h>
@@ -112,10 +112,13 @@ _CCCL_HOST_DEVICE
 //! _CCCL_ASSERT_IMPL_DEVICE should never be used directly
 #if _CCCL_OS(QNX)
 #  define _CCCL_ASSERT_IMPL_DEVICE(expression, message) ((void) 0)
-#elif _CCCL_COMPILER(NVRTC)
+#elif _CCCL_COMPILER(NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
+// NOTE(HIP/AMD): We need to use __assertfail which is defined in hiprtc_runtime, otherwise we get error: 
+// note: candidate function not viable: requires 0 arguments, but 5 were provided
 #  define _CCCL_ASSERT_IMPL_DEVICE(expression, message)    \
     _CCCL_BUILTIN_EXPECT(static_cast<bool>(expression), 1) \
-    ? (void) 0 : __assertfail(message, __FILE__, __LINE__, __func__, sizeof(char))
+    ? (void) 0 : __assertfail()
+    // ? (void) 0 : __assertfail(message, __FILE__, __LINE__, __func__, sizeof(char))
 #elif _CCCL_CUDA_COMPILER(NVCC) //! Use __assert_fail to implement device side asserts
 #  if _CCCL_COMPILER(MSVC)
 #    define _CCCL_ASSERT_IMPL_DEVICE(expression, message)    \
@@ -157,7 +160,7 @@ _CCCL_HOST_DEVICE
 #    define _CCCL_ASSERT(expression, message) ((void) 0)
 #  endif
 #elif _CCCL_HAS_CUDA_COMPILER()
-#  if defined(__CUDA_ARCH__)
+#  if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #    define _CCCL_VERIFY(expression, message) _CCCL_ASSERT_IMPL_DEVICE(expression, message)
 #    define _CCCL_ASSERT(expression, message) _CCCL_ASSERT_DEVICE(expression, message)
 #  else // ^^^ __CUDA_ARCH__ ^^^ / vvv !__CUDA_ARCH__ vvv
