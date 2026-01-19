@@ -18,8 +18,9 @@ namespace miopen_legacy_plugin
 // ============================================================================
 // Engine Registration
 // ============================================================================
-// For plugins that are not yet globally registered, use HIPDNN_REGISTER_ENGINE
-// to register your engine names here. This will:
+// For plugins that are not yet globally registered (by adding a call to
+// HIPDNN_REGISTER_ENGINE() in "hipdnn_data_sdk/utilities/EngineNames.hpp",
+// use HIPDNN_REGISTER_ENGINE to register the engine names here. This will:
 // 1. Create _NAME and _ID constants for the engine
 // 2. Detect hash collisions with other formally-registered engines
 //
