@@ -87,24 +87,27 @@ __include/\<component\>\_version.h.in__
 Note: The `configure_file` cmake function will replace the names between the at signs with matching cmake variables, and the modified file will be installed with the component.
 
 ### 4.2 Version bumps
-Our versioning follows the guidelines of [semantic versioning](https://semver.org/), unless otherwise specified.
+Our versioning follows the guidelines of [semantic versioning](https://semver.org/), unless otherwise specified. The version follows the format `MAJOR.MINOR.PATCH.TWEAK`
 #### Major version
-In major version updates, API breaking changes may be made, and deprecated features may be removed. Updates must coincide with a rocm major release.
+In major version updates, API breaking changes may be made, and deprecated features may be removed. Updates must coincide with a rocm major release. Note that a rocm major release will not require a hipDNN major version bump. However, if any component undergoes a major version bump every component should, ensuring that all components will share a major version.
 
-Process for this TBD
+The process for major version bumps is TBD, however we will be ensuring that breaking changes are deprecated ahead of time to give consumers advanced notice.
+
 #### Minor version
 API and features additions can be added within a minor version bump, but nothing can be removed. If a function or class is no longer needed, it should be marked as deprecated using the deprecated attribute. If appropriate, logging should be added to warn about its usage.
 
-Version bumps should be made with a dedicated PR on an approximately weekly schedule. During a minor version bump, the changelog should be updated with all of the changes that have been made since the last minor version increase. While this will not be in place to start, this process should be eventually automated, likely by parsing conventional commits. (Details to be included in a separate RFC).
+**Note**: There is a distinction between C and C++ APIs. In our C++ APIs, new overloads can be added. In C APIs, overloads are considered a breaking change, and only new functions may be added.
+
+Version bumps should be made with a dedicated PR on an approximately weekly schedule. During a minor version bump, the changelog should be updated with all of the changes that have been made since the last minor version increase. While this will not be in place to start, this process will be eventually automated. Details on how this process will work, and the eventual automation will come in a follow-up RFC describing how we will track changes inside hipDNN.
 
 The exception to this are API and schema changes. If either of these are changed, the minor version must be updated in the same PR.
 
 #### Patch version
 The patch is updated on backward compatible bug fixes.
 
-Version bumps should be handled automatically by the same process and/or automation as minor versions
+Version bumps should be handled using the same process and/or automation as for minor versions
 #### Tweak version
-The patch version is determined by the short commit hash of rocm-libraries, and updates automatically as a result.
+The tweak version is a fourth identifier added to the version determined by the short commit hash of rocm-libraries, and updates automatically as a result.
 
 #### Public dependencies
 
@@ -115,7 +118,7 @@ For any components with dependencies that expose headers from another component,
 - hipdnn_data_sdk version increases from 1.3.5 to 1.4.0
 - hipdnn_plugin_sdk version must be increased to 1.7.0
 
-### 4.3 Requirements
+### 4.3 Version requirements
 
 Excluding components that are compatible within major versions (See section 4.6), the required version for all internal dependencies should be read from the version.json file in that component.
 
@@ -196,7 +199,7 @@ Plugins are responsible for failing gracefully on unsupported schemas. Typically
 #### 4.6.5 Plugin sdk
  Currently the `hipdnn_plugin_sdk` is a single component. This document proposes splitting it into 4 different components each with its own version
 
- | target | headers |
+ | component | headers |
  | -- | -- |
  | plugin_sdk_api | PluginApi.h |
  | plugin_sdk_engine_api.h | EnginePluginApi.h |
