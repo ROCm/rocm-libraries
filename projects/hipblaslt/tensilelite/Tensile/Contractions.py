@@ -678,7 +678,7 @@ class SizeMapping:
                    synchronizerSizePerWG    = synchronizerSizePerWG,
                    nonTemporalA             = d['NonTemporalA'],
                    nonTemporalB             = d['NonTemporalB'],
-                   customMainLoopScheduling = d['UseCustomMainLoopSchedule'],
+                   customMainLoopScheduling = bool(d['UseCustomMainLoopSchedule']),  # trial fix
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):
