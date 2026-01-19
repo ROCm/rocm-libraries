@@ -518,7 +518,7 @@ struct radix_key_codec
             unsigned int mask = (1u << length) - 1;
             return static_cast<unsigned int>(bit_key >> start) & mask;
         }
-
+        public: 
         ROCPRIM_HOST_DEVICE
         static Key twiddle_in(bit_key_type bit_key)
         {
@@ -561,6 +561,7 @@ struct radix_key_codec
             return static_cast<unsigned int>(bit_key >> start) & mask;
         }
 
+        public: 
         ROCPRIM_HOST_DEVICE
         static Key twiddle_in(bit_key_type bit_key)
         {
@@ -621,10 +622,11 @@ struct radix_key_codec
             return static_cast<unsigned int>(bit_key >> start) & mask;
         }
 
+        public: 
         ROCPRIM_HOST_DEVICE
         static Key twiddle_in(bit_key_type bit_key)
         {
-            bit_key_type mask = (bit_key & sign_bit) ? bit_key(-1) : sign_bit;
+            bit_key_type mask = (bit_key & sign_bit) ? bit_key_type(-1) : sign_bit;
             return bit_key ^ mask;
         }
     };
@@ -656,6 +658,7 @@ struct radix_key_codec
             return static_cast<unsigned int>(bit_key >> start) & mask;
         }
 
+        public: 
         ROCPRIM_HOST_DEVICE
         static bool twiddle_in(bit_key_type bit_key)
         {

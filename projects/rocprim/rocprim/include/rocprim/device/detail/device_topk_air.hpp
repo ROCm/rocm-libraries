@@ -542,8 +542,8 @@ struct device_topk_air_impl
         {
             // TODO: Can also use output_flip or input_flip, need to see which is generally faster
             // need to run some benchmarks to see which is faster
-            digit = extract_digit_flip_xaxis<flip_strategy::output_flip, key_codec>(
-                key,
+            digit = device_air_topk_impl::key_codec::template extract_digit<Decomposer>(
+                traits::radix_key_codec::codec_base<key_in_t>::twiddle_in(key),
                 start_bits, // Start bit of the sequence of bits to extract
                 cur_bits, // How many bits to extract
                 decomposer);
@@ -551,16 +551,16 @@ struct device_topk_air_impl
         else if constexpr(rocprim::is_integral<key_in_t>::value
                           && rocprim::is_unsigned<key_in_t>::value)
         {
-            digit = extract_digit_flip_xaxis<flip_strategy::no_flip, key_codec>(
-                key,
+            digit = device_air_topk_impl::key_codec::template extract_digit<Decomposer>(
+                traits::radix_key_codec::codec_base<key_in_t>::twiddle_in(key),
                 start_bits, // Start bit of the sequence of bits to extract
                 cur_bits, // How many bits to extract
                 decomposer);
         }
         else if constexpr(rocprim::is_floating_point<key_in_t>::value)
         {
-            digit = extract_digit_flip_xaxis<flip_strategy::output_flip, key_codec>(
-                key,
+            digit = device_air_topk_impl::key_codec::template extract_digit<Decomposer>(
+                traits::radix_key_codec::codec_base<key_in_t>::twiddle_in(key),
                 start_bits, // Start bit of the sequence of bits to extract
                 cur_bits, // How many bits to extract
                 decomposer);
