@@ -8,22 +8,6 @@ project(origami-python VERSION 0.1.0 LANGUAGES CXX)
 # Find Python
 find_package(Python 3.9 COMPONENTS Interpreter Development.Module REQUIRED)
 
-# Determine ROCm path for HIP and link directories
-if(NOT DEFINED ROCM_PATH)
-  if(DEFINED ENV{ROCM_PATH})
-    set(ROCM_PATH "$ENV{ROCM_PATH}")
-  else()
-    set(ROCM_PATH "/opt/rocm")
-  endif()
-endif()
-set(ROCM_PATH "${ROCM_PATH}" CACHE PATH "Path to ROCm")
-if(EXISTS "${ROCM_PATH}")
-  list(PREPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
-  if(NOT DEFINED hip_DIR AND EXISTS "${ROCM_PATH}/lib/cmake/hip")
-    set(hip_DIR "${ROCM_PATH}/lib/cmake/hip")
-  endif()
-endif()
-
 option(ORIGAMI_BUILD_FROM_SOURCE "Build origami from source instead of finding installed version" ON)
 if(ORIGAMI_BUILD_FROM_SOURCE)
     set(ORIGAMI_ENABLE_PYTHON OFF CACHE BOOL "Build origami python bindings" FORCE)

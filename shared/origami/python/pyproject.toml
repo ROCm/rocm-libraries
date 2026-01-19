@@ -11,7 +11,7 @@ build-backend = "scikit_build_core.build"
 # NOTE: Building this package requires ROCm/HIP to be installed on your system.
 # ROCm cannot be installed via pip and must be installed separately.
 # See: https://rocm.docs.amd.com/en/latest/deploy/linux/quick_start.html
-# Ensure ROCM_PATH environment variable is set (default: /opt/rocm)
+# Ensure CMAKE_PREFIX_PATH includes ROCm (default: /opt/rocm)
 
 [project]
 name = "origami"
@@ -47,7 +47,7 @@ cmake.args = [
     "-DCMAKE_BUILD_TYPE:STRING=Release",
 ]
 # CMake defines - these can be overridden via environment
-# ROCM_PATH will be detected automatically by python/CMakeLists.txt
+# CMAKE_PREFIX_PATH will be used by python/CMakeLists.txt
 cmake.define = { }
 # Dynamic version from __init__.py
 metadata.version.provider = "scikit_build_core.metadata.regex"
