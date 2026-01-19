@@ -53,10 +53,10 @@ jobs:
                             { "name": "Workflow", "value": "'${GITHUB_WORKFLOW}'" },
                             { "name": "Job", "value": "'${JOB_NAME}'" },
                             { "name": "Branch", "value": "'${GITHUB_REF}'" },
-                            { "name": "Run ID", "value": "'${GITHUB_RUN_ID}'" 
+                            { "name": "Run ID", "value": "'${GITHUB_RUN_ID}'" }
                         }
                       ],
-                      markdown": true
+                      "markdown": true,
                       "potentialAction": [
                         {
                           "@type": "OpenUri",
