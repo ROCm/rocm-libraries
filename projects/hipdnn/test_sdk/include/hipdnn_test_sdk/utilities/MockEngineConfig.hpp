@@ -33,6 +33,8 @@ public:
                 getKnobSettingByName,
                 (const std::string& knobName),
                 (const, override));
+    MOCK_METHOD(bool, hasKnobSetting, (int64_t knobId), (const, override));
+    MOCK_METHOD(bool, hasKnobSetting, (const std::string& knobName), (const, override));
 };
 
 }
