@@ -106,6 +106,10 @@ endif()
 
 # --- Packaging and installation ---
 
+if(HIPSPARSE_ENABLE_HOST)
+    rocm_package_setup_component(runtime)
+endif()
+
 if(HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
     rocm_package_setup_component(clients)
     rocm_package_setup_client_component(clients-common)
@@ -162,10 +166,10 @@ endif()
 
 if(HIPSPARSE_ENABLE_HIP)
     set(ROCSPARSE_MINIMUM "4.0.1")
-    rocm_package_add_dependencies(SHARED_DEPENDS "rocsparse >= ${ROCSPARSE_MINIMUM}")
+    rocm_package_add_dependencies(COMPONENT runtime DEPENDS "rocsparse >= ${ROCSPARSE_MINIMUM}")
     if(NOT BUILD_SHARED_LIBS)
-        rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocsparse-static-dev >= ${ROCSPARSE_MINIMUM}")
-        rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocsparse-static-devel >= ${ROCSPARSE_MINIMUM}")
+        rocm_package_add_deb_dependencies(COMPONENT devel DEPENDS "rocsparse-static-dev >= ${ROCSPARSE_MINIMUM}")
+        rocm_package_add_rpm_dependencies(COMPONENT devel DEPENDS "rocsparse-static-devel >= ${ROCSPARSE_MINIMUM}")
     endif()
 endif()
 
