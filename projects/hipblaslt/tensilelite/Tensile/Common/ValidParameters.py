@@ -244,6 +244,12 @@ validParameters = { # we need to make sure this matches develop
     # Need to allocate PGR+1 or PGR LDS buffer
     # Allocating PGR+1 LDS buffer is better for instruction scheduling.
     "PrefetchGlobalRead": [0, 1, 2] + list(range(3,16 + 1)),
+    # number of iteration prefetch local reads from lds to VGPRs buffer = PLR
+    "PrefetchLocalRead": list(range(128 + 1)),
+    # MatrixInstruction Only
+    # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
+    # So we can schedule these localReads to the front of the loop
+    "ClusterLocalRead": [0, 1],
     # Allocating PGR+1 LDS buffer if we have enough LDS memory size
     # Only for DirectToLdsA+B + PGR>=2
     # -1: auto (enable this for PGR>=3)
@@ -252,13 +258,8 @@ validParameters = { # we need to make sure this matches develop
     # IF LDS size exceeds maxLDS,
     #   PGR>=3: disable (set 0) and continue
     #   PGR==2: reject (use -1 or 0 in that case)
+    # 1LDSBuffer will be 0 if DtlPlusLdsBuf if enabled
     "DtlPlusLdsBuf": [-1,0,1],
-    # number of iteration prefetch local reads from lds to VGPRs buffer = PLR
-    "PrefetchLocalRead": list(range(128 + 1)),
-    # MatrixInstruction Only
-    # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
-    # So we can schedule these localReads to the front of the loop
-    "ClusterLocalRead": [0, 1],
     # We use double LDS buffer when PrefetchGlobalRead.
     # While it reads data from LDS[0]/[1], it prefetch global data and writes to LDS[1]/[0]
     # If we can make sure all data are read from LDS to register before writing data to LDS, we can use 1 LDS buffer to save LDS memory.

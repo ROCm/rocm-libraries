@@ -2926,10 +2926,15 @@ class Solution(collections.abc.Mapping):
       # PGR>=2 only
       if state["PrefetchGlobalRead"] < 2:
         state["DtlPlusLdsBuf"] = 0
+      # SIA==3 only
+      if state["ScheduleIterAlg"] != 3:
+        state["DtlPlusLdsBuf"] = 0
       # restrict feature combinations
       if state["DtlPlusLdsBuf"]:
         # disable CMS for DtlPlusLdsBuf (not supported yet)
         state["UseCustomMainLoopSchedule"] = False
+        # force 1LDSBuffer = 0
+        state["1LDSBuffer"] = 0
 
     # Here, 1LDSBuffer == -1 is not resolved yet.
     # (cannot move 1LDSBuffer==-1 resolution code above because of referring ldsNumBytesAB)
@@ -2938,9 +2943,22 @@ class Solution(collections.abc.Mapping):
     if state["PrefetchGlobalRead"] >= 3:
       # PGR>=3, number of LDS Block is set to PGR
       numLdsBlk = state["PrefetchGlobalRead"]
+      # force 1LDSBuffer = 0
+      state["1LDSBuffer"] = 0
     if state["PrefetchGlobalRead"] >= 2 and state["DtlPlusLdsBuf"]:
       # PGR>=2 + DtlPlusLdsBuf case, try to allocate PGR+1 LDSBlk to schedule GR over barrier
       numLdsBlk = state["PrefetchGlobalRead"] + 1
+
+    def setLdsOffsets(offsetBlk, numLdsBlk, ldsNumBytesB):
+      if numLdsBlk <= 1:
+        # 1LDSBuffer case, use 2 to calculate ldsNumBytesAB
+        numLdsBlk = 2
+      state["LdsOffsetA_Blk"] = offsetBlk
+      state["LdsOffsetMetadata_Blk"] = state["LdsOffsetA_Blk"] + state["LdsNumElementsAlignedA"]
+      state["LdsOffsetB_Blk"] = state["LdsOffsetMetadata_Blk"] + state["LdsNumElementsAlignedMetadata"]
+      ldsNumBytesAB = (numLdsBlk - 2) * offsetBlk + state["LdsOffsetB_Blk"] + ldsNumBytesB
+      return ldsNumBytesAB
+
     if state["PrefetchGlobalRead"]:
       state["LdsOffsetMetadata"] = state["LdsOffsetA"] + state["LdsNumElementsAlignedA"]
       state["LdsOffsetB"] = state["LdsOffsetMetadata"] + state["LdsNumElementsAlignedMetadata"]
@@ -2957,19 +2975,19 @@ class Solution(collections.abc.Mapping):
         # skip ceiling to nearest power of two for numLdsBlk>=3
         offsetBlk = roundupOffsetBlk
 
-      state["LdsOffsetA_Blk"] = offsetBlk
-      state["LdsOffsetMetadata_Blk"] = state["LdsOffsetA_Blk"] + state["LdsNumElementsAlignedA"]
-      state["LdsOffsetB_Blk"] = state["LdsOffsetMetadata_Blk"] + state["LdsNumElementsAlignedMetadata"]
-      ldsNumBytesAB = (numLdsBlk - 2) * offsetBlk + state["LdsOffsetB_Blk"] + ldsNumBytesB
+      ldsNumBytesAB = setLdsOffsets(offsetBlk, numLdsBlk, ldsNumBytesB)
       # decrement numLdsBlk for DtlPlusLdsBuf if it exceeds MaxLDS
       # PGR 2 case, reject kernel (need to use StoreSwapAddr in that case)
       if state["DtlPlusLdsBuf"] and ldsNumBytesAB > state["MaxLDS"]:
         numLdsBlk -= 1
-        # re-calculate LDS size
-        ldsNumBytesAB = (numLdsBlk - 2) * offsetBlk + state["LdsOffsetB_Blk"] + ldsNumBytesB
-        # continue with StoreSwapAddr for PGR2
+        # continue with original logic for PGR2 + numLdsBlk==2
         if state["PrefetchGlobalRead"] == 2:
-          state["StoreSwapAddr"] = True
+          if  (offsetBlk + roundupOffsetBlk) > state["MaxLDS"]:
+            state["StoreSwapAddr"] = True
+          else:
+            offsetBlk = roundupOffsetBlk
+        # re-calculate LDS size with numLdsBlk==2
+        ldsNumBytesAB = setLdsOffsets(offsetBlk, numLdsBlk, ldsNumBytesB)
         # unset DtlPlusLdsBuf
         state["DtlPlusLdsBuf"] = 0
     else:
@@ -3395,6 +3413,9 @@ class Solution(collections.abc.Mapping):
       # does not work with PLR=0
       if state["PrefetchLocalRead"] == 0:
         reject(state, printRejectionReason, "PrefetchGlobalRead>=3 Supports only PrefetchLocalRead >= 1")
+      # support SIA==3 only
+      if state["ScheduleIterAlg"] != 3:
+        reject(state, printRejectionReason, "PrefetchGlobalRead>=3 Supports only ScheduleIterAlg == 3")
       # TODO: enable PGR>=3 for Sparse
       if state["ProblemType"]["Sparse"]:
         reject(state, printRejectionReason, "PrefetchGlobalRead>=3 + Sparse is not supported yet")
