@@ -65,7 +65,7 @@ typedef short data_t;
 typedef float data_t;
 #endif
 
-typedef unsigned long arg_size_t;
+typedef uint64_t arg_size_t;
 
 // N - batch size
 // C - # of maps
