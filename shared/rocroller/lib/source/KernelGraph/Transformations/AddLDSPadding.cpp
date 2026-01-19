@@ -112,7 +112,7 @@ namespace rocRoller
         using namespace AddLDSPaddingDetail;
 
         /**
-         * @brief
+         * @brief Return the number of elements that the fastest thread-tile indexes.
          */
         uint GetFastThreadTileIndexElementWidth(KernelGraph const& graph, int tileTag)
         {
