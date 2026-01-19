@@ -174,12 +174,12 @@ struct random_data_generator
 
         // not all integral types are valid for int distribution
         using dist_value_type
-            = std::conditional_t<std::is_integral<T>::value
+            = std::conditional_t<rocprim::is_integral<T>::value
                                      && !common::is_valid_for_int_distribution<value_type>::value,
                                  int,
                                  value_type>;
 
-        using val_dist_type = std::conditional_t<std::is_integral<T>::value,
+        using val_dist_type = std::conditional_t<rocprim::is_integral<T>::value,
                                                  common::uniform_int_distribution<dist_value_type>,
                                                  std::uniform_real_distribution<dist_value_type>>;
         using dup_dist_type = common::uniform_int_distribution<int>;

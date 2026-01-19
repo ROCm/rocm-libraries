@@ -85,6 +85,8 @@
 
 #define rocblas_syrk_ex_fortran rocblas_syrk_ex
 #define rocblas_syrk_ex_64_fortran rocblas_syrk_ex_64
+#define rocblas_herk_ex_fortran rocblas_herk_ex
+#define rocblas_herk_ex_64_fortran rocblas_herk_ex_64
 
 #define rocblas_trsm_ex_fortran rocblas_trsm_ex
 #define rocblas_trsm_batched_ex_fortran rocblas_trsm_batched_ex

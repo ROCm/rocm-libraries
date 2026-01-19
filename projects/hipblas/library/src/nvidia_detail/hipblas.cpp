@@ -16469,6 +16469,56 @@ hipblasStatus_t hipblasZsyrkStridedBatched_64(hipblasHandle_t         handle,
     return HIPBLAS_STATUS_NOT_SUPPORTED;
 }
 
+// syrk_ex
+hipblasStatus_t hipblasSyrkEx(hipblasHandle_t    handle,
+                              hipblasFillMode_t  uplo,
+                              hipblasOperation_t transa,
+                              int                n,
+                              int                k,
+                              const void*        alpha,
+                              const void*        A,
+                              hipDataType        a_type,
+                              int                lda,
+                              const void*        beta,
+                              void*              C,
+                              hipDataType        c_type,
+                              int                ldc,
+                              hipDataType        compute_type)
+try
+{
+    // complex support when added will have overlap in future
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+// herk_ex
+hipblasStatus_t hipblasHerkEx(hipblasHandle_t    handle,
+                              hipblasFillMode_t  uplo,
+                              hipblasOperation_t transa,
+                              int                n,
+                              int                k,
+                              const void*        alpha,
+                              const void*        A,
+                              hipDataType        a_type,
+                              int                lda,
+                              const void*        beta,
+                              void*              C,
+                              hipDataType        c_type,
+                              int                ldc,
+                              hipDataType        compute_type)
+try
+{
+    // complex support when added will have overlap in future
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
 // syr2k
 hipblasStatus_t hipblasSsyr2k(hipblasHandle_t    handle,
                               hipblasFillMode_t  uplo,

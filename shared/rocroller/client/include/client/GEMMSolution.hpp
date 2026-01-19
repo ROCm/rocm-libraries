@@ -29,6 +29,7 @@
 #include "GEMMParameters.hpp"
 
 #include <rocRoller/Operations/CommandArgument_fwd.hpp>
+#include <rocRoller/Operations/Scratch_fwd.hpp>
 
 using namespace rocRoller;
 
@@ -61,7 +62,8 @@ namespace rocRoller
                 {
                 }
 
-                virtual Operations::OperationTag getScratchTag() const
+                virtual Operations::OperationTag
+                    getScratchTag(Operations::ScratchPolicy scratchPolicy) const
                 {
                     return {};
                 }

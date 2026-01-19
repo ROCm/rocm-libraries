@@ -160,7 +160,7 @@ void testing_spsv_coo_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_spsv_coo(Arguments argus)
+void testing_spsv_coo(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
     I                    m        = argus.M;
@@ -190,11 +190,8 @@ hipsparseStatus_t testing_spsv_coo(Arguments argus)
     srand(12345ULL);
 
     I nnz;
-    if(!generate_csr_matrix(filename, m, n, nnz, hrow_ptr, hcol_ind, hval, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hrow_ptr, hcol_ind, hval, idx_base));
 
     std::vector<I> hrow_ind(nnz);
 
@@ -380,8 +377,6 @@ hipsparseStatus_t testing_spsv_coo(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SPSV_COO_HPP

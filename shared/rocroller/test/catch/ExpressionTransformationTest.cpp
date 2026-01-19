@@ -183,9 +183,8 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
     SECTION("bitFieldExtract")
     {
         CHECK_THAT(simplify(bfe(DataType::Int32, v, 0, 32)), IdenticalTo(v));
-        // TODO: Enable this simplification with a reinterpret_cast expression
-        // CHECK_THAT(simplify(bfe(DataType::UInt32, v, 0, 32)),
-        //            IdenticalTo(reinterpret(DataType::UInt32, v)));
+        CHECK_THAT(simplify(bfe(DataType::UInt32, v, 0, 32)),
+                   IdenticalTo(reinterpret(DataType::UInt32, v)));
 
         auto expr  = bfe(DataType::Int32, v, 16, 16);
         auto expr2 = bfe(DataType::Int32, expr, 0, 16);
@@ -228,6 +227,18 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
             simplify(concat({bfe(DataType::UInt32, v3, 0, 32), bfe(DataType::UInt32, v3, 32, 32)},
                             {DataType::UInt64})),
             IdenticalTo(v3));
+    }
+
+    SECTION("convert")
+    {
+        CHECK_THAT(simplify(convert(DataType::Int32, v)), IdenticalTo(v));
+        CHECK_THAT(simplify(convert(DataType::UInt64, v3)), IdenticalTo(v3));
+    }
+
+    SECTION("reinterpret")
+    {
+        CHECK_THAT(simplify(reinterpret(DataType::Int32, v)), IdenticalTo(v));
+        CHECK_THAT(simplify(reinterpret(DataType::UInt64, v3)), IdenticalTo(v3));
     }
 }
 
@@ -594,10 +605,10 @@ TEST_CASE("ConvertPropagation", "[expression][expression-transformation]")
 
     SECTION("nested convert")
     {
-        // Int32(r64 + Int64(r32 * r32)) -> Int32(Int32(r64), Int64(r32 * r32))
+        // Int32(r64 + Int64(r32 * r32)) -> Int32(Int32(r64) + Int32(r32 * r32))
         CHECK_THAT(
             convertPropagation(convert(Int32, r64[0] + convert(Int64, r32[1] * r32[2]))),
-            IdenticalTo(convert(Int32, convert(Int32, r64[0]) + convert(Int64, r32[1] * r32[2]))));
+            IdenticalTo(convert(Int32, convert(Int32, r64[0]) + convert(Int32, r32[1] * r32[2]))));
 
         // Do not propagate existing converts to larger types
         // Int32(r64 + Int64(r64 * r64)) -> Int32(Int32(r64) + Int64(r64 * r64))
@@ -649,6 +660,45 @@ TEST_CASE("ConvertPropagation", "[expression][expression-transformation]")
 
         CHECK_THAT(convertPropagation(convert(Int32, (r64[0] / r64[1]))),
                    IdenticalTo(convert(Int32, convert(Int32, (r64[0] / r64[1])))));
+    }
+}
+
+TEST_CASE("Nested Reinterpret simplification", "[expression][expression-transformation]")
+{
+    using namespace rocRoller;
+    using namespace Expression;
+
+    auto context = TestContext::ForDefaultTarget();
+
+    auto r_int32
+        = Register::Value::Placeholder(context.get(), Register::Type::Vector, DataType::Int32, 1);
+    r_int32->allocateNow();
+    auto v = r_int32->expression();
+
+    SECTION("Double reinterpret same size types")
+    {
+        auto expr       = reinterpret(DataType::Int32, reinterpret(DataType::Float, v));
+        auto simplified = simplify(expr);
+
+        CHECK_THAT(simplified, IdenticalTo(v));
+    }
+
+    SECTION("Reinterpret chain")
+    {
+        auto expr       = reinterpret(DataType::UInt32, reinterpret(DataType::Float, v));
+        auto simplified = simplify(expr);
+
+        CHECK_THAT(simplified, IdenticalTo(reinterpret(DataType::UInt32, v)));
+    }
+
+    SECTION("Reinterpret of literal")
+    {
+        auto lit        = literal(10.0f);
+        auto expr       = reinterpret(DataType::UInt32, lit);
+        auto simplified = simplify(expr);
+
+        CHECK(std::holds_alternative<CommandArgumentValue>(*simplified));
+        CHECK(std::get<uint32_t>(evaluate(simplified)) == 1092616192);
     }
 }
 
@@ -1152,6 +1202,35 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
     }
 
+    SECTION("Combine 64 bit register into second, third, and fourth dwords of 128 bit dst")
+    {
+        auto expr = bfc(reg64, zero128, 0, 57, 45);
+
+        // zero128    0x 00000000 00000000 00000000 00000000
+        // reg64      0x XXXXXXXX XXXXXXXX (45 bits used: bits 0-44)
+        // expr       0x 000000XX XXXXXXXX XXXXXXX0 00000000
+        //
+        // Bit layout (45 bits from reg64[0:44] inserted at dest bits 57-101):
+        //   dword0 (bits 0-31):   unchanged = zero32
+        //   dword1 (bits 32-63):  bits 57-63 = reg64[0:6] (7 bits at positions 25-31)
+        //   dword2 (bits 64-95):  bits 64-95 = reg64[7:38] (32 bits, crosses dword boundary)
+        //                         split into: bfe(reg64, 7, 25) | (bfe(reg64, 32, 7) << 25)
+        //   dword3 (bits 96-127): bits 96-101 = reg64[39:44] (6 bits at positions 0-5)
+
+        auto dword2_lower = bfe(DataType::Raw32, reg64, 7, 25);
+        auto dword2_upper = bfe(DataType::Raw32, reg64, 32, 7);
+        auto dword2       = dword2_lower | (dword2_upper << Expression::literal(25u));
+
+        std::vector<Expression::ExpressionPtr> operands{
+            zero32,
+            bfc(bfe(DataType::Raw32, reg64, 0, 7), zero32, 0, 25, 7),
+            dword2,
+            bfc(bfe(DataType::Raw32, reg64, 39, 6), zero32, 0, 0, 6)};
+        auto expected = concat(operands, {DataType::None, PointerType::Buffer});
+
+        CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
+    }
+
     SECTION("Combine into the first dword of 128 bit dst, across src dword boundary")
     {
         auto expr = bfc(reg64, zero128, 16, 0, 32);
@@ -1159,9 +1238,15 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
         // zero128    0x 00000000 00000000 00000000 00000000
         // reg64      0x 0000XXXX XXXX0000
         // expr       0x 00000000 00000000 00000000 XXXXXXXX
+        //
+        // bfe(reg64, 16, 32) extracts bits 16-47, crosses dword boundary at bit 32
+        // Split into: bfe(reg64, 16, 16) | (bfe(reg64, 32, 16) << 16)
 
-        std::vector<Expression::ExpressionPtr> operands{
-            bfe(DataType::Raw32, reg64, 16, 32), zero32, zero32, zero32};
+        auto dword0_lower = bfe(DataType::Raw32, reg64, 16, 16);
+        auto dword0_upper = bfe(DataType::Raw32, reg64, 32, 16);
+        auto dword0       = dword0_lower | (dword0_upper << Expression::literal(16u));
+
+        std::vector<Expression::ExpressionPtr> operands{dword0, zero32, zero32, zero32};
         auto expected = concat(operands, {DataType::None, PointerType::Buffer});
 
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "Handle.hpp"
+#include <spdlog/fmt/fmt.h>
 
 using namespace hipdnn_backend::plugin;
 
@@ -24,4 +25,16 @@ hipStream_t hipdnnHandle::getStream() const
 std::shared_ptr<EnginePluginResourceManager> hipdnnHandle::getPluginResourceManager() const
 {
     return _pluginResourceManager;
+}
+
+std::string hipdnnHandle::toString() const
+{
+    std::string str = "hipdnnHandle: {";
+    str += "stream="
+           + (_stream != nullptr ? fmt::format("{:p}", static_cast<void*>(_stream)) : "null");
+    str += ", "
+           + (_pluginResourceManager != nullptr ? _pluginResourceManager->toString()
+                                                : "pluginResourceManager=null");
+    str += "}";
+    return str;
 }

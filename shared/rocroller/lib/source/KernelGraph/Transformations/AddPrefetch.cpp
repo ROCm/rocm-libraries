@@ -336,7 +336,7 @@ namespace rocRoller
             void commit(KernelGraph&);
 
         private:
-            std::set<int> m_storeLDSTileOperations;
+            std::set<int> m_operations;
 
             ContextPtr m_context;
         };
@@ -388,24 +388,36 @@ namespace rocRoller
 
         void AddBarrierVisitor::stage(KernelGraph const& graph, int opTag)
         {
-            auto maybeStoreLDSTile = graph.control.get<StoreLDSTile>(opTag);
-            if(!maybeStoreLDSTile)
-                return;
-            m_storeLDSTileOperations.insert(opTag);
+            m_operations.insert(opTag);
         }
 
         void AddBarrierVisitor::commit(KernelGraph& graph)
         {
-            for(auto storeLDSTileTag : m_storeLDSTileOperations)
+            for(auto tag : m_operations)
             {
-                auto preBarrier  = graph.control.addElement(Barrier());
-                auto postBarrier = graph.control.addElement(Barrier());
+                auto maybeStoreLDSTile = graph.control.get<StoreLDSTile>(tag);
+                if(maybeStoreLDSTile)
+                {
+                    auto preBarrier  = graph.control.addElement(Barrier());
+                    auto postBarrier = graph.control.addElement(Barrier());
 
-                insertBefore(graph, storeLDSTileTag, preBarrier, preBarrier);
-                insertAfter(graph, storeLDSTileTag, postBarrier, postBarrier);
+                    insertBefore(graph, tag, preBarrier, preBarrier);
+                    insertAfter(graph, tag, postBarrier, postBarrier);
 
-                auto ldsTileTag = graph.mapper.get<LDS>(storeLDSTileTag);
-                graph.mapper.connect<LDS>(postBarrier, ldsTileTag, 0);
+                    auto ldsTileTag = graph.mapper.get<LDS>(tag);
+                    graph.mapper.connect<LDS>(postBarrier, ldsTileTag, 0);
+                }
+                auto maybeLoadTile = graph.control.get<LoadTiled>(tag);
+                if(maybeLoadTile)
+                {
+                    auto tileTag = graph.mapper.get<MacroTile>(tag);
+                    AssertFatal(tileTag != -1);
+                    auto tile = graph.coordinates.get<MacroTile>(tileTag).value();
+                    AssertFatal(tile.memoryType == MemoryType::WAVE_Direct2LDS);
+
+                    auto preBarrier = graph.control.addElement(Barrier());
+                    insertBefore(graph, tag, preBarrier, preBarrier);
+                }
             }
         }
 
@@ -448,6 +460,38 @@ namespace rocRoller
                 if(!storeHasBarrierAlready.contains(tag))
                     barrierVisitor.stage(graph, tag);
             }
+
+            // If we aren't prefetching, we need to put barriers
+            // before Direct2LDS loads as well.  For example, this:
+            //
+            //   for loop:
+            //      buffer_load lds
+            //      s_barrier
+            //      ds_read     <-- an eager wave could wrap around and write into lds
+            //      v_mfma
+            //
+            // needs to be:
+            //
+            //   for loop:
+            //      s_barrier
+            //      buffer_load lds
+            //      s_barrier
+            //      ds_read
+            //      v_mfma
+            if(not m_params->prefetch)
+            {
+                for(auto const& tag : graph.control.getNodes<LoadTiled>())
+                {
+                    auto tileTag = graph.mapper.get<MacroTile>(tag);
+                    if(tileTag == -1)
+                        continue;
+                    auto tile = graph.coordinates.get<MacroTile>(tileTag).value();
+                    if(tile.memoryType != MemoryType::WAVE_Direct2LDS)
+                        continue;
+                    barrierVisitor.stage(graph, tag);
+                }
+            }
+
             barrierVisitor.commit(graph);
 
             removeRedundantSequenceEdges(graph);

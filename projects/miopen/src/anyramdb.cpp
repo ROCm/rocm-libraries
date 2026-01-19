@@ -34,9 +34,9 @@
 #include <chrono>
 #include <ctime>
 #include <fstream>
-#include <limits>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <sstream>
 
 namespace miopen {
@@ -66,7 +66,7 @@ AnyRamDb& AnyRamDb::GetCached(const fs::path& path)
     return *instances.emplace(path, std::make_unique<AnyRamDb>(path)).first->second;
 }
 
-boost::optional<AnyRamDb::TRecord> AnyRamDb::FindRecord(const std::string& problem)
+std::optional<AnyRamDb::TRecord> AnyRamDb::FindRecord(const std::string& problem)
 {
     const auto lock = exclusive_lock(lock_file, GetLockTimeout());
     MIOPEN_VALIDATE_LOCK(lock);
@@ -91,13 +91,13 @@ bool AnyRamDb::RemoveRecord(const std::string& key)
     return true;
 }
 
-boost::optional<AnyRamDb::TRecord> AnyRamDb::FindRecordUnsafe(const std::string& problem)
+std::optional<AnyRamDb::TRecord> AnyRamDb::FindRecordUnsafe(const std::string& problem)
 {
     MIOPEN_LOG_I2("Looking for key " << problem << " in cache for file " << filename);
     const auto it = cache.find(problem);
 
     if(it == cache.end())
-        return boost::none;
+        return {};
 
     return it->second;
 }

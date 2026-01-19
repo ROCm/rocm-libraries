@@ -38,8 +38,6 @@
 
 #include <nlohmann/json_fwd.hpp>
 
-#include <boost/optional.hpp>
-
 #include <optional>
 #include <unordered_map>
 
@@ -71,7 +69,7 @@ struct MIOPEN_INTERNALS_EXPORT Solution : miopenSolution
 
     struct RunInput
     {
-        boost::optional<TensorDescriptor> descriptor;
+        std::optional<TensorDescriptor> descriptor;
         Data_t buffer = nullptr;
 
         inline RunInput() = default;

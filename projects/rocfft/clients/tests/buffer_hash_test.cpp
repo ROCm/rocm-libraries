@@ -22,7 +22,6 @@
 #include "../../shared/params_gen.h"
 #include "../../shared/rocfft_params.h"
 #include <algorithm>
-#include <chrono>
 #include <gtest/gtest.h>
 #include <memory>
 #include <random>

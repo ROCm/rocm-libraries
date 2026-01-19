@@ -88,6 +88,8 @@ and :doc:`Performance database <../conceptual/perfdb>`.
         | "HYBRID" or 3: Hybrid find (FindDb hit or full find)
         | 4: Reserved (do not use)
         | "DYNAMIC_HYBRID" or 5: Dynamic hybrid (default, skip non-dynamic kernels)
+        | "TRUST_VERIFY" or 6: Trust verify (use UserFindDb or FindDb fallback or skip non-dynamic kernels fallback with timebox)
+        | "TRUST_VERIFY_FULL" or 7: Trust verify full (same as trust verify without timebox)
 
     * - | ``MIOPEN_FIND_ENFORCE``
         | Controls auto-tune behavior and database updates.
@@ -96,6 +98,11 @@ and :doc:`Performance database <../conceptual/perfdb>`.
         | "SEARCH" or 3: Auto-tune even if not requested via API
         | "SEARCH_DB_UPDATE" or 4: Combination of DB_UPDATE and SEARCH
         | "DB_CLEAN" or 5: Remove optimized values from User PerfDb
+
+    * - | ``MIOPEN_SEARCH_CUTOFF``
+        | Allows speculative early termination of suboptimal searches.
+      - | 1: Enable
+        | 0 or unset: Disable
 
     * - | ``MIOPEN_DEBUG_DISABLE_FIND_DB``
         | Disables FindDb functionality.

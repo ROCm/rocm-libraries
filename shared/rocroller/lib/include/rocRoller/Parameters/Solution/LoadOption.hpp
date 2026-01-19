@@ -40,6 +40,8 @@ namespace rocRoller
                 BufferToVGPR,
                 BufferToLDSViaVGPR,
                 BufferToLDS,
+                GlobalToVGPR,
+                GlobalToLDSViaVGPR,
                 Count,
             };
 
@@ -48,6 +50,7 @@ namespace rocRoller
 
             MemoryType GetMemoryType(LoadPath const& path);
             bool       IsBufferToLDS(LoadPath const& path);
+            bool       IsPathToLDS(LoadPath const& path);
         } // namespace Solution
     } // namespace Parameters
 

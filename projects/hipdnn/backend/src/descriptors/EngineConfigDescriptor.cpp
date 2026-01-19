@@ -9,14 +9,14 @@
 #include "HipdnnException.hpp"
 #include "handle/Handle.hpp"
 
-#include <hipdnn_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 
 namespace hipdnn_backend
 {
 
 EngineConfigDescriptor::EngineConfigDescriptor()
 {
-    _engineConfigData = std::make_unique<hipdnn_sdk::data_objects::EngineConfigT>();
+    _engineConfigData = std::make_unique<hipdnn_data_sdk::data_objects::EngineConfigT>();
 }
 
 void EngineConfigDescriptor::finalize()
@@ -215,11 +215,19 @@ hipdnnPluginConstData_t EngineConfigDescriptor::getSerializedEngineConfig() cons
 
         flatbuffers::FlatBufferBuilder builder;
         builder.Finish(
-            hipdnn_sdk::data_objects::EngineConfig::Pack(builder, _engineConfigData.get()));
+            hipdnn_data_sdk::data_objects::EngineConfig::Pack(builder, _engineConfigData.get()));
         _engineConfigSerializedBuffer = builder.Release();
     }
 
     return {_engineConfigSerializedBuffer.data(), _engineConfigSerializedBuffer.size()};
+}
+
+std::string EngineConfigDescriptor::toString() const
+{
+    std::string str = "EngineConfigDescriptor: {engineId=";
+    str += _engine ? std::to_string(_engine->getEngineId()) : "null";
+    str += ", maxWorkspaceSize=" + std::to_string(_maxWorkspaceSize) + "}";
+    return str;
 }
 
 } // namespace hipdnn_backend

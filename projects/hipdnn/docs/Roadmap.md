@@ -11,7 +11,7 @@ The following improvements represent foundational changes spanning all hipDNN co
 
 ### Near-Term Priorities
 
-- **Version Management**: Implement consistent version numbering across Frontend, SDK, and Backend components
+- **Version Management**: Implement consistent version numbering across Frontend, SDKs, and Backend components
 - **EngineId Management**: Update engineId registration to support plugin development workflows
 - **Enhanced Logging**: Add detailed logging for API calls and runtime graph serialization capture
 - **Persistence**: Implement graph save and load functionality
@@ -48,18 +48,17 @@ The Backend manages plugins and orchestrates graph execution. See [Design.md](./
 - **C API Support**: Add graph building C API for language interoperability
 - **Custom Schema Support**: Allow users to extend graphs without recompiling hipDNN backend
 
-## SDK
+## SDKs
 
-The SDK provides shared utilities and interfaces ensuring compatibility between Frontend, Backend, and Plugins.
+hipDNN provides three SDK libraries ensuring compatibility between Frontend, Backend, and Plugins:
+- **Data SDK** (`data_sdk`): FlatBuffers schemas and data structures for graph representation
+- **Plugin SDK** (`plugin_sdk`): Plugin API and utilities for creating engine plugins
+- **Test SDK** (`test_sdk`): Testing utilities and CPU reference implementations for plugin validation
 
 ### Near-Term Priorities
 
-- **SDK Refactoring**: Split SDK into focused sub-components:
-  - Testing SDK
-  - Plugin Development SDK
-  - Graph Data Object SDK
-- **Testing SDK**: Extract testing utilities from MIOpen plugin and reference implementation into a unified SDK for plugin integration testing
-- **Plugin Development SDK**: Provide plugin headers and utilities for bootstrapping plugin development
+- **Test SDK Expansion**: Continue extracting testing utilities from MIOpen plugin into the unified Test SDK
+- **CPU Reference Coverage**: Expand CPU reference implementations for additional operations
 
 ## Plugins
 
@@ -70,9 +69,8 @@ Plugins extend hipDNN's computational capabilities. See [Design.md](./Design.md#
 #### Near-Term Priorities
 
 - **Fusion Support**: Complete integration for Convolution fusions
-- **Batchnorm Inference**: Re-enable support after resolving [known issues](https://github.com/ROCm/rocm-libraries/issues/2459)
 - **Batchnorm Running Stats**: Add support for running statistics in Batchnorm operations
-- **Code Refactoring**: Extract common MIOpen plugin code into reusable SDK components
+- **Code Refactoring**: Extract common MIOpen plugin code into reusable Plugin SDK and Test SDK components
 
 ### Fusilli IREE Plugin
 

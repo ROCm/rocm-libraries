@@ -102,7 +102,7 @@ TEST(TestConvolutionWgradAttributes, PackAttributes)
 
     auto buffer = builder.GetBufferPointer();
     auto convAttributesFb
-        = flatbuffers::GetRoot<hipdnn_sdk::data_objects::ConvolutionWrwAttributes>(buffer);
+        = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>(buffer);
 
     // Verify packed tensor UIDs
     EXPECT_EQ(convAttributesFb->x_tensor_uid(), 1);
@@ -126,7 +126,8 @@ TEST(TestConvolutionWgradAttributes, PackAttributes)
     EXPECT_EQ(convAttributesFb->dilation()->Get(0), 1);
     EXPECT_EQ(convAttributesFb->dilation()->Get(1), 1);
 
-    EXPECT_EQ(convAttributesFb->conv_mode(), hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION);
+    EXPECT_EQ(convAttributesFb->conv_mode(),
+              hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION);
 }
 
 TEST(TestConvolutionWgradAttributes, DefaultValues)

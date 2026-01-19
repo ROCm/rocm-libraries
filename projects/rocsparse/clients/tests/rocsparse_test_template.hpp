@@ -23,6 +23,7 @@
 * ************************************************************************ */
 #pragma once
 
+#include "rocsparse_memory_check.hpp"
 #include "rocsparse_test_call.hpp"
 #include "rocsparse_test_check.hpp"
 #include "rocsparse_test_dispatch.hpp"
@@ -164,40 +165,22 @@ namespace
 
             static bool memory_filter(const Arguments& arg)
             {
-                static double available_memory_in_GB = 0.0;
-                static bool   query_device_memory    = true;
-                if(query_device_memory)
+                size_t available_host   = rocsparse_memory_check::get_available_host_memory_gb();
+                size_t available_device = rocsparse_memory_check::get_available_device_memory_gb();
+
+                bool can_run = (arg.host_memory_gb <= available_host)
+                               && (arg.device_memory_gb <= available_device);
+
+                if(!can_run)
                 {
-                    size_t available_memory;
-                    size_t total_memory;
-
-                    if(hipDeviceSynchronize() != hipSuccess)
-                    {
-                        return false;
-                    }
-
-                    if(hipMemGetInfo(&available_memory, &total_memory) != hipSuccess)
-                    {
-                        return false;
-                    }
-
-                    available_memory_in_GB = (double)available_memory / (1024 * 1024 * 1024);
-
-                    query_device_memory = false;
+                    std::cout << "SKIPPING TEST: Insufficient memory" << std::endl;
+                    std::cout << "  Required host:   " << arg.host_memory_gb
+                              << " GB (available: " << available_host << " GB)" << std::endl;
+                    std::cout << "  Required device: " << arg.device_memory_gb
+                              << " GB (available: " << available_device << " GB)" << std::endl;
                 }
 
-                if(available_memory_in_GB < arg.req_memory)
-                {
-                    std::cout << "Skipping test "
-                              << (std::string(arg.category) + "/" + std::string(arg.function) + "/"
-                                  + name_suffix(arg))
-                              << " because insufficient memory avaiable. Required: "
-                              << arg.req_memory << "GB. Available: " << available_memory_in_GB
-                              << "GB." << std::endl;
-                    return false;
-                }
-
-                return true;
+                return can_run;
             }
 
             static std::string name_suffix(const Arguments& arg)

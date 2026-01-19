@@ -28,18 +28,19 @@
 #include <miopen/tensor_reorder_util.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/tensor_layout.hpp>
-#include <miopen/general_tensor_reorder_sol.hpp>
 #include <miopen/invoker.hpp>
 #include <miopen/invoke_params.hpp>
-#include <boost/optional.hpp>
-#include <vector>
-#include <cstdlib>
-#include <ctime>
+
 #include "test.hpp"
 #include "driver.hpp"
 #include "random.hpp"
 #include "get_handle.hpp"
 #include "workspace.hpp"
+
+#include <cstdlib>
+#include <ctime>
+#include <optional>
+#include <vector>
 
 template <typename T>
 void cpu_tensor_reorder(T* dst,
@@ -374,7 +375,7 @@ struct tensor_reorder_driver : tensor_reorder_base_driver
 
             const auto invoke_param         = reorder_invoke_param{src_dev.get(), wspace.ptr()};
             std::vector<OpKernelArg> opArgs = reorder_sol->GetKernelArg();
-            boost::optional<miopen::InvokerFactory> invoker_factory(
+            std::optional<miopen::InvokerFactory> invoker_factory(
                 [=](const std::vector<miopen::Kernel>& kernels) mutable {
                     return [=](const miopen::Handle& handle,
                                const miopen::AnyInvokeParams& primitive_param) mutable {
@@ -388,21 +389,25 @@ struct tensor_reorder_driver : tensor_reorder_base_driver
                 });
             std::vector<miopen::solver::KernelInfo> construction_params{
                 reorder_sol->GetKernelInfo()};
-            const auto invoker = handle.PrepareInvoker(*invoker_factory, construction_params);
-            // run gpu
-            invoker(handle, invoke_param);
-            // run cpu
-            cpu_reorder<T>::run(t_dst.data.data(),
-                                t_src.data.data(),
-                                dim_0,
-                                dim_1,
-                                dim_2,
-                                dim_3,
-                                order_0,
-                                order_1,
-                                order_2,
-                                order_3);
-            invoker_factory = boost::none;
+
+            if(invoker_factory.has_value())
+            {
+                const auto invoker = handle.PrepareInvoker(*invoker_factory, construction_params);
+                // run gpu
+                invoker(handle, invoke_param);
+                // run cpu
+                cpu_reorder<T>::run(t_dst.data.data(),
+                                    t_src.data.data(),
+                                    dim_0,
+                                    dim_1,
+                                    dim_2,
+                                    dim_3,
+                                    order_0,
+                                    order_1,
+                                    order_2,
+                                    order_3);
+            }
+            invoker_factory.reset();
 
             t_dst_gpu.data = wspace.Read<decltype(t_dst_gpu.data)>();
 

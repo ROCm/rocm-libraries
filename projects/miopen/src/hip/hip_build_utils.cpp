@@ -31,7 +31,7 @@
 #include <miopen/logger.hpp>
 #include <miopen/env.hpp>
 #include <miopen/target_properties.hpp>
-#include <boost/optional.hpp>
+
 #include <sstream>
 #include <string>
 

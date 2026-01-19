@@ -10,7 +10,7 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 
 using namespace hipdnn_backend;
 
@@ -22,12 +22,12 @@ public:
         return test_utilities::createValidGraph();
     }
 
-    static void verifyGraph(const hipdnn_sdk::data_objects::GraphT& graph)
+    static void verifyGraph(const hipdnn_data_sdk::data_objects::GraphT& graph)
     {
         EXPECT_EQ(graph.name, "test");
-        EXPECT_EQ(graph.compute_data_type, hipdnn_sdk::data_objects::DataType::FLOAT);
-        EXPECT_EQ(graph.intermediate_data_type, hipdnn_sdk::data_objects::DataType::HALF);
-        EXPECT_EQ(graph.io_data_type, hipdnn_sdk::data_objects::DataType::BFLOAT16);
+        EXPECT_EQ(graph.compute_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
+        EXPECT_EQ(graph.intermediate_data_type, hipdnn_data_sdk::data_objects::DataType::HALF);
+        EXPECT_EQ(graph.io_data_type, hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
         EXPECT_EQ(graph.tensors.size(), 0);
         EXPECT_EQ(graph.nodes.size(), 0);
     }
@@ -43,7 +43,7 @@ TEST_F(TestGraphDescriptor, SerializeDeserializeGraph)
 
     auto output = descriptor.getSerializedGraph();
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(output.ptr), output.size);
-    ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_sdk::data_objects::Graph>());
+    ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::Graph>());
 }
 
 TEST_F(TestGraphDescriptor, WillCorrectlySetGraph)

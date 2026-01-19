@@ -89,7 +89,7 @@ void testing_gemm_strided_batched_bad_arg(const Arguments& arg)
     device_strided_batch_matrix<T> dC(M, N, ldc, stride_C, batch_count);
 
     device_vector<T> d_alpha(1), d_beta(1), d_one(1), d_zero(1);
-    Ts               h_alpha{1}, h_beta{2}, h_one{1}, h_zero{0};
+    Ts               h_alpha{1.0f}, h_beta{2.0f}, h_one{1.0f}, h_zero{0.0f};
 
     if constexpr(std::is_same_v<T, hipblasHalf>)
         h_one = float_to_half(1.0f);
@@ -546,7 +546,7 @@ void testing_gemm_strided_batched(const Arguments& arg)
     CHECK_HIP_ERROR(hipMemcpy(d_alpha, &h_alpha, sizeof(T), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     /* =====================================================================
          HIPBLAS

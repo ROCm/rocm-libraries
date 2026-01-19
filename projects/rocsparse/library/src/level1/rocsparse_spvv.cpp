@@ -338,6 +338,9 @@ try
     ROCSPARSE_CHECKARG(2, x, x->init == false, rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(3, y, y->init == false, rocsparse_status_not_initialized);
 
+    ROCSPARSE_CHECKARG(2, x, (x->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(3, y, (y->batch_count != 1), rocsparse_status_not_implemented);
+
     rocsparse::spvv_t f;
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::spvv_find(&f, compute_type, x->idx_type, x->data_type, y->data_type));

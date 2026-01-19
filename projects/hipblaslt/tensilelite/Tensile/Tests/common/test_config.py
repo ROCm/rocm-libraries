@@ -218,6 +218,12 @@ def findConfigs(rootDir=None):
                 filepath = os.path.join(rootDir, dirpath, filename)
                 if not "test_data" in filepath:
                     marks = configMarks(filepath, rootDir, availableArchs)
+
+                    # Conditionally xfail icache_flush.yaml on rocm 7.1 due to ROCm bug.
+                    if filename == "icache_flush.yaml" and rocm_version and rocm_version.startswith("7.1"):
+                        reason = "Test is expected to fail on ROCm 7.1 due to a known bug."
+                        marks.append(pytest.mark.xfail(reason=reason, strict=True))
+
                     relpath = os.path.relpath(filepath, printRoot)
                     params.append(pytest.param(filepath, marks=marks, id=relpath))
     return params

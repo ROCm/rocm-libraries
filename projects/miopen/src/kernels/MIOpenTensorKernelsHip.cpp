@@ -166,10 +166,10 @@ extern "C" __global__ void Op2dTensorSquash(const MIOPEN_TYPE* a,
                                             const MIOPEN_TYPE alpha0,
                                             const MIOPEN_TYPE alpha1,
                                             const MIOPEN_TYPE beta,
-                                            const long Aoffset,
-                                            const long Boffset,
-                                            const long Coffset,
-                                            const long total_work,
+                                            const int64_t Aoffset,
+                                            const int64_t Boffset,
+                                            const int64_t Coffset,
+                                            const int64_t total_work,
                                             const int use_apl0,
                                             const int use_apl1,
                                             const int use_bet)
@@ -448,9 +448,9 @@ extern "C" __global__ void Op4dTensorGeneric(MIOPEN_TYPE* a,
                                              const MIOPEN_TYPE beta,
                                              const unsigned int bitmap,
                                              const int work_per_wg,
-                                             const long Aoffset,
-                                             const long Boffset,
-                                             const long Coffset,
+                                             const int64_t Aoffset,
+                                             const int64_t Boffset,
+                                             const int64_t Coffset,
                                              const int num_wg)
 {
     int gid = blockIdx.x;
@@ -544,10 +544,10 @@ extern "C" __global__ void Op4dTensorLite(const MIOPEN_TYPE* a,
                                           const MIOPEN_TYPE alpha0,
                                           const MIOPEN_TYPE alpha1,
                                           const MIOPEN_TYPE beta,
-                                          const long Aoffset,
-                                          const long Boffset,
-                                          const long Coffset,
-                                          const long total_work,
+                                          const int64_t Aoffset,
+                                          const int64_t Boffset,
+                                          const int64_t Coffset,
+                                          const int64_t total_work,
                                           const int use_beta)
 {
     int gid0        = blockIdx.x * blockDim.x + threadIdx.x;
@@ -791,6 +791,118 @@ extern "C" __global__ void OpTensorFwdBiasGeneric(MIOPEN_TYPE* a,
                     MIOPEN_TENSOR_OP(a_off[aindex] * alpha0, operand) + beta * c_off[cindex];
 
                 lid += blockDim.x;
+            }
+        }
+    }
+}
+#endif
+
+#ifdef USE_2D_TENSOR_LITE
+extern "C" __global__ void Op2dTensorLite(const MIOPEN_TYPE* a,
+                                          const int a_nstride,
+                                          const MIOPEN_TYPE* b,
+                                          const int b_nstride,
+                                          MIOPEN_TYPE* c,
+                                          const int c_nstride,
+                                          const MIOPEN_TYPE alpha0,
+                                          const MIOPEN_TYPE alpha1,
+                                          const MIOPEN_TYPE beta,
+                                          const uint64_t Aoffset,
+                                          const uint64_t Boffset,
+                                          const uint64_t Coffset,
+                                          const size_t total_work,
+                                          const size_t total_work2,
+                                          const int use_beta,
+                                          const int use_bias)
+{
+    int gid0 = blockIdx.x * blockDim.x + threadIdx.x;
+    int gid1 = blockIdx.y * blockDim.y + threadIdx.y;
+
+    MIOPEN_TYPE a_dat[RD_BLCK];
+    MIOPEN_TYPE b_dat[RD_BLCK];
+    MIOPEN_TYPE c_dat[RD_BLCK];
+
+    if(gid0 < total_work)
+    {
+        if(use_bias == 1)
+        {
+            int b_index          = gid0 * RD_BLCK;
+            *((READ_TYPE*)b_dat) = *((const READ_TYPE*)(b + Boffset + b_index));
+        }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wfloat-equal"
+        if(beta == static_cast<MIOPEN_TYPE>(0))
+#pragma clang diagnostic pop
+        {
+            for(; gid1 < total_work2; gid1 += gridDim.y * blockDim.y)
+            {
+                for(int i = 0; i < RD_BLCK; ++i)
+                {
+                    c_dat[i] = (MIOPEN_TYPE)0;
+                }
+
+                int a_index = gid1 * a_nstride + gid0 * RD_BLCK;
+                int c_index = gid1 * c_nstride + gid0 * RD_BLCK;
+
+                *((READ_TYPE*)a_dat) = *((const READ_TYPE*)(a + Aoffset + a_index));
+                if(use_beta == 1)
+                {
+                    *((READ_TYPE*)c_dat) = *((const READ_TYPE*)(c + Coffset + c_index));
+                }
+
+                if(use_bias == 0)
+                {
+                    int b_index          = gid1 * b_nstride + gid0 * RD_BLCK;
+                    *((READ_TYPE*)b_dat) = *((const READ_TYPE*)(b + Boffset + b_index));
+                }
+
+                for(int i = 0; i < RD_BLCK; ++i)
+                {
+                    if(use_beta == 1)
+                    {
+                        c_dat[i] = (MIOPEN_TYPE)0;
+                    }
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i] * alpha0, b_dat[i] * alpha1);
+                }
+
+                *((READ_TYPE*)(c + Coffset + c_index)) = *((READ_TYPE*)c_dat);
+            }
+        }
+        else
+        {
+            for(; gid1 < total_work2; gid1 += gridDim.y * blockDim.y)
+            {
+                for(int i = 0; i < RD_BLCK; ++i)
+                {
+                    c_dat[i] = (MIOPEN_TYPE)0;
+                }
+
+                int a_index = gid1 * a_nstride + gid0 * RD_BLCK;
+                int c_index = gid1 * c_nstride + gid0 * RD_BLCK;
+
+                *((READ_TYPE*)a_dat) = *((const READ_TYPE*)(a + Aoffset + a_index));
+                if(use_beta == 1)
+                {
+                    *((READ_TYPE*)c_dat) = *((const READ_TYPE*)(c + Coffset + c_index));
+                }
+
+                if(use_bias == 0)
+                {
+                    int b_index          = gid1 * b_nstride + gid0 * RD_BLCK;
+                    *((READ_TYPE*)b_dat) = *((const READ_TYPE*)(b + Boffset + b_index));
+                }
+
+                for(int i = 0; i < RD_BLCK; ++i)
+                {
+                    if(use_beta == 1)
+                    {
+                        c_dat[i] *= beta;
+                    }
+                    c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i] * alpha0, b_dat[i] * alpha1);
+                }
+
+                *((READ_TYPE*)(c + Coffset + c_index)) = *((READ_TYPE*)c_dat);
             }
         }
     }

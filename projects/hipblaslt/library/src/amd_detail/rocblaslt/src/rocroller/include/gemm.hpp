@@ -32,7 +32,10 @@
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
+#include <rocRoller/Operations/Scratch_fwd.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
+
+#include <map>
 
 /**
  * @brief GemmKernel
@@ -57,7 +60,7 @@ struct GemmKernel
     rocRoller::Operations::OperationTag tagTensorScaleA;
     rocRoller::Operations::OperationTag tagTensorScaleB;
 
-    rocRoller::Operations::OperationTag tagScratch;
+    std::map<rocRoller::Operations::ScratchPolicy, rocRoller::Operations::OperationTag> tagScratch;
     rocRoller::Operations::OperationTag tagSKGrid;
     rocRoller::Operations::OperationTag tagWGM;
 

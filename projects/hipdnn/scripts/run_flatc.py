@@ -14,9 +14,9 @@ def main():
     """Run flatc compiler on FlatBuffers schema files on Linux or Windows."""
     # Get the directory where this script is located
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    schemas_dir = os.path.join(script_dir, "..", "sdk", "schemas")
+    schemas_dir = os.path.join(script_dir, "..", "data_sdk", "schemas")
     output_dir = os.path.join(
-        script_dir, "..", "sdk", "include", "hipdnn_sdk", "data_objects"
+        script_dir, "..", "data_sdk", "include", "hipdnn_data_sdk", "data_objects"
     )
 
     # Find flatc in PATH and prepare to validate its version
