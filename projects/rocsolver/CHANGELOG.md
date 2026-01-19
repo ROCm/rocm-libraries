@@ -2,14 +2,6 @@
 
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
-## rocSOLVER 3.33.0 for ROCm 7.2.0
-
-### Resolved issues
-
-* Fixed a synchronization issue in GETF2.
-
-
-
 ## rocSOLVER 3.32.0 for ROCm 7.2.0
 
 ### Optimized
