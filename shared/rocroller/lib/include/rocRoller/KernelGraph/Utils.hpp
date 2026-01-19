@@ -796,9 +796,9 @@ namespace rocRoller
                                                      bool isStorePartOfGlobalToLDSOp = false);
 
         /**
-         * @brief Get the number of LDS elements for a given tile and LDS tag.
+         * @brief Get the number of LDS elements for a given LDS tag.
          */
-        int getNumLDSElements(KernelGraph const& graph, int tileTag, int ldsTag);
+        int getNumLDSElements(KernelGraph const& graph, int ldsTag);
 
         /**
          * @brief Get the first and last nodes from a set of nodes that are totally ordered
