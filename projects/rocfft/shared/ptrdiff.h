@@ -20,8 +20,8 @@
 
 #pragma once
 
-#include <type_traits>
 #include <numeric>
+#include <type_traits>
 #include <vector>
 
 // Compute the farthest point from the original pointer for a C-style array.
@@ -53,7 +53,7 @@ static size_t compute_ptrdiff(const std::vector<intT1>& length, const std::vecto
         if(std::any_of(stride.begin(), stride.end(), [](const auto& s) { return s < 0; }))
             throw std::runtime_error("Negative strides given to compute_ptrdiff");
     }
-    
+
     // We allow for weird data layouts with self-aliasing; this is not an array validator.
 
     // 1 + sum_i [ ( length_i - 1 ) * stride_i
