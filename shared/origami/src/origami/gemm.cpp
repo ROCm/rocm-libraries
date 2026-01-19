@@ -780,16 +780,22 @@ double compute_tile_latency(const problem_t& problem,
     L_cvt = compute_cvt_overhead_x1(problem, hardware, config);
   }
 
-  // 5) Single-tile latency (always additive)
-  // Calculate the fraction of the work that is useful (not padding).
-
-  // 5) Single-tile latency (apply penalty after finding the bottleneck)
-  double L_tile_single = (std::max(L_compute, L_mem) * effective_tile_penalty) + L_cvt;
+  // 5)
+  // 5-0) Look up main_loop_efficiency from hardware map
+  double main_loop_efficiency = 1.0;
+  if (config.custom_mainloop_scheduling) {
+    main_loop_efficiency = hardware.get_adjusted_main_loop_efficiency(problem.a_transpose, 
+                                                                      problem.b_transpose, 
+                                                                      config.mt.m, 
+                                                                      config.mt.n, 
+                                                                      config.mt.k, 
+                                                                      problem.mi_dtype);
+  }
+  // 5-1) Single-tile latency (apply penalty after finding the bottleneck)
+  double L_tile_single = (std::max(L_compute, L_mem) * main_loop_efficiency * effective_tile_penalty) + L_cvt;
   L_prologue *= effective_tile_penalty;
+
   // 6) Number of K-iterations (excluding epilogue), at least 1
-  // long num_iter = static_cast<long>(((K + MT_K - 1) / MT_K)) - 1;
-  // num_iter      = std::ceil(num_iter / splitting_factor);
-  // num_iter      = std::max(num_iter, 1L);
   const long k_per_split = static_cast<long>(math::safe_ceil_div(K, splitting_factor));
   long num_iter =
       std::max(static_cast<long>(math::safe_ceil_div(static_cast<size_t>(k_per_split), MT_K) - 1),
