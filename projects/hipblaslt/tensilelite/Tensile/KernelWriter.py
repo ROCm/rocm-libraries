@@ -4781,14 +4781,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       
     if kernel["UseDirect32XEmulation"]:
       numVgprsEmu = (self.states.a.numVgprValu + self.states.b.numVgprValu) // 2
-      if (vgprIdx >= (self.states.regCaps["MaxVgpr"] - numVgprsEmu)):
-        kernel["UseDirect32XEmulation"] = False
-        kernel["UseDot2F32XEmulation"] = True
-      else:
-        #align 64 bit
-        vgprIdx = ((vgprIdx+1)//2)*2
-        self.states.startVgprCvt = vgprIdx
-        vgprIdx += numVgprsEmu # for vgpr 32XEmulation
+      #align 64 bit
+      vgprIdx = ((vgprIdx+1)//2)*2
+      self.states.startVgprCvt = vgprIdx
+      vgprIdx += numVgprsEmu # for vgpr 32XEmulation
 
     # TODO: Serial is always the first/last register in the pool so the store
     # code doesn't have to deal with fragmentation
