@@ -163,6 +163,20 @@ Tests:
   matrix: [rocsparse_matrix_random]
 
 - name: csr2gebsr
+  category: pre_checkin
+  function: csr2gebsr
+  precision: *single_double_precisions_complex_real
+  M: [56782]
+  N: [48775]
+  row_block_dimA: [2, 4, 8, 16, 32, 64]
+  col_block_dimA: [33]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+
+
+- name: csr2gebsr
   category: nightly
   function: csr2gebsr
   precision: *single_only_precisions

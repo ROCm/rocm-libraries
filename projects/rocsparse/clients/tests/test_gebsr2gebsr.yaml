@@ -31,6 +31,7 @@ Tests:
   function: gebsr2gebsr_bad_arg
   precision: *single_double_precisions_complex_real
 
+# Quick
 - name: gebsr2gebsr
   category: quick
   function: gebsr2gebsr
@@ -106,6 +107,7 @@ Tests:
   direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_random]
 
+# Pre-checkin
 - name: gebsr2gebsr_file
   category: pre_checkin
   function: gebsr2gebsr
@@ -234,6 +236,55 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [mplate]
 
+- name: gebsr2gebsr_file
+  category: pre_checkin
+  function: gebsr2gebsr
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  row_block_dimA: [40]
+  col_block_dimA: [32]
+  row_block_dimB: [45]
+  col_block_dimB: [37]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [qc2534]
+
+- name: gebsr2gebsr_file
+  category: pre_checkin
+  function: gebsr2gebsr
+  precision: *single_only_precisions_complex
+  M: 1
+  N: 1
+  row_block_dimA: [62]
+  col_block_dimA: [44]
+  row_block_dimB: [36]
+  col_block_dimB: [55]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate]
+
+- name: gebsr2gebsr_file
+  category: pre_checkin
+  function: gebsr2gebsr
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  row_block_dimA: [15]
+  col_block_dimA: [12]
+  row_block_dimB: [5, 13, 34]
+  col_block_dimB: [8]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [scircuit]
+
+# Nightly
 - name: gebsr2gebsr
   category: nightly
   function: gebsr2gebsr

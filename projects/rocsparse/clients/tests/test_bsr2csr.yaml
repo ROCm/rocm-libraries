@@ -37,7 +37,7 @@ Tests:
   precision: *single_only_precisions
   M: [1, 872]
   N: [1, 623]
-  block_dim: [1, 4, 7, 10]
+  block_dim: [1, 7, 150, 256]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_row, rocsparse_direction_column]
@@ -150,6 +150,18 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [mplate,
              Chevron2]
+
+- name: bsr2csr
+  category: pre_checkin
+  function: bsr2csr
+  precision: *single_double_precisions_complex_real
+  M: [2857]
+  N: [3210]
+  block_dim: [3, 128]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
 
 - name: bsr2csr
   category: nightly
