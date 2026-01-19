@@ -104,6 +104,12 @@ NB_MODULE(origami, m) {
       .def_rw("workspace_size_per_elem_c", &origami::config_t::workspace_size_per_elem_c)
       .def_rw("grid_selection", &origami::config_t::grid_selection);
 
+  nanobind::class_<origami::workgroup_mapping_t>(m, "workgroup_mapping_t")
+      .def(nanobind::init<>())
+      .def_rw("wgmxccchunk", &origami::workgroup_mapping_t::wgmxccchunk)
+      .def_rw("wgmxcc", &origami::workgroup_mapping_t::wgmxcc)
+      .def_rw("wgm", &origami::workgroup_mapping_t::wgm);
+
   nanobind::class_<origami::prediction_result_t>(m, "prediction_result_t")
       .def(nanobind::init<>())
       .def_rw("latency", &origami::prediction_result_t::latency)
@@ -166,9 +172,16 @@ NB_MODULE(origami, m) {
   m.def("select_grid_size",
         &origami::streamk::select_grid_size,
         "Select best grid size for the given configuration");
-  m.def("select_workgroup_mapping",
-        &origami::select_workgroup_mapping,
-        "Select best workgroup mapping");
+  m.def(
+      "select_workgroup_mapping",
+      [](const origami::problem_t& problem,
+         const origami::hardware_t& hardware,
+         const origami::config_t& config,
+         int sk_grid) {
+        const auto result = origami::select_workgroup_mapping(problem, hardware, config, sk_grid);
+        return nanobind::make_tuple(result.wgmxcc, result.wgm);
+      },
+      "Select best workgroup mapping");
   m.def("rank_configs", &origami::rank_configs, "Rank configurations by performance");
   m.def("select_config_mnk",
         &origami::select_config_mnk,

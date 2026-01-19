@@ -74,9 +74,6 @@ if(ORIGAMI_PYTHON_ENABLE_WARNINGS)
     )
 endif()
 
-# Set link directories for ROCm libraries
-#target_link_directories(_pyorigami PRIVATE "${ROCM_PATH}/lib")
-
 # Install the compiled module to the package directory
 install(TARGETS _pyorigami LIBRARY DESTINATION "${PYTHON_INSTALL_DIR}")
 
