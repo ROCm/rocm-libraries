@@ -1,12 +1,12 @@
 # hipBLASLt Provider Plugin
-A plugin wrapping hipBLASLt in order to provide engines to solve some hipDNN graphs.
+The hipBLASLt provider plugin is a wrapping around hipBLASLt that provides engines to solve certain hipDNN graphs.
 
 :construction: **This project is under active development** :construction:
 
 ## Building
-This plugin is built as a standalone plugin. To build the plugin you need to have installed hipDNN and hipBLASLt on the system first.
+This plugin is built as a standalone plugin. To build the plugin, first install hipDNN and hipBLASLt on the system and then follow these steps:
 
 1. Navigate to the `dnn-providers/hipblaslt-provider` directory.
-1. Make a build directory, `mkdir build && cd build`.
-1. Run `cmake -DCMAKE_CXX_COMPILER=<path to amdclang>/clang++ ..` to configure the build.
-1. Run `ninja` to build the plugin.
+1. Make a build directory using `mkdir build && cd build`.
+1. Configure the build using `cmake -DCMAKE_CXX_COMPILER=<path to amdclang>/clang++ ..`.
+1. Finally, run `ninja` to build the plugin.
