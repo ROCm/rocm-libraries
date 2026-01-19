@@ -493,41 +493,124 @@ TEST_CASE("Formocast: FIFO queue operations", "[formocast]") {
     Formocast simulator;
     simulator.setHardware(hardware_t::architecture_t::gfx950);
     
-    SECTION("Check global read FIFO full") {
+    SECTION("Check global read FIFO full - no stall") {
         std::queue<int> fifo;
         int result = simulator.getGlobalReadQueueFullStallCycles(100, fifo, 8, 4, false);
-        REQUIRE(result >= 0);
+        REQUIRE(result == 100);
+        REQUIRE(fifo.size() == 1);
+        REQUIRE(fifo.back() == 100);
     }
     
-    SECTION("Check local read FIFO full") {
+    SECTION("Check global read FIFO full - with stall") {
         std::queue<int> fifo;
-        int result = simulator.getLocalReadQueueFullStallCycles(100, fifo, 8, 4, false, 1.0);
-        REQUIRE(result >= 0);
+        fifo.push(10);
+        fifo.push(20);
+        fifo.push(30);
+        fifo.push(40);
+        // no stall
+        int result = simulator.getGlobalReadQueueFullStallCycles(100, fifo, 8, 4, true);
+        REQUIRE(result == 100);
+        REQUIRE(fifo.size() == 4);
     }
     
-    SECTION("Check local read finished") {
+    SECTION("Check global read FIFO full - causes stall") {
         std::queue<int> fifo;
         fifo.push(50);
         fifo.push(60);
         fifo.push(70);
-        
-        int result = simulator.getLocalReadCompletionCycle(100, fifo, 2);
-        REQUIRE(result >= 0);
+        fifo.push(80);
+        // stall to 130
+        int result = simulator.getGlobalReadQueueFullStallCycles(100, fifo, 8, 4, true);
+        REQUIRE(result == 130);
+        REQUIRE(fifo.size() == 4);
+        REQUIRE(fifo.back() == 130);
     }
     
-    SECTION("Push local read for gfx950") {
+    SECTION("Check local read FIFO full - no stall") {
+        std::queue<int> fifo;
+        // no stall
+        int result = simulator.getLocalReadQueueFullStallCycles(100, fifo, 8, 4, false, 1.0);
+        REQUIRE(result == 100);
+        REQUIRE(fifo.size() == 1);
+    }
+    
+    SECTION("Check local read FIFO full - with bank conflict") {
+        std::queue<int> fifo;
+        fifo.push(10);
+        fifo.push(20);
+        fifo.push(30);
+        fifo.push(40);
+        // no stall
+        int result = simulator.getLocalReadQueueFullStallCycles(100, fifo, 8, 4, true, 1.5);
+        REQUIRE(result == 100);
+        REQUIRE(fifo.size() == 4);
+    }
+    
+    SECTION("Check local read completion - queue not full") {
+        std::queue<int> fifo;
+        fifo.push(50);
+        fifo.push(60);
+        // fifo.size()=2 <= numLR=2, should return currentCycle
+        int result = simulator.getLocalReadCompletionCycle(100, fifo, 2);
+        REQUIRE(result == 100);
+        REQUIRE(fifo.size() == 2);
+    }
+    
+    SECTION("Check local read completion - remove finished reads") {
+        std::queue<int> fifo;
+        fifo.push(50);
+        fifo.push(60);
+        fifo.push(70);
+        // no stall
+        int result = simulator.getLocalReadCompletionCycle(100, fifo, 2);
+        REQUIRE(result == 100);
+        REQUIRE(fifo.size() == 2);
+        REQUIRE(fifo.front() == 60);
+    }
+    
+    SECTION("Check local read completion - wait for unfinished reads") {
+        std::queue<int> fifo;
+        fifo.push(110);
+        fifo.push(120);
+        fifo.push(130);
+        // stall to 120
+        int result = simulator.getLocalReadCompletionCycle(100, fifo, 1);
+        REQUIRE(result == 120);
+        REQUIRE(fifo.size() == 1);
+    }
+    
+    SECTION("Push local read for gfx950 - bpr=8") {
         std::queue<int> fifo;
         simulator.pushLocalRead(100, fifo, 8, true);
         
-        REQUIRE(fifo.size() > 0);
+        REQUIRE(fifo.size() == 1);
+        REQUIRE(fifo.front() == 111); // 100 + 11
+    }
+    
+    SECTION("Push local read for gfx950 - bpr=16") {
+        std::queue<int> fifo;
+        simulator.pushLocalRead(100, fifo, 16, true);
+        
+        REQUIRE(fifo.size() == 1);
+        REQUIRE(fifo.front() == 121); // 100 + 21
     }
     
     SECTION("Push local read write with bank conflict") {
         std::queue<int> fifo;
+
         simulator.pushLocalReadWrite(100, fifo, 8, 1.5);
         
-        REQUIRE(fifo.size() > 0);
-        REQUIRE(fifo.front() > 100); // Should have added latency
+        REQUIRE(fifo.size() == 1);
+        REQUIRE(fifo.front() == 111); // 100 + 11
+    }
+    
+    SECTION("Push local read write without bank conflict") {
+        std::queue<int> fifo;
+
+        simulator.pushLocalReadWrite(100, fifo, 8, 1.0);
+        
+        REQUIRE(fifo.size() == 1);
+        REQUIRE(fifo.front() == 110); // 100 + 10
     }
 }
 
