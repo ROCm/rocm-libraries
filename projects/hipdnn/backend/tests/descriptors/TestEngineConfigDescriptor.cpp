@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "DescriptorTestUtils.hpp"
+#include "HipdnnBackendFlatbufferData.h"
 #include "TestMacros.hpp"
 #include "descriptors/EngineConfigDescriptor.hpp"
 #include "descriptors/EngineDescriptor.hpp"
@@ -13,6 +14,7 @@
 #include "mocks/MockHandle.hpp"
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 
 #include <memory>
 
@@ -281,4 +283,147 @@ TEST_F(TestEngineConfigDescriptor, GetEngineDescriptorMaxWorkspaceSize)
     ASSERT_NO_THROW(engineConfig->getAttribute(
         HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, &count, &workspaceSize));
     ASSERT_EQ(count, 1);
+}
+
+// Helper function to create a serialized KnobSetting
+static flatbuffers::DetachedBuffer createSerializedKnobSetting(int64_t knobId, int64_t value)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    auto intValue = hipdnn_data_sdk::data_objects::CreateIntValue(builder, value);
+    auto knobSetting = hipdnn_data_sdk::data_objects::CreateKnobSetting(
+        builder, knobId, hipdnn_data_sdk::data_objects::KnobValue::IntValue, intValue.Union());
+    builder.Finish(knobSetting);
+    return builder.Release();
+}
+
+TEST_F(TestEngineConfigDescriptor, SetKnobChoiceInvalidType)
+{
+    auto engineConfig = getEngineConfigDescriptor();
+
+    auto knobBuffer = createSerializedKnobSetting(100, 42);
+    hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
+
+    // Wrong attribute type
+    ASSERT_THROW_HIPDNN_STATUS(
+        engineConfig->setAttribute(
+            HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT, HIPDNN_TYPE_INT64, 1, &knobData),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestEngineConfigDescriptor, SetKnobChoiceInvalidCount)
+{
+    auto engineConfig = getEngineConfigDescriptor();
+
+    auto knobBuffer = createSerializedKnobSetting(100, 42);
+    hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
+
+    // Element count < 1
+    ASSERT_THROW_HIPDNN_STATUS(
+        engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                   HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                   0,
+                                   &knobData),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestEngineConfigDescriptor, SetKnobChoiceNullPointer)
+{
+    auto engineConfig = getEngineConfigDescriptor();
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                   HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                   1,
+                                   nullptr),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST_F(TestEngineConfigDescriptor, SetKnobChoiceNullFlatbufferPointer)
+{
+    auto engineConfig = getEngineConfigDescriptor();
+
+    hipdnnBackendFlatbufferData_t knobData = {nullptr, 100};
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                   HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                   1,
+                                   &knobData),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST_F(TestEngineConfigDescriptor, SetKnobChoiceZeroSize)
+{
+    auto engineConfig = getEngineConfigDescriptor();
+
+    auto knobBuffer = createSerializedKnobSetting(100, 42);
+    hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), 0};
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                   HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                   1,
+                                   &knobData),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestEngineConfigDescriptor, SetKnobChoiceSuccess)
+{
+    auto engineConfig = getEngineConfigDescriptor();
+
+    EXPECT_CALL(*getMockEngine(), isFinalized()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
+
+    // Set engine first
+    ASSERT_NO_THROW(engineConfig->setAttribute(
+        HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_mockEngineWrapper));
+
+    // Now set a knob choice
+    auto knobBuffer = createSerializedKnobSetting(100, 42);
+    hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
+
+    ASSERT_NO_THROW(engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                               HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                               1,
+                                               &knobData));
+}
+
+TEST_F(TestEngineConfigDescriptor, SetKnobChoiceMultipleKnobs)
+{
+    auto engineConfig = getEngineConfigDescriptor();
+
+    EXPECT_CALL(*getMockEngine(), isFinalized()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
+
+    // Set engine first
+    ASSERT_NO_THROW(engineConfig->setAttribute(
+        HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_mockEngineWrapper));
+
+    // Create multiple knob settings
+    auto knobBuffer1 = createSerializedKnobSetting(100, 42);
+    auto knobBuffer2 = createSerializedKnobSetting(101, 84);
+
+    std::vector<hipdnnBackendFlatbufferData_t> knobDataArray
+        = {{knobBuffer1.data(), knobBuffer1.size()}, {knobBuffer2.data(), knobBuffer2.size()}};
+
+    ASSERT_NO_THROW(engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                               HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                               2,
+                                               knobDataArray.data()));
+}
+
+TEST_F(TestEngineConfigDescriptor, SetKnobChoiceOnFinalizedDescriptor)
+{
+    auto engineConfig = getEngineConfigDescriptor();
+    makeEngineConfigFinalized();
+
+    auto knobBuffer = createSerializedKnobSetting(100, 42);
+    hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        engineConfig->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                   HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                   1,
+                                   &knobData),
+        HIPDNN_STATUS_NOT_INITIALIZED);
 }

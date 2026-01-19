@@ -64,6 +64,11 @@ namespace rocRoller
                    && (m_variableType == rhs.m_variableType);
         }
 
+        inline std::vector<size_t> const& Tensor::literalSizes() const
+        {
+            return m_literalSizes;
+        }
+
         inline std::vector<size_t> const& Tensor::literalStrides() const
         {
             return m_literalStrides;
