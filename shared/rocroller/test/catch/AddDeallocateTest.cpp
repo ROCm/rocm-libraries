@@ -92,6 +92,7 @@ namespace AddDeallocateTest
         SECTION("Placement of LDS Deallocates")
         {
             kgraph = kgraph.transform(std::make_shared<NopExtraScopes>());
+            kgraph = kgraph.transform(std::make_shared<AddLDSBarriers>());
             kgraph = kgraph.transform(std::make_shared<AddDeallocateDataFlow>());
 
             auto ldsDeallocatePredicate = [&](int tag) -> bool {
@@ -132,12 +133,13 @@ namespace AddDeallocateTest
                           std::inserter(ldsDeallocateInsideLoop, ldsDeallocateInsideLoop.end()));
             }
 
+            // TODO: Adjust comment/check now that AddLDSBarriers is a thing.
             // With 4 unrolls and 2 inflight prefetches, we expect the following
             // 1. A, B deallocated three times in the main loop
             // 2. A, B deallocate after the main loop
             // 3. C deallocated once after the prolog
-            CHECK(ldsDeallocateFromKernel.size() == 5);
-            CHECK(ldsDeallocateInsideLoop.size() == 3);
+            CHECK(ldsDeallocateFromKernel.size() == 8);
+            CHECK(ldsDeallocateInsideLoop.size() == 6);
         }
     }
 

@@ -42,7 +42,6 @@ namespace rocRoller
 
         namespace
         {
-
             /**
              * @brief Check if a Barrier is connected to an LDS coordinate via mapper connections.
              *
@@ -116,16 +115,15 @@ namespace rocRoller
              *
              * @param graph The kernel graph
              * @param recordsForCoord Trace records filtered for a specific coordinate
-             * @return A pair of vectors: first contains write operations (tag, recordIndex),
-             *         second contains read operations (tag, recordIndex)
+             * @return A pair of vectors: first contains write operations,
+             *         second contains read operations
              */
-            inline std::pair<std::vector<std::pair<int, size_t>>,
-                             std::vector<std::pair<int, size_t>>>
+            inline std::pair<std::vector<int>, std::vector<int>>
                 collectReadAndWritesToCoordinate(KernelGraph const&    graph,
                                                  RWTraceRecords const& recordsForCoord)
             {
-                std::vector<std::pair<int, size_t>> reads;
-                std::vector<std::pair<int, size_t>> writes;
+                std::vector<int> reads;
+                std::vector<int> writes;
                 for(auto recordIndex = 0; recordIndex < recordsForCoord.size(); ++recordIndex)
                 {
                     auto const& record = recordsForCoord[recordIndex];
@@ -141,14 +139,106 @@ namespace rocRoller
                     if(record.rw == ControlFlowRWTracer::ReadWrite::WRITE
                        || record.rw == ControlFlowRWTracer::ReadWrite::READWRITE)
                     {
-                        writes.push_back({record.control, recordIndex});
+                        writes.push_back(record.control);
                     }
                     else if(record.rw == ControlFlowRWTracer::ReadWrite::READ)
                     {
-                        reads.push_back({record.control, recordIndex});
+                        reads.push_back(record.control);
                     }
                 }
+
                 return {writes, reads};
+            }
+
+            /**
+             * @brief Find the innermost loop (ForLoopOp or DoWhileOp) containing an operation.
+             *
+             * Collects all loops containing the operation and returns the one that does not
+             * contain any other ForLoopOp or DoWhileOp in its body (i.e., the innermost loop).
+             *
+             * @param graph The kernel graph
+             * @param opTag Tag of the operation
+             * @return The tag of the innermost containing loop, or std::nullopt if not in any loop
+             */
+            std::optional<int> findInnermostLoop(KernelGraph const& graph, int opTag)
+            {
+                // Collect all loops containing the operation
+                std::vector<int> containingLoops;
+                for(const auto node : graph.control.nodesContaining(opTag))
+                {
+                    if(graph.control.get<ForLoopOp>(node) || graph.control.get<DoWhileOp>(node))
+                    {
+                        containingLoops.push_back(node);
+                    }
+                }
+
+                if(containingLoops.empty())
+                {
+                    return std::nullopt;
+                }
+
+                // Find the innermost loop: one that doesn't contain any other
+                // loop from loops that contain opTag.
+                for(auto i = 0; i < containingLoops.size(); ++i)
+                {
+                    const auto loopA = containingLoops[i];
+
+                    bool isInnermost = true;
+                    for(auto j = i + 1; j < containingLoops.size(); ++j)
+                    {
+                        const auto loopB = containingLoops[j];
+
+                        auto nodesContainingOther
+                            = graph.control.nodesContaining(loopB).to<std::set>();
+                        if(nodesContainingOther.contains(loopA))
+                        {
+                            // If loopA contains loopB then loopA  is not the innermost
+                            // loop that contains opTag
+                            isInnermost = false;
+                            break;
+                        }
+                    }
+
+                    if(isInnermost)
+                    {
+                        return {loopA};
+                    }
+                }
+
+                AssertFatal(
+                    false,
+                    "Operation is contained by loop(s) but innermost loop could not be found.",
+                    ShowValue(opTag),
+                    ShowValue(containingLoops));
+                return std::nullopt;
+            }
+
+            /**
+             * @brief Check if a barrier and an operation are in the body of the same loop.
+             *
+             * This function determines if both the barrier and the operation are
+             * immediately contained within the same loop body (ForLoopOp or DoWhileOp).
+             * If neither is in any loop, they are considered to be in the same body
+             * (the kernel body).
+             *
+             * @param graph The kernel graph
+             * @param barrierTag Tag of the barrier operation
+             * @param opTag Tag of the operation to check
+             * @return true if both are in the body of the same innermost loop (or both outside any loop)
+             */
+            inline bool areInSameLoopBody(KernelGraph const& graph, int barrierTag, int opTag)
+            {
+                auto barrierLoop = findInnermostLoop(graph, barrierTag);
+                auto opLoop      = findInnermostLoop(graph, opTag);
+
+                // Both must be in the same loop (or both not in any loop)
+                if(barrierLoop.has_value() && opLoop.has_value())
+                {
+                    return *barrierLoop == *opLoop;
+                }
+
+                // If neither is in a loop, they're in the same kernel body
+                return !barrierLoop.has_value() && !opLoop.has_value();
             }
 
             /**
@@ -181,7 +271,7 @@ namespace rocRoller
             }
 
             /**
-             * @brief Find a Barrier operation between firstOp and secondOp.
+             * @brief Find a LDS Barrier operation between firstOp and secondOp.
              *
              * A barrier is considered "between" if it executes after firstOp and before secondOp.
              *
@@ -189,14 +279,13 @@ namespace rocRoller
              * @param allRecords All control flow RW tracer records
              * @param firstOpRecordIndex Position in tracer order of the operation that executes first
              * @param secondOpRecordIndex Position in tracer order of the operation that executes second
-             * @param requireLDSConnection If true, only return barriers connected to LDS
              * @return The tag of a barrier between the operations, or std::nullopt if none exists
              */
             std::optional<int> findBarrierBetween(KernelGraph const&    graph,
                                                   RWTraceRecords const& allRecords,
+                                                  int                   ldsCoord,
                                                   size_t                firstOpRecordIndex,
-                                                  size_t                secondOpRecordIndex,
-                                                  bool                  requireLDSConnection = true)
+                                                  size_t                secondOpRecordIndex)
             {
                 const auto startPos = firstOpRecordIndex + 1;
                 const auto endPos   = secondOpRecordIndex - 1;
@@ -207,20 +296,27 @@ namespace rocRoller
                             ShowValue(secondOpRecordIndex));
 
                 // Look for Barrier nodes between firstOp and secondOp in trace order
-                std::set<int> checkedControls;
                 for(auto i = startPos; i <= endPos; ++i)
                 {
                     int ctrl = allRecords[i].control;
-                    if(!checkedControls.contains(ctrl))
+                    int barrierLdsCoord = allRecords[i].coordinate;
+                    if(graph.control.get<Barrier>(ctrl) and isBarrierForLDS(graph, ctrl)
+                       and areInSameLoopBody(graph, ctrl, allRecords[secondOpRecordIndex].control)
+                       and barrierLdsCoord == ldsCoord)
                     {
-                        checkedControls.insert(ctrl);
-                        // Check if this control node is a Barrier
-                        if(graph.control.get<Barrier>(ctrl))
+                        auto foundWritesAfterBarrier = std::any_of(
+                            allRecords.begin() + i,
+                            allRecords.begin() + endPos,
+                            [ldsCoord, &graph](const ControlFlowRWTracer::ReadWriteRecord& record) {
+                                return (record.rw == ControlFlowRWTracer::READWRITE
+                                        or record.rw == ControlFlowRWTracer::WRITE)
+                                       and record.coordinate == ldsCoord
+                                       and not graph.control.get<Barrier>(record.control);
+                            });
+                        // Found a Barrier connected to a LDS coordinate in same loop as secondOp
+                        if(not foundWritesAfterBarrier)
                         {
-                            if(!requireLDSConnection || isBarrierForLDS(graph, ctrl))
-                            {
-                                return ctrl;
-                            }
+                            return {ctrl};
                         }
                     }
                 }
@@ -229,7 +325,7 @@ namespace rocRoller
             }
 
             /**
-             * @brief Check if there is a Barrier operation between firstOp and secondOp.
+             * @brief Check if there is a LDS Barrier operation between firstOp and secondOp.
              *
              * A barrier is considered "between" if it executes after firstOp and before secondOp.
              *
@@ -243,13 +339,14 @@ namespace rocRoller
              */
             bool hasBarrierBetween(KernelGraph const&    graph,
                                    RWTraceRecords const& allRecords,
+                                   int                   ldsCoord,
                                    int                   firstOpTag,
                                    int                   secondOpTag,
                                    size_t                firstOpRecordIndex,
                                    size_t                secondOpRecordIndex)
             {
                 auto barrier = findBarrierBetween(
-                    graph, allRecords, firstOpRecordIndex, secondOpRecordIndex);
+                    graph, allRecords, ldsCoord, firstOpRecordIndex, secondOpRecordIndex);
                 if(barrier.has_value())
                 {
                     Log::debug(fmt::format("FORWARD: Found LDS Barrier({}) between index "
@@ -265,7 +362,7 @@ namespace rocRoller
             }
 
             /**
-             * @brief Find a barrier handling loop-carried dependencies.
+             * @brief Find a LDS barrier handling loop-carried dependencies.
              *
              * For loop-carried dependencies, we need a barrier that executes either:
              * - After secondOp (before the next iteration's firstOp), OR
@@ -274,17 +371,17 @@ namespace rocRoller
              * @param graph The kernel graph
              * @param allRecords All control flow RW tracer records
              * @param commonAncestorLoopTag The common ancestor loop tag
+             * @param firstLoopInstructionIndex The index of the first instruction in the common ancestor loop
              * @param firstOpRecordIndex Position in tracer order of the operation that executes first
              * @param secondOpRecordIndex Position in tracer order of the operation that executes second
-             * @param requireLDSConnection If true, only return barriers connected to LDS
              * @return The tag of a barrier for loop-carried dependencies, or std::nullopt if none exists
              */
             std::optional<int> findBarrierForLoopCarried(KernelGraph const&    graph,
                                                          RWTraceRecords const& allRecords,
+                                                         int ldsCoord,
                                                          int    commonAncestorLoopTag,
                                                          size_t firstOpRecordIndex,
-                                                         size_t secondOpRecordIndex,
-                                                         bool   requireLDSConnection = true)
+                                                         size_t secondOpRecordIndex)
             {
                 const auto afterSecondOpPos = secondOpRecordIndex + 1;
 
@@ -306,17 +403,25 @@ namespace rocRoller
                 for(size_t i = 0; i < firstOpRecordIndex; ++i)
                 {
                     int ctrl = allRecords[i].control;
-                    if(graph.control.get<Barrier>(ctrl))
+                    int barrierLdsCoord = allRecords[i].coordinate;
+                    if(graph.control.get<Barrier>(ctrl) && isBarrierForLDS(graph, ctrl)
+                       && barrierLdsCoord == ldsCoord)
                     {
-                        if(!requireLDSConnection || isBarrierForLDS(graph, ctrl))
+                        auto foundWritesAfterBarrier = std::any_of(
+                            allRecords.begin() + i,
+                            allRecords.begin() + firstOpRecordIndex,
+                            [ldsCoord, &graph](const ControlFlowRWTracer::ReadWriteRecord& record) {
+                                return (record.rw == ControlFlowRWTracer::READWRITE
+                                        or record.rw == ControlFlowRWTracer::WRITE)
+                                       and record.coordinate == ldsCoord
+                                       and not graph.control.get<Barrier>(record.control);
+                            });
+                        // Verify the barrier is inside the common ancestor loop
+                        auto containingNodes = graph.control.nodesContaining(ctrl).to<std::set>();
+                        if(not foundWritesAfterBarrier
+                           and containingNodes.contains(commonAncestorLoopTag))
                         {
-                            // Verify the barrier is inside the common ancestor loop
-                            auto containingNodes
-                                = graph.control.nodesContaining(ctrl).to<std::set>();
-                            if(containingNodes.contains(commonAncestorLoopTag))
-                            {
-                                return ctrl;
-                            }
+                            return {ctrl};
                         }
                     }
                 }
@@ -325,17 +430,25 @@ namespace rocRoller
                 for(auto i = afterSecondOpPos; i < allRecords.size(); ++i)
                 {
                     int ctrl = allRecords[i].control;
-                    if(graph.control.get<Barrier>(ctrl))
+                    int barrierLdsCoord = allRecords[i].coordinate;
+                    if(graph.control.get<Barrier>(ctrl) && isBarrierForLDS(graph, ctrl)
+                       && barrierLdsCoord == ldsCoord)
                     {
-                        if(!requireLDSConnection || isBarrierForLDS(graph, ctrl))
+                        auto foundWritesAfterBarrier = std::any_of(
+                            allRecords.begin() + i,
+                            allRecords.end(),
+                            [ldsCoord, &graph](const ControlFlowRWTracer::ReadWriteRecord& record) {
+                                return (record.rw == ControlFlowRWTracer::READWRITE
+                                        or record.rw == ControlFlowRWTracer::WRITE)
+                                       and record.coordinate == ldsCoord
+                                       and not graph.control.get<Barrier>(record.control);
+                            });
+                        // Verify the barrier is inside the common ancestor loop
+                        auto containingNodes = graph.control.nodesContaining(ctrl).to<std::set>();
+                        if(not foundWritesAfterBarrier
+                           and containingNodes.contains(commonAncestorLoopTag))
                         {
-                            // Verify the barrier is inside the common ancestor loop
-                            auto containingNodes
-                                = graph.control.nodesContaining(ctrl).to<std::set>();
-                            if(containingNodes.contains(commonAncestorLoopTag))
-                            {
-                                return ctrl;
-                            }
+                            return {ctrl};
                         }
                     }
                 }
@@ -344,7 +457,7 @@ namespace rocRoller
             }
 
             /**
-             * @brief Check if there is a barrier handling loop-carried dependencies.
+             * @brief Check if there is a LDS barrier handling loop-carried dependencies.
              *
              * For loop-carried dependencies, we need a barrier that executes either:
              * - After secondOp (before the next iteration's firstOp), OR
@@ -353,6 +466,7 @@ namespace rocRoller
              * @param graph The kernel graph
              * @param allRecords All control flow RW tracer records
              * @param commonAncestorLoopTag The common ancestor loop tag
+             * @param firstLoopInstructionIndex The index of the first instruction in the common ancestor loop
              * @param firstOpTag Tag of the operation that executes first (used for debug logging)
              * @param secondOpTag Tag of the operation that executes second (used for debug logging)
              * @param firstOpRecordIndex Position in tracer order of the operation that executes first
@@ -361,6 +475,7 @@ namespace rocRoller
              */
             bool hasBarrierBetweenSecondAndFirstOpsInLoop(KernelGraph const&    graph,
                                                           RWTraceRecords const& allRecords,
+                                                          int ldsCoord,
                                                           int    commonAncestorLoopTag,
                                                           int    firstOpTag,
                                                           int    secondOpTag,
@@ -369,6 +484,7 @@ namespace rocRoller
             {
                 auto barrier = findBarrierForLoopCarried(graph,
                                                          allRecords,
+                                                         ldsCoord,
                                                          commonAncestorLoopTag,
                                                          firstOpRecordIndex,
                                                          secondOpRecordIndex);
@@ -429,13 +545,12 @@ namespace rocRoller
                 {
                     auto recordsForCoord = tracer.coordinatesReadWrite(ldsCoord);
 
-                    const auto [readOpTagsAndRecordIndices, writeOpTagsAndRecordIndices]
+                    const auto [readOpTags, writeOpTags]
                         = collectReadAndWritesToCoordinate(graph, recordsForCoord);
 
-                    // Check each write-read pair
-                    for(const auto [writeTag, writeRecordIndex] : writeOpTagsAndRecordIndices)
+                    for(const auto writeTag : writeOpTags)
                     {
-                        for(const auto [readTag, readRecordIndex] : readOpTagsAndRecordIndices)
+                        for(const auto readTag : readOpTags)
                         {
                             auto getOpName = [graph](int tag) {
                                 return std::visit(
@@ -449,17 +564,22 @@ namespace rocRoller
                                        getOpName(readTag),
                                        readTag);
 
+                            const auto writeRecordIndex
+                                = getCrontrolOpIndexInAllRecords(writeTag, allRecords);
+                            const auto readRecordIndex
+                                = getCrontrolOpIndexInAllRecords(readTag, allRecords);
+
                             // Determine which operation executes first and second based on
-                            // their order in recordsForCoord (which preserves trace order)
+                            // their order in trace
                             const auto [firstOpTag, secondOpTag]
                                 = (writeRecordIndex < readRecordIndex)
                                       ? std::make_pair(writeTag, readTag)
                                       : std::make_pair(readTag, writeTag);
 
-                            const auto firstOpIndexInAllRecords
-                                = getCrontrolOpIndexInAllRecords(firstOpTag, allRecords);
-                            const auto secondOpIndexInAllRecords
-                                = getCrontrolOpIndexInAllRecords(secondOpTag, allRecords);
+                            const auto [firstOpIndex, secondOpIndex]
+                                = (writeRecordIndex < readRecordIndex)
+                                      ? std::make_pair(writeRecordIndex, readRecordIndex)
+                                      : std::make_pair(readRecordIndex, writeRecordIndex);
 
                             // Find common ancestor loop (if any)
                             const auto commonAncestorLoop
@@ -487,13 +607,13 @@ namespace rocRoller
                             //      first and second operations.
 
                             // Check for barrier between firstOp & secondOp (forward dependency)
-                            bool hasBarrierForForwardDependency
-                                = hasBarrierBetween(graph,
-                                                    allRecords,
-                                                    firstOpTag,
-                                                    secondOpTag,
-                                                    firstOpIndexInAllRecords,
-                                                    secondOpIndexInAllRecords);
+                            bool hasBarrierForForwardDependency = hasBarrierBetween(graph,
+                                                                                    allRecords,
+                                                                                    ldsCoord,
+                                                                                    firstOpTag,
+                                                                                    secondOpTag,
+                                                                                    firstOpIndex,
+                                                                                    secondOpIndex);
 
                             if(not hasBarrierForForwardDependency)
                             {
@@ -521,11 +641,12 @@ namespace rocRoller
                                     = hasBarrierBetweenSecondAndFirstOpsInLoop(
                                         graph,
                                         allRecords,
+                                        ldsCoord,
                                         commonAncestorLoop.value(),
                                         firstOpTag,
                                         secondOpTag,
-                                        firstOpIndexInAllRecords,
-                                        secondOpIndexInAllRecords);
+                                        firstOpIndex,
+                                        secondOpIndex);
 
                                 if(not hasBarrierForLoopCarriedDependency)
                                 {
@@ -564,8 +685,8 @@ namespace rocRoller
 
             auto graph = original;
 
-            ControlFlowRWTracer tracer(graph);
-            auto                allRecords = tracer.coordinatesReadWrite();
+            auto tracer = std::make_unique<ControlFlowRWTracer>(graph);
+            auto                allRecords = tracer->coordinatesReadWrite();
 
             // Collect all LDS coordinates that are accessed
             const auto ldsCoordinates = collectAllLDSCoordinatesInRWTrace(graph, allRecords);
@@ -575,172 +696,119 @@ namespace rocRoller
                 return graph;
             }
 
-            // Track barriers we've already connected to LDS to avoid duplicate connections
-            std::set<int> barriersConnectedToLDS;
-
-            // Collect all existing LDS-connected barriers
-            for(const auto& record : allRecords)
-            {
-                if(graph.control.get<Barrier>(record.control)
-                   && isBarrierForLDS(graph, record.control))
-                {
-                    barriersConnectedToLDS.insert(record.control);
-                }
-            }
-
-            // Track inserted barriers to avoid inserting multiple barriers at the same location
-            // Maps (firstOpTag, secondOpTag) -> barrierTag for forward dependencies
-            std::map<std::pair<int, int>, int> forwardBarriers;
-            // Maps (loopTag, secondOpTag) -> barrierTag for loop-carried dependencies
-            std::map<std::pair<int, int>, int> loopCarriedBarriers;
-
             // For each LDS coordinate, find dependent operations and ensure barriers exist
             for(int ldsCoord : ldsCoordinates)
             {
-                auto recordsForCoord = tracer.coordinatesReadWrite(ldsCoord);
-                const auto [readOpTagsAndRecordIndices, writeOpTagsAndRecordIndices]
+                auto recordsForCoord = tracer->coordinatesReadWrite(ldsCoord);
+                const auto [readOpTags, writeOpTags]
                     = collectReadAndWritesToCoordinate(graph, recordsForCoord);
 
-                // Process each write-read pair
-                for(const auto& [writeTag, writeRecordIndex] : writeOpTagsAndRecordIndices)
+                for(const auto& writeTag : writeOpTags)
                 {
-                    for(const auto& [readTag, readRecordIndex] : readOpTagsAndRecordIndices)
+                    for(const auto& readTag : readOpTags)
                     {
+                        const auto writeRecordIndex
+                            = getCrontrolOpIndexInAllRecords(writeTag, allRecords);
+                        const auto readRecordIndex
+                            = getCrontrolOpIndexInAllRecords(readTag, allRecords);
+
                         // Determine which operation executes first and second
                         const auto [firstOpTag, secondOpTag]
                             = (writeRecordIndex < readRecordIndex)
                                   ? std::make_pair(writeTag, readTag)
                                   : std::make_pair(readTag, writeTag);
 
-                        const auto firstOpIndexInAllRecords
-                            = getCrontrolOpIndexInAllRecords(firstOpTag, allRecords);
-                        const auto secondOpIndexInAllRecords
-                            = getCrontrolOpIndexInAllRecords(secondOpTag, allRecords);
+                        auto [firstOpIndex, secondOpIndex]
+                            = (writeRecordIndex < readRecordIndex)
+                                  ? std::make_pair(writeRecordIndex, readRecordIndex)
+                                  : std::make_pair(readRecordIndex, writeRecordIndex);
 
                         // Find common ancestor loop (if any)
                         const auto commonAncestorLoop
                             = findCommonAncestorLoop(graph, firstOpTag, secondOpTag);
 
                         // === Handle forward dependency ===
-                        // First, check if there's already an LDS-connected barrier
-                        auto existingLDSBarrier = findBarrierBetween(graph,
-                                                                     allRecords,
-                                                                     firstOpIndexInAllRecords,
-                                                                     secondOpIndexInAllRecords,
-                                                                     true);
-
-                        if(!existingLDSBarrier.has_value())
+                        const auto existingBarrier = findBarrierBetween(
+                            graph, allRecords, ldsCoord, firstOpIndex, secondOpIndex);
+                        if(not existingBarrier.has_value())
                         {
-                            // Check if we already inserted a barrier for this first-second ops pair
-                            auto pairKey = std::make_pair(firstOpTag, secondOpTag);
-                            if(not forwardBarriers.contains(pairKey))
-                            {
-                                // Check if there's a non-LDS barrier we can reuse
-                                auto existingBarrier = findBarrierBetween(graph,
-                                                                          allRecords,
-                                                                          firstOpIndexInAllRecords,
-                                                                          secondOpIndexInAllRecords,
-                                                                          false);
-
-                                if(existingBarrier.has_value())
-                                {
-                                    // Reuse existing barrier by connecting to LDS
-                                    Log::debug(
-                                        "  Reusing existing Barrier({}) for forward dependency "
-                                        "between {} and {} for LDS({})",
-                                        *existingBarrier,
-                                        firstOpTag,
-                                        secondOpTag,
-                                        ldsCoord);
-                                    graph.mapper.connect<LDS>(*existingBarrier, ldsCoord);
-                                    barriersConnectedToLDS.insert(*existingBarrier);
-                                    forwardBarriers[pairKey] = *existingBarrier;
-                                }
-                                else
-                                {
-                                    // Insert new barrier before secondOp
-                                    auto newBarrier = graph.control.addElement(Barrier());
-                                    // Either the op itself or its top containing SetCoordinate
-                                    const auto insertPosition
-                                        = getTopSetCoordinate(graph, secondOpTag);
-                                    insertBefore(graph, insertPosition, newBarrier, newBarrier);
-                                    graph.mapper.connect<LDS>(newBarrier, ldsCoord);
-                                    barriersConnectedToLDS.insert(newBarrier);
-                                    forwardBarriers[pairKey] = newBarrier;
-                                    Log::debug("  Inserted new Barrier({}) before {} for forward "
-                                               "dependency between {} & {} and LDS({})",
-                                               newBarrier,
-                                               insertPosition,
-                                               firstOpTag,
-                                               secondOpTag,
-                                               ldsCoord);
-                                }
-                            }
+                            // Insert new barrier before secondOp
+                            auto newBarrier = graph.control.addElement(Barrier());
+                            // Either the op itself or its top containing SetCoordinate
+                            const auto insertPosition = getTopSetCoordinate(graph, secondOpTag);
+                            insertBefore(graph, insertPosition, newBarrier, newBarrier);
+                            graph.mapper.connect<LDS>(newBarrier, ldsCoord);
+                            tracer = std::make_unique<ControlFlowRWTracer>(graph);
+                            tracer->buildDependencies();
+                            allRecords = tracer->coordinatesReadWrite();
+                            const auto message
+                                = fmt::format("  Inserted new Barrier({}) before {} for forward "
+                                              "dependency between {} & {} and LDS({})",
+                                              newBarrier,
+                                              insertPosition,
+                                              firstOpTag,
+                                              secondOpTag,
+                                              ldsCoord);
+                            Log::debug(message);
+                        }
+                        else
+                        {
+                            Log::debug(fmt::format(
+                                "  Omitting insertion of new barrier for forward dependency "
+                                "between {} and {} for LDS({}) since existing/previously inserted "
+                                "barrier {} was found.",
+                                firstOpTag,
+                                secondOpTag,
+                                ldsCoord,
+                                existingBarrier.value()));
                         }
 
                         // === Handle loop-carried dependency ===
                         if(commonAncestorLoop.has_value())
                         {
-                            // Check if there's already an LDS-connected barrier for loop-carried
-                            auto existingLDSLoopBarrier
+                            auto existingBarrier
                                 = findBarrierForLoopCarried(graph,
                                                             allRecords,
+                                                            ldsCoord,
                                                             commonAncestorLoop.value(),
-                                                            firstOpIndexInAllRecords,
-                                                            secondOpIndexInAllRecords,
-                                                            true);
+                                                            firstOpIndex,
+                                                            secondOpIndex);
 
-                            if(!existingLDSLoopBarrier.has_value())
+                            if(not existingBarrier.has_value())
                             {
-                                // Check if we already inserted a barrier for this loop-firstOp pair
-                                auto loopKey
-                                    = std::make_pair(commonAncestorLoop.value(), secondOpTag);
-                                if(not loopCarriedBarriers.contains(loopKey))
-                                {
-                                    // Check if there's a non-LDS barrier we can reuse
-                                    auto existingLoopBarrier
-                                        = findBarrierForLoopCarried(graph,
-                                                                    allRecords,
-                                                                    commonAncestorLoop.value(),
-                                                                    firstOpIndexInAllRecords,
-                                                                    secondOpIndexInAllRecords,
-                                                                    false);
-
-                                    if(existingLoopBarrier.has_value())
-                                    {
-                                        // Reuse existing barrier
-                                        Log::debug("  Reusing existing Barrier({}) for "
-                                                   "loop-carried dependency in loop {} for LDS({})",
-                                                   *existingLoopBarrier,
-                                                   commonAncestorLoop.value(),
-                                                   ldsCoord);
-                                        graph.mapper.connect<LDS>(*existingLoopBarrier, ldsCoord);
-                                        barriersConnectedToLDS.insert(*existingLoopBarrier);
-                                        loopCarriedBarriers[loopKey] = *existingLoopBarrier;
-                                    }
-                                    else
-                                    {
-                                        // Insert new barrier before firstOp
-                                        auto newBarrier = graph.control.addElement(Barrier());
-                                        // Either the op itself or its top containing SetCoordinate
-                                        const auto insertPosition
-                                            = getTopSetCoordinate(graph, firstOpTag);
-                                        insertBefore(graph, insertPosition, newBarrier, newBarrier);
-                                        graph.mapper.connect<LDS>(newBarrier, ldsCoord);
-                                        barriersConnectedToLDS.insert(newBarrier);
-                                        loopCarriedBarriers[loopKey] = newBarrier;
-                                        Log::debug(
-                                            "  Inserted new Barrier({}) before {} for "
-                                            "loop-carried dependency from {} to {} in loop {} for "
-                                            "LDS({})",
-                                            newBarrier,
-                                            insertPosition,
-                                            secondOpTag,
-                                            firstOpTag,
-                                            commonAncestorLoop.value(),
-                                            ldsCoord);
-                                    }
-                                }
+                                // Insert new barrier before firstOp
+                                auto newBarrier = graph.control.addElement(Barrier());
+                                // Either the op itself or its top containing SetCoordinate
+                                const auto insertPosition = getTopSetCoordinate(graph, firstOpTag);
+                                insertBefore(graph, insertPosition, newBarrier, newBarrier);
+                                graph.mapper.connect<LDS>(newBarrier, ldsCoord);
+                                tracer = std::make_unique<ControlFlowRWTracer>(graph);
+                                tracer->buildDependencies();
+                                allRecords         = tracer->coordinatesReadWrite();
+                                const auto message = fmt::format(
+                                    "  Inserted new Barrier({}) before {} for "
+                                    "loop-carried dependency from {} to {} in loop {} for "
+                                    "LDS({})",
+                                    newBarrier,
+                                    insertPosition,
+                                    secondOpTag,
+                                    firstOpTag,
+                                    commonAncestorLoop.value(),
+                                    ldsCoord);
+                                Log::debug(message);
+                            }
+                            else
+                            {
+                                Log::debug(fmt::format("  Omitting insertion of new barrier for "
+                                                       "loop-carried dependency "
+                                                       "from {} to {} in loop {} for LDS({}) since "
+                                                       "existing/previously inserted "
+                                                       "barrier {} was found.",
+                                                       secondOpTag,
+                                                       firstOpTag,
+                                                       commonAncestorLoop.value(),
+                                                       ldsCoord,
+                                                       existingBarrier.value()));
                             }
                         }
                     }

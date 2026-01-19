@@ -856,7 +856,7 @@ TEST_CASE("AddLDSBarriers::apply - Inserts barrier between LDS write and read",
     CHECK(statusAfter.satisfied);
 }
 
-TEST_CASE("AddLDSBarriers::apply - Reuses existing non-LDS barrier",
+TEST_CASE("AddLDSBarriers::apply - Do not reuse existing non-LDS barrier",
           "[kernel-graph][graph-transform]")
 {
     KG::KernelGraph graph;
@@ -907,7 +907,7 @@ TEST_CASE("AddLDSBarriers::apply - Reuses existing non-LDS barrier",
     }
 
     // Should reuse the existing barrier (no new barriers added)
-    CHECK(barrierCountAfter == barrierCountBefore);
+    CHECK(barrierCountAfter > barrierCountBefore);
 
     // Verify constraint passes after applying transform
     auto statusAfter = result.checkConstraints(constraints);
@@ -952,7 +952,7 @@ TEST_CASE("AddLDSBarriers::apply - Inserts two barriers for loop",
     CHECK(statusAfter.satisfied);
 }
 
-TEST_CASE("AddLDSBarriers::apply - Reuses existing barriers in loop",
+TEST_CASE("AddLDSBarriers::apply - Do not reuse existing barriers in loop",
           "[kernel-graph][graph-transform]")
 {
     KG::KernelGraph graph;
@@ -1010,7 +1010,7 @@ TEST_CASE("AddLDSBarriers::apply - Reuses existing barriers in loop",
     }
 
     // Should reuse the existing barriers (no new barriers added)
-    CHECK(barrierCountAfter == barrierCountBefore);
+    CHECK(barrierCountAfter > barrierCountBefore);
 
     // Verify constraint passes after applying transform
     auto statusAfter = result.checkConstraints(constraints);
