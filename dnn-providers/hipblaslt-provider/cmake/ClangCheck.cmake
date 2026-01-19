@@ -2,18 +2,22 @@
 # SPDX-License-Identifier:  MIT
 
 # clang-format tool for code style
+set(EXPECTED_CLANG_FORMAT_VERSION "20")
 
-if(HIPBLASLT_ENABLE_CLANG_FORMAT)
+if(ENABLE_CLANG_FORMAT)
     find_program(
-        HIPBLASLT_CLANG_FORMAT_BIN
-        NAMES clang-format-20
+        CLANG_FORMAT_BINARY
+        NAMES "clang-format-${EXPECTED_CLANG_FORMAT_VERSION}"
         HINTS ${ROCM_PATH}/llvm/bin /opt/rocm/llvm/bin
         DOC "clang-format executable used for formatting"
     )
-    if(HIPBLASLT_CLANG_FORMAT_BIN)
-        message(STATUS "clang-format-20 has been found; format targets will be built")
+    if(CLANG_FORMAT_BINARY)
+        message(
+            STATUS
+                "clang-format-${EXPECTED_CLANG_FORMAT_VERSION} has been found; format targets will be built"
+        )
 
-        set(HIPBLASLT_CLANG_FORMAT_PRUNE
+        set(CLANG_FORMAT_PRUNE
             -path
             "./build"
             -prune
@@ -23,20 +27,20 @@ if(HIPBLASLT_ENABLE_CLANG_FORMAT)
             -prune
             -o
         )
-        set(HIPBLASLT_CLANG_FORMAT_REGEX ".*\\.\\(cpp\\|hpp\\|h\\)")
+        set(CLANG_FORMAT_REGEX ".*\\.\\(cpp\\|hpp\\|c\\|h\\)")
         add_custom_target(
-            hipblaslt_check_format
-            COMMAND find ${CMAKE_CURRENT_SOURCE_DIR} ${HIPBLASLT_CLANG_FORMAT_PRUNE} -regex
-                    "${HIPBLASLT_CLANG_FORMAT_REGEX}" -exec ${HIPBLASLT_CLANG_FORMAT_BIN}
+            check_format
+            COMMAND find ${CMAKE_CURRENT_SOURCE_DIR} ${CLANG_FORMAT_PRUNE} -regex
+                    "${CLANG_FORMAT_REGEX}" -exec ${CLANG_FORMAT_BINARY}
                     -style=file --dry-run --Werror {} +
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             COMMENT "Checking code style with clang-format"
             VERBATIM
         )
         add_custom_target(
-            hipblaslt_format
-            COMMAND find ${CMAKE_CURRENT_SOURCE_DIR} ${HIPBLASLT_CLANG_FORMAT_PRUNE} -regex
-                    "${HIPBLASLT_CLANG_FORMAT_REGEX}" -exec ${HIPBLASLT_CLANG_FORMAT_BIN}
+            format
+            COMMAND find ${CMAKE_CURRENT_SOURCE_DIR} ${CLANG_FORMAT_PRUNE} -regex
+                    "${CLANG_FORMAT_REGEX}" -exec ${CLANG_FORMAT_BINARY}
                     -style=file -i {} +
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             COMMENT "Applying clang-format to hipblaslt-provider sources"
@@ -45,7 +49,7 @@ if(HIPBLASLT_ENABLE_CLANG_FORMAT)
     else()
         message(
             WARNING
-                "HIPBLASLT_ENABLE_CLANG_FORMAT=ON but clang-format-20 not found; skipping format targets"
+                "ENABLE_CLANG_FORMAT=ON but clang-format-${EXPECTED_CLANG_FORMAT_VERSION} not found; skipping format targets"
         )
     endif()
 endif()

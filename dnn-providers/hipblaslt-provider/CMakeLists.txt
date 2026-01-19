@@ -37,7 +37,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib
 )
 
 option(HIPDNN_SKIP_TESTS "Skip building tests" OFF)
-option(HIPBLASLT_ENABLE_CLANG_FORMAT "Enable clang-format targets" ON)
+option(ENABLE_CLANG_FORMAT "Enable clang-format targets" ON)
 
 list(
     PREPEND
@@ -76,8 +76,8 @@ include(Dependencies)
 if (NOT HIPDNN_SKIP_TESTS)
     include(Tests)
 endif()
-if (HIPBLASLT_ENABLE_CLANG_FORMAT)
-    include(ClangFormat)
+if (ENABLE_CLANG_FORMAT)
+    include(ClangCheck)
 endif()
 
 if(WIN32)
