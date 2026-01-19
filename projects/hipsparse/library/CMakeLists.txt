@@ -52,7 +52,7 @@ rocm_install_targets(
 
 
 if(HIPSPARSE_ENABLE_HIP)
-    if(BUILD_SHARED_LIBS)
+    if(HIPSPARSE_BUILD_SHARED_LIBS)
         rocm_export_targets(
             TARGETS roc::hipsparse
             DEPENDS PACKAGE hip
