@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2020-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2020-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,22 +27,17 @@
 #include <cstdlib>
 #include <ctime>
 #include <optional>
-#include <tuple>
-#include <vector>
 
 #include <miopen/invoke_params.hpp>
 #include <miopen/invoker.hpp>
 #include <miopen/handle.hpp>
-#include <miopen/miopen.h>
 #include <miopen/tensor_reorder_util.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/tensor_layout.hpp>
 
-#include "driver.hpp"
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
 #include "random.hpp"
-#include "test.hpp"
 #include "test_parameter_name_generator.hpp"
 #include "workspace.hpp"
 
@@ -263,7 +258,7 @@ inline auto GetCases()
 } // namespace
 
 template <typename T>
-struct tensor_reorder_driver : public testing::TestWithParam<TestCase>
+struct tensor_reorder_test : public testing::TestWithParam<TestCase>
 {
     void SetUp() override
     {
@@ -386,7 +381,7 @@ struct TestNameGenerator
         str = ss.str();
 
         // Name format only supports letters, numbers and underscores.
-        std::transform(str.begin(), str.end(), str.begin(), [](char c) {
+        std::transform(str.begin(), str.end(), str.begin(), [](char c) -> char {
             return (c == '.') ? 'p' : (std::isalnum(c) ? c : '_');
         });
 
@@ -394,10 +389,10 @@ struct TestNameGenerator
     }
 };
 
-using GPU_TensorReorder_I8   = tensor_reorder_driver<int8_t>;
-using GPU_TensorReorder_FP16 = tensor_reorder_driver<half_float::half>;
-using GPU_TensorReorder_FP32 = tensor_reorder_driver<float>;
-using GPU_TensorReorder_FP64 = tensor_reorder_driver<double>;
+using GPU_TensorReorder_I8   = tensor_reorder_test<int8_t>;
+using GPU_TensorReorder_FP16 = tensor_reorder_test<half_float::half>;
+using GPU_TensorReorder_FP32 = tensor_reorder_test<float>;
+using GPU_TensorReorder_FP64 = tensor_reorder_test<double>;
 
 TEST_P(GPU_TensorReorder_I8, TestInt8) { this->Run(); }
 TEST_P(GPU_TensorReorder_FP16, TestFloat16) { this->Run(); }
