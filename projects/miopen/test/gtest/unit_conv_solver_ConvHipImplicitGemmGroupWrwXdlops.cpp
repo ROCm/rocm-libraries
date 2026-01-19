@@ -12,8 +12,7 @@ auto GetConvSmokeTestCases()
 {
     static std::vector<TestCase> test_cases = {
         // clang-format off
-        TestCase{{1, 64, 8, 8}, {96, 64, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 1}
-        // clang-format on
+        TestCase{{1, 64, 8, 8}, {96, 64, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 1} // clang-format on
     };
 
     return test_cases;
@@ -81,7 +80,8 @@ const auto& GetTestParams()
 Gpu GetDeterministicSupportedDevices()
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL && !defined(_WIN32)
-    return Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
+    return Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx110X | Gpu::gfx115X |
+           Gpu::gfx120X;
 #else
     return Gpu::None;
 #endif
