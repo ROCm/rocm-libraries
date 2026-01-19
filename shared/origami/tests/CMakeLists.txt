@@ -54,10 +54,20 @@ catch_discover_tests(origami-tests
 )
 
 # Install CTestTestfile.cmake for TheRock CI testing
-if(ORIGAMI_ENABLE_PYTHON)
+if(ORIGAMI_ENABLE_PYTHON) 
+    find_package(Python COMPONENTS Interpreter REQUIRED)
+    
+    set(ORIGAMI_INSTALL_LIBDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
+    set(ORIGAMI_INSTALL_PYTHON_BINDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/origami")
+    configure_file(CTestTestfile.cmake.in CTestTestfile.cmake.install @ONLY)
+    install(
+        FILES "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}/origami"
+        COMPONENT tests
+        RENAME CTestTestfile.cmake
+    )
     install(
         FILES 
-            "${CMAKE_CURRENT_SOURCE_DIR}/CTestTestfile.cmake"
             "${CMAKE_CURRENT_SOURCE_DIR}/../python/origami_test.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/../python/origami_grid_test.py"
         DESTINATION "${CMAKE_INSTALL_BINDIR}/origami"
@@ -65,13 +75,14 @@ if(ORIGAMI_ENABLE_PYTHON)
     )
 else()
     # Write CTestTestfile.cmake manually when only C++ tests are requested
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake"
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install"
         "# CTestTestfile for installed Origami tests (C++ only)\n"
         "add_test(origami-tests \"../origami-tests\")\n"
     )
     install(
-        FILES "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake"
+        FILES "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install"
         DESTINATION "${CMAKE_INSTALL_BINDIR}/origami"
         COMPONENT tests
+        RENAME CTestTestfile.cmake
     )
 endif()
