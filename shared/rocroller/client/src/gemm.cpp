@@ -1754,18 +1754,14 @@ int main(int argc, const char* argv[])
 
     app.add_flag(SN(&SP::matchMemoryAccess),
                  "Match memory access to transpose.  Currently decreases performance.");
-    {
-        auto description = fmt::format("Byte padding for A LDS buffer.  Passed as a pair: "
-                                       "contiguous-bytes,padding-bytes, eg {}=1024,8",
-                                       SN(&SP::padLDSA));
-        app.add_option(SN(&SP::padLDSA), description);
-    }
-    {
-        auto description = fmt::format("Byte padding for B LDS buffer.  Passed as a pair: "
-                                       "contiguous-bytes,padding-bytes, eg {}=1024,8",
-                                       SN(&SP::padLDSB));
-        app.add_option(SN(&SP::padLDSB), description);
-    }
+    auto descriptionPadLDSA = fmt::format("Byte padding for A LDS buffer.  Passed as a pair: "
+                                          "contiguous-bytes,padding-bytes, eg {}=1024,8",
+                                          SN(&SP::padLDSA));
+    app.add_option(SN(&SP::padLDSA), descriptionPadLDSA);
+    auto descriptionPadLDSB = fmt::format("Byte padding for B LDS buffer.  Passed as a pair: "
+                                          "contiguous-bytes,padding-bytes, eg {}=1024,8",
+                                          SN(&SP::padLDSB));
+    app.add_option(SN(&SP::padLDSB), descriptionPadLDSB);
     app.add_flag(SN(&SP::prefetch), "Enable prefetching (UnrollK=2 implied).");
     app.add_option(SN(&SP::prefetchInFlight), "Number of prefetches in flight at the same time");
     app.add_option(SN(&SP::prefetchLDSFactor),
