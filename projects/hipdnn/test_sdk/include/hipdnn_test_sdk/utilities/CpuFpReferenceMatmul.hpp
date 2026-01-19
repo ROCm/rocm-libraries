@@ -13,44 +13,6 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-namespace matmul
-{
-// Broadcasting rule (matches MatmulNode.hpp):
-// For each batch dim i, A[i] and B[i] are compatible if one divides the other.
-// Output batch dim is max(A[i], B[i]).
-template <typename ADims, typename BDims, typename CDims>
-inline bool validateBatchBroadcastDims(size_t batchDims,
-                                       const ADims& aDims,
-                                       const BDims& bDims,
-                                       const CDims& cDims)
-{
-    for(size_t i = 0; i < batchDims; ++i)
-    {
-        const auto aDimVal = static_cast<int64_t>(aDims[i]);
-        const auto bDimVal = static_cast<int64_t>(bDims[i]);
-        const auto cDimVal = static_cast<int64_t>(cDims[i]);
-
-        if(aDimVal <= 0 || bDimVal <= 0 || cDimVal <= 0)
-        {
-            return false;
-        }
-
-        if(aDimVal % bDimVal != 0 && bDimVal % aDimVal != 0)
-        {
-            return false;
-        }
-
-        const int64_t expectedOut = std::max(aDimVal, bDimVal);
-        if(cDimVal != expectedOut)
-        {
-            return false;
-        }
-    }
-
-    return true;
-}
-} // namespace matmul
-
 class CpuFpReferenceMatmul
 {
 public:
@@ -73,12 +35,12 @@ public:
         const auto& cDims = c.dims(); // [..., M, N]
 
         const auto rank = static_cast<int64_t>(cDims.size());
-        const auto batchDims = rank - 2;
+        const auto batchDims = rank - static_cast<int64_t>(K_BATCH_IDX);
 
-        auto computeElement = [&](const std::vector<int64_t>& indices) {
+        auto matmulFunc = [&](const std::vector<int64_t>& indices) {
             // C dims: [...batch..., M, N]
-            const int64_t m = indices[static_cast<size_t>(rank - 2)];
-            const int64_t n = indices[static_cast<size_t>(rank - 1)];
+            const int64_t m = *(indices.rbegin() + K_M_IDX);
+            const int64_t n = *(indices.rbegin() + K_N_IDX);
 
             std::vector<int64_t> aIndices(static_cast<size_t>(rank));
             std::vector<int64_t> bIndices(static_cast<size_t>(rank));
@@ -98,15 +60,15 @@ public:
                 bIndices[idx] = indices[idx] / bScale;
             }
 
-            aIndices[static_cast<size_t>(rank - 2)] = m;
-            bIndices[static_cast<size_t>(rank - 1)] = n;
+            *(aIndices.begin() + K_M_IDX) = m;
+            *(bIndices.begin() + K_N_IDX) = n;
 
             auto acc = static_cast<ComputeDataType>(0);
-            const int64_t kDim = aDims[static_cast<size_t>(rank - 1)];
+            const int64_t kDim = *(aDims.rbegin() + K_K_IDX_A);
             for(int64_t k = 0; k < kDim; ++k)
             {
-                aIndices[static_cast<size_t>(rank - 1)] = k;
-                bIndices[static_cast<size_t>(rank - 2)] = k;
+                *(aIndices.begin() + K_K_IDX_A) = k;
+                *(bIndices.begin() + K_K_IDX_B) = k;
 
                 const ADataType aVal = a.getHostValue(aIndices);
                 const BDataType bVal = b.getHostValue(bIndices);
@@ -118,7 +80,7 @@ public:
         };
 
         auto parallelFunc
-            = hipdnn_test_sdk::utilities::makeParallelTensorFunctor(computeElement, c.dims());
+            = hipdnn_test_sdk::utilities::makeParallelTensorFunctor(matmulFunc, c.dims());
         parallelFunc(std::thread::hardware_concurrency());
 
         c.memory().markHostModified();
@@ -130,51 +92,85 @@ private:
                               const hipdnn_data_sdk::utilities::TensorBase<TB>& b,
                               const hipdnn_data_sdk::utilities::TensorBase<TC>& c)
     {
-        // Matmul node requires A and B have the same rank
-        const auto rankA = a.dims().size();
-        const auto rankB = b.dims().size();
-        const auto rankC = c.dims().size();
-        if(rankA != rankB || rankA != rankC)
-        {
-            throw std::invalid_argument(
-                "Matmul expects A, B, and C to have the same rank (A rank="
-                + std::to_string(rankA) + ", B rank=" + std::to_string(rankB)
-                + ", C rank=" + std::to_string(rankC) + ")");
-        }
-        if(rankA < 2)
-        {
-            throw std::invalid_argument("Matmul expects rank >= 2 tensors");
-        }
-
         const auto& aDims = a.dims();
         const auto& bDims = b.dims();
         const auto& cDims = c.dims();
 
-        // For each batch dim: A[i] and B[i] are compatible if one divides the other
-        // Output batch dim is max(A[i], B[i])
-        const auto batchDims = rankA - 2;
-        if(!hipdnn_test_sdk::utilities::matmul::validateBatchBroadcastDims(
-               batchDims, aDims, bDims, cDims))
+        // Matmul node requires A and B have the same rank
+        if(aDims.size() != bDims.size() || aDims.size() != cDims.size())
+        {
+            throw std::invalid_argument("Matmul expects A, B, and C to have the same rank (A rank="
+                                        + std::to_string(aDims.size())
+                                        + ", B rank=" + std::to_string(bDims.size())
+                                        + ", C rank=" + std::to_string(cDims.size()) + ")");
+        }
+
+        const auto rank = aDims.size();
+        if(rank < 2)
+        {
+            throw std::invalid_argument("Matmul expects matrices with rank >= 2");
+        }
+
+        const auto batchDims = rank - 2;
+        if(!validateBroadcastableBatchDims(batchDims, aDims, bDims, cDims))
         {
             throw std::invalid_argument("Matmul batch dimensions are not broadcast-compatible");
         }
 
         // Matrix dimensions:
         // A[..., M, K] x B[..., K, N] -> C[..., M, N]
-        const int64_t mDim = aDims[rankA - 2];
-        const int64_t kDim = aDims[rankA - 1];
-        const int64_t bKDim = bDims[rankB - 2];
-        const int64_t nDim = bDims[rankB - 1];
+        const int64_t mDim = aDims[rank - 2];
+        const int64_t kDimA = aDims[rank - 1];
+        const int64_t kDimB = bDims[rank - 2];
+        const int64_t nDim = bDims[rank - 1];
 
-        if(kDim != bKDim)
+        if(kDimA != kDimB)
         {
             throw std::invalid_argument("Matmul shape mismatch: A.K must equal B.K");
         }
-        if(cDims[rankC - 2] != mDim || cDims[rankC - 1] != nDim)
+        if(cDims[rank - 2] != mDim || cDims[rank - 1] != nDim)
         {
             throw std::invalid_argument("Matmul shape mismatch: C must be [..., A.M, B.N]");
         }
     }
+
+    static bool validateBroadcastableBatchDims(size_t batchDims,
+                                               const std::vector<int64_t>& aDims,
+                                               const std::vector<int64_t>& bDims,
+                                               const std::vector<int64_t>& cDims)
+    {
+        for(size_t i = 0; i < batchDims; ++i)
+        {
+            const auto aDimVal = static_cast<int64_t>(aDims[i]);
+            const auto bDimVal = static_cast<int64_t>(bDims[i]);
+            const auto cDimVal = static_cast<int64_t>(cDims[i]);
+
+            if(aDimVal <= 0 || bDimVal <= 0 || cDimVal <= 0)
+            {
+                return false;
+            }
+
+            if(aDimVal % bDimVal != 0 && bDimVal % aDimVal != 0)
+            {
+                return false;
+            }
+
+            const int64_t expectedOut = std::max(aDimVal, bDimVal);
+            if(cDimVal != expectedOut)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // Indexes for the matrix dimensions starting from the last dimension
+    constexpr static size_t K_BATCH_IDX = 2;
+    constexpr static size_t K_M_IDX = 1;
+    constexpr static size_t K_K_IDX_A = 0;
+    constexpr static size_t K_K_IDX_B = 1;
+    constexpr static size_t K_N_IDX = 0;
 };
 
 } // namespace hipdnn_test_sdk::utilities
