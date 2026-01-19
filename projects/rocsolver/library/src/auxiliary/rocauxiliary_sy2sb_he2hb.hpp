@@ -43,7 +43,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 template <typename T, typename U>
 ROCSOLVER_KERNEL void sy2sb_updateAV_kernel(
     const rocblas_int inc,
-    const rocblas_int nb,
+    const rocblas_int kd,
     const rocblas_int m,
     const rocblas_int n,
     U A,
@@ -67,7 +67,7 @@ ROCSOLVER_KERNEL void sy2sb_updateAV_kernel(
 
     rocblas_int iv = i;
     rocblas_int jv = j + inc;
-    rocblas_int ia = i + nb;
+    rocblas_int ia = i + kd;
     rocblas_int ja = j + inc;
     if(i < m && j < n)
     {
@@ -103,8 +103,8 @@ ROCSOLVER_KERNEL void sy2sb_updateAV_kernel(
 template <bool BATCHED, typename T>
 void rocsolver_sy2sb_he2hb_getMemorySize(
     const rocblas_int n,
+    const rocblas_int kd,
     const rocblas_int nb,
-    const rocblas_int k,
     const rocblas_int batch_count,
     size_t* size_scalars,
     size_t* size_Acpy,
@@ -121,26 +121,26 @@ void rocsolver_sy2sb_he2hb_getMemorySize(
     *size_workArr = 0;
 
     // if quick return no workspace needed
-    if(n == 0 || batch_count == 0 || nb == 0 || k == 0)
+    if(n == 0 || batch_count == 0 || kd == 0 || nb == 0)
         return;
 
-    rocblas_int nk = n - nb;
+    rocblas_int n_kd = n - kd;
     size_t w, wa, s1, s2;
 
     // size for main arrays
-    *size_Acpy = sizeof(T) * nk * (nk + 1) * batch_count;
-    *size_workT = sizeof(T) * k * k * batch_count;
-    *size_workZ = sizeof(T) * nk * k * batch_count;
+    *size_Acpy = sizeof(T) * n_kd * (n_kd + 1) * batch_count;
+    *size_workT = sizeof(T) * nb * nb * batch_count;
+    *size_workZ = sizeof(T) * n_kd * nb * batch_count;
     *size_workArr = BATCHED ? sizeof(T*) * 2 * batch_count : 0;
 
     // extra space for geqrf calls
-    rocsolver_geqrf_getMemorySize<BATCHED, T>(nk, nb, batch_count, size_scalars, &w, &s1, &s2, &wa);
+    rocsolver_geqrf_getMemorySize<BATCHED, T>(n_kd, kd, batch_count, size_scalars, &w, &s1, &s2, &wa);
     *size_workT = std::max(*size_workT, s1);
     *size_workZ = std::max(*size_workZ, s2);
     *size_workArr = std::max(*size_workArr, wa);
 
     // extra space for larft calls
-    rocsolver_larft_getMemorySize<BATCHED, T>(n-k, k, batch_count, size_scalars, &w, &wa);
+    rocsolver_larft_getMemorySize<BATCHED, T>(n-nb, nb, batch_count, size_scalars, &w, &wa);
     *size_work = std::max(*size_work, w);
     *size_workArr = std::max(*size_workArr, wa);
 }
@@ -150,8 +150,8 @@ template <typename T, typename S>
 rocblas_status rocsolver_sy2sb_he2hb_argCheck(
     rocblas_handle handle,
     const rocblas_int n,
+    const rocblas_int kd,
     const rocblas_int nb,
-    const rocblas_int k,
     T A,
     const rocblas_int lda,
     S V,
@@ -164,7 +164,7 @@ rocblas_status rocsolver_sy2sb_he2hb_argCheck(
     // N/A
 
     // 2. invalid size
-    if(n < 0 || (n > 0 && nb < 1) || k < nb || lda < n || batch_count < 0)
+    if(n < 0 || (n > 0 && kd < 1) || nb < kd || lda < n || batch_count < 0)
         return rocblas_status_invalid_size;
 
     // skip pointer check if querying memory size
@@ -180,15 +180,15 @@ rocblas_status rocsolver_sy2sb_he2hb_argCheck(
 
 //------------------------------------------------------------------------------
 /// What's the point of types T and U? Isn't T == U always?
-/// Reduces A to Aband with bandwidth nb, using block size k.
+/// Reduces A to Aband with bandwidth kd, using block size nb.
 /// Outputs Householder vectors in V.
 /// W is workspace.
 template <bool BATCHED, bool STRIDED, typename T, typename U>
 rocblas_status rocsolver_sy2sb_he2hb_template(
     rocblas_handle handle,
     const rocblas_int n,
+    const rocblas_int kd,
     const rocblas_int nb,
-    const rocblas_int k,
     U A,
     const rocblas_int shiftA,
     const rocblas_int lda,
@@ -207,13 +207,13 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
     T* workZ,
     T** workArr)
 {
-    ROCSOLVER_ENTER("sy2sb_he2hb", "n:", n, "nb", nb, "k:", k, "shiftA:", shiftA, "lda:", lda,
+    ROCSOLVER_ENTER("sy2sb_he2hb", "n:", n, "kd", kd, "nb:", nb, "shiftA:", shiftA, "lda:", lda,
                     "bc:", batch_count);
 
     using S = decltype(std::real(T{}));
 
     // quick return
-    if(n == 0 || nb == 0 || k == 0 || batch_count == 0)
+    if(n == 0 || kd == 0 || nb == 0 || batch_count == 0)
         return rocblas_status_success;
 
     hipStream_t stream;
@@ -229,22 +229,22 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
     T negone = -1;
     S rone = 1;
 
-    rocblas_int ldt = k;
-    rocblas_stride strideT = k * k;
-    rocblas_int nk = n - nb;
-    rocblas_int ldacpy = nk;
-    rocblas_stride strideAcpy = nk * (nk + 1);
+    rocblas_int ldt = nb;
+    rocblas_stride strideT = nb * nb;
+    rocblas_int n_kd = n - kd;
+    rocblas_int ldacpy = n_kd;
+    rocblas_stride strideAcpy = n_kd * (n_kd + 1);
     rocblas_stride strideP = strideAcpy;
-    rocblas_int ldz = nk;
-    rocblas_stride strideZ = nk * k;
-    T* tau = Acpy + nk * nk;
+    rocblas_int ldz = n_kd;
+    rocblas_stride strideZ = n_kd * nb;
+    T* tau = Acpy + n_kd * n_kd;
 
     // Loop over large blocks.
-    for(rocblas_int i = 0; i < nk; i += k)
+    for(rocblas_int i = 0; i < n_kd; i += nb)
     {
-        rocblas_int qm = nk - i;
-        rocblas_int qn = std::min(nb, qm);
-        rocblas_int endb = std::min(i+k, nk);
+        rocblas_int qm = n_kd - i;
+        rocblas_int qn = std::min(kd, qm);
+        rocblas_int endb = std::min(i+nb, n_kd);
         rocblas_int kk = qn;
         rocblas_int j, inc, qnn, qmm;
 
@@ -258,34 +258,34 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             (copy_mat<T>),
             dim3(cpy_blks, cpy_blks, batch_count), dim3(32, 32), 0, stream,
             qm, qm,
-            A, shiftA + idx2D(i + nb, i + nb, lda), lda, strideA,
+            A, shiftA + idx2D(i + kd, i + kd, lda), lda, strideA,
             Acpy, 0, ldacpy, strideAcpy);
 
         /// TODO can this be merged into for j loop? Almost surely.
 
         // reduce first panel in block
-        /// TODO: qm x qn, instead of x nb?
+        /// TODO: qm x qn, instead of x kd?
         /// Maybe geqrf limits n to min( m, n ), but I don't think it should.
         rocsolver_geqrf_template<BATCHED, STRIDED>(
-            handle, qm, nb,
-            A, shiftA + idx2D(i + nb, i, lda), lda, strideA,
+            handle, qm, kd,
+            A, shiftA + idx2D(i + kd, i, lda), lda, strideA,
             tau, strideP, batch_count, scalars, work, workT, workZ, workArr);
 
         // Form corresponding matrix T
         rocsolver_larft_template<T>(
             handle, rocblas_forward_direction, rocblas_column_wise,
             qm, qn,
-            A, shiftA + idx2D(i + nb, i, lda), lda, strideA,
+            A, shiftA + idx2D(i + kd, i, lda), lda, strideA,
             tau, strideP, workT, ldt, strideT, batch_count, scalars, work, workArr);
 
         // update A and V
-        /// TODO: qm x qn, instead of x nb?
+        /// TODO: qm x qn, instead of x kd?
         rocblas_int mblks = (qm - 1) / 32 + 1;
-        rocblas_int nblks = (nb - 1) / 32 + 1;
+        rocblas_int nblks = (kd - 1) / 32 + 1;
         ROCSOLVER_LAUNCH_KERNEL(
             (sy2sb_updateAV_kernel),
             dim3(mblks, nblks, batch_count), dim3(32, 32), 0, stream,
-            0, nb, qm, nb,
+            0, kd, qm, kd,
             A, shiftA + idx2D(i, i, lda), lda, strideA,
             V + idx2D(i, i, ldv), ldv, strideV);
 
@@ -345,39 +345,39 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
 
         // Inner blocking to reach bandwidth.
         // reduce all other panels in block
-        for (j = i+nb; j < endb; j += nb)
-        ///j = i + nb;
+        for (j = i+kd; j < endb; j += kd)
+        ///j = i + kd;
         ///while(j < endb)
         {
             inc = j - i;
-            qmm = nk - j;
-            qnn = std::min(nb, qmm);
+            qmm = n_kd - j;
+            qnn = std::min(kd, qmm);
             kk += qnn;
 
             /// if (j > i) {
                 // update current panel
                 // Left looking: apply updates from previous sub-panels.
                 // A = A - V Z^H
-                /// TODO: qnn instead of nb?
+                /// TODO: qnn instead of kd?
                 rocsolver_gemm(
                     handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
-                    qmm + nb, nb, inc,
-                    &negone, V, idx2D(i+inc-nb, i, ldv), ldv, strideV,
-                             workZ, inc-nb, ldz, strideZ,
+                    qmm + kd, kd, inc,
+                    &negone, V, idx2D(i+inc-kd, i, ldv), ldv, strideV,
+                             workZ, inc-kd, ldz, strideZ,
                     &one,    A, shiftA + idx2D(j, j, lda), lda, strideA, batch_count, workArr);
                 // A = A - Z V^H
                 rocsolver_gemm(
                     handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
-                    qmm + nb, nb, inc,
-                    &negone, workZ, inc-nb, ldz, strideZ,
-                             V, idx2D(i+inc-nb, i, ldv), ldv, strideV,
+                    qmm + kd, kd, inc,
+                    &negone, workZ, inc-kd, ldz, strideZ,
+                             V, idx2D(i+inc-kd, i, ldv), ldv, strideV,
                     &one,    A, shiftA + idx2D(j, j, lda), lda, strideA, batch_count, workArr);
             /// } // end if
 
             // reduce current panel
             rocsolver_geqrf_template<BATCHED, STRIDED>(
-                handle, qmm, nb,
-                A, shiftA + idx2D(j + nb, j, lda), lda, strideA,
+                handle, qmm, kd,
+                A, shiftA + idx2D(j + kd, j, lda), lda, strideA,
                 tau, strideP, batch_count, scalars, work, workT, workZ, workArr);
 
             // Form corresponding matrix Tj = larft( Vj, tau_j )
@@ -386,7 +386,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             rocsolver_larft_template<T>(
                 handle, rocblas_forward_direction, rocblas_column_wise,
                 qmm, qnn,
-                A, shiftA + idx2D(j + nb, j, lda), lda, strideA,
+                A, shiftA + idx2D(j + kd, j, lda), lda, strideA,
                 tau, strideP, workT, ldt, strideT, batch_count, scalars, work, workArr);
 
             // update A and V
@@ -394,7 +394,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             ROCSOLVER_LAUNCH_KERNEL(
                 (sy2sb_updateAV_kernel),
                 dim3(mblks, nblks, batch_count), dim3(32, 32), 0, stream,
-                inc, nb, qm, nb,
+                inc, kd, qm, kd,
                 A, shiftA + idx2D(i, i, lda), lda, strideA,
                 V + idx2D(i, i, ldv), ldv, strideV);
 
@@ -452,25 +452,25 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
                           workT, 0, ldt, strideT,
                 &one,     workZ, 0, ldz, strideZ, batch_count, workArr);
 
-            ///j += nb;
+            ///j += kd;
         }
 
         // update trailing matrix (her2k as 2 gemms)
         inc = j - i;
-        qmm = nk - j;
+        qmm = n_kd - j;
         // A = A - V Z^H
         rocsolver_gemm(
             handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
-            qmm + nb, qmm + nb, kk,
-            &negone, V, idx2D(i+inc-nb, i, ldv), ldv, strideV,
-                     workZ, inc-nb, ldz, strideZ,
+            qmm + kd, qmm + kd, kk,
+            &negone, V, idx2D(i+inc-kd, i, ldv), ldv, strideV,
+                     workZ, inc-kd, ldz, strideZ,
             &one,    A, shiftA + idx2D(j, j, lda), lda, strideA, batch_count, workArr);
         // A = A - Z V^H
         rocsolver_gemm(
             handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
-            qmm + nb, qmm + nb, kk,
-            &negone, workZ, inc-nb, ldz, strideZ,
-                     V, idx2D(i+inc-nb, i, ldv), ldv, strideV,
+            qmm + kd, qmm + kd, kk,
+            &negone, workZ, inc-kd, ldz, strideZ,
+                     V, idx2D(i+inc-kd, i, ldv), ldv, strideV,
             &one,    A, shiftA + idx2D(j, j, lda), lda, strideA, batch_count, workArr);
     }
 
