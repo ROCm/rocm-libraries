@@ -31,15 +31,19 @@ template <typename intT1,
           class = typename std::enable_if<std::is_integral<intT2>::value>::type>
 static size_t compute_ptrdiff(const std::vector<intT1>& length, const std::vector<intT2>& stride)
 {
-    // Strides and lengths must have the same dimension:
-    if(length.size() != stride.size())
+    // Each length must have a matching stride:
+    if(stride.size() < length.size())
+        throw std::runtime_error("Inconsistent length/stride dimensions given to compute_ptrdiff");
+
+    // If any lengths are zero, no memory is allocated:
+    if(std::any_of(length.begin(), length.end(), [](const auto& l) { return l == 0; }))
         return 0;
-    // If any lengths are zero or negative, no memory is allocated:
-    if(std::any_of(length.begin(), length.end(), [](const intT1& l) { return l < 1; }))
-        return 0;
-    // Negative strides are not permitted (so as to avoid underflow):
-    if(std::any_of(stride.begin(), stride.end(), [](const intT1& s) { return s < 0; }))
-        return 0;
+
+    // Negative lengths or strides are not permitted:
+    if(std::any_of(length.begin(), length.end(), [](const auto& l) { return l < 0; }))
+        throw std::runtime_error("Negative lengths given to compute_ptrdiff");
+    if(std::any_of(stride.begin(), stride.end(), [](const auto& s) { return s < 0; }))
+        throw std::runtime_error("Negative strides given to compute_ptrdiff");
 
     // We allow for weird data layouts with self-aliasing; this is not an array validator.
     
