@@ -19,6 +19,22 @@ public:
                 (const, override));
     MOCK_METHOD(bool, isValid, (), (const, override));
     MOCK_METHOD(int64_t, engineId, (), (const, override));
+    MOCK_METHOD(uint32_t, knobSettingCount, (), (const, override));
+    MOCK_METHOD(
+        (const std::vector<std::unique_ptr<hipdnn_data_sdk::flatbuffer_utilities::IKnobSetting>>&),
+        knobSettingWrappers,
+        (),
+        (const, override));
+    MOCK_METHOD(const hipdnn_data_sdk::flatbuffer_utilities::IKnobSetting&,
+                getKnobSettingById,
+                (int64_t knobId),
+                (const, override));
+    MOCK_METHOD(const hipdnn_data_sdk::flatbuffer_utilities::IKnobSetting&,
+                getKnobSettingByName,
+                (const std::string& knobName),
+                (const, override));
+    MOCK_METHOD(bool, hasKnobSetting, (int64_t knobId), (const, override));
+    MOCK_METHOD(bool, hasKnobSetting, (const std::string& knobName), (const, override));
 };
 
 }

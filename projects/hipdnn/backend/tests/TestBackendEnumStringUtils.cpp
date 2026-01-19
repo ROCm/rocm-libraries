@@ -223,6 +223,9 @@ TEST(TestBackendEnumStringUtils, GetAttributeTypeString)
     EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_RNG_DISTRIBUTION),
                  "HIPDNN_TYPE_RNG_DISTRIBUTION");
 
+    EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT),
+                 "HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT");
+
     EXPECT_STREQ(hipdnnGetAttributeTypeString(static_cast<hipdnnBackendAttributeType_t>(-1)),
                  "HIPDNN_ATTRIBUTE_UNKNOWN");
 }

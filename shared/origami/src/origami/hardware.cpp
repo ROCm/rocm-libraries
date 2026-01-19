@@ -136,6 +136,25 @@ size_t hardware_t::get_mi_latency(size_t MI_M,
   }
 }
 
+double hardware_t::get_adjusted_main_loop_efficiency(transpose_t transA,
+                                                     transpose_t transB,
+                                                     size_t MT_M,
+                                                     size_t MT_N,
+                                                     size_t MT_K,
+                                                     data_type_t mi_input_type) const {
+  const auto& cms_map = CMS_MAP.at(arch);
+  auto key            = CMS_kernel(mi_input_type, transA, transB, MT_M, MT_N, MT_K);
+  auto it = cms_map.find(key);
+  if (it != cms_map.end()) {
+    if (origami::runtime_options().get().debug_enabled) {
+      std::cout << "Found " << key.to_string() << " with efficiency " << it->second << "\n";
+    }
+    return it->second;
+  } else {
+    return 1.0;  // Default main loop efficiency
+  }
+}
+
 std::string hardware_t::get_before_first_colon(const std::string& input) {
   size_t pos = input.find(':');
   if (pos != std::string::npos) { return input.substr(0, pos); }

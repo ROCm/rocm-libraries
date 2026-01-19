@@ -217,7 +217,7 @@ struct device_histogram_benchmark : public benchmark_utils::autotune_interface
 
         using counter_type = unsigned int;
         using level_type   = typename std::
-            conditional_t<std::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
+            conditional_t<rocprim::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
 
         struct case_data
         {

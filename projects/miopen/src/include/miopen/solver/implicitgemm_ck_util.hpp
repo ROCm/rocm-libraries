@@ -76,7 +76,7 @@ inline static bool NextCKSplitkValue(int& v)
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 namespace conv {
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGWrw = ck::tensor_operation::device::DeviceGroupedConvBwdWeight<
     2,
     ck::tensor_layout::convolution::NHWGC,
@@ -87,12 +87,13 @@ using DeviceOpGWrw = ck::tensor_operation::device::DeviceGroupedConvBwdWeight<
     DataType,
     ck::tensor_operation::element_wise::PassThrough,
     ck::tensor_operation::element_wise::PassThrough,
-    ck::tensor_operation::element_wise::PassThrough>;
-template <typename DataType>
-using DeviceOpGWrwPtrs =
-    ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<DeviceOpGWrw<DataType>>;
+    ck::tensor_operation::element_wise::PassThrough,
+    ComputeType>;
+template <typename DataType, typename ComputeType = DataType>
+using DeviceOpGWrwPtrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+    DeviceOpGWrw<DataType, ComputeType>>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwd = ck::tensor_operation::device::DeviceGroupedConvBwdDataMultipleD<
     2,
     ck::tensor_layout::convolution::NHWGK,
@@ -105,11 +106,12 @@ using DeviceOpGBwd = ck::tensor_operation::device::DeviceGroupedConvBwdDataMulti
     DataType,
     ck::tensor_operation::element_wise::PassThrough,
     ck::tensor_operation::element_wise::PassThrough,
-    ck::tensor_operation::element_wise::PassThrough>;
+    ck::tensor_operation::element_wise::PassThrough,
+    ComputeType>;
 
-template <typename DataType>
-using DeviceOpGBwdPtrs =
-    ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<DeviceOpGBwd<DataType>>;
+template <typename DataType, typename ComputeType = DataType>
+using DeviceOpGBwdPtrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+    DeviceOpGBwd<DataType, ComputeType>>;
 
 using InLayout    = ck::tensor_layout::convolution::NDHWGC;
 using WeiLayout   = ck::tensor_layout::convolution::GKZYXC;
@@ -118,7 +120,7 @@ using PassThrough = ck::tensor_operation::element_wise::PassThrough;
 using Bilinear    = ck::tensor_operation::element_wise::Bilinear;
 using Scale       = ck::tensor_operation::element_wise::Scale;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightDefault =
     ck::tensor_operation::device::DeviceGroupedConvBwdWeight<3,
                                                              InLayout,
@@ -129,9 +131,10 @@ using DeviceOpGBwdWeightDefault =
                                                              DataType,
                                                              PassThrough,
                                                              PassThrough,
-                                                             PassThrough>;
+                                                             PassThrough,
+                                                             ComputeType>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightBilinear =
     ck::tensor_operation::device::DeviceGroupedConvBwdWeightMultipleD<3,
                                                                       InLayout,
@@ -144,9 +147,10 @@ using DeviceOpGBwdWeightBilinear =
                                                                       ck::Tuple<DataType>,
                                                                       PassThrough,
                                                                       Bilinear,
-                                                                      PassThrough>;
+                                                                      PassThrough,
+                                                                      ComputeType>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightScale =
     ck::tensor_operation::device::DeviceGroupedConvBwdWeightMultipleD<3,
                                                                       InLayout,
@@ -159,22 +163,23 @@ using DeviceOpGBwdWeightScale =
                                                                       ck::Tuple<>,
                                                                       PassThrough,
                                                                       Scale,
-                                                                      PassThrough>;
+                                                                      PassThrough,
+                                                                      ComputeType>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightDefaultPtrs =
     ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOpGBwdWeightDefault<DataType>>;
+        DeviceOpGBwdWeightDefault<DataType, ComputeType>>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightBilinearPtrs =
     ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOpGBwdWeightBilinear<DataType>>;
+        DeviceOpGBwdWeightBilinear<DataType, ComputeType>>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGBwdWeightScalePtrs =
     ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOpGBwdWeightScale<DataType>>;
+        DeviceOpGBwdWeightScale<DataType, ComputeType>>;
 
 } // namespace conv
 
@@ -246,22 +251,27 @@ inline constexpr bool IsSplitKNeeded()
 {
     return std::is_same_v<DeviceOpType, conv::DeviceOpGWrwPtrs<ck::half_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGWrwPtrs<float>> ||
+           std::is_same_v<DeviceOpType, conv::DeviceOpGWrwPtrs<float, ck::tf32_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGWrwPtrs<int8_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGWrwPtrs<ck::bhalf_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdPtrs<ck::half_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdPtrs<float>> ||
+           std::is_same_v<DeviceOpType, conv::DeviceOpGBwdPtrs<float, ck::tf32_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdPtrs<int8_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdPtrs<ck::bhalf_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightDefaultPtrs<ck::half_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightDefaultPtrs<float>> ||
+           std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightDefaultPtrs<float, ck::tf32_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightDefaultPtrs<int8_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightDefaultPtrs<ck::bhalf_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightBilinearPtrs<ck::half_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightBilinearPtrs<float>> ||
+           std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightBilinearPtrs<float, ck::tf32_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightBilinearPtrs<int8_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightBilinearPtrs<ck::bhalf_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightScalePtrs<ck::half_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightScalePtrs<float>> ||
+           std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightScalePtrs<float, ck::tf32_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightScalePtrs<int8_t>> ||
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightScalePtrs<ck::bhalf_t>>;
 }
@@ -1469,7 +1479,8 @@ template <typename InvokerFactoryMakerNCHW, typename InvokerFactoryMakerNHWC>
 ConvSolution
 MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& problem,
                                         InvokerFactoryMakerNCHW&& invoker_factory_maker_ncdhw,
-                                        InvokerFactoryMakerNHWC&& invoker_factory_maker_ndhwc)
+                                        InvokerFactoryMakerNHWC&& invoker_factory_maker_ndhwc,
+                                        const bool use_tf32 = false)
 {
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
@@ -1477,10 +1488,14 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
     {
         switch(problem.GetInDataType())
         {
-        case miopenInt8: return invoker_factory_maker_ncdhw(int8_t{});
-        case miopenHalf: return invoker_factory_maker_ncdhw(ck::half_t{});
-        case miopenFloat: return invoker_factory_maker_ncdhw(float{});
-        case miopenBFloat16: return invoker_factory_maker_ncdhw(ck::bhalf_t{});
+        case miopenInt8: return invoker_factory_maker_ncdhw(int8_t{}, int8_t{});
+        case miopenHalf: return invoker_factory_maker_ncdhw(ck::half_t{}, ck::half_t{});
+        case miopenFloat:
+            if(use_tf32)
+                return invoker_factory_maker_ncdhw(float{}, ck::tf32_t{});
+            else
+                return invoker_factory_maker_ncdhw(float{}, float{});
+        case miopenBFloat16: return invoker_factory_maker_ncdhw(ck::bhalf_t{}, ck::bhalf_t{});
         case miopenInt64:
         case miopenInt32:
         case miopenDouble:
@@ -1496,10 +1511,14 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
     {
         switch(problem.GetInDataType())
         {
-        case miopenInt8: return invoker_factory_maker_ndhwc(int8_t{});
-        case miopenHalf: return invoker_factory_maker_ndhwc(ck::half_t{});
-        case miopenFloat: return invoker_factory_maker_ndhwc(float{});
-        case miopenBFloat16: return invoker_factory_maker_ndhwc(ck::bhalf_t{});
+        case miopenInt8: return invoker_factory_maker_ndhwc(int8_t{}, int8_t{});
+        case miopenHalf: return invoker_factory_maker_ndhwc(ck::half_t{}, ck::half_t{});
+        case miopenFloat:
+            if(use_tf32)
+                return invoker_factory_maker_ndhwc(float{}, ck::tf32_t{});
+            else
+                return invoker_factory_maker_ndhwc(float{}, float{});
+        case miopenBFloat16: return invoker_factory_maker_ndhwc(ck::bhalf_t{}, ck::bhalf_t{});
         case miopenInt64:
         case miopenInt32:
         case miopenDouble:

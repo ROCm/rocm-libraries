@@ -23,7 +23,8 @@
 #include "transform.h"
 
 std::map<int, device_callback_t> DeviceCallbackMap(const rocfft_execution_info_t*   info,
-                                                   const rocfft_plan_description_t& desc)
+                                                   const rocfft_plan_description_t& desc,
+                                                   int                              local_comm_rank)
 {
     // tolerate user not providing an execution_info
     rocfft_execution_info_t exec_info;
@@ -36,16 +37,18 @@ std::map<int, device_callback_t> DeviceCallbackMap(const rocfft_execution_info_t
 
     std::map<int, device_callback_t> callbacks;
 
-    auto set_field_callback = [&callbacks](const std::vector<rocfft_field_t>& fields,
-                                           void**                             src_fn,
-                                           void**                             src_data,
-                                           bool                               load) {
+    auto set_field_callback = [=, &callbacks](const std::vector<rocfft_field_t>& fields,
+                                              void**                             src_fn,
+                                              void**                             src_data,
+                                              bool                               load) {
         size_t src_idx = 0;
         for(const auto& f : fields)
         {
             for(const auto& b : f.bricks)
             {
                 int device_id = b.location.device;
+                if(b.location.comm_rank != local_comm_rank)
+                    continue;
 
                 if(load)
                 {

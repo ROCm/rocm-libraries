@@ -53,10 +53,6 @@ if( NOT HIPFFT_BUILD_SCOPE )
   find_package( hipfft REQUIRED CONFIG PATHS )
 endif()
 
-find_package( Boost REQUIRED)
-
-set( Boost_USE_STATIC_LIBS OFF )
-
 # searching FFTW with FindFFTW.cmake that is provided by project
 # because distro versions of FFTW does not include the cmake specific
 # helper files
@@ -151,7 +147,7 @@ if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )
   if( WIN32 )
     find_package( HIP CONFIG REQUIRED )
   else()
-    find_package( hip REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hip/ )
+    find_package( HIP REQUIRED )
   endif()
 endif()
 
@@ -244,7 +240,6 @@ foreach( target ${TEST_TARGETS} )
 
   target_include_directories( ${target}
     PRIVATE
-    $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
     $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
     $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
   )

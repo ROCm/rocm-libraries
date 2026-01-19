@@ -143,6 +143,18 @@ namespace rocsparse
 
          COOMV_AOS_CONFIG(rocsparse_datatype_f32_r,
                           rocsparse_indextype_i32,
+                          rocsparse_datatype_f16_r,
+                          rocsparse_datatype_f16_r,
+                          rocsparse_datatype_f16_r),
+
+         COOMV_AOS_CONFIG(rocsparse_datatype_f32_r,
+                          rocsparse_indextype_i64,
+                          rocsparse_datatype_f16_r,
+                          rocsparse_datatype_f16_r,
+                          rocsparse_datatype_f16_r),
+
+         COOMV_AOS_CONFIG(rocsparse_datatype_f32_r,
+                          rocsparse_indextype_i32,
                           rocsparse_datatype_bf16_r,
                           rocsparse_datatype_bf16_r,
                           rocsparse_datatype_f32_r),
@@ -152,6 +164,18 @@ namespace rocsparse
                           rocsparse_datatype_bf16_r,
                           rocsparse_datatype_bf16_r,
                           rocsparse_datatype_f32_r),
+
+         COOMV_AOS_CONFIG(rocsparse_datatype_f32_r,
+                          rocsparse_indextype_i32,
+                          rocsparse_datatype_bf16_r,
+                          rocsparse_datatype_bf16_r,
+                          rocsparse_datatype_bf16_r),
+
+         COOMV_AOS_CONFIG(rocsparse_datatype_f32_r,
+                          rocsparse_indextype_i64,
+                          rocsparse_datatype_bf16_r,
+                          rocsparse_datatype_bf16_r,
+                          rocsparse_datatype_bf16_r),
 
          COOMV_AOS_CONFIG(rocsparse_datatype_f32_c,
                           rocsparse_indextype_i32,

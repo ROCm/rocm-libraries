@@ -62,6 +62,38 @@ namespace hiptensor
         {
             mGcnArch = hipGcnArch_t::GFX950;
         }
+        else if(deviceName.find("gfx1100") != std::string::npos)
+        {
+            mGcnArch = hipGcnArch_t::GFX1100;
+        }
+        else if(deviceName.find("gfx1101") != std::string::npos)
+        {
+            mGcnArch = hipGcnArch_t::GFX1101;
+        }
+        else if(deviceName.find("gfx1102") != std::string::npos)
+        {
+            mGcnArch = hipGcnArch_t::GFX1102;
+        }
+        else if(deviceName.find("gfx1103") != std::string::npos)
+        {
+            mGcnArch = hipGcnArch_t::GFX1103;
+        }
+        else if(deviceName.find("gfx1150") != std::string::npos)
+        {
+            mGcnArch = hipGcnArch_t::GFX1150;
+        }
+        else if(deviceName.find("gfx1151") != std::string::npos)
+        {
+            mGcnArch = hipGcnArch_t::GFX1151;
+        }
+        else if(deviceName.find("gfx1152") != std::string::npos)
+        {
+            mGcnArch = hipGcnArch_t::GFX1152;
+        }
+        else if(deviceName.find("gfx1153") != std::string::npos)
+        {
+            mGcnArch = hipGcnArch_t::GFX1153;
+        }
         else if(deviceName.find("gfx1200") != std::string::npos)
         {
             mGcnArch = hipGcnArch_t::GFX1200;
@@ -127,6 +159,14 @@ namespace hiptensor
                     || mGcnArch == HipDevice::hipGcnArch_t::GFX90A
                     || mGcnArch == HipDevice::hipGcnArch_t::GFX942
                     || mGcnArch == HipDevice::hipGcnArch_t::GFX950
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1100
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1101
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1102
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1103
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1150
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1151
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1152
+                    || mGcnArch == HipDevice::hipGcnArch_t::GFX1153
                     || mGcnArch == HipDevice::hipGcnArch_t::GFX1200
                     || mGcnArch == HipDevice::hipGcnArch_t::GFX1201);
         default:

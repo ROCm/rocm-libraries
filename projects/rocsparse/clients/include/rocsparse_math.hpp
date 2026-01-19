@@ -148,6 +148,17 @@ inline bool rocsparse_isinf(_Float16 arg)
 }
 
 template <>
+inline bool rocsparse_isinf(rocsparse_bfloat16 arg)
+{
+    union
+    {
+        rocsparse_bfloat16 fp;
+        uint16_t           data;
+    } x = {arg};
+    return (~x.data & 0x7f80) == 0 && (x.data & 0x7f) == 0;
+}
+
+template <>
 inline bool rocsparse_isinf(float arg)
 {
     return std::isinf(arg);
