@@ -10,10 +10,6 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ## hipBLASLt 1.2.1 for ROCm 7.2.1
 
-### Changed
-
-* Enumeration value update for the Sigmoid Activation Function feature.
-
 ### Resolved issues
 
 * Fix issue where users might encounter a `HIPBLAS_STATUS_INTERNAL_ERROR` with various sizes in CPX mode.
