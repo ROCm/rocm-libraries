@@ -45,6 +45,7 @@
 #include <algorithm>
 #include <assert.h>
 #include <functional>
+#include <cstring>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -3781,12 +3782,12 @@ try
 {
     log_trace(__func__, "buf", static_cast<void*>(buf), "len", len);
     // include nul terminator
-    const auto version_len = strlen(ROCFFT_VERSION_STRING) + 1;
+    const auto version_len = std::strlen(ROCFFT_VERSION_STRING) + 1;
     if(!buf)
         return rocfft_status_failure;
     if(len < version_len)
         return rocfft_status_invalid_arg_value;
-    memcpy(buf, ROCFFT_VERSION_STRING, version_len);
+    std::memcpy(buf, ROCFFT_VERSION_STRING, version_len);
     return rocfft_status_success;
 }
 catch(...)
