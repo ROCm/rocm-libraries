@@ -127,6 +127,7 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->bias_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->variance_tensor_uid());
+        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->epsilon_tensor_uid());
 
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), XDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), OutputDataTypeEnum);
