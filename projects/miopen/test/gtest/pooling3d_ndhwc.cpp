@@ -28,20 +28,20 @@
 #include <miopen/env.hpp>
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
-#include "pooling2d.hpp"
+#include "pooling3d.hpp"
 
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_TEST_FLAGS_ARGS)
 
 namespace env = miopen::env;
 
-namespace pooling2d_asymmetric {
+namespace pooling3d_ndhwc {
 
-class GPU_AsymPooling2d_FP32 : public testing::TestWithParam<std::vector<std::string>>
+class GPU_Pooling3d_NDHWC_FP32 : public testing::TestWithParam<std::vector<std::string>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-class GPU_AsymPooling2d_FP16 : public testing::TestWithParam<std::vector<std::string>>
+class GPU_Pooling3d_NDHWC_FP16 : public testing::TestWithParam<std::vector<std::string>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
@@ -55,14 +55,14 @@ void GetArgs(const std::string& param, std::vector<std::string>& tokens)
         tokens.push_back(*begin++);
 }
 
-void Run2dDriver(miopenDataType_t prec)
+void Run3dDriver(miopenDataType_t prec)
 {
 
     std::vector<std::string> params;
     switch(prec)
     {
-    case miopenFloat: params = GPU_AsymPooling2d_FP32::GetParam(); break;
-    case miopenHalf: params = GPU_AsymPooling2d_FP16::GetParam(); break;
+    case miopenFloat: params = GPU_Pooling3d_NDHWC_FP32::GetParam(); break;
+    case miopenHalf: params = GPU_Pooling3d_NDHWC_FP16::GetParam(); break;
     case miopenBFloat16:
     case miopenInt8:
     case miopenFloat8_fnuz:
@@ -73,9 +73,9 @@ void Run2dDriver(miopenDataType_t prec)
         FAIL() << "miopenBFloat16, miopenInt8, miopenInt32, miopenDouble, miopenFloat8_fnuz, "
                   "miopenBFloat8_fnuz "
                   "data type not supported by "
-                  "pooling2d_asymmetric test";
+                  "pooling3d_ndhwc test";
 
-    default: params = GPU_AsymPooling2d_FP32::GetParam();
+    default: params = GPU_Pooling3d_NDHWC_FP32::GetParam();
     }
 
     for(const auto& test_value : params)
@@ -89,13 +89,13 @@ void Run2dDriver(miopenDataType_t prec)
         });
 
         testing::internal::CaptureStderr();
-        test_drive<pooling2d_driver>(ptrs.size(), ptrs.data());
+        test_drive<pooling3d_driver>(ptrs.size(), ptrs.data());
         auto capture = testing::internal::GetCapturedStderr();
         std::cerr << capture;
     }
 };
 
-bool IsTestSupportedForDevice(const miopen::Handle& handle) { return true; }
+bool IsTestSupportedForDevice() { return true; }
 
 std::vector<std::string> GetTestCases(const std::string& precision)
 {
@@ -103,37 +103,21 @@ std::vector<std::string> GetTestCases(const std::string& precision)
 
     const std::vector<std::string> test_cases = {
         // clang-format off
-    {"test_pooling2d " + precision + " --all --dataset 1 --limit 0 " + flag_arg}
+    {"test_pooling3d " + precision + " --all --in_layout NDHWC --out_layout NDHWC " + flag_arg}
         // clang-format on
     };
 
     return test_cases;
 }
 
-} // namespace pooling2d_asymmetric
-using namespace pooling2d_asymmetric;
+} // namespace pooling3d_ndhwc
+using namespace pooling3d_ndhwc;
 
-/*
-TEST_P(GPU_AsymPooling2d_FP32, FloatTest_pooling2d_asymmetric)
+TEST_P(GPU_Pooling3d_NDHWC_FP32, FloatTest_pooling3d_ndhwc)
 {
-    const auto& handle = get_handle();
-    if(IsTestSupportedForDevice(handle))
+    if(IsTestSupportedForDevice())
     {
-        Run2dDriver(miopenFloat);
-    }
-    else
-    {
-        GTEST_SKIP();
-    }
-};
-*/
-
-TEST_P(GPU_AsymPooling2d_FP16, HalfTest_pooling2d_asymmetric)
-{
-    const auto& handle = get_handle();
-    if(IsTestSupportedForDevice(handle))
-    {
-        Run2dDriver(miopenHalf);
+        Run3dDriver(miopenFloat);
     }
     else
     {
@@ -141,6 +125,18 @@ TEST_P(GPU_AsymPooling2d_FP16, HalfTest_pooling2d_asymmetric)
     }
 };
 
-// INSTANTIATE_TEST_SUITE_P(Full, GPU_AsymPooling2d_FP32, testing::Values(GetTestCases("--float")));
+TEST_P(GPU_Pooling3d_NDHWC_FP16, HalfTest_pooling3d_ndhwc)
+{
+    if(IsTestSupportedForDevice())
+    {
+        Run3dDriver(miopenHalf);
+    }
+    else
+    {
+        GTEST_SKIP();
+    }
+};
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_AsymPooling2d_FP16, testing::Values(GetTestCases("--half")));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling3d_NDHWC_FP32, testing::Values(GetTestCases("--float")));
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling3d_NDHWC_FP16, testing::Values(GetTestCases("--half")));
