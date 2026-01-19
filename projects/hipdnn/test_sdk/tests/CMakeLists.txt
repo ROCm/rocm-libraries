@@ -45,8 +45,8 @@ add_executable(
     utilities/cpu_graph_executor/TestConvolutionFwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestCpuReferenceGraphExecutor.cpp
     utilities/cpu_graph_executor/TestFusedOperationsCpuGraphExecutor.cpp
-    utilities/cpu_graph_executor/TestMatmulCpuGraphExecutor.cpp
     utilities/cpu_graph_executor/TestMatmulPlan.cpp
+    utilities/cpu_graph_executor/TestMatmulSignatureKey.cpp
     utilities/cpu_graph_executor/TestPointwiseOperationsCpuGraphExecutor.cpp
     utilities/cpu_graph_executor/TestGraphTensorBundle.cpp
     utilities/cpu_graph_executor/TestPlanRegistrySignatureKey.cpp
