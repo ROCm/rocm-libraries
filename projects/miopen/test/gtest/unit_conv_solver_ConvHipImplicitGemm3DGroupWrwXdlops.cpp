@@ -33,9 +33,9 @@ auto GetConvFullTestCases()
         TestCase {{6, 448, 3, 118, 182}, {896, 448, 1, 1, 1}, {0, 0, 0}, {1, 2, 2}, {1, 1, 1}, 1, false, tf32_compute},
 
         // Group Count > 1 (2, 3, 4)
-        // TestCase {{128, 2, 28, 28, 28}, {2, 1, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 2, false, tf32_compute},
-        TestCase {{128, 2, 14, 14, 14}, {2, 1, 3, 3, 3}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1}, 2, false, tf32_compute},
-        TestCase {{256, 9, 2, 28, 28}, {27, 3, 2, 14, 14}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 3, false, tf32_compute},
+        TestCase {{128, 2, 28, 28, 28}, {2, 1, 3, 3, 3}, {2, 2, 2}, {1, 1, 1}, {1, 1, 1}, 2, false, tf32_compute},
+        TestCase {{128, 2, 28, 28, 28}, {2, 1, 3, 3, 3}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1}, 2, false, tf32_compute},
+        TestCase {{256, 9, 2, 14, 14}, {27, 3, 2, 14, 14}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 3, false, tf32_compute},
         TestCase {{128, 4, 28, 28, 28}, {8, 1, 3, 3, 3}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1}, 4, false, tf32_compute}
         // clang-format on  
     };
@@ -67,15 +67,20 @@ const auto& GetTestParams()
 {
     static const auto params = [] {
 // If MIOpen is built without CK these tests will fail, skip them to avoid failing
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL && !defined(_WIN32)
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
         Gpu supportedDevices;
-        if constexpr(type == TestDataType::TF32 || type == TestDataType::BF16)
+        if constexpr(type == TestDataType::FP32)
+        {
+            supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
+        }
+        else if constexpr(type == TestDataType::TF32 || type == TestDataType::BF16)
         {
             supportedDevices = Gpu::gfx94X | Gpu::gfx950;
         }
         else
         {
-            supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
+            supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 |
+                               Gpu::gfx110X | Gpu::gfx115X | Gpu::gfx120X;
         }
 #else
         Gpu supportedDevices = Gpu::None;

@@ -58,13 +58,15 @@ const auto& GetTestParams()
 // If MIOpen is built without CK these tests will fail, skip them to avoid failing
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
         Gpu supportedDevices;
-        if constexpr(type == TestDataType::TF32)
-        {
-            supportedDevices = Gpu::gfx94X | Gpu::gfx950;
-        }
-        else
+        if constexpr(type == TestDataType::FP32)
         {
             supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
+        }
+        else if constexpr(type == TestDataType::TF32)
+        {
+            supportedDevices = Gpu::gfx94X | Gpu::gfx950;
+        }else{
+            supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx110X | Gpu::gfx115X | Gpu::gfx120X;
         }
 #else
         Gpu supportedDevices = Gpu::None;
