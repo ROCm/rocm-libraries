@@ -20,8 +20,7 @@
 #include "MiopenHandleFactory.hpp"
 #include "MiopenLegacyPlugin.hpp"
 
-// Use the engine name constant created by HIPDNN_REGISTER_ENGINE macro
-static const char* pluginName = hipdnn_data_sdk::utilities::MIOPEN_ENGINE_NAME;
+static const char* pluginName = "miopen_provider_plugin";
 static const char* pluginVersion = "1.0.0";
 
 using namespace hipdnn_plugin_sdk;

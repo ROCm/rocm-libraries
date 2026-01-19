@@ -7,27 +7,8 @@
 #include <memory>
 #include <vector>
 
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
-
 namespace miopen_legacy_plugin
 {
-
-// ============================================================================
-// Engine Registration
-// ============================================================================
-// For plugins that are not yet globally registered, use HIPDNN_REGISTER_ENGINE
-// to register your engine names here. This will:
-// 1. Create _NAME and _ID constants for the engine
-// 2. Detect hash collisions with other formally-registered engines
-//
-// Example for new engines:
-// HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE, "MY_CUSTOM_ENGINE")
-// HIPDNN_REGISTER_ENGINE(MY_OTHER_ENGINE, "MY_OTHER_ENGINE")
-//
-// Note: MIOPEN_ENGINE is already registered in EngineNames.hpp via
-// HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE, "MIOPEN_ENGINE"), so we can use
-// the MIOPEN_ENGINE_NAME and MIOPEN_ENGINE_ID constants directly from there.
-// ============================================================================
 
 class EngineManager;
 class IEngine;

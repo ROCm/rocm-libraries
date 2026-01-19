@@ -10,9 +10,27 @@
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
 namespace miopen_legacy_plugin
 {
+
+// ============================================================================
+// Engine Registration
+// ============================================================================
+// For plugins that are not yet globally registered, use HIPDNN_REGISTER_ENGINE
+// to register your engine names here. This will:
+// 1. Create _NAME and _ID constants for the engine
+// 2. Detect hash collisions with other formally-registered engines
+//
+// Example for new engines:
+// HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE, "MY_CUSTOM_ENGINE")
+// HIPDNN_REGISTER_ENGINE(MY_OTHER_ENGINE, "MY_OTHER_ENGINE")
+//
+// Note: MIOPEN_ENGINE is already registered in EngineNames.hpp via
+// HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE, "MIOPEN_ENGINE"), so we can use
+// the MIOPEN_ENGINE_NAME and MIOPEN_ENGINE_ID constants directly from there.
+// ============================================================================
 
 const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngineDefinitions()
 {
@@ -62,16 +80,11 @@ void MiopenContainer::copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uin
         *numEngines = totalEngines;
     }
 
-    // Copy up to maxEngines IDs
-    uint32_t enginesCopied = 0;
-    for(const auto& engineDefinition : engineDefinitions)
+    // Copy up to maxEngines IDs using index-based loop
+    auto enginesToCopy = std::min(maxEngines, totalEngines);
+    for(uint32_t i = 0; i < enginesToCopy; ++i)
     {
-        if(enginesCopied >= maxEngines)
-        {
-            break;
-        }
-        engineIds[enginesCopied] = engineDefinition.id;
-        enginesCopied++;
+        engineIds[i] = engineDefinitions[i].id;
     }
 }
 
