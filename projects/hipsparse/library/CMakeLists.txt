@@ -52,20 +52,12 @@ rocm_install_targets(
 
 
 if(HIPSPARSE_ENABLE_HIP)
-    if(HIPSPARSE_BUILD_SHARED_LIBS)
-        rocm_export_targets(
-            TARGETS roc::hipsparse
-            DEPENDS PACKAGE hip
-            NAMESPACE roc::
-        )
-    else()
-        rocm_export_targets(
-            TARGETS roc::hipsparse
-            DEPENDS PACKAGE hip
-            STATIC_DEPENDS PACKAGE rocsparse
-            NAMESPACE roc::
-        )
-    endif()
+    rocm_export_targets(
+        TARGETS roc::hipsparse
+        DEPENDS PACKAGE hip
+        STATIC_DEPENDS PACKAGE rocsparse
+        NAMESPACE roc::
+    )
 elseif(HIPSPARSE_ENABLE_CUDA)
     rocm_export_targets(
         TARGETS roc::hipsparse
