@@ -3856,3 +3856,39 @@ TEST_F(TestGraph, SetPreferredEngineIdByIdThenByName)
     EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
     EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), expectedId);
 }
+
+TEST_F(TestGraph, MethodChaining)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_CHAINING";
+    auto expectedEngineId = hipdnn_data_sdk::utilities::engineNameToId(testEngineName);
+
+    // Test that all setters return reference to self for chaining
+    auto& ref1 = graph.set_name("ChainedGraph");
+    auto& ref2 = ref1.set_compute_data_type(DataType::FLOAT);
+    auto& ref3 = ref2.set_intermediate_data_type(DataType::HALF);
+    auto& ref4 = ref3.set_io_data_type(DataType::BFLOAT16);
+    auto& ref5 = ref4.set_preferred_engine_id_ext(12345);
+
+    // All references should point to the same object
+    EXPECT_EQ(&graph, &ref1);
+    EXPECT_EQ(&graph, &ref2);
+    EXPECT_EQ(&graph, &ref3);
+    EXPECT_EQ(&graph, &ref4);
+    EXPECT_EQ(&graph, &ref5);
+
+    // Verify all values were set correctly
+    EXPECT_EQ(graph.get_name(), "ChainedGraph");
+    EXPECT_EQ(graph.get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(graph.get_intermediate_data_type(), DataType::HALF);
+    EXPECT_EQ(graph.get_io_data_type(), DataType::BFLOAT16);
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), 12345);
+
+    // Test chaining with string overload
+    auto& ref6 = graph.set_preferred_engine_id_ext(testEngineName);
+    EXPECT_EQ(&graph, &ref6);
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), expectedEngineId);
+}

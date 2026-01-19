@@ -1491,27 +1491,29 @@ public:
     }
 
     // NOLINTBEGIN(readability-identifier-naming)
-    void set_preferred_engine_id_ext(std::optional<int64_t> engineId)
+    Graph& set_preferred_engine_id_ext(std::optional<int64_t> engineId)
     // NOLINTEND(readability-identifier-naming)
     {
         _preferredEngineId = engineId;
+        return *this;
     }
 
     // NOLINTBEGIN(readability-identifier-naming)
-    void set_preferred_engine_id_ext(const std::string& engineName)
+    Graph& set_preferred_engine_id_ext(const std::string& engineName)
     // NOLINTEND(readability-identifier-naming)
     {
         if(engineName.empty())
         {
             _preferredEngineId = std::nullopt;
             HIPDNN_FE_LOG_INFO("Cleared preferred engine ID (empty string)");
-            return;
+            return *this;
         }
 
         auto engineId = hipdnn_data_sdk::utilities::engineNameToId(engineName);
         _preferredEngineId = engineId;
 
         HIPDNN_FE_LOG_INFO("Engine name '{}' mapped to ID: {}", engineName, engineId);
+        return *this;
     }
 
     // NOLINTBEGIN(readability-identifier-naming)
