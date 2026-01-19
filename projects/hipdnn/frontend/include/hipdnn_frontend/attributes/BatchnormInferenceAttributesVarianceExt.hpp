@@ -144,58 +144,18 @@ public:
     flatbuffers::Offset<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
-        auto x = get_x();
         auto mean = get_mean();
         auto variance = get_variance();
-        auto scale = get_scale();
-        auto bias = get_bias();
-        auto y = get_y();
         auto epsilon = get_epsilon();
-
-        if(!x)
-        {
-            throw std::runtime_error(
-                "BatchnormInferenceAttributesVarianceExt: X tensor is missing");
-        }
-        if(!mean)
-        {
-            throw std::runtime_error(
-                "BatchnormInferenceAttributesVarianceExt: Mean tensor is missing");
-        }
-        if(!variance)
-        {
-            throw std::runtime_error(
-                "BatchnormInferenceAttributesVarianceExt: Variance tensor is missing");
-        }
-        if(!scale)
-        {
-            throw std::runtime_error(
-                "BatchnormInferenceAttributesVarianceExt: Scale tensor is missing");
-        }
-        if(!bias)
-        {
-            throw std::runtime_error(
-                "BatchnormInferenceAttributesVarianceExt: Bias tensor is missing");
-        }
-        if(!y)
-        {
-            throw std::runtime_error(
-                "BatchnormInferenceAttributesVarianceExt: Y tensor is missing");
-        }
-        if(!epsilon)
-        {
-            throw std::runtime_error(
-                "BatchnormInferenceAttributesVarianceExt: Epsilon tensor is missing");
-        }
 
         return hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributesVarianceExt(
             builder,
-            x->get_uid(),
+            get_x()->get_uid(),
             mean->get_uid(),
             variance->get_uid(),
-            scale->get_uid(),
-            bias->get_uid(),
-            y->get_uid(),
+            get_scale()->get_uid(),
+            get_bias()->get_uid(),
+            get_y()->get_uid(),
             epsilon->get_uid());
     }
 

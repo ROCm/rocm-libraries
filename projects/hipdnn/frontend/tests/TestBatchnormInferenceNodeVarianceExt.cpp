@@ -134,6 +134,14 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateNodeMissingValues)
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
     batchnormAttributes.set_variance(std::make_shared<TensorAttributes>());
+    batchnormAttributesCopy = batchnormAttributes;
+    BatchnormInferenceNodeVarianceExt nodeWithVariance(std::move(batchnormAttributesCopy),
+                                                       graphAttributes);
+
+    error = nodeWithVariance.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
+
+    batchnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
 
     // For the final test to pass with enhanced validation, set proper dimensions
     auto xTensor = batchnormAttributes.get_x();

@@ -68,6 +68,11 @@ public:
             ErrorCode::ATTRIBUTE_NOT_SET,
             "BatchnormInferenceNodeVarianceExt missing variance for pre-validation");
 
+        HIPDNN_RETURN_IF_FALSE(
+            attributes.get_epsilon(),
+            ErrorCode::ATTRIBUTE_NOT_SET,
+            "BatchnormInferenceNodeVarianceExt missing epsilon for pre-validation");
+
         // Get tensor references
         auto x = attributes.get_x();
         auto y = attributes.get_y();
