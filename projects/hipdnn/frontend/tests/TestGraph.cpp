@@ -3788,3 +3788,71 @@ TEST_F(TestGraph, BuildMethodFailsWhenValidationFails)
     auto result = graph.build(_handle);
     EXPECT_FALSE(result.is_good());
 }
+
+TEST_F(TestGraph, SetPreferredEngineIdByName)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
+
+    // Set by name
+    graph.set_preferred_engine_id_ext(testEngineName);
+
+    // Verify it was converted to the correct ID
+    auto expectedId = hipdnn_data_sdk::utilities::engineNameToId(testEngineName);
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), expectedId);
+}
+
+TEST_F(TestGraph, SetPreferredEngineIdByEmptyStringClearsPreference)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
+
+    // First set a preference
+    graph.set_preferred_engine_id_ext(testEngineName);
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+
+    // Then clear it with empty string
+    graph.set_preferred_engine_id_ext("");
+
+    // Verify no preferred engine ID is set
+    EXPECT_FALSE(graph.get_preferred_engine_id_ext().has_value());
+}
+
+TEST_F(TestGraph, SetPreferredEngineIdByNameThenById)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
+
+    // Set by name first
+    graph.set_preferred_engine_id_ext(testEngineName);
+
+    // Then override with a different ID
+    int64_t overrideId = 999;
+    graph.set_preferred_engine_id_ext(std::optional<int64_t>(overrideId));
+
+    // Verify the ID overload took precedence
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), overrideId);
+}
+
+TEST_F(TestGraph, SetPreferredEngineIdByIdThenByName)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
+    auto expectedId = hipdnn_data_sdk::utilities::engineNameToId(testEngineName);
+
+    // Set by ID first
+    graph.set_preferred_engine_id_ext(std::optional<int64_t>(999));
+
+    // Then override with name
+    graph.set_preferred_engine_id_ext(testEngineName);
+
+    // Verify the name overload took precedence
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), expectedId);
+}
