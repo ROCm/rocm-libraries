@@ -34,7 +34,7 @@ target_sources(tensilelite-tests
 
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
-if(0) # HIPBLASLT_ENABLE_LLVM OR HIPBLASLT_ENABLE_MSGPACK)
+if(HIPBLASLT_ENABLE_LLVM OR HIPBLASLT_ENABLE_MSGPACK)
     target_sources(tensilelite-tests
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"

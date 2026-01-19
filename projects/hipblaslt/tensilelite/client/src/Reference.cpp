@@ -1117,8 +1117,6 @@ namespace TensileLite
                                                              actArgs);
                                     }
 
-                                    // TODO(newling) should I use 'sature cast' here, like the legacy path?
-
                                     curBatchD[idxD] = current;
                                 }
                             }
@@ -2233,7 +2231,6 @@ namespace TensileLite
 
             auto contractionInputsTypeId = getInputContractionInputsTypeId(problem);
             SolveCPUTemplates(contractionInputsTypeId, problem, inputs, elementsToValidate);
-            auto end = std::chrono::high_resolution_clock::now();
         }
 
         void SolveCPU(ContractionProblem const* problem,
