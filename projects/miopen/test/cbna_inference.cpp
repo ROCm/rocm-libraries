@@ -489,7 +489,7 @@ struct cbna_fusion_driver : test_driver
                 input_w >= (2 * fpad_w + wei_w))
         {
             (void)ranonce;
-#if (MIOPEN_BACKEND_HIP == 1)
+#if(MIOPEN_BACKEND_HIP == 1)
             if(!ranonce)
             { // Compiled and ready to run, but once!
                 ranonce = true;
