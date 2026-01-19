@@ -135,36 +135,81 @@ namespace rocRoller
                                        int                              macTileTag,
                                        std::vector<int> const&          sdim)
         {
+            namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+            using ET     = rocRoller::Expression::EvaluationTime;
+
             AssertFatal(sdim.size() == 4, "Expected 4 sub-dimensions for Pretiled MacroTile CT.");
 
-            auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
+            auto tile = graph.coordinates.getNode<MacroTile>(macTileTag);
 
-            auto sdimXTile = sdim[0];
-            auto sdimYTile = sdim[1];
-            auto sdimX     = sdim[2];
-            auto sdimY     = sdim[3];
+            auto sdimPTXTile = sdim[0];
+            auto sdimPTYTile = sdim[1];
+            auto sdimX       = sdim[2];
+            auto sdimY       = sdim[3];
 
-            auto numTilesX = graph.coordinates.get<SubDimension>(sdimXTile)->size;
-            auto numTilesY = graph.coordinates.get<SubDimension>(sdimYTile)->size;
+            auto numPTTilesX = graph.coordinates.get<SubDimension>(sdimPTXTile)->size;
+            auto numPTTilesY = graph.coordinates.get<SubDimension>(sdimPTYTile)->size;
+
+            auto sizePTTileXExpr = graph.coordinates.get<SubDimension>(sdimX)->size;
+            AssertFatal(
+                evaluationTimes(sizePTTileXExpr)[ET::Translate],
+                "Size of pre-tile tile must be known at translate time (ie, must be literal).");
+
+            auto sizePTTileYExpr = graph.coordinates.get<SubDimension>(sdimY)->size;
+            AssertFatal(
+                evaluationTimes(sizePTTileYExpr)[ET::Translate],
+                "Size of pre-tile tile must be known at translate time (ie, must be literal).");
+
+            auto sizePTTileX = getUnsignedInt(evaluate(sizePTTileXExpr));
+            auto sizePTTileY = getUnsignedInt(evaluate(sizePTTileYExpr));
+
+            auto nPTX = graph.coordinates.addElement(CT::WaveTileNumber(0, numPTTilesX, nullptr));
+            auto nPTY = graph.coordinates.addElement(CT::WaveTileNumber(1, numPTTilesY, nullptr));
+            auto iPTX
+                = graph.coordinates.addElement(CT::WaveTileIndex(0, literal(sizePTTileX), nullptr));
+            auto iPTY
+                = graph.coordinates.addElement(CT::WaveTileIndex(1, literal(sizePTTileY), nullptr));
+
+            graph.coordinates.addElement(PassThrough(), {sdimPTXTile}, {nPTX});
+            graph.coordinates.addElement(PassThrough(), {sdimPTYTile}, {nPTY});
+
+            graph.coordinates.addElement(PassThrough(), {sdimX}, {iPTX});
+            graph.coordinates.addElement(PassThrough(), {sdimY}, {iPTY});
 
             connections.push_back(DC<SubDimension>(sdimX, 0));
             connections.push_back(DC<SubDimension>(sdimY, 1));
 
-            auto nMacX = graph.coordinates.addElement(macTile.tileNumber(0, numTilesX));
-            auto nMacY = graph.coordinates.addElement(macTile.tileNumber(1, numTilesY));
-            auto iMacX = graph.coordinates.addElement(macTile.tileIndex(0));
-            auto iMacY = graph.coordinates.addElement(macTile.tileIndex(1));
+            auto numTilesX = tileCeilDivide(numPTTilesX * literal(sizePTTileX), tile.sizes[0]);
+            auto numTilesY = tileCeilDivide(numPTTilesY * literal(sizePTTileY), tile.sizes[1]);
 
-            connections.push_back(DC<MacroTileNumber>(nMacX, 0));
-            connections.push_back(DC<MacroTileNumber>(nMacY, 1));
+            auto nX = graph.coordinates.addElement(tile.tileNumber(0, numTilesX));
+            auto nY = graph.coordinates.addElement(tile.tileNumber(1, numTilesY));
+            auto iX = graph.coordinates.addElement(tile.tileIndex(0));
+            auto iY = graph.coordinates.addElement(tile.tileIndex(1));
 
-            graph.coordinates.addElement(PassThrough(), {sdimXTile}, {nMacX});
-            graph.coordinates.addElement(PassThrough(), {sdimYTile}, {nMacY});
+            AssertFatal(tile.sizes[0] % sizePTTileX == 0, "Pre-tile size mismatch.");
+            AssertFatal(tile.sizes[1] % sizePTTileY == 0, "Pre-tile size mismatch.");
+            AssertFatal(tile.sizes[0] / sizePTTileX > 0, "Bad pre-tile size.");
+            AssertFatal(tile.sizes[1] / sizePTTileY > 0, "Bad pre-tile size.");
 
-            graph.coordinates.addElement(PassThrough(), {sdimX}, {iMacX});
-            graph.coordinates.addElement(PassThrough(), {sdimY}, {iMacY});
+            auto numPTTilesPerTileX = tile.sizes[0] / sizePTTileX;
+            auto numPTTilesPerTileY = tile.sizes[1] / sizePTTileY;
 
-            return {nMacX, iMacX, nMacY, iMacY};
+            auto nPTSubX = graph.coordinates.addElement(
+                CT::WaveTileNumber(0, literal(numPTTilesPerTileX), nullptr));
+            auto nPTSubY = graph.coordinates.addElement(
+                CT::WaveTileNumber(1, literal(numPTTilesPerTileY), nullptr));
+
+            graph.coordinates.addElement(Tile(), {nPTX}, {nX, nPTSubX});
+            graph.coordinates.addElement(Tile(), {nPTY}, {nY, nPTSubY});
+
+            graph.coordinates.addElement(Flatten(), {nPTSubX, iPTX}, {iX});
+            graph.coordinates.addElement(Flatten(), {nPTSubY, iPTY}, {iY});
+
+            connections.push_back(DC<MacroTileNumber>(nX, 0));
+            connections.push_back(DC<MacroTileNumber>(nY, 1));
+
+            return {nX, iX, nY, iY};
         }
 
         /**
