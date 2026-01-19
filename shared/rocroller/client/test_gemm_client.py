@@ -250,8 +250,8 @@ unroll_x: 0
 unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
-padLDS_A: (0, 0)
-padLDS_B: (0, 0)
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
 storeLDS_D: true
 prefetch: false
 prefetchInFlight: 0
@@ -317,8 +317,8 @@ unroll_x: 0
 unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
-padLDS_A: (0, 0)
-padLDS_B: (0, 0)
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
 storeLDS_D: true
 prefetch: false
 prefetchInFlight: 0
@@ -383,8 +383,8 @@ unroll_x: 0
 unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
-padLDS_A: (0, 0)
-padLDS_B: (0, 0)
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
 storeLDS_D: true
 prefetch: false
 prefetchInFlight: 0
@@ -723,8 +723,8 @@ def test_gemm_options(tmp_path):
             "--padLDS_B=44,55",
         ]
     )
-    assert post["padLDS_A"] == (22, 33)
-    assert post["padLDS_B"] == (44, 55)
+    assert post["padLDS_A"] == [22, 33]
+    assert post["padLDS_B"] == [44, 55]
 
     # setting mxlds options
     post = run_and_load_example_yaml(

@@ -248,7 +248,7 @@ namespace GEMMTests
         auto instructions    = m_context->instructions()->toString();
         auto ldsWriteStrides = direct2LDSWriteStrides(instructions);
 
-        std::set<int> expectedLDSWriteStrides{1024 + 64, 1024 + 96};
+        std::set<int> expectedLDSWriteStrides{4 * (1024 + 64), 4 * (1024 + 96)};
         EXPECT_EQ(ldsWriteStrides, expectedLDSWriteStrides);
     }
 
