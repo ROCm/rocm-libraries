@@ -1698,7 +1698,7 @@ def _transform_index_standard(
     is_lr0: bool,
     use_f32x_emulation: bool,
     mfma_reorder: list[int],
-    num_vmfma: int,
+    num_vmfma: int
 ) -> int:
     """
     Convert column-major linear index into needed_by mfma index when ForceUnrollSubIter is disabled.
@@ -1706,7 +1706,7 @@ def _transform_index_standard(
     if use_f32x_emulation:  # Each tile requires 3 MFMAs
         needed_by *= 3
     
-    if is_lr0:  # LR0 reads data for 2nd half of this iteration
+    if is_lr0:  # LR0 reads data for 2nd half of this iteration (when present)
         needed_by += num_vmfma // 2
     
     if mfma_reorder:
@@ -1752,12 +1752,14 @@ def lr_needed_by_mfma(
     n_tiles_per_lra = n_tiles_a / n_local_reads_a
     n_tiles_per_lrb = n_tiles_b / n_local_reads_b
 
-    if force_unroll_sub_iter:
+    mfma_per_tile = 3 if use_f32x_emulation else 1
+    single_sub_iter = num_vmfma == n_tiles_a * n_tiles_b * mfma_per_tile
+    if force_unroll_sub_iter or single_sub_iter:
         # Without the unroll, the LRs are for half of the vmfmas.
         # But the number of vmfmas == 2 * n_tiles_a * n_tiles_b.
         # So each LR loads n_tiles tiles.
-        # For force_unroll_sub_iter, there are only n_tiles_a * n_tiles_b vmfmas.
-        # So each LR only loads half as many tiles.
+        # For force_unroll_sub_iter (and single-sub-iter schedules), there are only
+        # n_tiles_a * n_tiles_b vmfmas. So each LR only loads half as many tiles.
         n_tiles_per_lra /= 2
         n_tiles_per_lrb /= 2
 

@@ -642,6 +642,42 @@ class TestLRNeededByMFMA:
         for lr_name, expected_indices in expected_results.items():
             actual_indices = [lr_needed_by_mfma(lr_name, lr_idx, num_vmfma, mfma_reorder, n_tiles_a, n_tiles_b, n_local_reads_a, n_local_reads_b, force_unroll_sub_iter, use_f32x_emulation=False) for lr_idx in range(len(expected_indices))]
             assert actual_indices == expected_indices
+
+    def test_single_sub_iter_bf16(self):
+        """
+        Non-force-unroll case where MFMAs only cover a single sub-iteration.
+        """
+        n_tiles_a, n_tiles_b = 8, 8
+        n_local_reads_a, n_local_reads_b = 8, 8
+        num_vmfma = n_tiles_a * n_tiles_b
+
+        force_unroll_sub_iter = False
+        mfma_reorder = []
+
+        expected_results = {
+            "LRA0": [32, 32, 33, 33, 34, 34, 35, 35],
+            "LRB0": [32, 32, 40, 40, 48, 48, 56, 56],
+            "LRA1": [64, 64, 65, 65, 66, 66, 67, 67],
+            "LRB1": [64, 64, 72, 72, 80, 80, 88, 88],
+        }
+
+        for lr_name, expected_indices in expected_results.items():
+            actual_indices = [
+                lr_needed_by_mfma(
+                    lr_name,
+                    lr_idx,
+                    num_vmfma,
+                    mfma_reorder,
+                    n_tiles_a,
+                    n_tiles_b,
+                    n_local_reads_a,
+                    n_local_reads_b,
+                    force_unroll_sub_iter,
+                    use_f32x_emulation=False,
+                )
+                for lr_idx in range(len(expected_indices))
+            ]
+            assert actual_indices == expected_indices
     
     def test_simple_tf32(self):
         """
