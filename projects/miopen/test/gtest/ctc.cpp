@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,30 +24,10 @@
  *
  *******************************************************************************/
 
-#include <algorithm>
-#include <array>
-#include <cfloat>
-#include <cmath>
-#include <ctime>
-#include <iomanip>
-#include <iostream>
-#include <iterator>
-#include <limits>
-#include <memory>
-#include <utility>
-
 #include <miopen/ctc.hpp>
-#include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
 
-#include "get_handle.hpp"
 #include "gtest_common.hpp"
-#include "random.hpp"
-#include "rnn_util.hpp"
-#include "tensor_holder.hpp"
-#include "test.hpp"
 #include "test_parameter_name_generator.hpp"
-#include "verify.hpp"
 #include "workspace.hpp"
 
 namespace {
@@ -696,7 +676,7 @@ inline auto GetCases()
 } // namespace
 
 template <class T>
-struct ctc_driver : public testing::TestWithParam<TestCase>
+struct ctc_test : public testing::TestWithParam<TestCase>
 {
     int inputLen{};
     int labelLen{};
@@ -856,7 +836,7 @@ struct TestNameGenerator
     }
 };
 
-using GPU_CTC_FP32 = ctc_driver<float>;
+using GPU_CTC_FP32 = ctc_test<float>;
 
 TEST_P(GPU_CTC_FP32, TestFloat) { this->Run(); }
 
