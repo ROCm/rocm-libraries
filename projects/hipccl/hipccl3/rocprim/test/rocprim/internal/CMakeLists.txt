@@ -20,4 +20,5 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-add_rocprim_test("rocprim.internal.merge_path" test_internal_merge_path.hpp)
+add_rocprim_test("rocprim.internal.merge_path" test_internal_merge_path.cpp)
+add_rocprim_test("rocprim.internal.constexpr_for" test_internal_constexpr_for.cpp)
