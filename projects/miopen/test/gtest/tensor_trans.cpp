@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,25 +24,11 @@
  *
  *******************************************************************************/
 
-#include <array>
-#include <cstdlib>
-#include <iostream>
-#include <iterator>
-#include <limits>
-#include <memory>
-#include <utility>
-
-#include <miopen/convolution.hpp>
-#include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
 #include <miopen/util.hpp>
 
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
-#include "tensor_holder.hpp"
-#include "test.hpp"
 #include "test_parameter_name_generator.hpp"
-#include "verify.hpp"
 
 namespace {
 
@@ -214,7 +200,7 @@ inline auto GetCases()
 } // namespace
 
 template <class T>
-struct tensor_vec_driver : public testing::TestWithParam<TestCase>
+struct tensor_vec_test : public testing::TestWithParam<TestCase>
 {
     tensor<T> src;
     tensor<T> dst;
@@ -293,9 +279,9 @@ struct TestNameGenerator
     }
 };
 
-using GPU_TensorTrans_I8   = tensor_vec_driver<int8_t>;
-using GPU_TensorTrans_FP16 = tensor_vec_driver<half_float::half>;
-using GPU_TensorTrans_FP32 = tensor_vec_driver<float>;
+using GPU_TensorTrans_I8   = tensor_vec_test<int8_t>;
+using GPU_TensorTrans_FP16 = tensor_vec_test<half_float::half>;
+using GPU_TensorTrans_FP32 = tensor_vec_test<float>;
 
 TEST_P(GPU_TensorTrans_I8, TestInt8) { this->Run(); }
 TEST_P(GPU_TensorTrans_FP16, TestFloat16) { this->Run(); }

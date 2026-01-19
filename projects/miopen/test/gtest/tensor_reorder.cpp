@@ -24,18 +24,10 @@
  *
  *******************************************************************************/
 
-#include <cstdlib>
-#include <ctime>
-#include <optional>
-
-#include <miopen/invoke_params.hpp>
 #include <miopen/invoker.hpp>
-#include <miopen/handle.hpp>
 #include <miopen/tensor_reorder_util.hpp>
-#include <miopen/tensor.hpp>
 #include <miopen/tensor_layout.hpp>
 
-#include "get_handle.hpp"
 #include "gtest_common.hpp"
 #include "random.hpp"
 #include "test_parameter_name_generator.hpp"

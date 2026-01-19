@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,32 +24,12 @@
  *
  *******************************************************************************/
 
-#include <array>
-#include <cctype>
-#include <cstdlib>
-#include <iomanip>
-#include <iostream>
-#include <iterator>
-#include <limits>
-#include <memory>
-#include <sstream>
-#include <string>
-#include <utility>
-#include <vector>
-#include <tuple>
-
-#include <miopen/convolution.hpp>
-#include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
 #include <miopen/tensor_ops.hpp>
 
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
-#include "tensor_holder.hpp"
 #include "tensor_util.hpp"
-#include "test.hpp"
 #include "test_parameter_name_generator.hpp"
-#include "verify.hpp"
 
 namespace {
 
@@ -398,7 +378,7 @@ inline auto GetFullTestCases()
 } // namespace
 
 template <class T>
-struct tensor_transform_driver : public testing::TestWithParam<TestCase>
+struct tensor_transform_test : public testing::TestWithParam<TestCase>
 {
     // Params for tensor layout transform functionality for low-precision computation
     tensor<T> srcSuper_pad;
@@ -528,9 +508,9 @@ public:
     }
 };
 
-using GPU_TensorTransform_I8   = tensor_transform_driver<int8_t>;
-using GPU_TensorTransform_FP16 = tensor_transform_driver<half_float::half>;
-using GPU_TensorTransform_FP32 = tensor_transform_driver<float>;
+using GPU_TensorTransform_I8   = tensor_transform_test<int8_t>;
+using GPU_TensorTransform_FP16 = tensor_transform_test<half_float::half>;
+using GPU_TensorTransform_FP32 = tensor_transform_test<float>;
 
 TEST_P(GPU_TensorTransform_I8, TestInt8) { this->Run(); }
 TEST_P(GPU_TensorTransform_FP16, TestFloat16) { this->Run(); }
