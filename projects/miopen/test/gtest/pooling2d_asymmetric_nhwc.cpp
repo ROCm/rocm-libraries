@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2019 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,14 +34,14 @@ MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_TEST_FLAGS_ARGS)
 
 namespace env = miopen::env;
 
-namespace pooling2d_asymmetric {
+namespace pooling2d_asymmetric_nhwc {
 
-class GPU_AsymPooling2d_FP32 : public testing::TestWithParam<std::vector<std::string>>
+class GPU_AsymPooling2d_NHWC_FP32 : public testing::TestWithParam<std::vector<std::string>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-class GPU_AsymPooling2d_FP16 : public testing::TestWithParam<std::vector<std::string>>
+class GPU_AsymPooling2d_NHWC_FP16 : public testing::TestWithParam<std::vector<std::string>>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
@@ -61,8 +61,8 @@ void Run2dDriver(miopenDataType_t prec)
     std::vector<std::string> params;
     switch(prec)
     {
-    case miopenFloat: params = GPU_AsymPooling2d_FP32::GetParam(); break;
-    case miopenHalf: params = GPU_AsymPooling2d_FP16::GetParam(); break;
+    case miopenFloat: params = GPU_AsymPooling2d_NHWC_FP32::GetParam(); break;
+    case miopenHalf: params = GPU_AsymPooling2d_NHWC_FP16::GetParam(); break;
     case miopenBFloat16:
     case miopenInt8:
     case miopenFloat8_fnuz:
@@ -73,9 +73,9 @@ void Run2dDriver(miopenDataType_t prec)
         FAIL() << "miopenBFloat16, miopenInt8, miopenInt32, miopenDouble, miopenFloat8_fnuz, "
                   "miopenBFloat8_fnuz "
                   "data type not supported by "
-                  "pooling2d_asymmetric test";
+                  "pooling2d_asymmetric_nhwc test";
 
-    default: params = GPU_AsymPooling2d_FP32::GetParam();
+    default: params = GPU_AsymPooling2d_NHWC_FP32::GetParam();
     }
 
     for(const auto& test_value : params)
@@ -95,7 +95,7 @@ void Run2dDriver(miopenDataType_t prec)
     }
 };
 
-bool IsTestSupportedForDevice(const miopen::Handle& handle) { return true; }
+bool IsTestSupportedForDevice() { return true; }
 
 std::vector<std::string> GetTestCases(const std::string& precision)
 {
@@ -103,21 +103,19 @@ std::vector<std::string> GetTestCases(const std::string& precision)
 
     const std::vector<std::string> test_cases = {
         // clang-format off
-    {"test_pooling2d " + precision + " --all --dataset 1 --limit 0 " + flag_arg}
+    {"test_pooling2d " + precision + " --all --dataset 1 --limit 0 --in_layout NHWC --out_layout NHWC " + flag_arg}
         // clang-format on
     };
 
     return test_cases;
 }
 
-} // namespace pooling2d_asymmetric
-using namespace pooling2d_asymmetric;
+} // namespace pooling2d_asymmetric_nhwc
+using namespace pooling2d_asymmetric_nhwc;
 
-/*
-TEST_P(GPU_AsymPooling2d_FP32, FloatTest_pooling2d_asymmetric)
+TEST_P(GPU_AsymPooling2d_NHWC_FP32, FloatTest_pooling2d_asymmetric_nhwc)
 {
-    const auto& handle = get_handle();
-    if(IsTestSupportedForDevice(handle))
+    if(IsTestSupportedForDevice())
     {
         Run2dDriver(miopenFloat);
     }
@@ -126,12 +124,10 @@ TEST_P(GPU_AsymPooling2d_FP32, FloatTest_pooling2d_asymmetric)
         GTEST_SKIP();
     }
 };
-*/
 
-TEST_P(GPU_AsymPooling2d_FP16, HalfTest_pooling2d_asymmetric)
+TEST_P(GPU_AsymPooling2d_NHWC_FP16, HalfTest_pooling2d_asymmetric_nhwc)
 {
-    const auto& handle = get_handle();
-    if(IsTestSupportedForDevice(handle))
+    if(IsTestSupportedForDevice())
     {
         Run2dDriver(miopenHalf);
     }
@@ -141,6 +137,10 @@ TEST_P(GPU_AsymPooling2d_FP16, HalfTest_pooling2d_asymmetric)
     }
 };
 
-// INSTANTIATE_TEST_SUITE_P(Full, GPU_AsymPooling2d_FP32, testing::Values(GetTestCases("--float")));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_AsymPooling2d_NHWC_FP32,
+                         testing::Values(GetTestCases("--float")));
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_AsymPooling2d_FP16, testing::Values(GetTestCases("--half")));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_AsymPooling2d_NHWC_FP16,
+                         testing::Values(GetTestCases("--half")));

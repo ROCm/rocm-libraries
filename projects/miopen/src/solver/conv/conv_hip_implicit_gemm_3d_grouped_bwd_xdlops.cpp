@@ -645,10 +645,6 @@ bool ConvHipImplicitGemm3DGroupBwdXdlops::IsApplicable(
         return false;
     if(!ck_utility::is_ck_whitelist(ctx.GetStream().GetDeviceName()))
         return false;
-    // CK support disabled on Navi3 and Navi4 due to missing instances for BWD
-    if(StartsWith(ctx.GetStream().GetDeviceName(), "gfx12") ||
-       StartsWith(ctx.GetStream().GetDeviceName(), "gfx11"))
-        return false;
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
