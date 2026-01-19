@@ -164,6 +164,12 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& context
                 kern_args.push_back({static_cast<half_float::half>(activ_beta)});
                 kern_args.push_back({static_cast<half_float::half>(activ_gamma)});
             }
+            else if(input_type == miopenBFloat16)
+            {
+                kern_args.push_back({static_cast<bfloat16>(activ_alpha)});
+                kern_args.push_back({static_cast<bfloat16>(activ_beta)});
+                kern_args.push_back({static_cast<bfloat16>(activ_gamma)});
+            }
             else
                 MIOPEN_THROW("Unsupported Precision");
             kern_args.push_back(bn_invoke.epsilon);
