@@ -624,8 +624,8 @@ TEST_CASE("Formocast: Bank conflict analysis", "[formocast]") {
         
         // Initialize with some test addresses (no conflicts in this pattern)
         for (int i = 0; i < 64; i++) {
-            vgprState[i]["vgprLocalReadAddrA"] = i * 4;
-            vgprState[i]["vgprLocalReadAddrB"] = i * 8;
+            vgprState[i]["vgprLocalReadAddrA"] = i * 32;
+            vgprState[i]["vgprLocalReadAddrB"] = i * 16;
         }
         
         auto result = simulator.analyzeBankConflictsFromVGPR(
@@ -633,8 +633,8 @@ TEST_CASE("Formocast: Bank conflict analysis", "[formocast]") {
         );
         
         // Check specific expected values (no conflicts = 1.0)
-        REQUIRE(result.ratioA == Approx(1.0).epsilon(0.01));
-        REQUIRE(result.ratioB == Approx(1.0).epsilon(0.01));
+        REQUIRE(result.ratioA == Approx(8.0).epsilon(0.01));
+        REQUIRE(result.ratioB == Approx(2.0).epsilon(0.01));
     }
 }
 
