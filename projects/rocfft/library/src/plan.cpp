@@ -924,10 +924,9 @@ void set_rootplan_params(const rocfft_plan plan, NodeMetaData& planData)
                              ? -1
                              : 1;
 
-    planData.inArrayType  = plan->desc.inArrayType;
-    planData.outArrayType = plan->desc.outArrayType;
-    planData.rootIsC2C    = (planData.inArrayType != rocfft_array_type_real)
-                         && (planData.outArrayType != rocfft_array_type_real);
+    planData.inArrayType       = plan->desc.inArrayType;
+    planData.outArrayType      = plan->desc.outArrayType;
+    planData.rootTransformType = plan->transformType;
 }
 
 void set_bluestein_strides(const rocfft_plan plan, NodeMetaData& planData)
@@ -4481,7 +4480,7 @@ void TreeNode::RecursiveInsertNode(TreeNode* pos, std::unique_ptr<TreeNode>& new
     }
 }
 
-TreeNode* TreeNode::GetPlanRoot()
+const TreeNode* TreeNode::GetPlanRoot() const
 {
     if(isRootNode())
         return this;
@@ -4526,11 +4525,41 @@ TreeNode* TreeNode::GetPartialPassAncestor() const
     return parent->GetPartialPassAncestor();
 }
 
-bool TreeNode::IsRootPlanC2CTransform()
+bool TreeNode::IsRootPlanC2CTransform() const
 {
     auto root = GetPlanRoot();
     return (root->inArrayType != rocfft_array_type_real)
            && (root->outArrayType != rocfft_array_type_real);
+}
+
+bool TreeNode::IsRootPlanR2CTransform() const
+{
+    auto root = GetPlanRoot();
+    return (root->inArrayType == rocfft_array_type_real)
+           && (root->outArrayType != rocfft_array_type_real);
+}
+
+bool TreeNode::IsRootPlanC2RTransform() const
+{
+    auto root = GetPlanRoot();
+    return (root->inArrayType != rocfft_array_type_real)
+           && (root->outArrayType == rocfft_array_type_real);
+}
+
+rocfft_transform_type TreeNode::GetRootPlanTransformType() const
+{
+    auto root = GetPlanRoot();
+
+    if(IsRootPlanC2CTransform() && root->direction == -1)
+        return rocfft_transform_type_complex_forward;
+    else if(IsRootPlanC2CTransform() && root->direction == 1)
+        return rocfft_transform_type_complex_inverse;
+    else if(IsRootPlanR2CTransform())
+        return rocfft_transform_type_real_forward;
+    else if(IsRootPlanC2RTransform())
+        return rocfft_transform_type_real_inverse;
+    else
+        throw std::runtime_error("Unknown root plan transform type");
 }
 
 // remove a leaf node from the plan completely - plan optimization

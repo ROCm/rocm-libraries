@@ -68,11 +68,11 @@ NodeMetaData::NodeMetaData(TreeNode* refNode)
 {
     if(refNode != nullptr)
     {
-        precision  = refNode->precision;
-        batch      = refNode->batch;
-        direction  = refNode->direction;
-        rootIsC2C  = refNode->IsRootPlanC2CTransform();
-        deviceProp = refNode->deviceProp;
+        precision         = refNode->precision;
+        batch             = refNode->batch;
+        direction         = refNode->direction;
+        rootTransformType = refNode->GetRootPlanTransformType();
+        deviceProp        = refNode->deviceProp;
     }
 }
 

@@ -184,13 +184,13 @@ struct NodeMetaData
     size_t                  iDist = 0, oDist = 0;
     size_t                  iDistBlue = 0, oDistBlue = 0;
     size_t                  iOffset = 0, oOffset = 0;
-    int                     direction    = -1;
-    rocfft_result_placement placement    = rocfft_placement_inplace;
-    rocfft_precision        precision    = rocfft_precision_single;
-    rocfft_array_type       inArrayType  = rocfft_array_type_unset;
-    rocfft_array_type       outArrayType = rocfft_array_type_unset;
-    hipDeviceProp_t         deviceProp   = {};
-    bool                    rootIsC2C;
+    int                     direction         = -1;
+    rocfft_result_placement placement         = rocfft_placement_inplace;
+    rocfft_precision        precision         = rocfft_precision_single;
+    rocfft_transform_type   rootTransformType = rocfft_transform_type_complex_forward;
+    rocfft_array_type       inArrayType       = rocfft_array_type_unset;
+    rocfft_array_type       outArrayType      = rocfft_array_type_unset;
+    hipDeviceProp_t         deviceProp        = {};
 
     explicit NodeMetaData(TreeNode* refNode);
 };
@@ -543,7 +543,7 @@ public:
     void RecursiveInsertNode(TreeNode* pos, std::unique_ptr<TreeNode>& newNode);
 
     // Get root node of plan
-    TreeNode* GetPlanRoot();
+    const TreeNode* GetPlanRoot() const;
     // If 'this' is a leaf, return it.  Otherwise, return the first
     // leaf node under 'this' in the execution sequence.
     TreeNode* GetFirstLeaf();
@@ -553,7 +553,14 @@ public:
     // Return ancestor node of 'this' that is real-even (1D/2D/3D), or
     // nullptr if there is no such ancestor
     TreeNode* GetRealEvenAncestor();
-    bool      IsRootPlanC2CTransform();
+
+    // Return true if the root plan is C2C, R2C, or C2R
+    bool IsRootPlanC2CTransform() const;
+    bool IsRootPlanR2CTransform() const;
+    bool IsRootPlanC2RTransform() const;
+
+    // Return the transform type of the root plan
+    rocfft_transform_type GetRootPlanTransformType() const;
 
     // Return ancestor node of 'this' that is partial-pass, or
     // nullptr if there is no such ancestor
@@ -618,6 +625,7 @@ public:
                        pp_parent_node->length[1],
                        pp_parent_node->length[2],
                        precision,
+                       GetRootPlanTransformType(),
                        pp_parent_node->scheme);
     }
 

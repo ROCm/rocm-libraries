@@ -899,7 +899,8 @@ ComputeScheme NodeFactory::Decide3DScheme(const function_pool& pool, NodeMetaDat
                {rocfft_precision_double, {84, 108, 112, 168}}};
         if(childScheme == CS_2D_RC
            && length_excepted(exceptions, nodeData.precision, nodeData.length[1])
-           && nodeData.rootIsC2C)
+           && (nodeData.rootTransformType == rocfft_transform_type_complex_forward
+               || nodeData.rootTransformType == rocfft_transform_type_complex_inverse))
         {
             return CS_3D_TRTRTR;
         }
@@ -1065,6 +1066,7 @@ bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData
                    nodeData.length[1],
                    nodeData.length[2],
                    nodeData.precision,
+                   nodeData.rootTransformType,
                    CS_3D_PP)))
         return false;
 

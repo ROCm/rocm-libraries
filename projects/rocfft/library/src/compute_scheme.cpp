@@ -60,6 +60,7 @@ static const std::map<ComputeScheme, const char*>& ComputeSchemetoStringMap()
            {ENUMSTR(CS_KERNEL_TRANSPOSE_CMPLX_TO_R)},
            {ENUMSTR(CS_REAL_2D_EVEN)},
            {ENUMSTR(CS_REAL_3D_EVEN)},
+           {ENUMSTR(CS_REAL_3D_PP)},
 
            {ENUMSTR(CS_BLUESTEIN)},
            {ENUMSTR(CS_KERNEL_CHIRP)},
