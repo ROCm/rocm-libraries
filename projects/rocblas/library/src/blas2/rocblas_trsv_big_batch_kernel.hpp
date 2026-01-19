@@ -165,8 +165,10 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
 
 #if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
-    {
+#else
+    if(batch < batch_count)
 #endif
+    {
 
         // Load pointers for this specific batch
         auto* __restrict__ A = load_ptr_batch(dA, batch, offset_A, stride_A);
@@ -220,7 +222,7 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
                                || (TRANS && !LOWER && block_row < INV_AFTER)
                                || (TRANS && row_is_remainder);
 #else
-    bool cache_transpose = TRANS; // works for ALL without inversion method
+        bool cache_transpose = TRANS; // works for ALL without inversion method
 #endif
         if(!row_is_remainder)
         {
@@ -416,16 +418,16 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
                     x[(block_row * DIM_X + tid) * incx] = val;
         }
 #else
-    // Solve the diagonal block
-    if(backwards_sub)
-        rocblas_trsv_block_solve_upper_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, DIM_X, val);
-    else
-        rocblas_trsv_block_solve_lower_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, DIM_X, val);
+        // Solve the diagonal block
+        if(backwards_sub)
+            rocblas_trsv_block_solve_upper_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, DIM_X, val);
+        else
+            rocblas_trsv_block_solve_lower_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, DIM_X, val);
 
-    // Store solved value into x
-    if(!row_is_remainder || tx < remainder)
-        if(ty == 0)
-            x[(block_row * DIM_X + tid) * incx] = val;
+        // Store solved value into x
+        if(!row_is_remainder || tx < remainder)
+            if(ty == 0)
+                x[(block_row * DIM_X + tid) * incx] = val;
 #endif
 
         // ensure solved x values are saved
@@ -440,9 +442,7 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
 
         __threadfence();
 
-#if DEVICE_GRID_YZ_16BIT
-    }
-#endif
+    } // DEVICE_GRID_YZ_16BIT loop or if
 }
 
 /**
