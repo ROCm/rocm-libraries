@@ -50,6 +50,11 @@ public:
         }
     }
 
+    explicit EngineDetailsWrapper(const hipdnn_data_sdk::data_objects::EngineDetails* engineDetails)
+        : _shallowEngineDetails(engineDetails)
+    {
+    }
+
     const hipdnn_data_sdk::data_objects::EngineDetails& getEngineDetails() const override
     {
         throwIfNotValid();
