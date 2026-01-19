@@ -62,11 +62,16 @@ const auto& GetTestParams()
 {
     static const auto params = [] {
 // If MIOpen is built without CK these tests will fail, skip them to avoid failing
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL && !defined(_WIN32)
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
         Gpu supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
 
         if(datatype == miopenBFloat16)
             supportedDevices = Gpu::gfx94X | Gpu::gfx950;
+
+        if constexpr(datatype != miopenFloat)
+        {
+            supportedDevices = supportedDevices | Gpu::gfx110X | Gpu::gfx115X | Gpu::gfx120X;
+        }
 #else
         Gpu supportedDevices = Gpu::None;
 #endif
@@ -75,6 +80,9 @@ const auto& GetTestParams()
 
         // Increased tolerance because of tolerance failures
         p.SetTolerance(supportedDevices, miopenFloat, 30.0f);
+
+        // Tolerance bump for FP16 on gfx110X and gfx115X due to observed precision differences.
+        p.SetTolerance(Gpu::gfx110X | Gpu::gfx115X, miopenHalf, 4.0f);
 
         return p;
     }();
