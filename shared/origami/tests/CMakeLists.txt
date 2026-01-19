@@ -64,7 +64,7 @@ if(ORIGAMI_ENABLE_PYTHON)
         COMPONENT tests
     )
 else()
-    # C++ tests only
+    # Write CTestTestfile.cmake manually when only C++ tests are requested
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake"
         "# CTestTestfile for installed Origami tests (C++ only)\n"
         "add_test(origami-tests \"../origami-tests\")\n"
