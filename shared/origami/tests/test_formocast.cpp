@@ -373,6 +373,17 @@ TEST_CASE("Formocast: GSU overhead calculation", "[formocast]") {
         
         REQUIRE(gsu_overhead == 0);
     }
+    
+    SECTION("GSU overhead with small M and N values") {
+        // Test with very small matrix dimensions M=2, N=4
+        double gsu_overhead = simulator.calculateGlobalSplitUOverhead(
+            2, 4, 1024, 1, 2, 2, // M=2, N=4, K=1024, GlobalSplitU=2, MultipleBuffer
+            problem, hw, 304, 38, 32, 32, 256, 1.0, 1.0
+        );
+        
+        // With small M and N, the overhead should be very small
+        REQUIRE(gsu_overhead == Approx(0.0000151).epsilon(0.01));
+    }
 }
 
 TEST_CASE("Formocast: LSU overhead calculation", "[formocast]") {
