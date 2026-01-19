@@ -6,6 +6,7 @@
 #include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/PluginDataTypeHelpers.hpp>
@@ -110,8 +111,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIdsImpl(int64_t* engineIds,
         }
         throwIfNull(numEngines);
 
-        // For now, we will just return a single engine ID.
-        auto allEngineIds = std::vector<int64_t>({1});
+        auto allEngineIds = std::vector<int64_t>({hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID});
         if(allEngineIds.size() > std::numeric_limits<uint32_t>::max())
         {
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
