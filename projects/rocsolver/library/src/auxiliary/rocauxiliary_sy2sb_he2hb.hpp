@@ -101,16 +101,17 @@ ROCSOLVER_KERNEL void sy2sb_updateAV_kernel(
 
 //------------------------------------------------------------------------------
 template <bool BATCHED, typename T>
-void rocsolver_sy2sb_he2hb_getMemorySize(const rocblas_int n,
-                                         const rocblas_int nb,
-                                         const rocblas_int k,
-                                         const rocblas_int batch_count,
-                                         size_t* size_scalars,
-                                         size_t* size_Acpy,
-                                         size_t* size_work,
-                                         size_t* size_workT,
-                                         size_t* size_workZ,
-                                         size_t* size_workArr)
+void rocsolver_sy2sb_he2hb_getMemorySize(
+    const rocblas_int n,
+    const rocblas_int nb,
+    const rocblas_int k,
+    const rocblas_int batch_count,
+    size_t* size_scalars,
+    size_t* size_Acpy,
+    size_t* size_work,
+    size_t* size_workT,
+    size_t* size_workZ,
+    size_t* size_workArr)
 {
     *size_scalars = 0;
     *size_Acpy = 0;
@@ -146,15 +147,16 @@ void rocsolver_sy2sb_he2hb_getMemorySize(const rocblas_int n,
 
 //------------------------------------------------------------------------------
 template <typename T, typename S>
-rocblas_status rocsolver_sy2sb_he2hb_argCheck(rocblas_handle handle,
-                                              const rocblas_int n,
-                                              const rocblas_int nb,
-                                              const rocblas_int k,
-                                              T A,
-                                              const rocblas_int lda,
-                                              S V,
-                                              S W,
-                                              const rocblas_int batch_count = 1)
+rocblas_status rocsolver_sy2sb_he2hb_argCheck(
+    rocblas_handle handle,
+    const rocblas_int n,
+    const rocblas_int nb,
+    const rocblas_int k,
+    T A,
+    const rocblas_int lda,
+    S V,
+    S W,
+    const rocblas_int batch_count = 1)
 {
     // order is important for unit tests:
 
@@ -182,27 +184,28 @@ rocblas_status rocsolver_sy2sb_he2hb_argCheck(rocblas_handle handle,
 /// Outputs Householder vectors in V.
 /// W is workspace.
 template <bool BATCHED, bool STRIDED, typename T, typename U>
-rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
-                                              const rocblas_int n,
-                                              const rocblas_int nb,
-                                              const rocblas_int k,
-                                              U A,
-                                              const rocblas_int shiftA,
-                                              const rocblas_int lda,
-                                              const rocblas_stride strideA,
-                                              T* V,
-                                              const rocblas_int ldv,
-                                              const rocblas_stride strideV,
-                                              T* W,
-                                              const rocblas_int ldw,
-                                              const rocblas_stride strideW,
-                                              const rocblas_int batch_count,
-                                              T* scalars,
-                                              T* Acpy,
-                                              T* work,
-                                              T* workT,
-                                              T* workZ,
-                                              T** workArr)
+rocblas_status rocsolver_sy2sb_he2hb_template(
+    rocblas_handle handle,
+    const rocblas_int n,
+    const rocblas_int nb,
+    const rocblas_int k,
+    U A,
+    const rocblas_int shiftA,
+    const rocblas_int lda,
+    const rocblas_stride strideA,
+    T* V,
+    const rocblas_int ldv,
+    const rocblas_stride strideV,
+    T* W,
+    const rocblas_int ldw,
+    const rocblas_stride strideW,
+    const rocblas_int batch_count,
+    T* scalars,
+    T* Acpy,
+    T* work,
+    T* workT,
+    T* workZ,
+    T** workArr)
 {
     ROCSOLVER_ENTER("sy2sb_he2hb", "n:", n, "nb", nb, "k:", k, "shiftA:", shiftA, "lda:", lda,
                     "bc:", batch_count);
@@ -270,7 +273,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
 
         // Form corresponding matrix T
         rocsolver_larft_template<T>(
-            handle, rocblas_forward_direction, rocblas_column_wise, qm, qn,
+            handle, rocblas_forward_direction, rocblas_column_wise,
+            qm, qn,
             A, shiftA + idx2D(i + nb, i, lda), lda, strideA,
             tau, strideP, workT, ldt, strideT, batch_count, scalars, work, workArr);
 
@@ -289,14 +293,14 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
         ///     A := Q^H A Q
         ///        = (I - VTV^H)^H A (I - VTV^H)
         ///        = (I - V T^H V^H) A (I - VTV^H)
-        ///        = (A - V T^H V^H A) (I - VTV^H)    
+        ///        = (A - V T^H V^H A) (I - VTV^H)
         ///        = A - AVT V^H - V T^H V^H A + V T^H V^H AVT V^H
         ///        = A - (AVT) V^H - V (AVT)^H + 0.5 V (T^H V^H AVT V^H) + 0.5 (V T^H V^H AVT) V^H *
         ///        = A - (AVT - 0.5 V T^H V^H AVT) V^H - V (AVT - 0.5 V T^H V^H AVT)^H *
         ///        = A - ZV^H - VZ^H    her2k
         /// where  Z  = AVT - 0.5 V T^H V^H AVT,
         ///        W  = V T                     gemm; LAPACK would do trmm? Like trtzmm.
-        ///        Z0 = A W = A V T             gemm (requires A symmetrized); LAPACK would do hemm. 
+        ///        Z0 = A W = A V T             gemm (requires A symmetrized); LAPACK would do hemm.
         ///        T2 = W^H Z0 = T^H V^H A V T  gemm; LAPACK would do trmm + gemm?
         ///        Z  = Z0 - 0.5 V T2 = above   gemm; LAPACK would do trmm + gemm?
         /// * These steps rely on A == A^H.
@@ -305,7 +309,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
         // Update W = V T
         // sizes (qm x qn) = (qm x qn) (qn x qn), qn is this block size (jb); could be trmm right?
         rocsolver_gemm(
-            handle, rocblas_operation_none, rocblas_operation_none, qm, qn, qn,
+            handle, rocblas_operation_none, rocblas_operation_none,
+            qm, qn, qn,
             &one,  V, idx2D(i, i, ldv), ldv, strideV,
                    workT, 0, ldt, strideT,
             &zero, W, idx2D(i, i, ldw), ldw, strideW, batch_count, workArr);
@@ -315,7 +320,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
         // sizes (qm x qn) = (qm x qm) (qm x qn); could be hemm
         /// TODO: This assumes A is symmetrized. Otherwise NEED hemm!
         rocsolver_gemm(
-            handle, rocblas_operation_none, rocblas_operation_none, qm, qn, qm,
+            handle, rocblas_operation_none, rocblas_operation_none,
+            qm, qn, qm,
             &one,  Acpy, 0, ldacpy, strideAcpy,
                    W, idx2D(i, i, ldw), ldw, strideW,
             &zero, workZ, 0, ldz, strideZ, batch_count, workArr);
@@ -323,14 +329,16 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
         // sizes (qn x qn) = (qm x qn)^H (qm x qn); block inner product
         // reusing T workspace.
         rocsolver_gemm(
-            handle, rocblas_operation_conjugate_transpose, rocblas_operation_none, qn, qn, qm,
+            handle, rocblas_operation_conjugate_transpose, rocblas_operation_none,
+            qn, qn, qm,
             &one,  W, idx2D(i, i, ldw), ldw, strideW,
                    workZ, 0, ldz, strideZ,
             &zero, workT, 0, ldt, strideT, batch_count, workArr);
         // Z = Z0 - 0.5 V T2 = Z - 0.5 V (W^H Z) = (A W) - 0.5 V (W^H A W)
         //   = A V T - 0.5 V T^H V^H A V T
         rocsolver_gemm(
-            handle, rocblas_operation_none, rocblas_operation_none, qm, qn, qn,
+            handle, rocblas_operation_none, rocblas_operation_none,
+            qm, qn, qn,
             &neghalf, V, idx2D(i, i, ldv), ldv, strideV,
                       workT, 0, ldt, strideT,
             &one,     workZ, 0, ldz, strideZ, batch_count, workArr);
@@ -348,18 +356,21 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
 
             /// if (j > i) {
                 // update current panel
+                // Left looking: apply updates from previous sub-panels.
                 // A = A - V Z^H
                 /// TODO: qnn instead of nb?
                 rocsolver_gemm(
-                    handle, rocblas_operation_none, rocblas_operation_conjugate_transpose, qmm + nb, nb, inc,
+                    handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
+                    qmm + nb, nb, inc,
                     &negone, V, idx2D(i+inc-nb, i, ldv), ldv, strideV,
-                            workZ, inc-nb, ldz, strideZ,
+                             workZ, inc-nb, ldz, strideZ,
                     &one,    A, shiftA + idx2D(j, j, lda), lda, strideA, batch_count, workArr);
                 // A = A - Z V^H
                 rocsolver_gemm(
-                    handle, rocblas_operation_none, rocblas_operation_conjugate_transpose, qmm + nb, nb, inc,
+                    handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
+                    qmm + nb, nb, inc,
                     &negone, workZ, inc-nb, ldz, strideZ,
-                            V, idx2D(i+inc-nb, i, ldv), ldv, strideV,
+                             V, idx2D(i+inc-nb, i, ldv), ldv, strideV,
                     &one,    A, shiftA + idx2D(j, j, lda), lda, strideA, batch_count, workArr);
             /// } // end if
 
@@ -369,9 +380,12 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
                 A, shiftA + idx2D(j + nb, j, lda), lda, strideA,
                 tau, strideP, batch_count, scalars, work, workT, workZ, workArr);
 
-            // Form corresponding matrix T
+            // Form corresponding matrix Tj = larft( Vj, tau_j )
+            /// How is the whole tau being saved outside this function?
+            /// Don't we need that for the back transform (unmtr / unmqr)?
             rocsolver_larft_template<T>(
-                handle, rocblas_forward_direction, rocblas_column_wise, qmm, qnn,
+                handle, rocblas_forward_direction, rocblas_column_wise,
+                qmm, qnn,
                 A, shiftA + idx2D(j + nb, j, lda), lda, strideA,
                 tau, strideP, workT, ldt, strideT, batch_count, scalars, work, workArr);
 
@@ -386,23 +400,26 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
 
             // update W
             // TODO qmm?
-            // W = V T
+            // Wj = Vj Tj
             rocsolver_gemm(
-                handle, rocblas_operation_none, rocblas_operation_none, qm, qnn, qnn,
+                handle, rocblas_operation_none, rocblas_operation_none,
+                qm, qnn, qnn,
                 &one,  V, idx2D(i, j, ldv), ldv, strideV,
                        workT, 0, ldt, strideT,
                 &zero, W, idx2D(i, j, ldw), ldw, strideW, batch_count, workArr);
-            // Z = V^H W
+            // DZij = Vi^H Wj
             // TODO qmm?
             rocsolver_gemm(
-                handle, rocblas_operation_conjugate_transpose, rocblas_operation_none, inc, qnn, qm,
+                handle, rocblas_operation_conjugate_transpose, rocblas_operation_none,
+                inc, qnn, qm,
                 &one,  V, idx2D(i, i, ldv), ldv, strideV,
                        W, idx2D(i, j, ldw), ldw, strideW,
                 &zero, workZ, 0, ldz, strideZ, batch_count, workArr);
-            // W = -W Z   /// hmm... different parts of W?
+            // Wj = Wj - Wi DZij
             /// TODO qmm?
             rocsolver_gemm(
-                handle, rocblas_operation_none, rocblas_operation_none, qm, qnn, inc,
+                handle, rocblas_operation_none, rocblas_operation_none,
+                qm, qnn, inc,
                 &negone, W, idx2D(i, i, ldv), ldw, strideW,
                          workZ, 0, ldz, strideZ,
                 &one,    W, idx2D(i, j, ldw), ldw, strideW, batch_count, workArr);
@@ -411,22 +428,26 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
             // Z0 = A0 W
             /// TODO hemm?
             /// TODO qmm x ... x qmm?
+            /// This is doing A * Wi, when need only A * Wj.
             rocsolver_gemm(
-                handle, rocblas_operation_none, rocblas_operation_none, qm, inc+qnn, qm,
+                handle, rocblas_operation_none, rocblas_operation_none,
+                qm, inc+qnn, qm,
                 &one,  Acpy, 0, ldacpy, strideAcpy,
                        W, idx2D(i, i, ldw), ldw, strideW,
                 &zero, workZ, 0, ldz, strideZ, batch_count, workArr);
-            // wT = W^H Z0
+            // DT = W^H Z0
             /// TODO qmm?
             rocsolver_gemm(
-                handle, rocblas_operation_conjugate_transpose, rocblas_operation_none, inc+qnn, inc+qnn, qm,
+                handle, rocblas_operation_conjugate_transpose, rocblas_operation_none,
+                inc+qnn, inc+qnn, qm,
                 &one,  W, idx2D(i, i, ldw), ldw, strideW,
                        workZ, 0, ldz, strideZ,
                 &zero, workT, 0, ldt, strideT, batch_count, workArr);
-            // Z = Z0 - 0.5 V wT = Z0 - 0.5 V (W^H Z) = AVT - 0.5 V T^H V^H AVT
+            // Z = Z0 - 0.5 V DT = Z0 - 0.5 V (W^H Z) = AVT - 0.5 V T^H V^H AVT
             /// TODO qmm?
             rocsolver_gemm(
-                handle, rocblas_operation_none, rocblas_operation_none, qm, inc+qnn, inc+qnn,
+                handle, rocblas_operation_none, rocblas_operation_none,
+                qm, inc+qnn, inc+qnn,
                 &neghalf, V, idx2D(i, i, ldv), ldv, strideV,
                           workT, 0, ldt, strideT,
                 &one,     workZ, 0, ldz, strideZ, batch_count, workArr);
@@ -439,13 +460,15 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
         qmm = nk - j;
         // A = A - V Z^H
         rocsolver_gemm(
-            handle, rocblas_operation_none, rocblas_operation_conjugate_transpose, qmm + nb, qmm + nb, kk,
+            handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
+            qmm + nb, qmm + nb, kk,
             &negone, V, idx2D(i+inc-nb, i, ldv), ldv, strideV,
                      workZ, inc-nb, ldz, strideZ,
             &one,    A, shiftA + idx2D(j, j, lda), lda, strideA, batch_count, workArr);
         // A = A - Z V^H
         rocsolver_gemm(
-            handle, rocblas_operation_none, rocblas_operation_conjugate_transpose, qmm + nb, qmm + nb, kk,
+            handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
+            qmm + nb, qmm + nb, kk,
             &negone, workZ, inc-nb, ldz, strideZ,
                      V, idx2D(i+inc-nb, i, ldv), ldv, strideV,
             &one,    A, shiftA + idx2D(j, j, lda), lda, strideA, batch_count, workArr);
