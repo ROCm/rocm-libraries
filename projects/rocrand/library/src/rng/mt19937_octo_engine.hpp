@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -168,19 +168,31 @@ struct mt19937_octo_engine
     /// Returns \p val from thread <tt>tid mod 8</tt>.
     static __forceinline__ __device__ unsigned int shuffle(unsigned int val, unsigned int tid)
     {
+#if defined(__HIP_PLATFORM_AMD__)
         return __shfl(val, tid, 8);
+#elif defined(__HIP_PLATFORM_NVCC__)
+        return __shfl_sync(-1 /*mask 0xffffffff*/, val, tid, 8);
+#endif
     }
 
     /// For thread i, returns \p val from thread <tt>(i + 1) mod 8</tt>
     static __forceinline__ __device__ unsigned int shuffle_down(unsigned int val)
     {
+#if defined(__HIP_PLATFORM_AMD__)
         return __shfl_down(val, 1, 8);
+#elif defined(__HIP_PLATFORM_NVCC__)
+        return __shfl_down_sync(-1 /*mask 0xffffffff*/, val, 1, 8);
+#endif
     }
 
     /// For thread i, returns \p val from thread <tt>(i - 1) mod 8</tt>
     static __forceinline__ __device__ unsigned int shuffle_up(unsigned int val)
     {
+#if defined(__HIP_PLATFORM_AMD__)
         return __shfl_up(val, 1, 8);
+#elif defined(__HIP_PLATFORM_NVCC__)
+        return __shfl_up_sync(-1 /*mask 0xffffffff*/, val, 1, 8);
+#endif
     }
     /// Calculates value of index \p i using values <tt>i</tt>, <tt>(i + 1) % n</tt>, and <tt>(i + m) % n</tt>.
     static __forceinline__ __device__ __host__
