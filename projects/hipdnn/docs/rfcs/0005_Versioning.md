@@ -72,6 +72,9 @@ configure_file(
     @ONLY
 )
 ```
+
+The `CMakeLists.txt` file is then responsible for parsing the json file for the version number, adding the git commit hash as the tweak version, and configuring the version header.
+
 __include/\<component\>\_version.h.in__
 ```c
 #pragma once
@@ -80,10 +83,13 @@ __include/\<component\>\_version.h.in__
 #define <COMPONENT>_VERSION_PATCH @PROJECT_VERSION_PATCH@
 #define <COMPONENT>_VERSION_STRING "@PROJECT_VERSION@"
 ```
+
+Note: The `configure_file` cmake function will replace the names between the at signs with matching cmake variables, and the modified file will be installed with the component.
+
 ### 4.2 Version bumps
 Our versioning follows the guidelines of [semantic versioning](https://semver.org/), unless otherwise specified.
 #### Major version
-Updates must coincide with a rocm major release. At this point, API breaking changes may be made, and deprecated features may be removed.
+In major version updates, API breaking changes may be made, and deprecated features may be removed. Updates must coincide with a rocm major release.
 
 Process for this TBD
 #### Minor version
@@ -100,16 +106,24 @@ Version bumps should be handled automatically by the same process and/or automat
 #### Tweak version
 The patch version is determined by the short commit hash of rocm-libraries, and updates automatically as a result.
 
-### 4.3 Requirements
+### 4.3 High-level compatibility summary
 
-TBD
+#### 4.3.1 Schema
+
+**Scope**: Serialized flatbuffer schemas, and corresponding json serializations
+
+**Compatibility requirements**: Any component must be able to consume schemas within a minor version
+
+#### 4.3.2 Header-only api components
+
+
 
 ### 4.4 Public API
 Excluding the exception below, everything included in headers available to the user are part of the public API. Some of the library components have been split into multiple APIs with a user-facing header.
 
 If something must be included in a user-facing header, but shouldn't be part of the public API, it should be put inside a `detail` namespace. Anything in a detail namespace should not be used outside of the library internals, as it can be changed or removed at any time.
 ### 4.5 Versioned components
-In the proposed design, the following table lists the components of hipDNN, and the other internal components that they depend on
+In the proposed design, the following table lists the components of hipDNN, and the other internal components that they depend on (omitting the hipdnn_ at the start of each)
 
 | Target | Requirements |
 | -- | -- |
@@ -125,8 +139,12 @@ In the proposed design, the following table lists the components of hipDNN, and 
 [^1]: Schema refers to both serialized formats of flatbuffers and json.
 [^2]: The heuristic API hasn't yet been implemented
 [^3]: Static schema version is determined by the data_sdk compiled with, dynamic schema version comes from the schema version used for a serialization being consumed. Described in more detail below
+
 ### 4.6 Individual component details
 #### 4.6.1 Schema
+
+**Scope**: Serialized flatbuffer schemas, and corresponding json serializations
+
 The schema covers both the flatbuffer serialization and the json serialization. These two serializations should change in lockstep as new fields, enums and structs are added. The version should be encoded directly within the schema for every root_type. Currently that's `Graph`, `EngineConfig` and `EngineDetails`.
 
 Schemas should be backwards and forward compatible within a major release. To this aim, the following changes can be made within the same major version:
@@ -149,6 +167,8 @@ Json serialization changes should be made in concert with flatbuffer schema file
 > Consideration: Should schema files only have a major version?
 
 #### 4.6.2 Backend
+**Scope**:  hipdnn_backend, hipdnn_backend_private
+
 The backend has two components: hipdnn_backend (the API) and hipdnn_backend_private (the implementation). Both of these components need independent versions. While the hipdnn_backend will typically be consumed in a statically at build time, hipdnn_backend_private will exclusively be used dynamically at runtime.
 
 The hipdnn_backend_private should have functions to return both its internal version, as well as the version of the API it was built with.
@@ -156,6 +176,8 @@ The hipdnn_backend_private should have functions to return both its internal ver
 The backend must be entirely agnostic to the schema version (Note, this is not the current behaviour).
 
 #### 4.6.3 Frontend
+**Scope**: hipdnn_frontend
+
 The frontend must be forward and backward compatible with any hipdnn_backend version within a major release. This must be handled statically with hipdnn_backend, and dynamically with hipdnn_backend_private.
 
 When new functionality is added dependent on a backend feature that was added since the last major release, there must be static and dynamic guards placed to ensure that it is supported by both the backend api and the backend library. The `IHipdnnBackend` interface from `frontend/include/HipdnnBackendInterface.hpp` is a good location to place these guards when appropriate.
@@ -168,6 +190,29 @@ When a function is called that is not supported by one of the backends, the fron
 Plugins must have a function that reports the plugin API versions they were compiled with.
 
 Plugins are responsible for failing gracefully on unsupported schemas. Typically this will involve logging a warning, and registering the plugin as not applicable.
+
+#### 4.6.5 Plugin sdk
+ Currently the `hipdnn_plugin_sdk` is a single component. This document proposes splitting it into 4 different components each with its own version
+
+ | target | headers |
+ | -- | -- |
+ | plugin_sdk_api | PluginApi.h |
+ | plugin_sdk_engine_api.h | EnginePluginApi.h |
+ | plugin_sdk_heuristics_api | HeuristcsPluginApi.h [^5] |
+ | plugin_sdk | All remaining headers in the hipdnn_plugin_sdk folder |
+ [^5]: File does not yet exist
+
+### 4.7 Compatibility summary
+
+#### Schema &#8594; All consuming components
+	- **Forwards compatible** within major versions
+	- **Backwards compatibile** within major versions
+#### Backend &#8594; Frontend
+	- **Forwards compatible** within major versions
+	- **Backwards compatible** within major versions
+#### All components &#8594; All consuming components
+	- **Forwards compatible** within major versions
+
 ## 5. Key Design Decisions
 
 ### 5.1 Version syncing between CMake and C++
@@ -211,7 +256,7 @@ project(<component> VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH})
 **Risk**: The flatbuffer schema might be updated without also updating the json serialization
 **Mitigation**
 - Create tests creating serializations for all flatbuffer Unions and ensure that json can properly serialize them as well
-- This test exists already for `NodeAttributes` 
+- This test exists already for `NodeAttributes`
 ### 6.2 Backwards/Forwards compatibility breaking
 **Risk** Backwards or Forwards compatibility could become broken accidentally for some time before it's noticed. While this can often be remedied, it could lead to versions of library components that are not forward and backward compatible with each other.
 **Mitigation**
@@ -226,6 +271,7 @@ project(<component> VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH})
 	- If a version is required at the point of release, set it to 1.0.0
 - Ensure flatbuffer and json deserializations are robust to new parameters, unions, enums, etc...
 	- This impacts plugins, and the data_sdk
+- Add note to our documentation that the `detail` namespace is not part of the public API
 ### 7.2 Phase 2 (Add necessary versioning)
 - Add versions to json and flatbuffer serializations
 - Add version.json files
