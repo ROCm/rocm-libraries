@@ -347,15 +347,7 @@ staggerU_t select_staggerU(const problem_t& problem,
 
   // -------------------
   // General Cases
-  // -------------------  
-  // Early Exit: If K is substantial, StaggerU effect is negligible
-  if(numMT_K > 36)
-    return staggerU_t{0, 0, 0};
-  
-  // // Early Exit: If there is not a lot of L2 tiles, StaggerU effect is negligible
-  // if(batch == 1 && split_factor == 1 && numMTs < numCUsPerXCD)
-  //   return staggerU_t{0, 0, 0};
-
+  // -------------------
   // In a typicall GEMM, CUs compete to access the first K-slice.
   // While the first K-slice is in MALL, CUs on the same XCD compete to access the K-slice in L2.
   // Thus, there are two tiers of contention:
@@ -369,15 +361,43 @@ staggerU_t select_staggerU(const problem_t& problem,
   // in for the last XCD L2 tile).
   // In those cases, the performance is affected by inefficient use of L2 (for the last XCD) and the L2 contention is masked,
   // but the MALL contention is not masked.
-  
-  // Find the dimension with the least number of MTs
-  size_t min_MTs = std::min(numMT_M, numMT_N);
 
+  // Early Exit: splitK and Batch are not supported yet
+  if(split_factor != 1 || batch != 1)
+    return staggerU_t{0, 0, 0};
 
+  // Early Exit: If K is substantial, StaggerU effect is negligible
+  if(numMT_K > 36)
+    return staggerU_t{0, 0, 0}
   
-  size_t out_staggerUMapping     = defaultStaggerUMapping;
-  size_t out_staggerU            = defaultStaggerU;
-  size_t out_staggerUStrideShift = defaultStaggerUStrideShift;
+  // Find Mall Tile (the tile that is accessed by all CUs in one time step)
+  size_t Mall_N = numMT_N;
+  size_t Mall_M = numMT_M;
+  size_t L2_N   = std::min(wgm, numMT_N);
+  size_t L2_M   = std::min(numMT_M / wgm, numMT_M);
+
+  size_t numWGsPerL2 = skGrid > numMTs ? math::safe_ceil_div(skGrid, numXCD) : math::safe_ceil_div(numMTs, numXCD);
+  numWGsPerL2 = std::min(numWGsPerL2, numCUsPerXCD);
+  size_t numWGsPerMall = numWGsPerL2 * numXCD;
+  
+  // Find the dimension with the least number of MTs -- This is the dimension that will be staggered
+  if(L2_M > L2_N)
+  {
+    out_staggerUMapping = 0;
+    staggerTile = L2_M;
+  }
+  else
+  {
+    out_staggerUMapping = 1;
+    staggerTile = L2_N;
+  }
+  
+  // Compute smallest power of 2 larger than or equal to staggerTile
+  size_t powerOf2 = 1;
+  while(powerOf2 < staggerTile)
+    powerOf2 <<= 1;
+  out_staggerU = std::min(powerOf2, size_t(64)); // Cap at 64
+  out_staggerUStrideShift = 1;
 
   return staggerU_t{out_staggerUMapping, out_staggerU, out_staggerUStrideShift};
 }
