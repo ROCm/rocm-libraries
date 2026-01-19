@@ -104,6 +104,33 @@ void sort_kernel(const KeyType* input, KeyType* output)
     rocprim::block_store_direct_blocked(lid, output + block_offset, keys);
 }
 
+/// Turns a type T into a stable sortable type, given a certain order.
+template<class T>
+struct stablify
+{
+    using type = ::rocprim::tuple<T, int>;
+
+    __host__ __device__
+    static inline type make(T data, int ordering)
+    {
+        return ::rocprim::make_tuple(data, ordering);
+    }
+
+    __host__ __device__
+    static inline T unmake(type a)
+    {
+        using rocprim::get;
+        return get<0>(a);
+    }
+
+    __host__ __device__
+    static inline bool compare(type a, type b)
+    {
+        using rocprim::get;
+        return (get<0>(a) < get<0>(b)) || ((get<0>(a) == get<0>(b)) && (get<1>(a) < get<1>(b)));
+    }
+};
+
 template<typename KeyType,
          typename ValueType,
          unsigned int                  BlockSize,
@@ -118,24 +145,15 @@ void stable_sort_kernel(const KeyType* input, KeyType* output)
     KeyType keys[ItemsPerThread];
     rocprim::block_load_direct_striped<BlockSize>(lid, input + block_offset, keys);
 
-    using stable_key_type = rocprim::tuple<KeyType, unsigned int>;
+    using stable_key      = stablify<KeyType>;
+    using stable_key_type = typename stable_key::type;
     stable_key_type stable_keys[ItemsPerThread];
 
     ROCPRIM_UNROLL
     for(unsigned int item = 0; item < ItemsPerThread; ++item)
     {
-        stable_keys[item] = rocprim::make_tuple(keys[item], ItemsPerThread * lid + item);
+        stable_keys[item] = stable_key::make(keys[item], (ItemsPerThread * lid) + item);
     }
-
-    // Special comparison that preserves relative order of equal keys
-    auto stable_compare_function
-        = [](const stable_key_type& a, const stable_key_type& b) mutable -> bool
-    {
-        const bool ab = rocprim::less<KeyType>{}(rocprim::get<0>(a), rocprim::get<0>(b));
-        return ab
-               || (!rocprim::less<KeyType>{}(rocprim::get<0>(b), rocprim::get<0>(a))
-                   && (rocprim::get<1>(a) < rocprim::get<1>(b)));
-    };
 
     rocprim::block_sort<stable_key_type,
                         BlockSize,
@@ -143,12 +161,12 @@ void stable_sort_kernel(const KeyType* input, KeyType* output)
                         rocprim::empty_type,
                         block_sort_algorithm>
         bsort;
-    bsort.sort(stable_keys, stable_compare_function);
+    bsort.sort(stable_keys, stable_key::compare);
 
     ROCPRIM_UNROLL
     for(unsigned int item = 0; item < ItemsPerThread; ++item)
     {
-        keys[item] = rocprim::get<0>(stable_keys[item]);
+        keys[item] = stable_key::unmake(stable_keys[item]);
     }
 
     rocprim::block_store_direct_blocked(lid, output + block_offset, keys);
