@@ -479,7 +479,7 @@ public:
               BinaryFunction compare_function)
     {
         (void)storage;
-        sort(compare_function, thread_key, thread_value);
+        sort(thread_key, thread_value, compare_function);
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction, class V = Value>
