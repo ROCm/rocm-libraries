@@ -308,11 +308,11 @@ namespace GEMMTests
                                                   : std::vector<size_t>({});
 
             auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(
-                2, dataTypeA, gemm.transA == "N" ? oneStridesN : oneStridesT)); // A
+                2, dataTypeA, {}, gemm.transA == "N" ? oneStridesN : oneStridesT)); // A
             auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
             auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(
-                2, dataTypeB, gemm.transB == "N" ? oneStridesN : oneStridesT)); // B
+                2, dataTypeB, {}, gemm.transB == "N" ? oneStridesN : oneStridesT)); // B
             auto tagLoadB = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
             auto mulInputA = tagLoadA;
@@ -324,7 +324,7 @@ namespace GEMMTests
             if(gemm.scaleAMode == Operations::ScaleMode::Separate)
             {
                 tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                    2, gemm.scaleTypeA, gemm.transA == "N" ? oneStridesN : oneStridesT));
+                    2, gemm.scaleTypeA, {}, gemm.transA == "N" ? oneStridesN : oneStridesT));
                 tagLoadScaleA
                     = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleA));
 
@@ -348,7 +348,7 @@ namespace GEMMTests
             if(gemm.scaleBMode == Operations::ScaleMode::Separate)
             {
                 tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                    2, gemm.scaleTypeB, gemm.transB == "N" ? oneStridesN : oneStridesT));
+                    2, gemm.scaleTypeB, {}, gemm.transB == "N" ? oneStridesN : oneStridesT));
                 tagLoadScaleB
                     = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleB));
 
@@ -370,7 +370,7 @@ namespace GEMMTests
             }
 
             auto tagTensorC = command->addOperation(
-                rocRoller::Operations::Tensor(2, dataTypeC, oneStridesN)); // C
+                rocRoller::Operations::Tensor(2, dataTypeC, {}, oneStridesN)); // C
             auto tagLoadC = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorC));
 
             auto tagScalarAlpha
@@ -408,7 +408,7 @@ namespace GEMMTests
             command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
 
             auto tagTensorD = command->addOperation(
-                rocRoller::Operations::Tensor(2, dataTypeD, oneStridesN)); // D
+                rocRoller::Operations::Tensor(2, dataTypeD, {}, oneStridesN)); // D
             Operations::OperationTag tagScalarSeed;
             if constexpr(std::is_same_v<TC, TD>)
             {

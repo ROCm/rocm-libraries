@@ -30,7 +30,7 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 #if ROCWMMA_BENCHMARK_TESTS
-#include <rocm_smi/rocm_smi.h>
+#include <amd_smi/amdsmi.h>
 #endif // ROCWMMA_BENCHMARK_TESTS
 #include <rocwmma/internal/constants.hpp>
 
@@ -55,6 +55,7 @@ namespace rocwmma
             GFX1100          = Constants::AMDGCN_ARCH_ID_GFX1100,
             GFX1101          = Constants::AMDGCN_ARCH_ID_GFX1101,
             GFX1102          = Constants::AMDGCN_ARCH_ID_GFX1102,
+            GFX1103          = Constants::AMDGCN_ARCH_ID_GFX1103,
             GFX1150          = Constants::AMDGCN_ARCH_ID_GFX1150,
             GFX1151          = Constants::AMDGCN_ARCH_ID_GFX1151,
             GFX1152          = Constants::AMDGCN_ARCH_ID_GFX1152,
