@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -802,7 +802,7 @@ hipError_t radix_sort_keys(void*              temporary_storage,
                            hipStream_t        stream            = 0,
                            bool               debug_synchronous = false)
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        ignored;
     return detail::radix_sort_impl<Config, false>(temporary_storage,
@@ -919,7 +919,7 @@ hipError_t radix_sort_keys(void*               temporary_storage,
                            hipStream_t         stream            = 0,
                            bool                debug_synchronous = false)
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        is_result_in_output;
     hipError_t  error = detail::radix_sort_impl<Config, false>(temporary_storage,
@@ -1069,7 +1069,7 @@ auto radix_sort_keys(void*              temporary_storage,
                      bool               debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        ignored;
     return detail::radix_sort_impl<Config, false>(temporary_storage,
@@ -1201,7 +1201,7 @@ auto radix_sort_keys(void*              temporary_storage,
                      bool               debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        ignored;
     return detail::radix_sort_impl<Config, false>(
@@ -1344,7 +1344,7 @@ auto radix_sort_keys(void*               temporary_storage,
                      bool                debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        is_result_in_output;
     hipError_t  error = detail::radix_sort_impl<Config, false>(temporary_storage,
@@ -1478,7 +1478,7 @@ auto radix_sort_keys(void*               temporary_storage,
                      bool                debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        is_result_in_output;
     hipError_t  error = detail::radix_sort_impl<Config, false>(
@@ -1603,7 +1603,7 @@ hipError_t radix_sort_keys_desc(void*              temporary_storage,
                                 hipStream_t        stream            = 0,
                                 bool               debug_synchronous = false)
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        ignored;
     return detail::radix_sort_impl<Config, true>(temporary_storage,
@@ -1720,7 +1720,7 @@ hipError_t radix_sort_keys_desc(void*               temporary_storage,
                                 hipStream_t         stream            = 0,
                                 bool                debug_synchronous = false)
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        is_result_in_output;
     hipError_t  error = detail::radix_sort_impl<Config, true>(temporary_storage,
@@ -1870,7 +1870,7 @@ auto radix_sort_keys_desc(void*              temporary_storage,
                           bool               debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        ignored;
     return detail::radix_sort_impl<Config, true>(temporary_storage,
@@ -2002,7 +2002,7 @@ auto radix_sort_keys_desc(void*              temporary_storage,
                           bool               debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        ignored;
     return detail::radix_sort_impl<Config, true>(
@@ -2145,7 +2145,7 @@ auto radix_sort_keys_desc(void*               temporary_storage,
                           bool                debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        is_result_in_output;
     hipError_t  error = detail::radix_sort_impl<Config, true>(temporary_storage,
@@ -2279,7 +2279,7 @@ auto radix_sort_keys_desc(void*               temporary_storage,
                           bool                debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     empty_type* values = nullptr;
     bool        is_result_in_output;
     hipError_t  error
@@ -2423,7 +2423,7 @@ hipError_t radix_sort_pairs(void*                temporary_storage,
                             hipStream_t          stream            = 0,
                             bool                 debug_synchronous = false)
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool ignored;
     return detail::radix_sort_impl<Config, false>(temporary_storage,
                                                   storage_size,
@@ -2553,7 +2553,7 @@ hipError_t radix_sort_pairs(void*                 temporary_storage,
                             hipStream_t           stream            = 0,
                             bool                  debug_synchronous = false)
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool       is_result_in_output;
     hipError_t error = detail::radix_sort_impl<Config, false>(temporary_storage,
                                                               storage_size,
@@ -2722,7 +2722,7 @@ auto radix_sort_pairs(void*                temporary_storage,
                       bool                 debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool ignored;
     return detail::radix_sort_impl<Config, false>(temporary_storage,
                                                   storage_size,
@@ -2868,7 +2868,7 @@ auto radix_sort_pairs(void*                temporary_storage,
                       bool                 debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool ignored;
     return detail::radix_sort_impl<Config, false>(
         temporary_storage,
@@ -3022,7 +3022,7 @@ auto radix_sort_pairs(void*                 temporary_storage,
                       bool                  debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool       is_result_in_output;
     hipError_t error = detail::radix_sort_impl<Config, false>(temporary_storage,
                                                               storage_size,
@@ -3164,7 +3164,7 @@ auto radix_sort_pairs(void*                 temporary_storage,
                       bool                  debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool       is_result_in_output;
     hipError_t error = detail::radix_sort_impl<Config, false>(
         temporary_storage,
@@ -3304,7 +3304,7 @@ hipError_t radix_sort_pairs_desc(void*                temporary_storage,
                                  hipStream_t          stream            = 0,
                                  bool                 debug_synchronous = false)
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool ignored;
     return detail::radix_sort_impl<Config, true>(temporary_storage,
                                                  storage_size,
@@ -3428,7 +3428,7 @@ hipError_t radix_sort_pairs_desc(void*                 temporary_storage,
                                  hipStream_t           stream            = 0,
                                  bool                  debug_synchronous = false)
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool       is_result_in_output;
     hipError_t error = detail::radix_sort_impl<Config, true>(temporary_storage,
                                                              storage_size,
@@ -3597,7 +3597,7 @@ auto radix_sort_pairs_desc(void*                temporary_storage,
                            bool                 debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool ignored;
     return detail::radix_sort_impl<Config, true>(temporary_storage,
                                                  storage_size,
@@ -3743,7 +3743,7 @@ auto radix_sort_pairs_desc(void*                temporary_storage,
                            bool                 debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool ignored;
     return detail::radix_sort_impl<Config, true>(
         temporary_storage,
@@ -3897,7 +3897,7 @@ auto radix_sort_pairs_desc(void*                 temporary_storage,
                            bool                  debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool       is_result_in_output;
     hipError_t error = detail::radix_sort_impl<Config, true>(temporary_storage,
                                                              storage_size,
@@ -4039,7 +4039,7 @@ auto radix_sort_pairs_desc(void*                 temporary_storage,
                            bool                  debug_synchronous = false)
     -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    static_assert(rocprim::is_integral<Size>::value, "Size must be an integral type.");
     bool       is_result_in_output;
     hipError_t error
         = detail::radix_sort_impl<Config, true>(temporary_storage,

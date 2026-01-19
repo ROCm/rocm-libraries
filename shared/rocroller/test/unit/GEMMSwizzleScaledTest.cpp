@@ -61,6 +61,11 @@ namespace GEMMTests
     {
     };
 
+    // Params: StreamKMode
+    class SwizzleScaledStreamKTestGPU : public BaseGEMMContextFixture<StreamKMode>
+    {
+    };
+
     TEST_P(SwizzleScaledTestGPU, GPU_PrefetchGEMMMXF4TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
@@ -505,7 +510,68 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
     }
 
+    TEST_P(SwizzleScaledStreamKTestGPU, GPU_PrefetchGEMMMXF4TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
+
+        auto streamKMode = std::get<1>(GetParam());
+
+        auto gemm = GEMMProblemF8F6F4{32, 32, 64};
+
+        gemm.macM = 256;
+        gemm.macN = 256;
+        gemm.macK = 128;
+
+        gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
+
+        gemm.loadPathA      = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB      = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadScalePathA = SolutionParams::LoadPath::BufferToVGPR;
+        gemm.loadScalePathB = SolutionParams::LoadPath::BufferToVGPR;
+
+        gemm.unrollK           = 2;
+        gemm.prefetch          = true;
+        gemm.prefetchInFlight  = 2;
+        gemm.prefetchLDSFactor = 2;
+
+        gemm.scaleAMode = Operations::ScaleMode::Separate;
+        gemm.scaleBMode = Operations::ScaleMode::Separate;
+
+        gemm.scaleTypeA = DataType::E8M0;
+        gemm.scaleTypeB = DataType::E8M0;
+
+        gemm.swizzleScale  = true;
+        gemm.swizzleM      = 64;
+        gemm.swizzleN      = 64;
+        gemm.swizzleK      = 8;
+        gemm.prefetchScale = true;
+
+        gemm.scaleBlockSize
+            = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
+
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        gemm.numWGs = deviceProperties.multiProcessorCount;
+
+        gemm.m = gemm.macM * 8;
+        gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
+        gemm.k = gemm.macK * 8;
+
+        gemm.streamK = streamKMode;
+
+        basicGEMM<FP4, FP4, float>(gemm);
+    }
+
     INSTANTIATE_TEST_SUITE_P(GEMMTest, SwizzleScaledTestGPU, currentGPUISA());
+
+    INSTANTIATE_TEST_SUITE_P(GEMMTest,
+                             SwizzleScaledStreamKTestGPU,
+                             ::testing::Combine(currentGPUISA(),
+                                                ::testing::Values(StreamKMode::Standard,
+                                                                  StreamKMode::TwoTile,
+                                                                  StreamKMode::TwoTileDPFirst)));
 
     INSTANTIATE_TEST_SUITE_P(GEMMMXFP4TNSwizzleScaledUnrollTest,
                              GEMMMXFP4TNSwizzleScaledUnrollTestGPU,

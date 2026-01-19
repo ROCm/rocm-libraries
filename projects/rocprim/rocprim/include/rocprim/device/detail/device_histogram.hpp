@@ -107,7 +107,7 @@ struct sample_to_bin_even
 template<class Level>
 struct sample_to_bin_even<
     Level,
-    typename std::enable_if<std::is_integral<Level>::value && (sizeof(Level) <= 4)>::type>
+    typename std::enable_if<rocprim::is_integral<Level>::value && (sizeof(Level) <= 4)>::type>
 {
     size_t        bins;
     Level         lower_level;

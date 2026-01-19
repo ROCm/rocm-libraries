@@ -69,9 +69,6 @@ namespace ExpressionTest
             , m_bType(bType)
 
         {
-            auto const& arch = m_context->targetArchitecture().target();
-            if(!arch.isCDNAGPU())
-                SKIP("Test not yet supported on " << arch);
         }
 
         void generate() override

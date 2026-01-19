@@ -30,6 +30,9 @@ coverage:
       hipRAND:
         flags: [hipRAND]
         target: 80%
+      hipDNN:
+        flags: [hipDNN]
+        target: 80%
       rocRoller:
         flags: [rocRoller]
         target: 80%
