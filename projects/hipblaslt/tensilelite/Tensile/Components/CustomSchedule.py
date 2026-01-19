@@ -172,6 +172,21 @@ class ScheduleInfo:
     def isValidationDisabled(self):
         return self._skipValidation
 
+    def pretty_print(self):
+        klen = max(len(k) for k in self.optSchedule.keys())
+        for k,v in self.optSchedule.items():
+            print(f"{k:>{klen}}: {v}")
+        
+        if snops := self.optSchedule.get('SNOP', []):
+            print("---- SNOP code ----")
+            for idx, code in zip(snops[0], self.snopCode):
+                print(f"{idx:>2}: {str(code).strip()}")
+        
+        if syncs := self.optSchedule.get('SYNC', []):
+            print("---- SYNC code ----")
+            for idx, code in zip(syncs[0], self.syncCode):
+                print(f"{idx:>2}: {str(code).strip()}")
+
 def removeComments(module):
     retModule = Module()
     for i in module.flatitems():
@@ -2998,7 +3013,6 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
     syncCode = []   
     snops: list[tuple[int, SNop]] = []
     snopCode = []
-    S4 = SNop(4)
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = True
@@ -3068,6 +3082,115 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
         snopCode = [s[1] for s in snops]
  
     opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift, snopCode=snopCode)
+    return True, opt1
+
+@RegisterSchedule(
+    tile_config=TileConfig(128, 128, 32, 2, 1, True, 0, 0),
+    dtype_predicate=isTF32,
+    vector_widths=[4, 4, 4],
+    matrix_inst=[32, 32, 16, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
+    n_mfma = 128//2//32 * 128//2//32 * 3 * 2    # 128 MT0 / 2 WT0 / 32 mfma dim  * 128/2/32 * 3 bf16 MFMAs per tf32 mfma * 2 PLR=1
+    kernel["MfmaInitCVgprs"] = True
+    kernel["UsePLRPack"] = True
+
+    optSchedule = dict()
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    syncs = SyncSchedule()
+    syncCode = []   
+    snops: list[tuple[int, SNop]] = []
+    snopCode = []
+    gr_inc_step = 0
+
+    if isNN(kernel) and TLDS==1:
+        kernel["UseMFMAF32XEmulation"] = True
+        print("OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO")
+
+        offset_a=[0,0,0,0, 2,2, 3,3,3,3,
+                  0,0,0,0, 2,2, 3,3,3,3,
+                ]
+        offset_b=[1,1,1,1, 2,2, 4,4,4,4,
+                  1,1,1,1, 2,2, 4,4,4,4, 
+                ]
+        
+        lra0   = [0,0,0,0,
+                   1,1,1,1,
+                    2,2,2,2,
+                     3,3,3,3]
+        lrb0   = [          4,5,6,7]
+        #                wait then read
+        syncs.add(       3, dscnt=4, comment="wait for the first 2 LRAs before packing")
+        syncs.add(          5, dscnt=1, comment="wait for the rest of LRAs before packing them")
+        # pack_a0= [       i+4 for i in offset_a] # last at 7
+        pack_a0 = [        4,4,4,4, 6,6, 7,7,7,7,
+                            5,5,5,5, 6,6, 8,8,8,8]
+        # because of GR starting at 10, we need barrier at 9, will use that for sync too.
+        syncs.add(                          9, dscnt=0, comment="wait for LRBs before the packing them",
+                                            barrier=True, barrier_comment="barrier before GR")
+        pack_b0= [                          9,9,9,9, 10,10, 11,11,11,11,
+                                            9,9,9,9, 10,10, 11,11,11,11]
+
+        grinca = [0,0,0,1,1,1,2,2,2]
+        grincb = [3,3,3,4,4,4,5,5,5]
+        lrsa   = [10]
+        lrsb   = [10]
+        lwsa   = [18]
+        lwsb   = [18]        
+        
+        gra    = [                            10,11,13,15] # one index for two instructions
+        grb    = [                                       17,19,21,23] # one index for two instructions
+        num_gr = len(gra) + len(grb)
+
+        syncs.add(                                 12, vlcnt=2, barrier=True, comment="wait for the previous GRs")
+
+        lra1   = [12,12,12,12,
+                   13,13,13,13,
+                    14,14,14,14,
+                     15,15,15,15]
+        lrb1   = [          16,17,18,19]
+        #                wait then read
+        syncs.add(       15, dscnt=4, comment="wait for the first 2 LRAs before packing")
+        syncs.add(          17, dscnt=1, comment="wait for the rest of LRAs before packing them")
+        pack_a1 = [        16,16,16,16, 18,18, 19,19,19,19,
+                            17,17,17,17, 18,18, 19,19,19,19]
+        # because of GR starting at 10, we need barrier at 9, will use that for sync too.
+        syncs.add(                          20, dscnt=0, comment="wait for LRBs before the packing them")
+        pack_b1= [                          20,20,20,20, 21,21, 22,22,22,22,
+                                            20,20,20,20, 21,21, 22,22,22,22]
+
+    else:
+        return False, None  
+    
+    optSchedule = {
+        'SYNC':   [syncs.get_indicies()],
+        'GRIncA': [grinca],
+        'GRIncB': [grincb],
+        'LRA0':   [lra0],
+        'LRB0':   [lrb0],
+        'PackA0': [pack_a0],
+        'PackB0': [pack_b0],
+        'GRA':    [duplicate_list_items(gra,                2, gr_inc_step)],
+                #    duplicate_list_items([i+1 for i in gra], 2, gr_inc_step)],
+        'GRB':    [duplicate_list_items(grb,                2, gr_inc_step)],
+                #    duplicate_list_items([i+1 for i in grb], 2, gr_inc_step)],
+        'LRSA':   [lrsa],
+        'LRSB':   [lrsb],
+        'LWSA':   [lwsa],
+        'LWSB':   [lwsb],
+        'LRA1':   [lra1],
+        'LRB1':   [lrb1],
+        'PackB1': [pack_b1],
+        'PackA1': [pack_a1],
+        'LCC':    [[n_mfma-2, n_mfma-1]],
+    }
+
+    syncCode = syncs.get_code()
+    nglshift = nllshift = num_gr
+
+    opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
+    opt1.pretty_print()
     return True, opt1
 
 @RegisterSchedule(
