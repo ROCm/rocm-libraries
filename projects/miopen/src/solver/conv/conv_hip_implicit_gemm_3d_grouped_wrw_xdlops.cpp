@@ -256,11 +256,6 @@ struct CKArgs
     template <typename ConvPtr>
     bool IsSupportedBy(const ConvPtr& conv_ptr) const
     {
-        // TODO: Remove this limitation for CK Wmma instances
-        if(conv_ptr->GetTypeString().find("Wmma") != -1)
-        {
-            return false;
-        }
         auto arg_ptr        = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, 1);
         auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
         if(workspace_size != 0)
@@ -271,11 +266,6 @@ struct CKArgs
     template <typename ConvPtr>
     bool IsSupportedBySplitK(const ConvPtr& conv_ptr, int split_k) const
     {
-        // TODO: Remove this limitation for CK Wmma instances
-        if(conv_ptr->GetTypeString().find("Wmma") != -1)
-        {
-            return false;
-        }
         auto arg_ptr        = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f, split_k);
         auto workspace_size = conv_ptr->GetWorkSpaceSize(arg_ptr.get());
         if(workspace_size != 0)
@@ -339,6 +329,28 @@ FillValidKernelsByAlphaBeta(const ::miopen::conv::ProblemDescription& problem)
     }
 }
 } // namespace
+
+// Test helper: Get all WRW kernel TypeStrings without filtering
+// Used for metadata validation tests
+std::vector<std::string> GetAllWrwKernelTypeStrings()
+{
+    std::vector<std::string> all_kernels;
+
+    auto bilinear_ptrs = DeviceOpGBwdWeightBilinearPtrs<float>::GetInstances();
+    auto scale_ptrs    = DeviceOpGBwdWeightScalePtrs<float>::GetInstances();
+    auto default_ptrs  = DeviceOpGBwdWeightDefaultPtrs<float>::GetInstances();
+
+    all_kernels.reserve(bilinear_ptrs.size() + scale_ptrs.size() + default_ptrs.size());
+
+    for(const auto& ptr : bilinear_ptrs)
+        all_kernels.push_back(ptr->GetTypeString());
+    for(const auto& ptr : scale_ptrs)
+        all_kernels.push_back(ptr->GetTypeString());
+    for(const auto& ptr : default_ptrs)
+        all_kernels.push_back(ptr->GetTypeString());
+
+    return all_kernels;
+}
 
 template <typename DataType>
 void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::Init(
@@ -674,19 +686,12 @@ bool ConvHipImplicitGemm3DGroupWrwXdlops::IsApplicable(
         return false;
     if(!ck_utility::is_ck_whitelist(ctx.GetStream().GetDeviceName()))
         return false;
-    // CK support disabled on Navi3 and Navi4 due to missing instances for WRW
-    if(StartsWith(ctx.GetStream().GetDeviceName(), "gfx12") ||
-       StartsWith(ctx.GetStream().GetDeviceName(), "gfx11"))
-        return false;
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
     case miopenFloat: return CheckCKApplicability<float>(problem);
     case miopenInt8: return CheckCKApplicability<int8_t>(problem);
-    case miopenBFloat16:
-        return (ctx.GetStream().GetDeviceName() == "gfx942" ||
-                StartsWith(ctx.GetStream().GetDeviceName(), "gfx95")) &&
-               CheckCKApplicability<ck::bhalf_t>(problem);
+    case miopenBFloat16: return CheckCKApplicability<ck::bhalf_t>(problem);
     case miopenInt64:
     case miopenInt32:
     case miopenFloat8_fnuz:

@@ -118,8 +118,7 @@ if(HIPBLASLT_ENABLE_HOST)
         find_library(rocTracer roctx64 REQUIRED)
         get_filename_component(ROCTRACER_LIB_DIR ${rocTracer} DIRECTORY)
         get_filename_component(ROCTRACER_ROOT_DIR ${ROCTRACER_LIB_DIR} DIRECTORY)
-    
-        find_path(ROCTRACER_INCLUDE_DIR "roctracer/roctx.h" 
+        find_path(ROCTRACER_INCLUDE_DIR "roctracer/roctx.h"
             HINTS ${ROCTRACER_ROOT_DIR}
             PATH_SUFFIXES include
             REQUIRED)
@@ -310,7 +309,7 @@ endif()
 
 if(HIPBLASLT_ENABLE_HOST)
     # work around code object stripping failure if using /usr/bin/strip
-    find_program(LLVM_STRIP 
+    find_program(LLVM_STRIP
         NAMES llvm-strip
         PATH_SUFFIXES lib/llvm/bin llvm/bin bin
     )
@@ -521,8 +520,7 @@ if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
         DESTINATION ${CMAKE_INSTALL_DATADIR}/hipblaslt/samples
         COMPONENT samples
         FILES_MATCHING
-        PATTERN "*.cpp"
-        PATTERN "*.h"
+        PATTERN "*.cpp|*.h"
         PATTERN "CMakeLists.txt" EXCLUDE
     )
     rocm_package_setup_client_component(samples)
@@ -545,17 +543,10 @@ endif()
 
 if(HIPBLASLT_ENABLE_COVERAGE)
     target_compile_options(hipblaslt PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt PRIVATE -fprofile-instr-generate)
+    target_link_options(hipblaslt PUBLIC -fprofile-instr-generate)
 
     target_compile_options(hipblaslt-clients-common PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt-clients-common PRIVATE -fprofile-instr-generate)
-
-    target_compile_options(hipblaslt-bench PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt-bench PRIVATE -fprofile-instr-generate)
-
-    target_compile_options(hipblaslt-test PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping -fvisibility=default)
-    target_link_options(hipblaslt-test PRIVATE -fprofile-instr-generate)
-    target_compile_definitions(hipblaslt-test PRIVATE CODE_COVERAGE)
+    target_link_options(hipblaslt-clients-common PUBLIC -fprofile-instr-generate)
 
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
     add_custom_target(
@@ -567,24 +558,30 @@ if(HIPBLASLT_ENABLE_COVERAGE)
                                         GTEST_LISTENER=NO_PASS_LINE_IN_LOG
                                         $<TARGET_FILE:hipblaslt-test>
                                         --precompile=hipblaslt-test-precompile.db
+        COMMENT "Running hipblaslt testcases for coverage report"
       )
+
       find_program(
         LLVM_PROFDATA
         llvm-profdata
-        HINTS llvm/bin
         REQUIRED
+        HINTS ${ROCM_PATH}/llvm/bin
+        PATHS /opt/rocm/llvm/bin
       )
       find_program(
         LLVM_COV
         llvm-cov
         REQUIRED
-        HINTS llvm/bin
+        HINTS ${ROCM_PATH}/llvm/bin
+        PATHS /opt/rocm/llvm/bin
       )
       add_custom_target(
         coverage
         DEPENDS code_cov_tests
         COMMAND ${LLVM_PROFDATA} merge -sparse "${coverage_dir}/profraw/hipblaslt-coverage_*.profraw" -o "${coverage_dir}/hipblaslt.profdata"
-        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata"
-        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" -format=html -output-dir="${coverage_dir}"
+        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*"
+        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=html -output-dir="${coverage_dir}"
+        COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=lcov > "${coverage_dir}/coverage.info"
+        COMMENT "Generating code coverage report"
       )
 endif()
