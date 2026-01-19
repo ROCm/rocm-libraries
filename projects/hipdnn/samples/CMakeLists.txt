@@ -84,6 +84,7 @@ add_hipdnn_sample_test(conv_dgrad)
 add_hipdnn_sample_test(conv_wgrad)
 
 if(NOT WIN32)
+    # Some fused conv samples are not supported on windows due to lack of CK support
     add_hipdnn_sample_test(fused_conv_fprop_activ)
     add_hipdnn_sample_test(fused_conv_fprop_bias_activ)
 endif()
