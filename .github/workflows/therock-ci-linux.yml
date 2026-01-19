@@ -39,18 +39,17 @@ jobs:
         if: ${{ contains(inputs.project_to_test, 'miopen') }} # && failure()
         run: |
           RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}#${GITHUB_JOB}"
-          MESSAGE="❌ MiOpen GitHub Actions Failure \
-            Repository: ${GITHUB_REPOSITORY} \
-            Branch: ${GITHUB_REF} \
-            Job: ${GITHUB_JOB} \
+          MESSAGE="❌ MiOpen GitHub Actions Failure \n
+            Repository: ${GITHUB_REPOSITORY} \n
+            Branch: ${GITHUB_REF} \n
+            Job: ${GITHUB_JOB} \n
             Commit: ${GITHUB_SHA} \n
             Run Link:
 
             ${RUN_URL}
             "
-
            curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" -H 'Content-Type: application/json' \
-              -d "{\"text\": \"${MESSAGE//$'\n'/\\n}\"}"
+              -d "{\"text\": \"${MESSAGE"}"
  
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
