@@ -483,18 +483,18 @@ template <rocblas_int DIM_X,
           typename ATYPE,
           typename XTYPE>
 ROCBLAS_KERNEL(DIM_X* DIM_Y)
-rocblas_trsv_device(rocblas_int    n,
-                    ATYPE          dA,
-                    rocblas_stride offset_A,
-                    int64_t        lda,
-                    rocblas_stride stride_A,
-                    ALPHATYPE      alpha_device_host,
-                    XTYPE          dx,
-                    rocblas_stride offset_x,
-                    int64_t        incx,
-                    rocblas_stride stride_x,
+rocblas_trsv_device(rocblas_int           n,
+                    ATYPE                 dA,
+                    rocblas_stride        offset_A,
+                    int64_t               lda,
+                    rocblas_stride        stride_A,
+                    ALPHATYPE             alpha_device_host,
+                    XTYPE                 dx,
+                    rocblas_stride        offset_x,
+                    int64_t               incx,
+                    rocblas_stride        stride_x,
                     rocblas_int volatile* w_completed_sec,
-                    rocblas_int batch_count)
+                    rocblas_int           batch_count)
 {
     // If we need to start at the bottom and work upwards (backwards substitution)
     constexpr bool backwards_sub = (!LOWER && !TRANS) || (LOWER && TRANS);
