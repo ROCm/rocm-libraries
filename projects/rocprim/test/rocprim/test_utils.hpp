@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -570,7 +570,7 @@ void iota_modulo(ForwardIt first, ForwardIt last, T lbound, const size_t ubound)
     const T value_mod = static_cast<size_t>(lbound) < ubound ? lbound : 0;
     using value_type  = typename std::iterator_traits<ForwardIt>::value_type;
 
-    for(T value = value_mod; first != last; value++, *first++)
+    for(T value = value_mod; first != last; value++, (void)((*first)++))
     {
         if(static_cast<size_t>(value) >= ubound)
         {
@@ -593,7 +593,7 @@ void iota_modulo(ForwardIt first, ForwardIt last, T lbound, const size_t ubound)
     const T value_mod = static_cast<size_t>(lbound) < ubound ? lbound : 0;
     using value_type  = rocprim::half;
 
-    for(T value = value_mod; first != last; value++, *first++)
+    for(T value = value_mod; first != last; value++, (void)((*first)++))
     {
         if(static_cast<float>(static_cast<value_type>(value)) >= ubound)
         {
@@ -663,6 +663,66 @@ inline auto test_kernel_wrapper(F func, hipStream_t stream, const bool use_graph
         gHelper.cleanupGraphHelper();
     }
 }
+
+/// \brief This is a helper class for `::testing::Types` of google_test (and possibly other stuffs?).
+/// It can be used for merging multiple `::testing::Types` instances.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level ascending top-k is performed on an array.
+///
+/// \code{.cpp}
+/// // Let's say we have a test, which has a few options, and we want to test all of them
+/// enum class Options{
+///     OPT_1,
+///     OPT_2,
+///     OPT_3
+/// };
+///
+/// template<class T, Options Option>
+/// struct Params{
+///     using type = T;
+///     static constexpr option = Option;
+/// };
+///
+/// template<class T>
+/// using grouped_params = ::testing::Types<
+///                                 Params<T, Options::OPT_1>,
+///                                 Params<T, Options::OPT_2>,
+///                                 Params<T, Options::OPT_3>
+///                             >;
+///
+/// using TestParams = typename merge_sequence<
+///                                 grouped_params<uint8_t>,
+///                                 grouped_params<uint16_t>,
+///                                 grouped_params<uint32_t>
+///                             >::type;
+///
+/// TYPED_TEST(YOURTEST, TestParams){...}
+///
+/// \endcode
+/// \endparblock
+template<class...>
+struct merge_sequence
+{};
+
+template<class... Args>
+struct merge_sequence<::testing::Types<Args...>>
+{
+    using type = ::testing::Types<Args...>;
+};
+
+template<class... Args1, class... Args2>
+struct merge_sequence<::testing::Types<Args1...>, ::testing::Types<Args2...>>
+{
+    using type = ::testing::Types<Args1..., Args2...>;
+};
+
+template<class T1, class T2, class... Ts>
+struct merge_sequence<T1, T2, Ts...>
+{
+    using type = typename merge_sequence<typename merge_sequence<T1, T2>::type, Ts...>::type;
+};
 
 } // namespace test_utils
 

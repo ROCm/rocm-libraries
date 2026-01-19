@@ -40,6 +40,7 @@
 #include <rocprim/types.hpp>
 
 // std library
+#include <unordered_set>
 #include <vector>
 
 // Params for tests
@@ -87,13 +88,109 @@ void inline compare_k(InputVector input, OutputVector output, SizeOut k)
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(sorted_output, sorted_input, k));
 }
 
+namespace std
+{
+template<>
+struct hash<rocprim::int128_t>
+{
+    ROCPRIM_FORCE_INLINE size_t operator()(const rocprim::int128_t& value) const
+    {
+        rocprim::uint128_t v    = static_cast<rocprim::uint128_t>(value);
+        std::uint64_t      low  = static_cast<std::uint64_t>(v);
+        std::uint64_t      high = static_cast<std::uint64_t>(v >> 64);
+        return (hash<std::uint64_t>{}(low) * 31) + hash<std::uint64_t>{}(high);
+    }
+};
+template<>
+struct hash<rocprim::uint128_t>
+{
+    ROCPRIM_FORCE_INLINE size_t operator()(const rocprim::uint128_t& value) const
+    {
+        auto          v    = value;
+        std::uint64_t low  = static_cast<std::uint64_t>(v);
+        std::uint64_t high = static_cast<std::uint64_t>(v >> 64);
+        return (hash<std::uint64_t>{}(low) * 31) + hash<std::uint64_t>{}(high);
+    }
+};
+
+template<>
+struct hash<rocprim::half>
+{
+    ROCPRIM_FORCE_INLINE size_t operator()(const rocprim::half& value) const
+    {
+        if(value != value)
+            return 0; // NaN
+        uint16_t bits;
+        std::memcpy(&bits, &value, sizeof(value));
+        return static_cast<size_t>(bits);
+    }
+};
+
+} // namespace std
+
+struct pair_hash
+{
+    template<class T1, class T2>
+    ROCPRIM_FORCE_INLINE std::size_t operator()(const std::pair<T1, T2>& p) const
+    {
+        std::size_t h1 = std::hash<T1>{}(p.first);
+        std::size_t h2 = std::hash<T2>{}(p.second);
+        return h1 ^ (h2 << 1);
+    }
+};
+
+ROCPRIM_FORCE_INLINE bool isnan_half(const rocprim::half& h)
+{
+    const auto& bits = reinterpret_cast<const uint16_t&>(h);
+    return (bits & 0x7C00) == 0x7C00 && (bits & 0x03FF) != 0;
+}
+
+template<class T, class = void>
+struct custom_equal_to
+{
+    ROCPRIM_FORCE_INLINE bool operator()(const T& a, const T& b) const
+    {
+        return rocprim::equal_to<T>{}(a, b);
+    }
+};
+
+template<class T>
+struct custom_equal_to<
+    T,
+    std::enable_if_t<rocprim::is_floating_point<T>::value && !std::is_same_v<T, rocprim::half>>>
+{
+    ROCPRIM_FORCE_INLINE bool operator()(const T& a, const T& b) const
+    {
+        return (std::isnan(a) && std::isnan(b)) || rocprim::equal_to<T>{}(a, b);
+    }
+};
+
+template<>
+struct custom_equal_to<rocprim::half, void>
+{
+    ROCPRIM_FORCE_INLINE bool operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        return (isnan_half(a) && isnan_half(b)) || rocprim::equal_to<rocprim::half>{}(a, b);
+    }
+};
+
+template<class Pair>
+struct pair_comp
+{
+    ROCPRIM_FORCE_INLINE bool operator()(const Pair& a, const Pair& b) const
+    {
+        return custom_equal_to<typename Pair::first_type>{}(a.first, b.first)
+               && custom_equal_to<typename Pair::second_type>{}(a.second, b.second);
+    }
+};
+
 template<bool Descending,
          class InputKeyVector,
          class InputValueVector,
          class OutputKeyVector,
          class OutputValueVector,
          class SizeOut>
-void inline compare_pairs_k(InputKeyVector    keys_input,
+ROCPRIM_FORCE_INLINE void compare_pairs_k(InputKeyVector    keys_input,
                             InputValueVector  values_input,
                             OutputKeyVector   keys_output,
                             OutputValueVector values_output,
@@ -150,26 +247,43 @@ public:
     static constexpr bool use_indirect_iterator = Params::use_indirect_iterator;
 };
 
-using RocprimDeviceTopkTestsParams = ::testing::Types<
+template<class T>
+using grouped_params = ::testing::Types<
     // Non-ordered, non-deterministic, non-stable
     // Ascending
-    DeviceTopkParams<int8_t>,
-    DeviceTopkParams<short>,
-    DeviceTopkParams<int>,
-    DeviceTopkParams<rocprim::uint128_t>,
-    DeviceTopkParams<long long>,
-    DeviceTopkParams<rocprim::half>,
-    DeviceTopkParams<float>,
-    DeviceTopkParams<double>,
+    DeviceTopkParams<T, T, true>,
     // Descending
-    DeviceTopkParams<int8_t, int8_t, true>,
-    DeviceTopkParams<short, short, true>,
-    DeviceTopkParams<int, int, true>,
-    DeviceTopkParams<rocprim::uint128_t, rocprim::uint128_t, true>,
-    DeviceTopkParams<long long, long long, true>,
-    DeviceTopkParams<rocprim::half, rocprim::half, true>,
-    DeviceTopkParams<float, float, true>,
-    DeviceTopkParams<double, double, true>>;
+    DeviceTopkParams<T, T, false>,
+
+    // Non-ordered, non-deterministic, stable
+    // Ascending
+    DeviceTopkParams<T,
+                     T,
+                     true,
+                     rocprim::identity_decomposer,
+                     rocprim::default_config,
+                     false,
+                     false,
+                     true>,
+    // Descending
+    DeviceTopkParams<T,
+                     T,
+                     false,
+                     rocprim::identity_decomposer,
+                     rocprim::default_config,
+                     false,
+                     false,
+                     true>>;
+
+using RocprimDeviceTopkTestsParams =
+    typename test_utils::merge_sequence<grouped_params<int8_t>,
+                                        grouped_params<short>,
+                                        grouped_params<int>,
+                                        grouped_params<rocprim::uint128_t>,
+                                        grouped_params<long long>,
+                                        grouped_params<rocprim::half>,
+                                        grouped_params<float>,
+                                        grouped_params<double>>::type;
 
 TYPED_TEST_SUITE(RocprimDeviceTopkTests, RocprimDeviceTopkTestsParams);
 
@@ -181,18 +295,18 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkKey)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using key_type                                        = typename TestFixture::key_type;
-    constexpr bool descending                             = TestFixture::descending;
-    using decomposer_t                                    = typename TestFixture::decomposer_t;
-    using config                                          = typename TestFixture::config;
-    using size_in_type                                    = unsigned int;
-    using size_out_type                                   = unsigned int;
-    [[maybe_unused]] constexpr bool ordered               = TestFixture::ordered;
-    [[maybe_unused]] constexpr bool deterministic         = TestFixture::deterministic;
-    [[maybe_unused]] constexpr bool stable                = TestFixture::stable;
-    const bool                      debug_synchronous     = TestFixture::debug_synchronous;
-    constexpr bool                  use_graphs            = TestFixture::use_graphs;
-    constexpr bool                  use_indirect_iterator = TestFixture::use_indirect_iterator;
+    using key_type                       = typename TestFixture::key_type;
+    constexpr bool descending            = TestFixture::descending;
+    using decomposer_t                   = typename TestFixture::decomposer_t;
+    using config                         = typename TestFixture::config;
+    using size_in_type                   = unsigned int;
+    using size_out_type                  = unsigned int;
+    constexpr bool ordered               = TestFixture::ordered;
+    constexpr bool deterministic         = TestFixture::deterministic;
+    constexpr bool stable                = TestFixture::stable;
+    const bool     debug_synchronous     = TestFixture::debug_synchronous;
+    constexpr bool use_graphs            = TestFixture::use_graphs;
+    constexpr bool use_indirect_iterator = TestFixture::use_indirect_iterator;
 
     for(unsigned int seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
@@ -242,15 +356,16 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkKey)
 
             // Get size of d_temp_storage
             size_t temp_storage_size_bytes;
-            HIP_CHECK((rocprim::topk<config, descending>(nullptr,
-                                                         temp_storage_size_bytes,
-                                                         input_it,
-                                                         d_output.get(),
-                                                         size,
-                                                         k,
-                                                         decomposer,
-                                                         stream,
-                                                         debug_synchronous)));
+            HIP_CHECK((rocprim::topk<config, descending, ordered, deterministic, stable>(
+                nullptr,
+                temp_storage_size_bytes,
+                input_it,
+                d_output.get(),
+                size,
+                k,
+                decomposer,
+                stream,
+                debug_synchronous)));
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
@@ -272,15 +387,16 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkKey)
             }
 
             // Run
-            HIP_CHECK((rocprim::topk<config, descending>(d_temp_storage.get(),
-                                                         temp_storage_size_bytes,
-                                                         input_it,
-                                                         d_output.get(),
-                                                         size,
-                                                         k,
-                                                         decomposer,
-                                                         stream,
-                                                         debug_synchronous)));
+            HIP_CHECK((rocprim::topk<config, descending, ordered, deterministic, stable>(
+                d_temp_storage.get(),
+                temp_storage_size_bytes,
+                input_it,
+                d_output.get(),
+                size,
+                k,
+                decomposer,
+                stream,
+                debug_synchronous)));
 
             if(use_graphs)
             {
@@ -292,7 +408,6 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkKey)
 
             // Copy output to host
             const auto output = d_output.load();
-
             if(size > 0)
             {
                 compare_k<descending>(input, output, k);
@@ -307,7 +422,7 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkKey)
     }
 }
 
-TYPED_TEST(RocprimDeviceTopkTests, TopkPairsStable)
+TYPED_TEST(RocprimDeviceTopkTests, TopkPairs)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -320,6 +435,9 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkPairsStable)
     using config                         = typename TestFixture::config;
     using size_in_type                   = unsigned int;
     using size_out_type                  = unsigned int;
+    constexpr bool ordered               = TestFixture::ordered;
+    constexpr bool deterministic         = TestFixture::deterministic;
+    constexpr bool stable                = TestFixture::stable;
     const bool     debug_synchronous     = TestFixture::debug_synchronous;
     constexpr bool use_graphs            = TestFixture::use_graphs;
     constexpr bool use_indirect_iterator = TestFixture::use_indirect_iterator;
@@ -384,18 +502,18 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkPairsStable)
 
             // Get size of d_temp_storage
             size_t temp_storage_size_bytes;
-            HIP_CHECK((
-                rocprim::topk_pairs<config, descending, false, false, true>(nullptr,
-                                                                            temp_storage_size_bytes,
-                                                                            keys_input_it,
-                                                                            d_keys_output.get(),
-                                                                            values_input_it,
-                                                                            d_values_output.get(),
-                                                                            size,
-                                                                            k,
-                                                                            decomposer,
-                                                                            stream,
-                                                                            debug_synchronous)));
+            HIP_CHECK((rocprim::topk_pairs<config, descending, ordered, deterministic, stable>(
+                nullptr,
+                temp_storage_size_bytes,
+                keys_input_it,
+                d_keys_output.get(),
+                values_input_it,
+                d_values_output.get(),
+                size,
+                k,
+                decomposer,
+                stream,
+                debug_synchronous)));
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
@@ -417,18 +535,18 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkPairsStable)
             }
 
             // Run
-            HIP_CHECK((
-                rocprim::topk_pairs<config, descending, false, false, true>(d_temp_storage.get(),
-                                                                            temp_storage_size_bytes,
-                                                                            keys_input_it,
-                                                                            d_keys_output.get(),
-                                                                            values_input_it,
-                                                                            d_values_output.get(),
-                                                                            size,
-                                                                            k,
-                                                                            decomposer,
-                                                                            stream,
-                                                                            debug_synchronous)));
+            HIP_CHECK((rocprim::topk_pairs<config, descending, ordered, deterministic, stable>(
+                d_temp_storage.get(),
+                temp_storage_size_bytes,
+                keys_input_it,
+                d_keys_output.get(),
+                values_input_it,
+                d_values_output.get(),
+                size,
+                k,
+                decomposer,
+                stream,
+                debug_synchronous)));
 
             if(use_graphs)
             {
@@ -442,7 +560,17 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkPairsStable)
             const auto keys_output   = d_keys_output.load();
             const auto values_output = d_values_output.load();
 
-            if(size > 0)
+            if(use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+                HIP_CHECK(hipStreamDestroy(stream));
+            }
+            if(size <= 0)
+            {
+                continue;
+            }
+
+            if constexpr(stable)
             {
                 compare_pairs_k<descending>(keys_input,
                                             values_input,
@@ -450,11 +578,28 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkPairsStable)
                                             values_output,
                                             k);
             }
-
-            if(use_graphs)
+            else
             {
-                gHelper.cleanupGraphHelper();
-                HIP_CHECK(hipStreamDestroy(stream));
+                // Create input pairs
+                std::unordered_multiset<std::pair<key_type, value_type>,
+                                        pair_hash,
+                                        pair_comp<std::pair<key_type, value_type>>>
+                    h_input_map;
+                for(size_t i = 0; i < keys_input.size(); ++i)
+                {
+                    h_input_map.insert({keys_input[i], values_input[i]});
+                }
+
+                // Varify keys & values are matching each other
+                for(unsigned int i = 0; i < k; ++i)
+                {
+                    auto range = h_input_map.equal_range(
+                        std::pair<key_type, value_type>{keys_output[i], values_output[i]});
+                    ASSERT_NE(range.first, range.second);
+                }
+
+                // Check keys are correct
+                compare_k<descending>(keys_input, keys_output, k);
             }
         }
     }
@@ -464,6 +609,7 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkPairsStable)
 
 template<class config,
          bool descending,
+         bool stable,
          class decomposer_t,
          bool use_graphs,
          bool use_indirect_iterator,
@@ -519,15 +665,15 @@ void topk_large_sizes_test(bool debug_synchronous)
 
         // Get size of d_temp_storage
         size_t temp_storage_size_bytes;
-        HIP_CHECK((rocprim::topk<config, descending>(nullptr,
-                                                     temp_storage_size_bytes,
-                                                     input_it,
-                                                     d_output.get(),
-                                                     size,
-                                                     k,
-                                                     decomposer,
-                                                     stream,
-                                                     debug_synchronous)));
+        HIP_CHECK((rocprim::topk<config, descending, false, false, stable>(nullptr,
+                                                                           temp_storage_size_bytes,
+                                                                           input_it,
+                                                                           d_output.get(),
+                                                                           size,
+                                                                           k,
+                                                                           decomposer,
+                                                                           stream,
+                                                                           debug_synchronous)));
 
         // temp_storage_size_bytes must be >0
         ASSERT_GT(temp_storage_size_bytes, 0);
@@ -549,15 +695,15 @@ void topk_large_sizes_test(bool debug_synchronous)
         }
 
         // Run
-        HIP_CHECK((rocprim::topk<config, descending>(d_temp_storage.get(),
-                                                     temp_storage_size_bytes,
-                                                     input_it,
-                                                     d_output.get(),
-                                                     size,
-                                                     k,
-                                                     decomposer,
-                                                     stream,
-                                                     debug_synchronous)));
+        HIP_CHECK((rocprim::topk<config, descending, false, false, stable>(d_temp_storage.get(),
+                                                                           temp_storage_size_bytes,
+                                                                           input_it,
+                                                                           d_output.get(),
+                                                                           size,
+                                                                           k,
+                                                                           decomposer,
+                                                                           stream,
+                                                                           debug_synchronous)));
 
         if(use_graphs)
         {
@@ -586,9 +732,10 @@ void topk_large_sizes_test(bool debug_synchronous)
     }
 }
 
-TEST(RocprimDeviceTopkTests, TopkLargeSizes)
+TEST(RocprimDeviceTopkTests, TopkLargeSizesStable)
 {
     constexpr bool descending            = false;
+    constexpr bool stable                = true;
     using decomposer_t                   = rocprim::identity_decomposer;
     using config                         = rocprim::default_config;
     using size_in_type                   = std::size_t;
@@ -601,6 +748,31 @@ TEST(RocprimDeviceTopkTests, TopkLargeSizes)
     // Same data type for 'size' and 'k'
     topk_large_sizes_test<config,
                           descending,
+                          stable,
+                          decomposer_t,
+                          use_graphs,
+                          use_indirect_iterator,
+                          size_in_type,
+                          size_out_type>(debug_synchronous);
+}
+
+TEST(RocprimDeviceTopkTests, TopkLargeSizesUnstable)
+{
+    constexpr bool descending            = false;
+    constexpr bool stable                = false;
+    using decomposer_t                   = rocprim::identity_decomposer;
+    using config                         = rocprim::default_config;
+    using size_in_type                   = std::size_t;
+    using size_out_type                  = std::size_t;
+    const bool     debug_synchronous     = false;
+    constexpr bool use_graphs            = false;
+    constexpr bool use_indirect_iterator = false;
+
+    // Radix TopK
+    // Same data type for 'size' and 'k'
+    topk_large_sizes_test<config,
+                          descending,
+                          stable,
                           decomposer_t,
                           use_graphs,
                           use_indirect_iterator,
