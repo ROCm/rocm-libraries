@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <type_traits>
 #include <numeric>
 #include <vector>
 
@@ -40,11 +41,19 @@ static size_t compute_ptrdiff(const std::vector<intT1>& length, const std::vecto
         return 0;
 
     // Negative lengths or strides are not permitted:
-    if(std::any_of(length.begin(), length.end(), [](const auto& l) { return l < 0; }))
-        throw std::runtime_error("Negative lengths given to compute_ptrdiff");
-    if(std::any_of(stride.begin(), stride.end(), [](const auto& s) { return s < 0; }))
-        throw std::runtime_error("Negative strides given to compute_ptrdiff");
-
+    using lengthtype = std::remove_reference_t<decltype(length)>::value_type;
+    if(std::is_signed<lengthtype>::value)
+    {
+        if(std::any_of(length.begin(), length.end(), [](const auto& l) { return l < 0; }))
+            throw std::runtime_error("Negative lengths given to compute_ptrdiff");
+    }
+    using stridetype = std::remove_reference_t<decltype(stride)>::value_type;
+    if(std::is_signed<stridetype>::value)
+    {
+        if(std::any_of(stride.begin(), stride.end(), [](const auto& s) { return s < 0; }))
+            throw std::runtime_error("Negative strides given to compute_ptrdiff");
+    }
+    
     // We allow for weird data layouts with self-aliasing; this is not an array validator.
 
     // 1 + sum_i [ ( length_i - 1 ) * stride_i
