@@ -80,7 +80,7 @@ struct GemmPipelineProblemBase
     static constexpr bool kPadK = Traits::kPadK;
 
     static constexpr bool DoubleSmemBuffer  = Traits::DoubleSmemBuffer;
-    static constexpr auto Scheduler         = GemmPipelineScheduler::Default;
+    static constexpr auto Scheduler         = GemmPipelineScheduler::Intrawave;
     static constexpr index_t VectorLoadSize = Traits::_VectorSize;
 
     // In the base situation, the Preshuffle setting should be false.
@@ -316,10 +316,12 @@ template <typename ADataType_,
           typename CDataType_,
           typename BlockGemmShape_,
           typename Traits_,
-          GemmPipelineScheduler Scheduler_ = GemmPipelineScheduler::Intrawave,
-          bool HasHotLoop_                 = true,
-          TailNumber TailNum_              = TailNumber::Full,
-          typename ComputeDataType_        = ADataType_>
+          GemmPipelineScheduler Scheduler_      = GemmPipelineScheduler::Intrawave,
+          bool HasHotLoop_                      = true,
+          TailNumber TailNum_                   = TailNumber::Full,
+          amd_buffer_coherence_enum BMemNTType_ = amd_buffer_coherence_enum::coherence_default,
+          bool BPreShufflePermute_              = false,
+          typename ComputeDataType_             = ADataType_>
 struct FlatmmPipelineProblem
 {
     using Traits = remove_cvref_t<Traits_>;
@@ -352,6 +354,9 @@ struct FlatmmPipelineProblem
 
     static constexpr auto HasHotLoop = HasHotLoop_;
     static constexpr auto TailNum    = TailNum_;
+
+    static constexpr auto BMemNTType         = BMemNTType_;
+    static constexpr bool BPreShufflePermute = BPreShufflePermute_;
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {

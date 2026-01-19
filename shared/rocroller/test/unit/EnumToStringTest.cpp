@@ -137,6 +137,9 @@ TEST(EnumToStringTest, ALL)
         {MemoryType::WAVE, "WAVE"},
         {MemoryType::WAVE_LDS, "WAVE_LDS"},
         {MemoryType::WAVE_SPLIT, "WAVE_SPLIT"},
+        {MemoryType::WAVE_Direct2LDS, "WAVE_Direct2LDS"},
+        {MemoryType::WAVE_SWIZZLE, "WAVE_SWIZZLE"},
+        {MemoryType::WAVE_FROM_GLOBAL, "WAVE_FROM_GLOBAL"},
         {MemoryType::Literal, "Literal"},
         {MemoryType::None, "None"},
     });
@@ -237,18 +240,6 @@ TEST(EnumToStringTest, ALL)
             {EdgeType::CoordinateTransform, "CoordinateTransform"},
             {EdgeType::DataFlow, "DataFlow"},
             {EdgeType::Any, "Any"},
-        });
-    }
-
-    {
-        using namespace KernelGraph::Connections;
-        verify<ComputeIndexArgument>({
-            {ComputeIndexArgument::TARGET, "TARGET"},
-            {ComputeIndexArgument::INCREMENT, "INCREMENT"},
-            {ComputeIndexArgument::BASE, "BASE"},
-            {ComputeIndexArgument::OFFSET, "OFFSET"},
-            {ComputeIndexArgument::STRIDE, "STRIDE"},
-            {ComputeIndexArgument::BUFFER, "BUFFER"},
         });
     }
 

@@ -46,7 +46,7 @@
 #error "MLO_POOLING_IS2D_KERNEL must be defined"
 #endif
 
-using arg_size_t = unsigned long;
+using arg_size_t = uint64_t;
 
 extern "C" __global__ void mloPoolingForwardNaive(const FLOAT* bot_ptr,
                                                   FLOAT* top_ptr,

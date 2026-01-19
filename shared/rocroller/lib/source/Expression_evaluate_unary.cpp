@@ -180,13 +180,73 @@ namespace rocRoller::Expression::EvaluateDetail
         }
     };
 
+    template <>
+    struct OperationEvaluatorVisitor<Reinterpret>
+    {
+        Reinterpret exp;
+
+        template <CCommandArgumentValue FromType, int Idx = 0>
+        CommandArgumentValue reinterpret(FromType const& value, DataType targetDataType)
+        {
+            constexpr auto IdxType = static_cast<DataType>(Idx);
+
+            if constexpr(IdxType == DataType::None || IdxType == DataType::Count)
+            {
+                Throw<FatalError>("Unsupported reinterpret to type: ", toString(targetDataType));
+                return 0;
+            }
+            else
+            {
+                using ToType = typename EnumTypeInfo<IdxType>::Type;
+
+                if(targetDataType == IdxType)
+                {
+                    AssertFatal(std::is_trivially_copyable_v<FromType>,
+                                "FromType must be trivially copyable");
+                    AssertFatal(std::is_trivially_copyable_v<ToType>,
+                                "ToType must be trivially copyable");
+
+                    if constexpr(!CCommandArgumentValue<
+                                     ToType> || sizeof(ToType) != sizeof(FromType))
+                    {
+                        Throw<FatalError>("Cannot reinterpret to ",
+                                          friendlyTypeName<ToType>(),
+                                          " from ",
+                                          friendlyTypeName<FromType>());
+                        return 0;
+                    }
+                    else
+                    {
+                        return std::bit_cast<ToType>(value);
+                    }
+                }
+                else
+                {
+                    return reinterpret<FromType, Idx + 1>(value, targetDataType);
+                }
+            }
+        }
+
+        CommandArgumentValue call(CommandArgumentValue const& arg)
+        {
+            return std::visit(
+                [this](auto const& val) -> CommandArgumentValue {
+                    using FromType = std::decay_t<decltype(val)>;
+                    return reinterpret<FromType, 0>(val, exp.destinationType);
+                },
+                arg);
+        }
+    };
+
     template <CCommandArgumentValue FromType, int Idx = 0>
-    CommandArgumentValue reinterpretTruncate(FromType const& value, DataType targetDataType)
+    CommandArgumentValue reinterpretTruncateValue(FromType const& value,
+                                                  DataType        targetDataType,
+                                                  std::endian     endianness = std::endian::native)
     {
         constexpr auto IdxType = static_cast<DataType>(Idx);
 
         AssertFatal(
-            std::endian::native == std::endian::little || std::endian::native == std::endian::big,
+            endianness == std::endian::little || endianness == std::endian::big,
             "Unsupported or mixed endianness: only pure little- or big-endian are supported.");
 
         if constexpr(IdxType == DataType::None || IdxType == DataType::Count)
@@ -227,7 +287,7 @@ namespace rocRoller::Expression::EvaluateDetail
                         std::array<std::byte, sizeof(ToType)> dst_bytes{};
                         dst_bytes.fill(std::byte{0});
 
-                        if constexpr(std::endian::native == std::endian::little)
+                        if(endianness == std::endian::little)
                         {
                             // Keep least-significant bytes: at low addresses.
                             std::copy_n(src_bytes.data(), N, dst_bytes.data());
@@ -253,9 +313,22 @@ namespace rocRoller::Expression::EvaluateDetail
             }
             else
             {
-                return reinterpretTruncate<FromType, Idx + 1>(value, targetDataType);
+                return reinterpretTruncateValue<FromType, Idx + 1>(
+                    value, targetDataType, endianness);
             }
         }
+    }
+
+    CommandArgumentValue reinterpretTruncateValue(CommandArgumentValue const& value,
+                                                  DataType                    targetDataType,
+                                                  std::endian                 endianness)
+    {
+        return std::visit(
+            [targetDataType, endianness](auto const& val) -> CommandArgumentValue {
+                using FromType = std::decay_t<decltype(val)>;
+                return reinterpretTruncateValue<FromType>(val, targetDataType, endianness);
+            },
+            value);
     }
 
     template <>
@@ -304,7 +377,7 @@ namespace rocRoller::Expression::EvaluateDetail
                                     expr.width,
                                     DataTypeInfo::Get(expr.outputDataType).elementBits));
 
-            return reinterpretTruncate(static_cast<ARG>(result), expr.outputDataType);
+            return reinterpretTruncateValue(static_cast<ARG>(result), expr.outputDataType);
         }
 
         CommandArgumentValue operator()(Raw32 const& arg) const
@@ -493,5 +566,6 @@ namespace rocRoller::Expression::EvaluateDetail
     INSTANTIATE_UNARY_OP(ToScalar);
     INSTANTIATE_UNARY_OP(BitFieldExtract);
     INSTANTIATE_UNARY_OP(Convert);
+    INSTANTIATE_UNARY_OP(Reinterpret);
 
 }

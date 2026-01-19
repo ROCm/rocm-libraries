@@ -384,7 +384,7 @@ void testing_bsrxmv_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_bsrxmv(Arguments argus)
+void testing_bsrxmv(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     hipsparseDirection_t dir          = HIPSPARSE_DIRECTION_COLUMN;
@@ -493,7 +493,6 @@ hipsparseStatus_t testing_bsrxmv(Arguments argus)
 
     unit_check_near(1, mb * block_dim, 1, hyref.data(), hy.data());
 #endif
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_BSRXMV_HPP

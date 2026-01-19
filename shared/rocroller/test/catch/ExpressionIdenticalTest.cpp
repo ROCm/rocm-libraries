@@ -180,6 +180,19 @@ namespace ExpressionTest
         Expression::ExpressionPtr n = nullptr;
         CHECK_FALSE(Expression::equivalent(n + n, a + n));
         CHECK_FALSE(Expression::equivalent(n + n, n + a));
+
+        // Test convert to different types should not be identical or equivalent
+        auto convertFloat  = Expression::convert(DataType::Float, rc->expression());
+        auto convertInt64  = Expression::convert(DataType::Int64, rc->expression());
+        auto convertUInt32 = Expression::convert(DataType::UInt32, rc->expression());
+
+        CHECK_FALSE(identical(convertFloat, convertInt64));
+        CHECK_FALSE(identical(convertFloat, convertUInt32));
+        CHECK_FALSE(identical(convertInt64, convertUInt32));
+
+        CHECK_FALSE(equivalent(convertFloat, convertInt64));
+        CHECK_FALSE(equivalent(convertFloat, convertUInt32));
+        CHECK_FALSE(equivalent(convertInt64, convertUInt32));
     }
 
     TEST_CASE("Expression contains and split", "[expression]")

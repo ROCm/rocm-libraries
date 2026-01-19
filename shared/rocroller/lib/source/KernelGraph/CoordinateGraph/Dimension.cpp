@@ -117,9 +117,11 @@ namespace rocRoller
             return name() + stag;
         }
 
-        User::User(Expression::ExpressionPtr size, Expression::ExpressionPtr offset)
+        User::User(Expression::ExpressionPtr size,
+                   Expression::ExpressionPtr offset,
+                   std::string const&        argName)
             : BaseDimension(size, Expression::literal(1u), offset)
-            , argumentName(rocRoller::SCRATCH)
+            , argumentName(argName)
         {
         }
 

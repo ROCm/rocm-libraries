@@ -10,15 +10,15 @@
 #include <vector>
 
 #include <hip/hip_runtime.h>
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include "hipdnn_backend.h"
 
-namespace hipdnn_sdk::data_objects
+namespace hipdnn_data_sdk::data_objects
 {
 // NOLINTNEXTLINE(readability-identifier-naming)
 struct EngineDetails;
-} // namespace hipdnn_sdk::data_objects
+} // namespace hipdnn_data_sdk::data_objects
 
 namespace hipdnn_backend
 {
@@ -84,6 +84,8 @@ public:
     virtual void
         getLoadedPluginFiles(size_t* numPlugins, char** pluginPaths, size_t* maxStringLen) const;
 
+    virtual std::string toString() const;
+
 private:
     // MT-unsafe instance methods
     // virtual for gMock testing
@@ -132,7 +134,7 @@ public:
     EngineDetailsWrapper(EngineDetailsWrapper&& other) noexcept;
     EngineDetailsWrapper& operator=(EngineDetailsWrapper&& other) noexcept;
 
-    const hipdnn_sdk::data_objects::EngineDetails* get() const;
+    const hipdnn_data_sdk::data_objects::EngineDetails* get() const;
 
 private:
     std::shared_ptr<EnginePluginResourceManager> _rm;

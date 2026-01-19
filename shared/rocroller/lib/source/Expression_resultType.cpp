@@ -166,6 +166,12 @@ namespace rocRoller
                 return {argVal.regType, expr.destinationType};
             }
 
+            ResultType operator()(Reinterpret const& expr)
+            {
+                auto argVal = call(expr.arg);
+                return {argVal.regType, expr.destinationType};
+            }
+
             template <DataType DATATYPE>
             ResultType operator()(SRConvert<DATATYPE> const& expr)
             {

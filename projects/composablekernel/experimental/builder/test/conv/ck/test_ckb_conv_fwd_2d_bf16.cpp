@@ -3,6 +3,7 @@
 
 #include "utils/ckb_conv_test_configs.hpp"
 #include "utils/ckb_conv_test_utils.hpp"
+#include "utils/conv_algorithm_type_utils.hpp"
 
 namespace {
 
@@ -12,25 +13,31 @@ using namespace ck_tile::builder::test_utils;
 TEST(FwdConvInstances,
      Create_DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_Instance_2D_BF16_ChannelsLast)
 {
+    using enum ck_tile::builder::ConvDirection;
+    using enum ck_tile::builder::DataType;
+    using enum ck_tile::builder::TensorLayout;
+
     constexpr ConvSignature FwdConvSignature{.spatial_dim            = 2,
-                                             .direction              = ConvDirection::FORWARD,
-                                             .data_type              = DataType::BF16,
-                                             .accumulation_data_type = DataType::FP32,
-                                             .input  = {.config = {.layout = TensorLayout::NHWGC}},
-                                             .weight = {.config = {.layout = TensorLayout::GKYXC}},
-                                             .output = {.config = {.layout = TensorLayout::NHWGK}}};
+                                             .direction              = FORWARD,
+                                             .data_type              = BF16,
+                                             .accumulation_data_type = FP32,
+                                             .input  = {.config = {.layout = NHWGC}},
+                                             .weight = {.config = {.layout = GKYXC}},
+                                             .output = {.config = {.layout = NHWGK}}};
 
     constexpr auto FwdConvAlgorithm =
         ConvAlgorithm_DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3{}
-            .with_thread_block(FwdThreadBlock_256_256x256x32)
+            .with_thread_block(ThreadBlock_256_256x256x32)
             .with_gemm_config(FwdGemmParams_Xdl_4x4_per_wave)
-            .with_transfer(FwdTransfer_4x64x1)
-            .with_specializations(ConvFwdSpecialization::DEFAULT, GemmSpecialization::MNKPadding)
+            .with_transfer(Transfer_4x64x1)
+            .with_fwd_specializations(ConvSpecialization::DEFAULT, GemmSpecialization::MNKPadding)
             .with_block_gemm(BlockGemmDesc_v1_intrawave);
 
     using Builder = ConvBuilder<FwdConvSignature, FwdConvAlgorithm>;
+
+    const auto expected_transfer_parameters = to_string(FwdConvAlgorithm);
     run_test<Builder>({"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3",
-                       "256,256,256,32",
+                       expected_transfer_parameters,
                        "Default",
                        "NHWGC,GKYXC,EmptyTuple,NHWGK",
                        "PassThrough,PassThrough,PassThrough",
@@ -43,24 +50,32 @@ TEST(FwdConvInstances,
 TEST(FwdConvInstances,
      Create_DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_Instance_2D_BF16_NHWGC_Filter3x3)
 {
+    using enum ck_tile::builder::ConvDirection;
+    using enum ck_tile::builder::DataType;
+    using enum ck_tile::builder::TensorLayout;
+
     constexpr ConvSignature FwdConvSignature{.spatial_dim            = 2,
-                                             .direction              = ConvDirection::FORWARD,
-                                             .data_type              = DataType::BF16,
-                                             .accumulation_data_type = DataType::FP32,
-                                             .input  = {.config = {.layout = TensorLayout::NHWGC}},
-                                             .weight = {.config = {.layout = TensorLayout::GKYXC}},
-                                             .output = {.config = {.layout = TensorLayout::NHWGK}}};
+                                             .direction              = FORWARD,
+                                             .data_type              = BF16,
+                                             .accumulation_data_type = FP32,
+                                             .input  = {.config = {.layout = NHWGC}},
+                                             .weight = {.config = {.layout = GKYXC}},
+                                             .output = {.config = {.layout = NHWGK}}};
 
     constexpr auto FwdConvAlgorithm =
         ConvAlgorithm_DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3{}
-            .with_thread_block(FwdThreadBlock_256_256x256x32)
+            .with_thread_block(ThreadBlock_256_256x256x32)
             .with_gemm_config(FwdGemmParams_Xdl_4x4_per_wave)
-            .with_transfer(FwdTransfer_4x64x1)
-            .with_specializations(ConvFwdSpecialization::FILTER_3x3, GemmSpecialization::MNKPadding)
+            .with_transfer(Transfer_4x64x1)
+            .with_fwd_specializations(ConvSpecialization::FILTER_3x3,
+                                      GemmSpecialization::MNKPadding)
             .with_block_gemm(BlockGemmDesc_v5_intrawave);
 
     using Builder = ConvBuilder<FwdConvSignature, FwdConvAlgorithm>;
+
+    const auto expected_transfer_parameters = to_string(FwdConvAlgorithm);
     run_test<Builder>({"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3",
+                       expected_transfer_parameters,
                        "Filter3x3",
                        "NHWGC,GKYXC,EmptyTuple,NHWGK",
                        "PassThrough,PassThrough,PassThrough",

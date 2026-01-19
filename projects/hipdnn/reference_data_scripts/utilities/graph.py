@@ -89,7 +89,7 @@ class Graph:
 
         nodes = [node_from_dict(node_dict, tensor_map) for node_dict in d["nodes"]]
 
-        for (uid, tensor) in tensor_map.items():
+        for uid, tensor in tensor_map.items():
             filepath = "{}.tensor{}".format(base_path, uid)
             if os.path.exists(filepath):
                 load_data_from_binary(filepath, tensor)

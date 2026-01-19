@@ -5,8 +5,8 @@
 
 #include "BackendDescriptor.hpp"
 #include <flatbuffers/detached_buffer.h>
-#include <hipdnn_sdk/data_objects/engine_config_generated.h>
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 namespace hipdnn_backend
 {
@@ -17,7 +17,7 @@ class EngineConfigDescriptor : public HipdnnBackendDescriptorImpl<EngineConfigDe
 {
 private:
     std::shared_ptr<const EngineDescriptor> _engine;
-    std::unique_ptr<hipdnn_sdk::data_objects::EngineConfigT> _engineConfigData;
+    std::unique_ptr<hipdnn_data_sdk::data_objects::EngineConfigT> _engineConfigData;
     mutable flatbuffers::DetachedBuffer _engineConfigSerializedBuffer;
     int64_t _maxWorkspaceSize = INVALID_WORKSPACE_SIZE;
 
@@ -58,6 +58,8 @@ public:
     virtual std::shared_ptr<const EngineDescriptor> getEngine() const;
 
     virtual hipdnnPluginConstData_t getSerializedEngineConfig() const;
+
+    std::string toString() const override;
 };
 
 } // namespace hipdnn_backend

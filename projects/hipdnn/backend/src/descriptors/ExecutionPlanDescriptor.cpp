@@ -243,4 +243,14 @@ hipdnnBackendDescriptorType_t ExecutionPlanDescriptor::getStaticType()
     return HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR;
 }
 
+std::string ExecutionPlanDescriptor::toString() const
+{
+    std::string str = "ExecutionPlanDescriptor: {workspaceSize=" + std::to_string(_workspaceSize);
+    str += _engineConfig ? ", engineConfig="
+                               + fmt::format("{:p}", static_cast<const void*>(_engineConfig.get()))
+                         : ", engineConfig=null";
+    str += "}";
+    return str;
+}
+
 } // namespace hipdnn_backend

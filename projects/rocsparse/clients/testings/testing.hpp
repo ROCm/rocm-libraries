@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,7 @@
 #include "rocsparse_matrix_factory.hpp"
 #include "rocsparse_reproducibility.hpp"
 #include "rocsparse_reproducibility_test_save.hpp"
+#include "rocsparse_traits.hpp"
 #include "rocsparse_vector_utils.hpp"
 #include "utility.hpp"
 
@@ -156,7 +157,10 @@ namespace rocsparse_clients
         static constexpr const char* const gfx1100 = "gfx1100";
         static constexpr const char* const gfx1101 = "gfx1101";
         static constexpr const char* const gfx1102 = "gfx1102";
+        static constexpr const char* const gfx1150 = "gfx1150";
         static constexpr const char* const gfx1151 = "gfx1151";
+        static constexpr const char* const gfx1152 = "gfx1152";
+        static constexpr const char* const gfx1153 = "gfx1153";
         static constexpr const char* const gfx1200 = "gfx1200";
         static constexpr const char* const gfx1201 = "gfx1201";
     };

@@ -3,7 +3,7 @@
 
 target_sources(rocroller
     PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/AddComputeIndex.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AssignIndexExpressions.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddConvert.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddDeallocate.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddDirect2LDS.cpp"
@@ -14,13 +14,13 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/AddStreamK.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddTransposeLoadCT.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AliasDataFlowTags.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/AssignComputeIndex.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CleanArguments.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CleanLoops.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ConnectWorkgroups.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ConstantPropagation.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FuseExpressions.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FuseLoops.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/HoistLoopInvariant.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/IdentifyParallelDimensions.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/InlineIncrements.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/InlineInits.cpp"

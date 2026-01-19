@@ -330,6 +330,28 @@ FillValidKernelsByAlphaBeta(const ::miopen::conv::ProblemDescription& problem)
 }
 } // namespace
 
+// Test helper: Get all WRW kernel TypeStrings without filtering
+// Used for metadata validation tests
+std::vector<std::string> GetAllWrwKernelTypeStrings()
+{
+    std::vector<std::string> all_kernels;
+
+    auto bilinear_ptrs = DeviceOpGBwdWeightBilinearPtrs<float>::GetInstances();
+    auto scale_ptrs    = DeviceOpGBwdWeightScalePtrs<float>::GetInstances();
+    auto default_ptrs  = DeviceOpGBwdWeightDefaultPtrs<float>::GetInstances();
+
+    all_kernels.reserve(bilinear_ptrs.size() + scale_ptrs.size() + default_ptrs.size());
+
+    for(const auto& ptr : bilinear_ptrs)
+        all_kernels.push_back(ptr->GetTypeString());
+    for(const auto& ptr : scale_ptrs)
+        all_kernels.push_back(ptr->GetTypeString());
+    for(const auto& ptr : default_ptrs)
+        all_kernels.push_back(ptr->GetTypeString());
+
+    return all_kernels;
+}
+
 template <typename DataType>
 void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::Init(
     const ::miopen::conv::ProblemDescription& problem)
@@ -669,10 +691,7 @@ bool ConvHipImplicitGemm3DGroupWrwXdlops::IsApplicable(
     case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
     case miopenFloat: return CheckCKApplicability<float>(problem);
     case miopenInt8: return CheckCKApplicability<int8_t>(problem);
-    case miopenBFloat16:
-        return (ctx.GetStream().GetDeviceName() == "gfx942" ||
-                StartsWith(ctx.GetStream().GetDeviceName(), "gfx95")) &&
-               CheckCKApplicability<ck::bhalf_t>(problem);
+    case miopenBFloat16: return CheckCKApplicability<ck::bhalf_t>(problem);
     case miopenInt64:
     case miopenInt32:
     case miopenFloat8_fnuz:

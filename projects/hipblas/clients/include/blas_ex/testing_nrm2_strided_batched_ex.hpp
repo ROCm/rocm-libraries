@@ -186,7 +186,7 @@ void testing_nrm2_strided_batched_ex(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(dx.memcheck());
     CHECK_DEVICE_ALLOCATION(d_hipblas_result.memcheck());
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     // Initial Data on CPU
     hipblas_init_vector(hx, arg, hipblas_client_alpha_sets_nan, true);
@@ -237,7 +237,8 @@ void testing_nrm2_strided_batched_ex(const Arguments& arg)
             ref_nrm2<Tx, Tr>(N, hx[b], incx, &(h_cpu_result[b]));
         }
 
-        double abs_result = h_cpu_result[0] > 0 ? h_cpu_result[0] : -h_cpu_result[0];
+        double abs_result
+            = (float)h_cpu_result[0] > 0.0f ? (double)h_cpu_result[0] : (double)-h_cpu_result[0];
         double abs_error;
 
         abs_error = abs_result > 0 ? hipblas_type_epsilon<Tr> * N * abs_result

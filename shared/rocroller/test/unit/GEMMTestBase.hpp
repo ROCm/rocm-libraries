@@ -305,11 +305,11 @@ namespace GEMMTests
                                                   : std::vector<size_t>({});
 
             auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(
-                2, dataTypeA, gemm.transA == "N" ? oneStridesN : oneStridesT)); // A
+                2, dataTypeA, {}, gemm.transA == "N" ? oneStridesN : oneStridesT)); // A
             auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
             auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(
-                2, dataTypeB, gemm.transB == "N" ? oneStridesN : oneStridesT)); // B
+                2, dataTypeB, {}, gemm.transB == "N" ? oneStridesN : oneStridesT)); // B
             auto tagLoadB = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
             auto mulInputA = tagLoadA;
@@ -321,7 +321,7 @@ namespace GEMMTests
             if(gemm.scaleAMode == Operations::ScaleMode::Separate)
             {
                 tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                    2, gemm.scaleTypeA, gemm.transA == "N" ? oneStridesN : oneStridesT));
+                    2, gemm.scaleTypeA, {}, gemm.transA == "N" ? oneStridesN : oneStridesT));
                 tagLoadScaleA
                     = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleA));
 
@@ -345,7 +345,7 @@ namespace GEMMTests
             if(gemm.scaleBMode == Operations::ScaleMode::Separate)
             {
                 tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                    2, gemm.scaleTypeB, gemm.transB == "N" ? oneStridesN : oneStridesT));
+                    2, gemm.scaleTypeB, {}, gemm.transB == "N" ? oneStridesN : oneStridesT));
                 tagLoadScaleB
                     = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleB));
 
@@ -367,7 +367,7 @@ namespace GEMMTests
             }
 
             auto tagTensorC = command->addOperation(
-                rocRoller::Operations::Tensor(2, dataTypeC, oneStridesN)); // C
+                rocRoller::Operations::Tensor(2, dataTypeC, {}, oneStridesN)); // C
             auto tagLoadC = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorC));
 
             auto tagScalarAlpha
@@ -405,7 +405,7 @@ namespace GEMMTests
             command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
 
             auto tagTensorD = command->addOperation(
-                rocRoller::Operations::Tensor(2, dataTypeD, oneStridesN)); // D
+                rocRoller::Operations::Tensor(2, dataTypeD, {}, oneStridesN)); // D
             Operations::OperationTag tagScalarSeed;
             if constexpr(std::is_same_v<TC, TD>)
             {
@@ -434,14 +434,8 @@ namespace GEMMTests
                 command->addOperation(rocRoller::Operations::T_Store_Tiled(tagCvt, tagTensorD));
             }
 
-            auto tagScratch = command->allocateTag();
-            command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
-                                      tagScratch,
-                                      ArgumentType::Value,
-                                      DataDirection::ReadWrite,
-                                      rocRoller::SCRATCH);
-
-            Operations::OperationTag tagNumWGs;
+            std::map<Operations::ScratchPolicy, Operations::OperationTag> scratchTags;
+            Operations::OperationTag                                      tagNumWGs;
             if(gemm.streamK)
             {
                 tagNumWGs      = command->allocateTag();
@@ -450,6 +444,29 @@ namespace GEMMTests
                                                            ArgumentType::Value,
                                                            DataDirection::ReadOnly,
                                                            rocRoller::NUMWGS);
+
+                scratchTags[Operations::ScratchPolicy::None] = command->allocateTag();
+                command->addOperation(
+                    rocRoller::Operations::Scratch(scratchTags.at(Operations::ScratchPolicy::None),
+                                                   Operations::ScratchPolicy::None));
+                command->allocateArgument(
+                    VariableType(DataType::UInt32, PointerType::PointerGlobal),
+                    scratchTags.at(Operations::ScratchPolicy::None),
+                    ArgumentType::Value,
+                    DataDirection::ReadWrite,
+                    getScratchName(Operations::ScratchPolicy::None));
+
+                scratchTags[Operations::ScratchPolicy::ZeroedBeforeAndAfter]
+                    = command->allocateTag();
+                command->addOperation(rocRoller::Operations::Scratch(
+                    scratchTags.at(Operations::ScratchPolicy::ZeroedBeforeAndAfter),
+                    Operations::ScratchPolicy::ZeroedBeforeAndAfter));
+                command->allocateArgument(
+                    VariableType(DataType::UInt32, PointerType::PointerGlobal),
+                    scratchTags.at(Operations::ScratchPolicy::ZeroedBeforeAndAfter),
+                    ArgumentType::Value,
+                    DataDirection::ReadWrite,
+                    getScratchName(Operations::ScratchPolicy::ZeroedBeforeAndAfter));
             }
 
             Operations::OperationTag tagWGM;
@@ -512,8 +529,6 @@ namespace GEMMTests
 
             if(gemm.streamK)
             {
-                REQUIRE_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs);
-
                 AssertFatal(
                     numWorkgroupY == 1,
                     "Current scratch space implementation assumes that the kernel is launched "
@@ -653,15 +668,27 @@ namespace GEMMTests
                 commandArgs.setArgument(tagScalarSeed, ArgumentType::Value, srCvtSeed.value());
 
             // Create scratch space
+            size_t scratchSpaceRequired[static_cast<int>(Operations::ScratchPolicy::Count)];
+            std::shared_ptr<uint8_t>
+                deviceScratch[static_cast<int>(Operations::ScratchPolicy::Count)];
+            std::fill(std::begin(scratchSpaceRequired), std::end(scratchSpaceRequired), 0);
+            std::fill(std::begin(deviceScratch), std::end(deviceScratch), nullptr);
             if(gemm.streamK)
             {
                 commandArgs.setArgument(tagNumWGs, ArgumentType::Value, gemm.numWGs);
+                for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
+                {
+                    auto policy             = static_cast<Operations::ScratchPolicy>(i);
+                    scratchSpaceRequired[i] = commandKernel.scratchSpaceRequired(
+                        policy, commandArgs.runtimeArguments());
+                    if(scratchSpaceRequired[i] > 0)
+                    {
+                        deviceScratch[i] = make_shared_device<uint8_t>(scratchSpaceRequired[i], 0);
+                        commandArgs.setArgument(
+                            scratchTags.at(policy), ArgumentType::Value, deviceScratch[i].get());
+                    }
+                }
             }
-
-            auto scratchSpaceRequired
-                = commandKernel.scratchSpaceRequired(commandArgs.runtimeArguments());
-            auto deviceScratch = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
-            commandArgs.setArgument(tagScratch, ArgumentType::Value, deviceScratch.get());
 
             if(gemm.workgroupMappingDim != -1)
             {
@@ -774,8 +801,18 @@ namespace GEMMTests
             for(int iteration = 0; iteration < numIters; ++iteration)
             {
                 ASSERT_THAT(hipMemset(deviceD.get(), 0, M * N * sizeof(TD)), HasHipSuccess(0));
-                ASSERT_THAT(hipMemset(deviceScratch.get(), 0, scratchSpaceRequired),
-                            HasHipSuccess(0));
+                if(iteration == 0)
+                {
+                    for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
+                    {
+                        if(scratchSpaceRequired[i] > 0)
+                        {
+                            ASSERT_THAT(
+                                hipMemset(deviceScratch[i].get(), 0, scratchSpaceRequired[i]),
+                                HasHipSuccess(0));
+                        }
+                    }
+                }
 
                 commandKernel.launchKernel(commandArgs.runtimeArguments());
 
@@ -791,6 +828,36 @@ namespace GEMMTests
                           res.relativeNormL2,
                           res.acceptableError.relativeL2Tolerance,
                           iteration);
+
+                // Verify ZeroedBeforeAndAfter scratch is all zeros after kernel execution
+                auto zeroedIdx
+                    = static_cast<size_t>(Operations::ScratchPolicy::ZeroedBeforeAndAfter);
+                if(scratchSpaceRequired[zeroedIdx] > 0)
+                {
+                    std::vector<uint8_t> zeroedResult(scratchSpaceRequired[zeroedIdx]);
+                    ASSERT_THAT(hipMemcpy(zeroedResult.data(),
+                                          deviceScratch[zeroedIdx].get(),
+                                          scratchSpaceRequired[zeroedIdx],
+                                          hipMemcpyDeviceToHost),
+                                HasHipSuccess(0));
+
+                    bool allZeros = true;
+                    for(size_t i = 0; i < zeroedResult.size(); ++i)
+                    {
+                        if(zeroedResult[i] != 0)
+                        {
+                            allZeros = false;
+                            // Print as uint32 since flags are UInt32
+                            size_t flagIndex = i / sizeof(uint32_t);
+                            std::cerr << "Non-zero at byte " << i << " (flag index " << flagIndex
+                                      << "): " << static_cast<int>(zeroedResult[i]) << std::endl;
+                        }
+                    }
+                    EXPECT_TRUE(allZeros)
+                        << "ZeroedBeforeAndAfter scratch should be all zeros after kernel "
+                           "execution (size="
+                        << scratchSpaceRequired[zeroedIdx] << " bytes)";
+                }
 
                 if(debuggable && !res.ok)
                 {

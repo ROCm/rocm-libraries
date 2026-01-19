@@ -304,6 +304,11 @@ def writeSolutionsAndKernels(
     writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
     srcKernelFile = Path(outputPath) / "Kernels.cpp"
 
+    #TODO: GSU support for Complex datatypes is not ready yet. Source kernel build will fail.
+    complexKernel = False
+    for ko in kernelHelperObjs:
+        if ko.state["ProblemType"]["DataType"].isComplex(): complexKernel = True
+
     if globalParameters["PythonProfile"]:
         yappi.stop()
         yappi.get_func_stats().save("yappi_results.profile", type="callgrind")
@@ -322,15 +327,16 @@ def writeSolutionsAndKernels(
             assemblyTmpPath,
             compress,
         )
-        buildSourceCodeObjectFiles(
-            srcToolchain.compiler,
-            srcToolchain.bundler,
-            destLibPath,
-            objectTmpPath,
-            outputPath,
-            srcKernelFile,
-            cmdlineArchs,
-        )
+        if not complexKernel:
+            buildSourceCodeObjectFiles(
+                srcToolchain.compiler,
+                srcToolchain.bundler,
+                destLibPath,
+                objectTmpPath,
+                outputPath,
+                srcKernelFile,
+                cmdlineArchs,
+            )
 
     return codeObjectFiles, numKernels
 
@@ -421,15 +427,22 @@ def writeSolutionsAndKernelsTCL(
 
     writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
     srcKernelFile = Path(outputPath) / "Kernels.cpp"
-    buildSourceCodeObjectFiles(
-        srcToolchain.compiler,
-        srcToolchain.bundler,
-        destLibPath,
-        objectTmpPath,
-        outputPath,
-        srcKernelFile,
-        cmdlineArchs,
-    )
+
+    #TODO: GSU support for Complex datatypes is not ready yet. Source kernel build will fail.
+    complexKernel = False
+    for ko in kernelHelperObjs:
+        if ko.state["ProblemType"]["DataType"].isComplex(): complexKernel = True
+
+    if not complexKernel:
+        buildSourceCodeObjectFiles(
+            srcToolchain.compiler,
+            srcToolchain.bundler,
+            destLibPath,
+            objectTmpPath,
+            outputPath,
+            srcKernelFile,
+            cmdlineArchs,
+        )
 
     return len(uniqueAsmKernels)
 
