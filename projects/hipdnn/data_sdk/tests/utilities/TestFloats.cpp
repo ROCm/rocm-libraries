@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsBfp8.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp8.hpp>
 
@@ -105,4 +106,44 @@ TEST(TestUtilsFp8, Max)
     EXPECT_EQ(std::max(a, nan), 1.0_fp8);
     EXPECT_EQ(std::max(nan, b), 2.0_fp8);
     EXPECT_TRUE(hipdnn_data_sdk::utilities::fp8::fp8isnan(std::max(nan, nan)));
+}
+
+TEST(TestUtilsBfp8, BasicUsage)
+{
+    hip_fp8_e5m2 bf = 1.0_bfp8;
+    EXPECT_EQ(bf, 1.0_bfp8);
+}
+
+TEST(TestUtilsBfp8, Negation)
+{
+    hip_fp8_e5m2 bf = 1.0_bfp8;
+    EXPECT_EQ(-bf, static_cast<hip_fp8_e5m2>(-1.0f));
+}
+
+TEST(TestUtilsBfp8, Fabs)
+{
+    EXPECT_EQ(std::fabs(-1.0_bfp8), 1.0_bfp8);
+    EXPECT_EQ(std::fabs(1.0_bfp8), 1.0_bfp8);
+}
+
+TEST(TestUtilsBfp8, Comparison)
+{
+    EXPECT_EQ(1.25_bfp8, 1.25_bfp8);
+    ASSERT_NE(1.0_bfp8, 2.0_bfp8);
+    ASSERT_LT(0.0001_bfp8, 0.0002_bfp8); // 0.00010.00 < 0.00010.01
+    ASSERT_LT(-0.0002_bfp8, 0.0003_bfp8); // 1.00010.00 <= 0.00011.01
+    ASSERT_GT(0.0003_bfp8, 0.0002_bfp8); // 0.00011.01 > 0.00010.01
+    ASSERT_GE(0.0002_bfp8, -0.0002_bfp8); // 0.00010.01 >= 1.00010.01
+}
+
+TEST(TestUtilsBfp8, Max)
+{
+    hip_fp8_e5m2 a = 1.0_bfp8;
+    hip_fp8_e5m2 b = 2.0_bfp8;
+    hip_fp8_e5m2 nan = hipdnn_data_sdk::utilities::bfp8::uchar_as_bfp8(0x7F);
+    EXPECT_EQ(std::max(a, b), 2.0_bfp8);
+    EXPECT_EQ(std::max(b, a), 2.0_bfp8);
+    EXPECT_EQ(std::max(a, nan), 1.0_bfp8);
+    EXPECT_EQ(std::max(nan, b), 2.0_bfp8);
+    EXPECT_TRUE(hipdnn_data_sdk::utilities::bfp8::bfp8isnan(std::max(nan, nan)));
 }
