@@ -38,6 +38,39 @@ jobs:
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
+      name: Notify Microsoft Teams
+        if: ${{ contains(inputs.project_to_test, 'miopen') }} # && failure()
+        run: |
+          curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" -H 'Content-Type: application/json' \
+               -d '{
+                     "summary": "GitHub CI Failure",
+                     "themeColor": "FF0000",
+                     "title": "MIOpen GitHub CI Notification",
+                     "sections": [
+                        {
+                          "activityTitle": "Repository: '${GITHUB_REPOSITORY}'",
+                          "facts": [
+                            { "name": "Workflow", "value": "'${GITHUB_WORKFLOW}'" },
+                            { "name": "Job", "value": "'${JOB_NAME}'" },
+                            { "name": "Branch", "value": "'${GITHUB_REF}'" },
+                            { "name": "Run ID", "value": "'${GITHUB_RUN_ID}'" 
+                        }
+                      ],
+                      markdown": true
+                      "potentialAction": [
+                        {
+                          "@type": "OpenUri",
+                          "name": "View Failing Step",
+                          "targets": [
+                            {
+                              "os": "default",
+                              "uri": "https://github.com/'${GITHUB_REPOSITORY}'/actions/runs/'${GITHUB_RUN_ID}'"
+                            }
+                          ]
+                        }
+                      ],
+                     "text": "❌ Test failure on branch: '${GITHUB_REF}'"
+                   }'
       # We only want to build MIOpen HEAD against CK HEAD, not applicable for other projects
       - name: Checkout composable_kernel repository
         if: ${{ contains(inputs.project_to_test, 'miopen') || contains(inputs.project_to_test, 'miopen_plugin') }}
@@ -142,13 +175,13 @@ jobs:
             --build-dir TheRock/build \
             --upload
 
-      - name: Notify Microsoft Teams
-        if: ${{ contains(inputs.project_to_test, 'miopen') || contains(inputs.project_to_test, 'miopen_plugin') && failure() }}
+      - name: Notify Microsoft Teams 2
+        if: ${{ contains(inputs.project_to_test, 'miopen') && failure() }}
         run: |
           curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" -H 'Content-Type: application/json' \
                -d '{
                      "title": "MIOpen GitHub CI Notification",
-                     "text": "X Linux Build failure on branch: '${GITHUB_REF}'"
+                     "text": "❌ Linux Build failure on branch: '${GITHUB_REF}'"
                    }'
 
   therock-test-linux:

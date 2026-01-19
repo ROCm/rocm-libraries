@@ -91,12 +91,37 @@ jobs:
           ${{ fromJSON(inputs.component).test_script }}
 
       - name: Notify Microsoft Teams
-        if: ${{ contains(inputs.project_to_test, 'miopen') || contains(inputs.project_to_test, 'miopen_plugin') && failure() }}
+        if: ${{ contains(inputs.project_to_test, 'miopen') }} # && failure()
         run: |
           curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" -H 'Content-Type: application/json' \
                -d '{
+                     "summary": "GitHub CI Failure",
+                     "themeColor": "FF0000",
                      "title": "MIOpen GitHub CI Notification",
-                     "text": "X Test failure on branch: '${GITHUB_REF}'"
+                     "sections": [
+                        {
+                          "activityTitle": "Repository: '${GITHUB_REPOSITORY}'",
+                          "facts": [
+                            { "name": "Workflow", "value": "'${GITHUB_WORKFLOW}'" },
+                            { "name": "Job", "value": "'${JOB_NAME}'" },
+                            { "name": "Branch", "value": "'${GITHUB_REF}'" },
+                            { "name": "Run ID", "value": "'${GITHUB_RUN_ID}'" 
+                        }
+                      ],
+                      markdown": true
+                      "potentialAction": [
+                        {
+                          "@type": "OpenUri",
+                          "name": "View Failing Step",
+                          "targets": [
+                            {
+                              "os": "default",
+                              "uri": "https://github.com/'${GITHUB_REPOSITORY}'/actions/runs/'${GITHUB_RUN_ID}'"
+                            }
+                          ]
+                        }
+                      ],
+                     "text": "❌ Test failure on branch: '${GITHUB_REF}'"
                    }'
 
       # GitHub's 'Complete job' step is unaware of launched executables
