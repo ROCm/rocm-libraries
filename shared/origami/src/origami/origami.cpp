@@ -348,6 +348,9 @@ staggerU_t select_staggerU(const problem_t& problem,
   // -------------------
   // General Cases
   // -------------------
+  size_t out_staggerUMapping = 0;
+  size_t out_staggerU = 0;
+  size_t out_staggerUStrideShift = 0;
   // In a typicall GEMM, CUs compete to access the first K-slice.
   // While the first K-slice is in MALL, CUs on the same XCD compete to access the K-slice in L2.
   // Thus, there are two tiers of contention:
@@ -368,19 +371,27 @@ staggerU_t select_staggerU(const problem_t& problem,
 
   // Early Exit: If K is substantial, StaggerU effect is negligible
   if(numMT_K > 36)
-    return staggerU_t{0, 0, 0}
+    return staggerU_t{0, 0, 0};
+
+  if(wgm == -1)
+  {
+    std::cout << "StaggerU is disabled" << std::endl;
+    return staggerU_t{0, 0, 0};
+  }
   
   // Find Mall Tile (the tile that is accessed by all CUs in one time step)
   size_t Mall_N = numMT_N;
   size_t Mall_M = numMT_M;
-  size_t L2_N   = std::min(wgm, numMT_N);
-  size_t L2_M   = std::min(numMT_M / wgm, numMT_M);
+  size_t L2_N   = (wgm < numMT_N) ? wgm : numMT_N;
+  size_t L2_M_temp = math::safe_ceil_div(numMT_M, wgm);
+  size_t L2_M   = (L2_M_temp < numMT_M) ? L2_M_temp : numMT_M;
 
   size_t numWGsPerL2 = skGrid > numMTs ? math::safe_ceil_div(skGrid, numXCD) : math::safe_ceil_div(numMTs, numXCD);
-  numWGsPerL2 = std::min(numWGsPerL2, numCUsPerXCD);
+  numWGsPerL2 = (numWGsPerL2 < numCUsPerXCD) ? numWGsPerL2 : numCUsPerXCD;
   size_t numWGsPerMall = numWGsPerL2 * numXCD;
   
   // Find the dimension with the least number of MTs -- This is the dimension that will be staggered
+  size_t staggerTile = 0;
   if(L2_M > L2_N)
   {
     out_staggerUMapping = 0;
@@ -396,7 +407,7 @@ staggerU_t select_staggerU(const problem_t& problem,
   size_t powerOf2 = 1;
   while(powerOf2 < staggerTile)
     powerOf2 <<= 1;
-  out_staggerU = std::min(powerOf2, size_t(64)); // Cap at 64
+  out_staggerU = (powerOf2 < 64) ? powerOf2 : 64; // Cap at 64
   out_staggerUStrideShift = 1;
 
   return staggerU_t{out_staggerUMapping, out_staggerU, out_staggerUStrideShift};

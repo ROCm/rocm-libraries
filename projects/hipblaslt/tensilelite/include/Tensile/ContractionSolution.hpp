@@ -628,7 +628,7 @@ namespace TensileLite
         std::tuple<size_t, size_t, size_t>  calculateAutoStaggerU(Problem const&  problem,
                                                                   Hardware const* hardware,
                                                                   uint32_t        skgrid,
-                                                                  int32_t         autoWGM,) const;
+                                                                  int32_t         autoWGM) const;
         uint32_t calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
 
         double calculateDimensionM(Problem const&  problem) const;
