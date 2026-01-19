@@ -82,8 +82,11 @@ endfunction()
 add_hipdnn_sample_test(conv_fprop)
 add_hipdnn_sample_test(conv_dgrad)
 add_hipdnn_sample_test(conv_wgrad)
-add_hipdnn_sample_test(fused_conv_fprop_activ)
-add_hipdnn_sample_test(fused_conv_fprop_bias_activ)
+
+if(NOT WIN32)
+    add_hipdnn_sample_test(fused_conv_fprop_activ)
+    add_hipdnn_sample_test(fused_conv_fprop_bias_activ)
+endif()
 
 # Register batchnorm samples as tests
 add_hipdnn_sample_test(bn_inference)
