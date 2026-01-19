@@ -56,9 +56,14 @@ bool BnFwdInferActivationFused::IsApplicable(const FusionContext& /*context*/,
         return false;
     if(desc.op_map.at(1)->kind() != miopenFusionOpActivForward)
         return false;
-    if(!(problem.IsFp32() || problem.IsFp16()))
+    if(!(problem.IsFp32() || problem.IsFp16() || problem.IsBFp16()))
         return false;
-    if(!(problem.Is2D() && problem.IsLayoutContiguous()))
+    if(!(problem.Is2D()))
+        return false;
+    if(!(problem.IsLayoutNCHW() || problem.IsLayoutNHWC()))
+        return false;
+    const auto bn_problem = problem.GetBnProblem(0, miopen::batchnorm::Direction::ForwardInference);
+    if(!IsOCLInferTypeValid(bn_problem))
         return false;
     return true;
 }
@@ -130,15 +135,14 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& context
         {"MIOPEN_READ_UNIT", static_cast<int>(read_unit)},
         {"MIOPEN_SBN_BOUNDS", static_cast<unsigned int>(read_len / read_unit)},
         {"MIOPEN_NRN_OP_ID", static_cast<int>(activ_op.activMode)},
-        {"MIOPEN_USE_FP16", static_cast<int>(input_desc.GetType() == miopenHalf)},
+        {"MIOPEN_USE_BFPMIX", static_cast<int>(input_desc.GetType() == miopenBFloat16)},
+        {"MIOPEN_USE_FPMIX", static_cast<int>(input_desc.GetType() == miopenHalf)},
         {"MIOPEN_USE_FP32", static_cast<int>(input_desc.GetType() == miopenFloat)}};
     kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
     if(bn_problem.GetMode() == miopenBNSpatial)
         kernel.comp_options += " -DSPATIAL_BN";
     else
         kernel.comp_options += " -DPERACT_BN";
-    if(input_desc.GetType() == miopenHalf)
-        kernel.comp_options += " -DMIOPEN_USE_FPMIX=1";
 
     result.construction_params.push_back(kernel);
 
