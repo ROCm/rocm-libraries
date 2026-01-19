@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -518,6 +518,13 @@ struct radix_key_codec
             unsigned int mask = (1u << length) - 1;
             return static_cast<unsigned int>(bit_key >> start) & mask;
         }
+
+        template<bool KillNegativeZeros>
+        ROCPRIM_FORCE_INLINE
+        static constexpr Key twiddle_in(Key bit_key)
+        {
+            return bit_key;
+        }
     };
 
     /// \brief For signed integral types
@@ -553,6 +560,13 @@ struct radix_key_codec
         {
             unsigned int mask = (1u << length) - 1;
             return static_cast<unsigned int>(bit_key >> start) & mask;
+        }
+
+        template<bool KillNegativeZeros>
+        ROCPRIM_FORCE_INLINE
+        static constexpr Key twiddle_in(Key bit_key)
+        {
+            return bit_key ^ sign_bit;
         }
     };
 
@@ -608,6 +622,27 @@ struct radix_key_codec
             }
             return static_cast<unsigned int>(bit_key >> start) & mask;
         }
+
+        template<bool KillNegativeZeros>
+        ROCPRIM_FORCE_INLINE
+        static constexpr Key twiddle_in(Key bit_key)
+        {
+            static_assert(!std::is_same<bit_key_type, void>::value, "Input type not supported");
+            static_assert(sizeof(Key) == sizeof(bit_key_type),
+                          "Size of mathed_int_t is not the same as key_in_t");
+            // Might have undefined behavior, kill negative zeros
+            if constexpr(KillNegativeZeros)
+            {
+                bit_key = bit_key == bit_key_type{-0.0} ? bit_key_type{+0.0} : bit_key;
+            }
+            // Cast to integral type, so we can flip the two’s complement
+            const auto bits = traits::radix_key_codec::bit_cast<bit_key_type>(bit_key);
+            // For negative values, flip the whole number
+            // For positive values, flip only two’s complement
+            // Cast back when passing bits into extract_digit, in order to let extract_digit know that this is a floating point type
+            return traits::radix_key_codec::bit_cast<Key, bit_key_type>(
+                bits & sign_bit ? ~bits : bits ^ sign_bit);
+        }
     };
 
     /// \brief For bool
@@ -635,6 +670,13 @@ struct radix_key_codec
         {
             unsigned int mask = (1u << length) - 1;
             return static_cast<unsigned int>(bit_key >> start) & mask;
+        }
+
+        template<bool KillNegativeZeros>
+        ROCPRIM_FORCE_INLINE
+        static constexpr bool twiddle_in(bool bit_key)
+        {
+            return bit_key;
         }
     };
 

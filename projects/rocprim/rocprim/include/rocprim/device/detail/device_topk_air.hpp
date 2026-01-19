@@ -312,16 +312,6 @@ struct device_topk_air_impl
         discard
     };
 
-    enum class flip_strategy
-    {
-        // Does nothing, will call extract_digit directly
-        no_flip,
-        // Make input type unsigned, and move all values to fit unsigned type
-        input_flip,
-        // Flip only two’s complement or extracted digit
-        output_flip
-    };
-
     // In the implementaion of function `extract_digit`, we are confident that unrelated bits are zeros
     // So we can directly use the native operator
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE 
@@ -420,109 +410,6 @@ struct device_topk_air_impl
         }
     }
 
-    /// \brief Extracts digit values for radix-based sorting or partitioning.
-    /// For radix-based sorting or partitioning, digits are extracted from the most
-    /// significant bit to the least significant bit. For signed or floating-point
-    /// types, the position must be adjusted for negative values.
-    ///
-    /// This function provides three flip strategies, suitable for both integral
-    /// and floating-point types.
-    template<flip_strategy FlipStrategy, class KeyCodec>
-    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
-    static auto extract_digit_flip_xaxis(key_in_t key, unsigned int start, unsigned int length, Decomposer decomposer)
-    {
-        static_assert(!(rocprim::is_floating_point<key_in_t>::value
-                        && FlipStrategy == flip_strategy::input_flip),
-                      "For floating point types, only input_flip is not supported");
-
-        if constexpr(FlipStrategy == flip_strategy::no_flip)
-        {
-            return KeyCodec::template extract_digit<Decomposer>(
-                key,
-                start, // Start bit of the sequence of bits to extract
-                length, // How many bits to extract
-                decomposer);
-        }
-        else if constexpr(FlipStrategy == flip_strategy::input_flip)
-        {
-            using unsigned_t              = typename rocprim::make_unsigned<key_in_t>::type;
-            constexpr auto   half_max     = ((~unsigned_t{0}) / 2) + 1;
-            const unsigned_t unsigned_key = key >= 0 ? static_cast<unsigned_t>(key) + half_max
-                                                     : static_cast<unsigned_t>(key + half_max);
-            return KeyCodec::template extract_digit<Decomposer>(
-                unsigned_key,
-                start, // Start bit of the sequence of bits to extract
-                length, // How many bits to extract
-                decomposer);
-        }
-        else if constexpr(FlipStrategy == flip_strategy::output_flip)
-        {
-            if constexpr(rocprim::is_integral<key_in_t>::value
-                         && device_topk_air_helper::has_operator_left_shift_v<key_in_t>)
-            { // Builtin integral types (including rocprim::int128_t and rocprim::uint128_t)
-                return KeyCodec::template extract_digit<Decomposer>(
-                    key ^ (key_in_t{1} << (sizeof(key_in_t) * 8 - 1)), // Flip only two’s complement
-                    start, // Start bit of the sequence of bits to extract
-                    length, // How many bits to extract
-                    decomposer);
-            }
-            else if constexpr(rocprim::is_integral<key_in_t>::value
-                              && !device_topk_air_helper::has_operator_left_shift_v<key_in_t>)
-            { // Custom types may not support `operator<<`, so they are `bit_cast` to integral types instead.
-                using matched_int_t = typename device_topk_air_helper::matched_int<key_in_t>::type;
-                static_assert(!std::is_same<matched_int_t, void>::value,
-                              "Input type not supported");
-                static_assert(sizeof(key_in_t) == sizeof(matched_int_t),
-                              "Size of mathed_int_t is not the same as key_in_t");
-                auto bits = traits::radix_key_codec::bit_cast<matched_int_t>(key);
-                bits ^= (matched_int_t{1} << (sizeof(key_in_t) * 8 - 1));
-                // Cast back when passing bits into extract_digit, in order to let extract_digit know that this is a floating point type
-                return KeyCodec::template extract_digit<Decomposer>(
-                    traits::radix_key_codec::bit_cast<key_in_t>(bits),
-                    start, // Start bit of the sequence of bits to extract
-                    length, // How many bits to extract
-                    decomposer);
-            }
-            else if constexpr(rocprim::is_floating_point<key_in_t>::value)
-            { // Floating point types
-                using matched_int_t = typename device_topk_air_helper::matched_int<key_in_t>::type;
-                static_assert(!std::is_same<matched_int_t, void>::value,
-                              "Input type not supported");
-                static_assert(sizeof(key_in_t) == sizeof(matched_int_t),
-                              "Size of mathed_int_t is not the same as key_in_t");
-                // Might have undefined behavior, kill negative zeros
-                if constexpr(KillNegativeZeros)
-                {
-                    key = key == key_in_t{-0.0} ? key_in_t{+0.0} : key;
-                }
-                // Cast to integral type, so we can flip the two’s complement
-                const auto bits = traits::radix_key_codec::bit_cast<matched_int_t>(key);
-                constexpr matched_int_t mask = matched_int_t{1} << (sizeof(key_in_t) * 8 - 1);
-                // For negative values, flip the whole number
-                // For positive values, flip only two’s complement
-                // Cast back when passing bits into extract_digit, in order to let extract_digit know that this is a floating point type
-                return KeyCodec::template extract_digit<Decomposer>(
-                    traits::radix_key_codec::bit_cast<key_in_t, matched_int_t>(
-                        bits & mask ? ~bits : bits ^ mask),
-                    start, // Start bit of the sequence of bits to extract
-                    length, // How many bits to extract
-                    decomposer);
-            }
-            else
-            {
-                static_assert(
-                    false,
-                    "key_in_t must be either rocprim::floating_point or rocprim::integral. "
-                    "If you are using custom types, please specialize "
-                    "rocprim::traits::define<your_type> to implement recognizable traits.");
-            }
-        }
-        else
-        {
-            static_assert(false, "flip strategy is not supported");
-        }
-    }
-
     template<unsigned int Iteration>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static digit_t
     extract_digit_of_cur_iteration(key_in_t const&key, Decomposer decomposer)
@@ -537,41 +424,15 @@ struct device_topk_air_impl
         constexpr auto histogram_size
             = Iteration == (num_iterations - 1) ? num_buckets_last_iteration : num_buckets;
 
-        digit_t digit;
-        if constexpr(rocprim::is_integral<key_in_t>::value && rocprim::is_signed<key_in_t>::value)
-        {
-            // TODO: Can also use output_flip or input_flip, need to see which is generally faster
-            // need to run some benchmarks to see which is faster
-            digit = extract_digit_flip_xaxis<flip_strategy::output_flip, key_codec>(
-                key,
-                start_bits, // Start bit of the sequence of bits to extract
-                cur_bits, // How many bits to extract
-                decomposer);
-        }
-        else if constexpr(rocprim::is_integral<key_in_t>::value
-                          && rocprim::is_unsigned<key_in_t>::value)
-        {
-            digit = extract_digit_flip_xaxis<flip_strategy::no_flip, key_codec>(
-                key,
-                start_bits, // Start bit of the sequence of bits to extract
-                cur_bits, // How many bits to extract
-                decomposer);
-        }
-        else if constexpr(rocprim::is_floating_point<key_in_t>::value)
-        {
-            digit = extract_digit_flip_xaxis<flip_strategy::output_flip, key_codec>(
-                key,
-                start_bits, // Start bit of the sequence of bits to extract
-                cur_bits, // How many bits to extract
-                decomposer);
-        }
-        else
-        {
-            // In this else branch, key_in_t must be custom types
-            static_assert(
-                false,
-                "please use ::rocprim::traits::define to specify what data format is key_in_t.");
-        }
+        digit_t digit = key_codec::template extract_digit<Decomposer>(
+            // Extracts digit values. Digits are extracted from the most
+            // significant bit to the least significant bit. For signed or floating-point
+            // types, the position must be adjusted for negative values.
+            traits::radix_key_codec::codec_base<key_in_t>::template twiddle_in<KillNegativeZeros>(
+                key),
+            start_bits, // Start bit of the sequence of bits to extract
+            cur_bits, // How many bits to extract
+            decomposer);
 
         if constexpr(SelectMin)
         {
