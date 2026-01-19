@@ -659,13 +659,20 @@ std::string rocfft_brick_t::str() const
     return ret;
 }
 
+// internal brick-adding API
+static void rocfft_field_add_brick_internal(rocfft_field_t& field, const rocfft_brick_t& brick)
+{
+    field.bricks.emplace_back(brick);
+}
+
+// public brick-adding API that logs
 rocfft_status rocfft_field_add_brick(rocfft_field field, rocfft_brick brick)
 try
 {
     log_trace(__func__, "field", field, "brick", brick);
     if(!field || !brick)
         return rocfft_status_invalid_arg_value;
-    field->bricks.emplace_back(*brick);
+    rocfft_field_add_brick_internal(*field, *brick);
     return rocfft_status_success;
 }
 catch(...)
@@ -673,6 +680,23 @@ catch(...)
     return rocfft_handle_exception();
 }
 
+// internal API to create brick structs
+static rocfft_brick_t rocfft_brick_create_internal(const size_t* field_lower,
+                                                   const size_t* field_upper,
+                                                   const size_t* brick_stride,
+                                                   size_t        dim,
+                                                   int           deviceID)
+{
+    rocfft_brick_t brick;
+    std::copy_n(field_lower, dim, std::back_inserter(brick.lower));
+    std::copy_n(field_upper, dim, std::back_inserter(brick.upper));
+    std::copy_n(brick_stride, dim, std::back_inserter(brick.stride));
+
+    brick.location.device = deviceID;
+    return brick;
+}
+
+// public brick-creating API that logs calls
 rocfft_status rocfft_brick_create(rocfft_brick* brick,
                                   const size_t* field_lower,
                                   const size_t* field_upper,
@@ -698,12 +722,9 @@ try
         return rocfft_status_invalid_arg_value;
 
     auto brick_ptr = std::make_unique<rocfft_brick_t>();
-    std::copy_n(field_lower, dim, std::back_inserter(brick_ptr->lower));
-    std::copy_n(field_upper, dim, std::back_inserter(brick_ptr->upper));
-    std::copy_n(brick_stride, dim, std::back_inserter(brick_ptr->stride));
-
-    brick_ptr->location.device = deviceID;
-    *brick                     = brick_ptr.release();
+    *brick_ptr
+        = rocfft_brick_create_internal(field_lower, field_upper, brick_stride, dim, deviceID);
+    *brick = brick_ptr.release();
     return rocfft_status_success;
 }
 catch(...)
@@ -3143,23 +3164,17 @@ rocfft_status allgather_brick_params_lus_mpi(rocfft_plan&    plan,
         ++ibrick)
     {
         // Add bricks one by one.
-        rocfft_brick brick = nullptr;
-        auto         rcfft = rocfft_brick_create(&brick,
-                                         global_lowers.data() + ibrick * global_brick_length,
-                                         global_uppers.data() + ibrick * global_brick_length,
-                                         global_strides.data() + ibrick * global_brick_length,
-                                         global_brick_length,
-                                         global_devices[ibrick]); // device id
-        if(rcfft != rocfft_status_success)
-        {
-            return rcfft;
-        }
+        rocfft_brick_t brick
+            = rocfft_brick_create_internal(global_lowers.data() + ibrick * global_brick_length,
+                                           global_uppers.data() + ibrick * global_brick_length,
+                                           global_strides.data() + ibrick * global_brick_length,
+                                           global_brick_length,
+                                           global_devices[ibrick]); // device id
+
         // It should be possible to get the brick comm rank from global_brick_count, but for now we
         // can just communicate it and set it.
-        brick->location.comm_rank = global_comm_ranks[ibrick];
-        rocfft_field_add_brick(&field, brick);
-        rocfft_brick_destroy(brick);
-        brick = nullptr;
+        brick.location.comm_rank = global_comm_ranks[ibrick];
+        rocfft_field_add_brick_internal(field, brick);
     }
 
     return rocfft_status_success;
