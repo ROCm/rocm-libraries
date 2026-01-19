@@ -33,8 +33,8 @@ public:
         // During inference, BN uses PRE-COMPUTED running statistics from training.
         // For each channel c, using saved running stats (runMean_c, runVar_c):
         //
-        // Normalizes: xhat[n,c,h,w] = (x[n,c,h,w] - runMean_c) / sqrt(runVar_c + ε)
-        // Transforms: y[n,c,h,w] = scale_c * xhat[n,c,h,w] + bias_c
+        // Normalizes: x_normalized[n,c,h,w] = (x[n,c,h,w] - runMean_c) / sqrt(runVar_c + ε)
+        // Transforms: y[n,c,h,w] = scale_c * x_normalized[n,c,h,w] + bias_c
         //
         // Key difference from standard BatchnormInference:
         // - Uses VARIANCE directly instead of INV_VARIANCE
@@ -73,7 +73,7 @@ public:
             ErrorCode::ATTRIBUTE_NOT_SET,
             "BatchnormInferenceNodeVarianceExt missing epsilon for pre-validation");
 
-        // Epsilon (ε) provides numerical stability: xhat = (x - mean) / sqrt(var + ε)
+        // Epsilon (ε) provides numerical stability: x_normalized = (x - mean) / sqrt(var + ε)
         // Without ε, division by zero occurs when var ≈ 0. Must be a scalar.
         HIPDNN_CHECK_ERROR(validateScalarParameter(attributes.get_epsilon(), "Epsilon"));
 

@@ -25,18 +25,6 @@ using namespace hipdnn_sdk_test_utils;
 
 class TestBatchnormFwdWithVariancePlan : public ::testing::Test
 {
-protected:
-    static void initTensorValues(hipdnn_data_sdk::data_objects::TensorAttributesT& tensorAttr,
-                                 DataType dataType,
-                                 const std::vector<int64_t>& dims,
-                                 const std::vector<int64_t>& strides,
-                                 int64_t uid)
-    {
-        tensorAttr.data_type = dataType;
-        tensorAttr.dims = dims;
-        tensorAttr.strides = strides;
-        tensorAttr.uid = uid;
-    }
 };
 
 TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlan)
