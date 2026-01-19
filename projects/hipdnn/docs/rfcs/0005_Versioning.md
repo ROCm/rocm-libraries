@@ -106,17 +106,18 @@ Version bumps should be handled automatically by the same process and/or automat
 #### Tweak version
 The patch version is determined by the short commit hash of rocm-libraries, and updates automatically as a result.
 
-### 4.3 High-level compatibility summary
+#### Public dependencies
 
-#### 4.3.1 Schema
+For any components with dependencies that expose headers from another component, their version *must* also increase when that dependency's version increases.
 
-**Scope**: Serialized flatbuffer schemas, and corresponding json serializations
+**Ex**:
+- The hipdnn_plugin_sdk version is 1.6.3
+- hipdnn_data_sdk version increases from 1.3.5 to 1.4.0
+- hipdnn_plugin_sdk version must be increased to 1.7.0
 
-**Compatibility requirements**: Any component must be able to consume schemas within a minor version
+### 4.3 Requirements
 
-#### 4.3.2 Header-only api components
-
-
+Excluding components that are compatible within major versions (See section 4.6), the required version for all internal dependencies should be read from the version.json file in that component.
 
 ### 4.4 Public API
 Excluding the exception below, everything included in headers available to the user are part of the public API. Some of the library components have been split into multiple APIs with a user-facing header.
@@ -130,20 +131,21 @@ In the proposed design, the following table lists the components of hipDNN, and 
 | schema [^1] | |
 | data_sdk | - schema |
 | plugin_sdk | - data_sdk |
-| plugin_sdk_api | - plugin_sdk<br>- data_sdk |
-| plugin_sdk_engine_api | - plugin_sdk_api<br>- data_sdk |
-| plugin_sdk_heuristic_api [^2] | - plugin_sdk_api<br>- data_sdk |
+| plugin_sdk_api [^2] | - plugin_sdk<br>- data_sdk |
+| plugin_sdk_engine_api [^2]  | - plugin_sdk_api<br>- data_sdk |
+| plugin_sdk_heuristic_api [^2] [^3] | - plugin_sdk_api<br>- data_sdk |
 | backend_private | - data_sdk<br>- plugin_sdk<br>- plugin_sdk_api<br>- plugin_sdk_engine_api<br>- plugin_sdk_heuristic_api |
 | backend | - backend_private |
-| frontend | - backend<br>- backend_private (dynamic)<br>- data_sdk<br>- schema (static/dynamic) [^3] |
+| frontend | - backend<br>- backend_private (dynamic)<br>- data_sdk<br>- schema (static/dynamic) [^4] |
 [^1]: Schema refers to both serialized formats of flatbuffers and json.
-[^2]: The heuristic API hasn't yet been implemented
-[^3]: Static schema version is determined by the data_sdk compiled with, dynamic schema version comes from the schema version used for a serialization being consumed. Described in more detail below
+[^2]: These components do not form their own project, and will be bundled with the plugin_sdk
+[^3]: The heuristic API hasn't yet been implemented
+[^4]: Static schema version is determined by the data_sdk compiled with, dynamic schema version comes from the schema version used for a serialization being consumed. Described in more detail below
 
 ### 4.6 Individual component details
 #### 4.6.1 Schema
 
-**Scope**: Serialized flatbuffer schemas, and corresponding json serializations
+**Scope**: Serialized flatbuffer schemas and corresponding json serializations
 
 The schema covers both the flatbuffer serialization and the json serialization. These two serializations should change in lockstep as new fields, enums and structs are added. The version should be encoded directly within the schema for every root_type. Currently that's `Graph`, `EngineConfig` and `EngineDetails`.
 
@@ -202,6 +204,8 @@ Plugins are responsible for failing gracefully on unsupported schemas. Typically
  | plugin_sdk | All remaining headers in the hipdnn_plugin_sdk folder |
  [^5]: File does not yet exist
 
+ While each of these components will have their own version, from a packaging perspective they'll be bundled together under the plugin_sdk version. As a result of this, any time one of the API versions are bumped, the corresponding plugin_sdk version must be bumped as well. Unlike the other components listed in secion 4.5, these components all belong to a single project.
+
 ### 4.7 Compatibility summary
 
 #### Schema &#8594; All consuming components
@@ -251,6 +255,16 @@ project(<component> VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH})
 ```
 **Drawbacks**:
 - Can't dynamically set tweak version
+
+### 5.2 Dependency versions requirements match the current version in version.json
+**Decision**: Excluding the dependencies that must be compatible within major versions, all dependencies should have a required version that's set to the current version in that component's version.json
+**Rationale**:
+- This guarantees that the required version will always be compatible with the library
+- No automation or manual effort is required to maintain this. Implementing this automation would be difficult (maybe even infeasible) and likely require a large amount of CI time for compilation. Handling it manually would be likely be error prone and require dedicated effort
+**Drawbacks**:
+- While this guarantees that required versions will always be compatible, the required versions will have stronger requirements than necessary. Ideally, the required version would only be updated when a new function or feature is needed.
+
+
 ## 6. Risks
 ### 6.1 Flatbuffer and Json schema definitions getting out of sync
 **Risk**: The flatbuffer schema might be updated without also updating the json serialization
