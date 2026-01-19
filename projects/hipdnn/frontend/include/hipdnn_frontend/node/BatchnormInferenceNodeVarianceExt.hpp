@@ -73,6 +73,10 @@ public:
             ErrorCode::ATTRIBUTE_NOT_SET,
             "BatchnormInferenceNodeVarianceExt missing epsilon for pre-validation");
 
+        // Epsilon (ε) provides numerical stability: xhat = (x - mean) / sqrt(var + ε)
+        // Without ε, division by zero occurs when var ≈ 0. Must be a scalar.
+        HIPDNN_CHECK_ERROR(validateScalarParameter(attributes.get_epsilon(), "Epsilon"));
+
         // Get tensor references
         auto x = attributes.get_x();
         auto y = attributes.get_y();
