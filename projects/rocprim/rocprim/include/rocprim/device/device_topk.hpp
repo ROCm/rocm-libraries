@@ -304,6 +304,21 @@ hipError_t topk_impl(void*                      temporary_storage,
 ///
 /// Returns the K largest or smallest elements. These maybe be in any order.
 ///
+/// A similar algorithm is nth_element. The main differences are:
+/// * topk returns arrays of size `k`, whereas nth_element returns an array matching the input size.
+/// * The element at index `n` is set to the element that would be at the n-th position in nth_element, while
+///   topk does not guarantee that.
+/// * Elements which are smaller than the n-th element will be placed in the front of the output, while topk ignores
+///   all elements which are smaller or larger than the k-th element (depending on descending or ascending).
+/// * `In-place` operation can be done by nth_element, while topk does not support that.
+/// * topk supports hipGraph, but nth_element does not.
+///
+/// Here are some tips for choosing between nth_element and topk:
+/// * If you need the n-th largest or smallest element to be placed at index `n`, please use
+///   nth_element.
+/// * If you want to care about both smaller elements and larger elements, please use nth_element.
+/// * If you want to use hipGraph, please use topk.
+///
 /// \tparam Config [optional] configuration of the primitive, must be `default_config` or `topk_config`.
 /// \tparam Descending [optional] determines the starting direction. If \p true, select the largest K elements, and vice versa.
 /// \tparam Ordered [optional] determines whether the output results are sorted by size.
@@ -411,6 +426,21 @@ hipError_t topk(void*                    temporary_storage,
 /// \brief Find the largest or smallest K elements from an input array of values based on their corresponding keys.
 ///
 /// Returns the K largest or smallest (key, value) pairs. These maybe be in any order.
+///
+/// A similar algorithm is nth_element. The main differences are:
+/// * topk returns arrays of size `k`, whereas nth_element returns an array matching the input size.
+/// * The element at index `n` is set to the element that would be at the n-th position in nth_element, while
+///   topk does not guarantee that.
+/// * Elements which are smaller than the n-th element will be placed in the front of the output, while topk ignores
+///   all elements which are smaller or larger than the k-th element (depending on descending or ascending).
+/// * `In-place` operation can be done by nth_element, while topk does not support that.
+/// * topk supports hipGraph, but nth_element does not.
+///
+/// Here are some tips for choosing between nth_element and topk:
+/// * If you need the n-th largest or smallest element to be placed at index `n`, please use
+///   nth_element.
+/// * If you want to care about both smaller elements and larger elements, please use nth_element.
+/// * If you want to use hipGraph, please use topk.
 ///
 /// \tparam Config [optional] configuration of the primitive, must be `default_config` or `topk_config`.
 /// \tparam Descending [optional] determines the starting direction. If \p true, select the largest K elements, and vice versa.
