@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2021-2025 AMD ROCm(TM) Software
+ * Copyright 2021-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -84,12 +84,11 @@ namespace rocRoller::Expression::EvaluateDetail
         uint32_t evaluate(uint32_t const& arg) const
         {
             assertNonNullPointer(arg);
-            AssertFatal(arg != 1, "Fast division not supported for denominator == 1");
 
             if(arg == 0)
                 return std::numeric_limits<uint32_t>::max() / 2;
 
-            auto magic = libdivide::libdivide_u32_branchfree_gen(arg);
+            auto magic = libdivide::libdivide_u32_gen(arg);
 
             return magic.magic;
         }
@@ -403,14 +402,13 @@ namespace rocRoller::Expression::EvaluateDetail
         int evaluate(uint32_t const& arg) const
         {
             assertNonNullPointer(arg);
-            AssertFatal(arg != 1, "Fast division not supported for denominator == 1");
 
             if(arg == 0)
                 return 0;
 
-            auto magic = libdivide::libdivide_u32_branchfree_gen(arg);
+            auto magic = libdivide::libdivide_u32_gen(arg);
 
-            return magic.more & libdivide::LIBDIVIDE_32_SHIFT_MASK;
+            return magic.more;
         }
     };
 

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -178,13 +178,62 @@ namespace rocRoller
 
             if(!isSigned)
             {
-                auto q = multiplyHigh(numerator, magicExpr);
-                setComment(q, "Magic q (unsigned)");
+                if(evaluationTimes(magicExpr)[EvaluationTime::Translate])
+                {
+                    auto magicValue = getUnsignedInt(evaluate(magicExpr));
+                    auto shiftValue = getUnsignedInt(evaluate(numShiftsExpr));
 
-                auto t = (arithmeticShiftR(numerator - q, one)) + q;
-                setComment(t, "Magic t (unsigned)");
-                result = arithmeticShiftR(t, numShiftsExpr);
-                setComment(result, "Magic result (unsigned)");
+                    if(magicValue == 0)
+                        result = arithmeticShiftR(numerator, literal(shiftValue, denominatorType));
+                    else
+                    {
+                        auto q = multiplyHigh(numerator, literal(magicValue, denominatorType));
+                        if((shiftValue & 0x40))
+                        {
+                            auto t = (arithmeticShiftR(numerator - q, one)) + q;
+                            result
+                                = arithmeticShiftR(t, literal(shiftValue & 0x1F, denominatorType));
+                        }
+                        else
+                        {
+                            result = arithmeticShiftR(q, literal(shiftValue, denominatorType));
+                        }
+                    }
+                }
+                else
+                {
+                    auto q = multiplyHigh(numerator, magicExpr);
+                    setComment(q, "q");
+                    auto qShift = arithmeticShiftR(q, numShiftsExpr);
+                    setComment(qShift, "qShift");
+
+                    auto t = (arithmeticShiftR((numerator - q), one)) + q;
+                    setComment(t, "t");
+                    auto tShift
+                        = arithmeticShiftR(t, (numShiftsExpr & literal(0x1F, denominatorType)));
+                    setComment(tShift, "tShift");
+
+                    auto maskedShift = numShiftsExpr & literal(0x40, denominatorType);
+                    setComment(maskedShift, "maskedShift");
+
+                    auto isShiftZero
+                        = conditional(maskedShift == literal(0, denominatorType), qShift, tShift);
+                    setComment(isShiftZero, "isShiftZero");
+
+                    auto shiftNumerator = arithmeticShiftR(numerator, numShiftsExpr);
+                    setComment(shiftNumerator, "shiftNumerator");
+
+                    result = conditional(
+                        magicExpr == literal(0, denominatorType), shiftNumerator, isShiftZero);
+                }
+
+                //auto q = multiplyHigh(numerator, magicExpr);
+                //setComment(q, "Magic q (unsigned)");
+
+                //auto t = (arithmeticShiftR(numerator - q, one)) + q;
+                //setComment(t, "Magic t (unsigned)");
+                //result = arithmeticShiftR(t, numShiftsExpr);
+                //setComment(result, "Magic result (unsigned)");
             }
             else
             {
