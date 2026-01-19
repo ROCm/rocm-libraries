@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <hipdnn_sdk/utilities/PointwiseValidation.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/PointwiseOperationFunctors.hpp>
@@ -18,9 +18,9 @@ template <class DeviceExecutor, class OutputType, class... InputTypes>
 class ReferencePointwiseBase
 {
 public:
-    static bool isApplicable(const hipdnn_sdk::data_objects::Node& node)
+    static bool isApplicable(const hipdnn_data_sdk::data_objects::Node& node)
     {
-        using namespace hipdnn_sdk::data_objects;
+        using namespace hipdnn_data_sdk::data_objects;
 
         if(node.attributes_type() != NodeAttributes::PointwiseAttributes)
         {
@@ -43,17 +43,17 @@ public:
 
     // Unary operations
     template <typename InputType, typename ComputeType = double>
-    static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                 hipdnn_sdk::utilities::TensorBase<OutputType>& output,
-                                 const hipdnn_sdk::utilities::TensorBase<InputType>& input)
+    static void pointwiseCompute(hipdnn_data_sdk::data_objects::PointwiseMode operation,
+                                 hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                                 const hipdnn_data_sdk::utilities::TensorBase<InputType>& input)
     {
         executeUnaryOperation<InputType, ComputeType>(operation, output, input);
     }
 
     template <typename InputType, typename ParamType, typename ComputeType = double>
-    static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                 hipdnn_sdk::utilities::TensorBase<OutputType>& output,
-                                 const hipdnn_sdk::utilities::TensorBase<InputType>& input,
+    static void pointwiseCompute(hipdnn_data_sdk::data_objects::PointwiseMode operation,
+                                 hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                                 const hipdnn_data_sdk::utilities::TensorBase<InputType>& input,
                                  const ParamType lowerClip,
                                  const ParamType upperClip,
                                  const ParamType lowerSlope)
@@ -66,10 +66,10 @@ public:
 
     // Binary operations
     template <typename Input1Type, typename Input2Type, typename ComputeType = double>
-    static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                 hipdnn_sdk::utilities::TensorBase<OutputType>& output,
-                                 const hipdnn_sdk::utilities::TensorBase<Input1Type>& input1,
-                                 const hipdnn_sdk::utilities::TensorBase<Input2Type>& input2)
+    static void pointwiseCompute(hipdnn_data_sdk::data_objects::PointwiseMode operation,
+                                 hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                                 const hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1,
+                                 const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2)
     {
         executeBinaryOperation<Input1Type, Input2Type, ComputeType>(
             operation, output, input1, input2);
@@ -80,10 +80,10 @@ public:
               typename Input2Type,
               typename ParamType,
               typename ComputeType = double>
-    static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                 hipdnn_sdk::utilities::TensorBase<OutputType>& output,
-                                 const hipdnn_sdk::utilities::TensorBase<Input1Type>& input1,
-                                 const hipdnn_sdk::utilities::TensorBase<Input2Type>& input2,
+    static void pointwiseCompute(hipdnn_data_sdk::data_objects::PointwiseMode operation,
+                                 hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                                 const hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1,
+                                 const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2,
                                  const ParamType lowerClip,
                                  const ParamType upperClip,
                                  const ParamType lowerSlope)
@@ -96,30 +96,31 @@ public:
 
 private:
     template <typename InputType, typename ComputeType>
-    static void executeUnaryOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                      hipdnn_sdk::utilities::TensorBase<OutputType>& output,
-                                      const hipdnn_sdk::utilities::TensorBase<InputType>& input)
+    static void
+        executeUnaryOperation(hipdnn_data_sdk::data_objects::PointwiseMode operation,
+                              hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                              const hipdnn_data_sdk::utilities::TensorBase<InputType>& input)
     {
         DeviceExecutor policy;
 
         switch(operation)
         {
-        case hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD:
+        case hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD:
             policy.executeUnary(input, output, pointwise::ReluForward<ComputeType>{});
             break;
-        case hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_FWD:
+        case hipdnn_data_sdk::data_objects::PointwiseMode::SIGMOID_FWD:
             policy.executeUnary(input, output, pointwise::SigmoidForward<ComputeType>{});
             break;
-        case hipdnn_sdk::data_objects::PointwiseMode::TANH_FWD:
+        case hipdnn_data_sdk::data_objects::PointwiseMode::TANH_FWD:
             policy.executeUnary(input, output, pointwise::TanhForward<ComputeType>{});
             break;
-        case hipdnn_sdk::data_objects::PointwiseMode::ABS:
+        case hipdnn_data_sdk::data_objects::PointwiseMode::ABS:
             policy.executeUnary(input, output, pointwise::AbsoluteValue{});
             break;
-        case hipdnn_sdk::data_objects::PointwiseMode::NEG:
+        case hipdnn_data_sdk::data_objects::PointwiseMode::NEG:
             policy.executeUnary(input, output, pointwise::Negation{});
             break;
-        case hipdnn_sdk::data_objects::PointwiseMode::IDENTITY:
+        case hipdnn_data_sdk::data_objects::PointwiseMode::IDENTITY:
             policy.executeUnary(input, output, pointwise::Identity{});
             break;
         default:
@@ -132,9 +133,9 @@ private:
 
     template <typename InputType, typename ParamType, typename ComputeType>
     static void executeParameterizedUnaryOperation(
-        hipdnn_sdk::data_objects::PointwiseMode operation,
-        hipdnn_sdk::utilities::TensorBase<OutputType>& output,
-        const hipdnn_sdk::utilities::TensorBase<InputType>& input,
+        hipdnn_data_sdk::data_objects::PointwiseMode operation,
+        hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+        const hipdnn_data_sdk::utilities::TensorBase<InputType>& input,
         const ParamType lowerClip,
         const ParamType upperClip,
         const ParamType lowerSlope)
@@ -143,7 +144,7 @@ private:
 
         switch(operation)
         {
-        case hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD:
+        case hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD:
             policy.executeUnary(
                 input,
                 output,
@@ -160,33 +161,34 @@ private:
     }
 
     template <typename Input1Type, typename Input2Type, typename ComputeType>
-    static void executeBinaryOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                       hipdnn_sdk::utilities::TensorBase<OutputType>& output,
-                                       const hipdnn_sdk::utilities::TensorBase<Input1Type>& input1,
-                                       const hipdnn_sdk::utilities::TensorBase<Input2Type>& input2)
+    static void
+        executeBinaryOperation(hipdnn_data_sdk::data_objects::PointwiseMode operation,
+                               hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                               const hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1,
+                               const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2)
     {
         DeviceExecutor policy;
 
         switch(operation)
         {
-        case hipdnn_sdk::data_objects::PointwiseMode::ADD:
+        case hipdnn_data_sdk::data_objects::PointwiseMode::ADD:
             policy.executeBinaryBroadcast(input1, input2, output, pointwise::Add{});
             break;
-        case hipdnn_sdk::data_objects::PointwiseMode::SUB:
+        case hipdnn_data_sdk::data_objects::PointwiseMode::SUB:
             policy.executeBinaryBroadcast(input1, input2, output, pointwise::Subtract{});
             break;
-        case hipdnn_sdk::data_objects::PointwiseMode::MUL:
+        case hipdnn_data_sdk::data_objects::PointwiseMode::MUL:
             policy.executeBinaryBroadcast(input1, input2, output, pointwise::Multiply{});
             break;
-        case hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD:
+        case hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD:
             policy.executeBinaryBroadcast(
                 input1, input2, output, pointwise::ReluBackward<ComputeType>{});
             break;
-        case hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_BWD:
+        case hipdnn_data_sdk::data_objects::PointwiseMode::SIGMOID_BWD:
             policy.executeBinaryBroadcast(
                 input1, input2, output, pointwise::SigmoidBackward<ComputeType>{});
             break;
-        case hipdnn_sdk::data_objects::PointwiseMode::TANH_BWD:
+        case hipdnn_data_sdk::data_objects::PointwiseMode::TANH_BWD:
             policy.executeBinaryBroadcast(
                 input1, input2, output, pointwise::TanhBackward<ComputeType>{});
             break;
@@ -200,10 +202,10 @@ private:
 
     template <typename Input1Type, typename Input2Type, typename ParamType, typename ComputeType>
     static void executeParameterizedBinaryOperation(
-        hipdnn_sdk::data_objects::PointwiseMode operation,
-        hipdnn_sdk::utilities::TensorBase<OutputType>& output,
-        const hipdnn_sdk::utilities::TensorBase<Input1Type>& input1,
-        const hipdnn_sdk::utilities::TensorBase<Input2Type>& input2,
+        hipdnn_data_sdk::data_objects::PointwiseMode operation,
+        hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+        const hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1,
+        const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2,
         const ParamType lowerClip,
         const ParamType upperClip,
         const ParamType lowerSlope)
@@ -212,7 +214,7 @@ private:
 
         switch(operation)
         {
-        case hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD:
+        case hipdnn_data_sdk::data_objects::PointwiseMode::RELU_BWD:
             policy.executeBinaryBroadcast(input1,
                                           input2,
                                           output,
@@ -229,7 +231,8 @@ private:
         policy.markOutputModified(output);
     }
 
-    static bool canExecuteUnaryOperation(const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
+    static bool
+        canExecuteUnaryOperation(const hipdnn_data_sdk::data_objects::PointwiseAttributes* attrs)
     {
         return attrs->in_0_tensor_uid() != 0 && // Required: first input
                !attrs->in_1_tensor_uid() && // Must NOT be set
@@ -238,7 +241,7 @@ private:
     }
 
     static bool
-        canExecuteBinaryOperation(const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
+        canExecuteBinaryOperation(const hipdnn_data_sdk::data_objects::PointwiseAttributes* attrs)
     {
         return attrs->in_0_tensor_uid() != 0 && // Required: first input
                attrs->in_1_tensor_uid() && // Must be set
@@ -248,7 +251,7 @@ private:
     }
 
     static bool
-        canExecuteTernaryOperation(const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
+        canExecuteTernaryOperation(const hipdnn_data_sdk::data_objects::PointwiseAttributes* attrs)
     {
         return attrs->in_0_tensor_uid() != 0 && // Required: first input
                attrs->in_1_tensor_uid() && // Must be set
@@ -258,9 +261,9 @@ private:
                attrs->out_0_tensor_uid() != 0; // Required: output
     }
 
-    static bool canExecuteOperation(const hipdnn_sdk::data_objects::PointwiseAttributes* attrs)
+    static bool canExecuteOperation(const hipdnn_data_sdk::data_objects::PointwiseAttributes* attrs)
     {
-        using namespace hipdnn_sdk::data_objects;
+        using namespace hipdnn_data_sdk::data_objects;
 
         if(attrs == nullptr)
         {
@@ -269,15 +272,15 @@ private:
 
         PointwiseMode operation = attrs->operation();
 
-        if(hipdnn_sdk::utilities::isImplementedUnaryPointwiseMode(operation))
+        if(hipdnn_data_sdk::utilities::isImplementedUnaryPointwiseMode(operation))
         {
             return canExecuteUnaryOperation(attrs);
         }
-        if(hipdnn_sdk::utilities::isImplementedBinaryPointwiseMode(operation))
+        if(hipdnn_data_sdk::utilities::isImplementedBinaryPointwiseMode(operation))
         {
             return canExecuteBinaryOperation(attrs);
         }
-        if(hipdnn_sdk::utilities::isImplementedTernaryPointwiseMode(operation))
+        if(hipdnn_data_sdk::utilities::isImplementedTernaryPointwiseMode(operation))
         {
             return canExecuteTernaryOperation(attrs);
         }

@@ -111,7 +111,7 @@ if (ADDRESS_SANITIZER_ENABLED)
         TARGETS "gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+" )
 else()
     rocm_check_target_ids(DEFAULT_GPU_TARGETS
-        TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1200;gfx1201" )
+        TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201" )
 endif()
 
 # check if ROCm supports `__hip_fp8_e5m2` and `__hip_fp8_e4m3`
@@ -165,19 +165,19 @@ find_package( hiprtc REQUIRED )
 find_package( OpenMP REQUIRED )
 
 if (ROCWMMA_BUILD_BENCHMARK_TESTS)
-    ## Check for ROCM-smi
-    find_package(rocm_smi PATHS ${ROCM_PATH}/lib/cmake/rocm_smi)
-    if (rocm_smi_FOUND)
-      message(STATUS "Found rocm_smi at ${ROCM_SMI_INCLUDE_DIR}")
+    ## Check for AMD-smi
+    find_package(amd_smi PATHS ${ROCM_PATH}/lib/cmake/amd_smi)
+    if (amd_smi_FOUND)
+      message(STATUS "Found amd_smi at ${AMD_SMI_INCLUDE_DIR}")
     else()
-      set(ROCM_SMI_INCLUDE_DIR "${ROCM_PATH}/rocm_smi/include")
-      set(ROCM_SMI_LIB_DIR     "${ROCM_PATH}/rocm_smi/lib")
-      set(ROCM_SMI_LIBRARY   rocm_smi64)
+      set(AMD_SMI_INCLUDE_DIR "${ROCM_PATH}/include")
+      set(AMD_SMI_LIB_DIR     "${ROCM_PATH}/lib")
+      set(AMD_SMI_LIBRARY   amd_smi)
     endif()
 endif()
 
 add_library(rocwmma INTERFACE)
-target_link_libraries(rocwmma INTERFACE hip::device hip::host OpenMP::OpenMP_CXX ${ROCM_SMI_LIBRARY})
+target_link_libraries(rocwmma INTERFACE hip::device hip::host OpenMP::OpenMP_CXX ${AMD_SMI_LIBRARY})
 
 rocm_install_targets(
   TARGETS rocwmma

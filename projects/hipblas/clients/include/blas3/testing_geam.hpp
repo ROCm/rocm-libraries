@@ -254,7 +254,7 @@ void testing_geam(const Arguments& arg)
     T h_alpha = arg.get_alpha<T>();
     T h_beta  = arg.get_beta<T>();
 
-    double             gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double             gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
     hipblasLocalHandle handle(arg);
 
     int64_t A_row = transA == HIPBLAS_OP_N ? M : N;

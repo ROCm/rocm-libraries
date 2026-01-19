@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -34,15 +34,15 @@ Tests:
 - name: coo2csr
   category: quick
   function: coo2csr
-  precision: *single_precision
-  M: [0, 10, 500, 872, 1000]
-  N: [0, 33, 242, 623, 1000]
+  precision: *single_double_precisions_complex
+  M: [10, 500, 872, 1000]
+  N: [33, 242, 623, 1000]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
 
 - name: coo2csr_file
   category: pre_checkin
   function: coo2csr
-  precision: *single_precision
+  precision: *single_double_precisions_complex
   M: 1
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   filename: [rma10,

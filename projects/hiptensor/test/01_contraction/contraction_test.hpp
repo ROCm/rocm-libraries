@@ -90,7 +90,8 @@ namespace hiptensor
         ContractionTest& operator=(ContractionTest&)  = delete;
         ContractionTest& operator=(ContractionTest&&) = delete;
 
-        bool checkDevice(hiptensorDataType_t datatype) const;
+        bool checkDevice(hiptensorDataType_t          dataType,
+                         hiptensorComputeDescriptor_t computeType) const;
         bool checkSizes() const;
         void reset();
 

@@ -333,10 +333,11 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
             MIOPEN_LOG_I(sol << ": " << elapsed << (elapsed < best ? " < " : " >= ") << best);
             if(elapsed < best)
             {
-                best                              = elapsed;
-                selected                          = sol;
-                best_invoker                      = invoker;
-                core_result.find_search_best_time = best;
+                best         = elapsed;
+                selected     = sol;
+                best_invoker = invoker;
+                if(best < core_result.find_search_best_time)
+                    core_result.find_search_best_time = best;
             }
 
             auto solution = Solution{solver::Id{sol.solver_id}, elapsed, sol.workspace_sz};
@@ -458,7 +459,8 @@ bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo)
 bool IsEnoughWorkspace(std::string_view where,
                        const miopen::solver::Id& solver_id,
                        const std::size_t required_size,
-                       const miopen::AnyInvokeParams* const invokeParams)
+                       const miopen::AnyInvokeParams* const invokeParams,
+                       bool log_as_warning)
 {
     if(invokeParams != nullptr && required_size > 0)
     {
@@ -466,9 +468,14 @@ bool IsEnoughWorkspace(std::string_view where,
         const auto provided_ptr  = invokeParams->GetWorkspace();
         if(provided_ptr == nullptr || provided_size < required_size)
         {
-            MIOPEN_LOG_W("[" << where << "] Solver <" << solver_id.ToString() << ">"
-                             << ", workspace required: " << required_size
-                             << ", provided ptr: " << provided_ptr << " size: " << provided_size);
+            std::stringstream log;
+            log << "[" << where << "] Solver <" << solver_id.ToString() << ">"
+                << ", workspace required: " << required_size << ", provided ptr: " << provided_ptr
+                << " size: " << provided_size;
+            if(log_as_warning)
+                MIOPEN_LOG_W(log.str());
+            else
+                MIOPEN_LOG_I2(log.str());
             return false;
         }
     }

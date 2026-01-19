@@ -84,9 +84,6 @@ When contributing to hipDNN, please keep these architectural principles in mind:
   - Plugins can have their own dependencies as needed
   - See [Plugin Development](./docs/PluginDevelopment.md) for further guidance
 
-> [!NOTE]
-> 📝 The MIOpen Legacy Plugin is currently an exception and will be migrated to its own repository in the future.
-
 ## Development Workflow
 
 ### 1. Fork and Clone
@@ -160,7 +157,7 @@ cmake -DBUILD_ADDRESS_SANITIZER=ON ..
 ninja check
 
 # Check code coverage (optional but recommended)
-cmake -DCODE_COVERAGE=ON ..
+cmake -DHIPDNN_ENABLE_COVERAGE=ON ..
 ninja code_coverage
 ```
 

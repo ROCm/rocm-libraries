@@ -316,8 +316,9 @@ size_t rocfft_plan_t::AddMultiPlanItem(std::unique_ptr<MultiPlanItem>&& item,
                                        const std::vector<size_t>&       antecedents)
 {
     // ensure antecedents all exist
-    if(std::any_of(
-           antecedents.begin(), antecedents.end(), [=](size_t i) { return i >= multiPlan.size(); }))
+    if(std::any_of(antecedents.begin(), antecedents.end(), [=, this](size_t i) {
+           return i >= multiPlan.size();
+       }))
         throw std::runtime_error("antecedent does not exist");
 
     item->local_comm_rank = get_local_comm_rank();
@@ -4091,7 +4092,7 @@ void TreeNode::ApplyFusion()
             this->RecursiveInsertNode(firstFusedNode, fused);
 
             // iterate from first to last to remove old nodes
-            fuse->ForEachNode([=](TreeNode* node) { this->RecursiveRemoveNode(node); });
+            fuse->ForEachNode([=, this](TreeNode* node) { this->RecursiveRemoveNode(node); });
         }
     }
 

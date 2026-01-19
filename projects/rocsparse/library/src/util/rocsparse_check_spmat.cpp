@@ -457,6 +457,7 @@ try
                        rocsparse_status_invalid_pointer);
 
     ROCSPARSE_CHECKARG(1, mat, (mat->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(1, mat, (mat->batch_count != 1), rocsparse_status_not_implemented);
 
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::check_spmat_dynamic_dispatch(rocsparse::determine_I_indextype(mat),

@@ -54,9 +54,10 @@
 #include "client/DataParallelGEMMSolution.hpp"
 #include "client/GEMMParameters.hpp"
 #include "client/GEMMParameters_serialization.hpp"
-#include "client/PreSwizzle.hpp"
 #include "client/RotatingBuffer.hpp"
 #include "client/StreamKGEMMSolution.hpp"
+
+#include <mxDataGenerator/PreSwizzle.hpp>
 
 #include <CLI/CLI.hpp>
 
@@ -278,8 +279,9 @@ namespace rocRoller::Client::GEMMClient
                                    problemParams.types.scalePretileA[0]};
                 }
 
-                auto tmpScaleA = preSwizzle(hostScaleA, descScaleA, preSwizzleSize, preTileSize);
-                deviceScaleA   = make_shared_device(tmpScaleA);
+                auto tmpScaleA
+                    = DGen::preSwizzle(hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
+                deviceScaleA = make_shared_device(tmpScaleA);
             }
             else
             {
@@ -320,8 +322,9 @@ namespace rocRoller::Client::GEMMClient
                                    problemParams.types.scalePretileB[1]};
                 };
 
-                auto tmpScaleB = preSwizzle(hostScaleB, descScaleB, preSwizzleSize, preTileSize);
-                deviceScaleB   = make_shared_device(tmpScaleB);
+                auto tmpScaleB
+                    = DGen::preSwizzle(hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
+                deviceScaleB = make_shared_device(tmpScaleB);
             }
             else
             {
@@ -907,18 +910,6 @@ namespace rocRoller::Client::GEMMClient
         CommandPtr       command;
         CommandKernelPtr commandKernel;
 
-        if(doInfo)
-        {
-            std::cout << "Loading kernel from: " << io.loadCOPath << std::endl;
-            auto yaml = readMetaDataFromCodeObject(io.loadCOPath);
-            std::cout << yaml << std::endl;
-
-            auto kernelFromYAML = AssemblyKernels::fromYAML(yaml).kernels[0];
-            std::cout << *kernelFromYAML.command() << std::endl;
-
-            return ReturnCodes::OK;
-        }
-
         // Changing settings has to go before creating the context :(
         if(io.doSaveAsm)
         {
@@ -964,6 +955,30 @@ namespace rocRoller::Client::GEMMClient
             = Context::ForTarget(arch,
                                  solution.generateKernelName().shortName,
                                  {{.scaleSkipPermlane = solution.types.scaleSkipPermlane}});
+
+        if(doInfo)
+        {
+            std::cout << "Loading kernel from: " << io.loadCOPath << std::endl;
+
+            try
+            {
+                auto elfKernels = AssemblyKernels::fromELF(io.loadCOPath).kernels;
+                AssertFatal(elfKernels.size() == 1,
+                            "Expected exactly one kernel in ELF file, found ",
+                            elfKernels.size());
+                auto kernelFromELF = elfKernels.at(0);
+                auto metadataYaml  = kernelFromELF.amdgpu_metadata_yaml();
+                std::cout << metadataYaml << std::endl;
+                std::cout << *kernelFromELF.command() << std::endl;
+            }
+            catch(const std::exception& e)
+            {
+                std::cerr << "Error loading ELF file: " << e.what() << std::endl;
+                return ReturnCodes::GenerateFailure;
+            }
+
+            return ReturnCodes::OK;
+        }
 
         bool willRunOnGPU = doValidate || doBenchmark;
         if(willRunOnGPU)
@@ -2163,11 +2178,11 @@ int main(int argc, const char* argv[])
 
     if(pretileScale)
     {
-        types.scalePretileA = {static_cast<unsigned long>(solution.macM),
-                               static_cast<unsigned long>(solution.macK / types.scaleBlockSize)};
-
-        types.scalePretileB = {static_cast<unsigned long>(solution.macK / types.scaleBlockSize),
-                               static_cast<unsigned long>(solution.macN)};
+        AssertFatal(types.scaleShuffleTileA.size() >= 2 && types.scaleShuffleTileB.size() >= 2,
+                    "scaleShuffleTileA and scaleShuffleTileB must have at least 2 elements when "
+                    "pretileScale is enabled");
+        types.scalePretileA = {types.scaleShuffleTileA[0], types.scaleShuffleTileA[1]};
+        types.scalePretileB = {types.scaleShuffleTileB[1], types.scaleShuffleTileB[0]};
     }
 
     problem.types  = types;

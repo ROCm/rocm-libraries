@@ -31,9 +31,13 @@ if(NOT WIN32)
 endif()
 
 # Set up LLVM_TOOL_HINTS if LLVM_TOOLS_SEARCH_PREFIX is defined
+# First check if it was set via cmake -D, otherwise fall back to environment variable
 if(DEFINED LLVM_TOOLS_SEARCH_PREFIX)
     set(LLVM_TOOL_HINTS "${LLVM_TOOLS_SEARCH_PREFIX}")
-    message(VERBOSE "Using LLVM_TOOLS_SEARCH_PREFIX as hint: ${LLVM_TOOLS_SEARCH_PREFIX}")
+    message(VERBOSE "Using LLVM_TOOLS_SEARCH_PREFIX hint: ${LLVM_TOOLS_SEARCH_PREFIX}")
+elseif(DEFINED ENV{LLVM_TOOLS_SEARCH_PREFIX})
+    set(LLVM_TOOL_HINTS "$ENV{LLVM_TOOLS_SEARCH_PREFIX}")
+    message(VERBOSE "Using LLVM_TOOLS_SEARCH_PREFIX hint from environment: $ENV{LLVM_TOOLS_SEARCH_PREFIX}")
 endif()
 
 # Checks the version of a tool

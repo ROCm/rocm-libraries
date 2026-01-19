@@ -36,7 +36,6 @@
 #include <type_traits>
 #include <unordered_map>
 
-#include "origami/log.hpp"
 #include "origami/math.hpp"
 
 namespace origami {
@@ -95,8 +94,8 @@ int datatype_to_bits(data_type_t type);
  * @param type Data type
  * @return int Number of bytes
  */
-inline int data_type_to_bytes(data_type_t type) {
-  return math::safe_ceil_div(datatype_to_bits(type), 8);
+inline double data_type_to_bytes(data_type_t type) {
+  return static_cast<double>(datatype_to_bits(type)) / 8.0;
 }
 
 /**
@@ -182,6 +181,33 @@ enum class reduction_t : std::uint32_t {
 };
 
 /**
+ * @brief Prediction mode types for latency estimation.
+ *
+ * Different approaches for predicting kernel performance.
+ */
+enum class prediction_modes_t : std::uint32_t {
+  estimation = 0,     ///< Fast analytical estimation-based prediction (typically faster)
+  simulation = 1,     ///< Slow simulation-like prediction (typically more accurate)
+  count,              ///< Count of prediction modes
+  none = 0xFFFFFFFFu  ///< Explicitly invalid
+};
+
+/**
+ * @brief Target backend types for kernel execution.
+ *
+ * Different backends that kernels can target.
+ */
+enum class target_t : std::uint32_t {
+  generic           = 0,  ///< Generic backend (backend agnostic, not supported yet)
+  tensilelite       = 1,  ///< hipBLASLt (tensilelite) backend
+  rocroller         = 2,  ///< hipBLASLt (rocroller) backend
+  triton            = 3,  ///< Triton backend
+  composable_kernel = 4,  ///< Composable Kernel backend (Not supported yet)
+  count,                  ///< Count of target types
+  none = 0xFFFFFFFFu      ///< Explicitly invalid
+};
+
+/**
  * @brief Convert integer to reduction_t enum.
  *
  * @param rt Integer value to convert
@@ -262,8 +288,14 @@ struct runtime_options {
 
   /**
    * @brief Get the global runtime options instance.
+   *
+   * Inline to prevent ODR violations when included in multiple shared libraries.
+   * Static local variable ensures only one instance exists across all translation units. (PR#1862)
    */
-  static runtime_options& get();
+  static inline runtime_options& get() {
+    static runtime_options instance;
+    return instance;
+  }
 
   /**
    * @brief Read debug setting from environment variable.
@@ -300,7 +332,10 @@ struct config_t {
   dim3_t mt{0, 0, 0};
   dim3_t mi{0, 0, 0};
 
-  /// Occupancy (number of waves resident per CU).
+  /// Custom mainloop scheduling flag
+  bool custom_mainloop_scheduling = false;
+
+  /// Occupancy (number of wavefronts resident per CU).
   int occupancy = -1;
 
   /// Reorder workgroup id for L2 reuse.
@@ -319,22 +354,35 @@ struct config_t {
   /// Reduction strategy.
   reduction_t reduction_strategy = reduction_t::none;
 
-  /// Runtime options (if null, uses global singleton)
-  const runtime_options* runtime_opts{nullptr};
+  /// Prediction mode for latency estimation.
+  prediction_modes_t prediction_mode = prediction_modes_t::estimation;
 
-  /// Logger for analytical metrics
-  mutable logger_t logger;
+  /// Target backend for kernel execution.
+  target_t target = target_t::tensilelite;
+  /// Grid selection algorithm.
+  grid_selection_t grid_selection = grid_selection_t::k_split_aware;
+
+  /// CMS kernel flag
+  bool cms_kernel = false;
 
   constexpr bool operator==(const config_t& o) const noexcept {
-    return mt == o.mt && mi == o.mi && cache_hints_a == o.cache_hints_a &&
-           cache_hints_b == o.cache_hints_b && workgroup_mapping == o.workgroup_mapping;
+    return mt == o.mt && 
+           mi == o.mi && 
+           custom_mainloop_scheduling == o.custom_mainloop_scheduling &&
+           cache_hints_a == o.cache_hints_a &&
+           cache_hints_b == o.cache_hints_b && 
+           workgroup_mapping == o.workgroup_mapping &&
+           prediction_mode == o.prediction_mode && target == o.target;
   }
 
   std::size_t hash() const {
     return std::hash<size_t>()(mt.m) ^ std::hash<size_t>()(mt.n) ^ std::hash<size_t>()(mt.k) ^
            std::hash<size_t>()(mi.m) ^ std::hash<size_t>()(mi.n) ^ std::hash<size_t>()(mi.k) ^
+           std::hash<int>()(custom_mainloop_scheduling) ^
            std::hash<int>()(cache_hints_a) ^ std::hash<int>()(cache_hints_b) ^
-           std::hash<int>()(workgroup_mapping);
+           std::hash<int>()(workgroup_mapping) ^
+           std::hash<std::uint32_t>()(static_cast<std::uint32_t>(prediction_mode)) ^
+           std::hash<std::uint32_t>()(static_cast<std::uint32_t>(target));
   }
 
   void validate() const {
@@ -388,27 +436,100 @@ struct problem_t {
 };
 
 /**
- * @brief Get runtime options from config, or global singleton if config doesn't specify.
+ * @brief Struct to define various workgroup mapping parameters.
  *
- * @param config Configuration struct (may contain runtime_opts pointer)
- * @return const runtime_options& Reference to runtime options
+ * Contains all the parameters needed to describe various workgroup mapping parameters.
+ */
+struct workgroup_mapping_t {
+  /// Workgroup mapping chunk size.
+  std::size_t wgmxccchunk = 0;
+
+  /// Workgroup mapping size.
+  std::size_t wgmxcc = 8;
+
+  /// Workgroup mapping size.
+  int32_t wgm = 1;
+};
+
+/**
+ * @brief Get runtime options (always uses global singleton).
+ *
+ * @param config Configuration struct (unused, kept for API compatibility)
+ * @return const runtime_options& Reference to runtime options singleton
  */
 inline const runtime_options& get_runtime_options(const config_t& config) {
-  return config.runtime_opts ? *config.runtime_opts : runtime_options::get();
+  (void)config;  // Unused parameter - kept for API compatibility
+  return runtime_options::get();
 }
+
+/**
+ * @brief Struct to define CMS kernels.
+ *
+ * Contains the dimensions and data type of a matrix instruction.
+ */
+ struct CMS_kernel {
+  data_type_t mi_input_type;
+  transpose_t transA;
+  transpose_t transB;
+  dim3_t mt{0, 0, 0};
+
+  CMS_kernel()
+    : mi_input_type(data_type_t::Float)
+    , transA(transpose_t::N)
+    , transB(transpose_t::N)
+    , mt{0,0,0} 
+    {}
+
+  CMS_kernel(data_type_t mi_input_type, transpose_t transA, transpose_t transB, size_t MT_M, size_t MT_N, size_t MT_K)
+    : mi_input_type(mi_input_type)
+    , transA(transA)
+    , transB(transB)
+    , mt {MT_M, MT_N, MT_K}
+    {}
+
+  std::string to_string() const {
+    return "CMS_kernel(mi_input_type=" + datatype_to_string(mi_input_type) + 
+              ", transA=" + std::string(transA == transpose_t::T ? "T" : "N") + 
+              ", transB=" + std::string(transB == transpose_t::T ? "T" : "N") + 
+              ", MT_M=" + std::to_string(mt.m) + 
+              ", MT_N=" + std::to_string(mt.n) + 
+              ", MT_K=" + std::to_string(mt.k) + ")";
+  }
+
+  bool operator==(const CMS_kernel& other) const {
+    return mi_input_type == other.mi_input_type && transA == other.transA && transB == other.transB &&
+           mt.m == other.mt.m && mt.n == other.mt.n && mt.k == other.mt.k;
+  }
+
+  std::size_t hash() const {
+    return std::hash<data_type_t>()(mi_input_type) ^ 
+            std::hash<size_t>()(static_cast<size_t>(transA)) ^ std::hash<size_t>()(static_cast<size_t>(transB)) ^ 
+            std::hash<size_t>()(mt.m) ^ std::hash<size_t>()(mt.n) ^ std::hash<size_t>()(mt.k);
+  }
+};
 
 }  // namespace origami
 
 // Specialization of std::hash in the std namespace for use of std::unordered_map with
 // matrix_instruction and config_t as keys.
+// Inline to prevent ODR violations when included in multiple shared libraries. (PR#1862)
+// CMS_kernel, matrix_instruction, and config_t as keys.
 namespace std {
 template <>
+struct hash<origami::CMS_kernel> {
+  inline std::size_t operator()(const origami::CMS_kernel& k) const { return k.hash(); }
+};
+
+template <>
 struct hash<origami::matrix_instruction> {
-  std::size_t operator()(const origami::matrix_instruction& k) const { return k.hash(); }
+  inline std::size_t operator()(const origami::matrix_instruction& k) const { return k.hash(); }
 };
 
 template <>
 struct hash<origami::config_t> {
-  std::size_t operator()(const origami::config_t& config) const noexcept { return config.hash(); }
+  inline std::size_t operator()(const origami::config_t& config) const noexcept {
+    return config.hash();
+  }
 };
 }  // namespace std
+

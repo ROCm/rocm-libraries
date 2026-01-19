@@ -48,6 +48,9 @@ try
     ROCSPARSE_CHECKARG(1, y, y->init == false, rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(2, x, x->init == false, rocsparse_status_not_initialized);
 
+    ROCSPARSE_CHECKARG(1, y, (y->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(2, x, (x->batch_count != 1), rocsparse_status_not_implemented);
+
     // Check for matching types while we do not support mixed precision computation
     ROCSPARSE_CHECKARG(2, x, (x->data_type != y->data_type), rocsparse_status_not_implemented);
 
