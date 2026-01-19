@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -25,22 +25,8 @@
 
 #include "auto_testing_bad_arg.hpp"
 #include "rocsparse_matrix_statistics.hpp"
+#include "rocsparse_traits.hpp"
 #include "testing_spmv_dispatch_traits.hpp"
-
-// Helper to check if type is low-precision (bf16 or f16)
-template <typename T>
-inline constexpr bool is_low_precision_v
-    = std::is_same<T, rocsparse_bfloat16>{} || std::is_same<T, _Float16>{};
-
-// Set all entries in an array to 1.0f for numerical stability with low-precision types
-template <typename T>
-inline void set_array_to_ones(T* data, size_t size)
-{
-    for(size_t i = 0; i < size; ++i)
-    {
-        data[i] = static_cast<T>(1.0f);
-    }
-}
 
 template <rocsparse_format FORMAT,
           typename I,

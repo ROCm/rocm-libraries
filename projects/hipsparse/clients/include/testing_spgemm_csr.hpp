@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -371,6 +371,9 @@ void testing_spgemm_csr(Arguments argus)
     I nnz_A;
     CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
         filename, m, k, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idxBaseA));
+
+    // Redefine sparse matrix values
+    hipsparseInit<T>(hcsr_val_A, hcsr_val_A.size(), 1);
 
     // For sparse matrix B, use the transpose of A
     J n     = m;
