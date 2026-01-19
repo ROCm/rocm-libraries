@@ -25,7 +25,7 @@
  *******************************************************************************/
 #include <miopen/miopen.h>
 #include <gtest/gtest.h>
-#include "gru.hpp"
+#include "../gru.hpp"
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
 
