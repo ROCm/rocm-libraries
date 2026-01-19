@@ -216,7 +216,7 @@ class function_pool
     template <typename TKey, typename TKeyPool>
     const TKey& get_actual_key(const TKey& key, TKeyPool& pool) const
     {
-        // - for keys that we are querying with no/empty kernel-config, actually we are refering to
+        // - for keys that we are querying with no/empty kernel-config, actually we are referring to
         //   the default kernel-configs in kernel-generator.py. So get the actual keys to look-up
         //   the pool.
         // - if not in the pool, then we simply use itself (for dynamically added kernel)

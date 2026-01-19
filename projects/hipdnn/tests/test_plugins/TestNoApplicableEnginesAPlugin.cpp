@@ -5,7 +5,7 @@
 #include "TestPluginEngineIdMap.hpp"
 // NOLINTNEXTLINE
 thread_local char
-    hipdnn_plugin::PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH]
+    hipdnn_plugin_sdk::PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH]
     = "";
 
 class NoApplicableEnginesAPlugin : public TestPluginBase

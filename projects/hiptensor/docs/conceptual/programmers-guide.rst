@@ -32,7 +32,7 @@ Infrastructure
 Design concepts
 --------------------------------
 
-hipTensor is a library developed with the ``C++17`` language standard. It uses meta-programming techniques to optimize code at compile time and generate efficient GPU kernels.
+hipTensor is a library developed with the ``C++20`` language standard. It uses meta-programming techniques to optimize code at compile time and generate efficient GPU kernels.
 hipTensor employs Composable Kernel as a functional backend and is written in different layers.
 
 The outer API layer serves as a functional interface for users to define tensor data abstractions and manipulations.

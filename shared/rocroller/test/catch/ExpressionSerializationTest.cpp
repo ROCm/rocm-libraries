@@ -77,6 +77,7 @@ namespace ExpressionTest
             auto expr13 = Expression::bfe(DataType::UInt8, a, 8, 8);
             auto expr14 = Expression::multiplyAdd(b, b, b);
             auto expr15 = Expression::splitBitfieldCombine(Expression::bfc(expr14, e, 0, 0, 32));
+            auto expr16 = Expression::reinterpret(DataType::UInt32, Expression::literal(10.0f));
 
             auto expr = GENERATE_COPY(expr1,
                                       expr2,
@@ -92,7 +93,8 @@ namespace ExpressionTest
                                       expr12,
                                       expr13,
                                       expr14,
-                                      expr15);
+                                      expr15,
+                                      expr16);
 
             CAPTURE(expr);
 

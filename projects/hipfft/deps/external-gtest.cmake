@@ -24,7 +24,7 @@ message( STATUS "Configuring gtest external dependency" )
 include( ExternalProject )
 
 # set( gtest_cmake_args -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>/package )
-set( PREFIX_GTEST ${CMAKE_INSTALL_PREFIX} CACHE PATH "Location where boost should install, defaults to /usr/local" )
+set( PREFIX_GTEST ${CMAKE_INSTALL_PREFIX} CACHE PATH "Location where gtest should install, defaults to /usr/local" )
 set( gtest_cmake_args -DCMAKE_INSTALL_PREFIX=${PREFIX_GTEST} )
 append_cmake_cli_arguments( gtest_cmake_args gtest_cmake_args )
 
@@ -54,7 +54,7 @@ else( )
   else( )
     set( gtest_make "make" )
 
-    # The -j paramter does not work with nmake
+    # The -j parameter does not work with nmake
     if( NOT Cores EQUAL 0 )
       math( EXPR Cores "${Cores} + 1 " )
       list( APPEND gtest_make -j ${Cores} )

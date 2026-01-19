@@ -23,7 +23,7 @@ from kernels.configs.config_arch import supported_arch
 from types import SimpleNamespace as NS
 
 # for SBRC, if direct_to_from_reg is True, we do store-from-reg, but will not do load-to-reg
-#           And since SBRC is is dir-from-lds but NOT dir-to-reg, the global load part requires full LDS
+#           And since SBRC is dir-from-lds but NOT dir-to-reg, the global load part requires full LDS
 #           So, SBRC is able to use half-lds.
 
 # yapf: disable

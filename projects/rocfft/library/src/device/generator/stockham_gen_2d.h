@@ -319,7 +319,7 @@ struct StockhamKernelFused2D : public StockhamKernelRR
             "  uses " + std::to_string(kernel0.threads_per_transform)
                 + " threads per row-transform of length-" + std::to_string(length0),
             "  does max " + std::to_string(max_rows_tpb) + " row-transforms per thread block",
-            "row-elem is contigous (SB_UNIT)"};
+            "row-elem is contiguous (SB_UNIT)"};
 
         length0_part
             += CommentLines{"calc the thread_in_device value once and for all device funcs"};
@@ -416,7 +416,7 @@ struct StockhamKernelFused2D : public StockhamKernelRR
             "  uses " + std::to_string(kernel1.threads_per_transform)
                 + " threads per col-transform of length-" + std::to_string(length1),
             "  does max " + std::to_string(max_cols_tpb) + " col-transforms per thread block",
-            "col-elem is non-contigous (SB_NONUNIT), each elem is strided with stride_lds"};
+            "col-elem is non-contiguous (SB_NONUNIT), each elem is strided with stride_lds"};
 
         length1_part
             += CommentLines{"calc the thread_in_device value once and for all device funcs"};

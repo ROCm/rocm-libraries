@@ -4,7 +4,7 @@
 #pragma once
 
 #include "BackendDescriptor.hpp"
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 namespace hipdnn_backend
 {
@@ -64,6 +64,8 @@ public:
     static hipdnnBackendDescriptorType_t getStaticType();
 
     static constexpr int64_t INVALID_WORKSPACE_SIZE = -1;
+
+    std::string toString() const override;
 };
 
 } // namespace hipdnn_backend

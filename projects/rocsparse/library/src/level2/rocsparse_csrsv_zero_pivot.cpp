@@ -53,6 +53,7 @@ namespace rocsparse
         }
         auto status = info->copy_zero_pivot_async(
             batch_count, handle->pointer_mode, indextype, position, handle->stream);
+
         if(status == rocsparse_status_zero_pivot)
         {
             return status;

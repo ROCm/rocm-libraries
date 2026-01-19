@@ -335,7 +335,9 @@ size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
     const auto ptrs = DeviceOpType::GetInstances();
     for(auto& ptr : ptrs)
     {
-        auto split_k = CkSplitkAutoDeduce;
+        // Cycle `split_k` over {1,2,4,...,128} then `CkSplitkAutoDeduce`.
+        // The loop then restarts from 1 for the next conv instance.
+        auto split_k = 1;
         do
         {
             if(args.IsSupportedBySplitK(ptr, split_k))

@@ -235,6 +235,7 @@ namespace rocwmma
                                   mLd, // ld
                                   mParam1, // param1
                                   mParam2); // param2
+            CHECK_HIP_ERROR(hipGetLastError());
 
             auto timeMs = 0.0f;
             CHECK_HIP_ERROR(hipEventSynchronize(stopEvent));

@@ -48,7 +48,7 @@ from operator import mul
 
 from generator import (ArgumentList, BaseNode, Call, CommentBlock, Function,
                        Include, LineBreak, Map, StatementList, Variable,
-                       Assign, name_args, write, ForwardDeclaration)
+                       Assign, name_args, write, ForwardDeclaration, Declaration)
 
 from collections import namedtuple
 
@@ -58,7 +58,7 @@ LaunchParams = namedtuple(
         'transforms_per_block',
         'workgroup_size',
         'threads_per_transform',
-        'half_lds',  # load real and imag part separately with half regular lds resouce to increase occupancy
+        'half_lds',  # load real and imag part separately with half regular lds resource to increase occupancy
         'direct_to_from_reg'
     ]
 )  # load from global mem to registers directly and store from registers to global mem.
@@ -286,6 +286,7 @@ def generate_cpu_function_pool_main(num_files):
         call_list += Call(name=f'function_pool_init_{i}', arguments=call_args)
     return StatementList(
         Include('"../include/function_pool.h"'), fwd_declarations,
+        Declaration(type='std::vector<FMKey>', name='EmptyFMKeyVec'),
         Function(name='function_pool_data::function_pool_data',
                  value=False,
                  arguments=ArgumentList(),

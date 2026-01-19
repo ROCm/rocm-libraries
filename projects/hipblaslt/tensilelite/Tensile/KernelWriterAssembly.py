@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -583,17 +583,18 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["ProblemType"]["Sparse"]:
         module.add(self.defineSgpr("ShadowLimitMetadata", 2, 2))
 
-    module.add(self.defineSgpr("StaggerUIter", 1))  # stagger loop iterations, used for various iter counts in the code
-    isDTVAorB = (kernel["DirectToVgprA"] != kernel["DirectToVgprB"]) #  only one of them is enabled
-    if kernel["PrefetchGlobalRead"] == 2 and isDTVAorB:
-      # PGR2 + DTVA or B (only 1 side), need separate StaggerUIter for DTV load
-      module.add(self.defineSgpr("StaggerUIterDTV", 1))  # stagger loop iterations, used for various iter counts in the code
-    module.add(self.defineSgpr("WrapUA", 2))  # Bytes to add to SrdA to reset address from N-1 iter to AddressA
-    module.add(self.defineSgpr("WrapUB", 2))  # Bytes to add to SrdB to reset address from N-1 iter to AddressB
-    if kernel["ProblemType"]["Sparse"]:
-      module.add(self.defineSgpr("WrapUMetadata", 2))  # Bytes to add to SrdMetadata to reset address from N-1 iter to AddressMetadata
-    self.addSgprVarToPool("WrapUA")
-    self.addSgprVarToPool("WrapUB")
+    if self.states.staggerU:
+      module.add(self.defineSgpr("StaggerUIter", 1))  # stagger loop iterations, used for various iter counts in the code
+      isDTVAorB = (kernel["DirectToVgprA"] != kernel["DirectToVgprB"]) #  only one of them is enabled
+      if kernel["PrefetchGlobalRead"] == 2 and isDTVAorB:
+        # PGR2 + DTVA or B (only 1 side), need separate StaggerUIter for DTV load
+        module.add(self.defineSgpr("StaggerUIterDTV", 1))  # stagger loop iterations, used for various iter counts in the code
+      module.add(self.defineSgpr("WrapUA", 2))  # Bytes to add to SrdA to reset address from N-1 iter to AddressA
+      module.add(self.defineSgpr("WrapUB", 2))  # Bytes to add to SrdB to reset address from N-1 iter to AddressB
+      if kernel["ProblemType"]["Sparse"]:
+        module.add(self.defineSgpr("WrapUMetadata", 2))  # Bytes to add to SrdMetadata to reset address from N-1 iter to AddressMetadata
+      self.addSgprVarToPool("WrapUA")
+      self.addSgprVarToPool("WrapUB")
 
 
     module.add(self.defineSgpr("GlobalReadIncsA", self.states.a.numSgprGlobalReadIncs))
@@ -1796,6 +1797,13 @@ class KernelWriterAssembly(KernelWriter):
         for i in range(1, self.states.totalVgprs):
           moduleRegInit.add(VMovB32(dst=vgpr(i), src=hex(self.consts.initVgprValue), comment="InitVgpr&0x1"))
         moduleRegInit.addSpaceLine()
+
+      # init workgroup id from ttmp
+      if self.states.archCaps["WorkGroupIdFromTTM"]:
+        module.addComment1("Init workgroup id from ttmp")
+        module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9"))
+        module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7"))
+        module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7"))
 
       # set m0
       moduleRegInit.add(SMovB32(dst=mgpr(0), src=hex(kernel["LdsNumBytes"]),
@@ -3662,15 +3670,8 @@ class KernelWriterAssembly(KernelWriter):
               quotient = loopCounterName
               dividend = "SizesSum+%u"%self.states.unrollIdx
               divisor = kernel["DepthU"]
-              if kernel["NoTailLoop"] and kernel["AssertSummationElementMultiple"] % kernel["DepthU"] != 0:
-                # round up SizesSum/DepthU for noTailLoop case
-                module.add(SAddI32(dst=sgpr(quotient), src0=(divisor - 1), src1=sgpr(dividend), \
-                    comment="round up SizeSum / DepthU" ))
-                module.add(scalarStaticDivideAndRemainder(quotient, None, quotient, \
-                            divisor, tmpSgprInfo, 0))
-              else:
-                module.add(scalarStaticDivideAndRemainder(quotient, None, dividend, \
-                            divisor, tmpSgprInfo, 0))
+              module.add(scalarStaticDivideAndRemainder(quotient, None, dividend, \
+                         divisor, tmpSgprInfo, 0))
 
               gsuComponent = Component.GSU.find(self)
               if kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1:
@@ -4487,9 +4488,9 @@ class KernelWriterAssembly(KernelWriter):
         label = Label("StaggerUMapping_%d"%(i + 1), comment="")
         module.add(SCmpEQU32(src0=sgpr(staggerUMapping), src1=hex(i << 13)))
         if i != 4:
-          module.add(SCBranchSCC1(labelName=label.getLabelName()))
+          module.add(SCBranchSCC0(labelName=label.getLabelName()))
         else:
-          module.add(SCBranchSCC1(labelName=staggerLabel.getLabelName()))
+          module.add(SCBranchSCC0(labelName=staggerLabel.getLabelName()))
         if i == 0:
           module.add(SMovB32(dst=sgpr(staggerInput), src=sgpr("WorkGroup0")))
         elif i == 1:
@@ -5447,7 +5448,7 @@ class KernelWriterAssembly(KernelWriter):
   # 0 is outermost; self.states.unrollIdx is the unroll index.
   # -1 is tail loop (used only for the unroll loop)
   ##############################################################################
-  def calculateLoopNumIter(self, kernel, tPA, tPB, loopIdx):
+  def calculateLoopNumIter(self, kernel, tPA, tPB, loopIdx, tailloopInNll=False, NLLindex=0):
     module = Module("calculateLoopNumIter")
 
     tailLoop = loopIdx < 0
@@ -5480,6 +5481,7 @@ class KernelWriterAssembly(KernelWriter):
             tP = tPB if kernel["ProblemType"]["Sparse"] == 2 else tPA
             module.add(self.setTailSrd(tP, sgpr(tmpSgpr+0)))
             module.addSpaceLine()
+
         # LOCAL_SPLITU * min(sizeL % LOCAL_DEPTHU, DEPTHU / LOCAL_SPLITU)
         module.addComment("numIter%s = LOCAL_SPLITU * min(size%s %% LOCAL_DEPTHU, DEPTHU / LOCAL_SPLITU)" \
             % (self.states.unrollChar, self.states.unrollChar))
@@ -5488,6 +5490,29 @@ class KernelWriterAssembly(KernelWriter):
         module.add(scalarStaticDivideAndRemainder(tmpSgpr, loopCounterName, \
           "SizesSum+%u"%loopIdx, kernel["DepthU"], ContinuousRegister(tmpSgpr+2, 2), 2))
         loopCounter = sgpr(loopCounterName)
+
+        if tailloopInNll and NLLindex == 0:
+          # tailLoop in NLL case
+          if kernel["StreamK"]:
+            # StreamK + TailLoopINNLL case
+            # skip TailLoopINNLL if StreamK WG not processing final iteration
+            # Check if tile finished
+            module.add(SCmpLtU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr("ItersPerTile"), comment="Check if WG processes final iteration of tile"))
+            module.add(SCMovB32(dst=loopCounter, src=0, comment="This WG not completing tile"))
+          module.add(SCmpEQU32(src0=loopCounter, src1=0, comment="numIter%s == 0"%loopChar))
+          EndOfTailLoopInNLLLabel = Label("TailLoopInNLLEnd%s"%(loopChar), "" )
+          module.add(SCBranchSCC1(labelName=EndOfTailLoopInNLLLabel.getLabelName(), comment="skip TailLoopInNLL code"))
+
+          maxUnit = self.states.tailloopInNllmaxUnit
+          if maxUnit > 1:
+            module.add(SAndB32(dst=sgpr(tmpSgpr+2), src0=loopCounter, src1=maxUnit-1, \
+                               comment="if summation is not multiple of %s, skip TailLoopInNLL"%maxUnit))
+            module.add(SCBranchSCC1(labelName=EndOfTailLoopInNLLLabel.getLabelName(), comment="skip TailLoopInNLL code and use TailLoop"))
+          if kernel["GlobalSplitU"] != 0:
+            # skip tailloopInNll code if GSU>1
+            module.add(SAndB32(dst=sgpr(tmpSgpr+2), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+            module.add(SCmpGtU32(src0=sgpr(tmpSgpr+2), src1=1, comment="GSU > 1 ?"))
+            module.add(SCBranchSCC1(labelName=EndOfTailLoopInNLLLabel.getLabelName(), comment="skip TailLoopInNLL code and use TailLoop"))
 
         if kernel["LocalSplitU"] > 1:
           # we cannot set loopCounter zero and skip tail loop because we need all waves to do global read.
@@ -5519,18 +5544,20 @@ class KernelWriterAssembly(KernelWriter):
           self.vgprPool.checkIn(wave_id)
           self.vgprPool.checkIn(tmpVgpr)
 
-      skComponent = Component.StreamK.find(self)
-      module.add(skComponent.tailLoopNumIter(self, kernel, loopCounter))
+      if not tailloopInNll:
+        # skip tailLoopNumIter in tailloopInNll (already generated above)
+        skComponent = Component.StreamK.find(self)
+        module.add(skComponent.tailLoopNumIter(self, kernel, loopCounter))
 
-      gsuComponent = Component.GSU.find(self)
-      module.add(gsuComponent.tailLoopNumIter(self, kernel, loopCounter))
+        gsuComponent = Component.GSU.find(self)
+        module.add(gsuComponent.tailLoopNumIter(self, kernel, loopCounter))
 
-      # if tail numIter == 0 skip altogether
-      skipTailLoopLabel = Label.getFormatting("SkipTailLoop%s"%(loopChar) )
-      module.add(SCmpEQU32(src0=loopCounter, src1=0, comment="numIter%s == 0"%loopChar ))
-      module.add(SMovB32(dst=sgpr("OrigLoopCounter"), src=0, comment="repurpose to count each localRead increment"))
-      module.add(SCBranchSCC1(labelName=skipTailLoopLabel, \
-                comment="skip to end of tail loop b/c numIter==0"))
+        # if tail numIter == 0 skip altogether
+        skipTailLoopLabel = Label.getFormatting("SkipTailLoop%s"%(loopChar) )
+        module.add(SCmpEQU32(src0=loopCounter, src1=0, comment="numIter%s == 0"%loopChar ))
+        module.add(SMovB32(dst=sgpr("OrigLoopCounter"), src=0, comment="repurpose to count each localRead increment"))
+        module.add(SCBranchSCC1(labelName=skipTailLoopLabel, \
+                  comment="skip to end of tail loop b/c numIter==0"))
 
     ########################################
     # Unrolled Loop
@@ -5662,7 +5689,7 @@ class KernelWriterAssembly(KernelWriter):
   # Close Loop
   # finalLoop : final unroll loop
   ##############################################################################
-  def closeLoop(self, kernel, tPA, tPB, loopIdx, finalLoop, emitEndLabelOnly=False, oddLabel=False, skipCondJumpCounter=-1):
+  def closeLoop(self, kernel, tPA, tPB, loopIdx, finalLoop, emitEndLabelOnly=False, oddLabel=False, skipCondJumpCounter=-1, NLLindexLast=False):
     module = Module("closeLoop")
     if emitEndLabelOnly:
       loopIdx = self.states.unrollIdx
@@ -5674,15 +5701,16 @@ class KernelWriterAssembly(KernelWriter):
     tPM = tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]
 
     finalJump = SCBranchSCC0
-    nonFinalJumpNeeded = True
+    jumpNeeded = True
 
     tailLoop = loopIdx < 0
+    tailloopInNll = loopIdx == -2 # use -2 for tailloopInNll
+    needTailEndCode = tailLoop and finalLoop and ((not tailloopInNll) or kernel["NoTailLoop"])
     if tailLoop:
       loopIdx = self.states.unrollIdx
       loopChar = self.states.indexChars[kernel["ProblemType"]["IndicesSummation"][loopIdx]]
       loopLabelBegin = Label("TailLoopBegin%s"%(loopChar), "" )
       loopLabelEnd = Label("TailLoopEnd%s"%(loopChar), "" )
-      loopLabelEndOddExit = Label("TailLoopEnd%s_oddexit"%(loopChar), "unroll loop odditer exit" )
       loopCounter = self.loopCounter(kernel, loopIdx)
       numReadsIterCoalescedA = self.states.numReadsIterCoalescedA
       numReadsIterCoalescedB = self.states.numReadsIterCoalescedB
@@ -5709,7 +5737,7 @@ class KernelWriterAssembly(KernelWriter):
         #    skipCondJumpCounter==1 case: execute K=1,3,5,7  (here, all K=0-7 are done. check condition and jump if tail loop is done)
         # skipCondJump=True is not to exit after skipCondJumpCounter==0.
         skipCondJump = True
-      nonFinalJumpNeeded = not skipCondJump
+      jumpNeeded = not skipCondJump
       if not skipCondJump:
         module.addComment1("closeLoop loop%s finalLoop=%d tailLoop=%d" % (loopChar, finalLoop, tailLoop))
 
@@ -5807,10 +5835,11 @@ class KernelWriterAssembly(KernelWriter):
           if decValue == 2:
             decCode = ""
           condCode = ""
-          nonFinalJumpNeeded = False
           if finalLoop:
             # No exit and finalLoop case, use s_branch (no condition)
             finalJump = SBranch
+          else:
+            jumpNeeded =False
 
         if decCode: module.add(decCode)
         if condCode: module.add(condCode)
@@ -5831,11 +5860,12 @@ class KernelWriterAssembly(KernelWriter):
       # (end label is generated after odd/even code)
       jumpLabel = loopLabelEndOddExit if oddLabel else loopLabelEndEvenExit
     if not finalLoop:
-      if nonFinalJumpNeeded:
+      if jumpNeeded:
         # just an exit check, else fall through to the next loop copy
         module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), comment="exit Loop%s"%loopChar ))
     else: #finalLoop:
-      module.add(finalJump(labelName=loopLabelBegin.getLabelName(), comment="restart Loop%s"%(loopChar)))
+      if jumpNeeded:
+        module.add(finalJump(labelName=loopLabelBegin.getLabelName(), comment="restart Loop%s"%(loopChar)))
 
       if not tailLoop and loopIdx == self.states.unrollIdx:
         oddIterPreCode = Module()
@@ -5904,9 +5934,17 @@ class KernelWriterAssembly(KernelWriter):
         module.add(secondPreCode)
         module.add(secondCode)
 
-      module.add(loopLabelEnd)
+      if (not tailLoop) or needTailEndCode:
+        module.add(loopLabelEnd)
+      elif tailloopInNll:
+        module.add(SBranch(labelName=loopLabelEnd.getLabelName(), \
+                  comment="End of tailloopInNll. Jump to the end of TailLoop"))
+        if NLLindexLast:
+          # end of tailloopInNll label (NLLindex==NLLnum-1 only)
+          EndOfTailLoopInNLLLabel = Label("TailLoopInNLLEnd%s"%(loopChar), "" )
+          module.add(EndOfTailLoopInNLLLabel)
 
-      if tailLoop:
+      if needTailEndCode:
         if len(kernel["ProblemType"]["IndicesSummation"]) > 1 or kernel["StreamK"]:
           # recover the 'damage' done to LRO:
 
@@ -5965,7 +6003,7 @@ class KernelWriterAssembly(KernelWriter):
               self.vgprPool.checkIn(self.oriLwaM)
               self.oriLwaM = None
     # restore all threads
-    if tailLoop and kernel["LocalSplitU"] > 1:
+    if needTailEndCode and kernel["LocalSplitU"] > 1:
       sgprCnt = self.states.laneSGPRCount
       waveSize = kernel["WavefrontSize"]
       module.addComment1("restore full exec mask")
@@ -7000,7 +7038,7 @@ class KernelWriterAssembly(KernelWriter):
             ccVgprs = [None]*3 # three terms that can be negated: [real1, imag0, imag1]
             ccInsts = [None]*3
             accImOffset = accVgprImagNumOffset(kernel)
-            accStartSrcImg = accStartSrc+accImOffset
+            accStartSrcImg = accStart+accImOffset
             accEndSrcImg = accStartSrcImg + accs_per_wave - 1
 
             # vgpr A,B setting. In complex case, numRegistersIn does not match. Use numRegistersOut instead
@@ -7159,7 +7197,7 @@ class KernelWriterAssembly(KernelWriter):
   # or in the PAP code.
   # isOptNLL : this is for the store-interleaved NLL optimization
   ##############################################################################
-  def openSumAtLeastUnroll(self, kernel, prefetch, isOptNLL, isNGLL=False, NLLindex=0, NLLnum=1):
+  def openSumAtLeastUnroll(self, kernel, prefetch, isOptNLL, isNGLL=False, NLLindex=0, NLLnum=1, tailloopInNll=False):
     isLongBranch = False
     if kernel["EnableMatrixInstruction"] and kernel["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all']:
       acclen = getAccToArchLen(kernel)
@@ -7231,8 +7269,8 @@ class KernelWriterAssembly(KernelWriter):
               module.add(SCmpEQU64(src0=sgpr("Alpha",2), src1=sgpr(tmpSgpr,2), comment="Alpha == 1.0 ?"))
 
             elif kernel["ProblemType"]["ComputeDataType"].isSingleComplex():
-              module.add(SMovB32(dst=sgpr(tmpSgpr+0), src=hex(1.0), comment="Real part of 1.0"))
-              module.add(SMovB32(dst=sgpr(tmpSgpr+1), src=hex(0.0), comment="Imaginary part of 1.0"))
+              module.add(SMovB32(dst=sgpr(tmpSgpr+0), src=1.0, comment="Real part of 1.0"))
+              module.add(SMovB32(dst=sgpr(tmpSgpr+1), src=0.0, comment="Imaginary part of 1.0"))
               module.add(SCmpEQU64(src0=sgpr("Alpha",2), src1=sgpr(tmpSgpr,2), comment="Alpha == 1.0 ?"))
 
             elif kernel["ProblemType"]["ComputeDataType"].isDoubleComplex():
@@ -7240,7 +7278,10 @@ class KernelWriterAssembly(KernelWriter):
               module.add(SMovB32(dst=sgpr(tmpSgpr+1), src=hex(0x3ff00000), comment="msb of real part of 1.0"))
               module.add(SCmpEQU64(src0=sgpr("Alpha",2), src1=sgpr(tmpSgpr,2), comment="Alpha.real == 1.0 ?"))
               if placeHolder == None:
-                module.add(SCBranchSCC0(labelName=skipOptNLL.getLabelName(), comment="branch if alpha.real != 1"))
+                if isLongBranch:
+                  module.add(self.longBranchScc0(skipOptNLL, posNeg=1, tmpSgprInfo=tmpSgprInfo, comment="branch if alpha != 1"))
+                else:
+                  module.add(SCBranchSCC0(labelName=skipOptNLL.getLabelName(), comment="branch if alpha != 1"))
               else:
                 skipOptNLLModule = Module("skipOptNLL_placeholder")
                 skipOptNLLModule.addComment1("branch if alpha.real != 1")
@@ -7266,8 +7307,8 @@ class KernelWriterAssembly(KernelWriter):
           module.addSpaceLine()
 
           # Check tail loop required:
-          # Skip tail loop check if noTailLoop is true
-          if not kernel["NoTailLoop"]:
+          # Skip tail loop check if noTailLoop is true (except for tailloopInNll)
+          if not kernel["NoTailLoop"] or self.states.tailloopInNll:
             loopChar = self.states.indexChars[ \
                 kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
             module.add(scalarStaticDivideAndRemainder(tmpSgpr, tmpSgpr+1, "SizesSum+%u"%self.states.unrollIdx, \
@@ -7317,6 +7358,9 @@ class KernelWriterAssembly(KernelWriter):
 
       if (not isNGLL) and NLLnum == 2:
         OptOrOrd = "Opt" if isOptNLL else "Ord"
+        if tailloopInNll:
+          # tailloopInNll case, add "_TI_" to avoid duplicated label
+          OptOrOrd += "_TI_"
         loopLabel2ndNLL = Label("%sNLL_second"%(OptOrOrd), "second %s NoLoadLoop entry"%OptOrOrd )
         # NLL + double buffer (NLLnum==2) case (PGR1/2), we need to generate 2 NLL (first and second buffer)
         if NLLindex == 0:
@@ -7329,7 +7373,7 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   ##############################################################################
-  def closeSumAtLeastUnroll(self, kernel, tPA, tPB, prefetch, isOptNLL, isNGLL, isNotLast=False):
+  def closeSumAtLeastUnroll(self, kernel, tPA, tPB, prefetch, isOptNLL, isNGLL, isNotLast=False, tailloopInNll=False):
     module = Module("closeSumAtLeastUnroll")
     if not prefetch:
       if isNGLL:
@@ -7355,7 +7399,9 @@ class KernelWriterAssembly(KernelWriter):
         if isNotLast:
           module.add(SBranch(labelName=toPGR1end.getLabelName(), comment="Branch to toPGR1end"))
         else:
-          module.add(toPGR1end)
+          if not tailloopInNll:
+            # generate toPGR1end label except for tailloopInNll case
+            module.add(toPGR1end)
           if isOptNLL:
               endSumLabel = "Summation_End_OptNLL"
 
@@ -7382,7 +7428,9 @@ class KernelWriterAssembly(KernelWriter):
               module.add(Label("OptNLL_End", ""))
 
           else:
-            module.add(Label("PrefetchGlobalLastIterEnd", ""))
+            if not tailloopInNll:
+              # generate PrefetchGlobalLastIterEnd label except for tailloopInNll case
+              module.add(Label("PrefetchGlobalLastIterEnd", ""))
 
     # swap back vgpr pool if any
     def swapBackGprPool(gprPool, savedGprPool, isNotLast):
@@ -7529,7 +7577,7 @@ class KernelWriterAssembly(KernelWriter):
       # TODO - does this handle N-dim tensors correctly?
       #if tP["isB"]:
       #  module.add(SMovB32(dst=sgpr("OffsetB"), src=sgpr("SrdB+0"), comment="hack to save"))
-      if loopIdx == self.states.unrollIdx: # and self.states.staggerU
+      if loopIdx == self.states.unrollIdx and self.states.staggerU:
         # add a wrap increment, if needed:
         with self.allocTmpSgpr(4) as tmpSgprInfo:
           incLower = tmpSgprInfo.idx
@@ -8483,7 +8531,9 @@ class KernelWriterAssembly(KernelWriter):
     tc = tP["tensorChar"]
     imod = Module("directToLdsM0Update%s_%u"%(tc,mode))
     DtldsModule = imod.add(Module("dtls_offset%s"%tP["tensorChar"]))
-    if not self.do["GlobalRead%s"%tP["tensorChar"]]: return imod
+    if not self.do["GlobalRead%s"%tP["tensorChar"]]:
+      return imod
+
     if kernel["DirectToLds%s"%tc]:
       # DirectToLds only enabled for TLU=1 cases, where the registers are directly copied into LDS
       # for cases both A&B are DTLS, updating m0 for each GlobalRead requires instruction schedule
@@ -8500,9 +8550,6 @@ class KernelWriterAssembly(KernelWriter):
         # do not generate local read wait for PGR=2
         DtldsModule.addComment0("before DirectToLds load, ensure prior ds_reads have finished")
         DtldsModule.add(SWaitCnt(dscnt=0, comment=""))
-        if not kernel["NoLdsWriteCode"]:
-          waitStr = 0
-          DtldsModule.add(SWaitCnt(vlcnt=waitStr, comment=""))
         DtldsModule.add(SBarrier())
 
     return imod
@@ -14023,12 +14070,10 @@ class KernelWriterAssembly(KernelWriter):
 
     loopChar = self.states.indexChars[kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
 
-    # Wait for all LR in pre-loop to complete before we start main loop
-    module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LR in pre-loop to complete"))
-
     if numCodePath == 1:
+      module.add(Label("LoopBegin%s_0"%(loopChar), "" ))
       module.add(MacroInstruction(name="MAINLOOP", args=[0]))
-      module.add(SCBranchSCC0(labelName="label_LoopBegin%s"%(loopChar), comment="" ))
+      module.add(SCBranchSCC0(labelName="label_LoopBegin%s_0"%(loopChar), comment="" ))
       module.add(Label("LoopEnd%s"%(loopChar), "" ))
       return module
 

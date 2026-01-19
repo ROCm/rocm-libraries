@@ -58,6 +58,8 @@ Tests:
   category: nightly
   hardware: [gfx908, gfx90a]
   function: ellmv_extra
+  host_memory_gb: 32
+  device_memory_gb: 5
 
 - name: ellmv
   category: quick
@@ -98,6 +100,8 @@ Tests:
   precision: *double_only_precisions_complex
   M: [39385, 193482, 639102]
   N: [29348, 340123, 710341]
+  host_memory_gb: 32
+  device_memory_gb: 8
   alpha_beta: *alpha_beta_range_nightly
   transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]

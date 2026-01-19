@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 
-#include <DataGenerator.hpp>
+#include <mxDataGenerator/DataGenerator.hpp>
 #include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 

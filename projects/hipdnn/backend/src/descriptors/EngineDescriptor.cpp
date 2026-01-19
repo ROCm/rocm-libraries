@@ -230,4 +230,14 @@ hipdnnBackendDescriptorType_t EngineDescriptor::getStaticType()
     return HIPDNN_BACKEND_ENGINE_DESCRIPTOR;
 }
 
+std::string EngineDescriptor::toString() const
+{
+    std::string str = "EngineDescriptor: {engineId=";
+    str += _engineIdSet ? std::to_string(_engineId) : "unset";
+    str += _graph ? ", graph=" + fmt::format("{:p}", static_cast<const void*>(_graph.get()))
+                  : ", graph=null";
+    str += "}";
+    return str;
+}
+
 } // namespace hipdnn_backend

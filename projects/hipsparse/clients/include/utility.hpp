@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -48,13 +48,8 @@
 #include <omp.h>
 #endif
 
-#ifdef __cpp_lib_filesystem
 #include <filesystem>
 namespace fs = std::filesystem;
-#else
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#endif
 
 /*! \brief Return path of this executable */
 std::string hipsparse_exepath();
@@ -100,7 +95,7 @@ inline std::string get_filename(const std::string& matrix_filename)
 {
     std::string matrix_filename_with_ext = matrix_filename;
 
-    // Check if file already has extension, keep it, otherwise add .bin extension
+    // Check if file already has extension, keep it, otherwise add .csr extension
     size_t last_dot_pos = matrix_filename_with_ext.find_last_of('.');
     if(last_dot_pos == std::string::npos || last_dot_pos == 0)
     {
@@ -113,20 +108,42 @@ inline std::string get_filename(const std::string& matrix_filename)
         matrices_dir = getenv("HIPSPARSE_CLIENTS_MATRICES_DIR");
     }
 
-    fs::path r;
+    fs::path matrix_path;
     if(matrices_dir != nullptr)
     {
-        r = fs::path(matrices_dir) / matrix_filename_with_ext;
+        matrix_path = fs::path(matrices_dir) / matrix_filename_with_ext;
     }
     else
     {
-        r = fs::path(hipsparse_exepath()) / ".." / "matrices" / matrix_filename_with_ext;
+        static constexpr const char* possible_relative_paths[] = {
+            // Development build: executable in build_dir/clients/staging, matrices in build_dir/clients/matrices
+            "../matrices",
+            // TheRock installation: executable in TheRock/bin, matrices in TheRock/clients/matrices
+            "../clients/matrices",
+        };
+
+        for(const auto& rel_path : possible_relative_paths)
+        {
+            fs::path test_path = fs::path(hipsparse_exepath()) / rel_path;
+            if(fs::exists(test_path))
+            {
+                matrix_path = test_path / matrix_filename_with_ext;
+                break;
+            }
+        }
+
+        if(matrix_path.empty())
+        {
+            missing_file_error_message(matrix_path.string().c_str());
+            std::cerr << "exit(HIPSPARSE_STATUS_INTERNAL_ERROR)" << std::endl;
+            exit(HIPSPARSE_STATUS_INTERNAL_ERROR);
+        }
     }
 
-    FILE* tmpf = fopen(r.string().c_str(), "r");
+    FILE* tmpf = fopen(matrix_path.string().c_str(), "r");
     if(!tmpf)
     {
-        missing_file_error_message(r.string().c_str());
+        missing_file_error_message(matrix_path.string().c_str());
         std::cerr << "exit(HIPSPARSE_STATUS_INTERNAL_ERROR)" << std::endl;
         exit(HIPSPARSE_STATUS_INTERNAL_ERROR);
     }
@@ -134,7 +151,7 @@ inline std::string get_filename(const std::string& matrix_filename)
     {
         fclose(tmpf);
     }
-    return r.string();
+    return matrix_path.string();
 }
 
 /*!\file
@@ -210,6 +227,24 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
     return "<undefined HIPSPARSE_STATUS value>";
 }
 #endif
+
+// CHECK_GENERATE_MATRIX_ERROR
+#ifdef GOOGLE_TEST
+#define CHECK_GENERATE_MATRIX_ERROR2(ERROR) ASSERT_EQ(ERROR, true)
+#else
+#define CHECK_GENERATE_MATRIX_ERROR2(ERROR)                                                        \
+    do                                                                                             \
+    {                                                                                              \
+        auto error = ERROR;                                                                        \
+        if(error != true)                                                                          \
+        {                                                                                          \
+            fprintf(                                                                               \
+                stderr, "Error encountered generating matrix data (%s:%d)\n", __FILE__, __LINE__); \
+            exit(EXIT_FAILURE);                                                                    \
+        }                                                                                          \
+    } while(0)
+#endif
+#define CHECK_GENERATE_MATRIX_ERROR(ERROR) CHECK_GENERATE_MATRIX_ERROR2(ERROR)
 
 // CHECK_HIP_ERROR
 #ifdef GOOGLE_TEST
@@ -1102,7 +1137,9 @@ int read_bin_matrix(const char*          filename,
 
     int err;
 
-    int nrowf, ncolf, nnzf;
+    int nrowf = 0;
+    int ncolf = 0;
+    int nnzf  = 0;
 
     err = fread(&nrowf, sizeof(int), 1, f);
     err |= fread(&ncolf, sizeof(int), 1, f);
@@ -1226,6 +1263,11 @@ bool generate_csr_matrix(const std::string    filename,
             {
                 return true;
             }
+            else
+            {
+                fprintf(stderr, "Cannot open [read] %s\ncol", full_filename_path.c_str());
+                return false;
+            }
         }
         else if(extension == "mtx")
         {
@@ -1259,6 +1301,11 @@ bool generate_csr_matrix(const std::string    filename,
 
                     return true;
                 }
+            }
+            else
+            {
+                fprintf(stderr, "Cannot open [read] %s\ncol", full_filename_path.c_str());
+                return false;
             }
         }
     }
@@ -3738,14 +3785,14 @@ void host_coomm_batched(I                    M,
 }
 
 template <typename T>
-int csrilu0(int                  m,
-            const int*           ptr,
-            const int*           col,
-            T*                   val,
-            hipsparseIndexBase_t idx_base,
-            bool                 boost,
-            double               boost_tol,
-            T                    boost_val)
+int host_csrilu0(int                  m,
+                 const int*           ptr,
+                 const int*           col,
+                 T*                   val,
+                 hipsparseIndexBase_t idx_base,
+                 bool                 boost,
+                 double               boost_tol,
+                 T                    boost_val)
 {
     // pointer of upper part of each row
     std::vector<int> diag_offset(m);
@@ -3823,9 +3870,31 @@ int csrilu0(int                  m,
             // Structural zero digonal
             return ai + idx_base;
         }
+        else
+        {
+            // set diagonal pointer to diagonal element
+            diag_offset[ai] = j;
 
-        // set diagonal pointer to diagonal element
-        diag_offset[ai] = j;
+            if(boost)
+            {
+                if(testing_abs(val[j]) <= boost_tol)
+                {
+                    val[j] = boost_val;
+                }
+            }
+            else
+            {
+                const bool is_diag = (j >= 0) && (col[j] == (ai + idx_base));
+
+                const bool is_zero_diag = is_diag && (val[j] == make_DataType<T>(0));
+
+                // check for zero diagonal
+                if(is_zero_diag)
+                {
+                    return ai + idx_base;
+                }
+            }
+        }
 
         // clear nnz entries
         for(j = row_start; j < row_end; ++j)

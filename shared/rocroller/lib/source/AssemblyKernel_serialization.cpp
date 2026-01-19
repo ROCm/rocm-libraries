@@ -29,6 +29,7 @@
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 
 #include <rocRoller/Serialization/AssemblyKernel.hpp>
+#include <rocRoller/Serialization/ELF.hpp>
 #include <rocRoller/Serialization/YAML.hpp>
 
 namespace rocRoller
@@ -49,5 +50,10 @@ namespace rocRoller
     AssemblyKernels AssemblyKernels::fromYAML(std::string const& str)
     {
         return Serialization::fromYAML<AssemblyKernels>(str);
+    }
+
+    AssemblyKernels AssemblyKernels::fromELF(std::string const& filename)
+    {
+        return Serialization::fromELFFile<AssemblyKernels>(filename);
     }
 }

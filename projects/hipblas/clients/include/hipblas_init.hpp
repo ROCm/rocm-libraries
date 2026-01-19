@@ -32,6 +32,7 @@
 #include "host_batch_vector.hpp"
 #include "host_strided_batch_vector.hpp"
 #include "host_vector.hpp"
+#include "type_utils.h"
 
 //!
 //! @brief enum to check for NaN initialization of the Input vector/matrix
@@ -125,10 +126,15 @@ void hipblas_init_matrix_alternating_sign(hipblas_matrix_type matrix_type,
             for(size_t i = 0; i < M; ++i)
                 for(size_t j = 0; j < N; ++j)
                 {
-                    auto value
-                        = uplo == 'U' ? (j >= i ? rand_gen() : T(0)) : (j <= i ? rand_gen() : T(0));
+                    auto value     = uplo == 'U' ? (j >= i ? rand_gen() : T(0.0f))
+                                                 : (j <= i ? rand_gen() : T(0.0f));
                     A[i + j * lda] = (i ^ j) & 1 ? T(value) : T(hipblas_negate(value));
                 }
+        }
+        else
+        {
+            throw std::invalid_argument(
+                "Invalid matrix_type for hipblas_init_matrix_alternating_sign function!");
         }
     }
 }
@@ -153,6 +159,8 @@ void hipblas_init_vector_alternating_sign(T rand_gen(), T* x, int64_t N, int64_t
 template <typename U, typename T>
 void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T rand_gen(), U& hA)
 {
+    using R = real_t<T>;
+
     for(int64_t batch_index = 0; batch_index < hA.batch_count(); ++batch_index)
     {
         auto*   A   = hA[batch_index];
@@ -182,11 +190,11 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
                     else if(uplo == 'U')
                     {
                         A[j + i * lda] = value;
-                        A[i + j * lda] = T(0);
+                        A[i + j * lda] = T(0.0f);
                     }
                     else if(uplo == 'L')
                     {
-                        A[j + i * lda] = T(0);
+                        A[j + i * lda] = T(0.0f);
                         A[i + j * lda] = value;
                     }
                     else
@@ -210,11 +218,11 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
                     else if(uplo == 'U')
                     {
                         A[j + i * lda] = value;
-                        A[i + j * lda] = T(0);
+                        A[i + j * lda] = T(0.0f);
                     }
                     else if(uplo == 'L')
                     {
-                        A[j + i * lda] = T(0);
+                        A[j + i * lda] = T(0.0f);
                         A[i + j * lda] = value;
                     }
                     else
@@ -232,8 +240,8 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
             for(size_t j = 0; j < N; ++j)
                 for(size_t i = 0; i < M; ++i)
                 {
-                    auto value
-                        = uplo == 'U' ? (j >= i ? rand_gen() : T(0)) : (j <= i ? rand_gen() : T(0));
+                    auto value     = uplo == 'U' ? (j >= i ? rand_gen() : T(0.0f))
+                                                 : (j <= i ? rand_gen() : T(0.0f));
                     A[i + j * lda] = value;
                 }
         }
@@ -250,13 +258,13 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
             for(size_t j = 0; j < N; ++j)
                 for(size_t i = 0; i < M; ++i)
                 {
-                    auto value
-                        = uplo == 'U' ? (j >= i ? rand_gen() : T(0)) : (j <= i ? rand_gen() : T(0));
+                    auto value     = uplo == 'U' ? (j >= i ? rand_gen() : T(0.0f))
+                                                 : (j <= i ? rand_gen() : T(0.0f));
                     A[i + j * lda] = value;
                 }
 
-            const T multiplier = T(
-                1.01); // Multiplying factor to slightly increase the base value of (abs_sum_off_diagonal_row + abs_sum_off_diagonal_col) dominant diagonal element. If tests fail and it seems that there are numerical stability problems, try increasing multiplier, it should decrease the condition number of the matrix and thereby avoid numerical stability issues.
+            const R multiplier = R(
+                1.01f); // Multiplying factor to slightly increase the base value of (abs_sum_off_diagonal_row + abs_sum_off_diagonal_col) dominant diagonal element. If tests fail and it seems that there are numerical stability problems, try increasing multiplier, it should decrease the condition number of the matrix and thereby avoid numerical stability issues.
 
             if(uplo == 'U') // hipblas_fill_upper
             {
@@ -265,20 +273,23 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
 #endif
                 for(size_t i = 0; i < N; i++)
                 {
-                    T abs_sum_off_diagonal_row = T(
-                        0); //store absolute sum of entire row of the particular diagonal element
-                    T abs_sum_off_diagonal_col = T(
-                        0); //store absolute sum of entire column of the particular diagonal element
+                    R abs_sum_off_diagonal_row = R(
+                        0.0f); //store absolute sum of entire row of the particular diagonal element
+                    R abs_sum_off_diagonal_col = R(
+                        0.0f); //store absolute sum of entire column of the particular diagonal element
 
                     for(size_t j = i + 1; j < N; j++)
-                        abs_sum_off_diagonal_row += hipblas_abs(A[i + j * lda]);
+                        abs_sum_off_diagonal_row
+                            = R(abs_sum_off_diagonal_row + hipblas_abs(A[i + j * lda]));
                     for(size_t j = 0; j < i; j++)
-                        abs_sum_off_diagonal_col += hipblas_abs(A[j + i * lda]);
+                        abs_sum_off_diagonal_col
+                            = R(abs_sum_off_diagonal_col + hipblas_abs(A[j + i * lda]));
 
-                    A[i + i * lda] = (abs_sum_off_diagonal_row + abs_sum_off_diagonal_col) == T(0)
-                                         ? T(1)
-                                         : T((abs_sum_off_diagonal_row + abs_sum_off_diagonal_col)
-                                             * multiplier);
+                    A[i + i * lda]
+                        = (abs_sum_off_diagonal_row + abs_sum_off_diagonal_col) == R(0.0f)
+                              ? R(1.0f)
+                              : R((abs_sum_off_diagonal_row + abs_sum_off_diagonal_col)
+                                  * multiplier);
                 }
             }
             else // hipblas_fill_lower
@@ -288,23 +299,30 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
 #endif
                 for(size_t j = 0; j < N; j++)
                 {
-                    T abs_sum_off_diagonal_row = T(
-                        0); //store absolute sum of entire row of the particular diagonal element
-                    T abs_sum_off_diagonal_col = T(
-                        0); //store absolute sum of entire column of the particular diagonal element
+                    R abs_sum_off_diagonal_row = R(
+                        0.0f); //store absolute sum of entire row of the particular diagonal element
+                    R abs_sum_off_diagonal_col = R(
+                        0.0f); //store absolute sum of entire column of the particular diagonal element
 
                     for(size_t i = j + 1; i < N; i++)
-                        abs_sum_off_diagonal_col += hipblas_abs(A[i + j * lda]);
+                        abs_sum_off_diagonal_col
+                            = R(abs_sum_off_diagonal_col + hipblas_abs(A[i + j * lda]));
 
                     for(size_t i = 0; i < j; i++)
-                        abs_sum_off_diagonal_row += hipblas_abs(A[j + i * lda]);
+                        abs_sum_off_diagonal_row
+                            = R(abs_sum_off_diagonal_row + hipblas_abs(A[j + i * lda]));
 
-                    A[j + j * lda] = (abs_sum_off_diagonal_row + abs_sum_off_diagonal_col) == T(0)
-                                         ? T(1)
-                                         : T((abs_sum_off_diagonal_row + abs_sum_off_diagonal_col)
-                                             * multiplier);
+                    A[j + j * lda]
+                        = (abs_sum_off_diagonal_row + abs_sum_off_diagonal_col) == R(0.0f)
+                              ? R(1.0f)
+                              : R((abs_sum_off_diagonal_row + abs_sum_off_diagonal_col)
+                                  * multiplier);
                 }
             }
+        }
+        else
+        {
+            throw std::invalid_argument("Invalid matrix_type for hipblas_init_matrix function!");
         }
     }
 }
@@ -362,11 +380,11 @@ void hipblas_init_matrix_trig(hipblas_matrix_type matrix_type,
                     else if(uplo == 'U')
                     {
                         A[j + i * lda] = value;
-                        A[i + j * lda] = T(0);
+                        A[i + j * lda] = T(0.0f);
                     }
                     else if(uplo == 'L')
                     {
-                        A[j + i * lda] = T(0);
+                        A[j + i * lda] = T(0.0f);
                         A[i + j * lda] = value;
                     }
                     else
@@ -390,11 +408,11 @@ void hipblas_init_matrix_trig(hipblas_matrix_type matrix_type,
                     else if(uplo == 'U')
                     {
                         A[j + i * lda] = value;
-                        A[i + j * lda] = T(0);
+                        A[i + j * lda] = T(0.0f);
                     }
                     else if(uplo == 'L')
                     {
-                        A[j + i * lda] = T(0);
+                        A[j + i * lda] = T(0.0f);
                         A[i + j * lda] = value;
                     }
                     else
@@ -414,10 +432,15 @@ void hipblas_init_matrix_trig(hipblas_matrix_type matrix_type,
                 {
                     auto value
                         = uplo == 'U'
-                              ? (j >= i ? T(seedReset ? cos(i + j * M) : sin(i + j * M)) : T(0))
-                              : (j <= i ? T(seedReset ? cos(i + j * M) : sin(i + j * M)) : T(0));
+                              ? (j >= i ? T(seedReset ? cos(i + j * M) : sin(i + j * M)) : T(0.0f))
+                              : (j <= i ? T(seedReset ? cos(i + j * M) : sin(i + j * M)) : T(0.0f));
                     A[i + j * lda] = value;
                 }
+        }
+        else
+        {
+            throw std::invalid_argument(
+                "Invalid matrix_type for hipblas_init_matrix_trig function!");
         }
     }
 }
@@ -456,7 +479,7 @@ void hipblas_init_vector_zero(U& hx)
         auto* x = hx[batch_index];
 
         for(size_t j = 0; j < N; ++j)
-            x[j * incx] = T(0.0);
+            x[j * incx] = T(0.0f);
     }
 }
 

@@ -41,4 +41,4 @@ public:
     }
 };
 
-} // namespace hipdnn_sdk::test_utilities
+} // namespace hipdnn_data_sdk::test_utilities

@@ -153,3 +153,18 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                        nullptr,
                        spsmDescr->externalBuffer));
 }
+
+hipsparseStatus_t hipsparseSpSM_solve_ex(hipsparseHandle_t           handle,
+                                         hipsparseOperation_t        opA,
+                                         hipsparseOperation_t        opB,
+                                         const void*                 alpha,
+                                         hipsparseConstSpMatDescr_t  matA,
+                                         hipsparseConstDnMatDescr_t  matB,
+                                         const hipsparseDnMatDescr_t matC,
+                                         hipDataType                 computeType,
+                                         hipsparseSpSMAlg_t          alg,
+                                         hipsparseSpSMDescr_t        spsmDescr)
+{
+    return hipsparseSpSM_solve(
+        handle, opA, opB, alpha, matA, matB, matC, computeType, alg, spsmDescr, nullptr);
+}

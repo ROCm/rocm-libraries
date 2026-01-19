@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -140,6 +140,10 @@ namespace TensileLite
                                                             Hardware const&  hardware,
                                                             int numSolutions) const override
         {
+            // TODO-
+            //   Can remove this override since the base SolutionLibrary has done the same thing
+            // FreeSize pool is simply a table, no ranking information.
+            // Return empty to indicate not supported for heuristic.
             SolutionVector<MySolution> solutions;
             return solutions;
         }

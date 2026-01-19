@@ -522,7 +522,7 @@ std::unique_ptr<TreeNode> NodeFactory::CreateExplicitNode(NodeMetaData& nodeData
             throw std::runtime_error("solution map error for L1D sub-problem");
     }
 
-    // createing tree without solution map, must call DecideNodeScheme
+    // creating tree without solution map, must call DecideNodeScheme
     if(determined_scheme == CS_NONE)
         determined_scheme = DecideNodeScheme(pool, nodeData, parent);
 
@@ -591,8 +591,17 @@ ComputeScheme NodeFactory::DecideRealScheme(const function_pool& pool, NodeMetaD
 {
     // use size in real units to decide what scheme to use
     const auto& realLength = nodeData.direction == -1 ? nodeData.length : nodeData.outputLength;
+    const auto& realStride = nodeData.direction == -1 ? nodeData.inStride : nodeData.outStride;
+    const auto& realDist   = nodeData.direction == -1 ? nodeData.iDist : nodeData.oDist;
+    const auto  isEven     = [](size_t val) { return val % 2 == 0; };
 
-    if(realLength[0] % 2 == 0 && nodeData.inStride[0] == 1 && nodeData.outStride[0] == 1)
+    // For even-length optimization, we treat real data as
+    // complex-interleaved, so fastest dimension stride must be 1 for
+    // both input and output.  Subsequent strides + dist on the real
+    // side must all be expressible as complex stride + dist; that
+    // is, they must all be even.
+    if(realLength[0] % 2 == 0 && nodeData.inStride[0] == 1 && nodeData.outStride[0] == 1
+       && std::all_of(realStride.begin() + 1, realStride.end(), isEven) && isEven(realDist))
     {
         switch(nodeData.dimension)
         {
@@ -699,7 +708,7 @@ ComputeScheme
             // get largest pow2 1D length
             auto largest = pool.get_largest_pow2_length(nodeData.precision);
 
-            // need to ignore len 1, or we're going into a infinity decompostion loop
+            // need to ignore len 1, or we're going into a infinity decomposition loop
             // basically not gonna happen unless someone builds only a len1 kernel...
             if(largest <= 1)
             {
@@ -775,11 +784,11 @@ ComputeScheme
                 if(divLength1 == 0)
                 {
                     // We need to recurse.  Note, for CS_L1D_TRTRT,
-                    // divLength0 has to be explictly supported
+                    // divLength0 has to be explicitly supported
                     auto divLength0 = get_largest_supported_factor(
                         pool, nodeData.precision, nodeData.length[0]);
 
-                    // should ignore factor 1 or we're going into a infinity decompostion loop,
+                    // should ignore factor 1 or we're going into a infinity decomposition loop,
                     // (an example is to run len-81 when we build only pow2 kernels, we'll be here)
                     divLength1 = (divLength0 <= 1) ? 0 : nodeData.length[0] / divLength0;
                 }
