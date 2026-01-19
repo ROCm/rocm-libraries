@@ -85,12 +85,16 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlan)
     auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.tensors[attributes.y_tensor_uid()]->rawHostData());
 
+    double epsilon
+        = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(params.epsilonTensor, "Epsilon");
+
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance(*shallowXTensor,
                                                       *shallowScaleTensor,
                                                       *shallowBiasTensor,
                                                       *shallowMeanTensor,
                                                       *shallowVarianceTensor,
-                                                      *shallowYTensor);
+                                                      *shallowYTensor,
+                                                      epsilon);
 
     BatchnormFwdInferenceWithVariancePlan<float, float, float, float, float> fwdPlan(
         std::move(params));
@@ -100,43 +104,6 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlan)
     EXPECT_TRUE(cpuRefOutputValidation.allClose(
         *directTensorBundle.tensors[attributes.y_tensor_uid()].get(),
         *planTensorBundle.tensors[attributes.y_tensor_uid()].get()));
-}
-
-TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlanWithBadEpsilon)
-{
-    std::vector<int64_t> dims = {6, 3, 32, 32};
-    unsigned int seed = getGlobalTestSeed();
-    auto graph = buildBatchnormFwdInferenceWithVarianceGraph(DataType::FLOAT,
-                                                             DataType::FLOAT,
-                                                             DataType::FLOAT,
-                                                             DataType::FLOAT,
-                                                             dims,
-                                                             TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
-    const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
-    BatchnormFwdWithVarianceTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
-
-    const auto& attributes = node.attributesAs<
-        hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
-    const auto& tensorMap = graphWrapper.getTensorMap();
-    BatchnormFwdInferenceWithVarianceParams params(*tensorMap.at(attributes.x_tensor_uid()),
-                                                   *tensorMap.at(attributes.y_tensor_uid()),
-                                                   *tensorMap.at(attributes.scale_tensor_uid()),
-                                                   *tensorMap.at(attributes.bias_tensor_uid()),
-                                                   *tensorMap.at(attributes.mean_tensor_uid()),
-                                                   *tensorMap.at(attributes.variance_tensor_uid()),
-                                                   *tensorMap.at(attributes.epsilon_tensor_uid()));
-
-    std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
-
-    // Set a bad epsilon value (smaller than default 1e-5)
-    params.epsilonTensor.value.Set(hipdnn_data_sdk::data_objects::Float64Value(1e-6));
-
-    BatchnormFwdInferenceWithVariancePlan<float, float, float, float, float> fwdPlan(
-        std::move(params));
-
-    EXPECT_THROW(fwdPlan.execute(variantPack), std::runtime_error);
 }
 
 TEST(TestBatchnormFwdWithVariancePlanBuilder, PlanConstruction)
