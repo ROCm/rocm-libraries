@@ -26,6 +26,7 @@
 #include "test.hpp"
 #include "driver.hpp"
 #include "fusionHost.hpp"
+#include "workspace.hpp"
 #include <miopen/stringutils.hpp>
 
 using ptr_FusionPlanDesc = MIOPEN_MANAGE_PTR(miopenFusionPlanDescriptor_t, miopenDestroyFusionPlan);
@@ -207,9 +208,8 @@ struct verify_forward_conv_bias_batchnorm_activ
         Workspace wspace{};
         size_t workspace_size = 0;
         miopenConvFwdAlgorithm_t algo{}; // not used in GetWorkSpaceSize
-        EXPECT_EQ(miopenFusionPlanGetWorkSpaceSize(&handle, fusion_plan, &workspace_size, algo),
-                  miopenStatusSuccess);
-
+        miopenError = miopenFusionPlanGetWorkSpaceSize(&handle, fusionplan, &workspace_size, algo);
+        EXPECT(miopenError == miopenStatusSuccess);
         wspace.resize(workspace_size);
 
         miopenExecuteFusionPlan_v2(&handle,
