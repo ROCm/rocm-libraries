@@ -89,7 +89,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_row, rocsparse_direction_column]
-  matrix: [rocsparse_matrix_random]
+  matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos1,
              nos2,
              nos3,
