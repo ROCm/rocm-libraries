@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -60,7 +60,7 @@ inline fs::path get_handle_lock_path(const char* name)
     const auto p = fs::current_path() / name;
     if(!fs::exists(p))
     {
-        const auto tmp = fs::current_path() / boost::filesystem::unique_path().string();
+        auto tmp = fs::current_path() / fs::temp_directory_path();
         std::ofstream{tmp}; // NOLINT(bugprone-unused-raii)
         fs::rename(tmp, p);
     }

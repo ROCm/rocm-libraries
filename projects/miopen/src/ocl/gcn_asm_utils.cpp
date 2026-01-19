@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,9 +23,9 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include <miopen/config.h>
 #include <miopen/env.hpp>
 #include <miopen/gcn_asm_utils.hpp>
-#include <miopen/config.h>
 
 #if MIOPEN_USE_COMGR
 
@@ -37,7 +37,7 @@ bool ValidateGcnAssembler() { return true; }
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
-#include <miopen/filesystem.hpp>
+#include <sstream>
 #include <miopen/errors.hpp>
 #include <miopen/manage_ptr.hpp>
 #include <miopen/write_file.hpp>
@@ -45,7 +45,6 @@ bool ValidateGcnAssembler() { return true; }
 #include <miopen/logger.hpp>
 #include <miopen/exec_utils.hpp>
 #include <miopen/temp_file.hpp>
-#include <sstream>
 
 #ifdef __linux__
 #include <paths.h>
@@ -54,9 +53,6 @@ bool ValidateGcnAssembler() { return true; }
 #include <sys/wait.h>
 #include <unistd.h>
 #endif // __linux__
-
-#include <boost/filesystem/operations.hpp>
-namespace fs = miopen::fs;
 
 /// SWDEV-233338: hip-clang reports unknown target instead of amdgpu.
 /// \todo Try to assemble AMD GCN source?
@@ -253,7 +249,7 @@ static void AmdgcnAssembleQuiet(std::string_view source, std::string_view params
 
 static bool GcnAssemblerHasBug34765Impl()
 {
-    auto p = fs::temp_directory_path() / boost::filesystem::unique_path().string();
+    auto p = miopen::fs::temp_directory_path();
     miopen::WriteFile(miopen::GetKernelSrc("bugzilla_34765_detect.s"), p);
     const auto& src = p.string();
     try
@@ -276,7 +272,7 @@ static bool GcnAssemblerHasBug34765()
 
 static bool GcnAssemblerSupportsOption(const std::string& option)
 {
-    auto p = fs::temp_directory_path() / boost::filesystem::unique_path().string();
+    auto p = miopen::fs::temp_directory_path();
     miopen::WriteFile(miopen::GetKernelSrc("dummy_kernel.s"), p);
     const auto& src = p.string();
     try

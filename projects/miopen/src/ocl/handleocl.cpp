@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,10 +24,9 @@
  *
  *******************************************************************************/
 
-#include <miopen/handle.hpp>
-
-#include <miopen/binary_cache.hpp>
 #include <miopen/config.h>
+#include <miopen/handle.hpp>
+#include <miopen/binary_cache.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/handle_lock.hpp>
 #include <miopen/invoker.hpp>
@@ -37,9 +36,7 @@
 #include <miopen/manage_ptr.hpp>
 #include <miopen/ocldeviceinfo.hpp>
 #include <miopen/timer.hpp>
-
 #include <miopen/filesystem.hpp>
-#include <boost/filesystem/operations.hpp>
 
 #include <string>
 
@@ -415,7 +412,7 @@ Program Handle::LoadProgram(const std::string& program_name,
         miopen::SaveBinary(
             binary, this->GetTargetProperties(), this->GetMaxComputeUnits(), program_name, params);
 #else
-        auto path = miopen::GetCachePath(false) / boost::filesystem::unique_path().string();
+        auto path = miopen::GetCachePath(false) / fs::temp_directory_path();
         miopen::SaveProgramBinary(p, path.string());
         miopen::SaveBinary(path, this->GetTargetProperties(), program_name, params);
 #endif

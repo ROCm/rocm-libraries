@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,11 +37,7 @@ namespace miopen {
 
 std::vector<char> LoadFile(const fs::path& path)
 {
-#if MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM
-    boost::system::error_code error_code;
-#else
     std::error_code error_code;
-#endif
     const auto size = fs::file_size(path, error_code);
     if(error_code)
         MIOPEN_THROW(path.string() + ": " + error_code.message());

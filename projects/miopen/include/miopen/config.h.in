@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -53,7 +53,6 @@
 #cmakedefine01 MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 #cmakedefine01 MIOPEN_ENABLE_AI_KERNEL_TUNING
 #cmakedefine01 MIOPEN_HIP_COMPILER_HAS_OPTION_OFFLOAD_UNIFORM_BLOCK
-#cmakedefine01 MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM
 #cmakedefine01 MIOPEN_ENABLE_FIN_INTERFACE
 
 // "_PACKAGE_" to avoid name contentions: the macros like

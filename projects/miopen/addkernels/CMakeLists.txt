@@ -2,7 +2,7 @@
 #
 # MIT License
 #
-# Copyright (c) 2017 Advanced Micro Devices, Inc.
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,16 +30,6 @@ add_executable(addkernels EXCLUDE_FROM_ALL ${ADD_KERNELS_SOURCE})
 target_include_directories(addkernels PRIVATE ${PROJECT_SOURCE_DIR}/src/include)
 if(HAS_LIB_STD_FILESYSTEM)
     target_link_libraries(addkernels PRIVATE stdc++fs)
-endif()
-
-# This hack is for MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM.
-# We can't use config.h because it is generated after addkernels.
-target_compile_definitions(addkernels PRIVATE -DMIOPEN_HACK_DO_NOT_INCLUDE_CONFIG_H=1)
-if(MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM)
-    target_compile_definitions(addkernels PRIVATE -DMIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM=1)
-    target_link_libraries(addkernels PRIVATE Boost::filesystem)
-else()
-    target_compile_definitions(addkernels PRIVATE -DMIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM=0)
 endif()
 
 clang_tidy_check(addkernels)
