@@ -26,7 +26,8 @@
 
 // The implementation of the rocblaslt<->Tensile interface layer.
 
-#include "rocblaslt.h"
+#include <hip/hip_runtime.h>
+#include <iostream>
 
 /*****************************************************************************
  * This is the only file in rocblaslt which should #include Tensile headers    *
@@ -35,7 +36,6 @@
 
 #include "Debug.hpp"
 #include "rocblaslt-types.h"
-#include "rocblaslt_mat_utils.hpp"
 #include "tensile_host.hpp"
 
 #ifdef HIPBLASLT_USE_ROCROLLER
@@ -52,21 +52,34 @@
 #include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
+#include <functional>
+#include <hip/hip_runtime.h>
+#include <iostream>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 #include <atomic>
-#include <complex>
 #include <exception>
 #include <filesystem>
-#include <iomanip>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <regex>
 #include <sstream>
 #include <string>
-#include <string_view>
 #include <type_traits>
 #include <vector>
+
+#define CHECK_HIP_DRV(cmd)                                                              \
+    {                                                                                   \
+        hipError_t error = cmd;                                                         \
+        if(error != hipSuccess)                                                         \
+        {                                                                               \
+            std::cerr << "HIP Driver Error: " << hipGetErrorString(error) << std::endl; \
+            return false;                                                               \
+        }                                                                               \
+    }
 
 #define HIPBLASLT_LIB_PATH "/opt/rocm/lib"
 
@@ -2523,6 +2536,243 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
 }
 #endif
 
+namespace
+{
+
+    static bool isDirectAssemblyEnabled()
+    {
+        static bool enabled = []() {
+            const char* env = getenv("HIPBLASLT_ENABLE_DIRECT_ASSEMBLY");
+            if(env && (std::string(env) == "1" || std::string(env) == "TRUE"))
+            {
+                return true;
+            }
+            return false;
+        }();
+        return enabled;
+    }
+
+    static std::string getCustomCoPath(const std::string& filename)
+    {
+        const char* env = std::getenv("HIPBLASLT_CUSTOM_ASM_DIR");
+        if(env)
+        {
+            std::string path = env;
+            // Ensure trailing slash
+            if(!path.empty() && path.back() != '/')
+            {
+                path += "/";
+            }
+            return path + filename;
+        }
+
+        // Fallback: Use current directory or a specific hardcoded path for safety
+        return "./" + filename;
+    }
+
+    /**
+      * @brief Singleton manager for direct assembly kernels.
+      * Handles rule selection, module loading, and kernel launching.
+      */
+    class DirectAssembly
+    {
+    public:
+        // The function signature for checking if a kernel applies to a problem.
+        using KernelSelector
+            = std::function<bool(rocblaslt_handle, const RocblasltContractionProblem&)>;
+
+        // The function signature for launching the kernel.
+        using KernelLauncher
+            = std::function<bool(hipFunction_t, const RocblasltContractionProblem&)>;
+
+        struct KernelInfo
+        {
+            std::string    coPath;
+            std::string    funcName;
+            KernelLauncher launcher;
+        };
+
+        struct RegistryEntry
+        {
+            std::string    name;
+            KernelSelector selector;
+            KernelInfo     info;
+        };
+
+        // Main Entry Point
+        static bool dispatch(rocblaslt_handle                   handle,
+                             const rocblaslt_matmul_algo*       algo,
+                             const RocblasltContractionProblem& prob)
+        {
+            // 1. Find matching kernel info
+            const auto* info = findKernel(handle, prob);
+            if(!info)
+            {
+                return false;
+            }
+
+            // 2. Get cached GPU function handle
+            hipFunction_t func = getFunction(*info);
+            if(!func)
+            {
+                std::cerr << "[DirectAssembly] Failed to get GPU function handle." << std::endl;
+                return false;
+            }
+
+            // 3. Execute launcher
+            return info->launcher(func, prob);
+        }
+
+    private:
+        // Rule 1: Simple GEMM PoC
+        static RegistryEntry entrySimpleGemmPoC()
+        {
+            return {"SimpleGemm_PoC", // Name
+                    [](rocblaslt_handle, const RocblasltContractionProblem& p) -> bool {
+                        // 1. Check Dimensions
+                        bool dimsMatch = (p.m == 128 && p.n == 64 && p.k == 256);
+
+                        // 2. Check Data Types (All F32)
+                        // Assuming standard hipBLASLt enum names:
+                        bool typesMatch = (p.a_type == HIP_R_32F && p.b_type == HIP_R_32F
+                                           && p.c_type == HIP_R_32F && p.d_type == HIP_R_32F);
+
+                        return dimsMatch && typesMatch;
+                    },
+                    // Info & Launcher
+                    {getCustomCoPath("poc_co.co"),
+                     "SimpleGemm", // Symbol
+                     [](hipFunction_t func, const RocblasltContractionProblem& p) -> bool {
+                         std::cout << "[DirectAssembly] Launching SimpleGemm..." << std::endl;
+
+                         struct Args
+                         {
+                             void*       D;
+                             const void *A, *B, *C;
+                             float       alpha, beta;
+                             int         m, n, k;
+                         };
+
+                         Args args = {p.D,
+                                      p.A,
+                                      p.B,
+                                      p.C,
+                                      *(float*)p.alpha,
+                                      *(float*)p.beta,
+                                      static_cast<int>(p.m),
+                                      static_cast<int>(p.n),
+                                      static_cast<int>(p.k)};
+
+                         size_t argsSize = sizeof(args);
+
+                         void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
+                                           &args,
+                                           HIP_LAUNCH_PARAM_BUFFER_SIZE,
+                                           &argsSize,
+                                           HIP_LAUNCH_PARAM_END};
+
+                         // Grid: 1 thread per element, 256 threads per block
+                         // For M=128, N=64 -> 8192 threads -> 32 blocks
+                         int threads   = static_cast<int>(p.m * p.n);
+                         int blockSize = 256;
+                         int blocks    = (threads + blockSize - 1) / blockSize;
+
+                         hipError_t err = hipModuleLaunchKernel(func,
+                                                                blocks,
+                                                                1,
+                                                                1, // Grid
+                                                                blockSize, // Block
+                                                                1,
+                                                                1,
+                                                                0, // Shared Mem
+                                                                p.stream, // Stream
+                                                                NULL,
+                                                                config);
+
+                         if(err != hipSuccess)
+                         {
+                             std::cerr
+                                 << "[DirectAssembly] Launch failed: " << hipGetErrorString(err)
+                                 << std::endl;
+                             return false;
+                         }
+                         return true;
+                     }}};
+        }
+
+        static const std::vector<RegistryEntry>& getRegistry()
+        {
+            static std::vector<RegistryEntry> registry = {
+                // Register your rules here:
+                entrySimpleGemmPoC(),
+                // entryLargeProblem(),
+            };
+            return registry;
+        }
+
+        static const KernelInfo* findKernel(rocblaslt_handle                   handle,
+                                            const RocblasltContractionProblem& prob)
+        {
+            for(const auto& entry : getRegistry())
+            {
+                if(entry.selector(handle, prob))
+                {
+                    std::cout << "[DirectAssembly] Match found: " << entry.name << std::endl;
+                    return &entry.info;
+                }
+            }
+            return nullptr;
+        }
+
+        static hipFunction_t getFunction(const KernelInfo& info)
+        {
+            // Static variables for caching (Singleton-like behavior)
+            static std::mutex                                     mutex;
+            static std::unordered_map<std::string, hipFunction_t> funcMap;
+            static std::vector<hipModule_t>                       modules; // Keep alive
+
+            std::lock_guard<std::mutex> lock(mutex);
+
+            std::string key = info.coPath + "::" + info.funcName;
+
+            if(funcMap.count(key))
+            {
+                return funcMap[key];
+            }
+
+            std::cout << "[DirectAssembly] Loading module: " << info.coPath << std::endl;
+
+            hipModule_t module;
+            if(hipModuleLoad(&module, info.coPath.c_str()) != hipSuccess)
+            {
+                std::cerr << "[DirectAssembly] Failed to load module: " << info.coPath << std::endl;
+                return nullptr;
+            }
+
+            hipFunction_t func;
+            if(hipModuleGetFunction(&func, module, info.funcName.c_str()) != hipSuccess)
+            {
+                std::cerr << "[DirectAssembly] Failed to find symbol: " << info.funcName
+                          << std::endl;
+                return nullptr;
+            }
+
+            modules.push_back(module);
+            funcMap[key] = func;
+            return func;
+        }
+    };
+
+    // Returns true if GEMM was run with direct assembly, false otherwise.
+    bool useDirectAssembly(rocblaslt_handle                   handle,
+                           const rocblaslt_matmul_algo*       algo,
+                           const RocblasltContractionProblem& prob)
+    {
+        return DirectAssembly::dispatch(handle, algo, prob);
+    }
+
+} // End anonymous namespace
+
 /******************************************************************************
  * runContractionProblem calls Tensile to run a contraction problem described *
  * by RocblasltContractionProblem *
@@ -2532,9 +2782,20 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                        const RocblasltContractionProblem& prob,
                                        std::shared_ptr<void>              gemmData)
 {
+
     rocblaslt_status status = rocblaslt_status_internal_error;
+
     try
     {
+
+        // Check if the environment variable to enable direct assembly is set.
+        // If it is, try and run the problem using direct assembly kernels.
+        // If you succeed, continue. Otherwise fall through to normal roc-roller + tensilelite paths.
+        if(isDirectAssemblyEnabled() && useDirectAssembly(handle, algo, prob))
+        {
+            return rocblaslt_status_success;
+        }
+
 #ifdef HIPBLASLT_USE_ROCROLLER
         if(useRocRoller(handle, prob))
             return runRocRollerContractionProblem(handle, algo, prob);
@@ -2620,7 +2881,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                                   false);
         }
 
-        auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+        // Print the data problem:
+        std::shared_ptr<TensileLite::ContractionSolution> solution
+            = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
         if(prob.workspaceSize < solution->requiredWorkspaceSize(data->problem, *hardware))
         {
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
@@ -2696,7 +2959,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             // set XCC=1 to param when this is a fallback solution
             data->problem.setParams().setWGMXCC((isCUFallback ? 1 : 0));
 
-            auto kernels = solution->solve(data->problem, GetTensileInputs(prob), *hardware);
+            std::vector<TensileLite::KernelInvocation> kernels
+                = solution->solve(data->problem, GetTensileInputs(prob), *hardware);
+
             // Remove this after supports getting comgr buffers from hip.
             bool isPreloaded = false;
             if(rocblaslt::Debug::Instance().preload())
@@ -3626,7 +3891,8 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
         for(size_t i = 0; i < algoCount; ++i)
         {
             auto& solution = solutions[i];
-            msg << "getBestSolutions(): sol-idx = " << solution->index << ", sol-tag = " << solution->matchingTag() << std::endl;
+            msg << "getBestSolutions(): sol-idx = " << solution->index
+                << ", sol-tag = " << solution->matchingTag() << std::endl;
         }
         log_info(__func__, msg.str());
     }
@@ -3702,7 +3968,7 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
 
     heuristicResults.resize(solutions.size());
 
-    int i = 0;
+    int i                 = 0;
     int duplicated_counts = 0;
     for(auto solution : solutions)
     {
@@ -3731,7 +3997,8 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
         if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
         {
             std::ostringstream msg;
-            msg << "getAllSolutions(): sol-idx = " << solution->index << ", sol-tag = " << solution->matchingTag() << std::endl;
+            msg << "getAllSolutions(): sol-idx = " << solution->index
+                << ", sol-tag = " << solution->matchingTag() << std::endl;
             log_info(__func__, msg.str());
         }
 
@@ -4218,7 +4485,8 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
             for(size_t i = 0; i < algoCount; ++i)
             {
                 auto& solution = solutions[i];
-                msg << "getBestSolutions(): sol-idx = " << solution->index << ", sol-tag = " << solution->matchingTag() << std::endl;
+                msg << "getBestSolutions(): sol-idx = " << solution->index
+                    << ", sol-tag = " << solution->matchingTag() << std::endl;
             }
             log_info(__func__, msg.str());
         }
