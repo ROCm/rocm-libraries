@@ -5,14 +5,17 @@
 #include <memory>
 #include <set>
 
+#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
 #include "engines/MiopenEngine.hpp"
 #include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
 #include "mocks/MockPlanBuilder.hpp"
+#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 
 using namespace miopen_legacy_plugin;
 using namespace hipdnn_test_sdk::utilities;
@@ -185,8 +188,105 @@ TEST(TestMiopenEngine, InitializeExecutionContextInvokesFirstApplicablePlanBuild
     MockGraph mockGraph;
     HipdnnEnginePluginHandle dummyHandle;
     MockHipdnnEnginePluginExecutionContext ctx;
+    MockEngineConfig mockConfig;
+    EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
-    engine.initializeExecutionContext(dummyHandle, mockGraph, ctx);
+    engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
+}
+
+TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingEnabled)
+{
+    MiopenEngine engine(1);
+    MockGraph mockGraph;
+    HipdnnEnginePluginHandle dummyHandle;
+    MockHipdnnEnginePluginExecutionContext ctx;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto knobValue = hipdnn_data_sdk::data_objects::CreateIntValue(builder, 1);
+    auto knobSetting = hipdnn_data_sdk::data_objects::CreateKnobSetting(
+        builder,
+        static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash("global.benchmarking")),
+        hipdnn_data_sdk::data_objects::KnobValue::IntValue,
+        knobValue.Union());
+
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>> knobsVector;
+    knobsVector.push_back(knobSetting);
+    auto knobs = builder.CreateVector(knobsVector);
+
+    auto engineConfig = hipdnn_data_sdk::data_objects::CreateEngineConfig(builder, 1, knobs);
+    builder.Finish(engineConfig);
+
+    auto buffer = builder.Release();
+    hipdnn_plugin_sdk::EngineConfigWrapper configWrapper(buffer.data(), buffer.size());
+
+    engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
+
+    EXPECT_TRUE(ctx.benchmarkingEnabled());
+}
+
+TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingDisabled)
+{
+    MiopenEngine engine(1);
+    MockGraph mockGraph;
+    HipdnnEnginePluginHandle dummyHandle;
+    MockHipdnnEnginePluginExecutionContext ctx;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto knobValue
+        = hipdnn_data_sdk::data_objects::CreateIntValue(builder, static_cast<int64_t>(0));
+    auto knobSetting = hipdnn_data_sdk::data_objects::CreateKnobSetting(
+        builder,
+        static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash("global.benchmarking")),
+        hipdnn_data_sdk::data_objects::KnobValue::IntValue,
+        knobValue.Union());
+
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>> knobsVector;
+    knobsVector.push_back(knobSetting);
+    auto knobs = builder.CreateVector(knobsVector);
+
+    auto engineConfig = hipdnn_data_sdk::data_objects::CreateEngineConfig(builder, 1, knobs);
+    builder.Finish(engineConfig);
+
+    auto buffer = builder.Release();
+    hipdnn_plugin_sdk::EngineConfigWrapper configWrapper(buffer.data(), buffer.size());
+
+    engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
+
+    EXPECT_FALSE(ctx.benchmarkingEnabled());
+}
+
+TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhenConfigInvalid)
+{
+    MiopenEngine engine(1);
+    MockGraph mockGraph;
+    HipdnnEnginePluginHandle dummyHandle;
+    MockHipdnnEnginePluginExecutionContext ctx;
+    MockEngineConfig mockConfig;
+
+    EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
+
+    engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
+
+    EXPECT_FALSE(ctx.benchmarkingEnabled());
+}
+
+TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhenNoKnobs)
+{
+    MiopenEngine engine(1);
+    MockGraph mockGraph;
+    HipdnnEnginePluginHandle dummyHandle;
+    MockHipdnnEnginePluginExecutionContext ctx;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto engineConfig = hipdnn_data_sdk::data_objects::CreateEngineConfig(builder, 1, 0);
+    builder.Finish(engineConfig);
+
+    auto buffer = builder.Release();
+    hipdnn_plugin_sdk::EngineConfigWrapper configWrapper(buffer.data(), buffer.size());
+
+    engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
+
+    EXPECT_FALSE(ctx.benchmarkingEnabled());
 }
 
 TEST(TestMiopenEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
@@ -209,8 +309,10 @@ TEST(TestMiopenEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
     MockGraph mockGraph;
     HipdnnEnginePluginHandle dummyHandle;
     MockHipdnnEnginePluginExecutionContext ctx;
+    MockEngineConfig mockConfig;
+    EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
-    engine.initializeExecutionContext(dummyHandle, mockGraph, ctx);
+    engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
 }
 
 TEST(TestMiopenEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoApplicableBuilders)
@@ -232,6 +334,8 @@ TEST(TestMiopenEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoApplica
     MockGraph mockGraph;
     HipdnnEnginePluginHandle dummyHandle;
     MockHipdnnEnginePluginExecutionContext ctx;
+    MockEngineConfig mockConfig;
+    EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
-    engine.initializeExecutionContext(dummyHandle, mockGraph, ctx);
+    engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
 }
