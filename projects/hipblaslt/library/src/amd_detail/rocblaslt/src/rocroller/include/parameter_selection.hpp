@@ -65,7 +65,7 @@ struct SolutionParameters
         = rocRoller::Parameters::Solution::LoadPath::BufferToLDS;
 
     rocRoller::Parameters::Solution::StorePath storePath
-        = rocRoller::Parameters::Solution::StorePath::VGPRToBuffer;
+        = rocRoller::Parameters::Solution::StorePath::VGPRToGlobalMemoryWithBuffer;
 
     bool prefetch          = true;
     int  prefetchInFlight  = 2;
