@@ -220,16 +220,43 @@ struct CKArgs
 template <typename DataType>
 void PerformanceConfigHipImplicitGemmGroupBwdXdlops::Init(const ProblemDescription& problem)
 {
-    valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType>, CKArgs>(problem);
-    index         = 0;
-    split_k       = 1;
-    kernel_id     = valid_kernels[index] + "+" + std::to_string(split_k);
+    if constexpr(std::is_same_v<DataType, float>)
+    {
+        if(problem.UseTF32())
+        {
+            use_tf32 = true;
+            valid_kernels =
+                FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType, ck::tf32_t>, CKArgs>(problem);
+        }
+        else
+        {
+            use_tf32      = false;
+            valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType>, CKArgs>(problem);
+        }
+    }
+    else
+    {
+        valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType>, CKArgs>(problem);
+    }
+    index     = 0;
+    split_k   = 1;
+    kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
 }
 
 template <typename DataType>
 bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::CheckIsSupportCKArgs(
     const ProblemDescription& problem) const
 {
+    if constexpr(std::is_same_v<DataType, float>)
+    {
+        if(problem.UseTF32() &&
+           IsCKArgsSupported<DeviceOpGBwdPtrs<DataType, ck::tf32_t>, CKArgs>(problem, kernel_id))
+        {
+            use_tf32 = true;
+            return true;
+        }
+        use_tf32 = false;
+    }
     return IsCKArgsSupported<DeviceOpGBwdPtrs<DataType>, CKArgs>(problem, kernel_id);
 }
 
@@ -237,6 +264,14 @@ template <typename DataType>
 bool ConvHipImplicitGemmGroupBwdXdlops::CheckCKApplicability(
     const ProblemDescription& problem) const
 {
+    if constexpr(std::is_same_v<DataType, float>)
+    {
+        if(problem.UseTF32() &&
+           IsCKApplicable<DeviceOpGBwdPtrs<DataType, ck::tf32_t>, CKArgs>(problem))
+        {
+            return true;
+        }
+    }
     return IsCKApplicable<DeviceOpGBwdPtrs<DataType>, CKArgs>(problem);
 }
 
@@ -363,8 +398,20 @@ template <typename DataType>
 bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::RunParameterPredictionModel(
     const ExecutionContext& ctx, const ProblemDescription& problem)
 {
-    valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType>, CKArgs>(
-        problem); // filter valid_kernel ID's
+    // filter valid_kernel ID's
+    if constexpr(std::is_same_v<DataType, float>)
+    {
+        if(problem.UseTF32())
+        {
+            valid_kernels =
+                FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType, ck::tf32_t>, CKArgs>(problem);
+        }
+    }
+    if(valid_kernels.empty())
+    {
+        valid_kernels = FillValidKernelsIDs<DeviceOpGBwdPtrs<DataType>, CKArgs>(problem);
+    }
+
     InitHeuristicKernelIDs();
     static const std::string& arch = ctx.GetStream().GetDeviceName();
     static std::string solver      = "ConvHipIgemmGroupBwdXdlops";
@@ -596,10 +643,6 @@ bool ConvHipImplicitGemmGroupBwdXdlops::IsApplicable(
         return false;
     if(!ck_utility::is_ck_whitelist(ctx.GetStream().GetDeviceName()))
         return false;
-    // CK support disabled on Navi3 and Navi4 due to missing instances for BWD
-    if(StartsWith(ctx.GetStream().GetDeviceName(), "gfx12") ||
-       StartsWith(ctx.GetStream().GetDeviceName(), "gfx11"))
-        return false;
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
@@ -624,23 +667,26 @@ ConvSolution ConvHipImplicitGemmGroupBwdXdlops::GetSolution(
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     return MakeSolutionGroupConvImplicitGemmXdlops(
         problem,
-        [&](auto data_type_val) {
-            using T = decltype(data_type_val);
+        [&](auto data_type_val, auto compute_type_val) {
+            using T        = decltype(data_type_val);
+            using TCompute = decltype(compute_type_val);
             return InitInvokerFactoryBwdNCHW<2,
                                              false,
-                                             DeviceOpGBwdPtrs<T>,
+                                             DeviceOpGBwdPtrs<T, TCompute>,
                                              CKArgs,
                                              miopen::conv::DataInvokeParams>(
                 ctx, problem, config.kernel_id);
         },
-        [&](auto data_type_val) {
-            using T = decltype(data_type_val);
+        [&](auto data_type_val, auto compute_type_val) {
+            using T        = decltype(data_type_val);
+            using TCompute = decltype(compute_type_val);
             return InitInvokerFactoryNHWC<false,
-                                          DeviceOpGBwdPtrs<T>,
+                                          DeviceOpGBwdPtrs<T, TCompute>,
                                           CKArgs,
                                           miopen::conv::DataInvokeParams>(
                 ctx, problem, config.kernel_id);
-        });
+        },
+        config.UseTF32());
 
 #else
     return {};
