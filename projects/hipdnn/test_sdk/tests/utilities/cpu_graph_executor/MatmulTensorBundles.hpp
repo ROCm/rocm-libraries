@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
@@ -18,9 +19,11 @@ struct MatmulTensorBundle
     MatmulTensorBundle(const std::vector<int64_t>& aDims,
                        const std::vector<int64_t>& bDims,
                        const std::vector<int64_t>& cDims,
+                       bool transA = false,
+                       bool transB = false,
                        unsigned int seed = hipdnn_test_sdk::utilities::getGlobalTestSeed())
-        : aTensor(aDims)
-        , bTensor(bDims)
+        : aTensor(aDims, generateInputStrideOrder(aDims, transA))
+        , bTensor(bDims, generateInputStrideOrder(bDims, transB))
         , cTensor(cDims)
     {
         aTensor.fillWithRandomValues(
@@ -44,6 +47,20 @@ struct MatmulTensorBundle
     hipdnn_data_sdk::utilities::Tensor<InputType> aTensor;
     hipdnn_data_sdk::utilities::Tensor<InputType> bTensor;
     hipdnn_data_sdk::utilities::Tensor<InputType> cTensor;
+
+private:
+    static std::vector<int64_t> generateInputStrideOrder(const std::vector<int64_t>& dims,
+                                                         bool transpose)
+    {
+        std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+        if(transpose)
+        {
+            const size_t rank = dims.size();
+            strides[rank - 1] = dims[rank - 2];
+            strides[rank - 2] = 1;
+        }
+        return strides;
+    }
 };
 
 }

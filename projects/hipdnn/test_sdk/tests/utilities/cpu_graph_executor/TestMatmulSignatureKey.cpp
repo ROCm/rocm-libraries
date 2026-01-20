@@ -73,7 +73,7 @@ TEST(TestMatmulSignatureKey, CreateFromNodeAndTensorMap)
     std::vector<int64_t> bDims = {1, 1, 2, 3};
     std::vector<int64_t> cDims = {1, 1, 4, 3};
 
-    MatmulTensorBundle<float> tensorBundle(aDims, bDims, cDims, 1);
+    MatmulTensorBundle<float> tensorBundle(aDims, bDims, cDims, false, false, 1);
 
     auto graphTuple = buildMatmulGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 

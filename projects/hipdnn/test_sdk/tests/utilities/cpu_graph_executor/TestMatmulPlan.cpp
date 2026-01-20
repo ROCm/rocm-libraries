@@ -44,8 +44,8 @@ TEST_F(TestMatmulPlan, ExecutePlan)
     std::vector<int64_t> cDims = {2, 4};
 
     unsigned int seed = getGlobalTestSeed();
-    MatmulTensorBundle<float> planTensorBundle(aDims, bDims, cDims, seed);
-    MatmulTensorBundle<float> directTensorBundle(aDims, bDims, cDims, seed);
+    MatmulTensorBundle<float> planTensorBundle(aDims, bDims, cDims, false, false, seed);
+    MatmulTensorBundle<float> directTensorBundle(aDims, bDims, cDims, false, false, seed);
 
     MatmulParams params;
     initTensorValues(params.aTensor, DataType::FLOAT, planTensorBundle.aTensor, 1);
@@ -76,7 +76,7 @@ TEST(TestMatmulPlanBuilder, PlanConstruction)
     std::vector<int64_t> bDims = {2, 3, 4};
     std::vector<int64_t> cDims = {2, 2, 4};
 
-    MatmulTensorBundle<float> tensorBundle(aDims, bDims, cDims, getGlobalTestSeed());
+    MatmulTensorBundle<float> tensorBundle(aDims, bDims, cDims, false, false, getGlobalTestSeed());
 
     auto graphTuple = buildMatmulGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
@@ -99,7 +99,7 @@ TEST(TestMatmulPlanBuilder, IsApplicable)
     std::vector<int64_t> bDims = {2, 3, 4};
     std::vector<int64_t> cDims = {2, 2, 4};
 
-    MatmulTensorBundle<float> tensorBundle(aDims, bDims, cDims, getGlobalTestSeed());
+    MatmulTensorBundle<float> tensorBundle(aDims, bDims, cDims, false, false, getGlobalTestSeed());
 
     auto graphTuple = buildMatmulGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
 
