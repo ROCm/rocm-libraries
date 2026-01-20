@@ -216,9 +216,6 @@ class GEMMSolution:
     workgroupRemapXCC: bool = False
     workgroupRemapXCCValue: int = -1
 
-    unroll_x: int = 0
-    unroll_y: int = 0
-
     load_A: str = "BufferToLDSViaVGPR"
     load_B: str = "BufferToLDSViaVGPR"
     storeLDS_D: bool = True
