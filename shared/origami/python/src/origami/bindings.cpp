@@ -179,7 +179,7 @@ NB_MODULE(origami, m) {
          const origami::config_t& config,
          int sk_grid) {
         const auto result = origami::select_workgroup_mapping(problem, hardware, config, sk_grid);
-        return nanobind::make_tuple(result.wgmxcc, result.wgm);
+        return nanobind::make_tuple(result.wgmxccchunk, result.wgmxcc, result.wgm);
       },
       "Select best workgroup mapping");
   m.def("rank_configs", &origami::rank_configs, "Rank configurations by performance");

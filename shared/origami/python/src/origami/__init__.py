@@ -20,6 +20,7 @@ try:
         dim3_t,
         config_t,
         prediction_result_t,
+        workgroup_mapping_t,
         problem_t,
         hardware_t,
         # Hardware functions
@@ -76,6 +77,7 @@ __all__ = [
     "dim3_t",
     "config_t",
     "prediction_result_t",
+    "workgroup_mapping_t",
     "problem_t",
     "hardware_t",
     # Hardware functions

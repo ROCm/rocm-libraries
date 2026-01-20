@@ -288,5 +288,5 @@ def test_select_workgroup_mapping(hardware):
     sk_grid = 100
     result = origami.select_workgroup_mapping(problem, hardware, config, sk_grid)
     assert isinstance(result, tuple)
-    assert len(result) == 2
+    assert len(result) == 3
 
