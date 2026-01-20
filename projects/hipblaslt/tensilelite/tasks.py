@@ -6,15 +6,24 @@ import os
 
 def detect_gpu_arch():
     import subprocess
+    import sys
     try:
-        result = subprocess.run(["rocm_agent_enumerator", "-v"], capture_output=True, text=True)
+        result = subprocess.run(["rocm_agent_enumerator", "-v"], capture_output=True, text=True, timeout=5, check=True)
         if result.returncode == 0:
             target = next((line.strip() for line in result.stdout.splitlines() if line.startswith("gfx") and line.strip() != "gfx000"), None)
             if target:
                 return target
+    except FileNotFoundError:
+        print("Error: 'rocm_agent_enumerator' command not found. Please install ROCm.", file=sys.stderr)
+
+    except subprocess.TimeoutExpired:
+        print("Error: GPU detection timed out. Hardware might be unresponsive.", file=sys.stderr)
+
     except Exception as e:
-        print(f"Error during GPU architecture detection: {e}")
-    assert False, "Failed to detect a valid GPU architecture (gfx target not found)."
+        print(f"An unexpected error occurred during GPU detection: {e}", file=sys.stderr)
+
+    print(f"Failed to detect a valid GPU architecture (gfx target not found).", file=sys.stderr)
+    return None
 
 @task
 def get_gpu_arch(c):
@@ -34,6 +43,9 @@ def build_client(c, clean=False, configure=True, build=True, build_dir="build_tm
 
     if gpu_targets is None:
         gpu_targets = detect_gpu_arch()
+        if gpu_targets == "None":
+            print("Error: No GPU detected and no gpu_targets provided. Skipping build.")
+            return
         print(f"warning: No GPU targets specified. Detected and using: {gpu_targets}")
 
     if clean and os.path.exists(build_dir):
