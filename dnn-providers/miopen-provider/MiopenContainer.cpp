@@ -71,14 +71,20 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
     return s_engineDefinitions;
 }
 
-void MiopenContainer::copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t* numEngines)
+uint32_t
+    MiopenContainer::copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t* numEngines)
 {
     const auto& engineDefinitions = getEngineDefinitions();
     auto totalEngines = static_cast<uint32_t>(engineDefinitions.size());
 
-    if(numEngines != nullptr)
+    if(maxEngines == 0)
     {
-        *numEngines = totalEngines;
+        // When maxEngines is 0, return total count
+        if(numEngines != nullptr)
+        {
+            *numEngines = totalEngines;
+        }
+        return totalEngines;
     }
 
     // Copy up to maxEngines IDs using index-based loop
@@ -87,6 +93,14 @@ void MiopenContainer::copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uin
     {
         engineIds[i] = engineDefinitions[i].id;
     }
+
+    // When maxEngines > 0, return number of engines copied
+    if(numEngines != nullptr)
+    {
+        *numEngines = enginesToCopy;
+    }
+
+    return totalEngines;
 }
 
 MiopenContainer::MiopenContainer()

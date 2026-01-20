@@ -29,9 +29,10 @@ public:
     ~MiopenContainer();
 
     // Copy engine IDs into a buffer.
-    // Always sets *numEngines to the total number of available engines.
-    // If maxEngines > 0, copies up to maxEngines IDs into *engineIds.
-    static void copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t* numEngines);
+    // If maxEngines == 0: Does not copy, only queries total count.
+    // If maxEngines > 0: Copies up to maxEngines IDs into *engineIds, sets *numEngines to number copied.
+    // Returns: Total number of available engines (regardless of maxEngines value).
+    static uint32_t copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t* numEngines);
 
     EngineManager& getEngineManager();
 

@@ -116,18 +116,9 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIdsImpl(int64_t* engineIds,
         }
         throwIfNull(numEngines);
 
-        MiopenContainer::copyEngineIds(engineIds, maxEngines, numEngines);
+        auto totalEngines = MiopenContainer::copyEngineIds(engineIds, maxEngines, numEngines);
 
-        // Log if we hit the max limit
-        if(maxEngines > 0 && maxEngines < *numEngines)
-        {
-            HIPDNN_LOG_INFO("Maximum number of engines reached ({}), ignoring additional "
-                            "engines, total available: {}",
-                            maxEngines,
-                            *numEngines);
-        }
-
-        LOG_API_SUCCESS(apiName, "numEngines={}", *numEngines);
+        LOG_API_SUCCESS(apiName, "numEngines={} totalEngines={}", *numEngines, totalEngines);
     });
 }
 
