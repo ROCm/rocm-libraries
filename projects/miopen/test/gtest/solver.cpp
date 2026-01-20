@@ -44,27 +44,25 @@
 #include "random.hpp"
 #include "../get_handle.hpp"
 
-namespace miopen {
-namespace tests {
-
-class TrivialTestSolver final : public solver::conv::ConvSolver
+namespace {
+class TrivialTestSolver final : public miopen::solver::conv::ConvSolver
 {
 public:
     static const char* FileName() { return "TrivialTestSolver"; }
 
     const std::string& SolverDbId() const override { return GetSolverDbId<TrivialTestSolver>(); }
 
-    bool IsApplicable(const ExecutionContext&,
-                      const conv::ProblemDescription& problem) const override
+    bool IsApplicable(const miopen::ExecutionContext&,
+                      const miopen::conv::ProblemDescription& problem) const override
     {
         return problem.GetInWidth() == 1;
     }
 
-    solver::ConvSolution GetSolution(const ExecutionContext&,
-                                     const conv::ProblemDescription&) const override
+    miopen::solver::ConvSolution GetSolution(const miopen::ExecutionContext&,
+                                             const miopen::conv::ProblemDescription&) const override
     {
-        solver::ConvSolution ret;
-        solver::KernelInfo kernel;
+        miopen::solver::ConvSolution ret;
+        miopen::solver::KernelInfo kernel;
 
         kernel.kernel_file  = FileName();
         kernel.comp_options = " ";
@@ -74,7 +72,7 @@ public:
     }
 };
 
-struct TestConfig : solver::PerfConfigBase<TestConfig>
+struct TestConfig : miopen::solver::PerfConfigBase<TestConfig>
 {
     std::string str;
 
@@ -85,7 +83,7 @@ struct TestConfig : solver::PerfConfigBase<TestConfig>
     }
 };
 
-class SearchableTestSolver final : public solver::conv::ConvTunableSolver<TestConfig>
+class SearchableTestSolver final : public miopen::solver::conv::ConvTunableSolver<TestConfig>
 {
 public:
     static int searches_done() { return _serches_done; }
@@ -94,29 +92,30 @@ public:
 
     const std::string& SolverDbId() const override { return GetSolverDbId<SearchableTestSolver>(); }
 
-    bool IsApplicable(const ExecutionContext&, const conv::ProblemDescription&) const override
+    bool IsApplicable(const miopen::ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override
     {
         return true;
     }
 
-    TestConfig GetDefaultPerformanceConfig(const ExecutionContext&,
-                                           const conv::ProblemDescription&) const override
+    TestConfig GetDefaultPerformanceConfig(const miopen::ExecutionContext&,
+                                           const miopen::conv::ProblemDescription&) const override
     {
         TestConfig config{};
         config.str = NoSearchFileName();
         return config;
     }
 
-    bool IsValidPerformanceConfig(const ExecutionContext&,
-                                  const conv::ProblemDescription&,
+    bool IsValidPerformanceConfig(const miopen::ExecutionContext&,
+                                  const miopen::conv::ProblemDescription&,
                                   const TestConfig&) const override
     {
         return true;
     }
 
-    TestConfig Search(const ExecutionContext&,
-                      const conv::ProblemDescription&,
-                      const AnyInvokeParams&) const override
+    TestConfig Search(const miopen::ExecutionContext&,
+                      const miopen::conv::ProblemDescription&,
+                      const miopen::AnyInvokeParams&) const override
     {
         TestConfig config;
         config.str = FileName();
@@ -124,13 +123,13 @@ public:
         return config;
     }
 
-    solver::ConvSolution GetSolution(const ExecutionContext&,
-                                     const conv::ProblemDescription&,
-                                     const TestConfig& config) const override
+    miopen::solver::ConvSolution GetSolution(const miopen::ExecutionContext&,
+                                             const miopen::conv::ProblemDescription&,
+                                             const TestConfig& config) const override
     {
 
-        solver::ConvSolution ret;
-        solver::KernelInfo kernel;
+        miopen::solver::ConvSolution ret;
+        miopen::solver::KernelInfo kernel;
 
         kernel.kernel_file  = config.str;
         kernel.comp_options = " ";
@@ -146,13 +145,13 @@ private:
 // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
 int SearchableTestSolver::_serches_done = 0;
 
-static solver::ConvSolution FindSolution(const ExecutionContext& ctx,
-                                         const conv::ProblemDescription& problem,
-                                         const fs::path& db_path)
+static miopen::solver::ConvSolution FindSolution(const miopen::ExecutionContext& ctx,
+                                                 const miopen::conv::ProblemDescription& problem,
+                                                 const miopen::fs::path& db_path)
 {
-    PlainTextDb db(DbKinds::PerfDb, db_path);
+    miopen::PlainTextDb db(miopen::DbKinds::PerfDb, db_path);
 
-    const auto solvers = solver::SolverContainer<TrivialTestSolver, SearchableTestSolver>{};
+    const auto solvers = miopen::solver::SolverContainer<TrivialTestSolver, SearchableTestSolver>{};
 
     return solvers.SearchForAllSolutions(ctx, problem, db, {}, 1).front();
 }
@@ -173,7 +172,8 @@ struct TestParams
 {
     std::string expected_kernel;
     std::vector<size_t> in;
-    std::function<void(ExecutionContext&)> context_filter = [](ExecutionContext&) {};
+    std::function<void(miopen::ExecutionContext&)> context_filter = [](miopen::ExecutionContext&) {
+    };
 };
 
 using TestCase =
@@ -183,20 +183,21 @@ using TestCase =
 auto GenCases()
 {
     return std::vector<TestCase>{std::make_tuple<std::vector<TestParams>, std::vector<TestParams>>(
-        {TestParams{TrivialTestSolver::FileName(), {1, 1, 1, 1}, [](ExecutionContext&) {}},
+        {TestParams{TrivialTestSolver::FileName(), {1, 1, 1, 1}, [](miopen::ExecutionContext&) {}},
          TestParams{TrivialTestSolver::FileName(),
                     {1, 1, 1, 1},
-                    [](ExecutionContext& c) { c.do_search = true; }},
+                    [](miopen::ExecutionContext& c) { c.do_search = true; }},
          TestParams{SearchableTestSolver::NoSearchFileName(),
                     {1, 1, 1, 2},
-                    [](ExecutionContext& c) { c.do_search = false; }},
+                    [](miopen::ExecutionContext& c) { c.do_search = false; }},
          TestParams{SearchableTestSolver::FileName(),
                     {1, 1, 1, 2},
-                    [](ExecutionContext& c) { c.do_search = true; }}},
-        {TestParams{SearchableTestSolver::FileName(), {1, 1, 1, 2}, [](ExecutionContext&) {}},
-         TestParams{SearchableTestSolver::FileName(), {1, 1, 1, 2}, [](ExecutionContext& c) {
-                        c.do_search = true;
-                    }}})};
+                    [](miopen::ExecutionContext& c) { c.do_search = true; }}},
+        {TestParams{
+             SearchableTestSolver::FileName(), {1, 1, 1, 2}, [](miopen::ExecutionContext&) {}},
+         TestParams{SearchableTestSolver::FileName(),
+                    {1, 1, 1, 2},
+                    [](miopen::ExecutionContext& c) { c.do_search = true; }}})};
 }
 
 auto GetCases()
@@ -205,13 +206,9 @@ auto GetCases()
     return cases;
 }
 
-} // namespace tests
-} // namespace miopen
+} // namespace
 
-using namespace miopen;
-using namespace miopen::tests;
-
-class SolverTest : public ::testing::TestWithParam<TestCase>
+class GPU_SolverTest_NONE : public ::testing::TestWithParam<TestCase>
 {
 public:
     void SetUp() override { prng::reset_seed(); }
@@ -219,7 +216,7 @@ public:
     void Run()
     {
         auto [pre_check_param, post_check_param] = GetParam();
-        const TempFile db_path("miopen.tests.solver");
+        const miopen::TempFile db_path("miopen.tests.solver");
 
         for(auto const& param : pre_check_param)
         {
@@ -242,18 +239,19 @@ public:
 
 protected:
     void ConstructTest(
-        const fs::path& db_path,
+        const miopen::fs::path& db_path,
         const char* expected_kernel,
         const std::vector<size_t>& in,
-        const std::function<void(ExecutionContext&)>& context_filler = [](ExecutionContext&) {
-        }) const
+        const std::function<void(miopen::ExecutionContext&)>& context_filler =
+            [](miopen::ExecutionContext&) {}) const
     {
-        const auto problem = conv::ProblemDescription{TensorDescriptor{miopenFloat, in},
-                                                      TensorDescriptor{miopenFloat, in},
-                                                      TensorDescriptor{miopenFloat, in},
-                                                      ConvolutionDescriptor{},
-                                                      conv::Direction::Forward};
-        auto ctx           = ExecutionContext{};
+        const auto problem =
+            miopen::conv::ProblemDescription{miopen::TensorDescriptor{miopenFloat, in},
+                                             miopen::TensorDescriptor{miopenFloat, in},
+                                             miopen::TensorDescriptor{miopenFloat, in},
+                                             miopen::ConvolutionDescriptor{},
+                                             miopen::conv::Direction::Forward};
+        auto ctx = miopen::ExecutionContext{};
         ctx.SetStream(&get_handle());
         context_filler(ctx);
 
@@ -264,8 +262,9 @@ protected:
     }
 };
 
-TEST_P(SolverTest, GPU_TestSolver_None) { Run(); }
+TEST_P(GPU_SolverTest_NONE, TestSolver) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, SolverTest, ::testing::ValuesIn(GetCases()), [](auto const&) {
-    return "SearchesDoneTest";
-});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_SolverTest_NONE,
+                         ::testing::ValuesIn(GetCases()),
+                         [](auto const&) { return "SearchesDoneTest"; });
