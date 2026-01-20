@@ -116,7 +116,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIdsImpl(int64_t* engineIds,
         }
         throwIfNull(numEngines);
 
-        auto totalEngines = MiopenContainer::copyEngineIds(engineIds, maxEngines, numEngines);
+        auto totalEngines = MiopenContainer::copyEngineIds(engineIds, maxEngines, *numEngines);
 
         LOG_API_SUCCESS(apiName, "numEngines={} totalEngines={}", *numEngines, totalEngines);
     });
