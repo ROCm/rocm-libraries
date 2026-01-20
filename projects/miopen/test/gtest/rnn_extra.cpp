@@ -25,7 +25,6 @@
  *******************************************************************************/
 #include <miopen/miopen.h>
 #include <gtest/gtest.h>
-// #include "../rnn_vanilla.hpp"
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
 

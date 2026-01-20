@@ -71,7 +71,7 @@ using RNNSeqApiParam = std::tuple<int,
                                   bool,
                                   bool>;
 
-auto RNNSeqGenCases(bool full_test = false)
+auto RNNSeqGenCases()
 {
     return ::testing::Combine(::testing::ValuesIn({7}),
                               ::testing::ValuesIn({13}),
@@ -224,7 +224,7 @@ struct verify_rnn_api_base
     size_t workspace_GPU_mem_size() {}
     size_t reservspace_GPU_mem_size() {}
 
-    void fail(/*int badtensor*/) const
+    void fail() const
     {
         std::stringstream ss{};
         ss << "./bin/MIOpenDriver rnn_seq ";

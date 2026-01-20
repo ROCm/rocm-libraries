@@ -31,7 +31,8 @@
 #include "miopen/tensor.hpp"
 #include "workspace.hpp"
 
-#include <vector>
+#define MIO_RNN_TEST_DEBUG 0
+#define MIO_RNN_TIME_EVERYTHING 0
 
 namespace {
 
@@ -83,9 +84,6 @@ auto GenCases(bool full_tests = false, bool use_dropout = false)
                                   ::testing::ValuesIn({1}));
     }
 }
-
-#define MIO_RNN_TEST_DEBUG 0
-#define MIO_RNN_TIME_EVERYTHING 0
 
 //****************************************************
 // FORWARD INFERENCE
