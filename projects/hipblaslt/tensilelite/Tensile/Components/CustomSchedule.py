@@ -3132,18 +3132,18 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         pack_b0= [                          9,9,9,9, 10,10, 11,11,11,11,
                                             9,9,9,9, 10,10, 11,11,11,11]
 
-        grinca = [0,0,0,1,1,1,2,2,2]
-        grincb = [3,3,3,4,4,4,5,5,5]
+        grinca = [3,3,3,3,3,3,5,5,5]
+        grincb = [5,5,5,6,6,6,6,6,6]
         lrsa   = [10]
         lrsb   = [10]
         lwsa   = [18]
         lwsb   = [18]        
         
-        gra    = [                            10,11,13,15] # one index for two instructions
-        grb    = [                                       17,19,21,23] # one index for two instructions
+        gra    = [                            10,10,11,11] # one index for two instructions
+        grb    = [                                       13,13,15,16] # one index for two instructions
         num_gr = len(gra) + len(grb)
 
-        syncs.add(                                 12, vlcnt=2, barrier=True, comment="wait for the previous GRs")
+        syncs.add(                                 12, vlcnt=4, barrier=True, comment="wait for the previous GRs")
 
         lra1   = [12,12,12,12,
                    13,13,13,13,
@@ -3169,12 +3169,12 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         'GRIncB': [grincb],
         'LRA0':   [lra0],
         'LRB0':   [lrb0],
-        'PackA0': [pack_a0],
-        'PackB0': [pack_b0],
         'GRA':    [duplicate_list_items(gra,                2, gr_inc_step)],
                 #    duplicate_list_items([i+1 for i in gra], 2, gr_inc_step)],
         'GRB':    [duplicate_list_items(grb,                2, gr_inc_step)],
                 #    duplicate_list_items([i+1 for i in grb], 2, gr_inc_step)],
+        'PackA0': [pack_a0],
+        'PackB0': [pack_b0],
         'LRSA':   [lrsa],
         'LRSB':   [lrsb],
         'LWSA':   [lwsa],
