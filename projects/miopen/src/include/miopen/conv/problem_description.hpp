@@ -410,7 +410,7 @@ struct ProblemDescription : ProblemDescriptionBase
     }
 
     MIOPEN_INTERNALS_EXPORT void SetupFloats(ExecutionContext& ctx) const;
-    void SetupComputeType(const ExecutionContext& ctx) const;
+    MIOPEN_INTERNALS_EXPORT void SetupComputeType(const ExecutionContext& ctx) const;
 
 private:
     std::string ComputeLayout(const TensorDescriptor& td) const;

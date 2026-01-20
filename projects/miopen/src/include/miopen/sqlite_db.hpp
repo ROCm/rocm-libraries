@@ -190,12 +190,12 @@ public:
     MIOPEN_INTERNALS_EXPORT SQLite();
     MIOPEN_INTERNALS_EXPORT SQLite(const fs::path& filename_, bool is_system);
     MIOPEN_INTERNALS_EXPORT ~SQLite();
-    SQLite(SQLite&&) noexcept;
+    MIOPEN_INTERNALS_EXPORT SQLite(SQLite&&) noexcept;
     MIOPEN_INTERNALS_EXPORT SQLite& operator=(SQLite&&) noexcept;
     SQLite& operator=(const SQLite&) = delete;
     MIOPEN_INTERNALS_EXPORT bool Valid() const;
     MIOPEN_INTERNALS_EXPORT result_type Exec(const std::string& query) const;
-    int Changes() const;
+    MIOPEN_INTERNALS_EXPORT int Changes() const;
     int Retry(std::function<int()>) const;
     static int Retry(std::function<int()> f, fs::path filename);
     MIOPEN_INTERNALS_EXPORT std::string ErrorMessage() const;

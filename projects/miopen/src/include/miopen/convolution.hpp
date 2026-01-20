@@ -372,7 +372,7 @@ struct ConvolutionDescriptor : miopenConvolutionDescriptor
                                                             Data_t dw,
                                                             Data_t workSpace,
                                                             std::size_t workSpaceSize) const;
-    miopenMathType_t GetMathType() const;
+    MIOPEN_INTERNALS_EXPORT miopenMathType_t GetMathType() const;
 
     std::size_t spatialDim;
     miopenConvolutionMode_t mode;
