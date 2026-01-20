@@ -518,7 +518,7 @@ struct radix_key_codec
             unsigned int mask = (1u << length) - 1;
             return static_cast<unsigned int>(bit_key >> start) & mask;
         }
-        public: 
+
         ROCPRIM_HOST_DEVICE
         static Key twiddle_in(bit_key_type bit_key)
         {
@@ -561,7 +561,6 @@ struct radix_key_codec
             return static_cast<unsigned int>(bit_key >> start) & mask;
         }
 
-        public: 
         ROCPRIM_HOST_DEVICE
         static Key twiddle_in(bit_key_type bit_key)
         {
@@ -622,11 +621,28 @@ struct radix_key_codec
             return static_cast<unsigned int>(bit_key >> start) & mask;
         }
 
-        public: 
         ROCPRIM_HOST_DEVICE
         static Key twiddle_in(bit_key_type bit_key)
         {
-            bit_key_type mask = (bit_key & sign_bit) ? bit_key_type(-1) : sign_bit;
+            /*using matched_int_t = typename device_air_topk_helper::matched_int<key_in_t>::type;
+            static_assert(!std::is_same<matched_int_t, void>::value,
+                            "Input type not supported");
+            static_assert(sizeof(bit_key) == sizeof(matched_int_t),
+                            "Size of mathed_int_t is not the same as key_in_t");
+            // Might have undefined behavior, kill negative zeros
+            if constexpr(KillNegativeZeros)
+            {
+                bit_key = bit_key == bit_key_type{-0.0} ? bit_key_type{+0.0} : bit_key;
+            }*/
+            //bit_key = (bit_key == sign_bit) ? bit_key_type{0} : bit_key;
+            // Cast to integral type, so we can flip the two’s complement
+            //const auto bits = traits::radix_key_codec::bit_cast<matched_int_t>(key);
+            // For negative values, flip the whole number
+            // For positive values, flip only two’s complement
+            // Cast back when passing bits into extract_digit, in order to let extract_digit know that this is a floating point type
+            //return bit_key & sign_bit ? ~bit_key : bit_key ^ sign_bit;
+
+            UnsignedBits mask = (bit_key & sign_bit) ? UnsignedBits(-1) : sign_bit;
             return bit_key ^ mask;
         }
     };
@@ -658,7 +674,6 @@ struct radix_key_codec
             return static_cast<unsigned int>(bit_key >> start) & mask;
         }
 
-        public: 
         ROCPRIM_HOST_DEVICE
         static bool twiddle_in(bit_key_type bit_key)
         {

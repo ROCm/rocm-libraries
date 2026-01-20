@@ -537,41 +537,11 @@ struct device_topk_air_impl
         constexpr auto histogram_size
             = Iteration == (num_iterations - 1) ? num_buckets_last_iteration : num_buckets;
 
-        digit_t digit;
-        if constexpr(rocprim::is_integral<key_in_t>::value && rocprim::is_signed<key_in_t>::value)
-        {
-            // TODO: Can also use output_flip or input_flip, need to see which is generally faster
-            // need to run some benchmarks to see which is faster
-            digit = device_air_topk_impl::key_codec::template extract_digit<Decomposer>(
+        digit_t digit = device_air_topk_impl::key_codec::template extract_digit<Decomposer>(
                 traits::radix_key_codec::codec_base<key_in_t>::twiddle_in(key),
                 start_bits, // Start bit of the sequence of bits to extract
                 cur_bits, // How many bits to extract
                 decomposer);
-        }
-        else if constexpr(rocprim::is_integral<key_in_t>::value
-                          && rocprim::is_unsigned<key_in_t>::value)
-        {
-            digit = device_air_topk_impl::key_codec::template extract_digit<Decomposer>(
-                traits::radix_key_codec::codec_base<key_in_t>::twiddle_in(key),
-                start_bits, // Start bit of the sequence of bits to extract
-                cur_bits, // How many bits to extract
-                decomposer);
-        }
-        else if constexpr(rocprim::is_floating_point<key_in_t>::value)
-        {
-            digit = device_air_topk_impl::key_codec::template extract_digit<Decomposer>(
-                traits::radix_key_codec::codec_base<key_in_t>::twiddle_in(key),
-                start_bits, // Start bit of the sequence of bits to extract
-                cur_bits, // How many bits to extract
-                decomposer);
-        }
-        else
-        {
-            // In this else branch, key_in_t must be custom types
-            static_assert(
-                false,
-                "please use ::rocprim::traits::define to specify what data format is key_in_t.");
-        }
 
         if constexpr(SelectMin)
         {
