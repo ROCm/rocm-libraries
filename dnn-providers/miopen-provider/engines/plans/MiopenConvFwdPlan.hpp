@@ -10,9 +10,10 @@
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <miopen/miopen.h>
 
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+
 #include "MiopenConvDescriptor.hpp"
 #include "MiopenTensor.hpp"
-#include "PlanInterface.hpp"
 
 namespace miopen_legacy_plugin
 {
@@ -47,7 +48,7 @@ private:
     bool _tensorsValid;
 };
 
-class ConvFwdPlan : public IPlan
+class ConvFwdPlan : public hipdnn_plugin_sdk::IPlan
 {
 public:
     ConvFwdPlan(const HipdnnEnginePluginHandle& handle,

@@ -5,11 +5,12 @@
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+
 #include "MiopenActivationDescriptor.hpp"
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
 #include "PlanBuilderInterface.hpp"
-#include "PlanInterface.hpp"
 
 namespace miopen_legacy_plugin
 {
@@ -63,7 +64,7 @@ private:
     std::optional<MiopenTensor> _activationOut;
 };
 
-class BatchnormFwdInferenceWithVariancePlan : public IPlan
+class BatchnormFwdInferenceWithVariancePlan : public hipdnn_plugin_sdk::IPlan
 {
 public:
     BatchnormFwdInferenceWithVariancePlan(BatchnormFwdInferenceWithVarianceParams&& inferenceParams,

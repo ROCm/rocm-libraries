@@ -3,10 +3,11 @@
 
 #pragma once
 
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
 #include "PlanBuilderInterface.hpp"
-#include "PlanInterface.hpp"
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <optional>
 
@@ -77,7 +78,7 @@ private:
     std::optional<MiopenTensor> _activationOut;
 };
 
-class BatchnormFwdTrainingPlan : public IPlan
+class BatchnormFwdTrainingPlan : public hipdnn_plugin_sdk::IPlan
 {
 public:
     BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams,

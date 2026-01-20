@@ -10,9 +10,10 @@
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+
 #include "MiopenActivationDescriptor.hpp"
 #include "MiopenTensor.hpp"
-#include "PlanInterface.hpp"
 
 namespace miopen_legacy_plugin
 {
@@ -66,7 +67,7 @@ private:
     std::optional<MiopenTensor> _optBias;
 };
 
-class BatchnormBwdPlan : public IPlan
+class BatchnormBwdPlan : public hipdnn_plugin_sdk::IPlan
 {
 public:
     BatchnormBwdPlan(BatchnormBwdParams&& params, bool benchmarkingEnabled = false);

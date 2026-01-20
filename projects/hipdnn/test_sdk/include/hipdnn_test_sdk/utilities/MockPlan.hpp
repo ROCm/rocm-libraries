@@ -1,0 +1,31 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#pragma once
+
+#include <gmock/gmock.h>
+
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+
+namespace hipdnn_test_sdk::utilities
+{
+
+class MockPlan : public hipdnn_plugin_sdk::IPlan
+{
+public:
+    MOCK_METHOD(size_t,
+                getWorkspaceSize,
+                (hipdnnEnginePluginHandle_t handle),
+                (const, override));
+    MOCK_METHOD(void,
+                execute,
+                (hipdnnEnginePluginHandle_t handle,
+                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                 uint32_t numDeviceBuffers,
+                 void* workspace),
+                (const, override));
+
+    ~MockPlan() override = default;
+};
+
+} // namespace hipdnn_test_sdk::utilities

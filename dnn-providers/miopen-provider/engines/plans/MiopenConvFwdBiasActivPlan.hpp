@@ -12,10 +12,11 @@
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <miopen/miopen.h>
 
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+
 #include "MiopenConvDescriptor.hpp"
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
-#include "PlanInterface.hpp"
 
 namespace miopen_legacy_plugin
 {
@@ -52,7 +53,7 @@ private:
     MiopenTensor _y;
 };
 
-class ConvFwdBiasActivPlan : public IPlan
+class ConvFwdBiasActivPlan : public hipdnn_plugin_sdk::IPlan
 {
 public:
     ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handle,
