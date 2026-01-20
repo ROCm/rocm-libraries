@@ -2,7 +2,7 @@
 # Copyright 2019-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
-cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 
 # --------------------------------------
 # Update these variables at release time
@@ -259,6 +259,9 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
     enable_testing()
   endif()
 
+  # Used by tests to define their RESOURCE_GROUPS
+  set(DEFAULT_GPU_RESOURCE "gpus")
+  
   # We still want the testing to be compiled to catch some errors
   #TODO: Get testing folder working with HIP on Windows
   if (NOT WIN32 AND BUILD_TEST)

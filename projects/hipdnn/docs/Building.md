@@ -124,13 +124,7 @@ ninja check
 ### Building Specific Components
 ```bash
 # Build without plugins
-cmake -GNinja -DHIP_DNN_BUILD_PLUGINS=OFF ..
-
-# Build without frontend
-cmake -GNinja -DHIP_DNN_BUILD_FRONTEND=OFF ..
-
-# Build without backend
-cmake -GNinja -DHIP_DNN_BUILD_BACKEND=OFF ..
+cmake -GNinja -DHIPDNN_BUILD_PLUGINS=OFF ..
 ```
 
 ### ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX

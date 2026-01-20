@@ -1,119 +1,185 @@
-# ########################################################################
-# Copyright (C) 2018-2022 Advanced Micro Devices, Inc. All rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-#
-# ########################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
-set(HIPSPARSE_CLIENTS_COMMON ../common/utility.cpp)
-
-# Function to add hipsparse examples
-function(add_hipsparse_example EXAMPLE_SOURCE)
-  get_filename_component(EXAMPLE_TARGET ${EXAMPLE_SOURCE} NAME_WE)
-  add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE} ${HIPSPARSE_CLIENTS_COMMON})
-
-  get_filename_component(EXAMPLE_EXTENSION ${EXAMPLE_SOURCE} LAST_EXT)
-
-  if("${EXAMPLE_EXTENSION}" STREQUAL ".f90")
-    add_dependencies(${EXAMPLE_TARGET} hipsparse_fortran)
-  endif()
-
-  # Include common client headers
-  target_include_directories(${EXAMPLE_TARGET} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
-
-  if (BUILD_CLIENTS_ONLY)
-    target_include_directories(${EXAMPLE_TARGET} PRIVATE ${hipsparse_INCLUDE_DIRS}/hipsparse)
-  endif()
-
-  # Linker dependencies
-  target_link_libraries(${EXAMPLE_TARGET} PRIVATE roc::hipsparse)
-
-  # Link against stdc++fs for std::experimental::filesystem support
-  if(NOT WIN32)
-    target_link_libraries(${EXAMPLE_TARGET} PRIVATE stdc++fs)
-  endif()
-
-  if(NOT USE_CUDA)
-    target_link_libraries(${EXAMPLE_TARGET} PRIVATE hip::host)
-  else()
-    target_compile_definitions(${EXAMPLE_TARGET} PRIVATE __HIP_PLATFORM_NVIDIA__)
-    target_include_directories(${EXAMPLE_TARGET} PRIVATE ${HIP_INCLUDE_DIRS})
-    target_link_libraries(${EXAMPLE_TARGET} PRIVATE ${CUDA_LIBRARIES})
-  endif()
-
-  set_target_properties(${EXAMPLE_TARGET} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
-endfunction()
-
-# Examples
-if (NOT WIN32)
-  # C program for checking hipsparse headers are C compatible.
-  add_hipsparse_example(example_c_headers.c)
-  if(NOT USE_CUDA)
-    add_hipsparse_example(example_axpyi.c)
-  endif()
+# C samples (for header compatibility check)
+if(NOT WIN32 AND HIPSPARSE_ENABLE_HIP)
+    add_executable(example_c_headers)
+    target_sources(example_c_headers PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/example_c_headers.c"
+    )
+    target_link_libraries(example_c_headers PRIVATE hipsparse::samples-common)
+    set_target_properties(example_c_headers PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
+    )
+    
+    if(HIPSPARSE_ENABLE_HIP)
+        add_executable(example_axpyi)
+        target_sources(example_axpyi PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/example_axpyi.c"
+        )
+        target_link_libraries(example_axpyi PRIVATE hipsparse::samples-common)
+        set_target_properties(example_axpyi PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
+        )
+    endif()
 endif()
 
-add_hipsparse_example(example_handle.cpp)
 
-if(NOT USE_CUDA OR (USE_CUDA AND CUDA_VERSION LESS 11))
-add_hipsparse_example(example_csrmv.cpp)
-add_hipsparse_example(example_hybmv.cpp)
+add_executable(example_handle)
+target_sources(example_handle PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/example_handle.cpp"
+)
+target_link_libraries(example_handle PRIVATE hipsparse::samples-common)
+set_target_properties(example_handle PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
+)
+
+# C++ samples that require older CUDA versions
+if(NOT HIPSPARSE_ENABLE_CUDA OR (HIPSPARSE_ENABLE_CUDA AND CUDAToolkit_VERSION VERSION_LESS 11))
+    add_executable(example_csrmv)
+    target_sources(example_csrmv PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/example_csrmv.cpp"
+    )
+    target_link_libraries(example_csrmv PRIVATE hipsparse::samples-common)
+    set_target_properties(example_csrmv PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
+    )
+    
+    add_executable(example_hybmv)
+    target_sources(example_hybmv PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/example_hybmv.cpp"
+    )
+    target_link_libraries(example_hybmv PRIVATE hipsparse::samples-common)
+    set_target_properties(example_hybmv PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
+    )
 endif()
 
-if (NOT WIN32)
-  # Fortran examples
-  if(TARGET hipsparse AND NOT USE_CUDA)
-    # Compile Fortran examples only if built directly with package
-    # else the Fortran module file is not generated
-
-    add_hipsparse_example(example_fortran_auxiliary.f90)
-    add_hipsparse_example(example_fortran_csrsv2.f90)
-    add_hipsparse_example(example_fortran_bsric02.f90)
-    add_hipsparse_example(example_fortran_csric02.f90)
-    add_hipsparse_example(example_fortran_bsrilu02.f90)
-    add_hipsparse_example(example_fortran_csrilu02.f90)
-    add_hipsparse_example(example_fortran_csrsm2.f90)
-    add_hipsparse_example(example_fortran_dotci.f90)
-    add_hipsparse_example(example_fortran_roti.f90)
-    add_hipsparse_example(example_fortran_spmv.f90)
-    add_hipsparse_example(example_fortran_bsrmm.f90)
-
-  endif()
+# Fortran samples (only if Fortran support enabled, using HIP, and building with library)
+if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
+    # Fortran example: example_fortran_auxiliary
+    add_executable(example_fortran_auxiliary)
+    target_sources(example_fortran_auxiliary PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_auxiliary.f90"
+    )
+    add_dependencies(example_fortran_auxiliary hipsparse_fortran)
+    target_link_libraries(example_fortran_auxiliary PRIVATE hipsparse::fortran-samples-common)
+    set_target_properties(example_fortran_auxiliary PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
+    )
+    
+    # Fortran example: example_fortran_csrsv2
+    add_executable(example_fortran_csrsv2)
+    target_sources(example_fortran_csrsv2 PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_csrsv2.f90"
+    )
+    add_dependencies(example_fortran_csrsv2 hipsparse_fortran)
+    target_link_libraries(example_fortran_csrsv2 PRIVATE hipsparse::fortran-samples-common)
+    set_target_properties(example_fortran_csrsv2 PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
+    )
+    
+    # Fortran example: example_fortran_bsric02
+    add_executable(example_fortran_bsric02)
+    target_sources(example_fortran_bsric02 PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_bsric02.f90"
+    )
+    add_dependencies(example_fortran_bsric02 hipsparse_fortran)
+    target_link_libraries(example_fortran_bsric02 PRIVATE hipsparse::fortran-samples-common)
+    set_target_properties(example_fortran_bsric02 PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
+    )
+    
+    # Fortran example: example_fortran_csric02
+    add_executable(example_fortran_csric02)
+    target_sources(example_fortran_csric02 PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_csric02.f90"
+    )
+    add_dependencies(example_fortran_csric02 hipsparse_fortran)
+    target_link_libraries(example_fortran_csric02 PRIVATE hipsparse::fortran-samples-common)
+    set_target_properties(example_fortran_csric02 PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
+    )
+    
+    # Fortran example: example_fortran_bsrilu02
+    add_executable(example_fortran_bsrilu02)
+    target_sources(example_fortran_bsrilu02 PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_bsrilu02.f90"
+    )
+    add_dependencies(example_fortran_bsrilu02 hipsparse_fortran)
+    target_link_libraries(example_fortran_bsrilu02 PRIVATE hipsparse::fortran-samples-common)
+    set_target_properties(example_fortran_bsrilu02 PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
+    )
+    
+    # Fortran example: example_fortran_csrilu02
+    add_executable(example_fortran_csrilu02)
+    target_sources(example_fortran_csrilu02 PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_csrilu02.f90"
+    )
+    add_dependencies(example_fortran_csrilu02 hipsparse_fortran)
+    target_link_libraries(example_fortran_csrilu02 PRIVATE hipsparse::fortran-samples-common)
+    set_target_properties(example_fortran_csrilu02 PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
+    )
+    
+    # Fortran example: example_fortran_csrsm2
+    add_executable(example_fortran_csrsm2)
+    target_sources(example_fortran_csrsm2 PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_csrsm2.f90"
+    )
+    add_dependencies(example_fortran_csrsm2 hipsparse_fortran)
+    target_link_libraries(example_fortran_csrsm2 PRIVATE hipsparse::fortran-samples-common)
+    set_target_properties(example_fortran_csrsm2 PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
+    )
+    
+    # Fortran example: example_fortran_dotci
+    add_executable(example_fortran_dotci)
+    target_sources(example_fortran_dotci PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_dotci.f90"
+    )
+    add_dependencies(example_fortran_dotci hipsparse_fortran)
+    target_link_libraries(example_fortran_dotci PRIVATE hipsparse::fortran-samples-common)
+    set_target_properties(example_fortran_dotci PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
+    )
+    
+    # Fortran example: example_fortran_roti
+    add_executable(example_fortran_roti)
+    target_sources(example_fortran_roti PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_roti.f90"
+    )
+    add_dependencies(example_fortran_roti hipsparse_fortran)
+    target_link_libraries(example_fortran_roti PRIVATE hipsparse::fortran-samples-common)
+    set_target_properties(example_fortran_roti PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
+    )
+    
+    # Fortran example: example_fortran_spmv
+    add_executable(example_fortran_spmv)
+    target_sources(example_fortran_spmv PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_spmv.f90"
+    )
+    add_dependencies(example_fortran_spmv hipsparse_fortran)
+    target_link_libraries(example_fortran_spmv PRIVATE hipsparse::fortran-samples-common)
+    set_target_properties(example_fortran_spmv PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
+    )
+    
+    # Fortran example: example_fortran_bsrmm
+    add_executable(example_fortran_bsrmm)
+    target_sources(example_fortran_bsrmm PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_bsrmm.f90"
+    )
+    add_dependencies(example_fortran_bsrmm hipsparse_fortran)
+    target_link_libraries(example_fortran_bsrmm PRIVATE hipsparse::fortran-samples-common)
+    set_target_properties(example_fortran_bsrmm PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
+    )
 endif()
 
-if(NOT USE_CUDA)
-  # Build documentation examples
-  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_CPP documentation_examples/*.cpp)
-  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_C documentation_examples/*.c)
-  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_F90 documentation_examples/*.f90)
-  
-  foreach(file ${DOCUMENTATION_EXAMPLES_CPP})
-      add_hipsparse_example(${file})
-  endforeach()
-
-  foreach(file ${DOCUMENTATION_EXAMPLES_C})
-      add_hipsparse_example(${file})
-  endforeach()
-
-  if (NOT WIN32)
-    foreach(file ${DOCUMENTATION_EXAMPLES_F90})
-        add_hipsparse_example(${file})
-    endforeach()
-  endif()
+# Documentation examples (HIP only)
+if(HIPSPARSE_ENABLE_HIP)
+    add_subdirectory(documentation_examples)
 endif()
