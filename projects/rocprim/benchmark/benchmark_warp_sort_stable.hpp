@@ -106,12 +106,11 @@ void warp_sort_stable_by_key_kernel(K* input_keys,
 template<typename Key,
          unsigned int BlockSize,
          unsigned int WarpSize,
-         unsigned int ItemsPerThread = 1,
-         typename Value              = rocprim::empty_type,
-         rocprim::warp_sort_stable_algorithm Algo
-         = rocprim::detail::default_warp_sort_stable_algo<Value>::value,
-         unsigned int Trials = 100,
-         typename Config     = rocprim::default_config>
+         unsigned int ItemsPerThread              = 1,
+         typename Value                           = rocprim::empty_type,
+         rocprim::warp_sort_stable_algorithm Algo = rocprim::warp_sort_stable_algorithm::merge_path,
+         unsigned int                        Trials = 100,
+         typename Config                            = rocprim::default_config>
 struct warp_sort_stable_benchmark : public primbench::benchmark_interface
 {
     primbench::json meta() const override

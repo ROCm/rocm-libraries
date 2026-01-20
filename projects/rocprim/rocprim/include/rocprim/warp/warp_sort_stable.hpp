@@ -49,51 +49,6 @@ enum class warp_sort_stable_algorithm
     shuffle
 };
 
-namespace detail
-{
-
-// Helper trait to determine the best default algorithm based on Benchmark results.
-// Logic:
-// 1. Key-Only (Value is empty_type): Merge Path (LDS) is usually faster.
-// 2. Key-Value: Shuffle is usually faster.
-template<class Value>
-struct default_warp_sort_stable_algo
-{
-    static constexpr warp_sort_stable_algorithm value
-        = std::is_same<Value, ::rocprim::empty_type>::value ? warp_sort_stable_algorithm::merge_path
-                                                            : warp_sort_stable_algorithm::shuffle;
-};
-
-// Selector for warp_sort_stable algorithm which gives implementation
-// type based on passed warp_sort_stable_algorithm enum
-template<warp_sort_stable_algorithm Algorithm>
-struct select_warp_sort_stable_impl;
-
-template<>
-struct select_warp_sort_stable_impl<warp_sort_stable_algorithm::merge_path>
-{
-    template<class Key,
-             unsigned int BlockSize,
-             unsigned int VirtualWaveSize,
-             unsigned int ItemsPerThread,
-             class Value>
-    using type = detail::warp_sort_stable<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>;
-};
-
-template<>
-struct select_warp_sort_stable_impl<warp_sort_stable_algorithm::shuffle>
-{
-    template<class Key,
-             unsigned int BlockSize,
-             unsigned int VirtualWaveSize,
-             unsigned int ItemsPerThread,
-             class Value>
-    using type
-        = detail::warp_sort_shuffle_stable<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>;
-};
-
-} // end namespace detail
-
 /// \brief The warp_sort_stable class provides stable sort methods for items partitioned
 /// across a thread warp.
 ///
@@ -132,27 +87,37 @@ template<class Key,
          unsigned int VirtualWaveSize         = arch::wavefront::min_size(),
          unsigned int ItemsPerThread          = 1,
          class Value                          = empty_type,
-         warp_sort_stable_algorithm Algorithm = detail::default_warp_sort_stable_algo<Value>::value>
+         warp_sort_stable_algorithm Algorithm = warp_sort_stable_algorithm::merge_path>
 class warp_sort_stable
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-    : private detail::select_warp_sort_stable_impl<
-          Algorithm>::template type<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>
-#endif
 {
-    using base_type = typename detail::select_warp_sort_stable_impl<
-        Algorithm>::template type<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>;
+    // Define both implementations to allow fallback dispatch
+    using merge_path_impl
+        = detail::warp_sort_stable<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>;
+    using shuffle_impl
+        = detail::warp_sort_shuffle_stable<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>;
 
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
     /// communication during operations provided by related parallel primitive.
-    using storage_type = typename base_type::storage_type;
+    ///
+    /// \note To ensure memory safety during fallback (e.g. when Algorithm is shuffle
+    /// but input_size is provided), this is always the storage type of the Merge Path implementation,
+    /// which requires Shared Memory.
+    using storage_type = typename merge_path_impl::storage_type;
 
     /// \brief Stable sort for Key only (Per-thread single value).
     template<class BinaryFunction = ::rocprim::less<Key>>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_key, BinaryFunction compare_function = BinaryFunction())
     {
-        base_type::sort(thread_key, compare_function);
+        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
+        {
+            shuffle_impl().sort(thread_key, compare_function);
+        }
+        else
+        {
+            merge_path_impl().sort(thread_key, compare_function);
+        }
     }
 
     /// \brief Stable sort for Key only with storage (Per-thread single value).
@@ -162,7 +127,17 @@ public:
               storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction())
     {
-        base_type::sort(thread_key, storage, compare_function);
+        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
+        {
+            // Shuffle impl expects empty_storage_type (size 0-1), but we have a large storage.
+            // Cast is safe because shuffle doesn't touch the memory.
+            typename shuffle_impl::storage_type dummy;
+            shuffle_impl().sort(thread_key, dummy, compare_function);
+        }
+        else
+        {
+            merge_path_impl().sort(thread_key, storage, compare_function);
+        }
     }
 
     /// \brief Stable sort for Key Array (Per-thread array).
@@ -171,7 +146,14 @@ public:
     void sort(Key (&thread_keys)[ItemsPerThread],
               BinaryFunction compare_function = BinaryFunction())
     {
-        base_type::sort(thread_keys, compare_function);
+        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
+        {
+            shuffle_impl().sort(thread_keys, compare_function);
+        }
+        else
+        {
+            merge_path_impl().sort(thread_keys, compare_function);
+        }
     }
 
     /// \brief Stable sort for Key Array with storage (Per-thread array).
@@ -181,13 +163,22 @@ public:
               storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction())
     {
-        base_type::sort(thread_keys, storage, compare_function);
+        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
+        {
+            typename shuffle_impl::storage_type dummy;
+            shuffle_impl().sort(thread_keys, dummy, compare_function);
+        }
+        else
+        {
+            merge_path_impl().sort(thread_keys, storage, compare_function);
+        }
     }
 
     /// \brief Stable sort for Key Array with storage and valid input size.
     ///
     /// \param input_size The number of valid items in the warp.
-    /// Note: If Algorithm is shuffle, input_size < VirtualWaveSize * ItemsPerThread may not be strictly supported without manual padding.
+    /// \note This function automatically falls back to the `merge_path` algorithm
+    /// regardless of the template `Algorithm` parameter, as `shuffle` does not support partial inputs.
     template<class BinaryFunction = ::rocprim::less<Key>>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key (&thread_keys)[ItemsPerThread],
@@ -195,7 +186,8 @@ public:
               const unsigned int input_size,
               BinaryFunction     compare_function = BinaryFunction())
     {
-        base_type::sort(thread_keys, storage, input_size, compare_function);
+        // Shuffle impl ignores input_size, so we must use merge_path for correctness.
+        merge_path_impl().sort(thread_keys, storage, input_size, compare_function);
     }
 
     /// \brief Stable sort for Key-Value pair (Per-thread single value).
@@ -205,7 +197,14 @@ public:
               Value&         thread_value,
               BinaryFunction compare_function = BinaryFunction())
     {
-        base_type::sort(thread_key, thread_value, compare_function);
+        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
+        {
+            shuffle_impl().sort(thread_key, thread_value, compare_function);
+        }
+        else
+        {
+            merge_path_impl().sort(thread_key, thread_value, compare_function);
+        }
     }
 
     /// \brief Stable sort for Key-Value pair with storage (Per-thread single value).
@@ -216,10 +215,21 @@ public:
               storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction())
     {
-        base_type::sort(thread_key, thread_value, storage, compare_function);
+        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
+        {
+            typename shuffle_impl::storage_type dummy;
+            shuffle_impl().sort(thread_key, thread_value, dummy, compare_function);
+        }
+        else
+        {
+            merge_path_impl().sort(thread_key, thread_value, storage, compare_function);
+        }
     }
 
     /// \brief Stable sort for Key-Value pair with storage and valid input size (Per-thread single value).
+    ///
+    /// \note This function automatically falls back to the `merge_path` algorithm
+    /// regardless of the template `Algorithm` parameter, as `shuffle` does not support partial inputs.
     template<class BinaryFunction = ::rocprim::less<Key>>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key&               thread_key,
@@ -228,7 +238,7 @@ public:
               const unsigned int input_size,
               BinaryFunction     compare_function = BinaryFunction())
     {
-        base_type::sort(thread_key, thread_value, storage, input_size, compare_function);
+        merge_path_impl().sort(thread_key, thread_value, storage, input_size, compare_function);
     }
 
     /// \brief Stable sort for Key-Value Arrays (Per-thread array).
@@ -238,7 +248,14 @@ public:
               Value (&thread_values)[ItemsPerThread],
               BinaryFunction compare_function = BinaryFunction())
     {
-        base_type::sort(thread_keys, thread_values, compare_function);
+        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
+        {
+            shuffle_impl().sort(thread_keys, thread_values, compare_function);
+        }
+        else
+        {
+            merge_path_impl().sort(thread_keys, thread_values, compare_function);
+        }
     }
 
     /// \brief Stable sort for Key-Value Arrays with storage (Per-thread array).
@@ -249,10 +266,21 @@ public:
               storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction())
     {
-        base_type::sort(thread_keys, thread_values, storage, compare_function);
+        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
+        {
+            typename shuffle_impl::storage_type dummy;
+            shuffle_impl().sort(thread_keys, thread_values, dummy, compare_function);
+        }
+        else
+        {
+            merge_path_impl().sort(thread_keys, thread_values, storage, compare_function);
+        }
     }
 
     /// \brief Stable sort for Key-Value Arrays with storage and valid input size.
+    ///
+    /// \note This function automatically falls back to the `merge_path` algorithm
+    /// regardless of the template `Algorithm` parameter, as `shuffle` does not support partial inputs.
     template<class BinaryFunction = ::rocprim::less<Key>>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key (&thread_keys)[ItemsPerThread],
@@ -261,7 +289,7 @@ public:
               const unsigned int input_size,
               BinaryFunction     compare_function = BinaryFunction())
     {
-        base_type::sort(thread_keys, thread_values, storage, input_size, compare_function);
+        merge_path_impl().sort(thread_keys, thread_values, storage, input_size, compare_function);
     }
 };
 
