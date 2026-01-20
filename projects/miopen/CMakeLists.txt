@@ -493,7 +493,7 @@ if(MIOPEN_USE_HIPRTC)
 endif()
 
 option(Boost_USE_STATIC_LIBS "Use boost static libraries" ON)
-add_definitions(-DBOOST_ALL_NO_LIB=1)
+#add_definitions(-DBOOST_ALL_NO_LIB=1)
 find_package(Boost REQUIRED COMPONENTS filesystem CONFIG)
 
 find_path(HALF_INCLUDE_DIR half/half.hpp)
@@ -683,7 +683,7 @@ endfunction()
 # install for all targets; this was the behaviour before MIOPEN_INSTALL_GPU_DATABASES
 # was added.
 set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx1030)
-set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE LIST "List of AMDGPU targets for which to install databases")
+set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE STRING "List of AMDGPU targets for which to install databases")
 
 # This list should be updated when a new KDB file is added to the project
 set(KDB_BZ2_FILES gfx942.kdb.bz2 gfx90a.kdb.bz2 gfx1030.kdb.bz2 gfx908.kdb.bz2 gfx906.kdb.bz2 gfx900.kdb.bz2)
