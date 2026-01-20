@@ -8,13 +8,6 @@ cmake_minimum_required(VERSION 3.25.2)
 # loaded backend plugins.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Use the ROCm Clang toolchain if not already specified. Must be set before project().
-if(NOT CMAKE_TOOLCHAIN_FILE)
-    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/../cmake/ClangToolChain.cmake"
-        CACHE FILEPATH "Toolchain file"
-    )
-endif()
-
 project(hipdnn_samples VERSION 0.1.0 LANGUAGES CXX)
 include(GNUInstallDirs)
 set(CMAKE_CXX_STANDARD 17)

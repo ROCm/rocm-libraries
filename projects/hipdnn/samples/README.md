@@ -7,8 +7,11 @@
    - Follow the instructions in [Building.md](../docs/Building.md) to install the needed dependencies, compilers, and libraries for building hipDNN projects. Specifically:
      * CMake
      * Ninja
-     * ROCm / TheRock
+     * ROCm / TheRock (includes AMD Clang compiler)
    - A ROCm-compatible GPU is required to run the samples
+
+   > [!IMPORTANT]
+   > **AMD Clang++ is required.** GCC cannot compile hipDNN samples because they use HIP device code that requires the AMD Clang compiler included with ROCm. Make sure to specify the compiler as shown in the build command below.
 
 2. **Build Samples:** From this `samples` directory:
    ```bash
