@@ -83,9 +83,12 @@ const std::optional<MiopenTensor>& BatchnormFwdInferenceParams::activationOut() 
     return _activationOut;
 }
 
-BatchnormFwdInferencePlan::BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams)
+BatchnormFwdInferencePlan::BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams,
+                                                     bool benchmarkingEnabled)
     : _inferenceParams(std::move(inferenceParams))
+    , _benchmarkingEnabled(benchmarkingEnabled)
 {
+    (void)_benchmarkingEnabled;
 }
 
 size_t BatchnormFwdInferencePlan::getWorkspaceSize(
