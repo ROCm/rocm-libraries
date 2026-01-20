@@ -68,7 +68,7 @@ bool BnFwdInferActivationFused::IsApplicable(const FusionContext& /*context*/,
     return true;
 }
 
-ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& context,
+ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext&,
                                                     const FusionDescription& problem) const
 {
     const auto bn_problem = problem.GetBnProblem(0, miopen::batchnorm::Direction::ForwardInference);
