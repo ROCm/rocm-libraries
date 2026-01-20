@@ -229,6 +229,7 @@ namespace GEMMTests
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+
         GEMMProblem gemm;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDS;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDS;
@@ -248,7 +249,15 @@ namespace GEMMTests
         auto instructions    = m_context->instructions()->toString();
         auto ldsWriteStrides = direct2LDSWriteStrides(instructions);
 
-        std::set<int> expectedLDSWriteStrides{4 * (1024 + 64), 4 * (1024 + 96)};
+        std::set<int> expectedLDSWriteStrides;
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWiderDirectToLds))
+        {
+            expectedLDSWriteStrides = {4 * (1024 + 64), 4 * (1024 + 96)};
+        }
+        else
+        {
+            expectedLDSWriteStrides = {1024 + 64, 1024 + 96};
+        }
         EXPECT_EQ(ldsWriteStrides, expectedLDSWriteStrides);
     }
 
