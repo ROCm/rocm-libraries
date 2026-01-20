@@ -141,17 +141,22 @@ constexpr auto example_instance = make_xdl_instance_from_old_params(
     1 // NumGroupsToMerge
 );
 
+constexpr auto NGCHW = ckb::TensorLayout::NGCHW;
+constexpr auto GKCYX = ckb::TensorLayout::GKCYX;
+constexpr auto NGKHW = ckb::TensorLayout::NGKHW;
+constexpr auto FP32  = ckb::DataType::FP32;
+
 constexpr auto example_instances()
 {
     std::array result = {make_xdl_instance_from_old_params(2,
-                                                           ckb::TensorLayout::NGCHW,
-                                                           ckb::TensorLayout::GKCYX,
-                                                           ckb::TensorLayout::NGKHW,
-                                                           ckb::DataType::FP32,
-                                                           ckb::DataType::FP32,
-                                                           ckb::DataType::FP32,
-                                                           ckb::DataType::FP32,
-                                                           ckb::DataType::FP32,
+                                                           NGCHW,
+                                                           GKCYX,
+                                                           NGKHW,
+                                                           FP32,
+                                                           FP32,
+                                                           FP32,
+                                                           FP32,
+                                                           FP32,
                                                            ckb::ConvSpecialization::DEFAULT,
                                                            ckb::GemmSpecialization::MNKPadding,
                                                            1,

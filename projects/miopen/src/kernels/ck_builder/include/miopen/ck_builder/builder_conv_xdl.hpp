@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <ck_tile/builder/types.hpp>
 #include <ck_tile/builder/conv_builder.hpp>
+#include <miopen/ck_builder/builder_factory.hpp>
 
 namespace ckb = ck_tile::builder;
 
@@ -18,12 +19,12 @@ struct XdlAlgorithm
 
     struct ThreadBlock
     {
-        unsigned int block_size;
+        std::size_t block_size;
         struct TileSize
         {
-            unsigned int m;
-            unsigned int n;
-            unsigned int k;
+            std::size_t m;
+            std::size_t n;
+            std::size_t k;
         } tile_size;
     } thread_block;
 
@@ -31,14 +32,14 @@ struct XdlAlgorithm
 
     struct GridwiseGemm
     {
-        unsigned int ak1;
-        unsigned int bk1;
+        std::size_t ak1;
+        std::size_t bk1;
         struct XdlParams
         {
-            unsigned int m_per_xdl      = 16;
-            unsigned int n_per_xdl      = 16;
-            unsigned int m_xdl_per_wave = 4;
-            unsigned int n_xdl_per_wave = 1;
+            std::size_t m_per_xdl      = 16;
+            std::size_t n_per_xdl      = 16;
+            std::size_t m_xdl_per_wave = 4;
+            std::size_t n_xdl_per_wave = 1;
         } xdl_params;
         static_assert(ckb::GridwiseXdlGemmDescriptor<XdlParams>);
     } gridwise_gemm;
@@ -50,15 +51,15 @@ struct XdlAlgorithm
         {
             struct BlockTransfer
             {
-                unsigned int k0;
-                unsigned int m_n;
-                unsigned int k1;
+                std::size_t k0;
+                std::size_t m_n;
+                std::size_t k1;
             } block_transfer;
             struct LdsTransfer
             {
-                unsigned int src_vector_dim;
-                unsigned int src_scalar_per_vector;
-                unsigned int lds_dst_scalar_per_vector;
+                std::size_t src_vector_dim;
+                std::size_t src_scalar_per_vector;
+                std::size_t lds_dst_scalar_per_vector;
                 bool is_direct_load;
                 bool lds_padding;
             } lds_transfer;
@@ -77,16 +78,16 @@ struct XdlAlgorithm
         {
             struct ThreadClusterDims
             {
-                unsigned int m_block;
-                unsigned int m_wave_per_xdl;
-                unsigned int n_block;
-                unsigned int n_wave_per_xdl;
+                std::size_t m_block;
+                std::size_t m_wave_per_xdl;
+                std::size_t n_block;
+                std::size_t n_wave_per_xdl;
             } thread_cluster_dims;
             struct Epilogue
             {
-                unsigned int m_xdl_per_wave_per_shuffle;
-                unsigned int n_per_wave_per_shuffle;
-                unsigned int scalar_per_vector;
+                std::size_t m_xdl_per_wave_per_shuffle;
+                std::size_t n_per_wave_per_shuffle;
+                std::size_t scalar_per_vector;
             } epilogue;
         } c;
     } transfer;
@@ -148,7 +149,7 @@ struct XdlInstance
 // template parameters Parameters are in the same order as the template parameters
 constexpr XdlInstance make_xdl_instance_from_old_params(
     // 1. NDimSpatial
-    unsigned int spatial_dim,
+    std::size_t spatial_dim,
     // 2-5. Layouts
     ckb::TensorLayout input_layout,
     ckb::TensorLayout weight_layout,
@@ -164,47 +165,47 @@ constexpr XdlInstance make_xdl_instance_from_old_params(
     ckb::ConvSpecialization conv_fwd_specialization,
     ckb::GemmSpecialization gemm_specialization,
     // 17. NumGemmKPrefetchStage
-    unsigned int num_gemm_k_prefetch_stage,
+    std::size_t num_gemm_k_prefetch_stage,
     // 18-21. Block dimensions
-    unsigned int block_size,
-    unsigned int m_per_block,
-    unsigned int n_per_block,
-    unsigned int k_per_block,
+    std::size_t block_size,
+    std::size_t m_per_block,
+    std::size_t n_per_block,
+    std::size_t k_per_block,
     // 22-27. XDL parameters
-    unsigned int ak1,
-    unsigned int bk1,
-    unsigned int m_per_xdl,
-    unsigned int n_per_xdl,
-    unsigned int m_xdl_per_wave,
-    unsigned int n_xdl_per_wave,
+    std::size_t ak1,
+    std::size_t bk1,
+    std::size_t m_per_xdl,
+    std::size_t n_per_xdl,
+    std::size_t m_xdl_per_wave,
+    std::size_t n_xdl_per_wave,
     // 28-34. A block transfer parameters
     std::array<std::size_t, 3> a_thread_cluster_lengths,
     std::array<std::size_t, 3> a_thread_cluster_arrange_order,
     std::array<std::size_t, 3> a_block_transfer_src_access_order,
-    unsigned int a_block_transfer_src_vector_dim,
-    unsigned int a_block_transfer_src_scalar_per_vector,
-    unsigned int a_block_transfer_dst_scalar_per_vector_k1,
+    std::size_t a_block_transfer_src_vector_dim,
+    std::size_t a_block_transfer_src_scalar_per_vector,
+    std::size_t a_block_transfer_dst_scalar_per_vector_k1,
     bool a_block_lds_extra_m,
     // 35-41. B block transfer parameters
     std::array<std::size_t, 3> b_thread_cluster_lengths,
     std::array<std::size_t, 3> b_thread_cluster_arrange_order,
     std::array<std::size_t, 3> b_block_transfer_src_access_order,
-    unsigned int b_block_transfer_src_vector_dim,
-    unsigned int b_block_transfer_src_scalar_per_vector,
-    unsigned int b_block_transfer_dst_scalar_per_vector_k1,
+    std::size_t b_block_transfer_src_vector_dim,
+    std::size_t b_block_transfer_src_scalar_per_vector,
+    std::size_t b_block_transfer_dst_scalar_per_vector_k1,
     bool b_block_lds_extra_n,
     // 42-45. C shuffle parameters
-    unsigned int c_shuffle_m_xdl_per_wave_per_shuffle,
-    unsigned int c_shuffle_n_xdl_per_wave_per_shuffle,
+    std::size_t c_shuffle_m_xdl_per_wave_per_shuffle,
+    std::size_t c_shuffle_n_xdl_per_wave_per_shuffle,
     std::array<std::size_t, 4> c_thread_cluster_lengths,
-    unsigned int c_block_transfer_scalar_per_vector,
+    std::size_t c_block_transfer_scalar_per_vector,
     // 46-47. Compute data types
     ckb::DataType input_compute_type,
     ckb::DataType weight_compute_type,
     // 48. Loop scheduler
     ckb::PipelineScheduler loop_scheduler,
     // 49. Groups to merge
-    unsigned int num_conv_groups_to_merge)
+    std::size_t num_conv_groups_to_merge)
 {
     return XdlInstance{
         .signature = {.spatial_dim            = spatial_dim,
@@ -234,9 +235,9 @@ constexpr XdlInstance make_xdl_instance_from_old_params(
                                            .m_xdl_per_wave = m_xdl_per_wave,
                                            .n_xdl_per_wave = n_xdl_per_wave}},
              .transfer =
-                 {.a = {.block_transfer = {.k0  = static_cast<int>(a_thread_cluster_lengths[0]),
-                                           .m_n = static_cast<int>(a_thread_cluster_lengths[1]),
-                                           .k1  = static_cast<int>(a_thread_cluster_lengths[2])},
+                 {.a = {.block_transfer = {.k0  = a_thread_cluster_lengths[0],
+                                           .m_n = a_thread_cluster_lengths[1],
+                                           .k1  = a_thread_cluster_lengths[2]},
                         .lds_transfer   = {.src_vector_dim = a_block_transfer_src_vector_dim,
                                          .src_scalar_per_vector =
                                              a_block_transfer_src_scalar_per_vector,
@@ -246,9 +247,9 @@ constexpr XdlInstance make_xdl_instance_from_old_params(
                                          .lds_padding    = a_block_lds_extra_m},
                         .block_transfer_access_order = {.order = a_thread_cluster_arrange_order},
                         .src_access_order = {.order = a_block_transfer_src_access_order}},
-                  .b = {.block_transfer = {.k0  = static_cast<int>(b_thread_cluster_lengths[0]),
-                                           .m_n = static_cast<int>(b_thread_cluster_lengths[1]),
-                                           .k1  = static_cast<int>(b_thread_cluster_lengths[2])},
+                  .b = {.block_transfer = {.k0  = b_thread_cluster_lengths[0],
+                                           .m_n = b_thread_cluster_lengths[1],
+                                           .k1  = b_thread_cluster_lengths[2]},
                         .lds_transfer   = {.src_vector_dim = b_block_transfer_src_vector_dim,
                                          .src_scalar_per_vector =
                                              b_block_transfer_src_scalar_per_vector,
@@ -259,17 +260,62 @@ constexpr XdlInstance make_xdl_instance_from_old_params(
                         .block_transfer_access_order = {.order = b_thread_cluster_arrange_order},
                         .src_access_order = {.order = b_block_transfer_src_access_order}},
                   .c = {.thread_cluster_dims =
-                            {.m_block        = static_cast<int>(c_thread_cluster_lengths[0]),
-                             .m_wave_per_xdl = static_cast<int>(c_thread_cluster_lengths[1]),
-                             .n_block        = static_cast<int>(c_thread_cluster_lengths[2]),
-                             .n_wave_per_xdl = static_cast<int>(c_thread_cluster_lengths[3])},
+                            {.m_block        = c_thread_cluster_lengths[0],
+                             .m_wave_per_xdl = c_thread_cluster_lengths[1],
+                             .n_block        = c_thread_cluster_lengths[2],
+                             .n_wave_per_xdl = c_thread_cluster_lengths[3]},
                         .epilogue = {.m_xdl_per_wave_per_shuffle =
                                          c_shuffle_m_xdl_per_wave_per_shuffle,
                                      .n_per_wave_per_shuffle = c_shuffle_n_xdl_per_wave_per_shuffle,
                                      .scalar_per_vector = c_block_transfer_scalar_per_vector}}},
              .fwd_specialization         = conv_fwd_specialization,
              .gemm_specialization        = gemm_specialization,
-             .num_gemm_k_prefetch_stages = static_cast<std::size_t>(num_gemm_k_prefetch_stage),
-             .num_conv_groups_to_merge   = static_cast<std::size_t>(num_conv_groups_to_merge),
+             .num_gemm_k_prefetch_stages = num_gemm_k_prefetch_stage,
+             .num_conv_groups_to_merge   = num_conv_groups_to_merge,
              .loop_scheduler             = loop_scheduler}};
 }
+
+namespace miopen {
+namespace conv {
+namespace ck_builder {
+namespace instance {
+
+using InLayout                             = ck::tensor_layout::convolution::NGCHW;
+using WeiLayout                            = ck::tensor_layout::convolution::GKCYX;
+using OutLayout                            = ck::tensor_layout::convolution::NGKHW;
+using PassThrough                          = ck::tensor_operation::element_wise::PassThrough;
+using EmptyTuple                           = ck::Tuple<>;
+static constexpr ck::index_t NumDimSpatial = 2;
+template <typename DataType>
+using DeviceOpGFwdDefault =
+    ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<NumDimSpatial,
+                                                                  InLayout,
+                                                                  WeiLayout,
+                                                                  ck::Tuple<>,
+                                                                  OutLayout,
+                                                                  DataType,
+                                                                  DataType,
+                                                                  ck::Tuple<>,
+                                                                  DataType,
+                                                                  PassThrough,
+                                                                  PassThrough,
+                                                                  PassThrough,
+                                                                  DataType,
+                                                                  DataType>;
+
+using DeviceOpGFWdDefaultFloat = DeviceOpGFwdDefault<float>;
+
+template<>
+struct DeviceOperationInstanceFactory<DeviceOpGFWdDefaultFloat>
+{
+    static std::vector<std::unique_ptr<DeviceOpGFWdDefaultFloat>> GetInstances()
+    {
+        std::vector<std::unique_ptr<DeviceOpGFWdDefaultFloat>> instances{};
+
+        return instances;
+    }
+};
+} // namespace instance
+} // namespace ck_builder
+} // namespace conv
+} // namespace miopen
