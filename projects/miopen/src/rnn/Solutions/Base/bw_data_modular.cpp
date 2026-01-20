@@ -619,8 +619,6 @@ void RNNBackwardDataModularAlgo::UpdateHStatePerTimeSeq(const Handle& handle,
             useCxIfGTBatch,
             hidden_vec,
             reservLayout.gateStride[1],
-            -666, // unused
-            -666, // unused
             cx,
             hiddenHxCxInfo.getOffset(getVirtualLayer(layer, direction), 0),
             reserveSpace,

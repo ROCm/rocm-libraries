@@ -63,9 +63,10 @@ struct MIOPEN_INTERNALS_EXPORT FusionPlanDescriptor : miopenFusionPlanDescriptor
                            Data_t workspace,
                            size_t workspace_size);
     miopenStatus_t Compile(const Handle& handle);
-    std::vector<Solution> Find(const Handle& handle,
-                               const std::function<fusion::FusionInvokeParams()>& invoke_params,
-                               const std::optional<FindOptions>& options = std::nullopt) const;
+    std::vector<Solution>
+    Find(const Handle& handle,
+         const std::function<fusion::FusionInvokeParams(size_t)>& invoke_params,
+         const std::optional<FindOptions>& options = std::nullopt) const;
     friend std::ostream& operator<<(std::ostream& stream, const FusionPlanDescriptor& fpd);
 
     miopenStatus_t

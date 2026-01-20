@@ -19,7 +19,7 @@ class TestGoldenReferenceCpu : public ::testing::TestWithParam<std::filesystem::
 {
 protected:
     hipdnn_test_sdk::utilities::GraphAndTensorMap _graphAndTensors;
-    std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::ITensor>>
+    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>
         _referenceOutputTensors;
 
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -56,7 +56,7 @@ protected:
 auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
 {
     return testing::ValuesIn(filesInDirectoryWithExtReturnEmptyPathOnThrow(
-        hipdnn_sdk::utilities::getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data"
+        hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data"
             / subDirectory,
         ".json"));
 }

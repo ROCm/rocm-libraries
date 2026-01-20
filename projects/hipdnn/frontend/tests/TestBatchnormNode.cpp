@@ -250,11 +250,11 @@ TEST(TestBatchnormNode, PackNode)
 
     builder.Finish(offset);
     auto bufferPointer = builder.GetBufferPointer();
-    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_sdk::data_objects::Node>(bufferPointer);
+    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Node>(bufferPointer);
 
     EXPECT_STREQ(nodeFlatbuffer->name()->c_str(), "Batchnorm");
     EXPECT_EQ(nodeFlatbuffer->attributes_type(),
-              hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes);
+              hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes);
 
     auto packedAttributes = nodeFlatbuffer->attributes_as_BatchnormAttributes();
     ASSERT_NE(packedAttributes, nullptr);

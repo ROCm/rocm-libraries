@@ -110,7 +110,7 @@ protected:
         getPluginSearchPaths(const char* envVarName,
                              const std::set<std::filesystem::path>& defaultPaths)
     {
-        const auto envPath = hipdnn_sdk::utilities::getEnv(envVarName);
+        const auto envPath = hipdnn_data_sdk::utilities::getEnv(envVarName);
         if(!envPath.empty())
         {
             // Could make this take multiple dirs
@@ -209,7 +209,7 @@ private:
             {
                 const auto& path = entry.path();
                 if(entry.is_regular_file()
-                   && path.extension() == hipdnn_sdk::utilities::SHARED_LIB_EXT)
+                   && path.extension() == hipdnn_data_sdk::utilities::SHARED_LIB_EXT)
                 {
                     pathsToLoad.insert(std::filesystem::weakly_canonical(path));
                 }

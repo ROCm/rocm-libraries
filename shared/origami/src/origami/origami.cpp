@@ -31,19 +31,19 @@ std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
 }
 
 /**
- * @brief Selects the best WGM (maximizing L2 hit rate) given fixed macro tile sizes.
+ * @brief Selects the best workgroup mapping parameters (maximizing cache hits) given fixed macro tile sizes.
  *
  * @param[in] problem Problem description (M, N, K, etc.)
  * @param[in] hardware Hardware characteristics
  * @param config Kernel configuration.
  *
- * @return A tuple: best predicted (wgmxcc, wgm).
+ * @return A workgroup_mapping_t struct: best predicted (wgmxccchunk, wgmxcc, wgm).
  */
 
-std::tuple<int, int> select_workgroup_mapping(const problem_t& problem,
-                                              const hardware_t& hardware,
-                                              const config_t& config,
-                                              size_t skGrid) {
+workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
+                                             const hardware_t& hardware,
+                                             const config_t& config,
+                                             size_t skGrid) {
   // Extract parameters from structured types
   size_t M     = problem.size.m;
   size_t N     = problem.size.n;
@@ -57,183 +57,206 @@ std::tuple<int, int> select_workgroup_mapping(const problem_t& problem,
   int nta = config.cache_hints_a;
   int ntb = config.cache_hints_b;
 
-  // Default is the closest we can get to a square
-  size_t max_CU_XCD = hardware.N_CU / hardware.NUM_XCD;
-  int defaultWGM    = static_cast<int>(ceil(std::sqrt(max_CU_XCD)));
+  // Default values
+  size_t numCUs = hardware.N_CU;
+  size_t numXCD = hardware.NUM_XCD;
+  size_t numCUsPerXCD = numCUs / numXCD;
+  size_t defaultWGMXCCCHUNK = 0;
+  size_t defaultWGMXCC = hardware.NUM_XCD;
+  int32_t defaultWGM = ceil(std::sqrt(numCUsPerXCD));
 
   // Number of output MTs per split and batch
   size_t numMT_M = math::safe_ceil_div(M, MT_M);
   size_t numMT_N = math::safe_ceil_div(N, MT_N);
-  size_t numMTs  = numMT_M * numMT_N;
+  size_t numMTs = numMT_M * numMT_N;
 
-  // What SK does -- we already have skGrid so just compute numWaves and splitFactor
-  auto numWaves    = skGrid > numMTs ? math::safe_ceil_div(skGrid, hardware.N_CU)
-                                     : math::safe_ceil_div(numMTs, hardware.N_CU);
-  auto splitFactor = math::safe_ceil_div(skGrid, numMTs);
+  // What SK does -- we already have skGrid so just compute num_timesteps and split_factor
+  auto num_timesteps = skGrid > numMTs ? math::safe_ceil_div(skGrid, numCUs)
+                                       : math::safe_ceil_div(numMTs, numCUs);
+  auto split_factor  = math::safe_ceil_div(skGrid, numMTs);
 
   // -------------------
   // NonTemporal Cases
   // -------------------
-  if (nta > 3 && ntb < 4)
-    return std::make_tuple(hardware.NUM_XCD, 1);
-  else if (nta < 4 && ntb > 3)
-    return std::make_tuple(hardware.NUM_XCD,
-                           std::min(max_CU_XCD, math::safe_ceil_div(numMTs, hardware.NUM_XCD)));
-  else if (nta > 3 && ntb > 3)
-    return std::make_tuple(hardware.NUM_XCD, 1);
+  if(nta > 3 && ntb < 4)
+      return workgroup_mapping_t{0, numMTs == 1 ? 1 : numXCD, 1};
+  else if(nta < 4 && ntb > 3)
+      return workgroup_mapping_t{0, numMTs == 1 ? 1 : numXCD, -1};
+  else if(nta > 3 && ntb > 3)
+      return workgroup_mapping_t{0, numMTs == 1 ? 1 : numXCD, 1};
+
+  // -------------------
+  // Batch Case
+  // -------------------    
+  if (batch > 1) {
+    // Total tiles including batch count
+    size_t numTotalTiles = numMTs * batch;
+    
+    size_t wgmxccchunk, wgmxcc;
+    int32_t wgm;
+
+    if (numMTs == 1 || numTotalTiles <= numXCD) {
+      wgmxccchunk = 0;
+      wgmxcc = 0;
+      wgm = 1;
+    }
+    // This gives a nice strided read pattern for batched GEMMs
+    else if (numMTs % numXCD == 0) {
+      wgmxccchunk = 0;
+      wgmxcc = 0;
+      wgm = 1;
+    }
+    else {
+      wgmxccchunk = (numCUsPerXCD / numMTs) * numMTs;
+      wgmxcc = numXCD;
+      wgm = 1;
+    }
+
+    return workgroup_mapping_t{wgmxccchunk, wgmxcc, wgm};
+  }
+
+  // -------------------
+  // WGMXCCCHUNK Prediction
+  // -------------------
+  size_t out_wgmxccchunk = defaultWGMXCCCHUNK;
+
+  // For large square-ish GEMMs, we can benefit from chunking.
+  constexpr size_t skinnyFactor = 12;
+  bool isMallImportant = (batch == 1 &&
+                          split_factor == 1 && 
+                          numMTs > 4 * numCUs &&
+                          numMT_M > 16 &&
+                          numMT_N > 16);
+  bool isSkinnyCase = std::min(numMT_M, numMT_N) <= skinnyFactor * std::max(numMT_M, numMT_N);
+  if (isMallImportant && !isSkinnyCase)
+    out_wgmxccchunk = numCUsPerXCD;
+  else
+    out_wgmxccchunk = 0;
 
   // -------------------
   // WGMXCC Prediction
   // -------------------
-  // Default WGMXCC -- always number of XCD
-  int defaultWGMXCC = static_cast<int>(hardware.NUM_XCD);
-  bool isWGMXCCset  = false;
-  int out_wgmxcc    = static_cast<int>(defaultWGMXCC);
+  size_t out_wgmxcc = defaultWGMXCC;
 
-  // Batched GEMMs
-  if (batch > 1 && !isWGMXCCset) {
-    // Total tiles including batch count
-    size_t numTotalTiles = numMTs * batch;
-
-    // if only one MT per each GEMM -> no mapping
-    // if less than hardware.NUM_XCD total tiles -> no mapping
-    if (numMTs == 1 || numTotalTiles <= hardware.NUM_XCD) {
-      out_wgmxcc  = 1;
-      isWGMXCCset = true;
-    }
-    // else use the default (num_xcd)
-  }
-
-  // If we are lucky that the splitFactor is a multiple of NUM_XCD -> no mapping
-  if ((splitFactor % hardware.NUM_XCD == 0) && !isWGMXCCset) {
-    out_wgmxcc  = 1;
-    isWGMXCCset = true;
-  }
-
+  if (split_factor % numXCD == 0)
+    out_wgmxcc = 0;
   // Small GEMMs
-  if ((numMTs <= hardware.NUM_XCD) && !isWGMXCCset) {
-    out_wgmxcc  = 1;
-    isWGMXCCset = true;
-  }
-
-  // For sizes that we have more than 2 waves of computations, we skip xcc mapping as MALL is
-  // more important -- matrix should not be skinny
-  // To avoid regressions, it's set to default, but it should actually be 1!
-  bool MallIsImportant =
-      (splitFactor == 1 && batch == 1 && numMTs > 2 * hardware.N_CU && numMT_M > 8 && numMT_N > 8);
-  if (MallIsImportant && !isWGMXCCset) {
-    out_wgmxcc  = defaultWGMXCC;
-    isWGMXCCset = true;
-  }
+  else if (numMTs <= numXCD)
+    out_wgmxcc = 0;
+  else
+    out_wgmxcc = defaultWGMXCC;
 
   // -------------------
   // WGM Prediction
   // -------------------
-  // Default WGM
-  bool isWGMset = false;
-  int out_wgm   = defaultWGM;
+  auto out_wgm = defaultWGM;
 
   // shortcut:
   // 1. if we have decided to not remap xcc, there is no reason to use wgm
   // 2. GEMMs that only have one tile in one dimension don't need wgm
-  // 3. Batched GEMMs don't need wgm (emprically -> batch count is often large!)
-  if (((out_wgmxcc == 1 && !MallIsImportant) || numMT_M == 1 || numMT_N == 1 || batch > 1) &&
-      !isWGMset) {
-    out_wgm  = 1;
-    isWGMset = true;
-  }
-
+  if (out_wgmxcc == 0 || numMT_M == 1 || numMT_N == 1)
+    out_wgm = 1;
   // For tall cases (M >> N), if we have enough tiles to schedule, we use the number of tiles
   // in the smaller dimension as WGM value
-  if (numMTs > hardware.N_CU && M > 10 * N && numMT_N <= 8) {
-    out_wgm  = numMT_N;
-    isWGMset = true;
-  }
-
-  // Cases where we have multiple rounds of computation per each CU
-  // To avoid regressions, it's set to defaultWGM. However, I think WGM=1 should be the winner
-  if (MallIsImportant && !isWGMset) {
-    out_wgm  = defaultWGM;
-    isWGMset = true;
-  }
-
-  if (!isWGMset) {
-    size_t numWGs = numWaves * splitFactor * numMTs;
-    size_t q      = numWGs / hardware.NUM_XCD;
-    size_t r      = numWGs % hardware.NUM_XCD;
-
+  else if (numMTs >= numCUs && numMT_N <= 8)
+    out_wgm = numMT_N;
+  else {
+    // List of candidates for WGM values
     std::vector<int> wgmList = {1, 2, 3, 4, 5, 6, 8, 16};
-    int bestWGM              = 1;
-    int bestL2               = std::numeric_limits<int>::max();
+
+    // Setup
+    size_t numWGs, q, r;
+    numWGs = num_timesteps * split_factor * numMT_M * numMT_N;
+    q = numWGs / numXCD;
+    r = numWGs % numXCD;
+
+    // Loop through all WGM values and find the best one
+    int bestWGM = 1;
+    int bestL2 = std::numeric_limits<int>::max();
     for (auto wgm : wgmList) {
-      auto slabTiles     = numMT_M * std::min(wgm, static_cast<int>(numMT_N));
-      auto slabCount     = math::safe_ceil_div(numMT_N, wgm);
-      auto edgeSlabWidth = numMT_N - (slabCount - 1) * wgm;
       auto wgmL2Estimate = 0;
-      auto numXCD        = std::min(hardware.NUM_XCD, numWGs);
+      auto slabTiles = numMT_M * std::min(wgm, static_cast<int>(numMT_N));
+      auto slabCount = math::safe_ceil_div(numMT_N, wgm);
+      auto edgeSlabWidth = numMT_N - (slabCount - 1) * wgm;
+      auto numXCDUsed = std::min(numXCD, numWGs);
 
       // Compute unique loads per L2 tile
-      for (uint32_t x = 0; x < numWaves * numXCD; ++x) {
-        // Range of "output tiles" that this xcd takes.
-        auto xccStart = q * x + (x < r ? x : r);
-        auto xccEnd   = xccStart + q - 1 + (x < r ? 1 : 0);
-        // xccStart and xccEnd are supposed to be tile IDs
-        // In case of splitting, they are WG IDs. Modify to get tile IDs
-        xccStart /= splitFactor;
-        xccEnd /= splitFactor;
+      for (uint32_t w = 0; w < num_timesteps; ++w) {
+        // offset for this wave
+        auto remainder = q % numCUsPerXCD;
+        auto adjustedEndTileInRound = (w == num_timesteps - 1 && remainder != 0) ? remainder : numCUsPerXCD;
+        for (uint32_t x = 0; x < numXCDUsed; ++x) {
+          // Range of "output tiles" that this xcd takes.
+          size_t xccStart, xccEnd;
+          if (out_wgmxccchunk > 0) {
+            // CHUNKED MODE: XCD x owns tiles [x*C, (x+1)*C)
+            xccStart = x * out_wgmxccchunk + w * numCUsPerXCD;
+            xccEnd = xccStart + adjustedEndTileInRound - 1;
+          } else {
+            // NON-CHUNK MODE: XCD x owns tiles [q*x + min(x,r), q*(x+1) + min(x+1,r))
+            // However, not all of these tiles are in the same wave/round.
+            // only the first numCUsPerXCD tiles are in the same wave/round.
+            xccStart = w * numCUsPerXCD + q * x + (x < r ? x : r);
+            xccEnd = xccStart + adjustedEndTileInRound - 1 + (x < r ? 1 : 0);
+          }
+          
+          // xccStart and xccEnd are supposed to be tile IDs
+          // In case of splitting, they are WG IDs. Modify to get tile IDs
+          xccStart /= split_factor;
+          xccEnd /= split_factor;
 
-        auto slabStart = xccStart / slabTiles;
-        auto slabEnd   = xccEnd / slabTiles;
+          auto slabStart = xccStart / slabTiles;
+          auto slabEnd = xccEnd / slabTiles;
 
-        auto firstSlabWidth      = (slabStart == slabCount - 1 ? edgeSlabWidth : wgm);
-        auto firstSlabStartIndex = xccStart % slabTiles;
-        auto firstSlabStartRow   = firstSlabStartIndex / firstSlabWidth;
-        auto firstSlabEndRow =
-            std::min((firstSlabStartIndex + (xccEnd - xccStart)) / firstSlabWidth, numMT_M - 1);
-        auto rowsInFirstSlab = firstSlabEndRow - firstSlabStartRow + 1;
+          auto firstSlabWidth = (slabStart == slabCount - 1 ? edgeSlabWidth : wgm);
+          auto firstSlabStartIndex = xccStart % slabTiles;
+          auto firstSlabStartRow = firstSlabStartIndex / firstSlabWidth;
+          auto firstSlabEndRow = std::min(
+              (firstSlabStartIndex + (xccEnd - xccStart)) / firstSlabWidth, numMT_M - 1);
+          auto rowsInFirstSlab = firstSlabEndRow - firstSlabStartRow + 1;
 
-        auto lastSlabWidth    = (slabEnd == slabCount - 1 ? edgeSlabWidth : wgm);
-        auto lastSlabEndIndex = xccEnd % slabTiles;
-        auto lastSlabEndRow   = lastSlabEndIndex / lastSlabWidth;
-        auto colsInLastRow    = (lastSlabEndIndex % lastSlabWidth) + 1;
-        auto colsInLastSlab   = (lastSlabEndRow > 0 ? lastSlabWidth : colsInLastRow);
+          auto lastSlabWidth = (slabEnd == slabCount - 1 ? edgeSlabWidth : wgm);
+          auto lastSlabEndIndex = xccEnd % slabTiles;
+          auto lastSlabEndRow = lastSlabEndIndex / lastSlabWidth;
+          auto colsInLastRow = (lastSlabEndIndex % lastSlabWidth) + 1;
+          auto colsInLastSlab = (lastSlabEndRow > 0 ? lastSlabWidth : colsInLastRow);
 
-        size_t uniqueRows = 0;
-        size_t uniqueCols = 0;
-        if (slabEnd == slabStart) {
-          uniqueRows = lastSlabEndRow - firstSlabStartRow + 1;
-          uniqueCols = firstSlabWidth;
-          if (rowsInFirstSlab <= 2) uniqueCols = std::min(xccEnd - xccStart + 1, firstSlabWidth);
-        } else {
-          auto colsInFirstRow  = firstSlabWidth - (xccStart % firstSlabWidth);
-          auto colsInFirstSlab = (rowsInFirstSlab > 1 ? firstSlabWidth : colsInFirstRow);
-          auto fullSlabs       = slabEnd - slabStart - 1;
-          uniqueRows =
-              (fullSlabs > 0 ? numMT_M : std::min(rowsInFirstSlab + lastSlabEndRow + 1, numMT_M));
-          uniqueCols = colsInFirstSlab + colsInLastSlab + fullSlabs * wgm;
+          size_t uniqueRows = 0;
+          size_t uniqueCols = 0;
+          if (slabEnd == slabStart) {
+            uniqueRows = lastSlabEndRow - firstSlabStartRow + 1;
+            uniqueCols = firstSlabWidth;
+            if (rowsInFirstSlab <= 2)
+                uniqueCols = std::min(xccEnd - xccStart + 1, firstSlabWidth);
+          } else {
+            auto colsInFirstRow = firstSlabWidth - (xccStart % firstSlabWidth);
+            auto colsInFirstSlab = (rowsInFirstSlab > 1 ? firstSlabWidth : colsInFirstRow);
+            auto fullSlabs = slabEnd - slabStart - 1;
+            uniqueRows =
+                (fullSlabs > 0 ? numMT_M
+                                : std::min(rowsInFirstSlab + lastSlabEndRow + 1, numMT_M));
+            uniqueCols = colsInFirstSlab + colsInLastSlab + fullSlabs * wgm;
+          }
+
+          // Sum up the L2 loads over all XCD
+          // We should technically multiply by K (or splitted K), but it
+          // has no effect on sorting
+          auto xccL2Estimate = uniqueRows * MT_M + uniqueCols * MT_N;
+          wgmL2Estimate += xccL2Estimate;
         }
-
-        // Sum up the L2 loads over all XCD
-        // We should technically multiply by K (or splitted K), but it
-        // has no effect on sorting
-        auto xccL2Estimate = uniqueRows * MT_M + uniqueCols * MT_N;
-        wgmL2Estimate += xccL2Estimate;
       }
 
       // If we have found a better WGM
       if (wgmL2Estimate < bestL2) {
-        bestL2  = wgmL2Estimate;
-        bestWGM = wgm;
-      }
-
-      if (get_runtime_options(config).debug_enabled) {
+          bestL2 = wgmL2Estimate;
+          bestWGM = wgm;
       }
     }
-
+    // Set the best WGM
     out_wgm = bestWGM;
   }
 
-  return std::make_tuple(out_wgmxcc, out_wgm);
+  return workgroup_mapping_t{out_wgmxccchunk, out_wgmxcc, out_wgm};
 }
 
 std::vector<prediction_result_t> rank_configs(const problem_t& problem,

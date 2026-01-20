@@ -5,36 +5,47 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
+#include <hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/backend/BackendWrapper.hpp>
 #include <hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
 #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
+#include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
+#include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/TopologicalSortingUtils.hpp>
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+#include <hipdnn_data_sdk/utilities/json/Graph.hpp>
+#endif
+#include <spdlog/fmt/ranges.h>
 
 namespace hipdnn_frontend::graph
 {
 // When an error occurs, get the backend error string and append it to the error_message.
-#define RETURN_ON_BACKEND_FAILURE(backend_status, error_message)                        \
-    if((backend_status) != HIPDNN_STATUS_SUCCESS)                                       \
-    {                                                                                   \
-        std::array<char, 256> backend_err_msg{};                                        \
-        hipdnn_frontend::hipdnnBackend()->getLastErrorString(backend_err_msg.data(),    \
-                                                             backend_err_msg.size());   \
-        std::string full_error_msg                                                      \
-            = std::string(error_message) + " Backend error: " + backend_err_msg.data(); \
-        return Error(ErrorCode::HIPDNN_BACKEND_ERROR, full_error_msg);                  \
-    }
+#define RETURN_ON_BACKEND_FAILURE(backend_status, error_message)                            \
+    do                                                                                      \
+    {                                                                                       \
+        if((backend_status) != HIPDNN_STATUS_SUCCESS)                                       \
+        {                                                                                   \
+            std::array<char, 256> backend_err_msg{};                                        \
+            hipdnn_frontend::hipdnnBackend()->getLastErrorString(backend_err_msg.data(),    \
+                                                                 backend_err_msg.size());   \
+            std::string full_error_msg                                                      \
+                = std::string(error_message) + " Backend error: " + backend_err_msg.data(); \
+            return Error(ErrorCode::HIPDNN_BACKEND_ERROR, full_error_msg);                  \
+        }                                                                                   \
+    } while(0)
 
 class Graph : public INode
 {
@@ -43,7 +54,16 @@ private:
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _engineHeuristicDesc;
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _engineConfigDesc;
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _executionPlanDesc;
+
     std::optional<int64_t> _preferredEngineId = std::nullopt;
+
+    void assignUnsetTensorUids()
+    {
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
+        auto usedIds = getUsedIds(allTensors);
+        populateHipdnnTensorIds(allTensors, usedIds);
+    }
 
     static std::shared_ptr<TensorAttributes> outputTensor(const std::string& name)
     {
@@ -303,6 +323,35 @@ private:
         }
     }
 
+    static Error checkTensorUidsSetImpl(
+        std::unordered_set<std::shared_ptr<TensorAttributes>> const& allTensors)
+    {
+        std::vector<std::string> missingUidTensors;
+
+        for(const auto& tensor : allTensors)
+        {
+            if(tensor && !tensor->has_uid())
+            {
+                auto name = tensor->get_name();
+                missingUidTensors.push_back(name.empty() ? "(unnamed)" : name);
+            }
+        }
+
+        if(!missingUidTensors.empty())
+        {
+            std::string errorMsg = "Tensors without UIDs: ";
+            for(const auto& name : missingUidTensors)
+            {
+                errorMsg += name + ", ";
+            }
+            errorMsg.pop_back();
+            errorMsg.pop_back();
+            return {ErrorCode::ATTRIBUTE_NOT_SET, errorMsg};
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
     static Error checkNoDuplicateTensorIdsImpl(
         std::unordered_set<std::shared_ptr<TensorAttributes>> const& allTensors)
     {
@@ -335,6 +384,241 @@ private:
         return {ErrorCode::OK, ""};
     }
 
+    std::pair<std::unordered_set<std::shared_ptr<TensorAttributes>>,
+              std::unordered_set<std::shared_ptr<TensorAttributes>>>
+        getGraphInputTensorAttributesAndRemainder() const
+    {
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allNodeOutputs;
+        std::unordered_set<std::shared_ptr<TensorAttributes>> graphInputs;
+
+        auto collectNodeOutputs = [&](const INode& node) {
+            auto nodeOutputs = node.getNodeOutputTensorAttributes();
+            allNodeOutputs.insert(nodeOutputs.begin(), nodeOutputs.end());
+        };
+        auto collectGraphInputs = [&](const INode& node) {
+            auto nodeInputs = node.getNodeInputTensorAttributes();
+            std::copy_if(nodeInputs.begin(),
+                         nodeInputs.end(),
+                         std::inserter(graphInputs, graphInputs.end()),
+                         [&](const auto& nodePtr) { return allNodeOutputs.count(nodePtr) == 0; });
+        };
+
+        visit(collectNodeOutputs);
+        visit(collectGraphInputs);
+
+        return {graphInputs, allNodeOutputs};
+    }
+
+    flatbuffers::DetachedBuffer buildFlatbufferOperationGraphConst() const
+    {
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
+
+        flatbuffers::FlatBufferBuilder builder;
+
+        std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+            tensorAttributes;
+        for(auto& tensor : allTensors)
+        {
+            if(tensor)
+            {
+                tensorAttributes.emplace_back(tensor->pack_attributes(builder));
+            }
+        }
+
+        std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+        for(auto& node : _sub_nodes)
+        {
+            if(node)
+            {
+                nodes.emplace_back(node->pack_node(builder));
+            }
+        }
+        auto graph = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+            builder,
+            graph_attributes.get_name().c_str(),
+            toSdkType(graph_attributes.get_compute_data_type()),
+            toSdkType(graph_attributes.get_intermediate_data_type()),
+            toSdkType(graph_attributes.get_io_data_type()),
+            &tensorAttributes,
+            &nodes,
+            _preferredEngineId);
+
+        builder.Finish(graph);
+        return builder.Release();
+    }
+
+    Error deserializeFromFlatBuffer(const hipdnn_data_sdk::data_objects::Graph* fbGraph)
+    {
+        // Set graph attributes from FlatBuffer
+        if(fbGraph->name() != nullptr)
+        {
+            set_name(fbGraph->name()->c_str());
+        }
+        set_compute_data_type(fromSdkType(fbGraph->compute_data_type()));
+        set_intermediate_data_type(fromSdkType(fbGraph->intermediate_data_type()));
+        set_io_data_type(fromSdkType(fbGraph->io_data_type()));
+
+        if(fbGraph->preferred_engine_id().has_value())
+        {
+            _preferredEngineId = fbGraph->preferred_engine_id().value();
+        }
+
+        // Build tensorMap from FlatBuffer tensors
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
+        if(fbGraph->tensors() != nullptr)
+        {
+            for(const auto* fbTensor : *fbGraph->tensors())
+            {
+                auto tensor = TensorAttributes::fromFlatBuffer(fbTensor);
+                if(tensor != nullptr && tensor->has_uid())
+                {
+                    tensorMap[tensor->get_uid()] = tensor;
+                }
+            }
+        }
+
+        // Create nodes from FlatBuffer
+        if(fbGraph->nodes() != nullptr)
+        {
+            for(const auto* fbNode : *fbGraph->nodes())
+            {
+                auto type = fbNode->attributes_type();
+
+                switch(type)
+                {
+                case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
+                {
+                    auto attr = BatchnormAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_BatchnormAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(
+                        std::make_shared<BatchnormNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
+                {
+                    auto attr = BatchnormBackwardAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_BatchnormBackwardAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(
+                        std::make_shared<BatchnormBackwardNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
+                {
+                    auto attr = BatchnormInferenceAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_BatchnormInferenceAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(std::make_shared<BatchnormInferenceNode>(
+                        std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::
+                    BatchnormInferenceAttributesVarianceExt:
+                {
+                    auto attr = BatchnormInferenceAttributesVarianceExt::fromFlatBuffer(
+                        fbNode->attributes_as_BatchnormInferenceAttributesVarianceExt(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(std::make_shared<BatchnormInferenceNodeVarianceExt>(
+                        std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
+                {
+                    auto attr = ConvFpropAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_ConvolutionFwdAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(
+                        std::make_shared<ConvolutionFpropNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
+                {
+                    auto attr = ConvDgradAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_ConvolutionBwdAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(
+                        std::make_shared<ConvolutionDgradNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
+                {
+                    auto attr = ConvWgradAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_ConvolutionWrwAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(
+                        std::make_shared<ConvolutionWgradNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes:
+                {
+                    auto attr = PointwiseAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_PointwiseAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(
+                        std::make_shared<PointwiseNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes:
+                {
+                    auto attr = MatmulAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_MatmulAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(
+                        std::make_shared<MatmulNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                default:
+                    return {ErrorCode::INVALID_VALUE, "Unsupported node type in deserialization"};
+                }
+            }
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+    Error deserializeImpl(const nlohmann::json& j)
+    {
+        // Convert JSON to FlatBuffer, then deserialize
+        flatbuffers::FlatBufferBuilder builder;
+        auto graphOffset
+            = hipdnn_data_sdk::json::to<hipdnn_data_sdk::data_objects::Graph>(builder, j);
+        builder.Finish(graphOffset);
+        auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(builder.GetBufferPointer());
+
+        return deserializeFromFlatBuffer(fbGraph);
+    }
+#endif
+
 public:
     Graph()
         : INode(GraphAttributes{})
@@ -346,35 +630,22 @@ public:
     {
         HIPDNN_FE_LOG_INFO("Validating graph {}", graph_attributes.get_name());
 
-        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
-        gatherHipdnnTensorsSubtree(allTensors);
+        auto [inputTensors, remainingTensors] = getGraphInputTensorAttributesAndRemainder();
 
-        auto result = checkNoDuplicateTensorIdsImpl(allTensors);
-        if(result.code != ErrorCode::OK)
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors = inputTensors;
+        allTensors.insert(remainingTensors.begin(), remainingTensors.end());
+
+        HIPDNN_CHECK_ERROR(checkNoDuplicateTensorIdsImpl(allTensors));
+
+        HIPDNN_CHECK_ERROR(topologicallySortGraph());
+
+        for(const auto& tensor : inputTensors)
         {
-            return result;
+            tensor->fill_from_context(graph_attributes);
+            HIPDNN_CHECK_ERROR(tensor->validate());
         }
 
-        result = topologicallySortGraph();
-        if(result.code != ErrorCode::OK)
-        {
-            return result;
-        }
-
-        result = validateSubtree();
-        if(result.code != ErrorCode::OK)
-        {
-            return result;
-        }
-
-        for(const auto& tensor : allTensors)
-        {
-            result = tensor->validate();
-            if(result.code != ErrorCode::OK)
-            {
-                return result;
-            }
-        }
+        HIPDNN_CHECK_ERROR(validateSubtree());
 
         return {ErrorCode::OK, ""};
     }
@@ -385,6 +656,58 @@ public:
         gatherHipdnnTensorsSubtree(allTensors);
 
         return checkNoDuplicateTensorIdsImpl(allTensors);
+    }
+
+    /// Checks if all tensors in the graph have UIDs assigned.
+    /// Returns an error if any tensor is missing a UID.
+    Error checkTensorUidsSet() const
+    {
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
+
+        return checkTensorUidsSetImpl(allTensors);
+    }
+
+    /// Returns a map of UID -> TensorAttributes for all tensors in the graph.
+    /// Tensors without UIDs are skipped (no error is generated).
+    /// @return Map from tensor UID to tensor attributes
+    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> getTensorsByUid() const
+    {
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> result;
+
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
+
+        for(const auto& tensor : allTensors)
+        {
+            if(tensor && tensor->has_uid())
+            {
+                result[tensor->get_uid()] = tensor;
+            }
+        }
+
+        return result;
+    }
+
+    /// Returns a map of name -> TensorAttributes for all tensors in the graph.
+    /// Tensors without names are skipped (no error is generated).
+    /// @return Map from tensor name to tensor attributes
+    std::unordered_map<std::string, std::shared_ptr<TensorAttributes>> getTensorsByName() const
+    {
+        std::unordered_map<std::string, std::shared_ptr<TensorAttributes>> result;
+
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
+
+        for(const auto& tensor : allTensors)
+        {
+            if(tensor && !tensor->get_name().empty())
+            {
+                result[tensor->get_name()] = tensor;
+            }
+        }
+
+        return result;
     }
 
     Error topologicallySortGraph()
@@ -420,44 +743,9 @@ public:
 
     flatbuffers::DetachedBuffer buildFlatbufferOperationGraph()
     {
-        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
-        gatherHipdnnTensorsSubtree(allTensors);
+        assignUnsetTensorUids();
 
-        auto usedIds = getUsedIds(allTensors);
-
-        populateHipdnnTensorIds(allTensors, usedIds);
-
-        flatbuffers::FlatBufferBuilder builder;
-
-        std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>>
-            tensorAttributes;
-        for(auto& tensor : allTensors)
-        {
-            if(tensor)
-            {
-                tensorAttributes.emplace_back(tensor->pack_attributes(builder));
-            }
-        }
-
-        std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
-        for(auto& node : _sub_nodes)
-        {
-            if(node)
-            {
-                nodes.emplace_back(node->pack_node(builder));
-            }
-        }
-        auto graph = hipdnn_sdk::data_objects::CreateGraphDirect(
-            builder,
-            graph_attributes.get_name().c_str(),
-            toSdkType(graph_attributes.get_compute_data_type()),
-            toSdkType(graph_attributes.get_intermediate_data_type()),
-            toSdkType(graph_attributes.get_io_data_type()),
-            &tensorAttributes,
-            &nodes);
-
-        builder.Finish(graph);
-        return builder.Release();
+        return buildFlatbufferOperationGraphConst();
     }
 
     Error build_operation_graph(hipdnnHandle_t handle) // NOLINT(readability-identifier-naming)
@@ -533,6 +821,150 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /// Serialize to FlatBuffer DetachedBuffer (const version)
+    /// Returns error if tensor UIDs are not set
+    Error toFlatBuffer(flatbuffers::DetachedBuffer& buffer) const
+    {
+        HIPDNN_CHECK_ERROR(checkTensorUidsSet());
+        buffer = buildFlatbufferOperationGraphConst();
+        return {ErrorCode::OK, ""};
+    }
+
+    /// Serialize to FlatBuffer DetachedBuffer (non-const version)
+    /// Assigns tensor UIDs if not already set
+    flatbuffers::DetachedBuffer toFlatBuffer()
+    {
+        assignUnsetTensorUids();
+        return buildFlatbufferOperationGraphConst();
+    }
+
+    /// Deserialize from FlatBuffer Graph object
+    Error fromFlatBuffer(const hipdnn_data_sdk::data_objects::Graph* fbGraph)
+    {
+        try
+        {
+            return deserializeFromFlatBuffer(fbGraph);
+        }
+        catch(const std::out_of_range& e)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    std::string("Deserialization failed - missing tensor or invalid reference: ")
+                        + e.what()};
+        }
+        catch(const std::exception& e)
+        {
+            return {ErrorCode::INVALID_VALUE, std::string("Deserialization failed: ") + e.what()};
+        }
+    }
+
+    /// Deserialize from FlatBuffer DetachedBuffer
+    Error fromFlatBuffer(const flatbuffers::DetachedBuffer& buffer)
+    {
+        auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
+        return fromFlatBuffer(fbGraph);
+    }
+
+    /// Serialize to FlatBuffer DetachedBuffer (const version)
+    /// Returns error if tensor UIDs are not set
+    Error serialize(flatbuffers::DetachedBuffer& buffer) const
+    {
+        return toFlatBuffer(buffer);
+    }
+
+    /// Deserialize from FlatBuffer Graph object
+    Error deserialize(const hipdnn_data_sdk::data_objects::Graph* fbGraph)
+    {
+        return fromFlatBuffer(fbGraph);
+    }
+
+    /// Deserialize from FlatBuffer DetachedBuffer
+    Error deserialize(const flatbuffers::DetachedBuffer& buffer)
+    {
+        return fromFlatBuffer(buffer);
+    }
+
+    /// Serialize to binary (const version)
+    /// Returns error if tensor UIDs are not set
+    Error serialize(std::vector<uint8_t>& data) const
+    {
+        HIPDNN_CHECK_ERROR(checkTensorUidsSet());
+        auto buffer = buildFlatbufferOperationGraphConst();
+        data.assign(buffer.data(), buffer.data() + buffer.size());
+        return {ErrorCode::OK, ""};
+    }
+
+    /// Serialize to binary (non-const version)
+    /// Assigns tensor UIDs if not already set
+    std::vector<uint8_t> toBinary()
+    {
+        assignUnsetTensorUids();
+        auto buffer = buildFlatbufferOperationGraphConst();
+        return {buffer.data(), buffer.data() + buffer.size()};
+    }
+
+    /// Deserialize from binary packed FlatBuffer
+    Error deserialize([[maybe_unused]] hipdnnHandle_t handle, const std::vector<uint8_t>& data)
+    {
+        auto fbGraph = hipdnn_data_sdk::data_objects::GetGraph(data.data());
+        return fromFlatBuffer(fbGraph);
+    }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+    /// Serialize to JSON (const version)
+    /// Returns error if tensor UIDs are not set
+    ///
+    /// Flow: Frontend → FlatBuffer binary → JSON
+    /// GetGraph() is zero-copy (just a pointer into the buffer), so the only
+    /// serialization cost is buildFlatbufferOperationGraphConst(). This keeps
+    /// JSON serialization logic centralized in data_sdk.
+    Error serialize(nlohmann::json& j) const
+    {
+        HIPDNN_CHECK_ERROR(checkTensorUidsSet());
+        auto buffer = buildFlatbufferOperationGraphConst();
+        // GetGraph returns a pointer view into buffer (zero-copy, no unpacking)
+        auto sdkGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
+
+        j = *sdkGraph;
+
+        return {ErrorCode::OK, ""};
+    }
+
+    /// Serialize to JSON (non-const version)
+    /// Assigns tensor UIDs if not already set
+    nlohmann::json toJson()
+    {
+        assignUnsetTensorUids();
+        auto buffer = buildFlatbufferOperationGraphConst();
+        auto sdkGraph = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
+
+        return *sdkGraph;
+    }
+
+    /// Deserialize from JSON
+    Error deserialize(const nlohmann::json& j)
+    {
+        try
+        {
+            return deserializeImpl(j);
+        }
+        catch(const std::out_of_range& e)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    std::string("Deserialization failed - missing tensor or invalid reference: ")
+                        + e.what()};
+        }
+        catch(const nlohmann::json::exception& e)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    std::string("Deserialization failed - malformed JSON: ") + e.what()};
+        }
+        catch(const std::exception& e)
+        {
+            return {ErrorCode::INVALID_VALUE, std::string("Deserialization failed: ") + e.what()};
+        }
+    }
+#endif
+
     Error build_plans() // NOLINT(readability-identifier-naming)
     {
         HIPDNN_FE_LOG_INFO("Building plans for graph {}", graph_attributes.get_name());
@@ -548,6 +980,31 @@ public:
         RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(_executionPlanDesc->get()),
                                   "Failed to finalize execution plan descriptor");
 
+        return {ErrorCode::OK, ""};
+    }
+
+    // NOLINTBEGIN(readability-identifier-naming)
+    Error build(hipdnnHandle_t handle,
+                std::vector<HeuristicMode> const& modes = {HeuristicMode::FALLBACK},
+                [[maybe_unused]] BuildPlanPolicy policy = BuildPlanPolicy::HEURISTICS_CHOICE,
+                [[maybe_unused]] bool do_multithreaded_builds = false)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        HIPDNN_FE_LOG_INFO("BUILD with handle for graph '{}', policy: {}, modes: [{}]",
+                           graph_attributes.get_name().empty() ? "unnamed"
+                                                               : graph_attributes.get_name(),
+                           policy,
+                           fmt::join(modes, ", "));
+
+        HIPDNN_CHECK_ERROR(validate());
+        HIPDNN_CHECK_ERROR(build_operation_graph(handle));
+        HIPDNN_CHECK_ERROR(create_execution_plans(modes));
+        HIPDNN_CHECK_ERROR(check_support());
+        HIPDNN_CHECK_ERROR(build_plans());
+
+        HIPDNN_FE_LOG_INFO("BUILD ALL OK for graph {}",
+                           graph_attributes.get_name().empty() ? "unnamed"
+                                                               : graph_attributes.get_name());
         return {ErrorCode::OK, ""};
     }
 
@@ -785,6 +1242,37 @@ public:
         return y;
     }
 
+    std::shared_ptr<TensorAttributes>
+        batchnorm_inference_variance_ext(std::shared_ptr<TensorAttributes> x, // NOLINT
+                                         std::shared_ptr<TensorAttributes> mean,
+                                         std::shared_ptr<TensorAttributes> variance,
+                                         std::shared_ptr<TensorAttributes> scale,
+                                         std::shared_ptr<TensorAttributes> bias,
+                                         std::shared_ptr<TensorAttributes> epsilon,
+                                         BatchnormInferenceAttributesVarianceExt attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("BatchnormInferenceVarianceExt_"
+                                + std::to_string(_sub_nodes.size()));
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        attributes.set_x(std::move(x));
+        attributes.set_mean(std::move(mean));
+        attributes.set_variance(std::move(variance));
+        attributes.set_scale(std::move(scale));
+        attributes.set_bias(std::move(bias));
+        attributes.set_epsilon(std::move(epsilon));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(std::make_shared<BatchnormInferenceNodeVarianceExt>(
+            std::move(attributes), graph_attributes));
+
+        return y;
+    }
+
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 PointwiseAttributes attributes)
 
@@ -870,6 +1358,35 @@ public:
             std::make_shared<PointwiseNode>(std::move(attributes), graph_attributes));
 
         return out0;
+    }
+
+    std::shared_ptr<TensorAttributes> matmul(std::shared_ptr<TensorAttributes> a,
+                                             std::shared_ptr<TensorAttributes> b,
+                                             MatmulAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Matmul_" + std::to_string(_sub_nodes.size()));
+        }
+        if(a->get_name().empty())
+        {
+            a->set_name(attributes.get_name() + "::A");
+        }
+        if(b->get_name().empty())
+        {
+            b->set_name(attributes.get_name() + "::B");
+        }
+
+        auto c = outputTensor(attributes.get_name() + "::C");
+
+        attributes.set_a(std::move(a));
+        attributes.set_b(std::move(b));
+        attributes.set_c(c);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<MatmulNode>(std::move(attributes), graph_attributes));
+
+        return c;
     }
 
     // NOLINTBEGIN(readability-identifier-naming)

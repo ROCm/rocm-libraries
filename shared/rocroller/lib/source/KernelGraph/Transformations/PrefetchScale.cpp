@@ -69,7 +69,7 @@ namespace rocRoller
             for(auto const load : loads)
             {
                 auto unrollMap  = colouring.operationColour.at(load);
-                auto unrollKDim = graph.mapper.get<Unroll>(load, 2);
+                auto unrollKDim = graph.mapper.get<Unroll>(load, rocRoller::KLOOP_UNROLL);
                 if(unrollKVal && *unrollKVal != unrollMap.at(unrollKDim))
                 {
                     nextLoad = load;
@@ -404,7 +404,7 @@ namespace rocRoller
 
                 auto inLoopLoad = duplicateChain(graph, {topOp});
                 graph.control.addElement(Sequence(), {copyTag}, {inLoopLoad});
-                auto unrollDim = graph.mapper.get<Unroll>(loadTag, 2);
+                auto unrollDim = graph.mapper.get<Unroll>(loadTag, rocRoller::KLOOP_UNROLL);
                 inLoopLoads.push_back(std::make_pair(inLoopLoad, unrollDim));
 
                 UpdateExchangeMacroTiles(
@@ -497,7 +497,7 @@ namespace rocRoller
             for(auto const loadTag : nonSwizzleLoads)
             {
                 auto unrollMap  = colouring.operationColour.at(loadTag);
-                auto unrollKDim = graph.mapper.get<Unroll>(loadTag, 2);
+                auto unrollKDim = graph.mapper.get<Unroll>(loadTag, rocRoller::KLOOP_UNROLL);
                 auto subiter    = unrollMap.at(unrollKDim);
 
                 // Detect if we've entered the K loop
@@ -640,7 +640,7 @@ namespace rocRoller
                     numInFlight = static_cast<int>(prefetchPosition.size());
 
                 auto unrollMap  = colouring.operationColour.at(loadTag);
-                auto unrollKDim = graph.mapper.get<Unroll>(loadTag, 2);
+                auto unrollKDim = graph.mapper.get<Unroll>(loadTag, rocRoller::KLOOP_UNROLL);
                 auto subiter    = unrollMap.at(unrollKDim);
 
                 auto topOp = getTopSetCoordinate(graph, loadTag);
@@ -828,9 +828,9 @@ namespace rocRoller
                             || macTile.layoutType == LayoutType::MATRIX_B,
                         ShowValue(macTile.layoutType));
 
-            auto unroll0 = graph.mapper.get<Unroll>(loadTag, 0);
-            auto unroll1 = graph.mapper.get<Unroll>(loadTag, 1);
-            auto unroll2 = graph.mapper.get<Unroll>(loadTag, 2);
+            auto unroll0 = graph.mapper.get<Unroll>(loadTag, rocRoller::XLOOP_UNROLL);
+            auto unroll1 = graph.mapper.get<Unroll>(loadTag, rocRoller::YLOOP_UNROLL);
+            auto unroll2 = graph.mapper.get<Unroll>(loadTag, rocRoller::KLOOP_UNROLL);
 
             unsigned int xyUnrollSize = 0, macKUnrollSize = 0;
             if(macTile.layoutType == LayoutType::MATRIX_A)

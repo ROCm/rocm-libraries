@@ -301,8 +301,6 @@ set( MIOpen_Source
     solver/layernorm/backward_t5layernorm.cpp
     solver/layernorm/forward_addlayernorm.cpp
     solver/layernorm/forward_layernorm.cpp
-    solver/layernorm/forward_layernorm2d_ck.cpp
-    solver/layernorm/forward_layernorm4d_ck.cpp
     solver/layernorm/forward_t5layernorm.cpp
     solver/mha/mha_solver_backward.cpp
     solver/mha/mha_solver_forward.cpp
@@ -364,13 +362,6 @@ endif()
 
 if(MIOPEN_ENABLE_SQLITE AND MIOPEN_ENABLE_SQLITE_KERN_CACHE)
     list(APPEND MIOpen_Source kern_db.cpp bz2.cpp)
-endif()
-
-if(MIOPEN_USE_COMPOSABLEKERNEL)
-    list(APPEND MIOpen_Source kernels/ck_header_only/layernorm/fwd/device_layernorm2d_fwd_f16_instance.cpp)
-    list(APPEND MIOpen_Source kernels/ck_header_only/layernorm/fwd/device_layernorm2d_fwd_f32_instance.cpp)
-    list(APPEND MIOpen_Source kernels/ck_header_only/layernorm/fwd/device_layernorm4d_fwd_f16_instance.cpp)
-    list(APPEND MIOpen_Source kernels/ck_header_only/layernorm/fwd/device_layernorm4d_fwd_f32_instance.cpp)
 endif()
 
 if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
@@ -605,7 +596,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenT5LayerNorm.cpp
         kernels/MIOpenUpSample.cpp
         kernels/MIOpenUtilKernels4.cl
-        kernels/MIOpenUtilKernels5.cl
+        kernels/MIOpenUtilKernels5.cpp
         kernels/MIOpenVecAdd.cpp
         kernels/MIOpenVecAddOCL.cl
         kernels/MIOpenIm2d2Col.cpp
@@ -620,7 +611,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenConvBwdWrW1x1_PAD_read4.cl
         kernels/MIOpenConvFwd_LxL_11.cl
         kernels/MIOpenConvFFT.cpp
-        kernels/MIOpenRNNHiddenStateUpdate.cl
+        kernels/MIOpenRNNHiddenStateUpdate.cpp
         kernels/bugzilla_34765_detect.s
         kernels/dummy_kernel.s
         kernels/conv3x3.s
@@ -702,7 +693,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/xform_bidirect_winograd_data.s
         kernels/xform_bidirect_winograd_filter.s
         kernels/xform_bidirect_winograd_out.s
-        kernels/UniversalTranspose.cl)
+        kernels/UniversalTranspose.cpp)
 
     # Kernels in development lists.
     # Should be ALWAYS empty in develop branch (at the time of PR merge)
@@ -751,7 +742,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         ocl/utilocl.cpp
         ocl/dropoutocl.cpp
         ocl/gcn_asm_utils.cpp
-        ocl/rnn_util_ocl.cpp
         hip/hip_build_utils.cpp
         hip/batched_transpose_sol.cpp
         hip/general_tensor_reorder_sol.cpp
@@ -906,7 +896,7 @@ if(HAS_LIB_STD_FILESYSTEM)
     target_link_libraries(MIOpen PRIVATE stdc++fs)
 endif()
 
-find_package(zstd)
+find_package(zstd QUIET)
 if(zstd_FOUND)
     target_link_libraries(MIOpen PRIVATE $<IF:$<TARGET_EXISTS:zstd::libzstd_shared>,zstd::libzstd_shared,zstd::libzstd_static>)
 endif()
@@ -936,6 +926,9 @@ if(MIOPEN_USE_COMPOSABLEKERNEL)
         # Use the aliased targets when we pull CK from /opt/rocm or other place on disc.
         set(MIOPEN_CK_LINK_FLAGS composable_kernel::device_conv_operations hip::host)
     endif()
+    if(GPU_TARGETS MATCHES "gfx942" OR GPU_TARGETS MATCHES "gfx950")
+        target_compile_definitions(MIOpen PRIVATE CK_ENABLE_TF32)
+    endif()
 endif()
 
 if(WIN32)
@@ -962,6 +955,10 @@ if(BUILD_TESTING)
     # See details here: https://learn.microsoft.com/en-us/cpp/build/exporting-from-a-dll?view=msvc-170
     generate_export_header(MIOpen BASE_NAME MIOPEN_INTERNALS EXPORT_FILE_NAME ${CMAKE_BINARY_DIR}/include/miopen/export_internals.h)
     target_compile_definitions(MIOpen PUBLIC $<BUILD_INTERFACE:MIOPEN_BUILD_TESTING>)
+endif()
+
+if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
+    target_compile_definitions(MIOpen PRIVATE CK_EXPERIMENTAL_BUILDER)
 endif()
 
 if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
@@ -1044,9 +1041,7 @@ endif()
 target_link_libraries(MIOpen PRIVATE nlohmann_json::nlohmann_json)
 target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
 
-target_internal_library(MIOpen
-    Boost::filesystem
-)
+target_internal_library(MIOpen Boost::filesystem)
 list(APPEND PACKAGE_STATIC_DEPENDS PACKAGE Boost COMPONENTS filesystem)
 if(NOT WIN32 AND NOT APPLE)
     file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/lib.def "

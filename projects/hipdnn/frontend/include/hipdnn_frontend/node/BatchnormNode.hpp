@@ -3,12 +3,12 @@
 #pragma once
 
 #include "Node.hpp"
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -82,11 +82,6 @@ public:
         // Epsilon (ε) provides numerical stability: xhat = (x - mean) / sqrt(var + ε)
         // Without ε, division by zero occurs when var ≈ 0. Must be a scalar.
         HIPDNN_CHECK_ERROR(validateScalarParameter(epsilon, "Epsilon"));
-
-        HIPDNN_RETURN_IF_FALSE(
-            x->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "BatchnormNode: Input tensor (x) dimensions and strides must be set and positive");
 
         // SECTION 3: Validate Output Tensor Shape Consistency
         // Why: BN preserves tensor shape - it only transforms values, not dimensions.
@@ -203,10 +198,9 @@ public:
 
             if(tensorToInfer->get_stride().empty())
             {
-                auto strideOrder
-                    = hipdnn_sdk::utilities::strideOrderNhwc(tensorToInfer->get_dim().size());
-                tensorToInfer->set_stride(
-                    hipdnn_sdk::utilities::generateStrides(tensorToInfer->get_dim(), strideOrder));
+                auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
+                tensorToInfer->set_stride(hipdnn_data_sdk::utilities::generateStrides(
+                    tensorToInfer->get_dim(), strideOrder));
             }
         };
 
@@ -252,14 +246,14 @@ public:
         }
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::Node>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
         pack_node(flatbuffers::FlatBufferBuilder& builder) const override
     {
-        return hipdnn_sdk::data_objects::CreateNodeDirect(
+        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
             builder,
             attributes.get_name().c_str(),
             toSdkType(attributes.compute_data_type),
-            hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes,
+            hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes,
             attributes.pack_attributes(builder).Union());
     }
 };

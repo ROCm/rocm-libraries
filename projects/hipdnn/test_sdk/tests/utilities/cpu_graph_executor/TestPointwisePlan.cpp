@@ -5,9 +5,9 @@
 
 #include "PointwiseGraphUtils.hpp"
 #include "PointwiseTensorBundles.hpp"
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
@@ -15,8 +15,8 @@
 #include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_sdk::data_objects;
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_plugin_sdk;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;

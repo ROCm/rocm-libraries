@@ -40,5 +40,7 @@ class supported_arch(Enum):
     GFX_1101 = "gfx1101"
     GFX_1102 = "gfx1102"
     GFX_1151 = "gfx1151"
+    GFX_1152 = "gfx1152"
+    GFX_1153 = "gfx1153"
     GFX_1200 = "gfx1200"
     GFX_1201 = "gfx1201"

@@ -8,17 +8,18 @@ Prior to running tests, follow the [Quick Start Guide](./Building.md#quick-start
 
 Afterwards, proceed to run the tests:
 ```bash
+# Configure the project (if not already configured).
 cmake -GNinja ..
 
-# Run all tests
+# Build and run all tests
 ninja check
 
-# Run all tests with minimal output details
-ninja check_ctest
+# Run all tests with additional details
+ninja check-verbose
 
 # Run specific test categories
-ninja unit-check        # Unit tests only
-ninja integration-check # Integration tests only
+ninja unit-check        # Unit tests only. Also `unit-check-verbose`.
+ninja integration-check # Integration tests only. Also `integration-check-verbose`.
 
 # Run with Address Sanitizer
 cmake -GNinja -DBUILD_ADDRESS_SANITIZER=ON ..
@@ -55,7 +56,9 @@ Standardized template for recording and tracking test results:
 |-----------|--------------|------|
 | Backend | `backend/tests/` | Unit tests |
 | Frontend | `frontend/tests/` | Unit tests |
-| SDK | `sdk/tests/` | Unit tests |
+| Data SDK | `data_sdk/tests/` | Unit tests |
+| Plugin SDK | `plugin_sdk/tests/` | Unit tests |
+| Test SDK | `test_sdk/tests/` | Unit tests |
 | Plugins | `plugins/<name>/tests/` | Unit tests |
 | Plugins | `plugins/<name>/integration_tests/` | Integration tests |
 | API | `tests/backend/` | Black box API tests |

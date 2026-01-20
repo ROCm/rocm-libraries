@@ -6,15 +6,15 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <limits>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_sdk::utilities;
-using namespace hipdnn_sdk::helpers;
+using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_data_sdk::helpers;
 
 TEST(TestCpuFpReferenceMiopenRmsValidation, NegativeToleranceThrows)
 {

@@ -5,8 +5,8 @@
 
 #include <cmath>
 #include <cstdint>
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceUtilities.hpp>
 #include <limits>
 #include <type_traits>
@@ -92,7 +92,7 @@ struct Negation
     template <typename X>
     auto operator()(const X& x) const -> X
     {
-        return -x;
+        return static_cast<X>(-x);
     }
 };
 

@@ -51,6 +51,9 @@ try
     // Check for matching types while we do not support mixed precision computation
     ROCSPARSE_CHECKARG(2, y, (y->data_type != x->data_type), rocsparse_status_not_implemented);
 
+    ROCSPARSE_CHECKARG(1, x, (x->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(2, y, (y->batch_count != 1), rocsparse_status_not_implemented);
+
     rocsparse_status sctr(rocsparse_handle     handle,
                           int64_t              nnz,
                           rocsparse_datatype   x_datatype,

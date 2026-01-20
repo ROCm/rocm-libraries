@@ -266,7 +266,7 @@ static bool MatchingLengthStride(const std::vector<size_t>& lengthA,
             return this->stride < other.stride;
         }
 
-        bool operator==(const iodim& other)
+        bool operator==(const iodim& other) const
         {
             return this->length == other.length && this->stride == other.stride;
         }

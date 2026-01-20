@@ -59,7 +59,7 @@ extern "C" __global__ void Col2Im3dU(FLOAT* col,
                                      const unsigned int height,
                                      const unsigned int width,
                                      FLOAT* im,
-                                     const unsigned long im_offset)
+                                     const uint64_t im_offset)
 {
     FLOAT* im_off            = im + im_offset;
     unsigned int gid         = blockIdx.x * blockDim.x + threadIdx.x;

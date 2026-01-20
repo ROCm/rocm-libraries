@@ -391,13 +391,6 @@ void testing_prune_dense2csr_by_percentage(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
     CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr, idx_base));
 
-    if(M == 0 || N == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        return;
-#endif
-    }
-
     // Allocate host memory
     std::vector<T>   h_A(LDA * N);
     std::vector<int> h_nnz_total_dev_host_ptr(1);
