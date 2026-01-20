@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -269,15 +269,16 @@ struct DeviceSegmentedSort
     }
 
     template<typename KeyT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t SortKeys(void*           d_temp_storage,
-                                                       size_t&         temp_storage_bytes,
-                                                       const KeyT*     d_keys_in,
-                                                       KeyT*           d_keys_out,
-                                                       int             num_items,
-                                                       int             num_segments,
-                                                       OffsetIteratorT d_begin_offsets,
-                                                       OffsetIteratorT d_end_offsets,
-                                                       hipStream_t     stream = 0)
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t SortKeys(void*           d_temp_storage,
+                               size_t&         temp_storage_bytes,
+                               const KeyT*     d_keys_in,
+                               KeyT*           d_keys_out,
+                               int64_t         num_items,
+                               int64_t         num_segments,
+                               OffsetIteratorT d_begin_offsets,
+                               OffsetIteratorT d_end_offsets,
+                               hipStream_t     stream = 0)
     {
         return ::rocprim::segmented_radix_sort_keys(d_temp_storage,
                                                     temp_storage_bytes,
@@ -319,14 +320,15 @@ struct DeviceSegmentedSort
     }
 
     template<typename KeyT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t SortKeys(void*               d_temp_storage,
-                                                       size_t&             temp_storage_bytes,
-                                                       DoubleBuffer<KeyT>& d_keys,
-                                                       int                 num_items,
-                                                       int                 num_segments,
-                                                       OffsetIteratorT     d_begin_offsets,
-                                                       OffsetIteratorT     d_end_offsets,
-                                                       hipStream_t         stream = 0)
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t SortKeys(void*               d_temp_storage,
+                               size_t&             temp_storage_bytes,
+                               DoubleBuffer<KeyT>& d_keys,
+                               int64_t             num_items,
+                               int64_t             num_segments,
+                               OffsetIteratorT     d_begin_offsets,
+                               OffsetIteratorT     d_end_offsets,
+                               hipStream_t         stream = 0)
     {
         ::rocprim::double_buffer<KeyT> d_keys_db = detail::to_double_buffer(d_keys);
         hipError_t                     error = ::rocprim::segmented_radix_sort_keys(d_temp_storage,
