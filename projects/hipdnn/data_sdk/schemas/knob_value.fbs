@@ -48,7 +48,6 @@ union KnobConstraint {
 
 // Knob metadata
 table Knob {
-    knob_id: int64;               // Hashed from knob_id_str
     knob_id_str: string;          // Unique identifier (namespaced by plugin)
     description: string;          // Help text
     default_value: KnobValue;     // Default setting

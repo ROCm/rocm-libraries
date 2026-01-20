@@ -26,14 +26,9 @@ public:
         (),
         (const, override));
     MOCK_METHOD(const hipdnn_data_sdk::flatbuffer_utilities::IKnobSetting&,
-                getKnobSettingById,
-                (int64_t knobId),
-                (const, override));
-    MOCK_METHOD(const hipdnn_data_sdk::flatbuffer_utilities::IKnobSetting&,
                 getKnobSettingByName,
                 (const std::string& knobName),
                 (const, override));
-    MOCK_METHOD(bool, hasKnobSetting, (int64_t knobId), (const, override));
     MOCK_METHOD(bool, hasKnobSetting, (const std::string& knobName), (const, override));
 };
 
