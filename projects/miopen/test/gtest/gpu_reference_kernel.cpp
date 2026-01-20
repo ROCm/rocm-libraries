@@ -42,9 +42,9 @@
 #include <vector>
 
 #include "../cpu_conv.hpp"
-#include "../driver.hpp"
 #include "../random.hpp"
 #include "../tensor_holder.hpp"
+#include "../verify.hpp"
 
 namespace {
 using TestCase2D = std::tuple<int, int, int, int, int, int, int, int, int, int, int, int, int, int>;
