@@ -57,7 +57,7 @@
 typedef char data_t;
 #elif MIOPEN_USE_INT32
 typedef int data_t;
-#elif (MIOPEN_USE_FP16 || MIOPEN_USE_BFP16)
+#elif MIOPEN_USE_FP16 || MIOPEN_USE_BFP16
 // As the half type degrades the performance, use short instead of half in
 // transpose kernels, which have no match op. May change back to half when
 // compile can deliver equal performance as short
