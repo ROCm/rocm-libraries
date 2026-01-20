@@ -566,9 +566,9 @@ namespace rocRoller
                 return *this;
             }
 
-            constexpr static inline auto            Type = Category::Arithmetic;
-            constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::Translate};
-            constexpr static inline int             Complexity = 1;
+            constexpr static inline auto Type       = Category::Arithmetic;
+            constexpr static inline auto EvalTimes  = EvaluationTimes::All();
+            constexpr static inline int  Complexity = 1;
 
             DataType outputDataType = DataType::None;
             uint32_t      offset         = 0;
