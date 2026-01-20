@@ -8399,10 +8399,9 @@ class KernelWriterAssembly(KernelWriter):
                       if (numElementsPerLoad == 2 and r % numElementsPer4Bytes != 0) or \
                          (numElementsPerLoad != 2 and ((r + 1) % numElementsPer4Bytes != 0)):
                         module.addComment0("g2l=%u, load component %u"%(g2lIdx, r))
-                        addr0Vgpr = offsetVgpr
                         module.add(self.chooseGlobalRead(useBuffer, \
                                   bpl, destVgpr=loadVgpr, \
-                                  addr0=vgpr(addr0Vgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
+                                  addr0=vgpr(offsetVgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
                                   soffset=soffset, offset=offset, \
                                   glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
                                   tr=isTr, hi16=hi16, \
@@ -8415,10 +8414,9 @@ class KernelWriterAssembly(KernelWriter):
                   else:
                     if (doTailOpt == 0) or (doTailOpt == 2 and behavior == "LOAD" and r >= rStart and r < rEnd):
 
-                      addr0Vgpr = offsetVgpr
                       module.add(self.chooseGlobalRead(useBuffer, \
                                 bpl, destVgpr=loadVgpr, \
-                                addr0=vgpr(addr0Vgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
+                                addr0=vgpr(offsetVgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
                                 soffset=soffset, offset=offset, \
                                 glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
                                 tr=isTr, hi16=hi16, \
@@ -9069,9 +9067,8 @@ class KernelWriterAssembly(KernelWriter):
                   self.globalread_gpr_record.b.offset.append(soffset)
 
                 useBuffer = not isTr
-                addr0Vgpr = offsetVgpr
 
-                # KRS: just-in-time patch for this offset register before issuing the load (inlined; no macro).
+                # KRS: just-in-time patch for this offset register before issuing the load.
                 if krTailJIT:
                   loadModule.addComment0(f"KRS: inline tail-offset apply before load for {tc} offsets")
 
@@ -9089,7 +9086,7 @@ class KernelWriterAssembly(KernelWriter):
 
                 loadModule.add( self.chooseGlobalRead(useBuffer, \
                           bpl, destVgpr=destVgpr, \
-                          addr0=vgpr(addr0Vgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
+                          addr0=vgpr(offsetVgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
                           soffset=soffset, offset=instOffset, \
                           glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
                           tr=isTr, hi16=isHigh16Bits , \
@@ -10702,7 +10699,6 @@ class KernelWriterAssembly(KernelWriter):
         module.add(component(self, kernel))
       else:
         module.add(component(self, kernel, divisor, tid0Scale, tid1Scale))
-
     return module
 
   ##############################################################################
