@@ -204,7 +204,7 @@ namespace rocRollerTest
             void setTileSize(int m, int n, int k);
             void setMFMA(int m, int n, int k, int b);
             void setUseLDS(bool a, bool b, bool d);
-            void setUnroll(unsigned int unrollX, unsigned int unrollY, unsigned int unrollK = 0);
+            void setUnroll(unsigned int unrollK);
             void setStreamK(rocRoller::StreamKMode streamKMode);
             void setPrefetch(bool prefetch,
                              int  prefetchInFlight,

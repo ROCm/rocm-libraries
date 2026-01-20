@@ -71,7 +71,6 @@ TEST_CASE("Test getUnrollAmount", "[kernel-graph][unroll]")
 
     auto params     = std::make_shared<CommandParameters>();
     params->unrollK = 5;
-    params->unrollX = 2;
 
     auto [forDim, forOp]   = kg::rangeFor(kgraph, Expression::literal(4), KLOOP);
     auto [forDim2, forOp2] = kg::rangeFor(kgraph, Expression::literal(16), "Another loop");
@@ -79,6 +78,7 @@ TEST_CASE("Test getUnrollAmount", "[kernel-graph][unroll]")
 
     CHECK(kg::getUnrollAmount(kgraph, forOp, params) == 5);
     CHECK(kg::getUnrollAmount(kgraph, forOp2, params) == 1);
+    // X loop is always fully unrolled when length is a constant
     CHECK(kg::getUnrollAmount(kgraph, forOp3, params) == 4);
 
     params->unrollK = 7;
