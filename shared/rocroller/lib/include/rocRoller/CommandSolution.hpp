@@ -158,7 +158,7 @@ namespace rocRoller
          *
          * A specification of {-1, -1} means automatic padding.
          */
-        std::map<LayoutType, std::pair<int, int>> padLDS
+        std::map<LayoutType, std::pair<int, int>> ldsPadding
             = {{LayoutType::MATRIX_A, {0, 0}}, {LayoutType::MATRIX_B, {0, 0}}};
 
     private:

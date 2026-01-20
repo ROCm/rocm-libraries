@@ -452,8 +452,8 @@ namespace rocRoller
                                 ShowValue(solutionParams.padLDSB.first),
                                 ShowValue(solutionParams.padLDSB.second));
 
-                    params->padLDS[LayoutType::MATRIX_A] = solutionParams.padLDSA;
-                    params->padLDS[LayoutType::MATRIX_B] = solutionParams.padLDSB;
+                    params->ldsPadding[LayoutType::MATRIX_A] = solutionParams.padLDSA;
+                    params->ldsPadding[LayoutType::MATRIX_B] = solutionParams.padLDSB;
 
                     auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macM, solutionParams.macK},

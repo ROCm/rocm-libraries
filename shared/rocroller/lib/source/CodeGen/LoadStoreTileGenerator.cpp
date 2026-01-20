@@ -1035,7 +1035,7 @@ namespace rocRoller
             Register::ValuePtr ldsAllocation;
             if(!m_context->registerTagManager()->hasRegister(ldsTag))
             {
-                auto numElements = getNumLDSElements(*m_graph, ldsTag) / packing;
+                auto numElements = GetNumLDSElements(*m_graph, ldsTag) / packing;
 
                 ldsAllocation = Register::Value::AllocateLDS(m_context, varType, numElements);
                 m_context->registerTagManager()->addRegister(ldsTag, ldsAllocation);
@@ -1320,7 +1320,7 @@ namespace rocRoller
             Register::ValuePtr ldsAllocation;
             if(!m_context->registerTagManager()->hasRegister(ldsTag))
             {
-                auto numElements = getNumLDSElements(*m_graph, ldsTag);
+                auto numElements = GetNumLDSElements(*m_graph, ldsTag);
                 ldsAllocation    = Register::Value::AllocateLDS(
                     m_context, varType, numElements / packing, /*alignment*/ 4, paddingBytes);
                 m_context->registerTagManager()->addRegister(ldsTag, ldsAllocation);
@@ -1425,7 +1425,7 @@ namespace rocRoller
             Register::ValuePtr ldsAllocation;
             if(!m_context->registerTagManager()->hasRegister(ldsTag))
             {
-                auto numElements = getNumLDSElements(*m_graph, ldsTag);
+                auto numElements = GetNumLDSElements(*m_graph, ldsTag);
 
                 ldsAllocation
                     = Register::Value::AllocateLDS(m_context, varType, numElements / packing);

@@ -75,7 +75,7 @@ namespace AddLDSPaddingTest
 
             auto flatten = graph.coordinates.addElement(Flatten(), {indexX, indexY}, {ldsTag});
 
-            int ldsElements = getNumLDSElements(graph, ldsTag);
+            int ldsElements = GetNumLDSElements(graph, ldsTag);
             CHECK(ldsElements == sizeX * sizeY);
         }
 
@@ -97,7 +97,7 @@ namespace AddLDSPaddingTest
 
             auto join = graph.coordinates.addElement(Join(), {indexX, indexY}, {ldsTag});
 
-            int ldsElements = getNumLDSElements(graph, ldsTag);
+            int ldsElements = GetNumLDSElements(graph, ldsTag);
             CHECK(ldsElements == strideX * sizeX);
         }
 
@@ -119,7 +119,7 @@ namespace AddLDSPaddingTest
 
             auto join = graph.coordinates.addElement(Join(), {indexX, indexY}, {ldsTag});
 
-            int ldsElements = getNumLDSElements(graph, ldsTag);
+            int ldsElements = GetNumLDSElements(graph, ldsTag);
             CHECK(ldsElements == strideY * sizeY);
         }
     }

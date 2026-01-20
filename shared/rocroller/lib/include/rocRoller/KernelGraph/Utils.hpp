@@ -798,7 +798,7 @@ namespace rocRoller
         /**
          * @brief Get the number of LDS elements for a given LDS tag.
          */
-        int getNumLDSElements(KernelGraph const& graph, int ldsTag);
+        int GetNumLDSElements(KernelGraph const& graph, int ldsTag);
 
         /**
          * @brief Get the first and last nodes from a set of nodes that are totally ordered

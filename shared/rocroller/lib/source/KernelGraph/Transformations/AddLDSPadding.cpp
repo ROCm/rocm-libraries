@@ -330,10 +330,10 @@ namespace rocRoller
             AddLDSPaddingVisitor::getLDSPaddingElements(KernelGraph const&    graph,
                                                         LDSPaddingInfo const& info) const
         {
-            if(m_params->padLDS.contains(info.layoutType))
+            if(m_params->ldsPadding.contains(info.layoutType))
             {
                 int contiguousBytes, paddingBytes;
-                std::tie(contiguousBytes, paddingBytes) = m_params->padLDS.at(info.layoutType);
+                std::tie(contiguousBytes, paddingBytes) = m_params->ldsPadding.at(info.layoutType);
                 if(contiguousBytes == -1)
                 {
                     Throw<FatalError>("Automatic padding not implemented yet.");

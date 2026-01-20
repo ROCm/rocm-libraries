@@ -1459,7 +1459,7 @@ namespace rocRoller
             return getUnsignedInt(evaluate(getSize(unrollDim)));
         }
 
-        int getNumLDSElements(KernelGraph const& graph, int ldsTag)
+        int GetNumLDSElements(KernelGraph const& graph, int ldsTag)
         {
             auto maybeParentLDS
                 = only(graph.coordinates.getOutputNodeIndices(ldsTag, CT::isEdge<CT::Duplicate>));

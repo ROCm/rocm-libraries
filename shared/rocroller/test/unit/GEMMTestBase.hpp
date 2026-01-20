@@ -495,8 +495,8 @@ namespace GEMMTests
             params->setSplitStoreTileIntoWaveBlocks(gemm.splitStoreTileIntoWaveBlocks);
 
             // Set LDS padding for MATRIX_A and MATRIX_B
-            params->padLDS[LayoutType::MATRIX_A] = gemm.padA;
-            params->padLDS[LayoutType::MATRIX_B] = gemm.padB;
+            params->ldsPadding[LayoutType::MATRIX_A] = gemm.padA;
+            params->ldsPadding[LayoutType::MATRIX_B] = gemm.padB;
 
             params->swizzleScale                  = gemm.swizzleScale;
             params->prefetchScale                 = gemm.prefetchScale;
