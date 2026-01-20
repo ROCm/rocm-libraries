@@ -961,10 +961,6 @@ class Solution(collections.abc.Mapping):
     if state["BAddrInterleave"]:
       state["AssertFree1DivByMT1LowbitGT1"] = state["MacroTile1"]
 
-    # KRingShift host-side restriction:
-    # With scheme3 supporting full (k+shift) mod K semantics (including mainloop wrap), we allow all K here.
-    # Any remaining safety requirement (e.g. base-address cacheline alignment) is enforced at runtime in codegen.
-
     # KRingShift wrap handling exists only in the tail loop.
     # If (k + KRingShift) would wrap inside the main loop, the kernel will be incorrect (no main-loop wrap fix).
     # Enforce a host-side runtime predicate which guarantees any KRS wrap happens only in tail.

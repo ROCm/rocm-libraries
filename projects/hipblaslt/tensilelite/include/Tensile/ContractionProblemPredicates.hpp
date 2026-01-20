@@ -204,7 +204,6 @@ namespace TensileLite
             //
             // We model the exact KRS enable/shift computation used in initKRingShift:
             //   rem = StrideB1J % cacheLineElements
-            //   if ((G * rem) % cacheLineElements != 0) or rem==0 => shift disabled (shift=0) => always safe
             //   shift = (-WorkGroup1 * rem) mod cacheLineElements
             //
             // mainLoopElems = k - (k % DepthU)
@@ -251,14 +250,7 @@ namespace TensileLite
 
                     if(mt1 == 0 || lvcb == 0 || bpeB == 0 || depthU == 0 || cacheLineByte == 0)
                         return false;
-
-                    // Compute cacheline elements and validate (match codegen behavior: shift stays 0 if invalid).
-                    if(cacheLineByte % bpeB != 0)
-                        return true; // shift disabled => safe
                     size_t cacheLineElems = cacheLineByte / bpeB;
-                    if(cacheLineElems == 0 || (cacheLineElems & (cacheLineElems - 1)) != 0)
-                        return true; // shift disabled => safe
-
                     // Compute runtime G from Free1 size and MT1.
                     size_t free1 = (!problem.transposeC01() ? problem.freeSizeB(0)
                                                            : problem.freeSizeA(0));
@@ -284,10 +276,6 @@ namespace TensileLite
                     // Determine whether KRS shift can be enabled at runtime.
                     size_t mask = cacheLineElems - 1;
                     size_t rem  = strideB1J & mask; // mod cacheLineElems (pow2)
-                    if(rem == 0)
-                        return true; // aligned => shift=0 => safe
-                    if(((G * rem) & mask) != 0)
-                        return true; // not congruent => shift disabled => safe
 
                     // K is the (last) bound index (typically the summation dimension).
                     size_t k = 0;
