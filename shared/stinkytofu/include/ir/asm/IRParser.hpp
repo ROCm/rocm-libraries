@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include "ir/Diagnostic.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 
 #include <memory>
@@ -31,69 +32,6 @@
 
 namespace stinkytofu
 {
-    /// Diagnostic message for parser errors.
-    class Diagnostic
-    {
-    public:
-        enum class Level
-        {
-            Error,
-            Warning,
-            Note
-        };
-
-    private:
-        Level       level;
-        std::string message;
-        unsigned    line;
-        unsigned    column;
-
-    public:
-        Diagnostic(Level lvl, std::string msg, unsigned l, unsigned c)
-            : level(lvl)
-            , message(std::move(msg))
-            , line(l)
-            , column(c)
-        {
-        }
-
-        Level getLevel() const
-        {
-            return level;
-        }
-        const std::string& getMessage() const
-        {
-            return message;
-        }
-        unsigned getLine() const
-        {
-            return line;
-        }
-        unsigned getColumn() const
-        {
-            return column;
-        }
-
-        std::string format() const
-        {
-            std::ostringstream oss;
-            oss << line << ":" << column << ": ";
-            switch(level)
-            {
-            case Level::Error:
-                oss << "error: ";
-                break;
-            case Level::Warning:
-                oss << "warning: ";
-                break;
-            case Level::Note:
-                oss << "note: ";
-                break;
-            }
-            oss << message;
-            return oss.str();
-        }
-    };
 
     /// Parsed instruction node from IR text format.
     /// This is a lightweight structure that holds the parsed instruction data
@@ -124,9 +62,49 @@ namespace stinkytofu
         }
     };
 
+    /// Result of parsing IR source, including instructions and diagnostics.
+    struct ParseResult
+    {
+        std::vector<std::unique_ptr<ParsedInstruction>> instructions;
+        std::vector<Diagnostic>                         diagnostics;
+
+        /// Check if any errors occurred during parsing.
+        bool hasErrors() const
+        {
+            for(const auto& diag : diagnostics)
+            {
+                if(diag.getLevel() == Diagnostic::Level::Error)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// Get count of errors (excluding warnings).
+        size_t errorCount() const
+        {
+            size_t count = 0;
+            for(const auto& diag : diagnostics)
+            {
+                if(diag.getLevel() == Diagnostic::Level::Error)
+                {
+                    count++;
+                }
+            }
+            return count;
+        }
+    };
+
     /// Parses a StinkyTofu IR source string and returns a vector of parsed instructions.
     /// @param sourceStr The IR source text to parse.
     /// @return A vector of unique pointers to ParsedInstruction objects representing the parsed instructions.
+    /// @note This function does not expose parse errors. Use parseSourceStringWithDiagnostics() to access diagnostics.
     std::vector<std::unique_ptr<ParsedInstruction>> parseSourceString(const std::string& sourceStr);
+
+    /// Parses a StinkyTofu IR source string and returns instructions with diagnostic information.
+    /// @param sourceStr The IR source text to parse.
+    /// @return A ParseResult containing parsed instructions and any diagnostics (errors/warnings).
+    ParseResult parseSourceStringWithDiagnostics(const std::string& sourceStr);
 
 } // namespace stinkytofu

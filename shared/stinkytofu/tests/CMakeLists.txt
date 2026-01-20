@@ -14,6 +14,8 @@ list(TRANSFORM TEST_MAIN PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 set(TEST_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/hipblaslt/tensilelite/rocisa/rocisa/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src          # For private headers (IRLexer.hpp, etc.)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/ir/asm   # For parser/lexer private headers
     ${CMAKE_CURRENT_SOURCE_DIR}/../hardware/include
     ${CMAKE_CURRENT_SOURCE_DIR}/unit  # For TestHelpers.hpp
     ${TABLEGEN_OUTPUT_DIR}
@@ -40,6 +42,11 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/PeepholeOptimizationPassTest.cpp
     unit/asm/StinkyAsmEmitterTest.cpp
     unit/asm/VirtualRegisterTest.cpp
+    # Parser/Lexer Tests (added for critical testing gaps)
+    unit/asm/IRLexerTest.cpp
+    unit/asm/IRParserTest.cpp
+    unit/asm/PatternParserTest.cpp
+    unit/asm/FuzzTest.cpp
 )
 
 # High-Level IR Tests

@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cassert>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "ir/asm/StinkyModifiers.hpp"
@@ -45,14 +46,60 @@ namespace stinkytofu
     };
 
     // Helper function to convert string to RegType
+    /// Convert string to RegType. Returns RegType::UNKNOWN for invalid strings.
+    /// Use isValidRegType() to check if the result is valid.
+    ///
+    /// Example usage:
+    ///   RegType type = stringToRegType("v");
+    ///   if (!isValidRegType(type)) {
+    ///       // Handle error: unknown register type
+    ///   }
+    ///
+    /// For new code, prefer tryParseRegType() which returns std::optional.
     inline RegType stringToRegType(const std::string& str)
     {
 #define REGISTER_TYPE(ENUM, STR, DESC) \
     if(str == STR)                     \
         return RegType::ENUM;
 #include "ir/asm/RegisterType.def"
-        assert(false && "Invalid register type");
+        // Don't assert on invalid input - return UNKNOWN for error handling
+        // Callers should check with isValidRegType() or compare to UNKNOWN
         return RegType::UNKNOWN;
+    }
+
+    /// Check if a register type is valid (not UNKNOWN)
+    inline bool isValidRegType(RegType type)
+    {
+        return type != RegType::UNKNOWN;
+    }
+
+    /// Validate if a string represents a valid register type
+    inline bool isValidRegTypeString(const std::string& str)
+    {
+        return stringToRegType(str) != RegType::UNKNOWN;
+    }
+
+    /// Convert string to RegType with explicit validation.
+    /// Returns std::nullopt if the string is not a valid register type.
+    /// Prefer this over stringToRegType() for new code.
+    ///
+    /// Example usage:
+    ///   auto type = tryParseRegType("v");
+    ///   if (!type) {
+    ///       // Handle error: unknown register type
+    ///       return error;
+    ///   }
+    ///   // Use *type safely
+    ///
+    /// This is the recommended API for C++ code that needs validation.
+    inline std::optional<RegType> tryParseRegType(const std::string& str)
+    {
+        RegType result = stringToRegType(str);
+        if(result == RegType::UNKNOWN)
+        {
+            return std::nullopt;
+        }
+        return result;
     }
 
     // Helper function to convert RegType to string

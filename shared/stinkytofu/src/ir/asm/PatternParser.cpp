@@ -51,19 +51,44 @@ namespace stinkytofu
 
     void PatternParser::error(const std::string& msg)
     {
-        const Token&       tok = lexer.peek();
-        std::ostringstream oss;
-        oss << "Error at line " << tok.line << ", column " << tok.column << ": " << msg;
-        errors.push_back(oss.str());
+        const Token& tok = lexer.peek();
+        diagnostics.emplace_back(Diagnostic::Level::Error, msg, tok.line, tok.column);
         hadError = true;
+    }
+
+    std::vector<std::string> PatternParser::getErrors() const
+    {
+        // Legacy API: format diagnostics as strings
+        std::vector<std::string> result;
+        result.reserve(diagnostics.size());
+        for(const auto& diag : diagnostics)
+        {
+            std::ostringstream oss;
+            oss << "Error at line " << diag.getLine() << ", column " << diag.getColumn() << ": "
+                << diag.getMessage();
+            result.push_back(oss.str());
+        }
+        return result;
     }
 
     void PatternParser::printErrors() const
     {
-        for(const auto& err : errors)
+        for(const auto& diag : diagnostics)
         {
-            std::cerr << err << "\n";
+            // Format: "Error at line 42, column 15: Expected '{'"
+            std::cerr << "Error at line " << diag.getLine() << ", column " << diag.getColumn()
+                      << ": " << diag.getMessage() << "\n";
         }
+    }
+
+    std::string PatternParser::stripQuotes(const std::string& str)
+    {
+        // Strip leading and trailing quotes from string literals
+        if(str.size() >= 2 && str.front() == '"' && str.back() == '"')
+        {
+            return str.substr(1, str.size() - 2);
+        }
+        return str;
     }
 
     std::string PatternParser::parseVariable()
@@ -652,7 +677,7 @@ namespace stinkytofu
                 skipNewlines();
                 if(lexer.peek().kind == TokenKind::QuotedString)
                 {
-                    pattern.comment = std::string(lexer.consume().text);
+                    pattern.comment = stripQuotes(std::string(lexer.consume().text));
                 }
                 skipNewlines();
             }
@@ -1039,6 +1064,36 @@ namespace stinkytofu
         }
 
         return patterns;
+    }
+
+    PatternParseResult parsePatternFileWithDiagnostics(const std::string& filename)
+    {
+        PatternParseResult result;
+
+        // Read file
+        std::ifstream file(filename);
+        if(!file.is_open())
+        {
+            // Create a synthetic diagnostic for file open failure
+            result.diagnostics.emplace_back(
+                Diagnostic::Level::Error, "Failed to open pattern file: " + filename, 0, 0);
+            return result;
+        }
+
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        std::string source = buffer.str();
+
+        // Lex
+        IRLexer lexer(source);
+        lexer.lex();
+
+        // Parse
+        PatternParser parser(lexer);
+        result.patterns    = parser.parsePatterns();
+        result.diagnostics = parser.getDiagnostics();
+
+        return result;
     }
 
 } // namespace stinkytofu

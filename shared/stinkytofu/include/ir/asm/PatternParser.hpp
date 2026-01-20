@@ -23,6 +23,8 @@
 
 #pragma once
 
+#include "ir/Diagnostic.hpp"
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -207,19 +209,23 @@ namespace stinkytofu
             return hadError;
         }
 
-        /// Get all error messages.
-        const std::vector<std::string>& getErrors() const
+        /// Get all diagnostics (structured error/warning/note messages).
+        const std::vector<Diagnostic>& getDiagnostics() const
         {
-            return errors;
+            return diagnostics;
         }
+
+        /// Get all error messages (legacy, for backward compatibility).
+        /// Returns formatted strings from diagnostics.
+        std::vector<std::string> getErrors() const;
 
         /// Print all errors to stderr.
         void printErrors() const;
 
     private:
-        IRLexer&                 lexer;
-        std::vector<std::string> errors;
-        bool                     hadError;
+        IRLexer&                lexer;
+        std::vector<Diagnostic> diagnostics;
+        bool                    hadError;
 
         // Parsing methods
         Pattern                           parsePattern();
@@ -237,13 +243,56 @@ namespace stinkytofu
         // Utility methods
         void        skipNewlines();
         std::string parseVariable(); // Parses a variable (identifier without $)
-        void        error(const std::string& msg);
+        std::string
+             stripQuotes(const std::string& str); // Strips surrounding quotes from string literals
+        void error(const std::string& msg);
+    };
+
+    /// Result of parsing a pattern file, containing both patterns and diagnostics.
+    struct PatternParseResult
+    {
+        std::vector<Pattern>    patterns;
+        std::vector<Diagnostic> diagnostics;
+
+        /// Check if any errors occurred during parsing.
+        bool hasErrors() const
+        {
+            for(const auto& diag : diagnostics)
+            {
+                if(diag.getLevel() == Diagnostic::Level::Error)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// Get count of errors (excluding warnings).
+        size_t errorCount() const
+        {
+            size_t count = 0;
+            for(const auto& diag : diagnostics)
+            {
+                if(diag.getLevel() == Diagnostic::Level::Error)
+                {
+                    count++;
+                }
+            }
+            return count;
+        }
     };
 
     /// Parse a pattern file and return all patterns.
     /// This is a convenience function that creates a lexer and parser.
     /// @param filename Path to the pattern file
     /// @return Vector of parsed patterns (empty if parsing failed)
+    /// @note This function does not expose parse errors. Use parsePatternFileWithDiagnostics() to access diagnostics.
     std::vector<Pattern> parsePatternFile(const std::string& filename);
+
+    /// Parse a pattern file and return patterns with diagnostic information.
+    /// This is a convenience function that creates a lexer and parser.
+    /// @param filename Path to the pattern file
+    /// @return A PatternParseResult containing parsed patterns and any diagnostics (errors/warnings).
+    PatternParseResult parsePatternFileWithDiagnostics(const std::string& filename);
 
 } // namespace stinkytofu
