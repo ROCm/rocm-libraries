@@ -88,7 +88,11 @@ namespace rocRoller::Expression::EvaluateDetail
             if(arg == 0)
                 return std::numeric_limits<uint32_t>::max() / 2;
 
-            auto magic = libdivide::libdivide_u32_gen(arg);
+            if(arg == 1)
+                return 0;
+
+            //auto magic = libdivide::libdivide_u32_gen(arg);
+            auto magic = libdivide::libdivide_u32_branchfree_gen(arg);
 
             return magic.magic;
         }
@@ -406,9 +410,14 @@ namespace rocRoller::Expression::EvaluateDetail
             if(arg == 0)
                 return 0;
 
-            auto magic = libdivide::libdivide_u32_gen(arg);
+            if(arg == 1)
+                return 0;
 
-            return magic.more;
+            //auto magic = libdivide::libdivide_u32_gen(arg);
+            auto magic = libdivide::libdivide_u32_branchfree_gen(arg);
+
+            //return magic.more;
+            return magic.more & libdivide::LIBDIVIDE_32_SHIFT_MASK;
         }
     };
 
