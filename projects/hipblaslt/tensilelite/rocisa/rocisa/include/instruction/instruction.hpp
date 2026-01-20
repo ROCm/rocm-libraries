@@ -225,14 +225,20 @@ namespace rocisa
                     }
                 }
             }
-            int setVal = msbSrc[0] + (msbSrc[1] << 2) + (msbSrc[2] << 4) + (msbDst << 6);
-            if(outputInlineAsm){
-                // workaround for inline asm. see kernels.cpp
-                kStr = "\"s_set_vgpr_msb " + std::to_string(setVal) + "\\n\\t\"\n" + kStr;
-            }
-            else if(hasVgpr && setVal != getVgprMsb()){
-                kStr = "s_set_vgpr_msb " + std::to_string(setVal) + "\n" + kStr;
-                rocIsa::getInstance().setVgprMsb(setVal);
+            int newVal = msbSrc[0] + (msbSrc[1] << 2) + (msbSrc[2] << 4) + (msbDst << 6);
+            int oriVal = getVgprMsb();
+            if(newVal != oriVal && !outputInlineAsm){
+                // Base layer WA: need to store previous msb value in [15:8] bits.
+                int setVal = oriVal < 0? newVal : newVal + (oriVal << 8);
+                std::string msbStr = "s_set_vgpr_msb " + std::to_string(setVal);
+                std::string msbComment = std::string("src0: " + std::to_string(msbSrc[0]) + ", src1: " + std::to_string(msbSrc[1]) + \
+                    ", src2: " + std::to_string(msbSrc[2]) + ", dst: " + std::to_string(msbDst));
+                msbStr = formatStr(false, msbStr, msbComment, false);
+                // Base layer WA: add a no-vgpr inst if oriVal is non-determined and right after label
+                if(oriVal == -1)
+                    msbStr = "s_nop 0\n" + msbStr;
+                kStr = msbStr + kStr;
+                rocIsa::getInstance().setVgprMsb(newVal);
             }
         }
 
