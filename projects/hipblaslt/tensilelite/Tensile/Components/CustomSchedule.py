@@ -3121,9 +3121,7 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         grinca = [0,0,0,1,1,1,2,2,2]
         grincb = [3,3,3,6,6,6,6,6,6]
         lrsa   = [10]
-        lrsb   = [10]
-        lwsa   = [19]
-        lwsb   = [19]        
+        lrsb   = [10]    
         
         gra    = [                                 10,10,11,11] # one index for two instructions
         grb    = [                                              13,13,14,14] # one index for two instructions
@@ -3131,16 +3129,19 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         syncs.add(                                             12, vlcnt=8, barrier=True, comment="wait for the previous GRAs")
 
         lra1   = [12,12,13,14] # twice on 12 since we are waiting for GRA anyway at 12
-        lrb1   = [           15,16,17,18]
+        lrb1   = [           15,16,16,17]
         #                wait then read
         syncs.add(           15, dscnt=2, vlcnt=8, comment="wait for the first 2 LRAs before packing. Also wait for GRBs",
                                  barrier=True, barrier_comment="make sure GRBs are done before starting LRBs"  )
-        syncs.add(                    18, dscnt=2, comment="wait for the rest of LRAs before packing them")
-        pack_a1 = [             16,16,16,16, 19,19, 20,20,20,20,
-                                 18,18,18,18, 19,19, 20,20,20,20]
-        syncs.add(                                              21, dscnt=0, comment="wait for LRBs before the packing them")
-        pack_b1= [                                              21,21,21,21, 22,22, 23,23,23,23,
-                                                                21,21,21,21, 22,22, 23,23,23,23]
+        syncs.add(               17, dscnt=3, comment="wait for the rest of LRAs before packing them")
+        pack_a1 = [             16,16,16,16, 20,20, 21,21,21,21,
+                                 17,17,17,17, 20,20, 21,21,21,21]
+        syncs.add(                 18, dscnt=2, comment="wait for 2 LRBs before the packing them")
+        syncs.add(                  19, dscnt=0, comment="wait for the rest of LRBs before the packing them")
+        pack_b1= [                 18,18,18,18, 20,20, 22,22,22,22,
+                                    19,19,19,19, 20,20, 22,22,23,23]
+        lwsa   = [                             20]
+        lwsb   = [                             20]    
     elif isNN(kernel) and TLDS==1:
         print(">>>>>>>>>>>>>>>>>>>>>>>>> _get_schedule_128x128x32_TF32_plr1   NN")
         lra0   = [0,0,0,0,
@@ -3206,7 +3207,7 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         'LRB1':   [lrb1],
         'PackB1': [pack_b1],
         'PackA1': [pack_a1],
-        'LCC':    [[n_mfma-2, n_mfma-1]],
+        'LCC':    [[n_mfma-1, n_mfma-1]],
     }
 
     syncCode = syncs.get_code()
