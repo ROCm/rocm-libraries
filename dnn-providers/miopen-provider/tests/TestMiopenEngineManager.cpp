@@ -168,7 +168,8 @@ TEST(TestMiopenEngineManager, InitializeExecutionContextCallsEngine)
 {
     auto mockEngine = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine, id()).WillRepeatedly(Return(7));
-    EXPECT_CALL(*mockEngine, initializeExecutionContext(::testing::_, ::testing::_, ::testing::_))
+    EXPECT_CALL(*mockEngine,
+                initializeExecutionContext(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(1);
 
     EngineManager manager;

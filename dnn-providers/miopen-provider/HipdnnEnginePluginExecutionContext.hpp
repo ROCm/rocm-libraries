@@ -41,6 +41,17 @@ public:
         return *_plan;
     }
 
+    void setBenchmarkingEnabled(bool enabled)
+    {
+        _benchmarkingEnabled = enabled;
+    }
+
+    bool benchmarkingEnabled() const
+    {
+        return _benchmarkingEnabled;
+    }
+
 private:
     std::unique_ptr<miopen_legacy_plugin::IPlan> _plan;
+    bool _benchmarkingEnabled = false;
 };
