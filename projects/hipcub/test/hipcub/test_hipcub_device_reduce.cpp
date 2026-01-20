@@ -885,13 +885,15 @@ void test_argminmax_allinf(TypeParam value, TypeParam empty_value)
     if(size > 0)
     {
         // all +/- infinity should produce +/- infinity
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].key, 0));
+        ASSERT_NO_FATAL_FAILURE(
+            test_utils::assert_eq(output[0].key, static_cast<decltype(output[0].key)>(0)));
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].value, value));
     }
     else
     {
         // empty input should produce a special value
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].key, 1));
+        ASSERT_NO_FATAL_FAILURE(
+            test_utils::assert_eq(output[0].key, static_cast<decltype(output[0].key)>(1)));
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].value, empty_value));
     }
 }
@@ -951,13 +953,15 @@ void test_argminmax_extremum(TypeParam value, TypeParam empty_value)
     if(size > 0)
     {
         // all +/- infinity should produce +/- infinity
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].key, 0));
+        ASSERT_NO_FATAL_FAILURE(
+            test_utils::assert_eq(output[0].key, static_cast<decltype(output[0].key)>(0)));
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].value, value));
     }
     else
     {
         // empty input should produce a special value
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].key, 1));
+        ASSERT_NO_FATAL_FAILURE(
+            test_utils::assert_eq(output[0].key, static_cast<decltype(output[0].key)>(1)));
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].value, empty_value));
     }
 }
