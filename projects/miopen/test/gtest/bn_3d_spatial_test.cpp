@@ -24,29 +24,14 @@
  *
  *******************************************************************************/
 
-#include <array>
-#include <cfloat>
-#include <cmath>
-#include <ctime>
-#include <iomanip>
-#include <iostream>
-#include <iterator>
-#include <limits>
-#include <memory>
-#include <utility>
-#include <vector>
-
 #include <miopen/activ.hpp>
 #include <miopen/batch_norm.hpp>
-#include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
 
+#include "../../src/include/miopen/ford.hpp"
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
 #include "random.hpp"
-#include "tensor_holder.hpp"
 #include "test_parameter_name_generator.hpp"
-#include "verify.hpp"
 
 // Run CPU emulations in hierarchical reduction mode.
 #define MIO_HEIRARCH_SEL 1
@@ -141,32 +126,17 @@ struct verify_forward_train_3d_bn_spatial
 
 #if(MIO_HEIRARCH_SEL == 0)
             // process the batch per channel
-            for(size_t bidx = 0; bidx < n_batch; bidx++)
-            { // via mini_batch
-                for(size_t didx = 0; didx < depth; ++didx)
-                { // via depth
-                    for(size_t row = 0; row < height; row++)
-                    { // via rows
-                        for(size_t column = 0; column < width; column++)
-                        { // via columns
-                            // #1 calculate the mean
-                            // iterating through the stack of images in the mini_batch
-                            mean_accum += input(bidx, cidx, didx, row, column);
-                        } // end for (column)
-                    }     // end for (row)
-                }         // end for (depth)
-            }             // end for (n)
+            miopen::ford(n_batch, depth, height, width)(
+                [&](size_t bidx, size_t didx, size_t row, size_t column) {
+                    // #1 calculate the mean
+                    // iterating through the stack of images in the mini_batch
+                    mean_accum += input(bidx, cidx, didx, row, column);
+                });
 #else
-            for(size_t didx = 0; didx < depth; ++didx)
-            { // via depth
-                for(size_t row = 0; row < height; row++){ //via rows
-                    for(size_t column = 0; column < width; column++){// via columns
-                        for(size_t bidx = 0; bidx < n_batch; bidx++){ //via mini_batch
-                            mean_accum_arr[row] += input(bidx,cidx,didx, row,column);
-                        }
-                    }// for (column)
-                }// for (row)
-            } // for (depth)
+            miopen::ford(depth, height, width, n_batch)([&](size_t didx, size_t row, size_t column, size_t bidx) {
+                mean_accum_arr[row] += input(bidx, cidx, didx, row, column);
+            });
+
             for(size_t i = 0; i<height; i++) mean_accum += mean_accum_arr[i];
 #endif
             mean_accum /= ndhw;
@@ -177,35 +147,19 @@ struct verify_forward_train_3d_bn_spatial
 #if(MIO_HEIRARCH_SEL == 0)
             // #2 calculate the variances
             // sigma^2 = (1/batch_mean) * sum( (x_i - batch_mean)^2 )
-            for(size_t bidx = 0; bidx < n_batch; bidx++)
-            { // via mini_batch
-                for(size_t didx = 0; didx < depth; ++didx)
-                { // via depth
-                    for(size_t row = 0; row < height; row++)
-                    { // via rows
-                        for(size_t column = 0; column < width; column++)
-                        { // via columns
-                            // using out buffer as scratchpad
-                            out(bidx, cidx, didx, row, column) = elemStd =
-                                (input(bidx, cidx, didx, row, column) - mean_accum); // (x_i - mean)
-                            variance_accum += (elemStd * elemStd); // sum{ (x_i - mean)^2 }
-                        }                                          // end for (column)
-                    }                                              // end for (row)
-                }                                                  // for (depth)
-            }                                                      // end for(n)
-
+            miopen::ford(n_batch, depth, height, width)(
+                [&](size_t bidx, size_t didx, size_t row, size_t column) {
+                    // using out buffer as scratchpad
+                    out(bidx, cidx, didx, row, column) = elemStd =
+                        (input(bidx, cidx, didx, row, column) - mean_accum); // (x_i - mean)
+                    variance_accum += (elemStd * elemStd); // sum{ (x_i - mean)^2 }
+                });
 #else
-            for(size_t didx = 0; didx < depth; ++didx) // via depth
-            {
-                for(size_t row = 0; row < height; row++){ //via rows
-                    for(size_t column = 0; column < width; column++){// via columns
-                        for(size_t bidx = 0; bidx < n_batch; bidx++){ //via mini_batch
-                            out(bidx,cidx,didx,row,column) = elemStd = input(bidx,cidx,didx,row,column) - mean_accum;
-                            variance_accum_arr[row] += elemStd*elemStd;
-                        }
-                    }// for (column)
-                }// for (row)
-            }
+            miopen::ford(depth, height, width, n_batch)([&](size_t didx, size_t row, size_t column, size_t bidx) {
+                out(bidx,cidx,didx,row,column) = elemStd = input(bidx,cidx,didx,row,column) - mean_accum;
+                variance_accum_arr[row] += elemStd * elemStd;
+            });
+
             for(size_t i = 0; i<height; i++) variance_accum += variance_accum_arr[i];
 #endif
             variance_accum /= ndhw; // (1/N)*sum{ (x_i - mean)^2 }
@@ -214,24 +168,14 @@ struct verify_forward_train_3d_bn_spatial
 
             // #4 apply the normalization
             // x_hat = (x_i - mean) / sqrt(variance_accum + epsilon)
-            for(size_t bidx = 0; bidx < n_batch; bidx++)
-            { // via mini_batch
-                for(size_t didx = 0; didx < depth; ++didx)
-                { // via depth
-                    for(size_t row = 0; row < height; row++)
-                    { // via rows
-                        for(size_t column = 0; column < width; column++)
-                        { // via columns
-                            // #5 Gamma and Beta adjust
-                            // y_i = gamma*x_hat + beta
-                            out(bidx, cidx, didx, row, column) =
-                                scale(0, cidx, 0, 0, 0) *
-                                    (invVar * out(bidx, cidx, didx, row, column)) +
-                                shift(0, cidx, 0, 0, 0);
-                        } // for (column)
-                    }     // for (row)
-                }
-            } // end for(n_batchs)
+            miopen::ford(n_batch, depth, height, width)(
+                [&](size_t bidx, size_t didx, size_t row, size_t column) {
+                    // #5 Gamma and Beta adjust
+                    // y_i = gamma*x_hat + beta
+                    out(bidx, cidx, didx, row, column) =
+                        scale(0, cidx, 0, 0, 0) * (invVar * out(bidx, cidx, didx, row, column)) +
+                        shift(0, cidx, 0, 0, 0);
+                });
 
             saveMean(0, cidx, 0, 0, 0)   = mean_accum;
             saveInvVar(0, cidx, 0, 0, 0) = invVar;
@@ -417,71 +361,46 @@ struct verify_forward_infer_3d_bn_spatial_recalc
             double invVar         = 0.;
 
             // process the batch per channel
-            for(size_t didx = 0; didx < depth; ++didx)
-            { // via rows
-                for(size_t row = 0; row < height; row++)
-                { // via rows
-                    for(size_t column = 0; column < width; column++)
-                    { // via columns
-                        // #1 calculate the mean
-                        for(size_t bidx = 0; bidx < n_batch; bidx++)
-                        { // via mini_batch
-                            // iterating through the stack of images in the mini_batch
-                            mean_accum += input(bidx, cidx, didx, row, column);
-                        } // end for (n)
-                    }     // end for (column)
-                }         // end for (row)
-            }
+            miopen::ford(depth, height, width, n_batch)(
+                [&](size_t didx, size_t row, size_t column, size_t bidx) {
+                    // iterating through the stack of images in the mini_batch
+                    mean_accum += input(bidx, cidx, didx, row, column);
+                });
+
             mean_accum /= ndhw;
 
             elemStd        = 0.;
             variance_accum = 0.;
+
             // #2 calculate the variances
             // sigma^2 = (1/batch_mean) * sum( (x_i - batch_mean)^2 )
-            for(size_t didx = 0; didx < depth; ++didx)
-            { // via depth
-                for(size_t row = 0; row < height; row++)
-                { // via rows
-                    for(size_t column = 0; column < width; column++)
-                    { // via columns
-                        for(size_t bidx = 0; bidx < n_batch; bidx++)
-                        { // via mini_batch
-                            // using out buffer as scratchpad
-                            out(bidx, cidx, didx, row, column) = elemStd =
-                                (input(bidx, cidx, didx, row, column) - mean_accum); // (x_i - mean)
-                            variance_accum += (elemStd * elemStd); // sum{ (x_i - mean)^2 }
-                        }                                          // end for(n)
-                    }                                              // end for (column)
-                }                                                  // end for (row)
-            }                                                      // end for (depth)
-            variance_accum /= ndhw;                                // (1/N)*sum{ (x_i - mean)^2 }
+            miopen::ford(depth, height, width, n_batch)(
+                [&](size_t didx, size_t row, size_t column, size_t bidx) {
+                    // using out buffer as scratchpad
+                    out(bidx, cidx, didx, row, column) = elemStd =
+                        (input(bidx, cidx, didx, row, column) - mean_accum); // (x_i - mean)
+                    variance_accum += (elemStd * elemStd); // sum{ (x_i - mean)^2 }
+                });
+
+            variance_accum /= ndhw; // (1/N)*sum{ (x_i - mean)^2 }
 
             // #3 add epsilon for numeric stability, sqr_root, and invert
             invVar = 1.0 / sqrt(variance_accum + epsilon);
 
             // #4 apply the normalization
             // x_hat = (x_i - mean) / sqrt(variance_accum - epsilon)
-            for(size_t didx = 0; didx < depth; ++didx)
-            { // via depth
-                for(size_t row = 0; row < height; row++)
-                { // via rows
-                    for(size_t column = 0; column < width; column++)
-                    { // via columns
-                        for(size_t bidx = 0; bidx < n_batch; bidx++)
-                        { // via mini_batch
-                            elemStd = out(bidx,
-                                          cidx,
-                                          didx,
-                                          row,
-                                          column); // using saved values from output tensor
-                            inhat   = elemStd * invVar;
-                            // #5 Gamma and Beta adjust // y_i = gamma*x_hat + beta
-                            out(bidx, cidx, didx, row, column) =
-                                scale(0, cidx, 0, 0, 0) * inhat + shift(0, cidx, 0, 0, 0);
-                        } // end for(n_batchs)
-                    }     // for (column)
-                }         // for (row)
-            }             // for (depth)
+            miopen::ford(depth, height, width, n_batch)(
+                [&](size_t didx, size_t row, size_t column, size_t bidx) {
+                    elemStd = out(bidx,
+                                  cidx,
+                                  didx,
+                                  row,
+                                  column); // using saved values from output tensor
+                    inhat   = elemStd * invVar;
+                    // #5 Gamma and Beta adjust // y_i = gamma*x_hat + beta
+                    out(bidx, cidx, didx, row, column) =
+                        scale(0, cidx, 0, 0, 0) * inhat + shift(0, cidx, 0, 0, 0);
+                });
         });
 
 #if(MIO_BN_TIME_EVERYTHING == 1)
@@ -582,23 +501,13 @@ struct verify_forward_infer_3d_bn_spatial_use_est
             double invVar   = 1.0 / sqrt(variance + epsilon);
 
             // process the batch per channel
-            for(size_t bidx = 0; bidx < n_batch; bidx++)
-            { // via mini_batch
-                for(size_t didx = 0; didx < depth; ++didx)
-                { // via depth
-                    for(size_t row = 0; row < height; row++)
-                    { // via rows
-                        for(size_t column = 0; column < width; column++)
-                        { // via columns
-
-                            elemStd = input(bidx, cidx, didx, row, column) - mean;
-                            inhat   = elemStd * invVar;
-                            out(bidx, cidx, didx, row, column) =
-                                scale(0, cidx, 0, 0, 0) * inhat + shift(0, cidx, 0, 0, 0);
-                        }
-                    }
-                }
-            }
+            miopen::ford(n_batch, depth, height, width)(
+                [&](size_t bidx, size_t didx, size_t row, size_t column) {
+                    elemStd = input(bidx, cidx, didx, row, column) - mean;
+                    inhat   = elemStd * invVar;
+                    out(bidx, cidx, didx, row, column) =
+                        scale(0, cidx, 0, 0, 0) * inhat + shift(0, cidx, 0, 0, 0);
+                });
         });
 
 #if(MIO_BN_TIME_EVERYTHING == 1)
@@ -729,31 +638,16 @@ struct verify_backward_3d_bn_spatial_recalc
 
 // process the batch per channel
 #if(MIO_HEIRARCH_SEL == 0)
-            for(size_t didx = 0; didx < depth; ++didx)
-            { // via depth
-                for(size_t row = 0; row < height; row++)
-                { // via rows
-                    for(size_t column = 0; column < width; column++)
-                    { // via columns
-                        for(size_t bidx = 0; bidx < n_batch; bidx++)
-                        { // via mini_batch
-                            // #1 calculate the mean
-                            mean += x_input(bidx, cidx, didx, row, column);
-                        }
-                    } // for (column)
-                }     // for (row)
-            }         // for (depth)
+            miopen::ford(depth, height, width, n_batch)(
+                [&](size_t didx, size_t row, size_t column, size_t bidx) {
+                    // #1 calculate the mean
+                    mean += x_input(bidx, cidx, didx, row, column);
+                });
 #else
-            for(size_t didx = 0; didx < depth; ++didx)
-            { // via depth
-                for(size_t row = 0; row < height; row++){ //via rows
-                    for(size_t column = 0; column < width; column++){// via columns
-                        for(size_t bidx = 0; bidx < n_batch; bidx++){ //via mini_batch
-                            mean_accum_arr[row] += x_input(bidx,cidx,didx,row,column);
-                        }
-                    }// for (column)
-                }// for (row)
-            }
+            miopen::ford(depth, height, width, n_batch)([&](size_t didx, size_t row, size_t column, size_t bidx) {
+                mean_accum_arr[row] += x_input(bidx, cidx, didx, row, column);
+            });
+
             for(size_t i = 0; i<height; i++) mean += mean_accum_arr[i];
 #endif
             mean /= ndhw;
@@ -761,35 +655,18 @@ struct verify_backward_3d_bn_spatial_recalc
             elemStd  = 0.;
             variance = 0.;
 #if(MIO_HEIRARCH_SEL == 0)
-            for(size_t didx = 0; didx < depth; ++didx)
-            { // via depth
-                for(size_t row = 0; row < height; row++)
-                { // via rows
-                    for(size_t column = 0; column < width; column++)
-                    { // via columns
-                        // #2 calculate the variances
-                        // sigma^2 = (1/batch_mean) * sum( (x_i - batch_mean)^2 )
-                        for(size_t bidx = 0; bidx < n_batch; bidx++)
-                        { // via mini_batch
-                            // per (x-dims) channel load a block of data into LDS
-                            elemStd = x_input(bidx, cidx, didx, row, column) - mean; // (x_i - mean)
-                            variance += elemStd * elemStd; // sum{ (x_i - mean)^2 }
-                        }                                  // end for(n)
-                    }                                      // for (column)
-                }                                          // for (row)
-            }
+            miopen::ford(depth, height, width, n_batch)(
+                [&](size_t didx, size_t row, size_t column, size_t bidx) {
+                    // per (x-dims) channel load a block of data into LDS
+                    elemStd = x_input(bidx, cidx, didx, row, column) - mean; // (x_i - mean)
+                    variance += elemStd * elemStd; // sum{ (x_i - mean)^2 }
+                });
 #else
-            for(size_t didx = 0; didx < depth; ++didx)
-            { //
-                for(size_t row = 0; row < height; row++){ //via rows
-                    for(size_t column = 0; column < width; column++){// via columns
-                        for(size_t bidx = 0; bidx < n_batch; bidx++){ //via mini_batch
-                            elemStd = x_input(bidx,cidx,didx,row,column) - mean;
-                            variance_accum_arr[row] += elemStd*elemStd;
-                        }
-                    }// for (column)
-                }// for (row)
-            }
+            miopen::ford(depth, height, width, n_batch)([&](size_t didx, size_t row, size_t column, size_t bidx) {
+                elemStd = x_input(bidx,cidx,didx,row,column) - mean;
+                variance_accum_arr[row] += elemStd*elemStd;
+            });
+
             for(size_t i = 0; i<height; i++) variance += variance_accum_arr[i];
 #endif
             variance /= ndhw; // (1/(N*H*W))*sum{ (x_i - mean)^2 }
@@ -798,70 +675,44 @@ struct verify_backward_3d_bn_spatial_recalc
             dscale(0, cidx, 0, 0, 0) = 0.;
 
 #if(MIO_HEIRARCH_SEL == 0)
-            for(size_t didx = 0; didx < depth; ++didx)
-            { //
-                for(size_t row = 0; row < height; row++)
-                { // via rows
-                    for(size_t column = 0; column < width; column++)
-                    { // via columns
-                        for(size_t bidx = 0; bidx < n_batch; bidx++)
-                        { // via mini_batch
-                            xhat_index =
-                                in_cstride * bidx + in_dstride * didx + width * row + column;
-                            // per (x-dims) channel load a block of data into LDS
-                            elemStd = x_input(bidx, cidx, didx, row, column) - mean; // (x_i - mean)
-                            xhat[xhat_index] = elemStd * invVar;
-                            dyelem           = dy_input(bidx, cidx, didx, row, column);
-                            dshift(0, cidx, 0, 0, 0) += dyelem;
-                            dscale(0, cidx, 0, 0, 0) += xhat[xhat_index] * dyelem;
-                        } // end for(n_batch)
-                    }     // for (column)
-                }         // for (row)
-            }
+            miopen::ford(depth, height, width, n_batch)(
+                [&](size_t didx, size_t row, size_t column, size_t bidx) {
+                    xhat_index = in_cstride * bidx + in_dstride * didx + width * row + column;
+                    // per (x-dims) channel load a block of data into LDS
+                    elemStd = x_input(bidx, cidx, didx, row, column) - mean; // (x_i - mean)
+                    xhat[xhat_index] = elemStd * invVar;
+                    dyelem           = dy_input(bidx, cidx, didx, row, column);
+                    dshift(0, cidx, 0, 0, 0) += dyelem;
+                    dscale(0, cidx, 0, 0, 0) += xhat[xhat_index] * dyelem;
+                });
 #else
-            for(size_t didx = 0; didx < depth; ++didx)
-            {
-                for(size_t row = 0; row < height; row++){ //via rows
-                    for(size_t column = 0; column < width; column++){// via columns
-                        for(size_t bidx = 0; bidx < n_batch; bidx++){ //via mini_batch
-                            xhat_index = in_cstride*bidx + in_dstride*didx + width*row + column;
-                            //per (x-dims) channel load a block of data into LDS
-                            elemStd             = x_input(bidx,cidx,didx,row,column) - mean;// (x_i - mean)
-                            xhat[xhat_index]    = elemStd*invVar;
-                            dyelem              = dy_input(bidx,cidx,didx,row,column);
-                            dshift_accum_arr[row] += dyelem;
-                            dscale_accum_arr[row] += xhat[xhat_index]*dyelem;
-                            //dscale_accum_arr[row] += x_input(bidx,cidx,row,column);;//dscale_accum_arr[row] += xhat[xhat_index];
-                            //dscale_accum_arr[row] += 1.0;//DEBUG
-                        }
-                    }// for (column)
-                }// for (row)
-            }
+            miopen::ford(depth, height, width, n_batch)([&](size_t didx, size_t row, size_t column, size_t bidx) {
+                xhat_index = in_cstride*bidx + in_dstride*didx + width*row + column;
+                //per (x-dims) channel load a block of data into LDS
+                elemStd             = x_input(bidx, cidx, didx, row, column) - mean;// (x_i - mean)
+                xhat[xhat_index]    = elemStd*invVar;
+                dyelem              = dy_input(bidx, cidx, didx, row, column);
+                dshift_accum_arr[row] += dyelem;
+                dscale_accum_arr[row] += xhat[xhat_index]*dyelem;
+                //dscale_accum_arr[row] += x_input(bidx,cidx,row,column);;//dscale_accum_arr[row] += xhat[xhat_index];
+                //dscale_accum_arr[row] += 1.0;//DEBUG
+            });
+
             for(size_t i = 0; i<height; i++) {
                 dshift(0,cidx,0,0,0) += dshift_accum_arr[i];
                 dscale(0,cidx,0,0,0) += dscale_accum_arr[i];
             }
 #endif
-            for(size_t didx = 0; didx < depth; ++didx)
-            { //
-                for(size_t row = 0; row < height; row++)
-                { // via rows
-                    for(size_t column = 0; column < width; column++)
-                    { // via columns
-                        for(size_t bidx = 0; bidx < n_batch; bidx++)
-                        { // via mini_batch
-                            xhat_index =
-                                in_cstride * bidx + in_dstride * didx + width * row + column;
+            miopen::ford(depth, height, width, n_batch)(
+                [&](size_t didx, size_t row, size_t column, size_t bidx) {
+                    xhat_index = in_cstride * bidx + in_dstride * didx + width * row + column;
 
-                            double tmp1 = ndhw * dy_input(bidx, cidx, didx, row, column) -
-                                          dshift(0, cidx, 0, 0, 0);
-                            double tmp2 = -xhat[xhat_index] * dscale(0, cidx, 0, 0, 0);
-                            double tmp3 = (scale(0, cidx, 0, 0, 0) * invVar) / ndhw;
-                            dx_out(bidx, cidx, didx, row, column) = tmp3 * (tmp2 + tmp1);
-                        } // end for(n_batchs)
-                    }     // for (column)
-                }         // for (row)
-            }
+                    const double tmp1 =
+                        ndhw * dy_input(bidx, cidx, didx, row, column) - dshift(0, cidx, 0, 0, 0);
+                    const double tmp2 = -xhat[xhat_index] * dscale(0, cidx, 0, 0, 0);
+                    const double tmp3 = (scale(0, cidx, 0, 0, 0) * invVar) / ndhw;
+                    dx_out(bidx, cidx, didx, row, column) = tmp3 * (tmp2 + tmp1);
+                });
         }); // for (channel)
 
 #if(MIO_BN_TIME_EVERYTHING == 1)
@@ -1025,71 +876,44 @@ struct verify_backward_3d_bn_spatial_use_saved
             dscale(0, cidx, 0, 0, 0) = 0.;
 
 #if(MIO_HEIRARCH_SEL == 0)
-            for(size_t didx = 0; didx < depth; ++didx)
-            { // via depth
-                for(size_t row = 0; row < height; row++)
-                { // via rows
-                    for(size_t column = 0; column < width; column++)
-                    { // via columns
-                        for(size_t bidx = 0; bidx < n_batch; bidx++)
-                        { // via mini_batch
-                            xhat_index =
-                                in_cstride * bidx + in_dstride * didx + width * row + column;
-                            // per (x-dims) channel load a block of data into LDS
-                            elemStd = x_input(bidx, cidx, didx, row, column) - mean; // (x_i - mean)
-                            xhat[xhat_index] = elemStd * invVar;
-                            dyelem           = dy_input(bidx, cidx, didx, row, column);
-                            dshift(0, cidx, 0, 0, 0) += dyelem;
-                            dscale(0, cidx, 0, 0, 0) += xhat[xhat_index] * dyelem;
-                        } // end for(n_batch)
-                    }     // for (column)
-                }         // for (row)
-            }
+            miopen::ford(depth, height, width, n_batch)(
+                [&](size_t didx, size_t row, size_t column, size_t bidx) {
+                    xhat_index = in_cstride * bidx + in_dstride * didx + width * row + column;
+                    // per (x-dims) channel load a block of data into LDS
+                    elemStd = x_input(bidx, cidx, didx, row, column) - mean; // (x_i - mean)
+                    xhat[xhat_index] = elemStd * invVar;
+                    dyelem           = dy_input(bidx, cidx, didx, row, column);
+                    dshift(0, cidx, 0, 0, 0) += dyelem;
+                    dscale(0, cidx, 0, 0, 0) += xhat[xhat_index] * dyelem;
+                });
 #else
-            for(size_t didx = 0; didx < depth; ++didx)
-            { // via depth
-                for(size_t row = 0; row < height; row++){ //via rows
-                    for(size_t column = 0; column < width; column++){// via columns
-                        for(size_t bidx = 0; bidx < n_batch; bidx++){ //via mini_batch
-                            xhat_index = in_cstride*bidx + in_dstride*didx + width*row + column;
-                            //per (x-dims) channel load a block of data into LDS
-                            elemStd             = x_input(bidx,cidx,didx,row,column) - mean;// (x_i - mean)
-                            xhat[xhat_index]    = elemStd*invVar;
-                            //printf("xhat[%d]: %lf\n",xhat_index,xhat[xhat_index]);
-                            dyelem              = dy_input(bidx,cidx,didx, row,column);
-                            dshift_accum_arr[row] += dyelem;
-                            dscale_accum_arr[row] += xhat[xhat_index]*dyelem;
-                            //dscale_accum_arr[row] += 1.0;//DEBUG
-                        }
-                    }// for (column)
-                }// for (row)
-            }
+            miopen::ford(depth, height, width, n_batch)([&](size_t didx, size_t row, size_t column, size_t bidx) {
+                xhat_index = in_cstride*bidx + in_dstride*didx + width*row + column;
+                //per (x-dims) channel load a block of data into LDS
+                elemStd             = x_input(bidx,cidx,didx,row,column) - mean;// (x_i - mean)
+                xhat[xhat_index]    = elemStd*invVar;
+                //printf("xhat[%d]: %lf\n",xhat_index,xhat[xhat_index]);
+                dyelem              = dy_input(bidx,cidx,didx, row,column);
+                dshift_accum_arr[row] += dyelem;
+                dscale_accum_arr[row] += xhat[xhat_index]*dyelem;
+                //dscale_accum_arr[row] += 1.0;//DEBUG
+            });
 
             for(size_t i = 0; i<height; i++) {
                 dshift(0,cidx,0,0,0) += dshift_accum_arr[i];
                 dscale(0,cidx,0,0,0) += dscale_accum_arr[i];
             }
 #endif
-            for(size_t didx = 0; didx < depth; ++didx)
-            { // via depth
-                for(size_t row = 0; row < height; row++)
-                { // via rows
-                    for(size_t column = 0; column < width; column++)
-                    { // via columns
-                        for(size_t bidx = 0; bidx < n_batch; bidx++)
-                        { // via mini_batch
-                            xhat_index =
-                                in_cstride * bidx + in_dstride * didx + width * row + column;
+            miopen::ford(depth, height, width, n_batch)(
+                [&](size_t didx, size_t row, size_t column, size_t bidx) {
+                    xhat_index = in_cstride * bidx + in_dstride * didx + width * row + column;
 
-                            double tmp1 = ndhw * dy_input(bidx, cidx, didx, row, column) -
-                                          dshift(0, cidx, 0, 0, 0);
-                            double tmp2 = -xhat[xhat_index] * dscale(0, cidx, 0, 0, 0);
-                            double tmp3 = (scale(0, cidx, 0, 0, 0) * invVar) / ndhw;
-                            dx_out(bidx, cidx, didx, row, column) = tmp3 * (tmp2 + tmp1);
-                        } // end for(n_batchs)
-                    }     // for (column)
-                }         // for (row)
-            }
+                    const double tmp1 =
+                        ndhw * dy_input(bidx, cidx, didx, row, column) - dshift(0, cidx, 0, 0, 0);
+                    const double tmp2 = -xhat[xhat_index] * dscale(0, cidx, 0, 0, 0);
+                    const double tmp3 = (scale(0, cidx, 0, 0, 0) * invVar) / ndhw;
+                    dx_out(bidx, cidx, didx, row, column) = tmp3 * (tmp2 + tmp1);
+                });
         }); // for (channel)
 #if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
@@ -1315,22 +1139,10 @@ struct Bn3DSpatialTest : public testing::TestWithParam<TestCase>
 
         // backprop recalc
         auto dy_input = std::get<0>(outpair.second);
-        for(size_t bidx = 0; bidx < n; bidx++)
-        { // via mini_batch
-            for(size_t cidx = 0; cidx < c; cidx++)
-            { // via mini_batch
-                for(size_t didx = 0; didx < d; didx++)
-                { // via depth
-                    for(size_t row = 0; row < h; row++)
-                    { // via rows
-                        for(size_t column = 0; column < w; column++)
-                        {
-                            dy_input(bidx, cidx, didx, row, column) *= 0.1;
-                        }
-                    }
-                }
-            }
-        }
+        miopen::ford(n, c, d, h, w)(
+            [&](size_t bidx, size_t cidx, size_t didx, size_t row, size_t column) {
+                dy_input(bidx, cidx, didx, row, column) *= 0.1;
+            });
 #if(MIO_BN_SP_TEST_DEBUG == 2)
         auto debugvals = Verify(verify_backward_3d_bn_spatial_recalc<T>{input, dy_input, scale});
         auto gpuout    = std::get<0>(debugvals.second);
@@ -1343,42 +1155,29 @@ struct Bn3DSpatialTest : public testing::TestWithParam<TestCase>
         int mh         = 0;
         int mw         = 0;
 
-        for(size_t bidx = 0; bidx < n; bidx++)
-        { // via mini_batch
-            for(size_t cidx = 0; cidx < c; cidx++)
-            { // via mini_batch
-                for(size_t didx = 0; didx < d; didx++)
-                {
-                    for(size_t row = 0; row < h; row++)
-                    { // via rows
-                        for(size_t column = 0; column < w; column++)
-                        { // via columns
-                            double diff = fabs(gpuout(bidx, cidx, didx, row, column) -
-                                               cpuout(bidx, cidx, didx, row, column));
-                            if(diff > maxdiff)
-                            {
-                                maxdiff = diff;
-                                mn      = bidx;
-                                mc      = cidx;
-                                md      = didx;
-                                mh      = row;
-                                mw      = column;
-                            }
-                            // if(diff > 1.)
-                            // {
-                            std::cout << "gpu[" << bidx << ", " << cidx << ", " << didx << ", "
-                                      << row << ", " << column
-                                      << "]: " << gpuout(bidx, cidx, didx, row, column) << " :: ";
-                            std::cout << "cpu[" << bidx << ", " << cidx << ", " << didx << ", "
-                                      << row << ", " << column
-                                      << "]: " << cpuout(bidx, cidx, didx, row, column) << " :: ";
-                            std::cout << "diff: " << diff << std::endl;
-                            //    }
-                        }
-                    }
-                }
+        miopen::ford(
+            n, c, d, h, w)([&](size_t bidx, size_t cidx, size_t didx, size_t row, size_t column) {
+            const double diff =
+                fabs(gpuout(bidx, cidx, didx, row, column) - cpuout(bidx, cidx, didx, row, column));
+            if(diff > maxdiff)
+            {
+                maxdiff = diff;
+                mn      = bidx;
+                mc      = cidx;
+                md      = didx;
+                mh      = row;
+                mw      = column;
             }
-        }
+            // if(diff > 1.)
+            // {
+            std::cout << "gpu[" << bidx << ", " << cidx << ", " << didx << ", " << row << ", "
+                      << column << "]: " << gpuout(bidx, cidx, didx, row, column) << " :: ";
+            std::cout << "cpu[" << bidx << ", " << cidx << ", " << didx << ", " << row << ", "
+                      << column << "]: " << cpuout(bidx, cidx, didx, row, column) << " :: ";
+            std::cout << "diff: " << diff << std::endl;
+            //    }
+        });
+
         if(maxdiff > 0)
         {
             std::cout << "Max diff: " << maxdiff << std::endl;
@@ -1413,42 +1212,29 @@ struct Bn3DSpatialTest : public testing::TestWithParam<TestCase>
         int mh         = 0;
         int mw         = 0;
 
-        for(size_t bidx = 0; bidx < n; bidx++)
-        { // via mini_batch
-            for(size_t cidx = 0; cidx < c; cidx++)
-            { // via mini_batch
-                for(size_t didx = 0; didx < d; didx++)
-                { // via mini_batch
-                    for(size_t row = 0; row < h; row++)
-                    { // via rows
-                        for(size_t column = 0; column < w; column++)
-                        { // via columns
-                            double diff = fabs(gpuout(bidx, cidx, didx, row, column) -
-                                               cpuout(bidx, cidx, didx, row, column));
-                            if(diff > maxdiff)
-                            {
-                                maxdiff = diff;
-                                mn      = bidx;
-                                mc      = cidx;
-                                md      = didx;
-                                mh      = row;
-                                mw      = column;
-                            }
-                            // if(diff > 1.)
-                            //{
-                            std::cout << "gpu[" << bidx << ", " << cidx << ", " << didx << ", "
-                                      << row << ", " << column
-                                      << "]: " << gpuout(bidx, cidx, didx, row, column) << " :: ";
-                            std::cout << "cpu[" << bidx << ", " << cidx << ", " << didx << ", "
-                                      << row << ", " << column
-                                      << "]: " << cpuout(bidx, cidx, didx, row, column) << " :: ";
-                            std::cout << "diff: " << diff << std::endl;
-                            //}
-                        }
-                    }
-                }
+        miopen::ford(
+            n, c, d, h, w)([&](size_t bidx, size_t cidx, size_t didx, size_t row, size_t column) {
+            const double diff =
+                fabs(gpuout(bidx, cidx, didx, row, column) - cpuout(bidx, cidx, didx, row, column));
+            if(diff > maxdiff)
+            {
+                maxdiff = diff;
+                mn      = bidx;
+                mc      = cidx;
+                md      = didx;
+                mh      = row;
+                mw      = column;
             }
-        }
+            // if(diff > 1.)
+            //{
+            std::cout << "gpu[" << bidx << ", " << cidx << ", " << didx << ", " << row << ", "
+                      << column << "]: " << gpuout(bidx, cidx, didx, row, column) << " :: ";
+            std::cout << "cpu[" << bidx << ", " << cidx << ", " << didx << ", " << row << ", "
+                      << column << "]: " << cpuout(bidx, cidx, didx, row, column) << " :: ";
+            std::cout << "diff: " << diff << std::endl;
+            //}
+        });
+
         if(maxdiff > 0)
         {
             std::cout << "Max diff: " << maxdiff << std::endl;
