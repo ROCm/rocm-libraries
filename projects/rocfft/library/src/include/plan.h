@@ -123,8 +123,7 @@ struct rocfft_brick_t
     std::vector<size_t> contiguous_strides() const;
 
     // return true if this brick is contiguous in the specified field
-    bool is_contiguous_in_field(const std::vector<size_t>& field_length,
-                                const std::vector<size_t>& field_stride) const;
+    bool is_contiguous_in_field(const std::vector<size_t>& field_length) const;
 
     // compute offset of this brick, given the field's stride
     size_t offset_in_field(const std::vector<size_t>& fieldStride) const;
