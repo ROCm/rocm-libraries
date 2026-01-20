@@ -3163,29 +3163,30 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         grinca = [2,2,2,2,2,2,2,2,2]
         grincb = [4,4,4,6,6,6,6,6,6]
         lrsa   = [10]
-        lrsb   = [10]
-        lwsa   = [18]
-        lwsb   = [18]        
+        lrsb   = [10]   
         
         gra    = [                                 10,10,11,11] # one index for two instructions
         grb    = [                                              13,13,15,16] # one index for two instructions
         num_gr = len(gra) + len(grb)
-        syncs.add(                                             12, vlcnt=4, barrier=True, comment="wait for the previous GRs")
+        syncs.add(                                             12, vlcnt=8, barrier=True, comment="wait for the previous GRAs")
 
         lra1   = [12,12,12,12,
                    13,13,13,13,
                     14,14,14,14,
-                     15,15,15,15]
-        lrb1   = [              16,17,18,19]
+                     14,14,14,14]
+        lrb1   = [              15,15,16,17]
         #                wait then read
-        syncs.add(            15, dscnt=4, comment="wait for the first 2x4 LRAs before packing")
-        syncs.add(                    18, dscnt=2, comment="wait for the rest of LRAs before packing them")
-        pack_a1 = [             16,16,16,16, 19,19, 20,20,20,20,
-                                 18,18,18,18, 19,19, 20,20,20,20]
-        syncs.add(                                              21, dscnt=0, comment="wait for LRBs before the packing them")
-        pack_b1= [                                              21,21,21,21, 22,22, 23,23,23,23,
-                                                                21,21,21,21, 22,22, 23,23,23,23]
-
+        syncs.add(            15, dscnt=8, vlcnt=6, comment="wait for the first 2x4 LRAs before packing and also wait for GRBs",
+                                  barrier=True, barrier_comment="make sure GRBs are done before starting LRBs"  )
+        syncs.add(               17, dscnt=3, comment="wait for the rest of LRAs before packing them")
+        pack_a1 = [             16,16,16,16, 20,20, 21,21,21,21,
+                                 17,17,17,17, 20,20, 21,21,21,21]
+        syncs.add(                18, dscnt=2, comment="wait for LRBs before the packing them")
+        syncs.add(                 19, dscnt=0, comment="wait for LRBs before the packing them")
+        pack_b1= [                18,18,18,18, 20,20, 22,22,22,22,
+                                   19,19,19,19, 20,20, 22,22,23,23]
+        lwsa   = [                            20]
+        lwsb   = [                            20]    
     else:
         return False, None  
     
