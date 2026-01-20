@@ -204,15 +204,14 @@ struct verify_backward_data_lstm
             }
         }
         std::cout << " -m lstm "
-                  << " -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen
-                  << " -l " << nLayers << " -F 0 " << " -r " << dirMode
-                  << " -b " << biasMode << " -p " << inputMode << " -q "
+                  << " -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen << " -l "
+                  << nLayers << " -F 0 "
+                  << " -r " << dirMode << " -b " << biasMode << " -p " << inputMode << " -q "
                   << use_seqPadding << std::endl;
 
         std::cout << "inputMode: " << inputMode << " biasMode: " << biasMode
                   << " dirMode: " << dirMode << std::endl;
-        std::cout << "hz: " << hiddenSize << " batch_n: " << batch_n
-                  << " seqLength: " << seqLength
+        std::cout << "hz: " << hiddenSize << " batch_n: " << batch_n << " seqLength: " << seqLength
                   << " inputLen: " << inputVecLen << " numLayers: " << nLayers
                   << " useDropout: " << int(use_dropout) << std::endl;
         std::cout << "Backward Data LSTM: " << std::endl;
