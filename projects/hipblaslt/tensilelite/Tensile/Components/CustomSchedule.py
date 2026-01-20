@@ -3100,65 +3100,52 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     syncs = SyncSchedule()
     syncCode = []   
-    snops: list[tuple[int, SNop]] = []
-    snopCode = []
     gr_inc_step = 0
 
     if isNN(kernel) and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = True
-        print("OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO")
 
-        offset_a=[0,0,0,0, 2,2, 3,3,3,3,
-                  0,0,0,0, 2,2, 3,3,3,3,
-                ]
-        offset_b=[1,1,1,1, 2,2, 4,4,4,4,
-                  1,1,1,1, 2,2, 4,4,4,4, 
-                ]
-        
         lra0   = [0,0,0,0,
                    1,1,1,1,
                     2,2,2,2,
                      3,3,3,3]
         lrb0   = [          4,5,6,7]
         #                wait then read
-        syncs.add(       3, dscnt=4, comment="wait for the first 2 LRAs before packing")
-        syncs.add(          5, dscnt=1, comment="wait for the rest of LRAs before packing them")
-        # pack_a0= [       i+4 for i in offset_a] # last at 7
-        pack_a0 = [        4,4,4,4, 6,6, 7,7,7,7,
+        syncs.add(          4, dscnt=8, comment="wait for the first 2x4 LRAs before packing")
+        syncs.add(            5, dscnt=1, comment="wait for the rest of LRAs before packing them")
+        pack_a0 = [         4,4,4,4, 6,6, 7,7,7,7,
                             5,5,5,5, 6,6, 8,8,8,8]
         # because of GR starting at 10, we need barrier at 9, will use that for sync too.
-        syncs.add(                          9, dscnt=0, comment="wait for LRBs before the packing them",
-                                            barrier=True, barrier_comment="barrier before GR")
-        pack_b0= [                          9,9,9,9, 10,10, 11,11,11,11,
-                                            9,9,9,9, 10,10, 11,11,11,11]
+        syncs.add(                               9, dscnt=0, comment="wait for LRBs before the packing them",
+                                                 barrier=True, barrier_comment="make sure all LRs are done before starting GR")
+        pack_b0= [                               9,9,9,9, 10,10, 11,11,11,11,
+                                                 9,9,9,9, 10,10, 11,11,11,11]
 
-        grinca = [3,3,3,3,3,3,5,5,5]
-        grincb = [5,5,5,6,6,6,6,6,6]
+        grinca = [2,2,2,2,2,2,2,2,2]
+        grincb = [4,4,4,6,6,6,6,6,6]
         lrsa   = [10]
         lrsb   = [10]
         lwsa   = [18]
         lwsb   = [18]        
         
-        gra    = [                            10,10,11,11] # one index for two instructions
-        grb    = [                                       13,13,15,16] # one index for two instructions
+        gra    = [                                 10,10,11,11] # one index for two instructions
+        grb    = [                                              13,13,15,16] # one index for two instructions
         num_gr = len(gra) + len(grb)
-
-        syncs.add(                                 12, vlcnt=4, barrier=True, comment="wait for the previous GRs")
+        syncs.add(                                             12, vlcnt=4, barrier=True, comment="wait for the previous GRs")
 
         lra1   = [12,12,12,12,
                    13,13,13,13,
                     14,14,14,14,
                      15,15,15,15]
-        lrb1   = [          16,17,18,19]
+        lrb1   = [              16,17,18,19]
         #                wait then read
-        syncs.add(       15, dscnt=4, comment="wait for the first 2 LRAs before packing")
-        syncs.add(          17, dscnt=1, comment="wait for the rest of LRAs before packing them")
-        pack_a1 = [        16,16,16,16, 18,18, 19,19,19,19,
-                            17,17,17,17, 18,18, 19,19,19,19]
-        # because of GR starting at 10, we need barrier at 9, will use that for sync too.
-        syncs.add(                          20, dscnt=0, comment="wait for LRBs before the packing them")
-        pack_b1= [                          20,20,20,20, 21,21, 22,22,22,22,
-                                            20,20,20,20, 21,21, 22,22,22,22]
+        syncs.add(            15, dscnt=4, comment="wait for the first 2x4 LRAs before packing")
+        syncs.add(                    18, dscnt=2, comment="wait for the rest of LRAs before packing them")
+        pack_a1 = [             16,16,16,16, 19,19, 20,20,20,20,
+                                 18,18,18,18, 19,19, 20,20,20,20]
+        syncs.add(                                              21, dscnt=0, comment="wait for LRBs before the packing them")
+        pack_b1= [                                              21,21,21,21, 22,22, 23,23,23,23,
+                                                                21,21,21,21, 22,22, 23,23,23,23]
 
     else:
         return False, None  
@@ -3169,10 +3156,8 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         'GRIncB': [grincb],
         'LRA0':   [lra0],
         'LRB0':   [lrb0],
-        'GRA':    [duplicate_list_items(gra,                2, gr_inc_step)],
-                #    duplicate_list_items([i+1 for i in gra], 2, gr_inc_step)],
-        'GRB':    [duplicate_list_items(grb,                2, gr_inc_step)],
-                #    duplicate_list_items([i+1 for i in grb], 2, gr_inc_step)],
+        'GRA':    [duplicate_list_items(gra, 2, gr_inc_step)],
+        'GRB':    [duplicate_list_items(grb, 2, gr_inc_step)],
         'PackA0': [pack_a0],
         'PackB0': [pack_b0],
         'LRSA':   [lrsa],
@@ -3189,7 +3174,7 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     syncCode = syncs.get_code()
     nglshift = nllshift = num_gr
 
-    opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
+    opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift)
     opt1.pretty_print()
     return True, opt1
 
