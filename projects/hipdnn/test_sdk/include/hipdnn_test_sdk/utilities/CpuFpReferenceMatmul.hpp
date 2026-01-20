@@ -60,15 +60,16 @@ public:
                 bIndices[idx] = indices[idx] / bScale;
             }
 
-            *(aIndices.begin() + K_M_IDX) = m;
-            *(bIndices.begin() + K_N_IDX) = n;
+            // Set matrix indices from the last dimension to match the [..., M, K] and [..., K, N] shapes
+            *(aIndices.rbegin() + K_M_IDX) = m;
+            *(bIndices.rbegin() + K_N_IDX) = n;
 
             auto acc = static_cast<ComputeDataType>(0);
             const int64_t kDim = *(aDims.rbegin() + K_K_IDX_A);
             for(int64_t k = 0; k < kDim; ++k)
             {
-                *(aIndices.begin() + K_K_IDX_A) = k;
-                *(bIndices.begin() + K_K_IDX_B) = k;
+                *(aIndices.rbegin() + K_K_IDX_A) = k;
+                *(bIndices.rbegin() + K_K_IDX_B) = k;
 
                 const ADataType aVal = a.getHostValue(aIndices);
                 const BDataType bVal = b.getHostValue(bIndices);
