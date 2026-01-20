@@ -246,7 +246,6 @@ class GEMMSolution:
     streamKTwoTileDPFirst: bool = False
 
     architecture: GPUArchitectureTarget = GPUArchitectureTarget()
-    matchMemoryAccess: bool = True
 
     version: str = ""
 

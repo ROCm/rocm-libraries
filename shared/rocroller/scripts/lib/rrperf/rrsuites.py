@@ -1061,7 +1061,6 @@ def fp4_target():
         prefetchLDSFactor=2,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1109,7 +1108,6 @@ def fp4_target_d2lds_mi32x32x64_pf2x1():
         prefetchLDSFactor=1,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1192,7 +1190,6 @@ def fp4_target_d2lds_mi32x32x64_pf4x1():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1244,7 +1241,6 @@ def fp4_target_d2lds_mi32x32x64_st32x8_pf4x1():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1308,7 +1304,6 @@ def fp4_target_d2lds_mi16x16x128_pf4x1():
         betaInFma=True,
         scheduler="Priority",
         schedulerCost="LinearWeightedSimple",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1361,7 +1356,6 @@ def fp4_target_d2lds_mi16x16x128_st32x8_pf4x1():
         betaInFma=True,
         scheduler="Priority",
         schedulerCost="LinearWeightedSimple",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1425,7 +1419,6 @@ def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1():
         betaInFma=True,
         scheduler="Priority",
         schedulerCost="LinearWeightedSimple",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1489,7 +1482,6 @@ def fp4_target_mxd2lds_mi16x16x128_st32x8_pf2x1():
         betaInFma=True,
         scheduler="Priority",
         schedulerCost="LinearWeightedSimple",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1551,7 +1543,6 @@ def does_this_fail():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1600,7 +1591,6 @@ def fp4_single_scale_target_d2lds_mi16x16x128_pf4x1():
         scaleValue_B=1e-2,
         scheduler="Priority",
         schedulerCost="LinearWeightedSimple",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1760,7 +1750,6 @@ def mxfp8_target_128x256():
         prefetchLDSFactor=2,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1808,7 +1797,6 @@ def mxfp8_target_256x128():
         prefetchLDSFactor=2,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1856,7 +1844,6 @@ def mxfp8_target_d2lds_mi32x32x64_pf2x1():
         prefetchLDSFactor=1,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1912,7 +1899,6 @@ def mxfp8_target_d2lds_mi32x32x64_pf4x1():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1968,7 +1954,6 @@ def mxfp8_target_d2lds_mi16x16x128_pf4x1():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -2024,7 +2009,6 @@ def fp8_target_d2lds_mi16x16x128_pf4x1():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",

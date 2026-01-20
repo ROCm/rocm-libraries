@@ -1258,7 +1258,6 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::make_pair("--unroll_y", &SolutionParameters::unrollY),
         std::make_pair("--scheduler", &SolutionParameters::scheduler),
         std::make_pair("--schedulerCost", &SolutionParameters::schedulerCost),
-        std::make_pair("--matchMemoryAccess", &SolutionParameters::matchMemoryAccess),
         std::make_pair("--streamK", &SolutionParameters::streamK),
         std::make_pair("--streamKTwoTile", &SolutionParameters::streamKTwoTile),
         std::make_pair("--streamKTwoTileDPFirst", &SolutionParameters::streamKTwoTileDPFirst));
@@ -1457,7 +1456,6 @@ namespace rocRoller::Client::GEMMClient::CLI
         update(SN(&SP::unrollY), solution.unrollY);
         update(SN(&SP::scheduler), solution.scheduler);
         update(SN(&SP::schedulerCost), solution.schedulerCost);
-        update(SN(&SP::matchMemoryAccess), solution.matchMemoryAccess);
     }
 }
 
@@ -1520,8 +1518,7 @@ int main(int argc, const char* argv[])
         .unrollX = 0,
         .unrollY = 0,
 
-        .scheduler         = "Priority",
-        .matchMemoryAccess = true,
+        .scheduler = "Priority",
 
         .streamK               = false,
         .streamKTwoTile        = false,
@@ -1736,8 +1733,6 @@ int main(int argc, const char* argv[])
     app.add_option(SN(&SP::scheduler), "Which scheduler to use.");
     app.add_option(SN(&SP::schedulerCost), "Which scheduler cost function to use.");
 
-    app.add_flag(SN(&SP::matchMemoryAccess),
-                 "Match memory access to transpose.  Currently decreases performance.");
     app.add_flag(SN(&SP::prefetch), "Enable prefetching (UnrollK=2 implied).");
     app.add_option(SN(&SP::prefetchInFlight), "Number of prefetches in flight at the same time");
     app.add_option(SN(&SP::prefetchLDSFactor),

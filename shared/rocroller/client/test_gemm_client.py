@@ -279,7 +279,6 @@ types:
 streamK: false
 streamKTwoTile: false
 streamKTwoTileDPFirst: false
-matchMemoryAccess: true
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false
@@ -323,7 +322,6 @@ prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeighted
-matchMemoryAccess: true
 types:
   trans_A: N
   trans_B: N
@@ -387,7 +385,6 @@ prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeighted
-matchMemoryAccess: true
 types:
   trans_A: N
   trans_B: N
