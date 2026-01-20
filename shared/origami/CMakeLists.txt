@@ -110,11 +110,11 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     if(ORIGAMI_ENABLE_PYTHON)
         find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 
-        add_test(NAME origami_python_test COMMAND python "origami_test.py"
+        add_test(NAME origami_python_test COMMAND python3 "origami_test.py"
                  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python"
         )
 
-        add_test(NAME origami_python_grid_test COMMAND python
+        add_test(NAME origami_python_grid_test COMMAND python3
                                                        "origami_grid_test.py"
                  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python"
         )
