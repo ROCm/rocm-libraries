@@ -38,11 +38,9 @@ endif()
 # 2.  How BF16 kernels (which are kind of mixed-precision now and expected to
 #     remain in the future)  perform final conversion (and rounding) of FP32
 #     to BF16 results. This affects the main functionality of the library.
-option( MIOPEN_USE_RNE_BFLOAT16 "Sets rounding scheme for bfloat16 type" ON )
-option( MIOPEN_FP8_IEEE_EXPONENT_BIAS "Sets the FP8 exponent bias to IEEE" OFF)
-option( MIOPEN_FP8_CLIPPING "Sets the FP8 clipping" ON)
-
-option( MIOPEN_FP8_CLIPPING "Sets the FP8 clipping" ON)
+option(MIOPEN_USE_RNE_BFLOAT16 "Sets rounding scheme for bfloat16 type" ON )
+option(MIOPEN_FP8_IEEE_EXPONENT_BIAS "Sets the FP8 exponent bias to IEEE" OFF)
+option(MIOPEN_FP8_CLIPPING "Sets the FP8 clipping" ON)
 
 configure_file("${PROJECT_SOURCE_DIR}/include/miopen/config.h.in" "${PROJECT_BINARY_DIR}/include/miopen/config.h")
 
@@ -301,6 +299,8 @@ set( MIOpen_Source
     solver/layernorm/backward_t5layernorm.cpp
     solver/layernorm/forward_addlayernorm.cpp
     solver/layernorm/forward_layernorm.cpp
+    solver/layernorm/forward_layernorm2d_ck.cpp
+    solver/layernorm/forward_layernorm4d_ck.cpp
     solver/layernorm/forward_t5layernorm.cpp
     solver/mha/mha_solver_backward.cpp
     solver/mha/mha_solver_forward.cpp
@@ -364,7 +364,14 @@ if(MIOPEN_ENABLE_SQLITE AND MIOPEN_ENABLE_SQLITE_KERN_CACHE)
     list(APPEND MIOpen_Source kern_db.cpp bz2.cpp)
 endif()
 
-if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+if(MIOPEN_USE_COMPOSABLEKERNEL)
+    list(APPEND MIOpen_Source kernels/ck_header_only/layernorm/fwd/device_layernorm2d_fwd_f16_instance.cpp)
+    list(APPEND MIOpen_Source kernels/ck_header_only/layernorm/fwd/device_layernorm2d_fwd_f32_instance.cpp)
+    list(APPEND MIOpen_Source kernels/ck_header_only/layernorm/fwd/device_layernorm4d_fwd_f16_instance.cpp)
+    list(APPEND MIOpen_Source kernels/ck_header_only/layernorm/fwd/device_layernorm4d_fwd_f32_instance.cpp)
+endif()
+
+if(MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
     file(GLOB_RECURSE STATIC_COMPOSABLE_KERNEL_INCLUDE "kernels/static_composable_kernel/include/*/*.hpp")
     file(GLOB_RECURSE STATIC_COMPOSABLE_KERNEL_SOURCE "kernels/static_composable_kernel/src/*/*.cpp")
     file(GLOB_RECURSE COMPOSABLE_KERNEL_INCLUDE "legacy_composable_kernel/composable_kernel/include/*.hpp")
@@ -377,7 +384,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
     file(GLOB_RECURSE GPU_BATCHED_TRANSPOSE_KERNEL_HIP "kernels/gpu_batched_transpose_kernel/*.cpp")
     file(GLOB_RECURSE GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_INCLUDE "kernels/gpu_general_tensor_reorder_kernel/*.hpp")
     file(GLOB_RECURSE GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_SOURCE "kernels/gpu_general_tensor_reorder_kernel/*.cpp")
-
 
     set(MIOPEN_KERNEL_INCLUDES
         ${STATIC_COMPOSABLE_KERNEL_INCLUDE}
@@ -596,7 +602,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenT5LayerNorm.cpp
         kernels/MIOpenUpSample.cpp
         kernels/MIOpenUtilKernels4.cl
-        kernels/MIOpenUtilKernels5.cpp
+        kernels/MIOpenUtilKernels5.cl
         kernels/MIOpenVecAdd.cpp
         kernels/MIOpenVecAddOCL.cl
         kernels/MIOpenIm2d2Col.cpp
@@ -611,7 +617,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenConvBwdWrW1x1_PAD_read4.cl
         kernels/MIOpenConvFwd_LxL_11.cl
         kernels/MIOpenConvFFT.cpp
-        kernels/MIOpenRNNHiddenStateUpdate.cpp
+        kernels/MIOpenRNNHiddenStateUpdate.cl
         kernels/bugzilla_34765_detect.s
         kernels/dummy_kernel.s
         kernels/conv3x3.s
@@ -693,7 +699,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/xform_bidirect_winograd_data.s
         kernels/xform_bidirect_winograd_filter.s
         kernels/xform_bidirect_winograd_out.s
-        kernels/UniversalTranspose.cpp)
+        kernels/UniversalTranspose.cl)
 
     # Kernels in development lists.
     # Should be ALWAYS empty in develop branch (at the time of PR merge)
@@ -742,6 +748,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         ocl/utilocl.cpp
         ocl/dropoutocl.cpp
         ocl/gcn_asm_utils.cpp
+        ocl/rnn_util_ocl.cpp
         hip/hip_build_utils.cpp
         hip/batched_transpose_sol.cpp
         hip/general_tensor_reorder_sol.cpp
@@ -926,9 +933,6 @@ if(MIOPEN_USE_COMPOSABLEKERNEL)
         # Use the aliased targets when we pull CK from /opt/rocm or other place on disc.
         set(MIOPEN_CK_LINK_FLAGS composable_kernel::device_conv_operations hip::host)
     endif()
-    if(GPU_TARGETS MATCHES "gfx942" OR GPU_TARGETS MATCHES "gfx950")
-        target_compile_definitions(MIOpen PRIVATE CK_ENABLE_TF32)
-    endif()
 endif()
 
 if(WIN32)
@@ -955,10 +959,6 @@ if(BUILD_TESTING)
     # See details here: https://learn.microsoft.com/en-us/cpp/build/exporting-from-a-dll?view=msvc-170
     generate_export_header(MIOpen BASE_NAME MIOPEN_INTERNALS EXPORT_FILE_NAME ${CMAKE_BINARY_DIR}/include/miopen/export_internals.h)
     target_compile_definitions(MIOpen PUBLIC $<BUILD_INTERFACE:MIOPEN_BUILD_TESTING>)
-endif()
-
-if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
-    target_compile_definitions(MIOpen PRIVATE CK_EXPERIMENTAL_BUILDER)
 endif()
 
 if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
@@ -1064,13 +1064,7 @@ local:
     # set_target_properties(MIOpen PROPERTIES CXX_VISIBILITY_PRESET hidden)
     set_target_properties(MIOpen PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
 endif()
-#######################################
-if(MIOPEN_ENABLE_SQLITE)
-    # MIOpen depends on SQLite
-    target_link_libraries(MIOpen PRIVATE SQLite::SQLite3)
-    target_link_libraries(MIOpen INTERFACE  $<BUILD_INTERFACE:SQLite::SQLite3>)
-endif()
-############################################################
+
 # MIOpen depends on librt for Boost.Interprocess
 if(NOT WIN32 AND NOT APPLE)
     find_library(LIBRT rt)
@@ -1078,6 +1072,12 @@ if(NOT WIN32 AND NOT APPLE)
         message(STATUS "Librt: " ${LIBRT})
         target_internal_library(MIOpen ${LIBRT})
     endif()
+endif()
+
+if(MIOPEN_ENABLE_SQLITE)
+    # MIOpen depends on SQLite
+    target_link_libraries(MIOpen PRIVATE SQLite::SQLite3)
+    target_link_libraries(MIOpen INTERFACE  $<BUILD_INTERFACE:SQLite::SQLite3>)
 endif()
 
 if(MIOPEN_USE_ROCTRACER)

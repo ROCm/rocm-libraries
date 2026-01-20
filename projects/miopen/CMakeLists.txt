@@ -77,8 +77,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-include(CTest)
-
 find_package(Threads REQUIRED)
 
 find_package(ROCmCMakeBuildTools)
@@ -341,21 +339,22 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
         if(MIOPEN_BUILD_CK)
             include(cmake/Dependencies.cmake)
 
-            execute_process (
-                COMMAND bash -c "grep -P -o '^[ \t]*(?<!#)[ \t]*\.\./composablekernel' ${CMAKE_SOURCE_DIR}/requirements.txt"
+            execute_process(
+                COMMAND bash -c "grep -P -o '^[ \t]*(?<!#)[ \t]*ROCm\/composable_kernel@[a-fA-F0-9]+' ${CMAKE_SOURCE_DIR}/requirements.txt"
                 OUTPUT_VARIABLE _match
             )
             if(_match)
-                message(STATUS "Found composablekernel in requirements.txt")
+                string(REGEX REPLACE "[ \t]*ROCm/composable_kernel@([a-fA-F0-9]+).*" "\\1" COMPOSABLE_KERNEL_HASH "${_match}")
+                message(STATUS "Parsed composable_kernel hash from requirements.txt: ${COMPOSABLE_KERNEL_HASH}")
             else()
-                message(FATAL_ERROR "Could not find composablekernel in requirements.txt")
+                message(FATAL_ERROR "Could not find ROCm/composable_kernel@<hash> in requirements.txt")
             endif()
-            miopen_add_dependency(composable_kernel options NO_LOCAL)
+            miopen_add_dependency(composable_kernel HASH ${COMPOSABLE_KERNEL_HASH} options NO_LOCAL)
         else()
-            find_package(composable_kernel 1.0.0 COMPONENTS device_conv_operations)
+            find_package(composable_kernel COMPONENTS device_conv_operations)
         endif()
     endif()
-    if( MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+    if(MIOPEN_BACKEND STREQUAL "HIPNOGPU")
         set(MIOPEN_MODE_NOGPU 1)
     endif()
     set(MIOPEN_BACKEND_HIP 1)
@@ -500,7 +499,7 @@ find_package(Boost REQUIRED COMPONENTS filesystem CONFIG)
 find_path(HALF_INCLUDE_DIR half/half.hpp)
 message(STATUS "HALF_INCLUDE_DIR: ${HALF_INCLUDE_DIR}")
 
-option( MIOPEN_DEBUG_FIND_DB_CACHING "Use system find-db caching" ON)
+option(MIOPEN_DEBUG_FIND_DB_CACHING "Use system find-db caching" ON)
 
 if(WIN32)
     set( DATA_INSTALL_DIR bin )
@@ -552,8 +551,8 @@ if(NOT WIN32 AND MIOPEN_USE_ROCTRACER)
     find_path(ROCTRACER_INCLUDE_DIR "roctracer/roctx.h")
     find_library(rocTracer roctx64)
     if(rocTracer AND ROCTRACER_INCLUDE_DIR)
-        MESSAGE(STATUS "Build with rocTracer: " ${rocTracer})
-        MESSAGE(STATUS "rocTracer include directory: " ${ROCTRACER_INCLUDE_DIR})
+        message(STATUS "Build with rocTracer: " ${rocTracer})
+        message(STATUS "rocTracer include directory: " ${ROCTRACER_INCLUDE_DIR})
         set(MIOPEN_PACKAGE_REQS "${MIOPEN_PACKAGE_REQS}, roctracer")
     else()
         message(WARNING "rocTracer cannot be found! Build without rocTracer")
