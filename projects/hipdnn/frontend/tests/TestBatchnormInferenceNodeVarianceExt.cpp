@@ -77,7 +77,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateNode)
     batchnormAttributes.set_variance(varianceTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
-    epsilonTensor->set_dim({1});
+    epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
     GraphAttributes graphAttributes;
@@ -164,7 +164,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateNodeMissingValues)
     varianceTensor->set_dim({1, 64, 1, 1});
 
     auto epsilonTensor = batchnormAttributes.get_epsilon();
-    epsilonTensor->set_dim({1});
+    epsilonTensor->set_dim({1}).set_value(1e-5);
 
     batchnormAttributesCopy = batchnormAttributes;
     BatchnormInferenceNodeVarianceExt nodeWithAllValues(std::move(batchnormAttributesCopy),
@@ -274,7 +274,8 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PackNode)
         .set_name("EpsilonTensor")
         .set_data_type(DataType::FLOAT)
         .set_dim({1})
-        .set_stride({1});
+        .set_stride({1})
+        .set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
     GraphAttributes graphAttributes;
@@ -382,7 +383,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsMismatchedInputOut
     batchnormAttributes.set_variance(varianceTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
-    epsilonTensor->set_dim({1});
+    epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
     GraphAttributes graphAttributes;
@@ -420,7 +421,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsMismatchedChannelD
     batchnormAttributes.set_variance(varianceTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
-    epsilonTensor->set_dim({1});
+    epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
     GraphAttributes graphAttributes;
@@ -458,7 +459,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsInvalidScaleTensor
     batchnormAttributes.set_variance(varianceTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
-    epsilonTensor->set_dim({1});
+    epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
     GraphAttributes graphAttributes;
@@ -496,7 +497,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsInvalidBiasTensorS
     batchnormAttributes.set_variance(varianceTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
-    epsilonTensor->set_dim({1});
+    epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
     GraphAttributes graphAttributes;
@@ -534,7 +535,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsInvalidMeanTensorS
     batchnormAttributes.set_variance(varianceTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
-    epsilonTensor->set_dim({1});
+    epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
     GraphAttributes graphAttributes;
@@ -572,7 +573,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateRejectsInvalidVarianceTen
     batchnormAttributes.set_variance(varianceTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
-    epsilonTensor->set_dim({1});
+    epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
     GraphAttributes graphAttributes;
@@ -615,7 +616,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateAcceptsSpatialDimensionEq
     batchnormAttributes.set_variance(varianceTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
-    epsilonTensor->set_dim({1});
+    epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
     GraphAttributes graphAttributes;
@@ -653,7 +654,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateAcceptsValidSpatialDimens
     batchnormAttributes.set_variance(varianceTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
-    epsilonTensor->set_dim({1});
+    epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
     GraphAttributes graphAttributes;
@@ -695,7 +696,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateAcceptsValid5DSpatialDime
     batchnormAttributes.set_variance(varianceTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
-    epsilonTensor->set_dim({1});
+    epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
     GraphAttributes graphAttributes;
@@ -733,7 +734,7 @@ TEST(TestBatchnormInferenceNodeVarianceExt, PreValidateAccepts5DSpatialDimension
     batchnormAttributes.set_variance(varianceTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
-    epsilonTensor->set_dim({1});
+    epsilonTensor->set_dim({1}).set_value(1e-5);
     batchnormAttributes.set_epsilon(epsilonTensor);
 
     GraphAttributes graphAttributes;

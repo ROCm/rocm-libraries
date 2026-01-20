@@ -31,7 +31,7 @@ struct BatchnormFwdTensorBundle : public hipdnn_test_sdk::utilities::GraphTensor
         randomizeTensor(attributes.scale_tensor_uid(), 0.0f, 1.0f, seed);
         randomizeTensor(attributes.bias_tensor_uid(), 0.0f, 1.0f, seed);
         randomizeTensor(attributes.mean_tensor_uid(), 0.0f, 1.0f, seed);
-        randomizeTensor(attributes.inv_variance_tensor_uid(), 0.1f, 1.0f, seed);
+        randomizeTensor(attributes.inv_variance_tensor_uid(), 1.0f, 3.0f, seed);
     }
 };
 
