@@ -663,7 +663,6 @@ struct FloatConstraintT : public ::flatbuffers::NativeTable {
   typedef FloatConstraint TableType;
   double min_value = 0.0;
   double max_value = 0.0;
-  std::vector<double> valid_values{};
 };
 
 struct FloatConstraint FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -671,8 +670,7 @@ struct FloatConstraint FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef FloatConstraintBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_MIN_VALUE = 4,
-    VT_MAX_VALUE = 6,
-    VT_VALID_VALUES = 8
+    VT_MAX_VALUE = 6
   };
   double min_value() const {
     return GetField<double>(VT_MIN_VALUE, 0.0);
@@ -686,18 +684,10 @@ struct FloatConstraint FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   bool mutate_max_value(double _max_value = 0.0) {
     return SetField<double>(VT_MAX_VALUE, _max_value, 0.0);
   }
-  const ::flatbuffers::Vector<double> *valid_values() const {
-    return GetPointer<const ::flatbuffers::Vector<double> *>(VT_VALID_VALUES);
-  }
-  ::flatbuffers::Vector<double> *mutable_valid_values() {
-    return GetPointer<::flatbuffers::Vector<double> *>(VT_VALID_VALUES);
-  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<double>(verifier, VT_MIN_VALUE, 8) &&
            VerifyField<double>(verifier, VT_MAX_VALUE, 8) &&
-           VerifyOffset(verifier, VT_VALID_VALUES) &&
-           verifier.VerifyVector(valid_values()) &&
            verifier.EndTable();
   }
   FloatConstraintT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -715,9 +705,6 @@ struct FloatConstraintBuilder {
   void add_max_value(double max_value) {
     fbb_.AddElement<double>(FloatConstraint::VT_MAX_VALUE, max_value, 0.0);
   }
-  void add_valid_values(::flatbuffers::Offset<::flatbuffers::Vector<double>> valid_values) {
-    fbb_.AddOffset(FloatConstraint::VT_VALID_VALUES, valid_values);
-  }
   explicit FloatConstraintBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -732,26 +719,11 @@ struct FloatConstraintBuilder {
 inline ::flatbuffers::Offset<FloatConstraint> CreateFloatConstraint(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     double min_value = 0.0,
-    double max_value = 0.0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<double>> valid_values = 0) {
+    double max_value = 0.0) {
   FloatConstraintBuilder builder_(_fbb);
   builder_.add_max_value(max_value);
   builder_.add_min_value(min_value);
-  builder_.add_valid_values(valid_values);
   return builder_.Finish();
-}
-
-inline ::flatbuffers::Offset<FloatConstraint> CreateFloatConstraintDirect(
-    ::flatbuffers::FlatBufferBuilder &_fbb,
-    double min_value = 0.0,
-    double max_value = 0.0,
-    const std::vector<double> *valid_values = nullptr) {
-  auto valid_values__ = valid_values ? _fbb.CreateVector<double>(*valid_values) : 0;
-  return hipdnn_data_sdk::data_objects::CreateFloatConstraint(
-      _fbb,
-      min_value,
-      max_value,
-      valid_values__);
 }
 
 ::flatbuffers::Offset<FloatConstraint> CreateFloatConstraint(::flatbuffers::FlatBufferBuilder &_fbb, const FloatConstraintT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -843,9 +815,8 @@ struct KnobT : public ::flatbuffers::NativeTable {
   int64_t knob_id = 0;
   std::string knob_id_str{};
   std::string description{};
-  hipdnn_data_sdk::data_objects::KnobValueUnion value_type{};
   hipdnn_data_sdk::data_objects::KnobValueUnion default_value{};
-  hipdnn_data_sdk::data_objects::KnobConstraintUnion constraints{};
+  hipdnn_data_sdk::data_objects::KnobConstraintUnion constraint{};
   bool deprecated = false;
 };
 
@@ -856,13 +827,11 @@ struct Knob FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_KNOB_ID = 4,
     VT_KNOB_ID_STR = 6,
     VT_DESCRIPTION = 8,
-    VT_VALUE_TYPE_TYPE = 10,
-    VT_VALUE_TYPE = 12,
-    VT_DEFAULT_VALUE_TYPE = 14,
-    VT_DEFAULT_VALUE = 16,
-    VT_CONSTRAINTS_TYPE = 18,
-    VT_CONSTRAINTS = 20,
-    VT_DEPRECATED = 22
+    VT_DEFAULT_VALUE_TYPE = 10,
+    VT_DEFAULT_VALUE = 12,
+    VT_CONSTRAINT_TYPE = 14,
+    VT_CONSTRAINT = 16,
+    VT_DEPRECATED = 18
   };
   int64_t knob_id() const {
     return GetField<int64_t>(VT_KNOB_ID, 0);
@@ -881,25 +850,6 @@ struct Knob FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   }
   ::flatbuffers::String *mutable_description() {
     return GetPointer<::flatbuffers::String *>(VT_DESCRIPTION);
-  }
-  hipdnn_data_sdk::data_objects::KnobValue value_type_type() const {
-    return static_cast<hipdnn_data_sdk::data_objects::KnobValue>(GetField<uint8_t>(VT_VALUE_TYPE_TYPE, 0));
-  }
-  const void *value_type() const {
-    return GetPointer<const void *>(VT_VALUE_TYPE);
-  }
-  template<typename T> const T *value_type_as() const;
-  const hipdnn_data_sdk::data_objects::IntValue *value_type_as_IntValue() const {
-    return value_type_type() == hipdnn_data_sdk::data_objects::KnobValue::IntValue ? static_cast<const hipdnn_data_sdk::data_objects::IntValue *>(value_type()) : nullptr;
-  }
-  const hipdnn_data_sdk::data_objects::FloatValue *value_type_as_FloatValue() const {
-    return value_type_type() == hipdnn_data_sdk::data_objects::KnobValue::FloatValue ? static_cast<const hipdnn_data_sdk::data_objects::FloatValue *>(value_type()) : nullptr;
-  }
-  const hipdnn_data_sdk::data_objects::StringValue *value_type_as_StringValue() const {
-    return value_type_type() == hipdnn_data_sdk::data_objects::KnobValue::StringValue ? static_cast<const hipdnn_data_sdk::data_objects::StringValue *>(value_type()) : nullptr;
-  }
-  void *mutable_value_type() {
-    return GetPointer<void *>(VT_VALUE_TYPE);
   }
   hipdnn_data_sdk::data_objects::KnobValue default_value_type() const {
     return static_cast<hipdnn_data_sdk::data_objects::KnobValue>(GetField<uint8_t>(VT_DEFAULT_VALUE_TYPE, 0));
@@ -920,24 +870,24 @@ struct Knob FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   void *mutable_default_value() {
     return GetPointer<void *>(VT_DEFAULT_VALUE);
   }
-  hipdnn_data_sdk::data_objects::KnobConstraint constraints_type() const {
-    return static_cast<hipdnn_data_sdk::data_objects::KnobConstraint>(GetField<uint8_t>(VT_CONSTRAINTS_TYPE, 0));
+  hipdnn_data_sdk::data_objects::KnobConstraint constraint_type() const {
+    return static_cast<hipdnn_data_sdk::data_objects::KnobConstraint>(GetField<uint8_t>(VT_CONSTRAINT_TYPE, 0));
   }
-  const void *constraints() const {
-    return GetPointer<const void *>(VT_CONSTRAINTS);
+  const void *constraint() const {
+    return GetPointer<const void *>(VT_CONSTRAINT);
   }
-  template<typename T> const T *constraints_as() const;
-  const hipdnn_data_sdk::data_objects::IntConstraint *constraints_as_IntConstraint() const {
-    return constraints_type() == hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint ? static_cast<const hipdnn_data_sdk::data_objects::IntConstraint *>(constraints()) : nullptr;
+  template<typename T> const T *constraint_as() const;
+  const hipdnn_data_sdk::data_objects::IntConstraint *constraint_as_IntConstraint() const {
+    return constraint_type() == hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint ? static_cast<const hipdnn_data_sdk::data_objects::IntConstraint *>(constraint()) : nullptr;
   }
-  const hipdnn_data_sdk::data_objects::FloatConstraint *constraints_as_FloatConstraint() const {
-    return constraints_type() == hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint ? static_cast<const hipdnn_data_sdk::data_objects::FloatConstraint *>(constraints()) : nullptr;
+  const hipdnn_data_sdk::data_objects::FloatConstraint *constraint_as_FloatConstraint() const {
+    return constraint_type() == hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint ? static_cast<const hipdnn_data_sdk::data_objects::FloatConstraint *>(constraint()) : nullptr;
   }
-  const hipdnn_data_sdk::data_objects::StringConstraint *constraints_as_StringConstraint() const {
-    return constraints_type() == hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint ? static_cast<const hipdnn_data_sdk::data_objects::StringConstraint *>(constraints()) : nullptr;
+  const hipdnn_data_sdk::data_objects::StringConstraint *constraint_as_StringConstraint() const {
+    return constraint_type() == hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint ? static_cast<const hipdnn_data_sdk::data_objects::StringConstraint *>(constraint()) : nullptr;
   }
-  void *mutable_constraints() {
-    return GetPointer<void *>(VT_CONSTRAINTS);
+  void *mutable_constraint() {
+    return GetPointer<void *>(VT_CONSTRAINT);
   }
   bool deprecated() const {
     return GetField<uint8_t>(VT_DEPRECATED, 0) != 0;
@@ -952,15 +902,12 @@ struct Knob FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyString(knob_id_str()) &&
            VerifyOffset(verifier, VT_DESCRIPTION) &&
            verifier.VerifyString(description()) &&
-           VerifyField<uint8_t>(verifier, VT_VALUE_TYPE_TYPE, 1) &&
-           VerifyOffset(verifier, VT_VALUE_TYPE) &&
-           VerifyKnobValue(verifier, value_type(), value_type_type()) &&
            VerifyField<uint8_t>(verifier, VT_DEFAULT_VALUE_TYPE, 1) &&
            VerifyOffset(verifier, VT_DEFAULT_VALUE) &&
            VerifyKnobValue(verifier, default_value(), default_value_type()) &&
-           VerifyField<uint8_t>(verifier, VT_CONSTRAINTS_TYPE, 1) &&
-           VerifyOffset(verifier, VT_CONSTRAINTS) &&
-           VerifyKnobConstraint(verifier, constraints(), constraints_type()) &&
+           VerifyField<uint8_t>(verifier, VT_CONSTRAINT_TYPE, 1) &&
+           VerifyOffset(verifier, VT_CONSTRAINT) &&
+           VerifyKnobConstraint(verifier, constraint(), constraint_type()) &&
            VerifyField<uint8_t>(verifier, VT_DEPRECATED, 1) &&
            verifier.EndTable();
   }
@@ -968,18 +915,6 @@ struct Knob FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   void UnPackTo(KnobT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
   static ::flatbuffers::Offset<Knob> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const KnobT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 };
-
-template<> inline const hipdnn_data_sdk::data_objects::IntValue *Knob::value_type_as<hipdnn_data_sdk::data_objects::IntValue>() const {
-  return value_type_as_IntValue();
-}
-
-template<> inline const hipdnn_data_sdk::data_objects::FloatValue *Knob::value_type_as<hipdnn_data_sdk::data_objects::FloatValue>() const {
-  return value_type_as_FloatValue();
-}
-
-template<> inline const hipdnn_data_sdk::data_objects::StringValue *Knob::value_type_as<hipdnn_data_sdk::data_objects::StringValue>() const {
-  return value_type_as_StringValue();
-}
 
 template<> inline const hipdnn_data_sdk::data_objects::IntValue *Knob::default_value_as<hipdnn_data_sdk::data_objects::IntValue>() const {
   return default_value_as_IntValue();
@@ -993,16 +928,16 @@ template<> inline const hipdnn_data_sdk::data_objects::StringValue *Knob::defaul
   return default_value_as_StringValue();
 }
 
-template<> inline const hipdnn_data_sdk::data_objects::IntConstraint *Knob::constraints_as<hipdnn_data_sdk::data_objects::IntConstraint>() const {
-  return constraints_as_IntConstraint();
+template<> inline const hipdnn_data_sdk::data_objects::IntConstraint *Knob::constraint_as<hipdnn_data_sdk::data_objects::IntConstraint>() const {
+  return constraint_as_IntConstraint();
 }
 
-template<> inline const hipdnn_data_sdk::data_objects::FloatConstraint *Knob::constraints_as<hipdnn_data_sdk::data_objects::FloatConstraint>() const {
-  return constraints_as_FloatConstraint();
+template<> inline const hipdnn_data_sdk::data_objects::FloatConstraint *Knob::constraint_as<hipdnn_data_sdk::data_objects::FloatConstraint>() const {
+  return constraint_as_FloatConstraint();
 }
 
-template<> inline const hipdnn_data_sdk::data_objects::StringConstraint *Knob::constraints_as<hipdnn_data_sdk::data_objects::StringConstraint>() const {
-  return constraints_as_StringConstraint();
+template<> inline const hipdnn_data_sdk::data_objects::StringConstraint *Knob::constraint_as<hipdnn_data_sdk::data_objects::StringConstraint>() const {
+  return constraint_as_StringConstraint();
 }
 
 struct KnobBuilder {
@@ -1018,23 +953,17 @@ struct KnobBuilder {
   void add_description(::flatbuffers::Offset<::flatbuffers::String> description) {
     fbb_.AddOffset(Knob::VT_DESCRIPTION, description);
   }
-  void add_value_type_type(hipdnn_data_sdk::data_objects::KnobValue value_type_type) {
-    fbb_.AddElement<uint8_t>(Knob::VT_VALUE_TYPE_TYPE, static_cast<uint8_t>(value_type_type), 0);
-  }
-  void add_value_type(::flatbuffers::Offset<void> value_type) {
-    fbb_.AddOffset(Knob::VT_VALUE_TYPE, value_type);
-  }
   void add_default_value_type(hipdnn_data_sdk::data_objects::KnobValue default_value_type) {
     fbb_.AddElement<uint8_t>(Knob::VT_DEFAULT_VALUE_TYPE, static_cast<uint8_t>(default_value_type), 0);
   }
   void add_default_value(::flatbuffers::Offset<void> default_value) {
     fbb_.AddOffset(Knob::VT_DEFAULT_VALUE, default_value);
   }
-  void add_constraints_type(hipdnn_data_sdk::data_objects::KnobConstraint constraints_type) {
-    fbb_.AddElement<uint8_t>(Knob::VT_CONSTRAINTS_TYPE, static_cast<uint8_t>(constraints_type), 0);
+  void add_constraint_type(hipdnn_data_sdk::data_objects::KnobConstraint constraint_type) {
+    fbb_.AddElement<uint8_t>(Knob::VT_CONSTRAINT_TYPE, static_cast<uint8_t>(constraint_type), 0);
   }
-  void add_constraints(::flatbuffers::Offset<void> constraints) {
-    fbb_.AddOffset(Knob::VT_CONSTRAINTS, constraints);
+  void add_constraint(::flatbuffers::Offset<void> constraint) {
+    fbb_.AddOffset(Knob::VT_CONSTRAINT, constraint);
   }
   void add_deprecated(bool deprecated) {
     fbb_.AddElement<uint8_t>(Knob::VT_DEPRECATED, static_cast<uint8_t>(deprecated), 0);
@@ -1055,24 +984,20 @@ inline ::flatbuffers::Offset<Knob> CreateKnob(
     int64_t knob_id = 0,
     ::flatbuffers::Offset<::flatbuffers::String> knob_id_str = 0,
     ::flatbuffers::Offset<::flatbuffers::String> description = 0,
-    hipdnn_data_sdk::data_objects::KnobValue value_type_type = hipdnn_data_sdk::data_objects::KnobValue::NONE,
-    ::flatbuffers::Offset<void> value_type = 0,
     hipdnn_data_sdk::data_objects::KnobValue default_value_type = hipdnn_data_sdk::data_objects::KnobValue::NONE,
     ::flatbuffers::Offset<void> default_value = 0,
-    hipdnn_data_sdk::data_objects::KnobConstraint constraints_type = hipdnn_data_sdk::data_objects::KnobConstraint::NONE,
-    ::flatbuffers::Offset<void> constraints = 0,
+    hipdnn_data_sdk::data_objects::KnobConstraint constraint_type = hipdnn_data_sdk::data_objects::KnobConstraint::NONE,
+    ::flatbuffers::Offset<void> constraint = 0,
     bool deprecated = false) {
   KnobBuilder builder_(_fbb);
   builder_.add_knob_id(knob_id);
-  builder_.add_constraints(constraints);
+  builder_.add_constraint(constraint);
   builder_.add_default_value(default_value);
-  builder_.add_value_type(value_type);
   builder_.add_description(description);
   builder_.add_knob_id_str(knob_id_str);
   builder_.add_deprecated(deprecated);
-  builder_.add_constraints_type(constraints_type);
+  builder_.add_constraint_type(constraint_type);
   builder_.add_default_value_type(default_value_type);
-  builder_.add_value_type_type(value_type_type);
   return builder_.Finish();
 }
 
@@ -1081,12 +1006,10 @@ inline ::flatbuffers::Offset<Knob> CreateKnobDirect(
     int64_t knob_id = 0,
     const char *knob_id_str = nullptr,
     const char *description = nullptr,
-    hipdnn_data_sdk::data_objects::KnobValue value_type_type = hipdnn_data_sdk::data_objects::KnobValue::NONE,
-    ::flatbuffers::Offset<void> value_type = 0,
     hipdnn_data_sdk::data_objects::KnobValue default_value_type = hipdnn_data_sdk::data_objects::KnobValue::NONE,
     ::flatbuffers::Offset<void> default_value = 0,
-    hipdnn_data_sdk::data_objects::KnobConstraint constraints_type = hipdnn_data_sdk::data_objects::KnobConstraint::NONE,
-    ::flatbuffers::Offset<void> constraints = 0,
+    hipdnn_data_sdk::data_objects::KnobConstraint constraint_type = hipdnn_data_sdk::data_objects::KnobConstraint::NONE,
+    ::flatbuffers::Offset<void> constraint = 0,
     bool deprecated = false) {
   auto knob_id_str__ = knob_id_str ? _fbb.CreateString(knob_id_str) : 0;
   auto description__ = description ? _fbb.CreateString(description) : 0;
@@ -1095,12 +1018,10 @@ inline ::flatbuffers::Offset<Knob> CreateKnobDirect(
       knob_id,
       knob_id_str__,
       description__,
-      value_type_type,
-      value_type,
       default_value_type,
       default_value,
-      constraints_type,
-      constraints,
+      constraint_type,
+      constraint,
       deprecated);
 }
 
@@ -1270,8 +1191,7 @@ inline ::flatbuffers::Offset<IntConstraint> CreateIntConstraint(::flatbuffers::F
 inline bool operator==(const FloatConstraintT &lhs, const FloatConstraintT &rhs) {
   return
       (lhs.min_value == rhs.min_value) &&
-      (lhs.max_value == rhs.max_value) &&
-      (lhs.valid_values == rhs.valid_values);
+      (lhs.max_value == rhs.max_value);
 }
 
 inline bool operator!=(const FloatConstraintT &lhs, const FloatConstraintT &rhs) {
@@ -1290,7 +1210,6 @@ inline void FloatConstraint::UnPackTo(FloatConstraintT *_o, const ::flatbuffers:
   (void)_resolver;
   { auto _e = min_value(); _o->min_value = _e; }
   { auto _e = max_value(); _o->max_value = _e; }
-  { auto _e = valid_values(); if (_e) { _o->valid_values.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->valid_values[_i] = _e->Get(_i); } } else { _o->valid_values.resize(0); } }
 }
 
 inline ::flatbuffers::Offset<FloatConstraint> FloatConstraint::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const FloatConstraintT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -1303,12 +1222,10 @@ inline ::flatbuffers::Offset<FloatConstraint> CreateFloatConstraint(::flatbuffer
   struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const FloatConstraintT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
   auto _min_value = _o->min_value;
   auto _max_value = _o->max_value;
-  auto _valid_values = _o->valid_values.size() ? _fbb.CreateVector(_o->valid_values) : 0;
   return hipdnn_data_sdk::data_objects::CreateFloatConstraint(
       _fbb,
       _min_value,
-      _max_value,
-      _valid_values);
+      _max_value);
 }
 
 
@@ -1358,9 +1275,8 @@ inline bool operator==(const KnobT &lhs, const KnobT &rhs) {
       (lhs.knob_id == rhs.knob_id) &&
       (lhs.knob_id_str == rhs.knob_id_str) &&
       (lhs.description == rhs.description) &&
-      (lhs.value_type == rhs.value_type) &&
       (lhs.default_value == rhs.default_value) &&
-      (lhs.constraints == rhs.constraints) &&
+      (lhs.constraint == rhs.constraint) &&
       (lhs.deprecated == rhs.deprecated);
 }
 
@@ -1381,12 +1297,10 @@ inline void Knob::UnPackTo(KnobT *_o, const ::flatbuffers::resolver_function_t *
   { auto _e = knob_id(); _o->knob_id = _e; }
   { auto _e = knob_id_str(); if (_e) _o->knob_id_str = _e->str(); }
   { auto _e = description(); if (_e) _o->description = _e->str(); }
-  { auto _e = value_type_type(); _o->value_type.type = _e; }
-  { auto _e = value_type(); if (_e) _o->value_type.value = hipdnn_data_sdk::data_objects::KnobValueUnion::UnPack(_e, value_type_type(), _resolver); }
   { auto _e = default_value_type(); _o->default_value.type = _e; }
   { auto _e = default_value(); if (_e) _o->default_value.value = hipdnn_data_sdk::data_objects::KnobValueUnion::UnPack(_e, default_value_type(), _resolver); }
-  { auto _e = constraints_type(); _o->constraints.type = _e; }
-  { auto _e = constraints(); if (_e) _o->constraints.value = hipdnn_data_sdk::data_objects::KnobConstraintUnion::UnPack(_e, constraints_type(), _resolver); }
+  { auto _e = constraint_type(); _o->constraint.type = _e; }
+  { auto _e = constraint(); if (_e) _o->constraint.value = hipdnn_data_sdk::data_objects::KnobConstraintUnion::UnPack(_e, constraint_type(), _resolver); }
   { auto _e = deprecated(); _o->deprecated = _e; }
 }
 
@@ -1401,24 +1315,20 @@ inline ::flatbuffers::Offset<Knob> CreateKnob(::flatbuffers::FlatBufferBuilder &
   auto _knob_id = _o->knob_id;
   auto _knob_id_str = _o->knob_id_str.empty() ? 0 : _fbb.CreateString(_o->knob_id_str);
   auto _description = _o->description.empty() ? 0 : _fbb.CreateString(_o->description);
-  auto _value_type_type = _o->value_type.type;
-  auto _value_type = _o->value_type.Pack(_fbb);
   auto _default_value_type = _o->default_value.type;
   auto _default_value = _o->default_value.Pack(_fbb);
-  auto _constraints_type = _o->constraints.type;
-  auto _constraints = _o->constraints.Pack(_fbb);
+  auto _constraint_type = _o->constraint.type;
+  auto _constraint = _o->constraint.Pack(_fbb);
   auto _deprecated = _o->deprecated;
   return hipdnn_data_sdk::data_objects::CreateKnob(
       _fbb,
       _knob_id,
       _knob_id_str,
       _description,
-      _value_type_type,
-      _value_type,
       _default_value_type,
       _default_value,
-      _constraints_type,
-      _constraints,
+      _constraint_type,
+      _constraint,
       _deprecated);
 }
 

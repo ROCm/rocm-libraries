@@ -40,7 +40,7 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
       auto hardware_fast = make_hardware(gpu_arch, 304, 65536, 8, 1.0, 1.0, 1.0, 4000000, 1.8);
       auto problem =
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
-      auto config = make_config(128, 128, 64, 32, 32, 8, 1);
+      auto config = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
       auto config_slow = config;
       auto config_fast = config;
@@ -78,7 +78,7 @@ TEST_CASE("Origami: best_grid_size", "[origami]") {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - grid size selection") {
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(1024, 1024, 4096);
-      auto config   = make_config(256, 256, 64, 32, 32, 8, 1);
+      auto config   = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
       auto grid_size = origami::streamk::select_grid_size(
           problem, hardware, config, origami::grid_selection_t::k_split_aware, hardware.N_CU);
@@ -98,11 +98,11 @@ TEST_CASE("Origami: best_macro_tile_size", "[origami]") {
       std::vector<origami::config_t> configs;
 
       // config A[0]
-      configs.push_back(make_config(256, 256, 32, 32, 32, 8, 1, 6, 0, 0));
+      configs.push_back(make_config(256, 256, 32, 32, 32, 8, false, 1, 6, 0, 0));
       // config A[1]
-      configs.push_back(make_config(128, 128, 64, 32, 32, 8, 1, 6, 0, 0));
+      configs.push_back(make_config(128, 128, 64, 32, 32, 8, false, 1, 6, 0, 0));
       // config A[2]
-      configs.push_back(make_config(64, 64, 64, 32, 32, 8, 1, 6, 0, 0));
+      configs.push_back(make_config(64, 64, 64, 32, 32, 8, false, 1, 6, 0, 0));
 
       auto results = origami::rank_configs(problem, hardware, configs);
 
@@ -153,30 +153,33 @@ TEST_CASE("Origami: select_workgroup_mapping", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - workgroup mapping selection") {
       auto hardware = make_hardware(gpu_arch);
-      auto problem  = make_problem(4096, 4096, 8192);
+      
+      // Large problem size
+      auto problem_large  = make_problem(4096, 4096, 8192);
+      auto config_large = make_config(256, 256, 32, 32, 32, 8, false, 1);
+      auto skGrid_large = ((4096 + 256 - 1) / 256) * ((4096 + 256 - 1) / 256);
+      auto mapping_large =
+          origami::select_workgroup_mapping(problem_large, hardware, config_large, skGrid_large);
 
-      auto config_large = make_config(256, 256, 32, 32, 32, 8, 1);
-      auto skGrid_large = (4096 + 256 - 1) / 256 * (4096 + 256 - 1) / 256;
-      auto [best_wgmxcc_large_tile, best_wgm_large_tile] =
-          origami::select_workgroup_mapping(problem, hardware, config_large, skGrid_large);
-
-      auto config_small = make_config(128, 128, 64, 32, 32, 8, 1);
-      auto skGrid_small = (4096 + 128 - 1) / 128 * (4096 + 128 - 1) / 128;
-      auto [best_wgmxcc_small_tile, best_wgm_small_tile] =
-          origami::select_workgroup_mapping(problem, hardware, config_small, skGrid_small);
+      // Small problem size
+      auto problem_small  = make_problem(2048, 2048, 2048);
+      auto skGrid_small = ((2048 + 256 - 1) / 256) * ((2048 + 256 - 1) / 256);
+      auto mapping_small =
+          origami::select_workgroup_mapping(problem_small, hardware, config_large, skGrid_small);
 
       // Different problem size for nonsquare test
-      origami::problem_t problem_nonsquare = problem;
-      problem_nonsquare.size.m             = 2048;
-      problem_nonsquare.size.n             = 5120;
-      auto skGrid_nonsquare                = (2048 + 128 - 1) / 128 * (5120 + 128 - 1) / 128;
-
-      auto [best_wgmxcc_nonsquare_tile, best_wgm_nonsquare] = origami::select_workgroup_mapping(
+      auto problem_nonsquare = make_problem(5120, 512, 5120);
+      auto skGrid_nonsquare  = ((5120 + 256 - 1) / 256) * ((512 + 256 - 1) / 256);
+      auto mapping_nonsquare = origami::select_workgroup_mapping(
           problem_nonsquare, hardware, config_large, skGrid_nonsquare);
 
-      REQUIRE(best_wgmxcc_large_tile == best_wgmxcc_small_tile);
-      REQUIRE(best_wgm_large_tile > best_wgm_small_tile);
-      REQUIRE(best_wgm_large_tile != best_wgm_nonsquare);
+      REQUIRE(mapping_large.wgmxccchunk >= mapping_small.wgmxccchunk);
+      REQUIRE(mapping_large.wgmxcc == mapping_small.wgmxcc);
+      REQUIRE(mapping_large.wgm >= mapping_small.wgm);
+
+      REQUIRE(mapping_large.wgmxccchunk >= mapping_nonsquare.wgmxccchunk);
+      REQUIRE(mapping_large.wgmxcc == mapping_nonsquare.wgmxcc);
+      REQUIRE(mapping_large.wgm >= mapping_nonsquare.wgm);
     }
   }
 }
@@ -200,9 +203,9 @@ TEST_CASE("GEMM: negative_occupancy", "[gemm]") {
       std::vector<origami::config_t> config;
 
       // config[0]
-      config.push_back(make_config(256, 256, 32, 16, 16, 32, -1, 6, 0, 0));
+      config.push_back(make_config(256, 256, 32, 16, 16, 32, false, -1, 6, 0, 0));
       // config[1]
-      config.push_back(make_config(32, 256, 16, 32, 32, 8, 2, 6, 0, 0));
+      config.push_back(make_config(32, 256, 16, 32, 32, 8, false, 2, 6, 0, 0));
 
       // Call select_config
       auto best_tile = origami::select_config(problem, hardware, config);
@@ -234,14 +237,14 @@ TEST_CASE("GEMM: deterministic_tie_breaking", "[gemm]") {
       std::vector<origami::config_t> config_B;
 
       // config A[0]
-      config_A.push_back(make_config(256, 64, 32, 32, 32, 8, 1, 6, 0, 0));
+      config_A.push_back(make_config(256, 64, 32, 32, 32, 8, false, 1, 6, 0, 0));
       // config A[1]
-      config_A.push_back(make_config(64, 256, 32, 32, 32, 8, 1, 6, 0, 0));
+      config_A.push_back(make_config(64, 256, 32, 32, 32, 8, false, 1, 6, 0, 0));
 
       // config B[0] (reversed order)
-      config_B.push_back(make_config(64, 256, 32, 32, 32, 8, 1, 6, 0, 0));
+      config_B.push_back(make_config(64, 256, 32, 32, 32, 8, false, 1, 6, 0, 0));
       // config B[1] (reversed order)
-      config_B.push_back(make_config(256, 64, 32, 32, 32, 8, 1, 6, 0, 0));
+      config_B.push_back(make_config(256, 64, 32, 32, 32, 8, false, 1, 6, 0, 0));
 
       // Call select_config with both orderings
       auto best_tile_A = origami::select_config(problem, hardware, config_A);
@@ -283,16 +286,16 @@ TEST_CASE("GEMM: Verify deterministic tile selection", "[gemm]") {
       std::vector<origami::config_t> config_B;
 
       // config A[0]
-      config_A.push_back(make_config(256, 160, 32, 16, 16, 32, 1, 6, 0, 0));  // Tile A
+      config_A.push_back(make_config(256, 160, 32, 16, 16, 32, false, 1, 6, 0, 0));  // Tile A
       // config A[1]
-      config_A.push_back(make_config(192, 160, 64, 16, 16, 32, 1, 6, 0, 0));  // Tile B
+      config_A.push_back(make_config(192, 160, 64, 16, 16, 32, false, 1, 6, 0, 0));  // Tile B
 
       // config B[0] Previous two tiles + a new one
-      config_B.push_back(make_config(256, 160, 32, 16, 16, 32, 1, 6, 0, 0));  // Tile A
+      config_B.push_back(make_config(256, 160, 32, 16, 16, 32, false, 1, 6, 0, 0));  // Tile A
       // config B[1]
-      config_B.push_back(make_config(192, 160, 64, 16, 16, 32, 1, 6, 0, 0));  // Tile B
+      config_B.push_back(make_config(192, 160, 64, 16, 16, 32, false, 1, 6, 0, 0));  // Tile B
       // config B[2]
-      config_B.push_back(make_config(192, 160, 32, 16, 16, 32, 1, 6, 0, 0));  // Tile C
+      config_B.push_back(make_config(192, 160, 32, 16, 16, 32, false, 1, 6, 0, 0));  // Tile C
 
       // Call select_config with both tile configs
       auto best_tile_A = origami::select_config(problem, hardware, config_A);
