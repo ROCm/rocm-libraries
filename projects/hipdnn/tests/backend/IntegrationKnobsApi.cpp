@@ -156,7 +156,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateIntKnob)
 
         auto knob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(knobData[i].ptr);
 
-        if(knob->knob_id_str()->str() == "test.int_knob")
+        if(knob->knob_id()->str() == "test.int_knob")
         {
             foundIntKnob = true;
 
@@ -217,7 +217,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateFloatKnob)
     {
         auto knob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(knobData[i].ptr);
 
-        if(knob->knob_id_str()->str() == "test.float_knob")
+        if(knob->knob_id()->str() == "test.float_knob")
         {
             foundFloatKnob = true;
 
@@ -277,7 +277,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateStringKnob)
     {
         auto knob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(knobData[i].ptr);
 
-        if(knob->knob_id_str()->str() == "test.string_knob")
+        if(knob->knob_id()->str() == "test.string_knob")
         {
             foundStringKnob = true;
 
@@ -347,7 +347,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateDeprecatedKnob)
     {
         auto knob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(knobData[i].ptr);
 
-        if(knob->knob_id_str()->str() == "test.deprecated_knob")
+        if(knob->knob_id()->str() == "test.deprecated_knob")
         {
             foundDeprecatedKnob = true;
 
