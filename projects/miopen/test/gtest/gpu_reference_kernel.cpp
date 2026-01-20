@@ -47,26 +47,46 @@
 #include "../verify.hpp"
 
 namespace {
-using TestCase2D = std::tuple<int, int, int, int, int, int, int, int, int, int, int, int, int, int>;
-using TestCase3D = std::tuple<int,
-                              int,
-                              int,
-                              int,
-                              int,
-                              int,
-                              int,
-                              int,
-                              int,
-                              int,
-                              int,
-                              int,
-                              int,
-                              int,
-                              int,
-                              int,
-                              int,
-                              int,
-                              int>;
+struct TestCase2D
+{
+    int n;
+    int wi;
+    int hi;
+    int c;
+    int k;
+    int fx;
+    int fy;
+    int px;
+    int py;
+    int sx;
+    int sy;
+    int dx;
+    int dy;
+    int g;
+};
+
+struct TestCase3D
+{
+    int n;
+    int di;
+    int wi;
+    int hi;
+    int c;
+    int k;
+    int fz;
+    int fx;
+    int fy;
+    int pz;
+    int px;
+    int py;
+    int sz;
+    int sx;
+    int sy;
+    int dz;
+    int dx;
+    int dy;
+    int g;
+};
 
 static constexpr int RAND_INTEGER_MAX       = 5;
 static constexpr int RAND_INTEGER_MIN       = -4;
@@ -75,53 +95,22 @@ static constexpr float MAX_INTEGER_INTERVAL = 4.f;
 auto NameGenerator(const ::testing::TestParamInfo<TestCase2D>& info)
 {
     std::stringstream ss{};
-    int n                                                        = 0;
-    int wi                                                       = 0;
-    int hi                                                       = 0;
-    int c                                                        = 0;
-    int k                                                        = 0;
-    int fx                                                       = 0;
-    int fy                                                       = 0;
-    int px                                                       = 0;
-    int py                                                       = 0;
-    int sx                                                       = 0;
-    int sy                                                       = 0;
-    int dx                                                       = 0;
-    int dy                                                       = 0;
-    int g                                                        = 0;
-    std::tie(n, wi, hi, c, k, fx, fy, px, py, sx, sy, dx, dy, g) = info.param;
-    ss << "n" << n << "wi" << wi << "hi" << hi << "c" << c << "k" << k << "fx" << fx << "fy" << fy
-       << "px" << px << "py" << py << "sx" << sx << "sy" << sy << "dx" << dx << "dy" << dy << "g"
-       << g;
+    ss << "n" << info.param.n << "wi" << info.param.wi << "hi" << info.param.hi << "c"
+       << info.param.c << "k" << info.param.k << "fx" << info.param.fx << "fy" << info.param.fy
+       << "px" << info.param.px << "py" << info.param.py << "sx" << info.param.sx << "sy"
+       << info.param.sy << "dx" << info.param.dx << "dy" << info.param.dy << "g" << info.param.g;
     return ss.str();
 }
 
 auto NameGenerator(const ::testing::TestParamInfo<TestCase3D>& info)
 {
     std::stringstream ss{};
-    int n                                                                            = 0;
-    int di                                                                           = 0;
-    int wi                                                                           = 0;
-    int hi                                                                           = 0;
-    int c                                                                            = 0;
-    int k                                                                            = 0;
-    int fz                                                                           = 0;
-    int fx                                                                           = 0;
-    int fy                                                                           = 0;
-    int pz                                                                           = 0;
-    int px                                                                           = 0;
-    int py                                                                           = 0;
-    int sz                                                                           = 0;
-    int sx                                                                           = 0;
-    int sy                                                                           = 0;
-    int dz                                                                           = 0;
-    int dx                                                                           = 0;
-    int dy                                                                           = 0;
-    int g                                                                            = 0;
-    std::tie(n, di, wi, hi, c, k, fz, fx, fy, pz, px, py, sz, sx, sy, dz, dx, dy, g) = info.param;
-    ss << "n" << n << "di" << di << "wi" << wi << "hi" << hi << "c" << c << "k" << k << "fz" << fz
-       << "fx" << fx << "fy" << fy << "pz" << pz << "px" << px << "py" << py << "sz" << sz << "sx"
-       << sx << "sy" << sy << "dz" << dz << "dx" << dx << "dy" << dy << "g" << g;
+    ss << "n" << info.param.n << "di" << info.param.di << "wi" << info.param.wi << "hi"
+       << info.param.hi << "c" << info.param.c << "k" << info.param.k << "fz" << info.param.fz
+       << "fx" << info.param.fx << "fy" << info.param.fy << "pz" << info.param.pz << "px"
+       << info.param.px << "py" << info.param.py << "sz" << info.param.sz << "sx" << info.param.sx
+       << "sy" << info.param.sy << "dz" << info.param.dz << "dx" << info.param.dx << "dy"
+       << info.param.dy << "g" << info.param.g;
 
     return ss.str();
 }
@@ -204,8 +193,8 @@ std::vector<TestCase2D> generate_conv_2d()
                                     continue;
                                 if((fx == 3 && fy == 5) || (fx == 5 && fy == 3))
                                     continue;
-                                result.push_back(std::make_tuple(
-                                    n, wi, hi, c, k, fx, fy, px, py, sx, sy, dx, dy, g));
+                                result.push_back(
+                                    TestCase2D{n, wi, hi, c, k, fx, fy, px, py, sx, sy, dx, dy, g});
                             }
                         }
                     }
@@ -259,25 +248,25 @@ std::vector<TestCase3D> generate_conv_3d()
                             continue;
                         if((fx == 3 && fy == 5) || (fx == 5 && fy == 3))
                             continue;
-                        result.push_back(std::make_tuple(n,
-                                                         di,
-                                                         wi,
-                                                         hi,
-                                                         c,
-                                                         k,
-                                                         fz,
-                                                         fx,
-                                                         fy,
-                                                         pz,
-                                                         px,
-                                                         py,
-                                                         sz,
-                                                         sx,
-                                                         sy,
-                                                         dz,
-                                                         dx,
-                                                         dy,
-                                                         g));
+                        result.push_back(TestCase3D{n,
+                                                    di,
+                                                    wi,
+                                                    hi,
+                                                    c,
+                                                    k,
+                                                    fz,
+                                                    fx,
+                                                    fy,
+                                                    pz,
+                                                    px,
+                                                    py,
+                                                    sz,
+                                                    sx,
+                                                    sy,
+                                                    dz,
+                                                    dx,
+                                                    dy,
+                                                    g});
                     }
                 }
             }
@@ -382,7 +371,21 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
 
     void Run()
     {
-        auto [n, wi, hi, c, k, fx, fy, px, py, sx, sy, dx, dy, g] = GetParam();
+        auto const& p = GetParam();
+        int n         = p.n;
+        int wi        = p.wi;
+        int hi        = p.hi;
+        int c         = p.c;
+        int k         = p.k;
+        int fx        = p.fx;
+        int fy        = p.fy;
+        int px        = p.px;
+        int py        = p.py;
+        int sx        = p.sx;
+        int sy        = p.sy;
+        int dx        = p.dx;
+        int dy        = p.dy;
+        int g         = p.g;
         miopenConvolutionDescriptor_t convDesc;
         miopenTensorDescriptor_t inDesc, weiDesc, outDesc;
 
@@ -1120,7 +1123,7 @@ using GPU_reference_kernel_bww_3d_NCDHW_FP16_FP16 =
                           half_float::half,
                           miopenTensorNCDHW>;
 
-using GPU_reference_kernel_bww_3d_NCDHW_BFP32_BFP32 =
+using GPU_reference_kernel_bww_3d_NCDHW_BFP16_BFP16 =
     gpu_reference_conv_3d<miopen::conv::Direction::BackwardWeights,
                           bfloat16,
                           bfloat16,
@@ -1218,7 +1221,7 @@ using GPU_reference_kernel_bww_3d_NDHWC_FP16_FP16 =
                           half_float::half,
                           miopenTensorNDHWC>;
 
-using GPU_reference_kernel_bww_3d_NDHWC_BFP32_BFP32 =
+using GPU_reference_kernel_bww_3d_NDHWC_BFP16_BFP16 =
     gpu_reference_conv_3d<miopen::conv::Direction::BackwardWeights,
                           bfloat16,
                           bfloat16,
@@ -1246,7 +1249,7 @@ TEST_P(GPU_reference_kernel_bwd_3d_NCDHW_FP16_FP16, Test) { Run(); }
 TEST_P(GPU_reference_kernel_bwd_3d_NCDHW_BFP16_BFP16, Test) { Run(); }
 TEST_P(GPU_reference_kernel_bww_3d_NCDHW_FP32_FP32, Test) { Run(); }
 TEST_P(GPU_reference_kernel_bww_3d_NCDHW_FP16_FP16, Test) { Run(); }
-TEST_P(GPU_reference_kernel_bww_3d_NCDHW_BFP32_BFP32, Test) { Run(); }
+TEST_P(GPU_reference_kernel_bww_3d_NCDHW_BFP16_BFP16, Test) { Run(); }
 
 TEST_P(GPU_reference_kernel_fwd_2d_NHWC_FP32_FP32, Test) { Run(); }
 TEST_P(GPU_reference_kernel_fwd_2d_NHWC_FP16_FP16, Test) { Run(); }
@@ -1270,7 +1273,7 @@ TEST_P(GPU_reference_kernel_bwd_3d_NDHWC_FP16_FP16, Test) { Run(); }
 TEST_P(GPU_reference_kernel_bwd_3d_NDHWC_BFP16_BFP16, Test) { Run(); }
 TEST_P(GPU_reference_kernel_bww_3d_NDHWC_FP32_FP32, Test) { Run(); }
 TEST_P(GPU_reference_kernel_bww_3d_NDHWC_FP16_FP16, Test) { Run(); }
-TEST_P(GPU_reference_kernel_bww_3d_NDHWC_BFP32_BFP32, Test) { Run(); }
+TEST_P(GPU_reference_kernel_bww_3d_NDHWC_BFP16_BFP16, Test) { Run(); }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_2d_NCHW_FP32_FP32,
@@ -1358,7 +1361,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          ::testing::ValuesIn(GenCases3D()),
                          [](const auto& info) { return NameGenerator(info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_reference_kernel_bww_3d_NCDHW_BFP32_BFP32,
+                         GPU_reference_kernel_bww_3d_NCDHW_BFP16_BFP16,
                          ::testing::ValuesIn(GenCases3D()),
                          [](const auto& info) { return NameGenerator(info); });
 
@@ -1448,6 +1451,6 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          ::testing::ValuesIn(GenCases3D()),
                          [](const auto& info) { return NameGenerator(info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_reference_kernel_bww_3d_NDHWC_BFP32_BFP32,
+                         GPU_reference_kernel_bww_3d_NDHWC_BFP16_BFP16,
                          ::testing::ValuesIn(GenCases3D()),
                          [](const auto& info) { return NameGenerator(info); });
