@@ -3532,11 +3532,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if item[0] != -1:
           module.add(self.tailLoopFreeVgpr(item[0], item[1]))
 
-      # KRS: tail is finished; sgprKRingShift must not be remapped (e.g. to 0) and can be released now.
-      # Emit an explicit UNDEF here so it lands right after the tail VALU vgpr UNDEF block.
-      if kernel["KRingShift"] and kernel["BufferLoad"]:
-        module.add(TextBlock(".set sgprKRingShift, UNDEF\n"))
-
       # Check in VGPR for DTV
       for item in vDtvResources:
         if item[0] != -1:

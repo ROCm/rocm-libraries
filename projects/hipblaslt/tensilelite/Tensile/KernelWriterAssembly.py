@@ -5276,6 +5276,8 @@ class KernelWriterAssembly(KernelWriter):
         "vgprKrsScratch",
       ):
         imod.add(ValueSet(name=n, value="UNDEF", format=-1))
+      # KRS: also release the real sgprKRingShift here (proper pool + ValueSet handling).
+      imod.add(self.undefineSgpr("KRingShift"))
 
     loadALabel  = Label(label="LoadA", comment="")
     loadBLabel  = Label(label="LoadB", comment="")
@@ -6865,7 +6867,6 @@ class KernelWriterAssembly(KernelWriter):
     # MIK=1 case, we still need this code for Coalesced case
     if tail and (kernel["MatrixInstK"] > 1 or numReadsIterCoalescedA > 1 or numReadsIterCoalescedB > 1):
       if not is_wmma_v1: #mfma or wmma_v2
-
         # ToDo: Avoid using extra kReg_first for wmma_v2 case
         kReg_first  = self.vgprPool.checkOut(1,"kReg_first") # the first vgpr of remainder
         kReg        = self.vgprPool.checkOut(1,"kReg") # remainder
