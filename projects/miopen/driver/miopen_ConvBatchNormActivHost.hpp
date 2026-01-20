@@ -132,9 +132,9 @@ int miopenBNPerActivFwdInferHost(miopenTensorDescriptor_t& inputTensor,
         { // via rows
             for(int column = 0; column < width; column++)
             { // via columns
-                adjIndex = (tensorLayout == miopenTensorNCHW)
-                               ? in_cstride * cidx + width * row + column
-                               : width * channels * row + channels * column + cidx;
+                adjIndex          = (tensorLayout == miopenTensorNCHW)
+                                        ? in_cstride * cidx + width * row + column
+                                        : width * channels * row + channels * column + cidx;
                 mean              = estimatedMean[adjIndex];
                 variance          = estimatedVariance[adjIndex];
                 double elemInvVar = 1.0 / double(sqrt(variance + epsilon));
