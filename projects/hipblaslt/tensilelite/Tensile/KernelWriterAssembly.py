@@ -1367,123 +1367,7 @@ class KernelWriterAssembly(KernelWriter):
             comment="offset *= bytes/element"))
       module.add(macro)
 
-    # KRingShift: emit a reference-style tail offset macro pair once (used right before tail global reads).
-    # Split into a one-time SETUP (hoist invariants across offsets) and per-offset APPLY.
-    if kernel["KRingShift"] and kernel["BufferLoad"]:
-      module.addComment1("KRS: KRingShift tail offset macro (reference shape)")
-      # KRS tail offset macros:
-      depthU = int(kernel["DepthU"])
-      maskDU = (~(depthU - 1)) & 0xFFFFFFFF
-
-      def _krsSetupMacroFor(tc: str, name: str) -> Macro:
-        """
-        Build a SETUP macro specialized per tensor (A/B).
-
-        NOTE: We must distinguish A/B because:
-          - numChunk is computed in elements using that tensor's GlobalReadVectorWidth{tc}
-          - mainLoopBytes/headBytes are computed in BYTES using that tensor's bpe
-          - oob sentinel must use that tensor's SRD limit (Srd{tc}+2)
-        """
-        if tc not in ("A", "B"):
-          raise RuntimeError(f"KRS: invalid tc={tc}")
-
-        bpeBytes = int(kernel["ProblemType"][f"DataType{tc}"].numBytes())
-        bpeShift = int(log2(bpeBytes))
-
-        # "Chunk" in KRS corresponds to one per-lane global read vector for this tensor:
-        #   chunkElems  = GlobalReadVectorWidth{tc} (elements)
-        #   chunkBytes  = chunkElems * bpeBytes
-        chunkElems = int(kernel[f"GlobalReadVectorWidth{tc}"])
-        if chunkElems <= 0:
-          raise RuntimeError(f"KRS: invalid GlobalReadVectorWidth{tc}={chunkElems}")
-        # KRS uses shifts, so require power-of-two chunkElems (1/2/4/8...).
-        if (chunkElems & (chunkElems - 1)) != 0:
-          raise RuntimeError(f"KRS: GlobalReadVectorWidth{tc} must be power-of-two, got {chunkElems}")
-        chunkElemShift = int(log2(chunkElems))
-        chunkByteShift = chunkElemShift + bpeShift
-
-        m = Macro(name, [])
-
-        # LoopCounterL is in elements. Each "chunk" corresponds to one per-lane global read vector.
-        # Compute:
-        #   numChunk = ceil((LoopCounterL * bpeBytes) / chunkBytes)
-        #          = ceil(LoopCounterL / chunkElems)
-        #          = (LoopCounterL + (chunkElems-1)) >> log2(chunkElems)   (since chunkElems is pow2)
-        ceilBias = chunkElems - 1
-        if ceilBias != 0:
-          m.add(SAddU32(dst=sgpr("krs_numChunk", 1, False), src0=sgpr("LoopCounterL"), src1=ceilBias,
-                        comment=f"KRS: numChunk = ceil(LoopCounterL/{chunkElems}) ; bias=+{ceilBias} elems"))
-          m.add(SLShiftRightB32(dst=sgpr("krs_numChunk", 1, False), shiftHex=hex(chunkElemShift), src=sgpr("krs_numChunk", 1, False),
-                                comment=f"KRS: numChunk >>= {chunkElemShift} (chunkElems={chunkElems})"))
-        else:
-          m.add(SMovB32(dst=sgpr("krs_numChunk", 1, False), src=sgpr("LoopCounterL"),
-                        comment="KRS: numChunk = LoopCounterL (chunkElems==1)"))
-
-        m.add(VAndB32(dst=vgpr("krs_chuck", 1, False), src0=0x0F, src1=vgpr("Serial"),
-                      comment="KRS: chuck = vgprSerial & 0x0F"))
-        m.add(SAddU32(dst=sgpr("krs_oobS", 1, False), src0=sgpr(f"Srd{tc}+2"), src1=1,
-                      comment=f"KRS: oobS = Srd{tc}.limit+1 (OOB sentinel)"))
-        m.add(VMovB32(dst=vgpr("krs_oobV", 1, False), src=sgpr("krs_oobS", 1, False),
-                      comment="KRS: oobV = oobS"))
-
-        # NOTE: krs_headBytes is reused:
-        # - first holds headChunks = (KRingShift / chunkElems)
-        # - later overwritten with headBytes = (KRingShift * bpe)
-        m.add(SLShiftRightB32(dst=sgpr("krs_headBytes", 1, False), shiftHex=hex(chunkElemShift), src=sgpr("KRingShift"),
-                              comment=f"KRS: headChunks = KRingShift / {chunkElems}"))
-        m.add(SSubU32(dst=sgpr("krs_headStartChuck", 1, False), src0=sgpr("krs_numChunk", 1, False), src1=sgpr("krs_headBytes", 1, False),
-                      comment="KRS: headStartChuck = numChunk - headChunks"))
-        m.add(SAndB32(dst=sgpr("krs_mainLoopBytes", 1, False), src0=sgpr(f"SizesSum+{self.states.unrollIdx}"), src1=f"0x{maskDU:08x}",
-                      comment="KRS: mainLoopElems = SizeK & ~(DepthU-1)"))
-        m.add(SLShiftLeftB32(dst=sgpr("krs_mainLoopBytes", 1, False), shiftHex=hex(bpeShift), src=sgpr("krs_mainLoopBytes", 1, False),
-                             comment="KRS: mainLoopBytes = mainLoopElems << log2(bpe)"))
-        m.add(SLShiftLeftB32(dst=sgpr("krs_deltaS", 1, False), shiftHex=hex(chunkByteShift), src=sgpr("krs_headStartChuck", 1, False),
-                             comment=f"KRS: deltaS.part = headStartChuck * {chunkElems}*bpe (chunkBytes=1<<{chunkByteShift})"))
-        m.add(SLShiftLeftB32(dst=sgpr("krs_headBytes", 1, False), shiftHex=hex(bpeShift), src=sgpr("KRingShift"),
-                             comment=f"KRS: headBytes = KRingShift * bpe (bpeBytes={bpeBytes})"))
-        m.add(SAddU32(dst=sgpr("krs_deltaS", 1, False), src0=sgpr("krs_deltaS", 1, False), src1=sgpr("krs_headBytes", 1, False),
-                      comment="KRS: deltaS = (nMinusM<<4) + headBytes"))
-        m.add(VMovB32(dst=vgpr("krs_deltaV", 1, False), src=sgpr("krs_deltaS", 1, False),
-                      comment="KRS: deltaV = deltaS"))
-
-        # maskN := (lane < n)
-        m.add(VCmpLtU32(dst=sgpr("krs_maskValid", 2, False), src0=vgpr("krs_chuck", 1, False), src1=sgpr("krs_numChunk", 1, False),
-                        comment="KRS: maskValid = (chuck < numChunk)"))
-        # maskHead := (chuck >= headStartChuck) && (chuck < numChunk)
-        m.add(VCmpGEU32(dst=sgpr("krs_maskHead", 2, False), src0=vgpr("krs_chuck", 1, False), src1=sgpr("krs_headStartChuck", 1, False),
-                        comment="KRS: maskGE = (chuck >= headStartChuck)"))
-        m.add(SAndB64(dst=sgpr("krs_maskHead", 2, False), src0=sgpr("krs_maskHead", 2, False), src1=sgpr("krs_maskValid", 2, False),
-                      comment="KRS: maskHead = maskGE & maskValid"))
-        m.add(SCmpEQU32(src0=sgpr("KRingShift"), src1=0, comment="KRS: shift==0 ? (disable/no-op)"))
-        m.add(SCSelectB32(dst=sgpr("krs_maskValid+0", 1, False), src0="0xffffffff", src1=sgpr("krs_maskValid+0", 1, False),
-                          comment="KRS: if disabled, maskN.lo = all-ones"))
-        m.add(SCSelectB32(dst=sgpr("krs_maskValid+1", 1, False), src0="0xffffffff", src1=sgpr("krs_maskValid+1", 1, False),
-                          comment="KRS: if disabled, maskN.hi = all-ones"))
-        m.add(SCSelectB32(dst=sgpr("krs_maskHead+0", 1, False), src0=0, src1=sgpr("krs_maskHead+0", 1, False),
-                          comment="KRS: if disabled, maskHead.lo = 0"))
-        m.add(SCSelectB32(dst=sgpr("krs_maskHead+1", 1, False), src0=0, src1=sgpr("krs_maskHead+1", 1, False),
-                          comment="KRS: if disabled, maskHead.hi = 0"))
-        return m
-
-      # Emit per-tensor SETUP macros. Some sites apply KRS to both A/B offsets, and they can
-      # differ in GRVW/bpe/SRD limit, so the setup must be specialized.
-      module.add(_krsSetupMacroFor("A", "KRS_TAIL_OFFSET_SETUP_A"))
-      module.add(_krsSetupMacroFor("B", "KRS_TAIL_OFFSET_SETUP_B"))
-
-      macroApply = Macro("KRS_TAIL_OFFSET_APPLY", ["vgprOffsetReg:req"])
-      macroApply.add(SMovB64(dst=VCC(), src=sgpr("krs_maskValid", 2, False), comment="KRS: vcc = maskValid"))
-      macroApply.add(VCndMaskB32(dst=vgpr("OffsetReg", 1, True), src0=vgpr("krs_oobV", 1, False), src1=vgpr("OffsetReg", 1, True), src2=VCC(),
-                                comment="KRS: Step3 set OOB lanes to sentinel"))
-      macroApply.add(SMovB64(dst=VCC(), src=sgpr("krs_maskHead", 2, False), comment="KRS: vcc = maskHead"))
-      macroApply.add(VAddU32(dst=vgpr("krs_scratch", 1, False), src0=vgpr("OffsetReg", 1, True), src1=sgpr("krs_mainLoopBytes", 1, False),
-                            comment="KRS: offsetPlusMainLoopBytes = offset + mainLoopBytes"))
-      macroApply.add(VCndMaskB32(dst=vgpr("OffsetReg", 1, True), src0=vgpr("krs_scratch", 1, False), src1=vgpr("OffsetReg", 1, True), src2=VCC(),
-                                comment="KRS: Step4 apply +mainLoopBytes in [n-m,n)"))
-      macroApply.add(VSubU32(dst=vgpr("krs_scratch", 1, False), src0=vgpr("OffsetReg", 1, True), src1=vgpr("krs_deltaV", 1, False),
-                            comment="KRS: offsetMinusDelta = offset - deltaS"))
-      macroApply.add(VCndMaskB32(dst=vgpr("OffsetReg", 1, True), src0=vgpr("OffsetReg", 1, True), src1=vgpr("krs_scratch", 1, False), src2=VCC(),
-                                comment="KRS: extra adjust (reference shape)"))
-      module.add(macroApply)
+    # KRingShift: KRS tail handling is inlined at call sites (no .macro emission).
 
     if kernel["ProblemType"]["StochasticRounding"] and not self.states.asmCaps["v_prng_b32"] :
       module.add(PseudoRandomGenerator())
@@ -5055,52 +4939,6 @@ class KernelWriterAssembly(KernelWriter):
     return imod
 
   ##############################################################################
-  # KRingShift: apply reference-style tail offset macro to vgprGlobalReadOffsetA/B
-  # so tail global reads use the same macro/schedule as the original commit.
-  ##############################################################################
-  def kRingShiftTailApplyOffsetMacro(self, kernel):
-    module = Module("KRingShiftTailApplyOffsetMacro")
-    if not (self.states.inTailLoop and kernel["KRingShift"] and kernel["BufferLoad"]):
-      return module
-
-    # Macros:
-    # - KRS_TAIL_OFFSET_SETUP_{A,B} uses tmp_sgpr..tmp_sgpr+9 and tmp_vgpr..tmp_vgpr+3
-    # - KRS_TAIL_OFFSET_APPLY uses tmp_vgpr+3 as scratch
-    # Must be even-aligned since we use b64 SGPR pairs inside the macro.
-    tmpS = self.sgprPool.checkOutAligned(10, 2, "krTailTmpS", preventOverflow=False)
-    tmpV = self.vgprPool.checkOutAligned(4, 2, "krTailTmpV", self.states.preventVgprOverflowDuringNewTile)
-
-    # Hoist all invariant computation (lane, n, masks, constants) once.
-    # Emit symbolic register aliases for readability (outside macro bodies).
-    module.add(TextBlock(
-      f".set sgprkrs_numChunk,      {tmpS}+0\n"
-      f".set sgprkrs_headBytes,     {tmpS}+1\n"
-      f".set sgprkrs_headStartChuck,{tmpS}+2\n"
-      f".set sgprkrs_oobS,          {tmpS}+3\n"
-      f".set sgprkrs_mainLoopBytes, {tmpS}+4\n"
-      f".set sgprkrs_deltaS,        {tmpS}+5\n"
-      f".set sgprkrs_maskValid,     {tmpS}+6\n"
-      f".set sgprkrs_maskHead,      {tmpS}+8\n"
-      f".set vgprkrs_chuck,         {tmpV}+0\n"
-      f".set vgprkrs_oobV,          {tmpV}+1\n"
-      f".set vgprkrs_deltaV,        {tmpV}+2\n"
-      f".set vgprkrs_scratch,       {tmpV}+3\n"
-    ))
-    # Apply to A offsets using A-specialized setup:
-    module.add(MacroInstruction(name="KRS_TAIL_OFFSET_SETUP_A", args=()))
-    for i in range(self.states.a.numVgprGlobalReadOffsets):
-      module.add(MacroInstruction(name="KRS_TAIL_OFFSET_APPLY", args=(f"vgprGlobalReadOffsetA + {i}",)))
-
-    # Apply to B offsets using B-specialized setup:
-    module.add(MacroInstruction(name="KRS_TAIL_OFFSET_SETUP_B", args=()))
-    for i in range(self.states.b.numVgprGlobalReadOffsets):
-      module.add(MacroInstruction(name="KRS_TAIL_OFFSET_APPLY", args=(f"vgprGlobalReadOffsetB + {i}",)))
-
-    self.vgprPool.checkIn(tmpV)
-    self.sgprPool.checkIn(tmpS)
-    return module
-
-  ##############################################################################
   # Set parameters UNDEF in the macro module
   ##############################################################################
   def undefineMacroModule(self, macroModule):
@@ -5410,6 +5248,24 @@ class KernelWriterAssembly(KernelWriter):
            (spool[i].status == RegisterPool.Status.InUse) and \
            (lastRegTag in tagList):
           imod.add(self.undefineSgpr(regTag))
+
+    # KRS: release symbol aliases for the temporary KRS registers.
+    # These are defined via RegSet/TextBlock (not via self.sgprs pool), so we only UNDEF the names here.
+    if kernel["KRingShift"] and kernel["BufferLoad"]:
+      imod.addComment1("KRS: release KRS temp symbol aliases")
+      for n in (
+        "sgprKrsNumChunk",
+        "sgprKrsKRingShiftBytes",
+        "sgprKrsTailStartChunk",
+        "sgprKrsOobS",
+        "sgprKrsMainLoopBytes",
+        "sgprKrsMaskValid",
+        "sgprKrsMaskHead",
+        "vgprKrsChunk",
+        "vgprKrsOobV",
+        "vgprKrsScratch",
+      ):
+        imod.add(ValueSet(name=n, value="UNDEF", format=-1))
 
     loadALabel  = Label(label="LoadA", comment="")
     loadBLabel  = Label(label="LoadB", comment="")
@@ -9058,21 +8914,59 @@ class KernelWriterAssembly(KernelWriter):
         krTmpV = self.vgprPool.checkOutAligned(4, 2, f"krTailJITTmpV{tc}", self.states.preventVgprOverflowDuringNewTile)
         imod.header.addComment0(f"KRS: tail JIT setup for {tc} offsets (setup once; apply before each load)")
         # Emit symbolic register aliases for readability (outside macro bodies).
-        imod.header.add(TextBlock(
-          f".set sgprkrs_numChunk,      {krTmpS}+0\n"
-          f".set sgprkrs_headBytes,     {krTmpS}+1\n"
-          f".set sgprkrs_headStartChuck,{krTmpS}+2\n"
-          f".set sgprkrs_oobS,          {krTmpS}+3\n"
-          f".set sgprkrs_mainLoopBytes, {krTmpS}+4\n"
-          f".set sgprkrs_deltaS,        {krTmpS}+5\n"
-          f".set sgprkrs_maskValid,     {krTmpS}+6\n"
-          f".set sgprkrs_maskHead,      {krTmpS}+8\n"
-          f".set vgprkrs_chuck,         {krTmpV}+0\n"
-          f".set vgprkrs_oobV,          {krTmpV}+1\n"
-          f".set vgprkrs_deltaV,        {krTmpV}+2\n"
-          f".set vgprkrs_scratch,       {krTmpV}+3\n"
-        ))
-        imod.header.add(MacroInstruction(name=f"KRS_TAIL_OFFSET_SETUP_{tc}", args=()))
+        # Define symbolic registers in the standard Tensile style (like sgprKRingShift).
+        imod.header.add(RegSet("s", "sgprKrsNumChunk",        krTmpS + 0))
+        imod.header.add(RegSet("s", "sgprKrsKRingShiftBytes", krTmpS + 1))
+        imod.header.add(RegSet("s", "sgprKrsTailStartChunk",  krTmpS + 2))
+        imod.header.add(RegSet("s", "sgprKrsOobS",            krTmpS + 3))
+        imod.header.add(RegSet("s", "sgprKrsMainLoopBytes",   krTmpS + 4))
+        imod.header.add(RegSet("s", "sgprKrsMaskValid",       krTmpS + 6))
+        imod.header.add(RegSet("s", "sgprKrsMaskHead",        krTmpS + 8))
+
+        imod.header.add(RegSet("v", "vgprKrsChunk",           krTmpV + 0))
+        imod.header.add(RegSet("v", "vgprKrsOobV",            krTmpV + 1))
+        imod.header.add(RegSet("v", "vgprKrsScratch",         krTmpV + 3))
+
+        # KRS: inline SETUP (no macro) for this tc.
+        imod.header.addComment0(f"KRS: inline tail-offset setup for {tc} offsets")
+
+        depthU = int(kernel["DepthU"])
+        maskDU = (~(depthU - 1)) & 0xFFFFFFFF
+        bpeBytes = int(kernel["ProblemType"][f"DataType{tc}"].numBytes())
+        bpeShift = int(log2(bpeBytes))
+        chunkElems = int(kernel[f"GlobalReadVectorWidth{tc}"])
+        if (chunkElems & (chunkElems - 1)) != 0:
+          raise RuntimeError(f"KRS: GlobalReadVectorWidth{tc} must be power-of-two, got {chunkElems}")
+        chunkElemShift = int(log2(chunkElems))
+        ceilBias = chunkElems - 1
+        if ceilBias != 0:
+          imod.header.add(SAddU32(dst=sgpr("KrsNumChunk", 1, False), src0=sgpr("LoopCounterL"), src1=ceilBias,
+                                  comment=f"KRS: numChunk = ceil(LoopCounterL/{chunkElems}) ; bias=+{ceilBias} elems"))
+          imod.header.add(SLShiftRightB32(dst=sgpr("KrsNumChunk", 1, False), shiftHex=hex(chunkElemShift), src=sgpr("KrsNumChunk", 1, False),
+                                          comment=f"KRS: numChunk >>= {chunkElemShift} (chunkElems={chunkElems})"))
+        else:
+          imod.header.add(SMovB32(dst=sgpr("KrsNumChunk", 1, False), src=sgpr("LoopCounterL"),
+                                  comment="KRS: numChunk = LoopCounterL (chunkElems==1)"))
+        imod.header.add(VAndB32(dst=vgpr("KrsChunk", 1, False), src0=0x0F, src1=vgpr("Serial"),
+                                comment="KRS: chunk = vgprSerial & 0x0F"))
+        imod.header.add(SAddU32(dst=sgpr("KrsOobS", 1, False), src0=sgpr(f"Srd{tc}+2"), src1=1,
+                                comment=f"KRS: oobS = Srd{tc}.limit+1 (OOB sentinel)"))
+        imod.header.add(VMovB32(dst=vgpr("KrsOobV", 1, False), src=sgpr("KrsOobS", 1, False),
+                                comment="KRS: oobV = oobS"))
+        imod.header.add(SLShiftRightB32(dst=sgpr("KrsTailStartChunk", 1, False), shiftHex=hex(chunkElemShift), src=sgpr("KRingShift"),
+                                        comment=f"KRS: tailStartChunk = KRingShift / {chunkElems}"))
+        imod.header.add(SAndB32(dst=sgpr("KrsMainLoopBytes", 1, False), src0=sgpr(f"SizesSum+{self.states.unrollIdx}"), src1=f"0x{maskDU:08x}",
+                                comment="KRS: mainLoopElems = SizeK & ~(DepthU-1)"))
+        imod.header.add(SLShiftLeftB32(dst=sgpr("KrsMainLoopBytes", 1, False), shiftHex=hex(bpeShift), src=sgpr("KrsMainLoopBytes", 1, False),
+                                       comment="KRS: mainLoopBytes = mainLoopElems << log2(bpe)"))
+        imod.header.add(SLShiftLeftB32(dst=sgpr("KrsKRingShiftBytes", 1, False), shiftHex=hex(bpeShift), src=sgpr("KRingShift"),
+                                       comment=f"KRS: KRingShiftBytes = KRingShift * bpe (bpeBytes={bpeBytes})"))
+        imod.header.add(VCmpLtU32(dst=sgpr("KrsMaskValid", 2, False), src0=vgpr("KrsChunk", 1, False), src1=sgpr("KrsNumChunk", 1, False),
+                                  comment="KRS: maskValid = (chunk < numChunk)"))
+        imod.header.add(VCmpLtU32(dst=sgpr("KrsMaskHead", 2, False), src0=vgpr("KrsChunk", 1, False), src1=sgpr("KrsTailStartChunk", 1, False),
+                                  comment="KRS: maskLT = (chunk < tailStartChunk)"))
+        imod.header.add(SAndB64(dst=sgpr("KrsMaskHead", 2, False), src0=sgpr("KrsMaskHead", 2, False), src1=sgpr("KrsMaskValid", 2, False),
+                                comment="KRS: maskHead = maskLT & maskValid"))
       else:
         krTmpS = None
         krTmpV = None
@@ -9193,12 +9087,21 @@ class KernelWriterAssembly(KernelWriter):
                 useBuffer = not isTr
                 addr0Vgpr = offsetVgpr
 
-                # KRS: just-in-time patch for this offset register before issuing the load.
+                # KRS: just-in-time patch for this offset register before issuing the load (inlined; no macro).
                 if krTailJIT:
-                  # offsetVgpr is "GlobalReadOffset{tc}+{graIdx}" in this path; map to macro symbol form.
-                  # For BufferLoad + !_UseSgprForGRO, graIdx indexes vgprGlobalReadOffset{tc}+graIdx.
-                  loadModule.add(MacroInstruction(name="KRS_TAIL_OFFSET_APPLY",
-                                                 args=(f"vgprGlobalReadOffset{tc} + {graIdx}",)))
+                  loadModule.addComment0(f"KRS: inline tail-offset apply before load for {tc} offsets")
+
+                  # offsetVgpr is "GlobalReadOffset{tc}+{graIdx}" in this path.
+                  loadModule.add(VSubU32(dst=vgpr(offsetVgpr), src0=vgpr(offsetVgpr), src1=sgpr("KrsKRingShiftBytes", 1, False),
+                                         comment="KRS: offset -= KRingShiftBytes"))
+                  loadModule.add(SMovB64(dst=VCC(), src=sgpr("KrsMaskValid", 2, False), comment="KRS: vcc = maskValid"))
+                  loadModule.add(VCndMaskB32(dst=vgpr(offsetVgpr), src0=vgpr("KrsOobV", 1, False), src1=vgpr(offsetVgpr), src2=VCC(),
+                                             comment="KRS: set OOB lanes to sentinel"))
+                  loadModule.add(SMovB64(dst=VCC(), src=sgpr("KrsMaskHead", 2, False), comment="KRS: vcc = maskHead"))
+                  loadModule.add(VAddU32(dst=vgpr("KrsScratch", 1, False), src0=vgpr(offsetVgpr), src1=sgpr("KrsMainLoopBytes", 1, False),
+                                         comment="KRS: offsetPlusMainLoopBytes = offset + mainLoopBytes"))
+                  loadModule.add(VCndMaskB32(dst=vgpr(offsetVgpr), src0=vgpr("KrsScratch", 1, False), src1=vgpr(offsetVgpr), src2=VCC(),
+                                             comment="KRS: head keep offset; tail apply +mainLoopBytes"))
 
                 loadModule.add( self.chooseGlobalRead(useBuffer, \
                           bpl, destVgpr=destVgpr, \
