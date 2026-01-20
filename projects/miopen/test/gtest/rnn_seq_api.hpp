@@ -27,7 +27,7 @@
 
 #include "gtest_common.hpp"
 #include "compare_helper.hpp"
-#include "dropout_util.hpp"
+#include "../dropout_util.hpp"
 #include "get_handle.hpp"
 
 #include "random.hpp"
@@ -42,9 +42,9 @@
 //
 // Native rnn tensor format
 //
-#include "seq_tensor_holder.hpp"
-#include "rnn_util.hpp"
-#include "cpu_rnn.hpp"
+#include "../seq_tensor_holder.hpp"
+#include "../rnn_util.hpp"
+#include "../cpu_rnn.hpp"
 ///
 
 namespace {

@@ -24,6 +24,9 @@
  *
  *******************************************************************************/
 #include "../rnn_util.hpp"
+#include "get_handle.hpp"
+#include <miopen/float_equal.hpp>
+#include "../dropout_util.hpp"
 #include "../cpu_rnn.hpp"
 #include "compare_helper.hpp"
 #include "gtest_common.hpp"
