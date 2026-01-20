@@ -3095,6 +3095,7 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     n_mfma = 128//2//32 * 128//2//32 * 3 * 2    # 128 MT0 / 2 WT0 / 32 mfma dim  * 128/2/32 * 3 bf16 MFMAs per tf32 mfma * 2 PLR=1
     kernel["MfmaInitCVgprs"] = True
     kernel["UsePLRPack"] = True
+    kernel["UseMFMAF32XEmulation"] = True
 
     optSchedule = dict()
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
@@ -3102,9 +3103,46 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     syncCode = []   
     gr_inc_step = 0
 
-    if isNN(kernel) and TLDS==1:
-        kernel["UseMFMAF32XEmulation"] = True
+    if isTN(kernel) and not useLDSTr and TLDS==1:
+        print(">>>>>>>>>>>>>>>>>>>>>>>>> _get_schedule_128x128x32_TF32_plr1   TN")
+        lra0   = [0,1,2,3]
+        lrb0   = [          4,5,6,7]
+        #                wait then read
+        syncs.add(          4, dscnt=2, comment="wait for the first 2 LRAs before packing")
+        syncs.add(            5, dscnt=1, comment="wait for the rest of LRAs before packing them")
+        pack_a0 = [         4,4,4,4, 6,6, 7,7,7,7,
+                            5,5,5,5, 6,6, 8,8,8,8]
+        # because of GR starting at 10, we need barrier at 9, will use that for sync too.
+        syncs.add(                               9, dscnt=0, comment="wait for LRBs before the packing them",
+                                                 barrier=True, barrier_comment="make sure all LRs are done before starting GR")
+        pack_b0= [                               9,9,9,9, 10,10, 11,11,11,11,
+                                                 9,9,9,9, 10,10, 11,11,11,11]
 
+        grinca = [0,0,0,1,1,1,2,2,2]
+        grincb = [3,3,3,6,6,6,6,6,6]
+        lrsa   = [10]
+        lrsb   = [10]
+        lwsa   = [19]
+        lwsb   = [19]        
+        
+        gra    = [                                 10,10,11,11] # one index for two instructions
+        grb    = [                                              13,13,14,14] # one index for two instructions
+        num_gr = len(gra) + len(grb)
+        syncs.add(                                             12, vlcnt=8, barrier=True, comment="wait for the previous GRAs")
+
+        lra1   = [12,12,13,14] # twice on 12 since we are waiting for GRA anyway at 12
+        lrb1   = [           15,16,17,18]
+        #                wait then read
+        syncs.add(           15, dscnt=2, vlcnt=8, comment="wait for the first 2 LRAs before packing. Also wait for GRBs",
+                                 barrier=True, barrier_comment="make sure GRBs are done before starting LRBs"  )
+        syncs.add(                    18, dscnt=2, comment="wait for the rest of LRAs before packing them")
+        pack_a1 = [             16,16,16,16, 19,19, 20,20,20,20,
+                                 18,18,18,18, 19,19, 20,20,20,20]
+        syncs.add(                                              21, dscnt=0, comment="wait for LRBs before the packing them")
+        pack_b1= [                                              21,21,21,21, 22,22, 23,23,23,23,
+                                                                21,21,21,21, 22,22, 23,23,23,23]
+    elif isNN(kernel) and TLDS==1:
+        print(">>>>>>>>>>>>>>>>>>>>>>>>> _get_schedule_128x128x32_TF32_plr1   NN")
         lra0   = [0,0,0,0,
                    1,1,1,1,
                     2,2,2,2,
@@ -3158,12 +3196,12 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         'LRB0':   [lrb0],
         'GRA':    [duplicate_list_items(gra, 2, gr_inc_step)],
         'GRB':    [duplicate_list_items(grb, 2, gr_inc_step)],
-        'PackA0': [pack_a0],
-        'PackB0': [pack_b0],
         'LRSA':   [lrsa],
         'LRSB':   [lrsb],
         'LWSA':   [lwsa],
         'LWSB':   [lwsb],
+        'PackA0': [pack_a0],
+        'PackB0': [pack_b0],
         'LRA1':   [lra1],
         'LRB1':   [lrb1],
         'PackB1': [pack_b1],
