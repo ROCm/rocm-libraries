@@ -74,7 +74,7 @@ TEST(CKBuilderXdl, Multiple_Static_Instances)
     std::vector<BaseOperatorPtr> kernels{};
     constexpr auto instances = miopen::ck_builder::example_instances();
 
-    build_kernels<XdlInstance, instances.size(), instances>(kernels);
+    build_kernels<instances>(kernels);
 
     std::cout << "Instance count: " << kernels.size() << std::endl;
 

@@ -146,13 +146,6 @@ constexpr auto GKCYX = ckb::TensorLayout::GKCYX;
 constexpr auto NGKHW = ckb::TensorLayout::NGKHW;
 constexpr auto FP32  = ckb::DataType::FP32;
 
-constexpr auto create_device_grouped_conv_fwd_xdl_f32_instance_data(std::size_t numDimensions, ckb::TensorLayout inLayout, ckb::TensorLayout weiLayout, ckb::TensorLayout outLayout, ckb::ConvSpecialization convSpecialization){
-    std::array result = {
-    };
-
-    return result;
-}
-
 constexpr auto example_instances()
 {
     std::array result = {make_xdl_instance_from_old_params(2,

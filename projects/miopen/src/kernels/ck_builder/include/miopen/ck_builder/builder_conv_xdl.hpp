@@ -167,10 +167,51 @@ constexpr void build_kernels_impl(std::vector<BaseOperatorPtr>& kernels, std::in
     build_kernels_helper<T, arr[I]...>(kernels);
 }
 
-template <typename T, std::size_t N, std::array<T, N> arr>
+template <typename ArrayType>
+struct array_traits;
+
+template <typename T, std::size_t N>
+struct array_traits<std::array<T, N>>
+{
+    using value_type                  = T;
+    static constexpr std::size_t size = N;
+};
+
+template <auto arr>
 constexpr void build_kernels(std::vector<BaseOperatorPtr>& kernels)
 {
+    using T                 = typename array_traits<decltype(arr)>::value_type;
+    constexpr std::size_t N = array_traits<decltype(arr)>::size;
     build_kernels_impl<T, N, arr>(kernels, std::make_index_sequence<N>{});
+}
+
+template <typename T, std::size_t N1, std::size_t N2, std::size_t... I1, std::size_t... I2>
+constexpr std::array<T, N1 + N2> concat2_impl(const std::array<T, N1>& a,
+                                              const std::array<T, N2>& b,
+                                              std::index_sequence<I1...>,
+                                              std::index_sequence<I2...>)
+{
+    return {a[I1]..., b[I2]...};
+}
+
+template <typename T, std::size_t N1, std::size_t N2>
+constexpr std::array<T, N1 + N2> concat2(const std::array<T, N1>& a, const std::array<T, N2>& b)
+{
+    return concat2_impl(a, b, std::make_index_sequence<N1>{}, std::make_index_sequence<N2>{});
+}
+
+// Variadic: concatenate many arrays recursively
+template <typename T, std::size_t N>
+constexpr std::array<T, N> concat(const std::array<T, N>& a)
+{
+    return a;
+}
+
+template <typename T, std::size_t N1, std::size_t N2, std::size_t... Ns>
+constexpr auto
+concat(const std::array<T, N1>& a, const std::array<T, N2>& b, const std::array<T, Ns>&... rest)
+{
+    return concat(concat2(a, b), rest...);
 }
 
 // Constexpr function to create XdlInstance from old DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
@@ -233,7 +274,7 @@ constexpr XdlInstance make_xdl_instance_from_old_params(
     // 48. Loop scheduler
     ckb::PipelineScheduler loop_scheduler = ckb::PipelineScheduler::DEFAULT,
     // 49. Groups to merge
-    std::size_t num_conv_groups_to_merge=1)
+    std::size_t num_conv_groups_to_merge = 1)
 {
     return XdlInstance{
         .signature = {.spatial_dim            = spatial_dim,
@@ -287,12 +328,11 @@ constexpr XdlInstance make_xdl_instance_from_old_params(
                                          .lds_padding    = b_block_lds_extra_n},
                         .block_transfer_access_order = {.order = b_thread_cluster_arrange_order},
                         .src_access_order = {.order = b_block_transfer_src_access_order}},
-                  .c = {.thread_cluster_dims =
-                            {.m_block        = c_thread_cluster_lengths[0],
-                             .m_wave_per_xdl = c_thread_cluster_lengths[1],
-                             .n_block        = c_thread_cluster_lengths[2],
-                             .n_wave_per_xdl = c_thread_cluster_lengths[3]},
-                        .epilogue = {.m_xdl_per_wave_per_shuffle =
+                  .c = {.thread_cluster_dims = {.m_block        = c_thread_cluster_lengths[0],
+                                                .m_wave_per_xdl = c_thread_cluster_lengths[1],
+                                                .n_block        = c_thread_cluster_lengths[2],
+                                                .n_wave_per_xdl = c_thread_cluster_lengths[3]},
+                        .epilogue            = {.m_xdl_per_wave_per_shuffle =
                                          c_shuffle_m_xdl_per_wave_per_shuffle,
                                      .n_per_wave_per_shuffle = c_shuffle_n_xdl_per_wave_per_shuffle,
                                      .scalar_per_vector = c_block_transfer_scalar_per_vector}}},
@@ -333,12 +373,266 @@ using DeviceOpGFwdDefault =
 
 using DeviceOpGFWdDefaultFloat = DeviceOpGFwdDefault<float>;
 
-template<>
+constexpr auto NGCHW = ckb::TensorLayout::NGCHW;
+constexpr auto GKCYX = ckb::TensorLayout::GKCYX;
+constexpr auto NGKHW = ckb::TensorLayout::NGKHW;
+constexpr auto FP32  = ckb::DataType::FP32;
+
+constexpr auto
+create_device_grouped_conv_fwd_xdl_f32_instance_data(std::size_t spatialDim,
+                                                     ckb::TensorLayout inLayout,
+                                                     ckb::TensorLayout weiLayout,
+                                                     ckb::TensorLayout outLayout,
+                                                     ckb::ConvSpecialization convSpecialization)
+{
+    // Adapted from the composable_kernel project, file:
+    // library/include/ck/library/tensor_operation_instance/gpu/grouped_conv_fwd/device_grouped_conv_fwd_xdl_instance.hpp
+
+    // clang-format off
+    std::array result = {
+        // Instance 1: Generic instance
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 64, 64, 64, 16, 4, 4, 32, 32, 2, 2,
+            {4, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 1, 4, true,
+            {4, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 1, 4, true,
+            1, 1, {1, 8, 1, 8}, 1,
+            FP32, FP32),
+        
+        // Instance 2: Small conv.K and conv.C
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 64, 64, 32, 16, 4, 4, 32, 32, 2, 1,
+            {4, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            {4, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            1, 1, {1, 8, 1, 8}, 1,
+            FP32, FP32),
+        
+        // Instance 3
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 256, 128, 128, 16, 4, 4, 32, 32, 2, 2,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 1, 4, true,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 1, 4, true,
+            1, 1, {1, 16, 1, 16}, 4,
+            FP32, FP32),
+        
+        // Instance 4
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 256, 256, 128, 16, 4, 4, 32, 32, 4, 2,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            1, 1, {1, 16, 1, 16}, 4,
+            FP32, FP32),
+        
+        // Instance 5
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 256, 128, 256, 16, 4, 4, 32, 32, 2, 4,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            1, 1, {1, 16, 1, 16}, 4,
+            FP32, FP32),
+        
+        // Instance 6
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 128, 128, 128, 16, 4, 4, 32, 32, 4, 2,
+            {4, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            {4, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            1, 1, {1, 8, 1, 16}, 4,
+            FP32, FP32),
+        
+        // Instance 7
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 256, 128, 128, 16, 4, 4, 32, 32, 2, 2,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            1, 1, {1, 16, 1, 16}, 4,
+            FP32, FP32),
+        
+        // Instance 8
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 128, 128, 64, 16, 4, 4, 32, 32, 2, 2,
+            {4, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            {4, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            1, 1, {1, 16, 1, 8}, 4,
+            FP32, FP32),
+        
+        // Instance 9
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 128, 64, 128, 16, 4, 4, 32, 32, 2, 2,
+            {4, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            {4, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            1, 1, {1, 8, 1, 16}, 4,
+            FP32, FP32),
+        
+        // Instance 10
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 64, 64, 64, 16, 4, 4, 32, 32, 2, 2,
+            {4, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            {4, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            1, 1, {1, 8, 1, 8}, 4,
+            FP32, FP32),
+        
+        // Instance 11
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 256, 128, 64, 16, 4, 4, 32, 32, 2, 1,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            1, 1, {1, 16, 1, 16}, 4,
+            FP32, FP32),
+        
+        // Instance 12
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 256, 64, 128, 16, 4, 4, 32, 32, 1, 2,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            1, 1, {1, 16, 1, 16}, 4,
+            FP32, FP32),
+        
+        // Instance 13
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 128, 128, 32, 16, 4, 4, 32, 32, 2, 1,
+            {4, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            {4, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            1, 1, {1, 16, 1, 8}, 4,
+            FP32, FP32),
+        
+        // Instance 14
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 128, 32, 128, 16, 4, 4, 32, 32, 1, 2,
+            {4, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            {4, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            1, 1, {1, 8, 1, 16}, 4,
+            FP32, FP32),
+        
+        // Instance 15
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 64, 64, 32, 16, 4, 4, 32, 32, 2, 1,
+            {4, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            {4, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            1, 1, {1, 8, 1, 8}, 4,
+            FP32, FP32),
+        
+        // Instance 16
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 64, 32, 64, 16, 4, 4, 32, 32, 1, 2,
+            {4, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            {4, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            1, 1, {1, 8, 1, 8}, 4,
+            FP32, FP32),
+        
+        // Instance 17
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 256, 128, 192, 16, 4, 4, 32, 32, 2, 3,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, true,
+            1, 1, {1, 16, 1, 16}, 4,
+            FP32, FP32)
+
+        // clang-format on
+    };
+
+    return result;
+}
+
+using BaseOperator    = ck::tensor_operation::device::BaseOperator;
+using BaseOperatorPtr = std::unique_ptr<BaseOperator>;
+
+template <auto arr>
+void build_k()
+{
+    auto s = arr.size();
+    std::cout << s << std::endl;
+}
+
+template <>
 struct DeviceOperationInstanceFactory<DeviceOpGFWdDefaultFloat>
 {
-    static std::vector<std::unique_ptr<DeviceOpGFWdDefaultFloat>> GetInstances()
+    static std::vector<BaseOperatorPtr> GetInstances()
     {
-        std::vector<std::unique_ptr<DeviceOpGFWdDefaultFloat>> instances{};
+        std::vector<BaseOperatorPtr> instances{};
+
+        constexpr std::array<XdlInstance, 17> defaultInstanceData =
+            create_device_grouped_conv_fwd_xdl_f32_instance_data(2,
+                                                                 ckb::TensorLayout::NGCHW,
+                                                                 ckb::TensorLayout::GKCYX,
+                                                                 ckb::TensorLayout::NGKHW,
+                                                                 ckb::ConvSpecialization::DEFAULT);
+        constexpr auto filter1x1Pad0InstanceData =
+            create_device_grouped_conv_fwd_xdl_f32_instance_data(
+                2,
+                ckb::TensorLayout::NGCHW,
+                ckb::TensorLayout::GKCYX,
+                ckb::TensorLayout::NGKHW,
+                ckb::ConvSpecialization::FILTER_1X1_PAD0);
+        constexpr auto filter1x1Stride1Pad0InstanceData =
+            create_device_grouped_conv_fwd_xdl_f32_instance_data(
+                2,
+                ckb::TensorLayout::NGCHW,
+                ckb::TensorLayout::GKCYX,
+                ckb::TensorLayout::NGKHW,
+                ckb::ConvSpecialization::FILTER_1X1_STRIDE1_PAD0);
+        constexpr auto oddCInstanceData =
+            create_device_grouped_conv_fwd_xdl_f32_instance_data(2,
+                                                                 ckb::TensorLayout::NGCHW,
+                                                                 ckb::TensorLayout::GKCYX,
+                                                                 ckb::TensorLayout::NGKHW,
+                                                                 ckb::ConvSpecialization::ODD_C);
+
+        constexpr auto instanceData = concat(defaultInstanceData,
+                                             filter1x1Pad0InstanceData,
+                                             filter1x1Stride1Pad0InstanceData,
+                                             oddCInstanceData);
+
+        build_kernels<instanceData>(instances);
 
         return instances;
     }
