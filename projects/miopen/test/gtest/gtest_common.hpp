@@ -48,7 +48,7 @@ public:
     ScopedEnvironment(ScopedEnvironment&&)      = delete;
 
     ScopedEnvironment& operator=(const ScopedEnvironment&) = delete;
-    ScopedEnvironment& operator=(ScopedEnvironment&&)      = delete;
+    ScopedEnvironment& operator=(ScopedEnvironment&&) = delete;
 
     ~ScopedEnvironment()
     {
