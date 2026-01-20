@@ -1,0 +1,49 @@
+defaults:
+  numbered: False
+  maxdepth: 6
+root: index
+subtrees:
+- entries:
+  - file: what-is-hipdnn.rst
+    title: What is hipDNN?
+
+- caption: Install
+  entries:
+  - file: install/hipdnn-prerequisites.rst
+    title: Prerequisites
+  - file: install/hipdnn-install.rst
+    title: hipDNN installation (Linux)
+  - file: install/hipdnn-install-windows.rst
+    title: hipDNN installation (Windows)
+
+- caption: Conceptual
+  entries:
+  - file: conceptual/miopen-plugin.rst
+    title: MIOpen Provider plugin architecture
+  - file: conceptual/architecture.rst
+    title: High-level architecture
+  - file: conceptual/backend-architecture.rst
+    title: Backend architecture (Advanced)
+
+- caption: How to
+  entries:
+  - file: how-to/build-execute-hipdnn.rst
+    title: Build and execute operation graphs
+  - file: how-to/extend-hipdnn.rst
+    title: Extend hipDNN functionality (Advanced)
+  - file: how-to/develop-plugins.rst
+    title: Develop plugins for hipDNN (Advanced)
+
+- caption: Reference
+  entries:
+  - file: reference/environment-variables.rst
+    title: Environment variables
+  - file: reference/naming-guidelines.rst
+    title: Coding style and naming guidelines
+  - file: reference/glossary.rst
+    title: Glossary
+    
+- caption: About
+  entries:
+  - file: license.rst
+    title: License

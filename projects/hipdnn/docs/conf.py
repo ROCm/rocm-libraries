@@ -6,56 +6,29 @@
 
 import re
 
-'''
-html_theme is usually unchanged (rocm_docs_theme).
-flavor defines the site header display, select the flavor for the corresponding portals
-flavor options: rocm, rocm-docs-home, rocm-blogs, rocm-ds, instinct, ai-developer-hub, local, generic
-'''
-html_theme = "rocm_docs_theme"
-html_theme_options = {"flavor": "rocm-docs-home"}
+from rocm_docs import ROCmDocs
 
-
-# This section turns on/off article info
-setting_all_article_info = True
-all_article_info_os = ["linux"]
-all_article_info_author = ""
-
-# Dynamically extract component version
-#with open('../CMakeLists.txt', encoding='utf-8') as f:
-#    pattern = r'.*\brocm_setup_version\(VERSION\s+([0-9.]+)[^0-9.]+' # Update according to each component's CMakeLists.txt
-#    match = re.search(pattern,
-#                      f.read())
+with open('../CMakeLists.txt', encoding='utf-8') as f:
+    match = re.search(r'.*\bHIPDNN_PROJECT_VERSION\s+\"?([0-9.]+)[^0-9.]+', f.read())
 #    if not match:
 #        raise ValueError("VERSION not found!")
-#    version_number = match[1]
+    version_number = "1.0.0"
+left_nav_title = f"hipDNN {version_number} Documentation"
 
 # for PDF output on Read the Docs
-project = "hipDNN"
+project = "hipDNN Documentation"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved."
-version = 1.0
-release = 1.0
+copyright = "Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved."
+version = version_number
+release = version_number
 
-external_toc_path = "./sphinx/_toc.yml" # Defines Table of Content structure definition path
+external_toc_path = "./sphinx/_toc.yml"
 
-'''
-Doxygen Settings
-Ensure Doxyfile is located at docs/doxygen.
-If the component does not need doxygen, delete this section for optimal build time
-'''
-#doxygen_root = "doxygen"
-#doxysphinx_enabled = True
-#doxygen_project = {
-#    "name": "doxygen",
-#    "path": "doxygen/xml",
-#}
-
-# Add more addtional package accordingly
-extensions = [
-    "rocm_docs", 
-#    "rocm_docs.doxygen",
-] 
-
-html_title = f"{project} {version} documentation"
+docs_core = ROCmDocs(left_nav_title)
+#docs_core.run_doxygen(doxygen_root="doxygen", doxygen_path="doxygen/xml")
+docs_core.setup()
 
 external_projects_current_project = "hipDNN"
+
+for sphinx_var in ROCmDocs.SPHINX_VARS:
+    globals()[sphinx_var] = getattr(docs_core, sphinx_var)

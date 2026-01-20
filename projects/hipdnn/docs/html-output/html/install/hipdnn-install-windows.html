@@ -1,0 +1,763 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta content="hipDNN install" name="description" />
+<meta content="Component, ROCm, install" name="keywords" />
+
+    <title>hipDNN installation on Windows &#8212; hipDNN 1.0.0 Documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=eba8b062" />
+    <link rel="stylesheet" type="text/css" href="../_static/mystnb.4510f1fc1dee50b3e5859aac5469c37c29e427902b24a333a5f9fcb2f0b3ac41.css?v=be8a1c11" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=643846e8" />
+    <link rel="stylesheet" type="text/css" href="../_static/rocm_header.css?v=9557e3d1" />
+    <link rel="stylesheet" type="text/css" href="../_static/rocm_footer.css?v=7095035a" />
+    <link rel="stylesheet" type="text/css" href="../_static/fonts.css?v=fcff5274" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="../_static/documentation_options.js?v=f9c1cefe"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=91c4cb68"></script>
+    <script async="async" src="../_static/code_word_breaks.js?v=327952c4"></script>
+    <script async="async" src="../_static/renameVersionLinks.js?v=929fe5e4"></script>
+    <script async="async" src="../_static/rdcMisc.js?v=01f88d96"></script>
+    <script async="async" src="../_static/theme_mode_captions.js?v=15f4ec5d"></script>
+    <script defer="defer" src="../_static/search.js?v=90a4452c"></script>
+    <script src="../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'install/hipdnn-install-windows';</script>
+    <script async="async" src="https://download.amd.com/js/analytics/analyticsinit.js"></script>
+    <link rel="icon" href="https://www.amd.com/content/dam/code/images/favicon/favicon.ico"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="MIOpen Provider plugin architecture" href="../conceptual/miopen-plugin.html" />
+    <link rel="prev" title="hipDNN installation" href="hipdnn-install.html" />
+    <meta name="google-site-verification" content="vo35SZt_GASsTHAEmdww7AYKPCvZyzLvOXBl8guBME4" />
+
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+<aside class="bd-header-announcement" aria-label="Announcement">
+  <div class="bd-header-announcement__content">This page contains proposed changes for a future release of ROCm. Read the <a id='rocm-banner' href='https://rocm.docs.amd.com/en/latest/'>latest Linux release of ROCm documentation</a> for your production environments.</div>
+</aside>
+
+  
+
+<header class="common-header" >
+    <nav class="navbar navbar-expand-xl">
+        <div class="container-fluid main-nav rocm-header">
+            
+            <button class="navbar-toggler collapsed" id="nav-icon" data-tracking-information="mainMenuToggle" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+            
+            <div class="header-logo">
+                <a class="navbar-brand" href="https://www.amd.com/">
+                    <img src="../_static/images/amd-header-logo.svg" alt="AMD Logo" title="AMD Logo" width="90" class="d-inline-block align-text-top hover-opacity"/>
+                </a>
+                <div class="vr vr mx-40 my-25"></div>
+                
+        
+    
+    <a class="klavika-font hover-opacity" href="https://rocm.docs.amd.com/en/develop">ROCm&#8482; Software Future Release</a>
+                <a class="header-all-versions" href="https://rocm.docs.amd.com/en/latest/release/versions.html">Version List</a>
+            </div>
+            <div class="icon-nav text-center d-flex ms-auto">
+            </div>
+        </div>
+    </nav>
+    
+    <nav class="navbar navbar-expand-xl second-level-nav">
+        <div class="container-fluid main-nav">
+            <div class="navbar-nav-container collapse navbar-collapse" id="navbarSupportedContent">
+                <ul class="navbar-nav nav-mega me-auto mb-2 mb-lg-0 col-xl-10">
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://github.com/ROCm/rocm-libraries" id="navgithub" role="button" aria-expanded="false" target="_blank" >
+                                GitHub
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://github.com/ROCm/ROCm/discussions" id="navcommunity" role="button" aria-expanded="false" target="_blank" >
+                                Community
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://rocm.blogs.amd.com/" id="navblogs" role="button" aria-expanded="false" target="_blank" >
+                                Blogs
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://www.amd.com/en/developer/resources/rocm-hub.html" id="navrocm-developer-hub" role="button" aria-expanded="false" target="_blank" >
+                                ROCm Developer Hub
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://instinct.docs.amd.com" id="navinstinct&#8482;-docs" role="button" aria-expanded="false" target="_blank" >
+                                Instinct&#8482; Docs
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://www.amd.com/en/developer/resources/infinity-hub.html" id="navinfinity-hub" role="button" aria-expanded="false" target="_blank" >
+                                Infinity Hub
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://github.com/ROCm/rocm-libraries/issues/new/choose" id="navsupport" role="button" aria-expanded="false" target="_blank" >
+                                Support
+                            </a>
+                        </li>
+                    
+                </ul>
+            </div>
+        </div>
+    </nav>
+    
+</header>
+
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          
+          
+            <div class="navbar-item">
+
+<a class="navbar-brand logo" href="https://rocm.docs.amd.com/en/develop">
+    <p>ROCm documentation</p>
+</a></div>
+          
+        
+      </div>
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">hipDNN 1.0.0 Documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../what-is-hipdnn.html">What is hipDNN?</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Install</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="hipdnn-prerequisites.html">Prerequisites</a></li>
+<li class="toctree-l1"><a class="reference internal" href="hipdnn-install.html">hipDNN installation (Linux)</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">hipDNN installation (Windows)</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Conceptual</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../conceptual/miopen-plugin.html">MIOpen Provider plugin architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../conceptual/architecture.html">High-level architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../conceptual/backend-architecture.html">Backend architecture (Advanced)</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">How to</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../how-to/build-execute-hipdnn.html">Build and execute operation graphs</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../how-to/extend-hipdnn.html">Extend hipDNN functionality (Advanced)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../how-to/develop-plugins.html">Develop plugins for hipDNN (Advanced)</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../reference/environment-variables.html">Environment variables</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/naming-guidelines.html">Coding style and naming guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/glossary.html">Glossary</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">About</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../license.html">License</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><label class="sidebar-toggle primary-toggle btn btn-sm" for="__primary" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-angle-right"></span>
+  </label></div>
+      
+        <div class="header-article-item">
+
+
+
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    <li class="breadcrumb-item active" aria-current="page">hipDNN...</li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>hipDNN installation on Windows</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#installation-steps">Installation steps</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#install-chocolatey-package-manager">Install Chocolatey Package Manager</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#install-utilities">Install utilities</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#enable-windows-10-long-paths">Enable Windows 10 long paths</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#enable-windows-10-symlinks">Enable Windows 10 symlinks</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#configure-git">Configure Git</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#install-clang-toolchain">Install Clang Toolchain</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#install-rocm-sdk">Install ROCm SDK</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#set-up-environment-variables">Set up environment variables</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clone-the-repository-and-build-hipdnn">Clone the repository and Build hipDNN</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#notes">Notes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="hipdnn-installation-on-windows">
+<span id="windows"></span><h1>hipDNN installation on Windows<a class="headerlink" href="#hipdnn-installation-on-windows" title="Link to this heading">#</a></h1>
+<p>This guide demonstrates how to install hipDNN on Windows systems. Before you begin, ensure the required dependencies are installed on your system as outlined in <a class="reference internal" href="hipdnn-prerequisites.html#prerequisites"><span class="std std-ref">hipDNN prerequisites</span></a>.
+hipDNN supports Windows 10 and Windows 11 (recommended).</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Some GPU functionality and HIP-related tests are not currently supported on Windows.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Refer to the <a class="reference internal" href="hipdnn-install.html#llvm"><span class="std std-ref">LLVM_TOOLS_SEARCH_PREFIX</span></a> section for approaches on how to manage the multiple Clang toolchain versions required for hipDNN.</p>
+</div>
+<p>To do a standalone build of hipDNN, you will need to set up a number of prerequisites.
+The standalone build of hipDNN requires a subset of the full environment required for building TheRock.
+Refer to <a class="reference external" href="https://github.com/ROCm/TheRock/blob/main/docs/development/windows_support.md">TheRock Windows Support</a> for a full Windows 11 build environment setup for TheRock (but do not perform a build of TheRock as this is generally not necessary for building hipDNN standalone).</p>
+<section id="installation-steps">
+<h2>Installation steps<a class="headerlink" href="#installation-steps" title="Link to this heading">#</a></h2>
+<p>Follow these steps to manually install hipDNN for your Windows system.</p>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>Automated Setup Script (Optional)
+An automated PowerShell script is available to perform the steps outlined below. This script is provided as a convenience and may not work in all environments.
+<a class="reference external" href="https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/scripts/windows/windows_build_setup.ps1">Review the script</a> before running it to ensure it meets your needs.</p>
+</div>
+<section id="install-chocolatey-package-manager">
+<h3>Install Chocolatey Package Manager<a class="headerlink" href="#install-chocolatey-package-manager" title="Link to this heading">#</a></h3>
+<p>Use <a class="reference external" href="https://community.chocolatey.org/">Chocolatey</a> to streamline the environment setup. The Chocolatey client, <code class="docutils literal notranslate"><span class="pre">choco</span></code> is used in these instructions.</p>
+</section>
+<section id="install-utilities">
+<h3>Install utilities<a class="headerlink" href="#install-utilities" title="Link to this heading">#</a></h3>
+<p>These third-party tools are needed for building hipDNN:</p>
+<ul class="simple">
+<li><p>Git (installed with both git and unix tools available on the windows PATH)</p></li>
+<li><p>Visual Studio 2022 with C++ workload (easy way to get Windows libraries)</p></li>
+<li><p>CMake 3.25.2+</p></li>
+<li><p>Ninja</p></li>
+<li><p>Python 3</p></li>
+</ul>
+<p>Using Chocolatey, install any of the missing required dependencies using an Administrative Command Prompt (or PowerShell):</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>choco<span class="w"> </span>install<span class="w"> </span>visualstudio2022buildtools<span class="w"> </span>-y<span class="w"> </span>--params<span class="w"> </span><span class="s2">&quot;--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.VC.CMake.Project --add Microsoft.VisualStudio.Component.VC.ATL --add Microsoft.VisualStudio.Component.Windows11SDK.22621&quot;</span>
+</pre></div>
+</div>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>choco<span class="w"> </span>install<span class="w"> </span>git.install<span class="w"> </span>-y<span class="w"> </span>--params<span class="w"> </span><span class="s2">&quot;&#39;/GitAndUnixToolsOnPath&#39;&quot;</span>
+</pre></div>
+</div>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>choco<span class="w"> </span>install<span class="w"> </span>cmake<span class="w"> </span>--version<span class="o">=</span><span class="m">3</span>.31.0<span class="w"> </span>-y
+</pre></div>
+</div>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>choco<span class="w"> </span>install<span class="w"> </span>ninja<span class="w"> </span>-y
+</pre></div>
+</div>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>choco<span class="w"> </span>install<span class="w"> </span>python<span class="w"> </span>-y
+</pre></div>
+</div>
+</section>
+<section id="enable-windows-10-long-paths">
+<h3>Enable Windows 10 long paths<a class="headerlink" href="#enable-windows-10-long-paths" title="Link to this heading">#</a></h3>
+<p>A detailed description and instructions for enabling long paths on Windows 10+ are available <a class="reference external" href="https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation?tabs=registry#enable-long-paths-in-windows-10-version-1607-and-later">in the Windows App Development docs</a>.</p>
+<p>From the Windows docs:</p>
+<blockquote>
+<div><p>In the Windows API (with some exceptions discussed in the following paragraphs), the maximum length for a path is MAX_PATH, which is defined as 260 characters.
+A local path is structured in the following order: drive letter, colon, backslash, name components separated by backslashes, and a terminating null character.
+For example, the maximum path on drive D is <code class="docutils literal notranslate"><span class="pre">&quot;D:\some</span> <span class="pre">256-character</span> <span class="pre">path</span> <span class="pre">string&lt;NUL&gt;&quot;</span></code> where <code class="docutils literal notranslate"><span class="pre">&quot;&lt;NUL&gt;&quot;</span></code> represents the invisible terminating null character for the current system codepage.
+(The characters <code class="docutils literal notranslate"><span class="pre">&lt;`</span> <span class="pre">`&gt;</span></code> are used here for visual clarity and cannot be part of a valid path string.)
+For example, you may hit this limitation if you are cloning a git repo that has long file names into a folder that itself has a long name.
+Starting in Windows 10, version 1607, MAX_PATH limitations have been removed from many common Win32 file and directory functions.
+The registry value <code class="docutils literal notranslate"><span class="pre">HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\FileSystem</span> <span class="pre">LongPathsEnabled</span></code> (Type: <code class="docutils literal notranslate"><span class="pre">REG_DWORD</span></code>) must exist and be set to <code class="docutils literal notranslate"><span class="pre">1</span></code>.
+The registry value will not be reloaded during the lifetime of the process. In order for all apps on the system to recognize the value, a reboot might be required because some processes may have started before the key was set.
+The following Administrative PowerShell command can be used to set this registry value:</p>
+<div class="highlight-PowerShell notranslate"><div class="highlight"><pre><span></span><span class="nb">New-ItemProperty</span> <span class="n">-Path</span> <span class="s2">&quot;HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem&quot;</span> <span class="n">-Name</span> <span class="s2">&quot;LongPathsEnabled&quot;</span> <span class="n">-Value</span> <span class="n">1</span> <span class="n">-PropertyType</span> <span class="n">DWORD</span> <span class="n">-Force</span>
+</pre></div>
+</div>
+</div></blockquote>
+</section>
+<section id="enable-windows-10-symlinks">
+<h3>Enable Windows 10 symlinks<a class="headerlink" href="#enable-windows-10-symlinks" title="Link to this heading">#</a></h3>
+<p>These instructions are summarized from these sources:</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://portal.perforce.com/s/article/3472">Enabling Symlinks on Windows</a></p></li>
+<li><p><a class="reference external" href="https://stackoverflow.com/questions/5917249/git-symbolic-links-in-windows/59761201#59761201">Git symbolic links in Windows</a></p></li>
+<li><p><a class="reference external" href="https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/security-policy-settings/create-symbolic-links">Create symbolic links</a></p></li>
+</ul>
+<p>Verify that you can create symlinks by running <code class="docutils literal notranslate"><span class="pre">mklink</span></code> from a command window:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;test&quot;</span><span class="w"> </span>&gt;<span class="w"> </span>mklinktest.txt
+mklink<span class="w"> </span>linkedfile.txt<span class="w"> </span>mklinktest.txt
+symbolic<span class="w"> </span>link<span class="w"> </span>created<span class="w"> </span><span class="k">for</span><span class="w"> </span>link.txt<span class="w"> </span>&lt;&lt;<span class="o">===</span>&gt;&gt;<span class="w"> </span>ExistingFile.txt
+</pre></div>
+</div>
+<p>If you don’t have the ability to create symlinks, you’ll see:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;test&quot;</span><span class="w"> </span>&gt;<span class="w"> </span>mklinktest.txt
+mklink<span class="w"> </span>linkedfile.txt<span class="w"> </span>mklinktest.txt
+You<span class="w"> </span><span class="k">do</span><span class="w"> </span>not<span class="w"> </span>have<span class="w"> </span>sufficient<span class="w"> </span>privilege<span class="w"> </span>to<span class="w"> </span>perform<span class="w"> </span>this<span class="w"> </span>operation.
+</pre></div>
+</div>
+<p>You can enable symlink creation by enabling <a class="reference external" href="https://www.wikihow.com/Enable-Developer-Mode-in-Windows-10">Developer Mode</a> in Windows 10/11:</p>
+<ul class="simple">
+<li><p>Windows 10: Go to <strong>Settings</strong> –&gt; <strong>Update &amp; Security</strong> –&gt; <strong>For Developers</strong> –&gt; <strong>Developer Mode</strong> –&gt; Toggle <strong>On</strong> –&gt; Click <strong>Yes</strong> to confirm.</p></li>
+<li><p>Windows 11: Go to <strong>Settings</strong> –&gt; <strong>System</strong> –&gt; <strong>For Developers</strong> –&gt; <strong>Developer Mode</strong> –&gt; Toggle <strong>On</strong>.</p></li>
+</ul>
+<p>Restart your computer for the settings to take effect.</p>
+</section>
+<section id="configure-git">
+<h3>Configure Git<a class="headerlink" href="#configure-git" title="Link to this heading">#</a></h3>
+<p>With <code class="docutils literal notranslate"><span class="pre">long-paths</span></code> and symlinks enabled, enable symlink and <code class="docutils literal notranslate"><span class="pre">long-path</span></code> support in git:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>config<span class="w"> </span>--global<span class="w"> </span>core.symlinks<span class="w"> </span><span class="nb">true</span>
+git<span class="w"> </span>config<span class="w"> </span>--global<span class="w"> </span>core.longpaths<span class="w"> </span><span class="nb">true</span>
+</pre></div>
+</div>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>You can use <code class="docutils literal notranslate"><span class="pre">git</span> <span class="pre">config</span> <span class="pre">--show-scope</span> <span class="pre">--show-origin</span> <span class="pre">core.symlinks</span></code> and <code class="docutils literal notranslate"><span class="pre">git</span> <span class="pre">config</span> <span class="pre">--show-scope</span> <span class="pre">--show-origin</span> <span class="pre">core.longpaths</span></code> to determine what the current active git configuration is, and where that setting is configured.</p>
+</div>
+</section>
+<section id="install-clang-toolchain">
+<h3>Install Clang Toolchain<a class="headerlink" href="#install-clang-toolchain" title="Link to this heading">#</a></h3>
+<p>Though TheRock toolchain is used to build hipDNN, utilities such as clang-format are currently provided by Clang.</p>
+<p>Download and unzip a recent <code class="docutils literal notranslate"><span class="pre">20.x.x</span></code> version of the <a class="reference external" href="https://github.com/llvm/llvm-project/releases?q=20">Clang Toolchain</a>.</p>
+<p>Unzip it to a path with no spaces. For example, after being unzipped to <code class="docutils literal notranslate"><span class="pre">C:\dist\clang</span></code> the bin folder will be located at <code class="docutils literal notranslate"><span class="pre">C:\dist\clang\bin</span></code>.</p>
+</section>
+<section id="install-rocm-sdk">
+<h3>Install ROCm SDK<a class="headerlink" href="#install-rocm-sdk" title="Link to this heading">#</a></h3>
+<p>Run <code class="docutils literal notranslate"><span class="pre">amdgpu-arch.exe</span></code> from the Clang release you just downloaded to find the GPU architecture you’re using, and record the result (it’ll be something like <code class="docutils literal notranslate"><span class="pre">gfx1103</span></code>).</p>
+<p>For example:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>c:<span class="se">\d</span>ist<span class="se">\c</span>lang<span class="se">\b</span>in<span class="se">\a</span>mdgpu-arch
+gfx1103
+</pre></div>
+</div>
+<p>You can use the table at <a class="reference external" href="https://github.com/ROCm/TheRock/blob/main/RELEASES.md#index-page-listing">TheROCK releases</a> or the <a class="reference external" href="https://github.com/ROCm/TheRock/blob/main/cmake/therock_amdgpu_targets.cmake#L43">CMake source</a> to determine the GFX Family.
+For example, the GPU architecture <code class="docutils literal notranslate"><span class="pre">gfx1103</span></code> is GFX Family <code class="docutils literal notranslate"><span class="pre">gfx110X-all</span></code>.</p>
+<p>Download a recent nightly Windows build tarball of TheRock ROCm SDK for your GFX Family from <a class="reference external" href="https://therock-nightly-tarball.s3.amazonaws.com/index.html">ROCm SDK nightly tarballs</a>.
+For example: for <code class="docutils literal notranslate"><span class="pre">gfx110X-all</span></code>, the most recent tarball available (at the time of this writing) is <code class="docutils literal notranslate"><span class="pre">therock-dist-windows-gfx110X-all-7.10.0a20251103.tar.gz</span></code>.</p>
+<p>Complete instructions and alternate methods for installing TheRock are available at <a class="reference external" href="https://github.com/ROCm/TheRock/blob/main/RELEASES.md">TheROCK releases</a>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>If a nightly tarball is not available for your GFX Family, you  may be able to <a class="reference external" href="https://github.com/ROCm/TheRock/tree/main#building-from-source">build TheRock from source</a> or follow the [Roadmap for Support](<a class="github reference external" href="https://github.com/ROCm/TheRock/blob/main/ROADMAP.md">ROCm/TheRock</a>) for more details.</p>
+</div>
+<p>Unzip the downloaded tarball to a path with no spaces. For example, after unzipped to <code class="docutils literal notranslate"><span class="pre">C:\dist\therock</span></code> the bin folder will be located at <code class="docutils literal notranslate"><span class="pre">c:\dist\therock\bin</span></code>.</p>
+</section>
+<section id="set-up-environment-variables">
+<h3>Set up environment variables<a class="headerlink" href="#set-up-environment-variables" title="Link to this heading">#</a></h3>
+<ol class="arabic">
+<li><p>Add TheRock <code class="docutils literal notranslate"><span class="pre">bin</span></code> folder to the system <code class="docutils literal notranslate"><span class="pre">PATH</span></code> so that applications can find and load the DLL files. For example:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">set</span><span class="w"> </span><span class="nv">PATH</span><span class="o">=</span>C:<span class="se">\d</span>ist<span class="se">\t</span>herock<span class="se">\b</span>in<span class="p">;</span>%PATH%
+</pre></div>
+</div>
+<p>It isn’t necessary to add the Clang toolchain to your system <code class="docutils literal notranslate"><span class="pre">PATH</span></code> to perform the build as these can be specified using the <a class="reference internal" href="hipdnn-install.html#llvm"><span class="std std-ref">LLVM_TOOLS_SEARCH_PREFIX</span></a> option to cmake.</p>
+<p>The AMD toolchain should be discovered automatically. If not, refer to the <a class="reference internal" href="hipdnn-install.html#rocm-path"><span class="std std-ref">ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX</span></a> for additional ways to locate the toolchain.</p>
+</li>
+<li><p>Set the <code class="docutils literal notranslate"><span class="pre">HIP_PLATFORM</span></code> environment varilable:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">set</span><span class="w"> </span><span class="nv">HIP_PLATFORM</span><span class="o">=</span>amd
+</pre></div>
+</div>
+</li>
+<li><p>Optionally, you can set Ninja as the default generator so that <code class="docutils literal notranslate"><span class="pre">-g</span> <span class="pre">Ninja</span></code> doesn’t need to be explicitly added to the <code class="docutils literal notranslate"><span class="pre">cmake</span></code> command line:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">set</span><span class="w"> </span><span class="nv">CMAKE_GENERATOR</span><span class="o">=</span>Ninja
+</pre></div>
+</div>
+</li>
+</ol>
+<p>Use <code class="docutils literal notranslate"><span class="pre">hipconfig</span></code> to check that TheRock is installed correctly and the <code class="docutils literal notranslate"><span class="pre">PATH</span></code> is setup correctly. The output from the command will show the detected ROCm path and ROCm clang path (<code class="docutils literal notranslate"><span class="pre">c:\dist\therock\</span></code> will be replaced with the folder TheRock was installed to on your system).
+This command requires that TheRock <code class="docutils literal notranslate"><span class="pre">bin</span></code> directory is in your system <code class="docutils literal notranslate"><span class="pre">PATH</span></code>.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>hipconfig<span class="w"> </span>-rocmpath<span class="w"> </span>-n<span class="w"> </span>--hipclangpath
+c:<span class="se">\d</span>ist<span class="se">\t</span>herock
+c:<span class="se">\d</span>ist<span class="se">\t</span>herock<span class="se">\l</span>ib<span class="se">\l</span>lvm<span class="se">\b</span>in
+</pre></div>
+</div>
+<p>Here’s an example CMake configuration command (including <code class="docutils literal notranslate"><span class="pre">ROCM_CMAKE_PATH</span></code> for completeness, even though it isn’t required when using the default value):</p>
+<div class="highlight-cmake notranslate"><div class="highlight"><pre><span></span><span class="err">projects\hipdnn\build&gt;set</span><span class="w"> </span><span class="err">CMAKE_GENERATOR=Ninja</span>
+<span class="err">projects\hipdnn\build&gt;cmake</span><span class="w"> </span><span class="err">-DGPU_TARGETS=gfx1103</span><span class="w"> </span><span class="err">-DROCM_CMAKE_PATH=c:/dist/therock</span><span class="w"> </span><span class="err">-DCMAKE_PROGRAM_PATH=c:/dist/clang/bin</span><span class="w"> </span><span class="err">..</span>
+<span class="err">--</span><span class="w"> </span><span class="err">Building</span><span class="w"> </span><span class="err">for:</span><span class="w"> </span><span class="err">Ninja</span>
+<span class="err">--</span><span class="w"> </span><span class="err">Using</span><span class="w"> </span><span class="err">ROCm</span><span class="w"> </span><span class="err">Clang</span><span class="w"> </span><span class="err">compilers</span><span class="w"> </span><span class="err">from</span><span class="w"> </span><span class="err">c:/dist/therock/lib/llvm/bin</span>
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>When generating the project, be sure to set <code class="docutils literal notranslate"><span class="pre">GPU_TARGETS</span></code> to your GPU as auto-detection isn’t currently on Windows. For example, <code class="docutils literal notranslate"><span class="pre">cmake</span> <span class="pre">-DGPU_TARGETS=gfx1103</span> <span class="pre">..</span></code> (replacing <cite>gfx1103</cite> with your GPU).</p>
+</div>
+</section>
+<section id="clone-the-repository-and-build-hipdnn">
+<h3>Clone the repository and Build hipDNN<a class="headerlink" href="#clone-the-repository-and-build-hipdnn" title="Link to this heading">#</a></h3>
+<ol class="arabic">
+<li><p>Clone the rocm-libraries repository with <code class="docutils literal notranslate"><span class="pre">git</span> <span class="pre">sparse-checkout</span></code>:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>clone<span class="w"> </span>--no-checkout<span class="w"> </span>--filter<span class="o">=</span>blob:none<span class="w"> </span>https://github.com/ROCm/rocm-libraries.git
+<span class="nb">cd</span><span class="w"> </span>rocm-libraries
+git<span class="w"> </span>sparse-checkout<span class="w"> </span>init<span class="w"> </span>--cone
+git<span class="w"> </span>sparse-checkout<span class="w"> </span><span class="nb">set</span><span class="w"> </span>projects/hipdnn
+git<span class="w"> </span>checkout<span class="w"> </span>develop<span class="w"> </span><span class="c1"># or the branch you are starting from</span>
+</pre></div>
+</div>
+</li>
+<li><p>Build hipDNN:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">cd</span><span class="w"> </span>rocm-libraries/projects/hipdnn
+mkdir<span class="w"> </span>build<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>build
+
+<span class="c1"># Configure with Ninja (recommended)</span>
+cmake<span class="w"> </span>-GNinja<span class="w"> </span>..
+
+<span class="c1"># Build and run all tests</span>
+<span class="c1"># Note that some tests may take several minutes to complete</span>
+ninja<span class="w"> </span>check
+</pre></div>
+</div>
+<p>Refer to the <a class="reference internal" href="hipdnn-install.html#target"><span class="std std-ref">Build targets</span></a> section below for info on additional build targets.</p>
+</li>
+<li><p>Install hipDNN.</p>
+<p>Set the install path with a build configuration. Refer to the <a class="reference internal" href="hipdnn-install.html#configure"><span class="std std-ref">Build configurations</span></a> section to determine which build configuration suits your workflow.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sudo<span class="w"> </span>ninja<span class="w"> </span>install
+</pre></div>
+</div>
+</li>
+</ol>
+<section id="notes">
+<h4>Notes<a class="headerlink" href="#notes" title="Link to this heading">#</a></h4>
+<ul class="simple">
+<li><p>Do <em>not</em> open the <code class="docutils literal notranslate"><span class="pre">x64</span> <span class="pre">Native</span> <span class="pre">Tools</span> <span class="pre">Command</span> <span class="pre">Prompt</span> <span class="pre">for</span> <span class="pre">VS</span> <span class="pre">2022</span></code> as this will interfere with the ROCm SDK and Clang toolchain.</p></li>
+<li><p>Do <em>not</em> set <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> in your environment as this will interfere with toolchain detection. If used, specify it using the <code class="docutils literal notranslate"><span class="pre">-DROCM_PATH=</span></code> option to cmake.</p></li>
+<li><p>When generating the project, CMake will warn about a <code class="docutils literal notranslate"><span class="pre">clang-format</span></code> or <code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code> mismatch. That can be resolved by installing the missing version of the toolchain to a parallel directory and setting the <a class="reference internal" href="hipdnn-install.html#llvm"><span class="std std-ref">LLVM_TOOLS_SEARCH_PREFIX</span></a> variable accordingly.</p></li>
+<li><p>Generating the project files may take longer than on Linux, but should complete within a few minutes.</p></li>
+<li><p>You may want to limit the number of threads used by Ninja when building hipDNN so that your computer is not bogged-down by the build. You can use the <code class="docutils literal notranslate"><span class="pre">ninja</span> <span class="pre">-j</span></code> option to set the number of threads to something smaller than the number of threads available on your CPU.</p></li>
+<li><p>To reduce build time, the <code class="docutils literal notranslate"><span class="pre">-DENABLE_CLANG_TIDY=OFF</span></code> option can be used to disable <code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code> check during development. Similarly the <code class="docutils literal notranslate"><span class="pre">-DENABLE_CLANG_FORMAT=OFF</span></code> option can be used to disable <code class="docutils literal notranslate"><span class="pre">clang-format</span></code>.</p></li>
+</ul>
+</section>
+</section>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="hipdnn-install.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">hipDNN installation</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="../conceptual/miopen-plugin.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">MIOpen Provider plugin architecture</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#installation-steps">Installation steps</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#install-chocolatey-package-manager">Install Chocolatey Package Manager</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#install-utilities">Install utilities</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#enable-windows-10-long-paths">Enable Windows 10 long paths</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#enable-windows-10-symlinks">Enable Windows 10 symlinks</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#configure-git">Configure Git</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#install-clang-toolchain">Install Clang Toolchain</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#install-rocm-sdk">Install ROCm SDK</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#set-up-environment-variables">Set up environment variables</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clone-the-repository-and-build-hipdnn">Clone the repository and Build hipDNN</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#notes">Notes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            <p>
+  </p>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+<footer class="rocm-footer">
+    <div class="container-lg">
+        <section class="bottom-menu menu py-45">
+            <div class="row d-flex align-items-center">
+                <div class="col-12 text-center">
+                    <ul>
+                        <li><a href="https://www.amd.com/en/corporate/copyright" target="_blank">Terms and Conditions</a></li>
+                        <li><a href="https://rocm.docs.amd.com/en/develop/about/license.html">ROCm Licenses and Disclaimers</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/privacy" target="_blank">Privacy</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/trademarks" target="_blank">Trademarks</a></li>
+                        <li><a href="https://www.amd.com/content/dam/amd/en/documents/corporate/cr/supply-chain-transparency.pdf" target="_blank">Supply Chain Transparency</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/competition" target="_blank">Fair and Open Competition</a></li>
+                        <li><a href="https://www.amd.com/system/files/documents/amd-uk-tax-strategy.pdf" target="_blank">UK Tax Strategy</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/cookies" target="_blank">Cookie Policy</a></li>
+                        <!-- OneTrust Cookies Settings button start -->
+                        <li><a href="#cookie-settings" id="ot-sdk-btn" class="ot-sdk-show-settings">Cookie Settings</a></li>
+                        <!-- OneTrust Cookies Settings button end -->
+                    </ul>
+                </div>
+            </div>
+            <div class="row d-flex align-items-center">
+                <div class="col-12 text-center">
+                    <div>
+                        <span class="copyright">© 2025 Advanced Micro Devices, Inc</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</footer>
+
+<!-- <div id="rdc-watermark-container">
+    <img id="rdc-watermark" src="../_static/images/alpha-watermark.svg" alt="DRAFT watermark"/>
+</div> -->
+  </body>
+</html>
