@@ -51,13 +51,6 @@ using ManagedFindOptions = std::unique_ptr<std::remove_pointer_t<miopenFindOptio
 
 constexpr int batch_factor = 4;
 
-// ptr_FusionPlanArgs GetManageFusionPlanArgs()
-// {
-//     miopenOperatorArgs_t fusionArgs;
-//     miopenCreateOperatorArgs(&fusionArgs);
-//     return ptr_FusionPlanArgs{fusionArgs};
-// }
-
 ptr_ActivationDesc GetManagedActivDesc()
 {
     miopenActivationDescriptor_t activdesc;
@@ -209,29 +202,6 @@ struct verify_inference_batchnorm_activ
             EXPECT_EQ(run_ret, miopenStatusSuccess);
         }
 
-        /*
-        double alpha = 1., beta = 0.;
-        auto ptr_fusionargs = GetManageFusionPlanArgs();
-        miopenSetOpArgsBatchNormInference(ptr_fusionargs.get(),
-                                          bNormOp,
-                                          &alpha,
-                                          &beta,
-                                          bnscale_dev.get(),
-                                          bnbias_dev.get(),
-                                          estMean_dev.get(),
-                                          estVariance_dev.get(),
-                                          epsilon);
-        miopenSetOpArgsActivForward(
-            ptr_fusionargs.get(), activOp, &alpha, &beta, activ_alpha, activ_beta, activ_gamma);
-        miopenExecuteFusionPlan(&handle,
-                                fusionplan,
-                                inputDesc,
-                                in_dev.get(),
-                                inputDesc,
-                                out_dev.get(),
-                                ptr_fusionargs.get());
-        */
-
         baout.data = handle.Read<T>(out_dev, baout.data.size());
         return baout;
     }
@@ -341,13 +311,13 @@ struct na_inference_find2_test : public ::testing::TestWithParam<TestCase>
         std::tie(ssn, ssc, ssh, ssw) = miopen::tien<4>(derivedBnDesc.GetLengths());
 
         scale = tensor<PREC_TYPE>{
-            ssn, ssc, ssh, ssw}; //.generate(                tensor_elem_gen_integer{max_value});;
+            ssn, ssc, ssh, ssw};
         shift = tensor<PREC_TYPE>{
-            ssn, ssc, ssh, ssw}; //.generate(               tensor_elem_gen_integer{max_value});;
+            ssn, ssc, ssh, ssw};
         estMean = tensor<PREC_TYPE>{
-            ssn, ssc, ssh, ssw}; //.generate(                tensor_elem_gen_integer{max_value});;
+            ssn, ssc, ssh, ssw};
         estVariance = tensor<PREC_TYPE>{
-            ssn, ssc, ssh, ssw}; //.generate(                tensor_elem_gen_integer{max_value});;
+            ssn, ssc, ssh, ssw};
 
         const double Data_scale = 0.01;
         for(std::size_t i = 0; i < scale.desc.GetElementSize(); i++)
