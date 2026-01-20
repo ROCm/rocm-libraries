@@ -2615,6 +2615,31 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SSubU32(dst=sgpr("KRingShift"), src0=0, src1=sgpr(sTmp), comment="KRS: shift = -tmp"))
       module.add(SAndB32(dst=sgpr("KRingShift"), src0=sgpr("KRingShift"), src1=mask, comment="KRS: shift %= cacheLineElements"))
 
+      # If sgprKRingShift is not aligned to GRVW(A/B), disable KRS (set shift=0).
+      # Requested behavior:
+      #   if (KRingShift % GRVWA != 0) or (KRingShift % GRVWB != 0) then KRingShift = 0
+      grvwA = int(kernel.get("GlobalReadVectorWidthA", 1))
+      grvwB = int(kernel.get("GlobalReadVectorWidthB", 1))
+      maskA = (grvwA - 1) if grvwA > 1 else 0
+      maskB = (grvwB - 1) if grvwB > 1 else 0
+      if maskA or maskB:
+        # Fast path requires power-of-two GRVWs for cheap modulo via AND-mask.
+        if ((grvwA & (grvwA - 1)) != 0) or ((grvwB & (grvwB - 1)) != 0):
+          module.addComment0("KRingShift: GRVW not pow2; disable shift=0")
+          module.add(SMovB32(dst=sgpr("KRingShift"), src=0, comment="KRS: disabled (shift=0)"))
+        else:
+          # sTmp := (shift & (grvwA-1)) | (shift & (grvwB-1))
+          if maskA:
+            module.add(SAndB32(dst=sgpr(sTmp), src0=sgpr("KRingShift"), src1=maskA, comment=f"KRS: shift % GRVWA (mask=0x{maskA:x})"))
+          else:
+            module.add(SMovB32(dst=sgpr(sTmp), src=0, comment="KRS: GRVWA==1 => aligned"))
+          if maskB:
+            module.add(SAndB32(dst=sgpr(sBase), src0=sgpr("KRingShift"), src1=maskB, comment=f"KRS: shift % GRVWB (mask=0x{maskB:x})"))
+            module.add(SOrB32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=sgpr(sBase), comment="KRS: (shift%GRVWA) | (shift%GRVWB)"))
+          module.add(SCmpEQU32(src0=sgpr(sTmp), src1=0, comment="KRS: (shift%GRVWA==0 && shift%GRVWB==0) ?"))
+          module.add(SCSelectB32(dst=sgpr("KRingShift"), src0=sgpr("KRingShift"), src1=0,
+                                comment="KRS: if misaligned, disable shift=0"))
+
     module.add(labelDone)
     return module
 
@@ -6651,16 +6676,6 @@ class KernelWriterAssembly(KernelWriter):
     abReg   = None
     dummy   = -1
 
-    # KRS: If KRingShift is enabled at runtime (sgprKRingShift != 0), we can skip the tail LDS
-    # zero-out masking sequence here since the KRS tail global-read path already forces OOB lanes
-    # to read from a safe sentinel (and thus provides the same "invalid -> 0" behavior).
-    # Place this at the very start of shiftK so it lands right after the local-read waitcnt.
-    if isTail and kernel["KRingShift"] and kernel["BufferLoad"]:
-      krsShiftKSkipMaskLabel = Label(self.labels.getUniqueNamePrefix("KRS_ShiftK_SkipMask"), comment="")
-      krsShiftKSkipMaskLabel.comment = "KRS: skip tail LDS zero-out mask when sgprKRingShift!=0"
-      shiftK.add(SCmpEQU32(src0=sgpr("KRingShift"), src1=0, comment="KRS: sgprKRingShift==0 ?"))
-      shiftK.add(SCBranchSCC0(labelName=krsShiftKSkipMaskLabel.getLabelName(), comment="KRS: enabled => skip tail LDS mask"))
-
     if isTail and (kernel["AssertSummationElementMultiple"] % kPerIter != 0):
       kReg    = self.vgprPool.checkOut(1,"kReg") # remainder
       loopCntSgpr = loopCounterName
@@ -6871,14 +6886,6 @@ class KernelWriterAssembly(KernelWriter):
     # MIK=1 case, we still need this code for Coalesced case
     if tail and (kernel["MatrixInstK"] > 1 or numReadsIterCoalescedA > 1 or numReadsIterCoalescedB > 1):
       if not is_wmma_v1: #mfma or wmma_v2
-        # KRS: If KRingShift is enabled at runtime (sgprKRingShift != 0), skip the tail LDS
-        # zero-out masking sequence (shiftK) and jump to the end of this module.
-        # Placed at the start of shiftK so it lands right after the local-read waitcnt.
-        if kernel["KRingShift"] and kernel["BufferLoad"]:
-          krsShiftKSkipMaskLabel = Label(self.labels.getUniqueNamePrefix("KRS_ShiftK_SkipMask"), comment="")
-          krsShiftKSkipMaskLabel.comment = "KRS: skip tail LDS zero-out mask when sgprKRingShift!=0"
-          shiftK.add(SCmpEQU32(src0=sgpr("KRingShift"), src1=0, comment="KRS: sgprKRingShift==0 ?"))
-          shiftK.add(SCBranchSCC0(labelName=krsShiftKSkipMaskLabel.getLabelName(), comment="KRS: enabled => skip tail LDS mask"))
 
         # ToDo: Avoid using extra kReg_first for wmma_v2 case
         kReg_first  = self.vgprPool.checkOut(1,"kReg_first") # the first vgpr of remainder
