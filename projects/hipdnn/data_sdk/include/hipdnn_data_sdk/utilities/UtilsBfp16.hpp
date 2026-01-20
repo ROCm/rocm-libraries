@@ -10,7 +10,8 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <string>
 
-#define HIPDNN_NAN_BF16 ushort_as_bfloat16(static_cast<unsigned short>(0x7FFFU))
+#define HIPDNN_NAN_BF16 \
+    hipdnn_data_sdk::utilities::bfp16::ushort_as_bfloat16(static_cast<unsigned short>(0x7FFFU))
 
 inline __HOST_DEVICE__ hip_bfloat16 operator""_bf(long double value)
 {

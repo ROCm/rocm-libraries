@@ -338,7 +338,7 @@ void rocfft_plan_t::Execute(void* in_buffer[], void* out_buffer[], rocfft_execut
 
     LogSortedPlan(sortedIdx);
 
-    auto callbacks = DeviceCallbackMap(info, desc);
+    auto callbacks = DeviceCallbackMap(info, desc, local_comm_rank);
 
     for(auto i = sortedIdx.begin(); i != sortedIdx.end(); ++i)
     {

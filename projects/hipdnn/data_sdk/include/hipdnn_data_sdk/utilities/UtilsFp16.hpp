@@ -7,7 +7,8 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <string>
 
-#define HIPDNN_NAN_FP16 ushort_as_half(static_cast<unsigned short>(0x7FFFU))
+#define HIPDNN_NAN_FP16 \
+    hipdnn_data_sdk::utilities::fp16::ushort_as_half(static_cast<unsigned short>(0x7FFFU))
 
 inline __HOST_DEVICE__ half operator""_h(long double value)
 {
