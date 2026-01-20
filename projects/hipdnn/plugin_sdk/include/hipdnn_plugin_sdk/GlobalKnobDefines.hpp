@@ -3,11 +3,7 @@
 
 #pragma once
 
-#include <hipdnn_plugin_sdk/KnobFactory.hpp>
-
 namespace hipdnn_plugin_sdk
 {
-
-DEFINE_HIPDNN_KNOB_NAMED(benchmarking, "global.benchmarking")
-
+static constexpr const char* BENCHMARKING_KNOB_NAME = "global.benchmarking";
 }
