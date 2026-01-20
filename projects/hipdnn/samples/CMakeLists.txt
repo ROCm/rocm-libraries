@@ -100,6 +100,7 @@ add_hipdnn_sample_test(bn_inference_with_variance)
 add_hipdnn_sample_test(bn_training)
 add_hipdnn_sample_test(fused_bn_training_activ)
 add_hipdnn_sample_test(bn_backward)
+add_hipdnn_sample_test(fused_bn_inference_activ)
 add_hipdnn_sample_test(fused_bn_inference_drelu_bn_backward)
 add_hipdnn_sample_test(fused_bn_inference_variance_activ)
 
