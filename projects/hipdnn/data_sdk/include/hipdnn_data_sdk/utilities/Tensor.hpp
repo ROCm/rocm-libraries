@@ -7,7 +7,9 @@
 #include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsBfp8.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsFp8.hpp>
 #include <iostream>
 #include <numeric>
 #include <random>
@@ -587,6 +589,10 @@ inline std::unique_ptr<utilities::ITensor> createTensor(data_objects::DataType d
         return std::make_unique<Tensor<int32_t>>(dims, strides);
     case data_objects::DataType::INT8:
         return std::make_unique<Tensor<int8_t>>(dims, strides);
+    case data_objects::DataType::FP8_E4M3:
+        return std::make_unique<Tensor<hip_fp8_e4m3>>(dims, strides);
+    case data_objects::DataType::FP8_E5M2:
+        return std::make_unique<Tensor<hip_fp8_e5m2>>(dims, strides);
     default:
         throw std::runtime_error("Unsupported data type for tensor");
     }

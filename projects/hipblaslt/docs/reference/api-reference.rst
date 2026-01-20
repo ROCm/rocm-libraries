@@ -93,7 +93,7 @@ HIPBLAS_COMPUTE_32F           HIP_R_32F           HIP_R_16BF      HIP_R_16BF
 
 For ``FP8`` type Matmul, hipBLASLt supports the type combinations shown in the following table:
 
-* This table uses simpler abbrieviations:
+* This table uses simpler abbreviations:
 
   *  **FP16** means **HIP_R_16F**
   *  **BF16** means **HIP_R_16BF**

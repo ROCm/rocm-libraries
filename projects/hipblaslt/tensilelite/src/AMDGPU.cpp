@@ -55,6 +55,7 @@ namespace TensileLite
         , skDynamicWGM(getSKDynamicWGM())
         , fixedWGM(getFixedWGM())
         , fixedWGMXCC(getFixedWGMXCC())
+        , fixedWGMXCCCHUNK(getFixedWGMXCCCHUNK())
         , skMaxCUs(getSKMaxCUs())
         , skGridMultiplier(getSKGridMultiplier())
         , skFixedGrid(getSKFixedGrid())
