@@ -18,11 +18,13 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk;
 
-template <typename InputType, typename IntermediateType>
+template <typename InputType, typename ComputeType>
 bool SampleRunner::operator()(const TensorLayout& layout)
 {
+    using OutputType = InputType;
+
     auto inputType = getDataTypeEnumFromType<InputType>();
-    auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
+    auto computeType = getDataTypeEnumFromType<ComputeType>();
 
     std::cout << "Running batch normalization inference with variance + ReLU activation graph "
               << inputType << " [" << layout << "]"
@@ -35,14 +37,14 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
-        .set_intermediate_data_type(intermediateType)
-        .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+        .set_intermediate_data_type(computeType)
+        .set_compute_data_type(computeType);
 
     auto x = createTensor({n, c, h, w}, inputType, layout);
-    auto scale = createTensor({1, c, 1, 1}, intermediateType);
-    auto bias = createTensor({1, c, 1, 1}, intermediateType);
-    auto mean = createTensor({1, c, 1, 1}, intermediateType);
-    auto variance = createTensor({1, c, 1, 1}, intermediateType);
+    auto scale = createTensor({1, c, 1, 1}, computeType);
+    auto bias = createTensor({1, c, 1, 1}, computeType);
+    auto mean = createTensor({1, c, 1, 1}, computeType);
+    auto variance = createTensor({1, c, 1, 1}, computeType);
 
     // Epsilon is a tensor for the variance extension
     auto epsilon = std::make_shared<graph::TensorAttributes>();
@@ -55,7 +57,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto y = graph->batchnorm_inference_variance_ext(
         x, mean, variance, scale, bias, epsilon, bnAttributes);
 
-    y->set_data_type(inputType);
+    y->set_data_type(computeType);
 
     // Step 2: Pointwise ReLU Activation
     auto pwAttributes = graph::PointwiseAttributes();
@@ -71,22 +73,22 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     // Allocate tensors
     utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
-    utilities::Tensor<IntermediateType> scaleTensor(scale->get_dim());
-    utilities::Tensor<IntermediateType> biasTensor(bias->get_dim());
-    utilities::Tensor<IntermediateType> meanTensor(mean->get_dim());
-    utilities::Tensor<IntermediateType> varianceTensor(variance->get_dim());
-    utilities::Tensor<InputType> activatedYTensor(activatedY->get_dim(), layout);
+    utilities::Tensor<ComputeType> scaleTensor(scale->get_dim());
+    utilities::Tensor<ComputeType> biasTensor(bias->get_dim());
+    utilities::Tensor<ComputeType> meanTensor(mean->get_dim());
+    utilities::Tensor<ComputeType> varianceTensor(variance->get_dim());
+    utilities::Tensor<OutputType> activatedYTensor(activatedY->get_dim(), layout);
 
     // Initialize tensors
     xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
-    scaleTensor.fillWithRandomValues(static_cast<IntermediateType>(0.0f),
-                                     static_cast<IntermediateType>(1.0f));
-    biasTensor.fillWithRandomValues(static_cast<IntermediateType>(0.0f),
-                                    static_cast<IntermediateType>(1.0f));
-    meanTensor.fillWithRandomValues(static_cast<IntermediateType>(0.0f),
-                                    static_cast<IntermediateType>(1.0f));
-    varianceTensor.fillWithRandomValues(static_cast<IntermediateType>(0.1f),
-                                        static_cast<IntermediateType>(1.0f));
+    scaleTensor.fillWithRandomValues(static_cast<ComputeType>(0.0f),
+                                     static_cast<ComputeType>(1.0f));
+    biasTensor.fillWithRandomValues(static_cast<ComputeType>(0.0f),
+                                    static_cast<ComputeType>(1.0f));
+    meanTensor.fillWithRandomValues(static_cast<ComputeType>(0.0f),
+                                    static_cast<ComputeType>(1.0f));
+    varianceTensor.fillWithRandomValues(static_cast<ComputeType>(0.1f),
+                                        static_cast<ComputeType>(1.0f));
 
     // Build variant pack
     std::unordered_map<int64_t, void*> variantPack;
@@ -113,7 +115,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         std::cout << "Running CPU reference validation using CpuReferenceGraphExecutor...\n";
 
         // Create reference tensor
-        utilities::Tensor<InputType> activatedYRefTensor(activatedY->get_dim(), layout);
+        utilities::Tensor<OutputType> activatedYRefTensor(activatedY->get_dim(), layout);
 
         // Build variant pack for CPU execution (using host pointers)
         std::unordered_map<int64_t, void*> cpuVariantPack;
@@ -130,9 +132,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 
         auto tolerance
-            = hipdnn_test_sdk::utilities::batchnorm::getToleranceInferenceWithVariance<InputType>();
+            = hipdnn_test_sdk::utilities::batchnorm::getToleranceInferenceWithVariance<OutputType>();
         auto yValidator
-            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
+            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<OutputType>(tolerance, tolerance);
 
         bool yValid = yValidator.allClose(activatedYRefTensor, activatedYTensor);
 
