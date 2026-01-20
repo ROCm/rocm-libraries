@@ -786,6 +786,15 @@ namespace TensileLite
                                ContractionInputs const&      inputs)
         {
 
+            // For more precise numerical correctness with XFloat32, skip this fast path.
+            // If we knew at this point that the data was initialized as whole number floats,
+            // we could continue down this fast path, because there would be no rounding
+            // errors incurred by f32 accumulation. But we do not.
+            if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
+            {
+                return false;
+            }
+
             // Guard rails to check that the fast path is appropriate to use.
             // Some of these can be relaxed  as support on this path is generalized.
             auto isSupportedType = [](rocisa::DataType t) {

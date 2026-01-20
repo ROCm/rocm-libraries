@@ -10,12 +10,12 @@ GlobalParameters:
   CMakeBuildType: Release
   KernelTime: True
   MaxWorkspaceSize: 13421772800
-  DataInitTypeA: 3
-  DataInitTypeB: 3
+  DataInitTypeA: 13
+  DataInitTypeB: 12
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
-  DataInitTypeBias: 3
-  DataInitTypeScaleAlphaVec: 3
+  DataInitTypeBias: 13
+  DataInitTypeScaleAlphaVec: 12
   BoundsCheck: 2
   #MaxFileName: 256
 
