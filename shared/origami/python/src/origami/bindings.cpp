@@ -132,6 +132,12 @@ NB_MODULE(origami, m) {
       .def_rw("a_mx_block_size", &origami::problem_t::a_mx_block_size)
       .def_rw("b_mx_block_size", &origami::problem_t::b_mx_block_size);
 
+  nanobind::class_<origami::staggerU_t>(m, "staggerU_t")
+      .def(nanobind::init<>())
+      .def_rw("staggerUMapping", &origami::staggerU_t::staggerUMapping)
+      .def_rw("staggerU", &origami::staggerU_t::staggerU)
+      .def_rw("staggerUStrideShift", &origami::staggerU_t::staggerUStrideShift);
+
   nanobind::class_<hardware_t>(m, "hardware_t")
       .def(nanobind::init<hardware_t::architecture_t,
                           size_t,  // N_CU
@@ -189,10 +195,21 @@ NB_MODULE(origami, m) {
   m.def("select_grid_size",
         &origami::streamk::select_grid_size,
         "Select best grid size for the given configuration");
+
   m.def("select_workgroup_mapping",
         &origami::select_workgroup_mapping,
         "Select best workgroup mapping");
-  m.def("rank_configs", &origami::rank_configs, "Rank configurations by performance");
+
+  m.def("select_staggerU",
+        &origami::select_staggerU,
+        "Select best staggerU parameters");
+
+  m.def("rank_configs",
+        &origami::rank_configs,
+        "problem"_a,
+        "hardware"_a,
+        "configs"_a,
+        "Rank configurations by performance");
   m.def("select_config_mnk",
         &origami::select_config_mnk,
         "Select best configuration for M,N,K dimensions");

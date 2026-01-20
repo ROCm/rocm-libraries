@@ -365,49 +365,73 @@ staggerU_t select_staggerU(const problem_t& problem,
   // In those cases, the performance is affected by inefficient use of L2 (for the last XCD) and the L2 contention is masked,
   // but the MALL contention is not masked.
 
-  // Early Exit: splitK and Batch are not supported yet
-  if(split_factor != 1 || batch != 1)
+  // Early Exit: splitK and Batch and num_timesteps are not supported yet
+  if(split_factor != 1 || batch != 1 || num_timesteps != 1)
     return staggerU_t{0, 0, 0};
 
-  // Early Exit: If K is substantial, StaggerU effect is negligible
-  if(numMT_K > 36)
-    return staggerU_t{0, 0, 0};
-
-  if(wgm == -1)
+  if(wgm < 0)
   {
-    std::cout << "StaggerU is disabled" << std::endl;
+    std::cout << "Invalid WGM value: " << wgm << std::endl;
     return staggerU_t{0, 0, 0};
   }
   
   // Find Mall Tile (the tile that is accessed by all CUs in one time step)
-  size_t Mall_N = numMT_N;
-  size_t Mall_M = numMT_M;
-  size_t L2_N   = (wgm < numMT_N) ? wgm : numMT_N;
-  size_t L2_M_temp = math::safe_ceil_div(numMT_M, wgm);
-  size_t L2_M   = (L2_M_temp < numMT_M) ? L2_M_temp : numMT_M;
-
-  size_t numWGsPerL2 = skGrid > numMTs ? math::safe_ceil_div(skGrid, numXCD) : math::safe_ceil_div(numMTs, numXCD);
-  numWGsPerL2 = (numWGsPerL2 < numCUsPerXCD) ? numWGsPerL2 : numCUsPerXCD;
-  size_t numWGsPerMall = numWGsPerL2 * numXCD;
+  size_t MallTile_N    = numMT_N;
+  size_t MallTile_M    = numMT_M;
+  size_t numWGsPerMallTile = numMT_M * numMT_N;
+  // Find L2 Tile (the tile that is accessed by all CUs in one time step)
+  size_t L2Tile_N      = (wgm < numMT_N) ? wgm : numMT_N;
+  size_t L2Tile_M_temp = math::safe_ceil_div(numMT_M, wgm);
+  size_t L2Tile_M      = (L2Tile_M_temp < numMT_M) ? L2Tile_M_temp : numMT_M;
+  size_t numWGsPerL2Tile = skGrid > numMTs ? math::safe_ceil_div(skGrid, numXCD) : math::safe_ceil_div(numMTs, numXCD);
+  numWGsPerL2Tile = (numWGsPerL2Tile < numCUsPerXCD) ? numWGsPerL2Tile : numCUsPerXCD;
   
-  // Find the dimension with the least number of MTs -- This is the dimension that will be staggered
-  size_t staggerTile = 0;
-  if(L2_M > L2_N)
+  // Find StaggerU for L2
+  size_t L2_staggerUMapping = 0;
+  size_t L2_staggerU = 0;
+  if(L2Tile_M >= L2Tile_N)
   {
-    out_staggerUMapping = 0;
-    staggerTile = L2_M;
+    L2_staggerUMapping = 0;
+    L2_staggerU = L2Tile_M;
   }
   else
   {
-    out_staggerUMapping = 1;
-    staggerTile = L2_N;
+    L2_staggerUMapping = 1;
+    L2_staggerU = L2Tile_N;
+  }
+
+  // Find StaggerU for Mall
+  size_t Mall_staggerUMapping = 0;
+  size_t Mall_staggerU = 0;
+  if(MallTile_M >= MallTile_N)
+  {
+    Mall_staggerUMapping = 0;
+    Mall_staggerU = MallTile_M;
+  }
+  else
+  {
+    Mall_staggerUMapping = 1;
+    Mall_staggerU = MallTile_N;
   }
   
-  // Compute smallest power of 2 larger than or equal to staggerTile
+  // Compute StaggerU
+  if(Mall_staggerU > 2 * L2_staggerU)
+  {
+    out_staggerUMapping = L2_staggerUMapping;
+    out_staggerU = L2_staggerU;
+  }
+  else
+  {
+    out_staggerUMapping = Mall_staggerUMapping;
+    out_staggerU = Mall_staggerU;
+  }
+
+  // Compute smallest power of 2 larger than or equal to out_staggerU
+  // 64 is the maximum value for staggerU, however, 32 is a more practical value for most cases.
   size_t powerOf2 = 1;
-  while(powerOf2 < staggerTile)
+  while(powerOf2 < out_staggerU)
     powerOf2 <<= 1;
-  out_staggerU = (powerOf2 < 64) ? powerOf2 : 64; // Cap at 64
+  out_staggerU = (powerOf2 < 32) ? powerOf2 : 32;
   out_staggerUStrideShift = 1;
 
   return staggerU_t{out_staggerUMapping, out_staggerU, out_staggerUStrideShift};
