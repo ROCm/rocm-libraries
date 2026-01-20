@@ -13,19 +13,11 @@
 namespace hipdnn_plugin_sdk
 {
 
-#define DEFINE_HIPDNN_KNOB_NAMED(VAR_NAME, STRING_NAME)              \
-    static constexpr const char* VAR_NAME##_KNOB_NAME = STRING_NAME; \
-    static const int64_t VAR_NAME##_KNOB_ID                          \
-        = static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash(STRING_NAME));
-
-#define DEFINE_HIPDNN_KNOB(NAME) DEFINE_HIPDNN_KNOB_NAMED(NAME, #NAME)
-
 class KnobFactory
 {
 public:
     static flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>
         createIntKnob(flatbuffers::FlatBufferBuilder& builder,
-                      int64_t id,
                       const std::string& name,
                       const std::string& description,
                       int64_t defaultValue,
@@ -44,7 +36,6 @@ public:
 
         return hipdnn_data_sdk::data_objects::CreateKnob(
             builder,
-            id,
             knobIdStr,
             descStr,
             hipdnn_data_sdk::data_objects::KnobValue::IntValue,
@@ -56,7 +47,6 @@ public:
 
     static flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>
         createFloatKnob(flatbuffers::FlatBufferBuilder& builder,
-                        int64_t id,
                         const std::string& name,
                         const std::string& description,
                         float defaultValue,
@@ -72,7 +62,6 @@ public:
 
         return hipdnn_data_sdk::data_objects::CreateKnob(
             builder,
-            id,
             knobIdStr,
             descStr,
             hipdnn_data_sdk::data_objects::KnobValue::FloatValue,
@@ -84,7 +73,6 @@ public:
 
     static flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>
         createStringKnob(flatbuffers::FlatBufferBuilder& builder,
-                         int64_t id,
                          const std::string& name,
                          const std::string& description,
                          const std::string& defaultValue,
@@ -108,7 +96,6 @@ public:
 
         return hipdnn_data_sdk::data_objects::CreateKnob(
             builder,
-            id,
             knobIdStr,
             descStr,
             hipdnn_data_sdk::data_objects::KnobValue::StringValue,
