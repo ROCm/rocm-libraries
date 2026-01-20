@@ -337,7 +337,7 @@ class LocalRead(ValidatorInstruction):
     # The index in the list of Local Read instructions provided by a CMS schedule.
     # Needed to properly calculate must_start_after for Packs.
     issue_index: int
-    needed_by: Union[int, float] = float('inf')
+    needed_by: ValidatorInstruction = field(default_factory=lambda: MFMA(float('inf')))
     guaranteed_by: Union[int, float] = float('inf')
 
     def done_idx(self) -> Union[int, float]:
@@ -345,35 +345,32 @@ class LocalRead(ValidatorInstruction):
 
     def validate(self) -> Optional[str]:
         # For when local reads are not being guaranteed by a particular pass.
-        if self.needed_by == float('inf'):
+        if self.needed_by.issued_at == float('inf'):
             return None
 
         # Needs to be guaranteed BEFORE the index at which it's needed since the
         # SWaitCnt is issued AFTER the vmfma.
-        if self.guaranteed_by < self.needed_by:
+        if self.guaranteed_by < self.needed_by.issued_at:
             return None
 
         guaranteed_by = self.guaranteed_by
         # Modulo for LRs that finish in next iteration.
-        needed_by = self.needed_by % self.num_vmfma
+        needed_by = int(self.needed_by.issued_at) % self.num_vmfma
         issued_at = floor(self.issued_at) % self.num_vmfma
         if guaranteed_by == float('inf'):
-            message = f"{self.name} at index {issued_at} is not valid. " + \
-                        "There are no guarantees on when it will be done."
+            return f"{self.name} @ idx={issued_at} is not valid. There are no guarantees on when it will be done."
+        
+        if self.num_vmfma - 1 + 0.5 <= (guaranteed_by % self.num_vmfma) < self.num_vmfma:
+            # Special case to handle idx=-1 which is in the range of [numVMFMA + 0.5, numVMFMA)
+            guaranteed_by = -1
         else:
-            if self.num_vmfma - 1 + 0.5 <= (guaranteed_by % self.num_vmfma) < self.num_vmfma:
-                # Special case to handle idx=-1 which is in the range of [numVMFMA + 0.5, numVMFMA)
-                guaranteed_by = -1
-            else:
-                guaranteed_by = floor(guaranteed_by) % self.num_vmfma
-            
-            context_str = ""
-            if self.needed_by > self.num_vmfma:
-                context_str = " (of next iteration)"
+            guaranteed_by = floor(guaranteed_by) % self.num_vmfma
+        
+        context_str = ""
+        if self.needed_by.issued_at > self.num_vmfma:
+            context_str = " (of next iteration)"
 
-            message = f"{self.name} at index {issued_at} is not valid. " + \
-                        f"Needed before index {needed_by}{context_str}, but only guaranteed at index {guaranteed_by}."
-        return message
+        return f"{self.name} @ idx={issued_at} issued too late, must be guaranteed before {self.needed_by.name} @ idx={needed_by}{context_str} but only guaranteed @ idx={guaranteed_by}."
 
 @dataclass
 class MFMA(ValidatorInstruction):
@@ -898,6 +895,10 @@ def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reor
     n_local_reads_a = len(timeline.get_instructions("LRA0", MAIN_LOOP))
     n_local_reads_b = len(timeline.get_instructions("LRB0", MAIN_LOOP))
 
+    mfmas_by_index: dict[int, MFMA] = {
+        int(mfma.issued_at): mfma for _, mfma in timeline.get_instructions_combined("MFMA")
+    }
+
     for i_loop, loop in enumerate(timeline.loops):
         loop_offset = timeline.num_vmfma * i_loop
         for instruction_name in timeline.get_instruction_names():
@@ -915,7 +916,7 @@ def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reor
                     n_local_reads_b=n_local_reads_b,
                     force_unroll_sub_iter=kernel.get("ForceUnrollSubIter", False),
                     use_f32x_emulation=kernel.get("UseF32XEmulation", False))                
-                lr.needed_by = needed_by + loop_offset
+                lr.needed_by = mfmas_by_index[needed_by + loop_offset]
 
 
 def set_gr_needed_by_from_lrs(timeline: Timeline, swap_global_read_order: bool) -> None:
@@ -1599,31 +1600,19 @@ def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
 
     # Build helper lookup
     index_for_inst_id = {id(inst): i for i, inst in enumerate(timeline.combined_timeline)}
-    
-    # TODO: Needed by LR, pointing to MFMA by index. Redo implementation of LR.
-    mfma_for_mfma_index = {
-        inst.issued_at: inst 
-        for inst in timeline.combined_timeline 
-        if isinstance(inst, MFMA)
-    }
 
     # Precompute issue times
     issue_times = precompute_issue_times(timeline.combined_timeline, kernel.get("UseMFMAF32XEmulation", False))
         
     # Estimate number of quad-cycles between being issued and result being used
     for i_instruction, instruction in enumerate(timeline.combined_timeline):
-        # TODO: Get rid of the float("inf") check once LocalRead uses the new needed_by version.
-        if not hasattr(instruction, "needed_by") or instruction.needed_by is None or instruction.needed_by is float("inf"):
+        if not hasattr(instruction, "needed_by") or instruction.needed_by is None or instruction.needed_by.issued_at == float("inf"):
             continue
         
         if not hasattr(instruction, "min_quad_cycles_before_result_used") or instruction.min_quad_cycles_before_result_used == 0:
             continue
 
         needed_by = instruction.needed_by
-        if not isinstance(instruction.needed_by, ValidatorInstruction):
-            needed_by = mfma_for_mfma_index.get(instruction.needed_by)
-            if needed_by is None:
-                continue
         
         i_needed_by = index_for_inst_id.get(id(needed_by))
         estimate = estimate_quad_cycles_precomputed(i_instruction, i_needed_by, issue_times)
@@ -1709,7 +1698,7 @@ def _transform_index_standard(
     is_lr0: bool,
     use_f32x_emulation: bool,
     mfma_reorder: list[int],
-    num_vmfma: int,
+    num_vmfma: int
 ) -> int:
     """
     Convert column-major linear index into needed_by mfma index when ForceUnrollSubIter is disabled.
@@ -1717,7 +1706,7 @@ def _transform_index_standard(
     if use_f32x_emulation:  # Each tile requires 3 MFMAs
         needed_by *= 3
     
-    if is_lr0:  # LR0 reads data for 2nd half of this iteration
+    if is_lr0:  # LR0 reads data for 2nd half of this iteration (when present)
         needed_by += num_vmfma // 2
     
     if mfma_reorder:
@@ -1763,12 +1752,14 @@ def lr_needed_by_mfma(
     n_tiles_per_lra = n_tiles_a / n_local_reads_a
     n_tiles_per_lrb = n_tiles_b / n_local_reads_b
 
-    if force_unroll_sub_iter:
+    mfma_per_tile = 3 if use_f32x_emulation else 1
+    single_sub_iter = num_vmfma == n_tiles_a * n_tiles_b * mfma_per_tile
+    if force_unroll_sub_iter or single_sub_iter:
         # Without the unroll, the LRs are for half of the vmfmas.
         # But the number of vmfmas == 2 * n_tiles_a * n_tiles_b.
         # So each LR loads n_tiles tiles.
-        # For force_unroll_sub_iter, there are only n_tiles_a * n_tiles_b vmfmas.
-        # So each LR only loads half as many tiles.
+        # For force_unroll_sub_iter (and single-sub-iter schedules), there are only
+        # n_tiles_a * n_tiles_b vmfmas. So each LR only loads half as many tiles.
         n_tiles_per_lra /= 2
         n_tiles_per_lrb /= 2
 

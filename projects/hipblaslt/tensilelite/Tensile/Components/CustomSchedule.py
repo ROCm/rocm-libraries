@@ -3692,3 +3692,96 @@ def _get_schedule_256x128x32_TF32(kernel, useLDSTr, TLDS):
 
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
+
+@RegisterSchedule(
+    tile_config=TileConfig(64, 128, 64, 2, 1, True, 0, 0),
+    dtype_predicate=isTF32,
+    vector_widths=[4, 4, 4],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_64x128x64_TF32(kernel, useLDSTr, TLDS):
+    kernel["MfmaInitCVgprs"] = True
+
+    n_mfma = 48
+    optSchedule = dict()
+    nglshift = nllshift = 0
+
+    syncs = SyncSchedule()
+    syncCode = []
+    gr_inc_step = 0
+
+    if isTN(kernel) and not useLDSTr and TLDS==1 and kernel["UseDirect32XEmulation"]:
+        kernel["UseMFMAF32XEmulation"] = True
+        kernel["UsePLRPack"] = True
+
+        grinca = [0,0,1,1,2,2,3,3,4]
+        grincb = [4,5,5,6,6,7,7,8,8]
+        lrsa   = [23]
+        lrsb   = [23]
+        lwsa   = [47]
+        lwsb   = [47]
+
+        pack_a_offset = [0,0,0,0, 2,2, 3,3,3,3,
+                         1,1,1,1, 2,2, 4,4,4,4
+                        ]
+        pack_b_offset = [0,0,0,0, 4,4, 5,5,5,5,
+                         1,1,1,1, 4,4, 6,6,6,6,
+                         2,2,2,2, 4,4, 7,7,7,7,
+                         3,3,3,3, 4,4, 8,8,8,8
+                        ]
+        lra0   = [0,1,2,3]
+        syncs.add(                8, dscnt=5, comment="wait for necessary LRA0 before pack to start")
+        syncs.add(                10, dscnt=4, barrier=True, comment="wait for remaining LRA0 before pack to complete + barrier for GRA")
+        pack_a0 = [                i+9 for i in pack_a_offset]  ## last index = 9 + 4 = 13
+
+        lrb0   = [        4,5, 7, 9,10,11,12,13]
+        syncs.add(                           14, dscnt=4, comment="wait for necessary LRB0 before pack to start")
+        syncs.add(                           16, dscnt=0, comment="wait for remaining LRB0 before pack to complete")
+        pack_b0 = [                          i+14 for i in pack_b_offset]  ## last index = 14 + 8 = 22
+
+        gra    = [                 10,13,17,21] # one index for two instructions
+        grb    = [                            24,28,32,35,38,41,43,45] # one index for two instructions
+        num_gr = len(gra) + len(grb)
+
+        syncs.add(                            24, vlcnt=4, barrier=True, comment="wait for previous set of global reads + barrier for GRB")
+
+        lra1   = [24,25,26,27]
+        syncs.add(                       32, dscnt=5, comment="wait for necessary LRA1 before pack to start")
+        syncs.add(                       34, dscnt=4, comment="wait for remaining LRA1 before pack to complete")
+        pack_a1 = [                         i+33 for i in pack_a_offset]  ## last index = 33 + 4 = 37
+
+        lrb1   = [           28,29, 31,32, 34,35,36,37]
+        syncs.add(                                     38, dscnt=4, comment="wait for necessary LRB1 before pack to start")
+        syncs.add(                                     40, dscnt=0, comment="wait for remaining LRB1 before pack to complete")
+        pack_b1 = [                                    i+38 for i in pack_b_offset]  ## last index = 38 + 8 = 46
+
+        optSchedule = {
+            'SYNC':   [syncs.get_indicies()],
+            'GRIncA': [grinca],
+            'GRIncB': [grincb],
+            'LRA0':   [lra0],
+            'LRB0':   [lrb0],
+            'PackA0': [pack_a0],
+            'PackB0': [pack_b0],
+            'GRA':    [duplicate_list_items(gra, 2, gr_inc_step)],
+            'GRB':    [duplicate_list_items(grb, 2, gr_inc_step)],
+            'LRSA':   [lrsa],
+            'LRSB':   [lrsb],
+            'LWSA':   [lwsa],
+            'LWSB':   [lwsb],
+            'LRA1':   [lra1],
+            'LRB1':   [lrb1],
+            'PackB1': [pack_b1],
+            'PackA1': [pack_a1],
+            'LCC':    [[n_mfma-1, n_mfma-1]],
+        }
+
+        syncCode = syncs.get_code()
+        nglshift = nllshift = num_gr
+
+        opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift)
+        return True, opt1
+
+    else:
+        return False, None
