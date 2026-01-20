@@ -3141,12 +3141,12 @@ namespace TensileLite
         AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
         assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
 
-        if(!sizeMapping.customKernelName.empty())
-        {
-            // Custom kernel currently only supports single-kernel reduction
-            reductionStrat = ReductionType::Tree;
-        }
-        else if(pAMDGPU->skDynamicGrid > 0)
+        // if(!sizeMapping.customKernelName.empty())
+        // {
+        //     // Custom kernel currently only supports single-kernel reduction
+        //     reductionStrat = ReductionType::Tree;
+        // }
+        if(pAMDGPU->skDynamicGrid > 0)
         {
             size_t x     = 1;
             size_t y     = 1;
