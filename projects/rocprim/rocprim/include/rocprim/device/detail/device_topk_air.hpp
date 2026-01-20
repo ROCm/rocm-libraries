@@ -538,7 +538,7 @@ struct device_topk_air_impl
             = Iteration == (num_iterations - 1) ? num_buckets_last_iteration : num_buckets;
 
         digit_t digit = device_air_topk_impl::key_codec::template extract_digit<Decomposer>(
-                traits::radix_key_codec::codec_base<key_in_t>::twiddle_in(key),
+                traits::radix_key_codec::codec_base<key_in_t>::template twiddle_in<KillNegativeZeros>(key),
                 start_bits, // Start bit of the sequence of bits to extract
                 cur_bits, // How many bits to extract
                 decomposer);

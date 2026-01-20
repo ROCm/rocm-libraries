@@ -562,6 +562,7 @@ struct radix_key_codec
             return static_cast<unsigned int>(bit_key >> start) & mask;
         }
 
+        template<bool KillNegativeZeros>
         ROCPRIM_HOST_DEVICE
         static Key twiddle_in(bit_key_type bit_key)
         {
