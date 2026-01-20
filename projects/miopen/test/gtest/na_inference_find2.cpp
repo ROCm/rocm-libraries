@@ -310,14 +310,10 @@ struct na_inference_find2_test : public ::testing::TestWithParam<TestCase>
         miopen::DeriveBNTensorDescriptor(derivedBnDesc, input.desc, bnmode);
         std::tie(ssn, ssc, ssh, ssw) = miopen::tien<4>(derivedBnDesc.GetLengths());
 
-        scale = tensor<PREC_TYPE>{
-            ssn, ssc, ssh, ssw};
-        shift = tensor<PREC_TYPE>{
-            ssn, ssc, ssh, ssw};
-        estMean = tensor<PREC_TYPE>{
-            ssn, ssc, ssh, ssw};
-        estVariance = tensor<PREC_TYPE>{
-            ssn, ssc, ssh, ssw};
+        scale       = tensor<PREC_TYPE>{ssn, ssc, ssh, ssw};
+        shift       = tensor<PREC_TYPE>{ssn, ssc, ssh, ssw};
+        estMean     = tensor<PREC_TYPE>{ssn, ssc, ssh, ssw};
+        estVariance = tensor<PREC_TYPE>{ssn, ssc, ssh, ssw};
 
         const double Data_scale = 0.01;
         for(std::size_t i = 0; i < scale.desc.GetElementSize(); i++)
