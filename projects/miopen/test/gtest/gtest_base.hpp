@@ -165,7 +165,7 @@ private:
                 {
                     if(!info.errors.contains(key))
                     {
-                        info.errors.insert({key, std::array<double, numberOfRunsAfterFailure>()});
+                        info.errors.insert({key, std::array<double, numberOfRunsAfterFailure>{}});
                     }
                     info.errors[key][info.numOfRunsFailed] = value;
                 }
