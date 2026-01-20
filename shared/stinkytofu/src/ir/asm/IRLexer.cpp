@@ -232,6 +232,66 @@ namespace stinkytofu
                 {
                     consumeChar();
                 }
+                // Check for scientific notation (e.g., 1.23e-4, 1.23E+10)
+                if(peekChar() == 'e' || peekChar() == 'E')
+                {
+                    consumeChar(); // consume 'e' or 'E'
+                    // Optional sign
+                    if(peekChar() == '+' || peekChar() == '-')
+                    {
+                        consumeChar();
+                    }
+                    // Must have at least one digit after 'e'
+                    if(!isDigit(peekChar()))
+                    {
+                        // Error: malformed scientific notation
+                        // For now, return what we have as FloatLiteral
+                        // A proper error would be better, but this prevents silent misparse
+                        return Token(TokenKind::FloatLiteral,
+                                     std::string_view(tokenStart, curPtr - tokenStart),
+                                     tokenLine,
+                                     tokenColumn);
+                    }
+                    while(isDigit(peekChar()))
+                    {
+                        consumeChar();
+                    }
+                }
+                return Token(TokenKind::FloatLiteral,
+                             std::string_view(tokenStart, curPtr - tokenStart),
+                             tokenLine,
+                             tokenColumn);
+            }
+            // Check for integer scientific notation (e.g., 123e4)
+            if(peekChar() == 'e' || peekChar() == 'E')
+            {
+                consumeChar(); // consume 'e' or 'E'
+                // Optional sign
+                if(peekChar() == '+' || peekChar() == '-')
+                {
+                    consumeChar();
+                }
+                // Must have at least one digit after 'e'
+                if(!isDigit(peekChar()))
+                {
+                    // Error: malformed scientific notation
+                    // Return as integer and let the 'e' be parsed separately
+                    // We need to backtrack
+                    curPtr = tokenStart;
+                    while(isDigit(peekChar()))
+                    {
+                        consumeChar();
+                    }
+                    return Token(TokenKind::IntegerLiteral,
+                                 std::string_view(tokenStart, curPtr - tokenStart),
+                                 tokenLine,
+                                 tokenColumn);
+                }
+                while(isDigit(peekChar()))
+                {
+                    consumeChar();
+                }
+                // Integer scientific notation is treated as float
                 return Token(TokenKind::FloatLiteral,
                              std::string_view(tokenStart, curPtr - tokenStart),
                              tokenLine,
@@ -258,6 +318,65 @@ namespace stinkytofu
                     {
                         consumeChar();
                     }
+                    // Check for scientific notation (e.g., -1.23e-4, -1.23E+10)
+                    if(peekChar() == 'e' || peekChar() == 'E')
+                    {
+                        consumeChar(); // consume 'e' or 'E'
+                        // Optional sign
+                        if(peekChar() == '+' || peekChar() == '-')
+                        {
+                            consumeChar();
+                        }
+                        // Must have at least one digit after 'e'
+                        if(!isDigit(peekChar()))
+                        {
+                            // Error: malformed scientific notation
+                            // Return what we have as FloatLiteral
+                            return Token(TokenKind::FloatLiteral,
+                                         std::string_view(tokenStart, curPtr - tokenStart),
+                                         tokenLine,
+                                         tokenColumn);
+                        }
+                        while(isDigit(peekChar()))
+                        {
+                            consumeChar();
+                        }
+                    }
+                    return Token(TokenKind::FloatLiteral,
+                                 std::string_view(tokenStart, curPtr - tokenStart),
+                                 tokenLine,
+                                 tokenColumn);
+                }
+                // Check for integer scientific notation (e.g., -123e4)
+                if(peekChar() == 'e' || peekChar() == 'E')
+                {
+                    consumeChar(); // consume 'e' or 'E'
+                    // Optional sign
+                    if(peekChar() == '+' || peekChar() == '-')
+                    {
+                        consumeChar();
+                    }
+                    // Must have at least one digit after 'e'
+                    if(!isDigit(peekChar()))
+                    {
+                        // Error: malformed scientific notation
+                        // Backtrack to just the integer part
+                        curPtr = tokenStart;
+                        consumeChar(); // consume '-'
+                        while(isDigit(peekChar()))
+                        {
+                            consumeChar();
+                        }
+                        return Token(TokenKind::IntegerLiteral,
+                                     std::string_view(tokenStart, curPtr - tokenStart),
+                                     tokenLine,
+                                     tokenColumn);
+                    }
+                    while(isDigit(peekChar()))
+                    {
+                        consumeChar();
+                    }
+                    // Integer scientific notation is treated as float
                     return Token(TokenKind::FloatLiteral,
                                  std::string_view(tokenStart, curPtr - tokenStart),
                                  tokenLine,
@@ -280,13 +399,38 @@ namespace stinkytofu
             }
 
         case '/':
-            // Check for C-style comment: //
+            // Check for C-style single-line comment: //
             if(peekChar() == '/')
             {
-                // This is a comment, skip until end of line
+                // This is a single-line comment, skip until end of line
                 consumeChar(); // consume second '/'
                 while(!isAtBufferEnd() && peekChar() != '\n' && peekChar() != '\r')
                 {
+                    consumeChar();
+                }
+                // Recursively call lexToken to get the next real token
+                return lexToken();
+            }
+            // Check for C-style block comment: /* */
+            else if(peekChar() == '*')
+            {
+                // This is a block comment, skip until */
+                consumeChar(); // consume '*'
+
+                while(!isAtBufferEnd())
+                {
+                    if(peekChar() == '*' && peekAheadChar() == '/')
+                    {
+                        consumeChar(); // consume '*'
+                        consumeChar(); // consume '/'
+                        break;
+                    }
+                    // Track line numbers inside block comments
+                    if(peekChar() == '\n')
+                    {
+                        currentLine++;
+                        currentColumn = 1;
+                    }
                     consumeChar();
                 }
                 // Recursively call lexToken to get the next real token
@@ -368,7 +512,7 @@ namespace stinkytofu
             {
                 consumeChar();
             }
-            // Handle C-style comments: //
+            // Handle C-style single-line comments: //
             else if(c == '/' && peekAheadChar() == '/')
             {
                 // Skip until end of line
@@ -379,6 +523,31 @@ namespace stinkytofu
                     consumeChar();
                 }
                 // Don't consume the newline - let it be processed normally
+            }
+            // Handle C-style block comments: /* */
+            else if(c == '/' && peekAheadChar() == '*')
+            {
+                // Skip until */
+                consumeChar(); // consume '/'
+                consumeChar(); // consume '*'
+
+                while(!isAtBufferEnd())
+                {
+                    if(peekChar() == '*' && peekAheadChar() == '/')
+                    {
+                        consumeChar(); // consume '*'
+                        consumeChar(); // consume '/'
+                        break;
+                    }
+                    // Track line numbers inside block comments
+                    if(peekChar() == '\n')
+                    {
+                        currentLine++;
+                        currentColumn = 1;
+                    }
+                    consumeChar();
+                }
+                // Continue skipping whitespace after the comment
             }
             else
             {

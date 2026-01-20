@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,78 @@ using namespace stinkytofu;
 
 namespace
 {
+    //----------------------------------------------------------------------
+    // Helper Functions
+    //----------------------------------------------------------------------
+
+    /// Safely convert string to integer with proper error handling
+    /// Returns std::nullopt if conversion fails
+    inline std::optional<int> safeStoi(const std::string& str, int base = 10)
+    {
+        // Manual validation instead of exception handling
+        if(str.empty())
+            return std::nullopt;
+
+        // Check for valid characters
+        size_t startPos = 0;
+        if(str[0] == '-' || str[0] == '+')
+            startPos = 1;
+
+        if(startPos >= str.length())
+            return std::nullopt;
+
+        // For hex, skip 0x prefix
+        if(base == 16 && str.length() > 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X'))
+            startPos = 2;
+
+        // Try conversion with range checking
+        long long result   = 0;
+        bool      negative = (str[0] == '-');
+
+        for(size_t i = startPos; i < str.length(); ++i)
+        {
+            int  digit;
+            char c = str[i];
+
+            if(base == 10)
+            {
+                if(c < '0' || c > '9')
+                    return std::nullopt;
+                digit = c - '0';
+            }
+            else if(base == 16)
+            {
+                if(c >= '0' && c <= '9')
+                    digit = c - '0';
+                else if(c >= 'a' && c <= 'f')
+                    digit = c - 'a' + 10;
+                else if(c >= 'A' && c <= 'F')
+                    digit = c - 'A' + 10;
+                else
+                    return std::nullopt;
+            }
+            else
+            {
+                return std::nullopt; // Unsupported base
+            }
+
+            // Check for overflow before multiplying
+            if(result > (LLONG_MAX - digit) / base)
+                return std::nullopt; // Would overflow
+
+            result = result * base + digit;
+        }
+
+        if(negative)
+            result = -result;
+
+        // Check if fits in int
+        if(result < INT_MIN || result > INT_MAX)
+            return std::nullopt;
+
+        return static_cast<int>(result);
+    }
+
     //----------------------------------------------------------------------
     // IRParser declaration (MLIR-style format)
     //----------------------------------------------------------------------
@@ -476,16 +548,22 @@ namespace
             if(peek().kind == TokenKind::IntegerLiteral)
             {
                 const Token& valueTok = consume();
-                int          value    = std::stoi(std::string(valueTok.text));
+                auto         value    = safeStoi(std::string(valueTok.text));
+                if(!value)
+                {
+                    emitError("Attribute value out of range or invalid: "
+                              + std::string(valueTok.text));
+                    continue;
+                }
 
                 if(attrStr == "issueCycles")
                 {
-                    inst.issueCycles  = value;
+                    inst.issueCycles  = *value;
                     parsedIssueCycles = true;
                 }
                 else if(attrStr == "latencyCycles")
                 {
-                    inst.latencyCycles  = value;
+                    inst.latencyCycles  = *value;
                     parsedLatencyCycles = true;
                 }
                 else
@@ -553,8 +631,13 @@ namespace
         if(kind == TokenKind::IntegerLiteral)
         {
             const Token& tok = consume();
-            int          val = std::stoi(std::string(tok.text));
-            return StinkyRegister(val);
+            auto         val = safeStoi(std::string(tok.text));
+            if(!val)
+            {
+                emitError("Integer literal out of range or invalid: " + std::string(tok.text));
+                return std::nullopt;
+            }
+            return StinkyRegister(*val);
         }
 
         // Handle hex literals
@@ -562,8 +645,13 @@ namespace
         {
             const Token& tok = consume();
             std::string  text(tok.text);
-            int          val = std::stoi(text, nullptr, 16);
-            return StinkyRegister(val);
+            auto         val = safeStoi(text, 16);
+            if(!val)
+            {
+                emitError("Hex literal out of range or invalid: " + text);
+                return std::nullopt;
+            }
+            return StinkyRegister(*val);
         }
 
         // Handle float literals
@@ -585,12 +673,24 @@ namespace
         std::string  regTypeStr(regTypeTok.text);
         RegType      regType = stringToRegType(regTypeStr);
 
+        // Validate register type
+        if(!isValidRegType(regType))
+        {
+            emitError("Unknown register type: " + regTypeStr);
+            return std::nullopt;
+        }
+
         // Check for format: v12 (no brackets)
         if(peek().kind == TokenKind::IntegerLiteral)
         {
             const Token& idxTok = consume();
-            int          idx    = std::stoi(std::string(idxTok.text));
-            return StinkyRegister(regType, idx, 1); // Single element
+            auto         idx    = safeStoi(std::string(idxTok.text));
+            if(!idx)
+            {
+                emitError("Register index out of range or invalid: " + std::string(idxTok.text));
+                return std::nullopt;
+            }
+            return StinkyRegister(regType, *idx, 1); // Single element
         }
 
         // Check for format: v[12] or v[10:13]
@@ -610,8 +710,14 @@ namespace
         }
 
         const Token& startTok = consume();
-        int          startIdx = std::stoi(std::string(startTok.text));
-        int          endIdx   = startIdx;
+        auto         startIdx = safeStoi(std::string(startTok.text));
+        if(!startIdx)
+        {
+            emitError("Register start index out of range or invalid: "
+                      + std::string(startTok.text));
+            return std::nullopt;
+        }
+        int endIdx = *startIdx;
 
         // Check for range notation [start:end]
         if(peek().kind == TokenKind::Colon)
@@ -624,8 +730,15 @@ namespace
                 return std::nullopt;
             }
 
-            const Token& endTok = consume();
-            endIdx              = std::stoi(std::string(endTok.text));
+            const Token& endTok    = consume();
+            auto         endIdxOpt = safeStoi(std::string(endTok.text));
+            if(!endIdxOpt)
+            {
+                emitError("Register end index out of range or invalid: "
+                          + std::string(endTok.text));
+                return std::nullopt;
+            }
+            endIdx = *endIdxOpt;
         }
 
         // Expect ']'
@@ -637,14 +750,14 @@ namespace
         consume();
 
         // Calculate register count
-        int regNum = endIdx - startIdx + 1;
+        int regNum = endIdx - *startIdx + 1;
         if(regNum <= 0)
         {
             emitError("Invalid register range");
             return std::nullopt;
         }
 
-        return StinkyRegister(regType, startIdx, regNum);
+        return StinkyRegister(regType, *startIdx, regNum);
     }
 
     bool IRParser::expect(TokenKind kind, const std::string& message)
@@ -696,5 +809,23 @@ namespace stinkytofu
 
         // Create parser and parse
         return IRParser(lexer).parse();
+    }
+
+    ParseResult parseSourceStringWithDiagnostics(const std::string& sourceStr)
+    {
+        ParseResult result;
+
+        // Create lexer and tokenize
+        IRLexer lexer(sourceStr);
+        lexer.lex();
+
+        // Create parser and parse
+        IRParser parser(lexer);
+        result.instructions = parser.parse();
+
+        // Copy diagnostics from parser
+        result.diagnostics = parser.getDiagnostics();
+
+        return result;
     }
 }
