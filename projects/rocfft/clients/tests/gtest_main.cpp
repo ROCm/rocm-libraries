@@ -421,8 +421,11 @@ int main(int argc, char* argv[])
         ->check(CLI::NonNegativeNumber);
     app.add_option("--mp_launch",
                    mp_launch,
-                   "Command line prefix to launch multi-process transforms, e.g. \"mpirun --np 4 "
-                   "/path/to/rocfft_mpi_worker\"")
+                   "Command line prefix to launch multi-process transforms, e.g. \n"
+                   "\"mpirun --np 4 /path/to/rocfft_mpi_worker\"\n"
+                   "NOTE: embedded quotes must be used for all command arguments that contain "
+                   "space character(s). For instance,\n"
+                   "\"mpirun --np 4 \\\"/path with spaces/to/rocfft_mpi_worker\\\"\"")
         ->default_val("")
         ->each([&](const std::string&) {
             if(mp_lib == fft_params::fft_mp_lib_none)

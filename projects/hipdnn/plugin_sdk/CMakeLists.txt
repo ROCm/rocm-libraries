@@ -7,7 +7,7 @@ set(HIP_DNN_PLUGIN_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 add_library(hipdnn_plugin_sdk INTERFACE)
 
-target_link_libraries(hipdnn_plugin_sdk INTERFACE hipdnn_sdk)
+target_link_libraries(hipdnn_plugin_sdk INTERFACE hipdnn_data_sdk)
 
 set(HIP_DNN_PLUGIN_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/plugin_sdk")
 

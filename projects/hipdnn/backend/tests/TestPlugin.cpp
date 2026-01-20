@@ -13,7 +13,7 @@
 
 #include "TestPluginConstants.hpp"
 #include "plugin/PluginCore.hpp"
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
@@ -86,10 +86,10 @@ const auto PLUGIN_PATH2 = ".." / TEST_PLUGIN_DIR / TEST_PLUGIN2_NAME;
 
 const auto FULL_PLUGIN_PATH1
     = hipdnn_backend::platform_utilities::getCurrentModuleDirectory().parent_path()
-      / TEST_PLUGIN_DIR / hipdnn_sdk::utilities::getLibraryName(TEST_PLUGIN1_NAME);
+      / TEST_PLUGIN_DIR / hipdnn_data_sdk::utilities::getLibraryName(TEST_PLUGIN1_NAME);
 const auto FULL_PLUGIN_PATH2
     = hipdnn_backend::platform_utilities::getCurrentModuleDirectory().parent_path()
-      / TEST_PLUGIN_DIR / hipdnn_sdk::utilities::getLibraryName(TEST_PLUGIN2_NAME);
+      / TEST_PLUGIN_DIR / hipdnn_data_sdk::utilities::getLibraryName(TEST_PLUGIN2_NAME);
 
 } // namespace
 

@@ -39,67 +39,46 @@ namespace detail
 {
 
 template<class Value, class Output>
-struct default_config_for_binary_search
-{};
+struct binary_search_config_selector
+{
+    using targets    = binary_search_targets;
+    using param_type = transform_config_params;
+
+    param_type params;
+
+    template<class Target>
+    constexpr binary_search_config_selector(Target)
+        : params(binary_search_config_picker<Target, Value, Output>())
+    {}
+};
 
 template<class Value, class Output>
-struct default_config_for_upper_bound
-{};
+struct lower_bound_config_selector
+{
+    using targets    = lower_bound_targets;
+    using param_type = transform_config_params;
+
+    param_type params;
+
+    template<class Target>
+    constexpr lower_bound_config_selector(Target)
+        : params(lower_bound_config_picker<Target, Value, Output>())
+    {}
+};
 
 template<class Value, class Output>
-struct default_config_for_lower_bound
-{};
-
-template<class Unused, bool IsPointer, class Value, class Output>
-struct wrapped_transform_config<default_config_for_binary_search<Value, Output>, Unused, IsPointer>
+struct upper_bound_config_selector
 {
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr transform_config_params params
-            = default_binary_search_config<static_cast<unsigned int>(Arch), Value, Output>{};
-    };
-};
+    using targets    = upper_bound_targets;
+    using param_type = transform_config_params;
 
-template<class Unused, bool IsPointer, class Value, class Output>
-struct wrapped_transform_config<default_config_for_upper_bound<Value, Output>, Unused, IsPointer>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr transform_config_params params
-            = default_upper_bound_config<static_cast<unsigned int>(Arch), Value, Output>{};
-    };
-};
+    param_type params;
 
-template<class Unused, bool IsPointer, class Value, class Output>
-struct wrapped_transform_config<default_config_for_lower_bound<Value, Output>, Unused, IsPointer>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr transform_config_params params
-            = default_lower_bound_config<static_cast<unsigned int>(Arch), Value, Output>{};
-    };
+    template<class Target>
+    constexpr upper_bound_config_selector(Target)
+        : params(upper_bound_config_picker<Target, Value, Output>())
+    {}
 };
-
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-template<class Unused, bool IsPointer, class Value, class Output>
-template<target_arch Arch>
-constexpr transform_config_params
-    wrapped_transform_config<default_config_for_binary_search<Value, Output>, Unused, IsPointer>::
-        architecture_config<Arch>::params;
-template<class Unused, bool IsPointer, class Value, class Output>
-template<target_arch Arch>
-constexpr transform_config_params
-    wrapped_transform_config<default_config_for_upper_bound<Value, Output>, Unused, IsPointer>::
-        architecture_config<Arch>::params;
-template<class Unused, bool IsPointer, class Value, class Output>
-template<target_arch Arch>
-constexpr transform_config_params
-    wrapped_transform_config<default_config_for_lower_bound<Value, Output>, Unused, IsPointer>::
-        architecture_config<Arch>::params;
-#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 } // end namespace detail
 

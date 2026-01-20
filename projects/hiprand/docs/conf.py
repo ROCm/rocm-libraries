@@ -17,7 +17,7 @@ python_dir_path = docs_dir_path.parent / 'python' / 'hiprand'
 sys.path.append(str(python_dir_path))
 
 with open('../CMakeLists.txt', encoding='utf-8') as f:
-    match = re.search(r'.*\bset\(hipRAND_VERSION\s+\"?([0-9.]+)[^0-9.]+', f.read())
+    match = re.search(r'.*\bset\(VERSION_STRING\s+\"?([0-9.]+)[^0-9.]+', f.read())
     if not match:
         raise ValueError("VERSION not found!")
     version_number = match[1]

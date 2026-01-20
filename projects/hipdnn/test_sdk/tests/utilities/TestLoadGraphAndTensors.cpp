@@ -3,14 +3,14 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedExecute.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-using namespace hipdnn_sdk;
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk;
+using namespace hipdnn_data_sdk::utilities;
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -65,7 +65,7 @@ TEST(TestLoadGraphAndTensors, Valid)
     SKIP_IF_NO_DEVICES();
 
     std::filesystem::path filepath
-        = hipdnn_sdk::utilities::getCurrentExecutableDirectory()
+        = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
           / "../lib/hipdnn_reference_data/BatchnormFwdInference/nchw/fp32/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed
@@ -108,7 +108,7 @@ TEST(TestLoadGraphAndTensors, Valid)
 TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
 {
     std::filesystem::path filepath
-        = hipdnn_sdk::utilities::getCurrentExecutableDirectory()
+        = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
           / "../lib/hipdnn_reference_data/BatchnormFwdInference/nchw/fp32/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed

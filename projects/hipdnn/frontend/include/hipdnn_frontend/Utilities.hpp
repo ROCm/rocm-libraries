@@ -7,11 +7,11 @@
 #include "node/Node.hpp"
 #include <algorithm>
 #include <hipdnn_backend.h>
-#include <hipdnn_sdk/logging/CallbackTypes.h>
-#include <hipdnn_sdk/logging/Logger.hpp>
-#include <hipdnn_sdk/logging/LoggingUtils.hpp>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/logging/CallbackTypes.h>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/logging/LoggingUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <numeric>
 #include <ranges>
 #include <vector>
@@ -61,12 +61,12 @@ inline Error findCommonShape(const std::vector<std::vector<int64_t>>& inputShape
 
 // Utility function to create Tensor_attributes from a Tensor
 template <class T,
-          class HostAlloc = hipdnn_sdk::utilities::HostAllocator<T>,
-          class DeviceAlloc = hipdnn_sdk::utilities::DeviceAllocator<T>>
-inline TensorAttributes
-    makeTensorAttributes(const std::string& name,
-                         DataType dataType,
-                         const hipdnn_sdk::utilities::Tensor<T, HostAlloc, DeviceAlloc>& tensor)
+          class HostAlloc = hipdnn_data_sdk::utilities::HostAllocator<T>,
+          class DeviceAlloc = hipdnn_data_sdk::utilities::DeviceAllocator<T>>
+inline TensorAttributes makeTensorAttributes(
+    const std::string& name,
+    DataType dataType,
+    const hipdnn_data_sdk::utilities::Tensor<T, HostAlloc, DeviceAlloc>& tensor)
 {
     return TensorAttributes()
         .set_name(name)
@@ -91,10 +91,10 @@ inline TensorAttributes makeTensorAttributes(const std::string& name,
     return TensorAttributes().set_name(name).set_dim(dims).set_stride(strides);
 }
 
-inline std::unique_ptr<hipdnn_sdk::utilities::ITensor>
+inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     createTensorFromAttribute(const TensorAttributes& attribute)
 {
-    return hipdnn_sdk::utilities::createTensor(
+    return hipdnn_data_sdk::utilities::createTensor(
         toSdkType(attribute.get_data_type()), attribute.get_dim(), attribute.get_stride());
 }
 
@@ -412,7 +412,7 @@ inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCall
     }
 
     static bool s_loggingInitialized = false;
-    static bool s_loggingEnabled = hipdnn_sdk::logging::isLoggingEnabled();
+    static bool s_loggingEnabled = hipdnn_data_sdk::logging::isLoggingEnabled();
 
     if(s_loggingInitialized || !s_loggingEnabled)
     {

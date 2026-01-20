@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -328,11 +328,11 @@ rocsparse_status
     if(length > 0)
     {
         const bool on_host = handle->pointer_mode == rocsparse_pointer_mode_host;
-        if(on_host && *scalar_device_host == 0)
+        if(on_host && *scalar_device_host == static_cast<T>(0))
         {
             RETURN_IF_HIP_ERROR(hipMemsetAsync(array, 0, sizeof(A) * length, handle->stream));
         }
-        else if((on_host && *scalar_device_host != 1) || on_host == false)
+        else if((on_host && *scalar_device_host != static_cast<T>(1)) || on_host == false)
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::scale_kernel<256>),
@@ -512,6 +512,8 @@ INSTANTIATE(int64_t, rocsparse_double_complex);
 
 INSTANTIATE(int32_t, rocsparse_bfloat16, float);
 INSTANTIATE(int32_t, _Float16, float);
+INSTANTIATE(int32_t, float, _Float16);
+INSTANTIATE(int32_t, float, rocsparse_bfloat16);
 INSTANTIATE(int32_t, int32_t, int32_t);
 INSTANTIATE(int32_t, float, float);
 INSTANTIATE(int32_t, double, double);
@@ -520,6 +522,8 @@ INSTANTIATE(int32_t, rocsparse_double_complex, rocsparse_double_complex);
 
 INSTANTIATE(int64_t, rocsparse_bfloat16, float);
 INSTANTIATE(int64_t, _Float16, float);
+INSTANTIATE(int64_t, float, _Float16);
+INSTANTIATE(int64_t, float, rocsparse_bfloat16);
 INSTANTIATE(int64_t, int32_t, int32_t);
 INSTANTIATE(int64_t, float, float);
 INSTANTIATE(int64_t, double, double);
@@ -539,6 +543,9 @@ INSTANTIATE(int64_t, rocsparse_double_complex, rocsparse_double_complex);
                                                         rocsparse_order  order);
 
 INSTANTIATE(int32_t, _Float16, _Float16);
+INSTANTIATE(int32_t, _Float16, float);
+INSTANTIATE(int32_t, rocsparse_bfloat16, rocsparse_bfloat16);
+INSTANTIATE(int32_t, rocsparse_bfloat16, float);
 INSTANTIATE(int32_t, int32_t, int32_t);
 INSTANTIATE(int32_t, float, float);
 INSTANTIATE(int32_t, double, double);
@@ -546,6 +553,9 @@ INSTANTIATE(int32_t, rocsparse_float_complex, rocsparse_float_complex);
 INSTANTIATE(int32_t, rocsparse_double_complex, rocsparse_double_complex);
 
 INSTANTIATE(int64_t, _Float16, _Float16);
+INSTANTIATE(int64_t, _Float16, float);
+INSTANTIATE(int64_t, rocsparse_bfloat16, rocsparse_bfloat16);
+INSTANTIATE(int64_t, rocsparse_bfloat16, float);
 INSTANTIATE(int64_t, int32_t, int32_t);
 INSTANTIATE(int64_t, float, float);
 INSTANTIATE(int64_t, double, double);

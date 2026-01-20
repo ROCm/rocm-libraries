@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceUtilities.hpp>
 #include <stdexcept>
 #include <thread>
@@ -17,9 +17,9 @@ class CpuFpReferenceConvolution
 {
 public:
     // Check if this CPU implementation supports the given node configuration
-    static bool isApplicable(const hipdnn_sdk::data_objects::Node& node)
+    static bool isApplicable(const hipdnn_data_sdk::data_objects::Node& node)
     {
-        using namespace hipdnn_sdk::data_objects;
+        using namespace hipdnn_data_sdk::data_objects;
 
         bool validNode = (node.attributes_type() == NodeAttributes::ConvolutionFwdAttributes
                           || node.attributes_type() == NodeAttributes::ConvolutionBwdAttributes);
@@ -41,9 +41,9 @@ public:
 
     // Overload for uniform padding
     template <class XDataType, class WDataType, class YDataType, class ComputeDataType = float>
-    static void fprop(const hipdnn_sdk::utilities::TensorBase<XDataType>& x,
-                      const hipdnn_sdk::utilities::TensorBase<WDataType>& w,
-                      hipdnn_sdk::utilities::TensorBase<YDataType>& y,
+    static void fprop(const hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
+                      const hipdnn_data_sdk::utilities::TensorBase<WDataType>& w,
+                      hipdnn_data_sdk::utilities::TensorBase<YDataType>& y,
                       const std::vector<int64_t>& strides,
                       const std::vector<int64_t>& dilations,
                       const std::vector<int64_t>& padding)
@@ -52,9 +52,9 @@ public:
     }
 
     template <class XDataType, class WDataType, class YDataType, class ComputeDataType = float>
-    static void fprop(const hipdnn_sdk::utilities::TensorBase<XDataType>& x,
-                      const hipdnn_sdk::utilities::TensorBase<WDataType>& w,
-                      hipdnn_sdk::utilities::TensorBase<YDataType>& y,
+    static void fprop(const hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
+                      const hipdnn_data_sdk::utilities::TensorBase<WDataType>& w,
+                      hipdnn_data_sdk::utilities::TensorBase<YDataType>& y,
                       const std::vector<int64_t>& strides,
                       const std::vector<int64_t>& dilations,
                       const std::vector<int64_t>& prePadding,
@@ -98,7 +98,7 @@ public:
                 int64_t xChannel = baseInputChannel + c;
 
                 // Iterate kernel spatial positions
-                hipdnn_sdk::utilities::iterateAlongDimensions(
+                hipdnn_data_sdk::utilities::iterateAlongDimensions(
                     kernelSpatialDims, [&](const std::vector<int64_t>& kernelSpatialIndices) {
                         std::vector<int64_t> xSpatialIndices(static_cast<size_t>(nSpatialDims));
                         bool validPosition = true;
@@ -130,14 +130,14 @@ public:
                         {
                             // Input dims: [n, xChannel, ...]
                             // Thus, we index via global x channel index.
-                            auto xFullIndices = hipdnn_sdk::utilities::buildTensorIndices(
+                            auto xFullIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
                                 nIdx, xChannel, xSpatialIndices);
 
                             // Weight dims: [yChannels,
                             // xChannels/groupCount, ...] Thus, we index via flattened y channel index and
                             // group-offset x channel index (c).
                             int64_t wIdx = (gIdx * yChannelsPerGroup) + kIdx;
-                            auto wFullIndices = hipdnn_sdk::utilities::buildTensorIndices(
+                            auto wFullIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
                                 wIdx, c, kernelSpatialIndices);
 
                             XDataType xVal = x.getHostValue(xFullIndices);
@@ -152,7 +152,7 @@ public:
 
             int64_t yChannel = (gIdx * yChannelsPerGroup) + kIdx;
             auto yFullIndices
-                = hipdnn_sdk::utilities::buildTensorIndices(nIdx, yChannel, ySpatialIndices);
+                = hipdnn_data_sdk::utilities::buildTensorIndices(nIdx, yChannel, ySpatialIndices);
 
             y.setHostValue(static_cast<YDataType>(accumulator), yFullIndices);
         };
@@ -170,9 +170,9 @@ public:
 
     // Overload for uniform padding
     template <class DxDataType, class WDataType, class DyDataType, class ComputeDataType = float>
-    static void dgrad(hipdnn_sdk::utilities::TensorBase<DxDataType>& gradX,
-                      const hipdnn_sdk::utilities::TensorBase<WDataType>& w,
-                      const hipdnn_sdk::utilities::TensorBase<DyDataType>& gradY,
+    static void dgrad(hipdnn_data_sdk::utilities::TensorBase<DxDataType>& gradX,
+                      const hipdnn_data_sdk::utilities::TensorBase<WDataType>& w,
+                      const hipdnn_data_sdk::utilities::TensorBase<DyDataType>& gradY,
                       const std::vector<int64_t>& strides,
                       const std::vector<int64_t>& dilations,
                       const std::vector<int64_t>& padding)
@@ -181,9 +181,9 @@ public:
     }
 
     template <class DxDataType, class WDataType, class DyDataType, class ComputeDataType = float>
-    static void dgrad(hipdnn_sdk::utilities::TensorBase<DxDataType>& gradX,
-                      const hipdnn_sdk::utilities::TensorBase<WDataType>& w,
-                      const hipdnn_sdk::utilities::TensorBase<DyDataType>& gradY,
+    static void dgrad(hipdnn_data_sdk::utilities::TensorBase<DxDataType>& gradX,
+                      const hipdnn_data_sdk::utilities::TensorBase<WDataType>& w,
+                      const hipdnn_data_sdk::utilities::TensorBase<DyDataType>& gradY,
                       const std::vector<int64_t>& strides,
                       const std::vector<int64_t>& dilations,
                       const std::vector<int64_t>& prePadding,
@@ -222,7 +222,7 @@ public:
             auto vAcc = static_cast<ComputeDataType>(0.0f);
 
             // Iterate over each spatial position of the kernel for contributing y gradients
-            hipdnn_sdk::utilities::iterateAlongDimensions(
+            hipdnn_data_sdk::utilities::iterateAlongDimensions(
                 kernelSpatialDims, [&](const std::vector<int64_t>& kernelSpatialIndices) {
                     std::vector<int64_t> ySpatialIndices(static_cast<size_t>(nSpatialDims));
                     bool validPosition = true;
@@ -265,12 +265,13 @@ public:
                         {
                             auto yChannelIdx = (gIdx * yChannelsPerGroup) + k;
 
-                            auto gradOutputFullIndices = hipdnn_sdk::utilities::buildTensorIndices(
-                                nIdx, yChannelIdx, ySpatialIndices);
+                            auto gradOutputFullIndices
+                                = hipdnn_data_sdk::utilities::buildTensorIndices(
+                                    nIdx, yChannelIdx, ySpatialIndices);
 
                             auto wBatchIdx = yChannelIdx;
                             auto wChannelIdx = cIdx;
-                            auto wFullIndices = hipdnn_sdk::utilities::buildTensorIndices(
+                            auto wFullIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
                                 wBatchIdx, wChannelIdx, kernelSpatialIndices);
 
                             DyDataType vOut = gradY.getHostValue(gradOutputFullIndices);
@@ -284,8 +285,8 @@ public:
                 });
 
             int64_t xChannelIdx = (gIdx * channelsPerGroup) + cIdx;
-            auto gradInputFullIndices
-                = hipdnn_sdk::utilities::buildTensorIndices(nIdx, xChannelIdx, xSpatialIndices);
+            auto gradInputFullIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
+                nIdx, xChannelIdx, xSpatialIndices);
 
             gradX.setHostValue(static_cast<DxDataType>(vAcc), gradInputFullIndices);
         };
@@ -302,9 +303,9 @@ public:
     }
 
     template <class XDataType, class DwDataType, class DyDataType, class ComputeDataType = float>
-    static void wgrad(const hipdnn_sdk::utilities::TensorBase<XDataType>& x,
-                      hipdnn_sdk::utilities::TensorBase<DwDataType>& gradW,
-                      const hipdnn_sdk::utilities::TensorBase<DyDataType>& gradY,
+    static void wgrad(const hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
+                      hipdnn_data_sdk::utilities::TensorBase<DwDataType>& gradW,
+                      const hipdnn_data_sdk::utilities::TensorBase<DyDataType>& gradY,
                       const std::vector<int64_t>& strides,
                       const std::vector<int64_t>& dilations,
                       const std::vector<int64_t>& padding)
@@ -313,9 +314,9 @@ public:
     }
 
     template <class XDataType, class DwDataType, class DyDataType, class ComputeDataType = float>
-    static void wgrad(const hipdnn_sdk::utilities::TensorBase<XDataType>& x,
-                      hipdnn_sdk::utilities::TensorBase<DwDataType>& gradW,
-                      const hipdnn_sdk::utilities::TensorBase<DyDataType>& gradY,
+    static void wgrad(const hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
+                      hipdnn_data_sdk::utilities::TensorBase<DwDataType>& gradW,
+                      const hipdnn_data_sdk::utilities::TensorBase<DyDataType>& gradY,
                       const std::vector<int64_t>& strides,
                       const std::vector<int64_t>& dilations,
                       const std::vector<int64_t>& prePadding,
@@ -354,7 +355,7 @@ public:
             auto vAcc = static_cast<ComputeDataType>(0.0f);
 
             // Iterate over each spatial position of the kernel for contributing y gradients
-            hipdnn_sdk::utilities::iterateAlongDimensions(
+            hipdnn_data_sdk::utilities::iterateAlongDimensions(
                 ySpatialDims, [&](const std::vector<int64_t>& ySpatialIndices) {
                     std::vector<int64_t> xSpatialIndices(static_cast<size_t>(nSpatialDims));
 
@@ -385,12 +386,13 @@ public:
                         {
                             auto yChannelIdx = (gIdx * yChannelsPerGroup) + kIdx;
 
-                            auto gradOutputFullIndices = hipdnn_sdk::utilities::buildTensorIndices(
-                                n, yChannelIdx, ySpatialIndices);
+                            auto gradOutputFullIndices
+                                = hipdnn_data_sdk::utilities::buildTensorIndices(
+                                    n, yChannelIdx, ySpatialIndices);
 
                             auto xChannelIdx = (gIdx * channelsPerGroup) + cIdx;
 
-                            auto xFullIndices = hipdnn_sdk::utilities::buildTensorIndices(
+                            auto xFullIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
                                 n, xChannelIdx, xSpatialIndices);
 
                             DyDataType vOut = gradY.getHostValue(gradOutputFullIndices);
@@ -406,7 +408,7 @@ public:
 
             auto wN = (gIdx * yChannelsPerGroup) + kIdx;
             auto wFullIndices
-                = hipdnn_sdk::utilities::buildTensorIndices(wN, cIdx, kernelSpatialIndices);
+                = hipdnn_data_sdk::utilities::buildTensorIndices(wN, cIdx, kernelSpatialIndices);
 
             gradW.setHostValue(static_cast<DwDataType>(vAcc), wFullIndices);
         };
@@ -424,9 +426,9 @@ public:
 
 private:
     template <typename T1, typename T2, typename T3>
-    static void validateInput(const hipdnn_sdk::utilities::TensorBase<T1>& x,
-                              const hipdnn_sdk::utilities::TensorBase<T2>& w,
-                              const hipdnn_sdk::utilities::TensorBase<T3>& y,
+    static void validateInput(const hipdnn_data_sdk::utilities::TensorBase<T1>& x,
+                              const hipdnn_data_sdk::utilities::TensorBase<T2>& w,
+                              const hipdnn_data_sdk::utilities::TensorBase<T3>& y,
                               const std::vector<int64_t>& strides,
                               const std::vector<int64_t>& dilations,
                               const std::vector<int64_t>& prePadding,

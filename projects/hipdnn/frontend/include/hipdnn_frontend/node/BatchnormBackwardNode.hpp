@@ -3,12 +3,12 @@
 #pragma once
 
 #include "Node.hpp"
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -89,18 +89,6 @@ public:
         HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
         HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(dy, 2, "Gradient input tensor (dy)"));
         HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(scale, 2, "Scale tensor"));
-
-        HIPDNN_RETURN_IF_FALSE(
-            x->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "BatchnormBackwardNode: Input tensor (x) dimensions and strides must be set and "
-            "positive");
-
-        HIPDNN_RETURN_IF_FALSE(
-            dy->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "BatchnormBackwardNode: Gradient input tensor (dy) dimensions and strides must be "
-            "set and positive");
 
         // SECTION 3: Validate Tensor Shape Consistency
         // Why: Gradients flow through the same computational graph as forward pass.
@@ -215,10 +203,9 @@ public:
 
             if(tensorToInfer->get_stride().empty())
             {
-                auto strideOrder
-                    = hipdnn_sdk::utilities::strideOrderNhwc(tensorToInfer->get_dim().size());
-                tensorToInfer->set_stride(
-                    hipdnn_sdk::utilities::generateStrides(tensorToInfer->get_dim(), strideOrder));
+                auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
+                tensorToInfer->set_stride(hipdnn_data_sdk::utilities::generateStrides(
+                    tensorToInfer->get_dim(), strideOrder));
             }
         };
 
@@ -242,14 +229,14 @@ public:
         }
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::Node>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
         pack_node(flatbuffers::FlatBufferBuilder& builder) const override
     {
-        return hipdnn_sdk::data_objects::CreateNodeDirect(
+        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
             builder,
             attributes.get_name().c_str(),
             toSdkType(attributes.compute_data_type),
-            hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
+            hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
             attributes.pack_attributes(builder).Union());
     }
 };

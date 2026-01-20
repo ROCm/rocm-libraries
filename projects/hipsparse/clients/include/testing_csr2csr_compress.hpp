@@ -335,12 +335,8 @@ void testing_csr2csr_compress(Arguments argus)
 
     // Read or construct CSR matrix
     int hnnz_A = 0;
-    if(!generate_csr_matrix(
-           filename, m, n, hnnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
+        filename, m, n, hnnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idx_base));
 
     // Allocate memory on the device
     auto dcsr_row_ptr_A_managed

@@ -42,6 +42,7 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/GPUArchitecture/GPUCapability.hpp>
 #include <rocRoller/Scheduling/Observers/FunctionalUnit/MEMObserver.hpp>
 
 #include <catch2/catch_template_test_macros.hpp>
@@ -68,9 +69,10 @@ namespace MEMObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(arch.isRDNAGPU())
+            if(!TestContext::ForTarget(arch)->targetArchitecture().HasCapability(
+                   GPUCapability::HasAccCD))
             {
-                SKIP("RDNA not supported yet");
+                SKIP("Architecture " + arch.toString() + " does not use Accumulator registers.");
             }
 
             SECTION("VMEM Instructions stall")

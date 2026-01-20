@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include <hipdnn_data_sdk/logging/CallbackTypes.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
-#include <hipdnn_sdk/logging/CallbackTypes.h>
 
 #ifdef _WIN32
 #ifdef HIPDNN_PLUGIN_STATIC_DEFINE

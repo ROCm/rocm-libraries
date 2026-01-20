@@ -272,6 +272,19 @@ Tests:
   category: pre_checkin
   function: spmv_bsr
   indextype: *i32_i64
+  precision: [*float16_float16_float16_float32_axyt_precision, *bfloat16_bfloat16_bfloat16_float32_axyt_precision]
+  M: [25196]
+  N: [31254]
+  block_dim: [4, 8, 16]
+  alpha_beta: *alpha_beta_range_quick
+  direction: *all_rocsparse_direction
+  baseA: *all_rocsparse_index_base
+  matrix: [rocsparse_matrix_random]
+
+- name: spmv_bsr
+  category: pre_checkin
+  function: spmv_bsr
+  indextype: *i32_i64
   precision: *bfloat16_bfloat16_float32_float32_axyt_precision
   M: [23649]
   N: [12129]

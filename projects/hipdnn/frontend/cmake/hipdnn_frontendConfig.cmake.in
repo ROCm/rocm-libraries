@@ -5,7 +5,7 @@
 
 # Include the SDK config file to get plugin-related variables
 include(CMakeFindDependencyMacro)
-find_dependency(hipdnn_sdk CONFIG REQUIRED)
+find_dependency(hipdnn_data_sdk CONFIG REQUIRED)
 find_dependency(hipdnn_backend CONFIG REQUIRED)
 
 # Include the targets file

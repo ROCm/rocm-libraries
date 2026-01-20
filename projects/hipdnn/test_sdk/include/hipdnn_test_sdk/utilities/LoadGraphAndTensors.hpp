@@ -5,12 +5,12 @@
 
 #include <filesystem>
 #include <fstream>
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/Visitor.hpp>
+#include <hipdnn_data_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
-#include <hipdnn_sdk/logging/Logger.hpp>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <hipdnn_sdk/utilities/Visitor.hpp>
-#include <hipdnn_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferTensorAttributesUtils.hpp>
@@ -29,12 +29,12 @@ struct DatatypeFromTensor
 };
 
 template <class T>
-struct DatatypeFromTensor<hipdnn_sdk::utilities::Tensor<T>>
+struct DatatypeFromTensor<hipdnn_data_sdk::utilities::Tensor<T>>
 {
     using Type = T;
 };
 
-inline void fillTensorFromFile(hipdnn_sdk::utilities::ITensor& tensor,
+inline void fillTensorFromFile(hipdnn_data_sdk::utilities::ITensor& tensor,
                                const std::filesystem::path& path)
 {
 
@@ -55,9 +55,9 @@ template <class T>
 using DataTypeFromTensor =
     typename detail::DatatypeFromTensor<std::remove_cv_t<std::remove_reference_t<T>>>::Type;
 
-inline std::unique_ptr<hipdnn_sdk::utilities::ITensor>
+inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     tensorFromFileAndAttributes(const std::filesystem::path& filepath,
-                                const hipdnn_sdk::data_objects::TensorAttributes& attributes)
+                                const hipdnn_data_sdk::data_objects::TensorAttributes& attributes)
 {
     auto tensor = hipdnn_test_sdk::utilities::createTensorFromAttribute(attributes);
     detail::fillTensorFromFile(*tensor, filepath);
@@ -68,12 +68,12 @@ inline std::unique_ptr<hipdnn_sdk::utilities::ITensor>
 struct GraphAndTensorMap
 {
     flatbuffers::DetachedBuffer graphBuffer;
-    std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::ITensor>> tensorMap;
+    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> tensorMap;
     std::vector<int64_t> outputTensorUids;
 
-    const hipdnn_sdk::data_objects::Graph& graph() const
+    const hipdnn_data_sdk::data_objects::Graph& graph() const
     {
-        return *hipdnn_sdk::data_objects::GetGraph(graphBuffer.data());
+        return *hipdnn_data_sdk::data_objects::GetGraph(graphBuffer.data());
     }
 
     hipdnn_plugin_sdk::GraphWrapper createGraphWrapper() const
@@ -93,10 +93,10 @@ struct GraphAndTensorMap
         return deviceBuffers;
     }
 
-    std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::ITensor>>
+    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>
         extractAndClearOutputTensorData()
     {
-        std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::ITensor>>
+        std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>
             outputTensorMap;
 
         auto tensorAttributeMap = createGraphWrapper().getTensorMap();
@@ -108,9 +108,9 @@ struct GraphAndTensorMap
             auto zeroedTensorPtr = std::visit(
                 [&](auto dataType) {
                     using DataType = decltype(dataType);
-                    auto tensorPtr = std::unique_ptr<hipdnn_sdk::utilities::ITensor>(
-                        new hipdnn_sdk::utilities::Tensor<DataType>(outputTensorPtr->dims(),
-                                                                    outputTensorPtr->strides()));
+                    auto tensorPtr = std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>(
+                        new hipdnn_data_sdk::utilities::Tensor<DataType>(
+                            outputTensorPtr->dims(), outputTensorPtr->strides()));
                     tensorPtr->fillTensorWithValue(0.f);
                     return tensorPtr;
                 },
@@ -125,7 +125,7 @@ struct GraphAndTensorMap
     }
 
     bool validateTensors(
-        std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::ITensor>>&
+        std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>&
             referenceTensors,
         float absTolerance,
         float relTolerance)
@@ -138,7 +138,7 @@ struct GraphAndTensorMap
             auto& referenceTensorPtr = mapPair.second;
 
             auto dataType = tensorAttributeMap[uid]->data_type();
-            auto validatorFunc = hipdnn_sdk::utilities::Visitor{
+            auto validatorFunc = hipdnn_data_sdk::utilities::Visitor{
                 [&](auto dataType) {
                     using DataType = decltype(dataType);
 
@@ -210,14 +210,14 @@ inline GraphAndTensorMap loadGraphAndTensors(const std::filesystem::path& path)
 
     flatbuffers::FlatBufferBuilder graphBuilder;
     auto graphOffset
-        = hipdnn_sdk::json::to<hipdnn_sdk::data_objects::Graph>(graphBuilder, graphJson);
+        = hipdnn_data_sdk::json::to<hipdnn_data_sdk::data_objects::Graph>(graphBuilder, graphJson);
     graphBuilder.Finish(graphOffset);
 
-    auto graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+    auto graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
 
     auto outputTensorUids = getOutputTensorUidsFromGraph(graphJson);
 
-    std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::ITensor>> tensorMap;
+    std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> tensorMap;
 
     if(graph->tensors() == nullptr || graph->tensors()->empty())
     {

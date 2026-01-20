@@ -35,15 +35,15 @@ Tests:
   category: quick
   function: csrgeam2
   precision: *single_double_precisions_complex_real
-  M: [0, 586, 1985]
-  N: [0, 439, 2948]
+  M: [586, 1985]
+  N: [439, 2948]
   alpha: [0.0, 1.0]
   alphai: [-0.5]
   beta: [0.0, 2.0]
   betai: [-0.5]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO]
 
 - name: csrgeam2
   category: pre_checkin
@@ -55,9 +55,9 @@ Tests:
   alphai: [-0.5]
   beta: [2.0]
   betai: [-0.5]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  baseB: [HIPSPARSE_INDEX_BASE_ONE]
+  baseC: [HIPSPARSE_INDEX_BASE_ONE]
   filename: [nos1,
              nos2,
              nos3,
