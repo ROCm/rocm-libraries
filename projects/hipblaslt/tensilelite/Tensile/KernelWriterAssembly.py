@@ -8953,8 +8953,15 @@ class KernelWriterAssembly(KernelWriter):
                                 comment=f"KRS: oobS = Srd{tc}.limit+1 (OOB sentinel)"))
         imod.header.add(VMovB32(dst=vgpr("KrsOobV", 1, False), src=sgpr("KrsOobS", 1, False),
                                 comment="KRS: oobV = oobS"))
-        imod.header.add(SLShiftRightB32(dst=sgpr("KrsTailStartChunk", 1, False), shiftHex=hex(chunkElemShift), src=sgpr("KRingShift"),
-                                        comment=f"KRS: tailStartChunk = KRingShift / {chunkElems}"))
+        # tailStartChunk = ceil(KRingShift / chunkElems) (for non-divisible KRingShift)
+        if ceilBias != 0:
+          imod.header.add(SAddU32(dst=sgpr("KrsTailStartChunk", 1, False), src0=sgpr("KRingShift"), src1=ceilBias,
+                                  comment=f"KRS: tailStartChunk = ceil(KRingShift/{chunkElems}) ; bias=+{ceilBias} elems"))
+          imod.header.add(SLShiftRightB32(dst=sgpr("KrsTailStartChunk", 1, False), shiftHex=hex(chunkElemShift), src=sgpr("KrsTailStartChunk", 1, False),
+                                          comment=f"KRS: tailStartChunk >>= {chunkElemShift} (chunkElems={chunkElems})"))
+        else:
+          imod.header.add(SMovB32(dst=sgpr("KrsTailStartChunk", 1, False), src=sgpr("KRingShift"),
+                                  comment="KRS: tailStartChunk = KRingShift (chunkElems==1)"))
         imod.header.add(SAndB32(dst=sgpr("KrsMainLoopBytes", 1, False), src0=sgpr(f"SizesSum+{self.states.unrollIdx}"), src1=f"0x{maskDU:08x}",
                                 comment="KRS: mainLoopElems = SizeK & ~(DepthU-1)"))
         imod.header.add(SLShiftLeftB32(dst=sgpr("KrsMainLoopBytes", 1, False), shiftHex=hex(bpeShift), src=sgpr("KrsMainLoopBytes", 1, False),
