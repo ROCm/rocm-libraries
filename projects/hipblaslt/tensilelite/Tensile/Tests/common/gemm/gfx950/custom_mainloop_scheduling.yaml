@@ -1945,7 +1945,6 @@ BenchmarkProblems:
         - ProblemSizes:
           - Range: [[224], [256], [1], [1, 17, 256]]
           - Range: [[224], [256], [1], [32, 64, 256]]
-          - Exact: [3584, 4096, 1, 8192]
         - BiasTypeArgs: ['b']
   ########################################
   # HHS NT - standard
