@@ -28,23 +28,7 @@ constexpr void do_builder_checks()
     static_assert(ck_tile::reflect::HasInstanceTraits<typename Builder::Instance>);
 }
 
-std::size_t FirstDifference(const std::string& a, const std::string& b)
-{
-    for(auto i = 0; i < min(a.size(), b.size()); i++)
-    {
-        if(a[i] != b[i])
-        {
-            return i;
-        }
-    }
-
-    if(a.size() == b.size())
-    {
-        return a.size();
-    }
-
-    return min(a.size(), b.size());
-}
+std::size_t FirstDifference(const std::string& a, const std::string& b);
 
 void print_closest_instance(std::string builderKernelInstanceString, auto&& factoryInstances)
 {

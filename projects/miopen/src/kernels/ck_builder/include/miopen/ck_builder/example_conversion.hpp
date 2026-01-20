@@ -146,6 +146,13 @@ constexpr auto GKCYX = ckb::TensorLayout::GKCYX;
 constexpr auto NGKHW = ckb::TensorLayout::NGKHW;
 constexpr auto FP32  = ckb::DataType::FP32;
 
+constexpr auto create_device_grouped_conv_fwd_xdl_f32_instance_data(std::size_t numDimensions, ckb::TensorLayout inLayout, ckb::TensorLayout weiLayout, ckb::TensorLayout outLayout, ckb::ConvSpecialization convSpecialization){
+    std::array result = {
+    };
+
+    return result;
+}
+
 constexpr auto example_instances()
 {
     std::array result = {make_xdl_instance_from_old_params(2,
@@ -233,9 +240,7 @@ constexpr auto example_instances()
                                                            {1, 8, 1, 8},
                                                            1,
                                                            ckb::DataType::FP32,
-                                                           ckb::DataType::FP32,
-                                                           ckb::PipelineScheduler::DEFAULT,
-                                                           1),
+                                                           ckb::DataType::FP32),
                          make_xdl_instance_from_old_params(2,
                                                            ckb::TensorLayout::NGCHW,
                                                            ckb::TensorLayout::GKCYX,
@@ -277,9 +282,7 @@ constexpr auto example_instances()
                                                            {1, 32, 1, 4},
                                                            1,
                                                            ckb::DataType::FP32,
-                                                           ckb::DataType::FP32,
-                                                           ckb::PipelineScheduler::DEFAULT,
-                                                           1),
+                                                           ckb::DataType::FP32),
                          make_xdl_instance_from_old_params(2,
                                                            ckb::TensorLayout::NGCHW,
                                                            ckb::TensorLayout::GKCYX,
@@ -321,9 +324,7 @@ constexpr auto example_instances()
                                                            {1, 8, 1, 16},
                                                            4,
                                                            ckb::DataType::FP32,
-                                                           ckb::DataType::FP32,
-                                                           ckb::PipelineScheduler::DEFAULT,
-                                                           1)};
+                                                           ckb::DataType::FP32)};
 
     return result;
 }

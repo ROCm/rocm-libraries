@@ -145,6 +145,34 @@ struct XdlInstance
     XdlAlgorithm algorithm;
 };
 
+template <auto KernelDescriptor>
+constexpr void instantiate_kernel(std::vector<BaseOperatorPtr>& kernels)
+{
+    using Builder = ckb::ConvBuilder<KernelDescriptor.signature, KernelDescriptor.algorithm>;
+    do_builder_checks<Builder>();
+
+    kernels.push_back(std::make_unique<typename Builder::Instance>());
+}
+
+template <typename T, T... values>
+constexpr void build_kernels_helper(std::vector<BaseOperatorPtr>& kernels)
+{
+    std::array<BaseOperatorPtr, sizeof...(values)> result{};
+    ((instantiate_kernel<values>(kernels)), ...);
+}
+
+template <typename T, std::size_t N, std::array<T, N> arr, std::size_t... I>
+constexpr void build_kernels_impl(std::vector<BaseOperatorPtr>& kernels, std::index_sequence<I...>)
+{
+    build_kernels_helper<T, arr[I]...>(kernels);
+}
+
+template <typename T, std::size_t N, std::array<T, N> arr>
+constexpr void build_kernels(std::vector<BaseOperatorPtr>& kernels)
+{
+    build_kernels_impl<T, N, arr>(kernels, std::make_index_sequence<N>{});
+}
+
 // Constexpr function to create XdlInstance from old DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
 // template parameters Parameters are in the same order as the template parameters
 constexpr XdlInstance make_xdl_instance_from_old_params(
@@ -203,9 +231,9 @@ constexpr XdlInstance make_xdl_instance_from_old_params(
     ckb::DataType input_compute_type,
     ckb::DataType weight_compute_type,
     // 48. Loop scheduler
-    ckb::PipelineScheduler loop_scheduler,
+    ckb::PipelineScheduler loop_scheduler = ckb::PipelineScheduler::DEFAULT,
     // 49. Groups to merge
-    std::size_t num_conv_groups_to_merge)
+    std::size_t num_conv_groups_to_merge=1)
 {
     return XdlInstance{
         .signature = {.spatial_dim            = spatial_dim,
