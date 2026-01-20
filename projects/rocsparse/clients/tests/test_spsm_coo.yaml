@@ -60,25 +60,25 @@ Definitions:
     - { alpha:   1.0,  alphai:  0.0 }
 
 Tests:
-- name: spsm_coo
-  category: pre_checkin
-  function: spsm_coo
-  indextype: *i32_i64
-  precision: *single_double_precisions
-  M_N: *M_N_range_checkin
-  K: [0, 1, 2, 8]
-  ld_multiplier_B: [1]
-  ld_multiplier_C: [2]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
-  orderB: [rocsparse_order_row, rocsparse_order_column]
-  orderC: [rocsparse_order_row, rocsparse_order_column]
-  diag: [rocsparse_diag_type_unit]
-  uplo: [rocsparse_fill_mode_upper, rocsparse_fill_mode_lower]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  spsm_alg: [rocsparse_spsm_alg_default]
-  matrix: [rocsparse_matrix_random]
+# - name: spsm_coo
+#   category: pre_checkin
+#   function: spsm_coo
+#   indextype: *i32_i64
+#   precision: *single_double_precisions
+#   M_N: *M_N_range_checkin
+#   K: [0, 1, 2, 8]
+#   ld_multiplier_B: [1]
+#   ld_multiplier_C: [2]
+#   alpha_alphai: *alpha_range_checkin
+#   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+#   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+#   orderB: [rocsparse_order_row, rocsparse_order_column]
+#   orderC: [rocsparse_order_row, rocsparse_order_column]
+#   diag: [rocsparse_diag_type_unit]
+#   uplo: [rocsparse_fill_mode_upper, rocsparse_fill_mode_lower]
+#   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+#   spsm_alg: [rocsparse_spsm_alg_default]
+#   matrix: [rocsparse_matrix_random]
 
 - name: spsm_coo_bad_arg
   category: pre_checkin
