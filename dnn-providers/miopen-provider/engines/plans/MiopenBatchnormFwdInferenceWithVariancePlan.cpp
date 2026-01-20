@@ -96,9 +96,11 @@ const std::optional<MiopenTensor>& BatchnormFwdInferenceWithVarianceParams::acti
 }
 
 BatchnormFwdInferenceWithVariancePlan::BatchnormFwdInferenceWithVariancePlan(
-    BatchnormFwdInferenceWithVarianceParams&& inferenceParams)
+    BatchnormFwdInferenceWithVarianceParams&& inferenceParams, bool benchmarkingEnabled)
     : _inferenceParams(std::move(inferenceParams))
+    , _benchmarkingEnabled(benchmarkingEnabled)
 {
+    (void)_benchmarkingEnabled;
 }
 
 size_t BatchnormFwdInferenceWithVariancePlan::getWorkspaceSize(

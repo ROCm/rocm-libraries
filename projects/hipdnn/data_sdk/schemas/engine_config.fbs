@@ -6,7 +6,7 @@ include "knob_value.fbs";
 namespace hipdnn_data_sdk.data_objects;
 
 table KnobSetting {
-    knob_id: int64;
+    knob_id: string;
     value: KnobValue;
 }
 
