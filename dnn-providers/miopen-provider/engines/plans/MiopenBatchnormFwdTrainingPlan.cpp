@@ -210,9 +210,12 @@ const std::optional<MiopenTensor>& BatchnormFwdTrainingParams::activationOut() c
     return _activationOut;
 }
 
-BatchnormFwdTrainingPlan::BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams)
+BatchnormFwdTrainingPlan::BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams,
+                                                   bool benchmarkingEnabled)
     : _trainingParams(std::move(trainingParams))
+    , _benchmarkingEnabled(benchmarkingEnabled)
 {
+    (void)_benchmarkingEnabled;
 }
 
 size_t BatchnormFwdTrainingPlan::getWorkspaceSize(
