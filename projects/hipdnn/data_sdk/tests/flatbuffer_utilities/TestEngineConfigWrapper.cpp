@@ -152,4 +152,28 @@ TEST(TestEngineConfigWrapper, KnobSettingMethodsOnInvalidWrapperThrow)
     EXPECT_THROW(wrapper.knobSettingWrappers(), std::invalid_argument);
     EXPECT_THROW(wrapper.getKnobSettingById(1), std::invalid_argument);
     EXPECT_THROW(wrapper.getKnobSettingByName("test"), std::invalid_argument);
+    EXPECT_THROW(wrapper.hasKnobSetting(1), std::invalid_argument);
+    EXPECT_THROW(wrapper.hasKnobSetting("test"), std::invalid_argument);
+}
+
+TEST(TestEngineConfigWrapper, HasKnobSettingById)
+{
+    auto builder = buildEngineConfigWithKnobSettings(42, {{100, 1000}, {200, 2000}});
+    EngineConfigWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(wrapper.hasKnobSetting(100));
+    EXPECT_TRUE(wrapper.hasKnobSetting(200));
+    EXPECT_FALSE(wrapper.hasKnobSetting(300));
+}
+
+TEST(TestEngineConfigWrapper, HasKnobSettingByName)
+{
+    auto knobName = "TEST_KNOB";
+    auto knobId = static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash(knobName));
+
+    auto builder = buildEngineConfigWithKnobSettings(42, {{knobId, 500}});
+    EngineConfigWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(wrapper.hasKnobSetting(knobName));
+    EXPECT_FALSE(wrapper.hasKnobSetting("NONEXISTENT_KNOB"));
 }

@@ -69,7 +69,7 @@ private:
 class BatchnormBwdPlan : public IPlan
 {
 public:
-    BatchnormBwdPlan(BatchnormBwdParams&& params);
+    BatchnormBwdPlan(BatchnormBwdParams&& params, bool benchmarkingEnabled = false);
 
     BatchnormBwdPlan(const BatchnormBwdPlan&) = delete;
     BatchnormBwdPlan& operator=(const BatchnormBwdPlan&) = delete;
@@ -86,6 +86,7 @@ public:
 
 private:
     BatchnormBwdParams _params;
+    bool _benchmarkingEnabled;
 };
 
 } // namespace miopen_legacy_plugin

@@ -193,7 +193,8 @@ void buildPlanFwd(const HipdnnEnginePluginHandle& handle,
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
     ConvFwdParams params(attr, opGraph.getTensorMap());
-    auto plan = std::make_unique<ConvFwdPlan>(handle, std::move(params));
+    auto plan = std::make_unique<ConvFwdPlan>(
+        handle, std::move(params), executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -204,7 +205,8 @@ void buildPlanBwd(const HipdnnEnginePluginHandle& handle,
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
     ConvBwdParams params(attr, opGraph.getTensorMap());
-    auto plan = std::make_unique<ConvBwdPlan>(handle, std::move(params));
+    auto plan = std::make_unique<ConvBwdPlan>(
+        handle, std::move(params), executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -215,7 +217,8 @@ void buildPlanWrw(const HipdnnEnginePluginHandle& handle,
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
     ConvWrwParams params(attr, opGraph.getTensorMap());
-    auto plan = std::make_unique<ConvWrwPlan>(handle, std::move(params));
+    auto plan = std::make_unique<ConvWrwPlan>(
+        handle, std::move(params), executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
 }
 
