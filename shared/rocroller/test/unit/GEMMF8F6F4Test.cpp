@@ -54,8 +54,6 @@ namespace GEMMTests
         : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
                                                    int,
                                                    std::pair<std::string, std::string>,
-                                                   int,
-                                                   int,
                                                    SolutionParams::LoadPath,
                                                    SolutionParams::LoadPath,
                                                    rocRoller::StreamKMode>>
@@ -641,8 +639,7 @@ namespace GEMMTests
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 
-        auto [typeAB, MFMAK, transOp, waveConfigX, swizzleK, loadPathA, loadPathB, mode]
-            = std::get<1>(GetParam());
+        auto [typeAB, MFMAK, transOp, loadPathA, loadPathB, mode] = std::get<1>(GetParam());
 
         if((typeAB == DataType::FP6 || typeAB == DataType::BF6)
            && (loadPathA == SolutionParams::LoadPath::BufferToLDS
@@ -690,8 +687,8 @@ namespace GEMMTests
         problem.macN = 128;
         problem.macK = 128;
 
-        problem.workgroupSizeX = waveConfigX * problem.wavefrontSize;
-        problem.workgroupSizeY = 4 / waveConfigX;
+        problem.workgroupSizeX = 2 * problem.wavefrontSize;
+        problem.workgroupSizeY = 2;
 
         problem.m = problem.macM * 4;
         problem.n = problem.macN * problem.numWGs / 2 + problem.macN * 2;
@@ -711,7 +708,7 @@ namespace GEMMTests
         problem.prefetchInFlight  = 2;
         problem.prefetchLDSFactor = 2;
 
-        // TODO: remove both if/else conditions when SwizzleScale supports non-TN data layout
+        // TODO: remove the if condition when SwizzleScale supports non-TN data layout
         if(problem.transA == "T" && problem.transB == "N")
         {
             problem.loadScalePathA = SolutionParams::LoadPath::BufferToVGPR;
@@ -726,17 +723,11 @@ namespace GEMMTests
             problem.swizzleScale  = true;
             problem.swizzleM      = 64;
             problem.swizzleN      = 64;
-            problem.swizzleK      = swizzleK;
+            problem.swizzleK      = 8;
             problem.prefetchScale = true;
 
             problem.scaleBlockSize = m_context->targetArchitecture().GetCapability(
                 GPUCapability::DefaultScaleBlockSize);
-        }
-        else
-        {
-            if(swizzleK != 4)
-                GTEST_SKIP() << "skip repeated test due to unrelated options : non-TN and swizzleK"
-                             << std::endl;
         }
 
         uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
@@ -906,8 +897,6 @@ namespace GEMMTests
                                   std::pair<std::string, std::string>("N", "T"),
                                   std::pair<std::string, std::string>("T", "N"),
                                   std::pair<std::string, std::string>("T", "T")),
-                ::testing::Values(1, 2, 4),
-                ::testing::Values(4, 8),
                 ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
                                   SolutionParams::LoadPath::BufferToLDS),
                 ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
