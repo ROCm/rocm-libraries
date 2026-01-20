@@ -5,7 +5,6 @@
 #include <string>
 #include <unordered_map>
 
-#include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
@@ -44,16 +43,12 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto scale = createTensor({1, c, 1, 1}, computeType);
     auto bias = createTensor({1, c, 1, 1}, computeType);
     auto mean = createTensor({1, c, 1, 1}, computeType);
+    // invVariance = 1/sqrt(variance + epsilon), epsilon is already baked in
     auto invVariance = createTensor({1, c, 1, 1}, computeType);
 
-    // Epsilon is a pass-by-value scalar, not a buffer
-    auto epsilon = std::make_shared<graph::TensorAttributes>();
-    epsilon->set_value(utilities::BATCHNORM_DEFAULT_EPSILON);
-
-    // Step 1: Batchnorm Inference
+    // Step 1: Batchnorm Inference (using pre-computed invVariance, so epsilon not needed)
     auto bnAttributes = graph::BatchnormInferenceAttributes();
     bnAttributes.set_name("bn_inference_node");
-    bnAttributes.set_epsilon(epsilon);
 
     auto y = graph->batchnorm_inference(x, mean, invVariance, scale, bias, bnAttributes);
 
@@ -83,10 +78,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
     scaleTensor.fillWithRandomValues(static_cast<ComputeType>(0.0f),
                                      static_cast<ComputeType>(1.0f));
-    biasTensor.fillWithRandomValues(static_cast<ComputeType>(0.0f),
-                                    static_cast<ComputeType>(1.0f));
-    meanTensor.fillWithRandomValues(static_cast<ComputeType>(0.0f),
-                                    static_cast<ComputeType>(1.0f));
+    biasTensor.fillWithRandomValues(static_cast<ComputeType>(0.0f), static_cast<ComputeType>(1.0f));
+    meanTensor.fillWithRandomValues(static_cast<ComputeType>(0.0f), static_cast<ComputeType>(1.0f));
     invVarianceTensor.fillWithRandomValues(static_cast<ComputeType>(0.1f),
                                            static_cast<ComputeType>(1.0f));
 
@@ -132,8 +125,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 
         auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceInference<OutputType>();
-        auto yValidator
-            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<OutputType>(tolerance, tolerance);
+        auto yValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<OutputType>(
+            tolerance, tolerance);
 
         bool yValid = yValidator.allClose(activatedYRefTensor, activatedYTensor);
 

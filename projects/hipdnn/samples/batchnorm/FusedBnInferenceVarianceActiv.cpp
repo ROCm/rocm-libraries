@@ -83,10 +83,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
     scaleTensor.fillWithRandomValues(static_cast<ComputeType>(0.0f),
                                      static_cast<ComputeType>(1.0f));
-    biasTensor.fillWithRandomValues(static_cast<ComputeType>(0.0f),
-                                    static_cast<ComputeType>(1.0f));
-    meanTensor.fillWithRandomValues(static_cast<ComputeType>(0.0f),
-                                    static_cast<ComputeType>(1.0f));
+    biasTensor.fillWithRandomValues(static_cast<ComputeType>(0.0f), static_cast<ComputeType>(1.0f));
+    meanTensor.fillWithRandomValues(static_cast<ComputeType>(0.0f), static_cast<ComputeType>(1.0f));
     varianceTensor.fillWithRandomValues(static_cast<ComputeType>(0.1f),
                                         static_cast<ComputeType>(1.0f));
 
@@ -131,10 +129,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor cpuExecutor;
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 
-        auto tolerance
-            = hipdnn_test_sdk::utilities::batchnorm::getToleranceInferenceWithVariance<OutputType>();
-        auto yValidator
-            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<OutputType>(tolerance, tolerance);
+        auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceInferenceWithVariance<
+            OutputType>();
+        auto yValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<OutputType>(
+            tolerance, tolerance);
 
         bool yValid = yValidator.allClose(activatedYRefTensor, activatedYTensor);
 
