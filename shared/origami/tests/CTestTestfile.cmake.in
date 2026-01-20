@@ -14,5 +14,5 @@ add_test(origami_python_grid_test python "origami_grid_test.py")
 # Set environment for Python tests to find liborigami.so and the Python module
 # Paths are absolute, computed at configure time from CMAKE_INSTALL_PREFIX
 set_tests_properties(origami_python_test origami_python_grid_test PROPERTIES
-    ENVIRONMENT "LD_LIBRARY_PATH=@ORIGAMI_INSTALL_LIBDIR@;PYTHONPATH=@ORIGAMI_INSTALL_PYTHON_BINDIR@"
+    ENVIRONMENT "LD_LIBRARY_PATH=@ORIGAMI_INSTALL_LIBDIR@:$ENV{LD_LIBRARY_PATH};PYTHONPATH=@ORIGAMI_INSTALL_PYTHON_BINDIR@:$ENV{PYTHONPATH}"
 )
