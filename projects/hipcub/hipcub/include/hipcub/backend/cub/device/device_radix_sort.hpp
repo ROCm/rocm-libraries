@@ -320,14 +320,15 @@ struct DeviceRadixSort
     }
 
     template<typename KeyT, typename NumItemsT>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t SortKeys(void*       d_temp_storage,
-                                                       size_t&     temp_storage_bytes,
-                                                       const KeyT* d_keys_in,
-                                                       KeyT*       d_keys_out,
-                                                       NumItemsT   num_items,
-                                                       int         begin_bit = 0,
-                                                       int         end_bit   = sizeof(KeyT) * 8,
-                                                       hipStream_t stream    = 0)
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t SortKeys(void*       d_temp_storage,
+                               size_t&     temp_storage_bytes,
+                               const KeyT* d_keys_in,
+                               KeyT*       d_keys_out,
+                               NumItemsT   num_items,
+                               int         begin_bit = 0,
+                               int         end_bit   = sizeof(KeyT) * 8,
+                               hipStream_t stream    = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortKeys(d_temp_storage,
                                                                        temp_storage_bytes,
