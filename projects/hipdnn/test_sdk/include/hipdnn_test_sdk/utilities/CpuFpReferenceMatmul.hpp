@@ -64,7 +64,7 @@ public:
             *(aIndices.rbegin() + K_M_IDX) = m;
             *(bIndices.rbegin() + K_N_IDX) = n;
 
-            auto acc = static_cast<ComputeDataType>(0);
+            auto acc = static_cast<ComputeDataType>(0.f);
             const int64_t kDim = *(aDims.rbegin() + K_K_IDX_A);
             for(int64_t k = 0; k < kDim; ++k)
             {
