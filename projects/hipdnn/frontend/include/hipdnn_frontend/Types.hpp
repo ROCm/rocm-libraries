@@ -8,7 +8,9 @@
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsBfp8.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsFp8.hpp>
 
 #include <bitset>
 #include <set>
@@ -88,6 +90,8 @@ enum class DataType
     UINT8 = 5,
     INT32 = 6,
     INT8 = 7,
+    FP8_E4M3 = 8,
+    FP8_E5M2 = 9,
 };
 typedef DataType DataType_t; // NOLINT(readability-identifier-naming)
 
@@ -134,6 +138,14 @@ DataType getDataTypeEnumFromType()
     else if constexpr(std::is_same_v<T, int8_t>)
     {
         return DataType::INT8;
+    }
+    else if constexpr(std::is_same_v<T, hip_fp8_e4m3>)
+    {
+        return DataType::FP8_E4M3;
+    }
+    else if constexpr(std::is_same_v<T, hip_fp8_e5m2>)
+    {
+        return DataType::FP8_E5M2;
     }
     else
     {
@@ -186,6 +198,10 @@ inline hipdnn_data_sdk::data_objects::DataType toSdkType(const DataType& type)
         return hipdnn_data_sdk::data_objects::DataType::INT32;
     case DataType::INT8:
         return hipdnn_data_sdk::data_objects::DataType::INT8;
+    case DataType::FP8_E4M3:
+        return hipdnn_data_sdk::data_objects::DataType::FP8_E4M3;
+    case DataType::FP8_E5M2:
+        return hipdnn_data_sdk::data_objects::DataType::FP8_E5M2;
     default:
         return hipdnn_data_sdk::data_objects::DataType::UNSET;
     }
@@ -209,6 +225,10 @@ inline hipdnn_frontend::DataType fromSdkType(const hipdnn_data_sdk::data_objects
         return hipdnn_frontend::DataType::INT32;
     case hipdnn_data_sdk::data_objects::DataType::INT8:
         return hipdnn_frontend::DataType::INT8;
+    case hipdnn_data_sdk::data_objects::DataType::FP8_E4M3:
+        return hipdnn_frontend::DataType::FP8_E4M3;
+    case hipdnn_data_sdk::data_objects::DataType::FP8_E5M2:
+        return hipdnn_frontend::DataType::FP8_E5M2;
     default:
         return hipdnn_frontend::DataType::NOT_SET;
     }
@@ -451,6 +471,10 @@ inline const char* to_string(const DataType& type)
         return "int32";
     case DataType::INT8:
         return "int8";
+    case DataType::FP8_E4M3:
+        return "fp8_e4m3";
+    case DataType::FP8_E5M2:
+        return "fp8_e5m2";
     default:
         return "unknown";
     }

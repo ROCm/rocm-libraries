@@ -28,11 +28,18 @@
 
 #include <string>
 #include <tuple>
+#include <stdexcept>
+#include <miopen/stringutils.hpp>
 
 #define WORKAROUND_ISSUE_1204 1 // ROCm may incorrectly report "sramecc-" for gfx900.
 #define WORKAROUND_ISSUE_3001 1
 
 namespace miopen {
+
+static inline bool IsTF32Supported(const std::string& device_name)
+{
+    return device_name == "gfx942" || StartsWith(device_name, "gfx95");
+}
 
 struct Handle;
 

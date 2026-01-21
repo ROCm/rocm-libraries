@@ -5,8 +5,13 @@
 #include "BackendEnumStringUtils.hpp"
 #include "GraphDescriptor.hpp"
 #include "HipdnnBackendDescriptorType.h"
+#include "HipdnnBackendFlatbufferData.h"
 #include "HipdnnException.hpp"
 #include "handle/Handle.hpp"
+#include "plugin/EnginePluginResourceManager.hpp"
+
+#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_data_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 
 namespace hipdnn_backend
 {
@@ -38,6 +43,28 @@ void EngineDescriptor::finalize()
     _engineDetails = plugin::EnginePluginResourceManager::getEngineDetails(
         pluginResourceManager, _engineId, _graph.get());
 
+    auto engineDetailsPtr = _engineDetails->get();
+    if(engineDetailsPtr != nullptr)
+    {
+        hipdnn_plugin_sdk::EngineDetailsWrapper detailsWrapper(engineDetailsPtr);
+        auto knobCount = detailsWrapper.knobCount();
+
+        if(knobCount > 0)
+        {
+            const auto& knobWrappers = detailsWrapper.knobWrappers();
+            _knobSerializedBuffers.reserve(knobCount);
+
+            for(const auto& knobWrapper : knobWrappers)
+            {
+                flatbuffers::FlatBufferBuilder builder;
+                auto knobOffset = hipdnn_data_sdk::data_objects::Knob::Pack(
+                    builder, knobWrapper->getKnob().UnPack());
+                builder.Finish(knobOffset);
+                _knobSerializedBuffers.push_back(builder.Release());
+            }
+        }
+    }
+
     HipdnnBackendDescriptorImpl<EngineDescriptor>::finalize();
 }
 
@@ -58,6 +85,9 @@ void EngineDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
         break;
     case HIPDNN_ATTR_ENGINE_GLOBAL_INDEX:
         getGlobalId(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        break;
+    case HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT:
+        getKnobInfo(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_ENGINE_KNOB_INFO:
     case HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE:
@@ -228,6 +258,48 @@ int64_t EngineDescriptor::getEngineId() const
 hipdnnBackendDescriptorType_t EngineDescriptor::getStaticType()
 {
     return HIPDNN_BACKEND_ENGINE_DESCRIPTOR;
+}
+
+void EngineDescriptor::getKnobInfo(hipdnnBackendAttributeType_t attributeType,
+                                   int64_t requestedElementCount,
+                                   int64_t* elementCount,
+                                   void* arrayOfElements) const
+{
+    THROW_IF_NE(attributeType,
+                HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                HIPDNN_STATUS_BAD_PARAM,
+                "EngineDescriptor failed to get knob info: Invalid attribute type.");
+
+    auto knobCount = static_cast<int64_t>(_knobSerializedBuffers.size());
+
+    // If requestedElementCount is 0, just return the count
+    if(requestedElementCount == 0)
+    {
+        if(elementCount != nullptr)
+        {
+            *elementCount = knobCount;
+        }
+        return;
+    }
+
+    THROW_IF_NULL(arrayOfElements,
+                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                  "EngineDescriptor failed to get knob info: Null pointer.");
+
+    // Fill the output array with hipdnnBackendFlatbufferData_t structs
+    auto* outputArray = static_cast<hipdnnBackendFlatbufferData_t*>(arrayOfElements);
+    auto elementsToReturn = std::min(requestedElementCount, knobCount);
+
+    for(int64_t i = 0; i < elementsToReturn; ++i)
+    {
+        outputArray[i].ptr = _knobSerializedBuffers[static_cast<size_t>(i)].data();
+        outputArray[i].size = _knobSerializedBuffers[static_cast<size_t>(i)].size();
+    }
+
+    if(elementCount != nullptr)
+    {
+        *elementCount = elementsToReturn;
+    }
 }
 
 std::string EngineDescriptor::toString() const
