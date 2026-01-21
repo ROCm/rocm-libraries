@@ -685,8 +685,8 @@ namespace rocRoller
 
             auto graph = original;
 
-            auto tracer     = std::make_unique<ControlFlowRWTracer>(graph);
-            auto allRecords = tracer->coordinatesReadWrite();
+            ControlFlowRWTracer tracer{graph};
+            auto                allRecords = tracer.coordinatesReadWrite();
 
             // Collect all LDS coordinates that are accessed
             const auto ldsCoordinates = collectAllLDSCoordinatesInRWTrace(graph, allRecords);
@@ -699,9 +699,8 @@ namespace rocRoller
             // For each LDS coordinate, find dependent operations and ensure barriers exist
             for(int ldsCoord : ldsCoordinates)
             {
-                auto recordsForCoord = tracer->coordinatesReadWrite(ldsCoord);
-                const auto [readOpTags, writeOpTags]
-                    = collectReadAndWritesToCoordinate(graph, recordsForCoord);
+                const auto [readOpTags, writeOpTags] = collectReadAndWritesToCoordinate(
+                    graph, tracer.coordinatesReadWrite(ldsCoord));
 
                 for(const auto& writeTag : writeOpTags)
                 {
@@ -738,9 +737,20 @@ namespace rocRoller
                             const auto insertPosition = getTopSetCoordinate(graph, secondOpTag);
                             insertBefore(graph, insertPosition, newBarrier, newBarrier);
                             graph.mapper.connect<LDS>(newBarrier, ldsCoord);
-                            tracer = std::make_unique<ControlFlowRWTracer>(graph);
-                            tracer->buildDependencies();
-                            allRecords = tracer->coordinatesReadWrite();
+                            auto it = std::find_if(
+                                allRecords.begin(),
+                                allRecords.end(),
+                                [secondOpTag](const ControlFlowRWTracer::ReadWriteRecord& record) {
+                                    return record.control == secondOpTag;
+                                });
+                            AssertFatal(it != allRecords.end(),
+                                        "Could not find secondOpTag in allRecords.",
+                                        ShowValue(secondOpTag));
+                            allRecords.insert(it,
+                                              ControlFlowRWTracer::ReadWriteRecord{
+                                                  newBarrier, ldsCoord, ControlFlowRWTracer::READ});
+                            firstOpIndex  = getCrontrolOpIndexInAllRecords(firstOpTag, allRecords);
+                            secondOpIndex = getCrontrolOpIndexInAllRecords(secondOpTag, allRecords);
                             const auto message
                                 = fmt::format("  Inserted new Barrier({}) before {} for forward "
                                               "dependency between {} & {} and LDS({})",
@@ -782,9 +792,20 @@ namespace rocRoller
                                 const auto insertPosition = getTopSetCoordinate(graph, firstOpTag);
                                 insertBefore(graph, insertPosition, newBarrier, newBarrier);
                                 graph.mapper.connect<LDS>(newBarrier, ldsCoord);
-                                tracer = std::make_unique<ControlFlowRWTracer>(graph);
-                                tracer->buildDependencies();
-                                allRecords         = tracer->coordinatesReadWrite();
+                                auto it = std::find_if(
+                                    allRecords.begin(),
+                                    allRecords.end(),
+                                    [firstOpTag](
+                                        const ControlFlowRWTracer::ReadWriteRecord& record) {
+                                        return record.control == firstOpTag;
+                                    });
+                                AssertFatal(it != allRecords.end(),
+                                            "Could not find firstOpTag in allRecords.",
+                                            ShowValue(firstOpTag));
+                                allRecords.insert(
+                                    it,
+                                    ControlFlowRWTracer::ReadWriteRecord{
+                                        newBarrier, ldsCoord, ControlFlowRWTracer::READ});
                                 const auto message = fmt::format(
                                     "  Inserted new Barrier({}) before {} for "
                                     "loop-carried dependency from {} to {} in loop {} for "
