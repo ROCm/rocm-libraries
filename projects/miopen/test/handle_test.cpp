@@ -61,7 +61,7 @@ std::string Write2s(kernel_type_t kern_type)
 {
     if(kern_type == miopenHIPKernelType)
     {
-        return "#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS\n"
+        return "#ifndef MIOPEN_DONT_USE_RUNTIME_HEADERS\n"
                "#include <hip/hip_runtime.h>\n"
 #if WORKAROUND_SWDEV_257056_PCH_MISSING_MACROS
                "#else\n"
@@ -156,7 +156,7 @@ std::string WriteError(kernel_type_t kern_type)
     }
     else if(kern_type == miopenHIPKernelType)
     {
-        return "#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS\n"
+        return "#ifndef MIOPEN_DONT_USE_RUNTIME_HEADERS\n"
                "#include <hip/hip_runtime.h>\n"
                "#endif\n"
                "extern \"C\" {\n"
@@ -244,7 +244,7 @@ std::string WriteNop(kernel_type_t kern_type)
     }
     else if(kern_type == miopenHIPKernelType)
     {
-        return "#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS\n"
+        return "#ifndef MIOPEN_DONT_USE_RUNTIME_HEADERS\n"
                "#include <hip/hip_runtime.h>\n"
                "#endif\n"
                "extern \"C\" {\n"

@@ -23,7 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_DONT_USE_RUNTIME_HEADERS
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
 #endif

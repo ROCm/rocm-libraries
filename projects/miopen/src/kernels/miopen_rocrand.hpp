@@ -45,7 +45,7 @@
 
 // Use inlined rocrand header for runtime compilation to avoid external dependency
 // For host code compilation, use the regular rocrand header
-#ifdef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifdef MIOPEN_DONT_USE_RUNTIME_HEADERS
 #include "rocrand_xorwow_inlined.h"
 #else
 #include <rocrand/rocrand_xorwow.h>
