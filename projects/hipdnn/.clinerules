@@ -127,7 +127,8 @@ When requested to build/test:
 ### Testing
 - Use Google Test (gtest) framework for all C/C++ tests
 - Never generate a main() function in test files - gtest provides its own
-- Use TEST(), TEST_F(), or TEST_P() macros as appropriate
+- Use TEST(), TEST_F(), TEST_P(), or TYPED_TEST() macros as appropriate
+- **Prefer TYPED_TEST for multi-datatype tests** - When testing functionality across multiple data types (float, half, bfloat16), use TYPED_TEST instead of duplicating test code
 
 #### Test Naming Guidelines
 
@@ -218,3 +219,43 @@ TEST_F(MyTestFixture, testSomething)
 {
     // Test implementation
 }
+```
+
+## TYPED_TEST for Multi-Datatype Tests
+
+When testing functionality across multiple data types (float, half, bfloat16), use TYPED_TEST instead of duplicating test code:
+
+```cpp
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#include <gtest/gtest.h>
+#include <hip/hip_fp16.h>
+#include <hip/hip_bfloat16.h>
+
+template <typename T>
+class MyTypedTest : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        // Setup code - use TypeParam for the data type
+    }
+};
+
+// Define the types to test
+using TestTypes = ::testing::Types<float, __half, hip_bfloat16>;
+TYPED_TEST_SUITE(MyTypedTest, TestTypes);
+
+TYPED_TEST(MyTypedTest, TestSomething)
+{
+    // TypeParam is the current type being tested (float, __half, or hip_bfloat16)
+    TypeParam value = static_cast<TypeParam>(1.0f);
+    // Test implementation
+}
+```
+
+**When to use TYPED_TEST:**
+- Testing the same logic across float, half, bfloat16
+- GPU kernel tests that should work for multiple precisions
+- Validation utilities that are type-agnostic

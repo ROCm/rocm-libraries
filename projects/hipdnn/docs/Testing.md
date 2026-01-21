@@ -64,6 +64,34 @@ Standardized template for recording and tracking test results:
 | API | `tests/backend/` | Black box API tests |
 | Frontend Integration | `tests/frontend/` | Integration tests |
 
+### Multi-Datatype Testing with TYPED_TEST
+
+When testing functionality that should work across multiple data types (float, half, bfloat16), use Google Test's `TYPED_TEST` to avoid code duplication:
+
+```cpp
+#include <gtest/gtest.h>
+#include <hip/hip_fp16.h>
+#include <hip/hip_bfloat16.h>
+
+template <typename T>
+class MyTypedTest : public ::testing::Test { };
+
+using TestTypes = ::testing::Types<float, __half, hip_bfloat16>;
+TYPED_TEST_SUITE(MyTypedTest, TestTypes);
+
+TYPED_TEST(MyTypedTest, TestSomething)
+{
+    // TypeParam is the current type (float, __half, or hip_bfloat16)
+    TypeParam value = static_cast<TypeParam>(1.0f);
+    // Test implementation runs for each type
+}
+```
+
+**When to use TYPED_TEST:**
+- GPU kernel tests that should work for multiple precisions
+- Validation utilities that are type-agnostic
+- Any test logic that applies identically across float, half, and bfloat16
+
 ### Testing Requirements
 
 - **Coverage Target**: 80% overall, with each component maintaining >80% individually
