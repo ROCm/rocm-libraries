@@ -1,9 +1,16 @@
 
-import itertools
 import math
-import torch
 from typing import Iterable
+
+import torch
+
 import origami
+
+"""
+Origami: Analytical GEMM Solution Selection
+
+Python bindings for the Origami C++ library.
+"""
 
 
 class OrigamiMatmulSelector:
