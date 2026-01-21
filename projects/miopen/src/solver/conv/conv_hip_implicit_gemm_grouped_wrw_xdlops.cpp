@@ -49,9 +49,9 @@ using ProblemDescription = miopen::conv::ProblemDescription;
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
-template <typename DataType>
-using DeviceOpGWrwPtrs =
-    ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<DeviceOpGWrw<DataType>>;
+template <typename DataType, typename ComputeType>
+using DeviceOpGWrwPtrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+    DeviceOpGWrw<DataType, ComputeType>>;
 
 namespace {
 
@@ -220,16 +220,43 @@ struct CKArgs
 template <typename DataType>
 void PerformanceConfigHipImplicitGemmGroupWrwXdlops::Init(const ProblemDescription& problem)
 {
-    valid_kernels = FillValidKernelsIDs<DeviceOpGWrwPtrs<DataType>, CKArgs>(problem);
-    index         = 0;
-    split_k       = 1;
-    kernel_id     = valid_kernels[index] + "+" + std::to_string(split_k);
+    if constexpr(std::is_same_v<DataType, float>)
+    {
+        if(problem.UseTF32())
+        {
+            use_tf32 = true;
+            valid_kernels =
+                FillValidKernelsIDs<DeviceOpGWrwPtrs<DataType, ck::tf32_t>, CKArgs>(problem);
+        }
+        else
+        {
+            use_tf32      = false;
+            valid_kernels = FillValidKernelsIDs<DeviceOpGWrwPtrs<DataType>, CKArgs>(problem);
+        }
+    }
+    else
+    {
+        valid_kernels = FillValidKernelsIDs<DeviceOpGWrwPtrs<DataType>, CKArgs>(problem);
+    }
+    index     = 0;
+    split_k   = 1;
+    kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
 }
 
 template <typename DataType>
 bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::CheckIsSupportCKArgs(
     const ProblemDescription& problem) const
 {
+    if constexpr(std::is_same_v<DataType, float>)
+    {
+        if(problem.UseTF32() &&
+           IsCKArgsSupported<DeviceOpGWrwPtrs<DataType, ck::tf32_t>, CKArgs>(problem, kernel_id))
+        {
+            use_tf32 = true;
+            return true;
+        }
+        use_tf32 = false;
+    }
     return IsCKArgsSupported<DeviceOpGWrwPtrs<DataType>, CKArgs>(problem, kernel_id);
 }
 
@@ -237,6 +264,14 @@ template <typename DataType>
 bool ConvHipImplicitGemmGroupWrwXdlops::CheckCKApplicability(
     const ProblemDescription& problem) const
 {
+    if constexpr(std::is_same_v<DataType, float>)
+    {
+        if(problem.UseTF32() &&
+           IsCKApplicable<DeviceOpGWrwPtrs<DataType, ck::tf32_t>, CKArgs>(problem))
+        {
+            return true;
+        }
+    }
     return IsCKApplicable<DeviceOpGWrwPtrs<DataType>, CKArgs>(problem);
 }
 
@@ -395,8 +430,20 @@ template <typename DataType>
 bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::RunParameterPredictionModel(
     const ExecutionContext& ctx, const ProblemDescription& problem)
 {
-    valid_kernels = FillValidKernelsIDs<DeviceOpGWrwPtrs<DataType>, CKArgs>(
-        problem); // filter valid_kernel ID's
+    // filter valid_kernel ID's
+    if constexpr(std::is_same_v<DataType, float>)
+    {
+        if(problem.UseTF32())
+        {
+            valid_kernels =
+                FillValidKernelsIDs<DeviceOpGWrwPtrs<DataType, ck::tf32_t>, CKArgs>(problem);
+        }
+    }
+    if(valid_kernels.empty())
+    {
+        valid_kernels = FillValidKernelsIDs<DeviceOpGWrwPtrs<DataType>, CKArgs>(problem);
+    }
+
     static const std::string& arch = ctx.GetStream().GetDeviceName();
     if(arch == "gfx90a")
         InitHeuristicKernelIDs("DeviceGroupedConvBwdWeight_Xdl_CShuffle");
@@ -654,23 +701,26 @@ ConvSolution ConvHipImplicitGemmGroupWrwXdlops::GetSolution(
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     return MakeSolutionGroupConvImplicitGemmXdlops(
         problem,
-        [&](auto data_type_val) {
-            using T = decltype(data_type_val);
+        [&](auto data_type_val, auto compute_type_val) {
+            using T        = decltype(data_type_val);
+            using TCompute = decltype(compute_type_val);
             return InitInvokerFactoryWrwNCHW<2,
                                              false,
-                                             DeviceOpGWrwPtrs<T>,
+                                             DeviceOpGWrwPtrs<T, TCompute>,
                                              CKArgs,
                                              miopen::conv::WrWInvokeParams>(
                 ctx, problem, config.kernel_id);
         },
-        [&](auto data_type_val) {
-            using T = decltype(data_type_val);
+        [&](auto data_type_val, auto compute_type_val) {
+            using T        = decltype(data_type_val);
+            using TCompute = decltype(compute_type_val);
             return InitInvokerFactoryNHWC<false,
-                                          DeviceOpGWrwPtrs<T>,
+                                          DeviceOpGWrwPtrs<T, TCompute>,
                                           CKArgs,
                                           miopen::conv::WrWInvokeParams>(
                 ctx, problem, config.kernel_id);
-        });
+        },
+        config.UseTF32());
 
 #else
     return {};
