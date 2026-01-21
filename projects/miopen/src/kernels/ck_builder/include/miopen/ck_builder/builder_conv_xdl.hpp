@@ -101,6 +101,8 @@ struct XdlAlgorithm
     PipeSched loop_scheduler;
 };
 
+static_assert(ckb::factory::FwdXdlAlgorithm<XdlAlgorithm>);
+
 struct XdlSignature
 {
     int spatial_dim;
@@ -137,6 +139,8 @@ struct XdlSignature
     ckb::DataType data_type;
     ckb::DataType accumulation_data_type;
 };
+
+
 
 // Struct to hold both signature and algorithm
 struct XdlInstance
@@ -227,12 +231,20 @@ struct XdlV3Algorithm
     GemmSpecial gemm_specialization;
     std::size_t num_gemm_k_prefetch_stages;
     std::size_t num_conv_groups_to_merge;
-    PipeSched loop_scheduler;
+    
+    // V3-specific: BlockGemmPipelineDescriptor
+    struct BlockGemmPipelineDescriptor
+    {
+        ckb::PipelineScheduler scheduler;
+        ckb::PipelineVersion pipeline_version;
+    } block_gemm_pipeline;
 
-    // V3-specific fields
-    ckb::PipelineVersion pipeline_version;
+    static_assert(ckb::BlockGemmPipelineDescriptor<BlockGemmPipelineDescriptor>);
+    
     bool direct_load;
 };
+
+static_assert(ckb::factory::FwdXdlV3Algorithm<XdlV3Algorithm>);
 
 // V3 Instance struct
 struct XdlV3Instance
@@ -570,8 +582,7 @@ constexpr XdlV3Instance make_xdl_v3_instance_from_old_params(
              .gemm_specialization        = gemm_specialization,
              .num_gemm_k_prefetch_stages = num_gemm_k_prefetch_stage,
              .num_conv_groups_to_merge   = num_conv_groups_to_merge,
-             .loop_scheduler             = loop_scheduler,
-             .pipeline_version           = pipeline_version,
+             .block_gemm_pipeline = {.scheduler = loop_scheduler, .pipeline_version = pipeline_version},
              .direct_load                = direct_load}};
 }
 
@@ -1442,14 +1453,13 @@ struct DeviceOperationInstanceFactory<DeviceOpGFWdDefaultFloat>
         constexpr auto xdlMemInterInstanceData =
             create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_inter_instance_data();
 
-        constexpr auto instanceData = concat(xdlMergedInstanceData,
-                                             xdlInstanceData,
-                                             xdl16x16InstanceData,
-                                             xdlCompInstanceData,
-                                             xdlMemIntraInstanceData,
-                                             xdlMemInterInstanceData);
+        constexpr auto xdlAllInstanceData =
+            concat(xdlMergedInstanceData, xdlInstanceData, xdl16x16InstanceData);
+        build_kernels<xdlAllInstanceData>(instances);
 
-        build_kernels<instanceData>(instances);
+        constexpr auto xdlV3AllInstanceData =
+            concat(xdlCompInstanceData, xdlMemIntraInstanceData, xdlMemInterInstanceData);
+        build_kernels<xdlV3AllInstanceData>(instances);
 
         return instances;
     }
