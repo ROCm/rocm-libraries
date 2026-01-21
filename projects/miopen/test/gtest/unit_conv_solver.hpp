@@ -37,6 +37,37 @@
 namespace miopen {
 namespace unit_tests {
 
+// Enum class to represent all compute types including TF32
+enum class TestDataType
+{
+    I8,
+    FP8,
+    BF8,
+    FP16,
+    BF16,
+    FP32,
+    TF32,
+    FP64,
+    I64
+};
+
+// Helper function to convert TestDataType to miopenDataType_t
+constexpr miopenDataType_t GetDataType(TestDataType type)
+{
+    constexpr miopenDataType_t type_map[] = {
+        miopenInt8,
+        miopenFloat8_fnuz,
+        miopenBFloat8_fnuz,
+        miopenHalf,
+        miopenBFloat16,
+        miopenFloat,
+        miopenFloat,
+        miopenDouble,
+        miopenInt64,
+    };
+    return type_map[static_cast<int>(type)];
+}
+
 //************************************************************************************
 // ConvTestCase
 //************************************************************************************
@@ -228,6 +259,10 @@ using GPU_UnitTestConvSolverWrw_BFP16 = miopen::unit_tests::UnitTestConvSolverWr
 using GPU_UnitTestConvSolverFwd_FP32 = miopen::unit_tests::UnitTestConvSolverFwd;
 using GPU_UnitTestConvSolverBwd_FP32 = miopen::unit_tests::UnitTestConvSolverBwd;
 using GPU_UnitTestConvSolverWrw_FP32 = miopen::unit_tests::UnitTestConvSolverWrw;
+
+using GPU_UnitTestConvSolverFwd_TF32 = miopen::unit_tests::UnitTestConvSolverFwd;
+using GPU_UnitTestConvSolverBwd_TF32 = miopen::unit_tests::UnitTestConvSolverBwd;
+using GPU_UnitTestConvSolverWrw_TF32 = miopen::unit_tests::UnitTestConvSolverWrw;
 
 using GPU_UnitTestConvSolverFwd_I8 = miopen::unit_tests::UnitTestConvSolverFwd;
 using GPU_UnitTestConvSolverBwd_I8 = miopen::unit_tests::UnitTestConvSolverBwd;
