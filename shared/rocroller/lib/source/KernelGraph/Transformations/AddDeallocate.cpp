@@ -275,6 +275,16 @@ namespace rocRoller::KernelGraph
                 // are all of them are within the same body-parent.
                 for(auto src : controls)
                     graph.control.addElement(Sequence(), {src}, {deallocate});
+
+                // Add a barrier before deallocating LDS to avoid write-after-read races
+                // when different LDS allocation alias to the same LDS offset/address.
+                if(std::any_of(coords.begin(), coords.end(), [&](int coordinate) {
+                       return graph.coordinates.get<LDS>(coordinate).has_value();
+                   }))
+                {
+                    auto barrierTag = graph.control.addElement(Barrier());
+                    insertBefore(graph, barrierTag, deallocate, deallocate);
+                }
             }
         }
 
