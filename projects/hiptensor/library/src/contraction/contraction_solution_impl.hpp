@@ -58,9 +58,10 @@ namespace hiptensor
                              std::vector<std::size_t> const& e_ms_ns_strides,
                              std::vector<int32_t> const&     e_ms_ns_modes);
 
-    bool                     isColMajorLayout(std::vector<std::size_t> const& strides,
-                                              std::vector<std::size_t> const& lengths);
-    std::vector<std::size_t> applyCKColMajorStridesOptimizationForContraction(std::vector<std::size_t> const& lengths);
+    bool isColMajorLayout(std::vector<std::size_t> const& strides,
+                          std::vector<std::size_t> const& lengths);
+    std::vector<std::size_t>
+        applyCKColMajorStridesOptimizationForContraction(std::vector<std::size_t> const& lengths);
 
     template <typename DeviceOp, typename Enabler = void>
     class ContractionSolutionImpl;
@@ -71,7 +72,7 @@ namespace hiptensor
         std::enable_if_t<(std::is_same_v<typename MetaTraits<DeviceOp>::CDEOp,
                                          ck::tensor_operation::element_wise::Bilinear>)
                          || (std::is_same_v<typename MetaTraits<DeviceOp>::CDEOp,
-                                         ck::tensor_operation::element_wise::BilinearUnary>)
+                                            ck::tensor_operation::element_wise::BilinearUnary>)
                          || (std::is_same_v<typename MetaTraits<DeviceOp>::CDEOp,
                                             ck::tensor_operation::element_wise::BilinearComplex>)>>
         : public ContractionSolution
@@ -83,26 +84,26 @@ namespace hiptensor
         {
         }
 
-        bool initArgs(void const*              alpha,
-                      void const*              A,
-                      void const*              B,
-                      void const*              beta,
-                      void const*              D,
-                      void*                    E,
-                      std::vector<std::size_t> a_ms_ks_lengths,
-                      std::vector<std::size_t> a_ms_ks_strides,
-                      std::vector<int32_t>     a_ms_ks_modes,
-                      std::vector<std::size_t> b_ns_ks_lengths,
-                      std::vector<std::size_t> b_ns_ks_strides,
-                      std::vector<int32_t>     b_ns_ks_modes,
-                      std::vector<std::size_t> ds_ms_ns_lengths,
-                      std::vector<std::size_t> ds_ms_ns_strides,
-                      std::vector<int32_t>     ds_ms_ns_modes,
-                      std::vector<std::size_t> e_ms_ns_lengths,
-                      std::vector<std::size_t> e_ms_ns_strides,
-                      std::vector<int32_t>     e_ms_ns_modes,
+        bool initArgs(void const*                             alpha,
+                      void const*                             A,
+                      void const*                             B,
+                      void const*                             beta,
+                      void const*                             D,
+                      void*                                   E,
+                      std::vector<std::size_t>                a_ms_ks_lengths,
+                      std::vector<std::size_t>                a_ms_ks_strides,
+                      std::vector<int32_t>                    a_ms_ks_modes,
+                      std::vector<std::size_t>                b_ns_ks_lengths,
+                      std::vector<std::size_t>                b_ns_ks_strides,
+                      std::vector<int32_t>                    b_ns_ks_modes,
+                      std::vector<std::size_t>                ds_ms_ns_lengths,
+                      std::vector<std::size_t>                ds_ms_ns_strides,
+                      std::vector<int32_t>                    ds_ms_ns_modes,
+                      std::vector<std::size_t>                e_ms_ns_lengths,
+                      std::vector<std::size_t>                e_ms_ns_strides,
+                      std::vector<int32_t>                    e_ms_ns_modes,
                       std::vector<hiptensorOperator_t> const& operators,
-                      void*                    workspacePtr) override
+                      void*                                   workspacePtr) override
         {
             using Base   = ContractionSolution;
             using Traits = MetaTraits<DeviceOp>;
@@ -155,23 +156,24 @@ namespace hiptensor
 
             //Apply CK ColMajor strides for col major layout
             if(isColMajorLayout(a_ms_ks_strides, a_ms_ks_lengths))
-                normal_a_ms_ks_strides = applyCKColMajorStridesOptimizationForContraction(normal_a_ms_ks_lengths);
+                normal_a_ms_ks_strides
+                    = applyCKColMajorStridesOptimizationForContraction(normal_a_ms_ks_lengths);
             if(isColMajorLayout(b_ns_ks_strides, b_ns_ks_lengths))
-                normal_b_ns_ks_strides = applyCKColMajorStridesOptimizationForContraction(normal_b_ns_ks_lengths);
+                normal_b_ns_ks_strides
+                    = applyCKColMajorStridesOptimizationForContraction(normal_b_ns_ks_lengths);
             if(isColMajorLayout(ds_ms_ns_strides, ds_ms_ns_lengths))
-                normal_ds_ms_ns_strides = applyCKColMajorStridesOptimizationForContraction(normal_ds_ms_ns_lengths);
+                normal_ds_ms_ns_strides
+                    = applyCKColMajorStridesOptimizationForContraction(normal_ds_ms_ns_lengths);
             if(isColMajorLayout(e_ms_ns_strides, e_ms_ns_lengths))
-                normal_e_ms_ns_strides = applyCKColMajorStridesOptimizationForContraction(normal_e_ms_ns_lengths);
+                normal_e_ms_ns_strides
+                    = applyCKColMajorStridesOptimizationForContraction(normal_e_ms_ns_lengths);
 
             // Initialize the argument pointer
-            if constexpr(std::is_same_v<typename Traits::AOp,
-                         ck::tensor_operation::element_wise::PassThrough> &&
-                         std::is_same_v<typename Traits::BOp,
-                         ck::tensor_operation::element_wise::PassThrough> &&
-                         (std::is_same_v<typename Traits::CDEOp,
-                         ck::tensor_operation::element_wise::Bilinear> ||
-                         std::is_same_v<typename Traits::CDEOp,
-                         ck::tensor_operation::element_wise::BilinearComplex>))
+            if constexpr(std::
+                             is_same_v<typename Traits::AOp,
+                                       ck::
+                                           tensor_operation::
+                                               element_wise::PassThrough> && std::is_same_v<typename Traits::BOp, ck::tensor_operation::element_wise::PassThrough> && (std::is_same_v<typename Traits::CDEOp, ck::tensor_operation::element_wise::Bilinear> || std::is_same_v<typename Traits::CDEOp, ck::tensor_operation::element_wise::BilinearComplex>))
             {
                 Base::mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
                     A,
@@ -191,7 +193,7 @@ namespace hiptensor
                     typename Traits::CDEOp(alphaF, betaF)));
             }
             else
-            {                                          
+            {
                 Base::mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
                     A,
                     B,
@@ -207,7 +209,9 @@ namespace hiptensor
                     toCKVec(normal_e_ms_ns_strides),
                     typename Traits::AOp{operators[0]},
                     typename Traits::BOp{operators[1]},
-                    typename Traits::CDEOp{ck::tensor_operation::element_wise::Bilinear{alphaF, betaF}, ck::tensor_operation::element_wise::HiptensorUnaryOp{operators[2]}}));
+                    typename Traits::CDEOp{
+                        ck::tensor_operation::element_wise::Bilinear{alphaF, betaF},
+                        ck::tensor_operation::element_wise::HiptensorUnaryOp{operators[2]}}));
             }
 
             // Attach the workspace pointer
@@ -266,26 +270,26 @@ namespace hiptensor
         {
         }
 
-        bool initArgs(void const*              alpha,
-                      void const*              A,
-                      void const*              B,
-                      void const*              beta,
-                      void const*              D,
-                      void*                    E,
-                      std::vector<std::size_t> a_ms_ks_lengths,
-                      std::vector<std::size_t> a_ms_ks_strides,
-                      std::vector<int32_t>     a_ms_ks_modes,
-                      std::vector<std::size_t> b_ns_ks_lengths,
-                      std::vector<std::size_t> b_ns_ks_strides,
-                      std::vector<int32_t>     b_ns_ks_modes,
-                      std::vector<std::size_t> ds_ms_ns_lengths,
-                      std::vector<std::size_t> ds_ms_ns_strides,
-                      std::vector<int32_t>     ds_ms_ns_modes,
-                      std::vector<std::size_t> e_ms_ns_lengths,
-                      std::vector<std::size_t> e_ms_ns_strides,
-                      std::vector<int32_t>     e_ms_ns_modes,
+        bool initArgs(void const*                             alpha,
+                      void const*                             A,
+                      void const*                             B,
+                      void const*                             beta,
+                      void const*                             D,
+                      void*                                   E,
+                      std::vector<std::size_t>                a_ms_ks_lengths,
+                      std::vector<std::size_t>                a_ms_ks_strides,
+                      std::vector<int32_t>                    a_ms_ks_modes,
+                      std::vector<std::size_t>                b_ns_ks_lengths,
+                      std::vector<std::size_t>                b_ns_ks_strides,
+                      std::vector<int32_t>                    b_ns_ks_modes,
+                      std::vector<std::size_t>                ds_ms_ns_lengths,
+                      std::vector<std::size_t>                ds_ms_ns_strides,
+                      std::vector<int32_t>                    ds_ms_ns_modes,
+                      std::vector<std::size_t>                e_ms_ns_lengths,
+                      std::vector<std::size_t>                e_ms_ns_strides,
+                      std::vector<int32_t>                    e_ms_ns_modes,
                       std::vector<hiptensorOperator_t> const& operators,
-                      void*                    workspacePtr) override
+                      void*                                   workspacePtr) override
         {
             using Base   = ContractionSolution;
             using Traits = MetaTraits<DeviceOp>;
@@ -332,53 +336,57 @@ namespace hiptensor
 
             //Apply CK ColMajor strides for col major layout
             if(isColMajorLayout(a_ms_ks_strides, a_ms_ks_lengths))
-                normal_a_ms_ks_strides = applyCKColMajorStridesOptimizationForContraction(normal_a_ms_ks_lengths);
+                normal_a_ms_ks_strides
+                    = applyCKColMajorStridesOptimizationForContraction(normal_a_ms_ks_lengths);
             if(isColMajorLayout(b_ns_ks_strides, b_ns_ks_lengths))
-                normal_b_ns_ks_strides = applyCKColMajorStridesOptimizationForContraction(normal_b_ns_ks_lengths);
+                normal_b_ns_ks_strides
+                    = applyCKColMajorStridesOptimizationForContraction(normal_b_ns_ks_lengths);
             if(isColMajorLayout(e_ms_ns_strides, e_ms_ns_lengths))
-                normal_e_ms_ns_strides = applyCKColMajorStridesOptimizationForContraction(normal_e_ms_ns_lengths);
+                normal_e_ms_ns_strides
+                    = applyCKColMajorStridesOptimizationForContraction(normal_e_ms_ns_lengths);
 
             // Initialize the argument pointer
-            if constexpr(std::is_same_v<typename Traits::AOp,
-                         ck::tensor_operation::element_wise::PassThrough> &&
-                         std::is_same_v<typename Traits::BOp,
-                         ck::tensor_operation::element_wise::PassThrough>)
+            if constexpr(
+                std::is_same_v<
+                    typename Traits::AOp,
+                    ck::tensor_operation::element_wise::
+                        PassThrough> && std::is_same_v<typename Traits::BOp, ck::tensor_operation::element_wise::PassThrough>)
             {
-                Base::mInvokerArgPtr
-                    = std::move(deviceOp->MakeArgumentPointer(A,
-                                                              B,
-                                                              std::array<const void*, 0>{},
-                                                              E,
-                                                              toCKVec(normal_a_ms_ks_lengths),
-                                                              toCKVec(normal_a_ms_ks_strides),
-                                                              toCKVec(normal_b_ns_ks_lengths),
-                                                              toCKVec(normal_b_ns_ks_strides),
-                                                              std::array<std::vector<ck::index_t>, 0>{},
-                                                              std::array<std::vector<ck::index_t>, 0>{},
-                                                              toCKVec(normal_e_ms_ns_lengths),
-                                                              toCKVec(normal_e_ms_ns_strides),
-                                                              typename Traits::AOp{},
-                                                              typename Traits::BOp{},
-                                                              typename Traits::CDEOp(alphaF)));
+                Base::mInvokerArgPtr = std::move(
+                    deviceOp->MakeArgumentPointer(A,
+                                                  B,
+                                                  std::array<const void*, 0>{},
+                                                  E,
+                                                  toCKVec(normal_a_ms_ks_lengths),
+                                                  toCKVec(normal_a_ms_ks_strides),
+                                                  toCKVec(normal_b_ns_ks_lengths),
+                                                  toCKVec(normal_b_ns_ks_strides),
+                                                  std::array<std::vector<ck::index_t>, 0>{},
+                                                  std::array<std::vector<ck::index_t>, 0>{},
+                                                  toCKVec(normal_e_ms_ns_lengths),
+                                                  toCKVec(normal_e_ms_ns_strides),
+                                                  typename Traits::AOp{},
+                                                  typename Traits::BOp{},
+                                                  typename Traits::CDEOp(alphaF)));
             }
             else
             {
-                Base::mInvokerArgPtr
-                    = std::move(deviceOp->MakeArgumentPointer(A,
-                                                              B,
-                                                              std::array<const void*, 0>{},
-                                                              E,
-                                                              toCKVec(normal_a_ms_ks_lengths),
-                                                              toCKVec(normal_a_ms_ks_strides),
-                                                              toCKVec(normal_b_ns_ks_lengths),
-                                                              toCKVec(normal_b_ns_ks_strides),
-                                                              std::array<std::vector<ck::index_t>, 0>{},
-                                                              std::array<std::vector<ck::index_t>, 0>{},
-                                                              toCKVec(normal_e_ms_ns_lengths),
-                                                              toCKVec(normal_e_ms_ns_strides),
-                                                              typename Traits::AOp{operators[0]},
-                                                              typename Traits::BOp{operators[1]},
-                                                              typename Traits::CDEOp(alphaF)));
+                Base::mInvokerArgPtr = std::move(
+                    deviceOp->MakeArgumentPointer(A,
+                                                  B,
+                                                  std::array<const void*, 0>{},
+                                                  E,
+                                                  toCKVec(normal_a_ms_ks_lengths),
+                                                  toCKVec(normal_a_ms_ks_strides),
+                                                  toCKVec(normal_b_ns_ks_lengths),
+                                                  toCKVec(normal_b_ns_ks_strides),
+                                                  std::array<std::vector<ck::index_t>, 0>{},
+                                                  std::array<std::vector<ck::index_t>, 0>{},
+                                                  toCKVec(normal_e_ms_ns_lengths),
+                                                  toCKVec(normal_e_ms_ns_strides),
+                                                  typename Traits::AOp{operators[0]},
+                                                  typename Traits::BOp{operators[1]},
+                                                  typename Traits::CDEOp(alphaF)));
             }
 
             // Attach the workspace pointer

@@ -47,4 +47,4 @@ TEST_P(ContractionWithUnaryOpsTest, RunKernel)
 
 INSTANTIATE_TEST_SUITE_P(ContractionWithUnaryOpsTests,
                          ContractionWithUnaryOpsTest,
-                         load_sequence_config_params());
+                         load_combined_config_params());

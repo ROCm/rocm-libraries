@@ -33,8 +33,8 @@
 #include <ck/utility/math_v2.hpp>
 #include <ck/utility/type_convert.hpp>
 
-#include <hiptensor/hiptensor_types.h>
 #include <ck/tensor_operation/gpu/element/binary_element_wise_operation.hpp>
+#include <hiptensor/hiptensor_types.h>
 
 namespace ck
 {
@@ -53,7 +53,7 @@ namespace ck
             template <typename T>
             __host__ __device__ static void hiptensor_sqrt(T& y, T const& x)
             {
-                y = ck::math::sqrt(x);
+                y = std::sqrt(x);
             };
             template <typename T>
             __host__ __device__ static void hiptensor_relu(T& y, T const& x)
@@ -73,27 +73,27 @@ namespace ck
             template <typename T>
             __host__ __device__ static void hiptensor_sigmoid(T& y, T const& x)
             {
-                y = 1 / (1 + ck::math::exp(-x));
+                y = 1 / (1 + std::exp(-x));
             }
             template <typename T>
             __host__ __device__ static void hiptensor_tanh(T& y, T const& x)
             {
-                y = ck::math::tanh(x);
+                y = std::tanh(x);
             }
             template <typename T>
             __host__ __device__ static void hiptensor_exp(T& y, T const& x)
             {
-                y = ck::math::exp(x);
+                y = std::exp(x);
             }
             template <typename T>
             __host__ __device__ static void hiptensor_log(T& y, T const& x)
             {
-                y = ck::math::log(x);
+                y = std::log(x);
             }
             template <typename T>
             __host__ __device__ static void hiptensor_abs(T& y, T const& x)
             {
-                y = ck::math::abs(x);
+                y = std::abs(x);
             }
             template <typename T>
             __host__ __device__ static void hiptensor_neg(T& y, T const& x)
@@ -103,67 +103,67 @@ namespace ck
             template <typename T>
             __host__ __device__ static void hiptensor_sin(T& y, T const& x)
             {
-                y = ck::math::sin(x);
+                y = std::sin(x);
             }
             template <typename T>
             __host__ __device__ static void hiptensor_cos(T& y, T const& x)
             {
-                y = ck::math::cos(x);
+                y = std::cos(x);
             }
             template <typename T>
             __host__ __device__ static void hiptensor_tan(T& y, T const& x)
             {
-                y = ck::math::tan(x);
+                y = std::tan(x);
             }
             template <typename T>
             __host__ __device__ static void hiptensor_sinh(T& y, T const& x)
             {
-                y = ck::math::sinh(x);
+                y = std::sinh(x);
             }
             template <typename T>
             __host__ __device__ static void hiptensor_cosh(T& y, T const& x)
             {
-                y = ck::math::cosh(x);
+                y = std::cosh(x);
             }
             template <typename T>
             __host__ __device__ static void hiptensor_asin(T& y, T const& x)
             {
-                y = ck::math::asin(x);
+                y = std::asin(x);
             }
             template <typename T>
             __host__ __device__ static void hiptensor_acos(T& y, T const& x)
             {
-                y = ck::math::acos(x);
+                y = std::acos(x);
             }
             template <typename T>
             __host__ __device__ static void hiptensor_atan(T& y, T const& x)
             {
-                y = ck::math::atan(x);
+                y = std::atan(x);
             }
             template <typename T>
             __host__ __device__ static void hiptensor_asinh(T& y, T const& x)
             {
-                y = ck::math::asinh(x);
+                y = std::asinh(x);
             }
             template <typename T>
             __host__ __device__ static void hiptensor_acosh(T& y, T const& x)
             {
-                y = ck::math::acosh(x);
+                y = std::acosh(x);
             }
             template <typename T>
             __host__ __device__ static void hiptensor_atanh(T& y, T const& x)
             {
-                y = ck::math::atanh(x);
+                y = std::atanh(x);
             }
             template <typename T>
             __host__ __device__ static void hiptensor_ceil(T& y, T const& x)
             {
-                y = ck::math::ceil(x);
+                y = std::ceil(x);
             }
             template <typename T>
             __host__ __device__ static void hiptensor_floor(T& y, T const& x)
             {
-                y = ck::math::floor(x);
+                y = std::floor(x);
             }
 
             struct HiptensorUnaryOp
@@ -174,40 +174,90 @@ namespace ck
                 {
                 }
                 __host__ __device__ HiptensorUnaryOp(const HiptensorUnaryOp& dynamic_op) = default;
-                __host__ __device__ ~HiptensorUnaryOp()                       = default;
+                __host__            __device__ ~HiptensorUnaryOp()                       = default;
                 __host__ __device__ HiptensorUnaryOp& operator=(const HiptensorUnaryOp& other)
                     = default;
 
-                template<typename T>
+                template <typename T>
                 __host__ __device__ void switch_op(T& y, T const& x) const
                 {
                     switch(op_type)
                     {
-                    case HIPTENSOR_OP_IDENTITY: hiptensor_identity(y, x); break;
-                    case HIPTENSOR_OP_SQRT: hiptensor_sqrt(y, x); break;
-                    case HIPTENSOR_OP_RELU: hiptensor_relu(y, x); break;
-                    case HIPTENSOR_OP_CONJ: hiptensor_conj(y, x); break;
-                    case HIPTENSOR_OP_RCP: hiptensor_rcp(y, x); break;
-                    case HIPTENSOR_OP_SIGMOID: hiptensor_sigmoid(y, x); break;
-                    case HIPTENSOR_OP_TANH: hiptensor_tanh(y, x); break;
-                    case HIPTENSOR_OP_EXP: hiptensor_exp(y, x); break;
-                    case HIPTENSOR_OP_LOG: hiptensor_log(y, x); break;
-                    case HIPTENSOR_OP_ABS: hiptensor_abs(y, x); break;
-                    case HIPTENSOR_OP_NEG: hiptensor_neg(y, x); break;
-                    case HIPTENSOR_OP_SIN: hiptensor_sin(y, x); break;
-                    case HIPTENSOR_OP_COS: hiptensor_cos(y, x); break;
-                    case HIPTENSOR_OP_TAN: hiptensor_tan(y, x); break;
-                    case HIPTENSOR_OP_SINH: hiptensor_sinh(y, x); break;
-                    case HIPTENSOR_OP_COSH: hiptensor_cosh(y, x); break;
-                    case HIPTENSOR_OP_ASIN: hiptensor_asin(y, x); break;
-                    case HIPTENSOR_OP_ACOS: hiptensor_acos(y, x); break;
-                    case HIPTENSOR_OP_ATAN: hiptensor_atan(y, x); break;
-                    case HIPTENSOR_OP_ASINH: hiptensor_asinh(y, x); break;
-                    case HIPTENSOR_OP_ACOSH: hiptensor_acosh(y, x); break;
-                    case HIPTENSOR_OP_ATANH: hiptensor_atanh(y, x); break;
-                    case HIPTENSOR_OP_CEIL: hiptensor_ceil(y, x); break;
-                    case HIPTENSOR_OP_FLOOR: hiptensor_floor(y, x); break;
-                    default: hiptensor_identity(y, x); break;
+                    case HIPTENSOR_OP_IDENTITY:
+                        hiptensor_identity(y, x);
+                        break;
+                    case HIPTENSOR_OP_SQRT:
+                        hiptensor_sqrt(y, x);
+                        break;
+                    case HIPTENSOR_OP_RELU:
+                        hiptensor_relu(y, x);
+                        break;
+                    case HIPTENSOR_OP_CONJ:
+                        hiptensor_conj(y, x);
+                        break;
+                    case HIPTENSOR_OP_RCP:
+                        hiptensor_rcp(y, x);
+                        break;
+                    case HIPTENSOR_OP_SIGMOID:
+                        hiptensor_sigmoid(y, x);
+                        break;
+                    case HIPTENSOR_OP_TANH:
+                        hiptensor_tanh(y, x);
+                        break;
+                    case HIPTENSOR_OP_EXP:
+                        hiptensor_exp(y, x);
+                        break;
+                    case HIPTENSOR_OP_LOG:
+                        hiptensor_log(y, x);
+                        break;
+                    case HIPTENSOR_OP_ABS:
+                        hiptensor_abs(y, x);
+                        break;
+                    case HIPTENSOR_OP_NEG:
+                        hiptensor_neg(y, x);
+                        break;
+                    case HIPTENSOR_OP_SIN:
+                        hiptensor_sin(y, x);
+                        break;
+                    case HIPTENSOR_OP_COS:
+                        hiptensor_cos(y, x);
+                        break;
+                    case HIPTENSOR_OP_TAN:
+                        hiptensor_tan(y, x);
+                        break;
+                    case HIPTENSOR_OP_SINH:
+                        hiptensor_sinh(y, x);
+                        break;
+                    case HIPTENSOR_OP_COSH:
+                        hiptensor_cosh(y, x);
+                        break;
+                    case HIPTENSOR_OP_ASIN:
+                        hiptensor_asin(y, x);
+                        break;
+                    case HIPTENSOR_OP_ACOS:
+                        hiptensor_acos(y, x);
+                        break;
+                    case HIPTENSOR_OP_ATAN:
+                        hiptensor_atan(y, x);
+                        break;
+                    case HIPTENSOR_OP_ASINH:
+                        hiptensor_asinh(y, x);
+                        break;
+                    case HIPTENSOR_OP_ACOSH:
+                        hiptensor_acosh(y, x);
+                        break;
+                    case HIPTENSOR_OP_ATANH:
+                        hiptensor_atanh(y, x);
+                        break;
+                    case HIPTENSOR_OP_CEIL:
+                        hiptensor_ceil(y, x);
+                        break;
+                    case HIPTENSOR_OP_FLOOR:
+                        hiptensor_floor(y, x);
+                        break;
+                    default:
+                        hiptensor_identity(y, x);
+                        break;
                     }
                 }
 
@@ -234,11 +284,11 @@ namespace ck
                     float tempX = ck::type_convert<float, bhalf_t>(x);
                     float tempY;
                     switch_op(tempY, tempX);
-                    y = type_convert<bhalf_t, float>(tempY);  
+                    y = ck::type_convert<bhalf_t, float>(tempY);
                 }
 
             public:
-                hiptensorOperator_t               op_type     = HIPTENSOR_OP_IDENTITY;
+                hiptensorOperator_t op_type = HIPTENSOR_OP_IDENTITY;
             };
 
             struct HiptensorBinaryOp
@@ -249,7 +299,7 @@ namespace ck
                 }
                 __host__ __device__ HiptensorBinaryOp(const HiptensorBinaryOp& dynamic_op)
                     = default;
-                __host__            __device__ ~HiptensorBinaryOp() = default;
+                __host__                               __device__ ~HiptensorBinaryOp() = default;
                 __host__ __device__ HiptensorBinaryOp& operator=(const HiptensorBinaryOp& other)
                     = default;
 
@@ -323,14 +373,21 @@ namespace ck
                 hiptensorOperator_t op_type = HIPTENSOR_OP_IDENTITY;
             };
 
-            struct BilinearUnary 
+            struct BilinearUnary
             {
                 static constexpr const char* name = "BilinearUnary";
 
-                __host__ __device__ BilinearUnary() : bilinear_op_(), unary_op_() {}
+                __host__ __device__ BilinearUnary()
+                    : bilinear_op_()
+                    , unary_op_()
+                {
+                }
 
-                __host__ __device__ BilinearUnary(Bilinear bilinear_op, HiptensorUnaryOp unary_op) 
-                    : bilinear_op_(bilinear_op), unary_op_(unary_op) {}
+                __host__ __device__ BilinearUnary(Bilinear bilinear_op, HiptensorUnaryOp unary_op)
+                    : bilinear_op_(bilinear_op)
+                    , unary_op_(unary_op)
+                {
+                }
 
                 template <typename Y, typename X0, typename X1>
                 __host__ __device__ void operator()(Y& y, const X0& x0, const X1& x1) const
@@ -340,9 +397,9 @@ namespace ck
                     bilinear_op_(y, x0, x1_tmp);
                 }
 
-                private:
-                Bilinear bilinear_op_;
-                HiptensorUnaryOp    unary_op_;
+            private:
+                Bilinear         bilinear_op_;
+                HiptensorUnaryOp unary_op_;
             };
         } // namespace element_wise
     } // namespace tensor_operation

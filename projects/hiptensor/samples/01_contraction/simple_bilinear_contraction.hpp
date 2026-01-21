@@ -145,7 +145,7 @@ int bilinearContractionSample(void* alpha, void* beta)
         }
         else
         {
-            C[i] = (BDataType)(float(i) / 100);
+            C[i] = (CDataType)(float(i) / 100);
         }
     }
 
@@ -218,11 +218,12 @@ int bilinearContractionSample(void* alpha, void* beta)
                                                      typeCompute));
 
     hiptensorDataType_t scalarType;
-    CHECK_HIPTENSOR_ERROR(hiptensorOperationDescriptorGetAttribute(handle,
-                desc,
-                HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE,
-                (void*)&scalarType,
-                sizeof(scalarType)));
+    CHECK_HIPTENSOR_ERROR(
+        hiptensorOperationDescriptorGetAttribute(handle,
+                                                 desc,
+                                                 HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE,
+                                                 (void*)&scalarType,
+                                                 sizeof(scalarType)));
     assert(scalarType == *hiptensor::convertToHipTensorDataType(typeCompute));
 
     /***************************
