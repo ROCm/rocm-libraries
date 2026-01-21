@@ -228,7 +228,7 @@ struct XdlV3Algorithm
     std::size_t num_gemm_k_prefetch_stages;
     std::size_t num_conv_groups_to_merge;
     PipeSched loop_scheduler;
-    
+
     // V3-specific fields
     ckb::PipelineVersion pipeline_version;
     bool direct_load;
@@ -439,8 +439,9 @@ constexpr XdlInstance make_xdl_instance_from_old_params(
              .loop_scheduler             = loop_scheduler}};
 }
 
-// Constexpr function to create XdlV3Instance from old DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
-// template parameters. Parameters are in the same order as the template parameters, with V3-specific additions.
+// Constexpr function to create XdlV3Instance from old
+// DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3 template parameters. Parameters are in the same
+// order as the template parameters, with V3-specific additions.
 constexpr XdlV3Instance make_xdl_v3_instance_from_old_params(
     // 1. NDimSpatial
     std::size_t spatial_dim,
@@ -893,7 +894,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_comp_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            256, 128, 128, 32, 8, 8, 32, 32, 2, 2,
+            1, 256, 128, 128, 32, 8, 8, 32, 32, 2, 2,
             {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 32, 1, 8}, 8,
@@ -905,7 +906,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_comp_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            256, 128, 128, 64, 8, 8, 32, 32, 2, 2,
+            1, 256, 128, 128, 64, 8, 8, 32, 32, 2, 2,
             {8, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 32, 1, 8}, 8,
@@ -917,7 +918,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_comp_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            256, 128, 128, 64, 8, 8, 32, 32, 2, 2,
+            1, 256, 128, 128, 64, 8, 8, 32, 32, 2, 2,
             {8, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 32, 1, 8}, 8,
@@ -929,7 +930,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_comp_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            256, 128, 128, 64, 8, 8, 32, 32, 2, 2,
+            1, 256, 128, 128, 64, 8, 8, 32, 32, 2, 2,
             {8, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 32, 1, 8}, 8,
@@ -959,7 +960,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            128, 32, 16, 64, 8, 8, 16, 16, 1, 1,
+            1, 128, 32, 16, 64, 8, 8, 16, 16, 1, 1,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 8}, 2,
@@ -970,7 +971,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            64, 16, 16, 128, 8, 8, 16, 16, 1, 1,
+            1, 64, 16, 16, 128, 8, 8, 16, 16, 1, 1,
             {16, 4, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {16, 4, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 4}, 4,
@@ -981,7 +982,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            64, 16, 16, 64, 8, 8, 16, 16, 1, 1,
+            1, 64, 16, 16, 64, 8, 8, 16, 16, 1, 1,
             {8, 8, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 8, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 4}, 4,
@@ -992,7 +993,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            128, 16, 32, 64, 8, 8, 16, 16, 1, 1,
+            1, 128, 16, 32, 64, 8, 8, 16, 16, 1, 1,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 8}, 4,
@@ -1003,7 +1004,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            128, 16, 64, 64, 8, 8, 16, 16, 1, 2,
+            1, 128, 16, 64, 64, 8, 8, 16, 16, 1, 2,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 8}, 4,
@@ -1014,7 +1015,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            128, 32, 64, 64, 8, 8, 32, 32, 1, 1,
+            1, 128, 32, 64, 64, 8, 8, 32, 32, 1, 1,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 8}, 8,
@@ -1026,7 +1027,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            128, 128, 32, 64, 8, 8, 32, 32, 2, 1,
+            1, 128, 128, 32, 64, 8, 8, 32, 32, 2, 1,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 8}, 4,
@@ -1037,7 +1038,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            128, 128, 16, 64, 8, 8, 16, 16, 4, 1,
+            1, 128, 128, 16, 64, 8, 8, 16, 16, 4, 1,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 8}, 2,
@@ -1048,7 +1049,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            128, 64, 32, 64, 8, 8, 32, 32, 1, 1,
+            1, 128, 64, 32, 64, 8, 8, 32, 32, 1, 1,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 8}, 4,
@@ -1059,7 +1060,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            128, 64, 16, 64, 8, 8, 16, 16, 2, 1,
+            1, 128, 64, 16, 64, 8, 8, 16, 16, 2, 1,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 8}, 2,
@@ -1070,7 +1071,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            128, 32, 16, 64, 8, 8, 16, 16, 1, 1,
+            1, 128, 32, 16, 64, 8, 8, 16, 16, 1, 1,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 8}, 2,
@@ -1100,7 +1101,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_inter_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            128, 32, 16, 64, 8, 8, 16, 16, 1, 1,
+            1, 128, 32, 16, 64, 8, 8, 16, 16, 1, 1,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 8}, 2,
@@ -1111,7 +1112,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_inter_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            64, 16, 16, 128, 8, 8, 16, 16, 1, 1,
+            1, 64, 16, 16, 128, 8, 8, 16, 16, 1, 1,
             {16, 4, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {16, 4, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 4}, 4,
@@ -1122,7 +1123,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_inter_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            64, 16, 16, 64, 8, 8, 16, 16, 1, 1,
+            1, 64, 16, 16, 64, 8, 8, 16, 16, 1, 1,
             {8, 8, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 8, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 4}, 4,
@@ -1133,7 +1134,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_inter_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            128, 16, 32, 64, 8, 8, 16, 16, 1, 1,
+            1, 128, 16, 32, 64, 8, 8, 16, 16, 1, 1,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 8}, 4,
@@ -1144,7 +1145,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_inter_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            128, 16, 64, 64, 8, 8, 16, 16, 1, 2,
+            1, 128, 16, 64, 64, 8, 8, 16, 16, 1, 2,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 8}, 4,
@@ -1155,7 +1156,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_inter_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            128, 32, 64, 64, 8, 8, 32, 32, 1, 1,
+            1, 128, 32, 64, 64, 8, 8, 32, 32, 1, 1,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 8}, 8,
@@ -1167,7 +1168,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_inter_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            128, 128, 32, 64, 8, 8, 32, 32, 2, 1,
+            1, 128, 128, 32, 64, 8, 8, 32, 32, 2, 1,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 8}, 4,
@@ -1178,7 +1179,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_inter_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            128, 128, 16, 64, 8, 8, 16, 16, 4, 1,
+            1, 128, 128, 16, 64, 8, 8, 16, 16, 4, 1,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 8}, 2,
@@ -1189,7 +1190,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_inter_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            128, 64, 32, 64, 8, 8, 32, 32, 1, 1,
+            1, 128, 64, 32, 64, 8, 8, 32, 32, 1, 1,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 8}, 4,
@@ -1200,7 +1201,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_inter_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            128, 64, 16, 64, 8, 8, 16, 16, 2, 1,
+            1, 128, 64, 16, 64, 8, 8, 16, 16, 2, 1,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 8}, 2,
@@ -1211,7 +1212,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_inter_instance_data(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
             convSpecialization, ckb::GemmSpecialization::MNKPadding,
-            128, 32, 16, 64, 8, 8, 16, 16, 1, 1,
+            1, 128, 32, 16, 64, 8, 8, 16, 16, 1, 1,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
             1, 1, {1, 16, 1, 8}, 2,
@@ -1311,12 +1312,12 @@ constexpr auto create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_16x16_
     // Adapted from the composable_kernel project, file:
     // library/src/tensor_operation_instance/gpu/grouped_conv2d_fwd/xdl/device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_16x16_instance.cpp
 
-    constexpr auto defaultInstanceData =
-        create_device_grouped_conv_fwd_xdl_f32_16x16_instance_data(2,
-                                                                   ckb::TensorLayout::NGCHW,
-                                                                   ckb::TensorLayout::GKCYX,
-                                                                   ckb::TensorLayout::NGKHW,
-                                                                   ckb::ConvSpecialization::DEFAULT);
+    constexpr auto defaultInstanceData = create_device_grouped_conv_fwd_xdl_f32_16x16_instance_data(
+        2,
+        ckb::TensorLayout::NGCHW,
+        ckb::TensorLayout::GKCYX,
+        ckb::TensorLayout::NGKHW,
+        ckb::ConvSpecialization::DEFAULT);
 
     constexpr auto filter1x1Pad0InstanceData =
         create_device_grouped_conv_fwd_xdl_f32_16x16_instance_data(
@@ -1355,8 +1356,7 @@ constexpr auto create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_comp_i
     return defaultInstanceData;
 }
 
-constexpr auto
-create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_intra_instance_data()
+constexpr auto create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_intra_instance_data()
 {
     // Adapted from the composable_kernel project, file:
     // library/src/tensor_operation_instance/gpu/grouped_conv2d_fwd/xdl/mem/device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_intra_instance.cpp
@@ -1372,8 +1372,7 @@ create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_intra_instance_da
     return defaultInstanceData;
 }
 
-constexpr auto
-create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_inter_instance_data()
+constexpr auto create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_inter_instance_data()
 {
     // Adapted from the composable_kernel project, file:
     // library/src/tensor_operation_instance/gpu/grouped_conv2d_fwd/xdl/mem/device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_inter_instance.cpp
@@ -1431,7 +1430,24 @@ struct DeviceOperationInstanceFactory<DeviceOpGFWdDefaultFloat>
         constexpr auto xdlInstanceData =
             create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_instance_data();
 
-        constexpr auto instanceData = concat(xdlMergedInstanceData, xdlInstanceData);
+        constexpr auto xdl16x16InstanceData =
+            create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_16x16_instance_data();
+
+        constexpr auto xdlCompInstanceData =
+            create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_comp_instance_data();
+
+        constexpr auto xdlMemIntraInstanceData =
+            create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_intra_instance_data();
+
+        constexpr auto xdlMemInterInstanceData =
+            create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_inter_instance_data();
+
+        constexpr auto instanceData = concat(xdlMergedInstanceData,
+                                             xdlInstanceData,
+                                             xdl16x16InstanceData,
+                                             xdlCompInstanceData,
+                                             xdlMemIntraInstanceData,
+                                             xdlMemInterInstanceData);
 
         build_kernels<instanceData>(instances);
 
