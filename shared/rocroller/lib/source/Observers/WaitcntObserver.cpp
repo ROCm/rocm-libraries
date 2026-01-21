@@ -242,6 +242,11 @@ namespace rocRoller
                         {
                             WaitQueueRegisters queueRegisters;
                             append(queueRegisters, inst.getAllDsts());
+                            // track LDS access to avoid write-after-read races.
+                            auto isLDSReg = [](Register::ValuePtr const reg) -> bool {
+                                return reg->regType() == Register::Type::LocalData;
+                            };
+                            append(queueRegisters, filter(isLDSReg, inst.getAllSrcs()));
 
                             m_instructionQueues[waitQueue].push_back(std::move(queueRegisters));
                         }
