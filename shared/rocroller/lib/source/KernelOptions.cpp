@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
 

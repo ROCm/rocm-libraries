@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include <rocRoller/CodeGen/Arithmetic/Convert.hpp>
 
 #include <rocRoller/CodeGen/CopyGenerator.hpp>

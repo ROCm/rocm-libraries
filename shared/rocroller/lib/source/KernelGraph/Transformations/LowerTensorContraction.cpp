@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerTensorContraction.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>

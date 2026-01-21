@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 /*
  * When analysing when registers are modified, we construct a
  * "read/write" tree, where leaves are operations that can modify

@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/RemoveSetCoordinate.hpp>

@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
 
 #include <rocRoller/KernelGraph/Transforms/AddConvert.hpp>

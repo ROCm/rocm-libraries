@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include <rocRoller/DataTypes/DataTypes_BF6.hpp>
 #include <rocRoller/DataTypes/DataTypes_F6_Utils.hpp>
 #include <rocRoller/DataTypes/DataTypes_FP6.hpp>

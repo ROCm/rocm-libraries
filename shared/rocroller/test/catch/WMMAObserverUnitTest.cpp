@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include <rocRoller/Scheduling/Observers/FunctionalUnit/WMMAObserver.hpp>
 
 #include <catch2/catch_test_macros.hpp>

@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include <catch2/catch_test_case_info.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/interfaces/catch_interfaces_testcase.hpp>

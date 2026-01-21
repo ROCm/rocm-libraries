@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include <memory>
 
 #include <rocRoller/Scheduling/Observers/FunctionalUnit/MFMAObserver.hpp>

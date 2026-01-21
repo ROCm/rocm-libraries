@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/Utilities/Settings.hpp>

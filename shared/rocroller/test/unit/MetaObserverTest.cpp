@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Scheduling/MetaObserver.hpp>
 #include <rocRoller/Scheduling/Observers/AllocatingObserver.hpp>

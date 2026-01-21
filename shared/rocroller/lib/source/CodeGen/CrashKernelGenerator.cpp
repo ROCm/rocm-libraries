@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/CrashKernelGenerator.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>

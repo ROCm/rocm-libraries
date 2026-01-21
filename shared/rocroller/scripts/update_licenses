@@ -20,12 +20,16 @@ sys.path.append(str(repo_dir / "scripts" / "lib"))
 from rrperf import git  # noqa: E402
 
 # New license text for different file types
-LICENSE_CPP = """// Copyright Advanced Micro Devices, Inc., or its affiliates.
+LICENSE_CPP = """
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 """
 
-LICENSE_HASH = """# Copyright Advanced Micro Devices, Inc., or its affiliates.
+LICENSE_HASH = """
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
+
 """
 
 # Files that should never have licenses added
@@ -176,7 +180,9 @@ def main():
                 print(f"Error processing {path}: {e}")
                 errors.append(path)
 
-    print(f"\n{'Would add license to' if args.dry_run else 'Added license to'} {updated} files")
+    print(
+        f"\n{'Would add license to' if args.dry_run else 'Added license to'} {updated} files"
+    )
     if errors:
         print(f"\nErrors in {len(errors)} files:")
         for e in errors:

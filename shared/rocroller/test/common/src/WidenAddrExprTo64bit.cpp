@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include <common/WidenAddrExprTo64bit.hpp>
 #include <rocRoller/AssemblyKernelArgument.hpp>
 #include <rocRoller/Expression.hpp>

@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include <rocRoller/KernelGraph/Transforms/IdentifyParallelDimensions.hpp>
 
 #include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>

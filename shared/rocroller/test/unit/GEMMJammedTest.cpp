@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>

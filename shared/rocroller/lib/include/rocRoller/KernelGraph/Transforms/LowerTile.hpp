@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #pragma once
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Context_fwd.hpp>

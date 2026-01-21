@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include "GenericContextFixture.hpp"
 #include "Utilities.hpp"
 #include <rocRoller/Utilities/Logging.hpp>

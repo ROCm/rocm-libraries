@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include <rocRoller/Assemblers/Assembler.hpp>
 #include <rocRoller/Utilities/Component.hpp>
 #include <rocRoller/Utilities/Error.hpp>

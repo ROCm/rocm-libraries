@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include <gtest/gtest-spi.h>
 
 #include <rocRoller/KernelGraph/ControlGraph/ControlEdge_fwd.hpp>

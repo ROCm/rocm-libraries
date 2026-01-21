@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include <cmath>
 #include <cstdint>
 #include <rocRoller/DataTypes/DataTypes_Half.hpp>

@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 /**
 @class AddLDS
 @brief Add load/store through LDS to the graph; and prefetching.

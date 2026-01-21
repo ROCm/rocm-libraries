@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/CodeGen/WaitCount.hpp>
 #include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
