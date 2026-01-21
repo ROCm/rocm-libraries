@@ -32,14 +32,15 @@ catch_discover_tests(origami-tests
 )
 
 # Install CTestTestfile.cmake for installed Origami tests
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install"
-    "# Copyright Advanced Micro Devices, Inc., or its affiliates.\n"
-    "# SPDX-License-Identifier: MIT\n"
-    "\n"
-    "# C++ tests\n"
-    "add_test(origami-tests \"../origami-tests\")\n"
-    "\n"
-)
+set(_ctest_content [=[
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# C++ tests
+add_test(origami-tests "../origami-tests")
+set_tests_properties(origami-tests PROPERTIES LABELS "cpp")
+
+]=])
 
 if(ORIGAMI_ENABLE_PYTHON)
     find_package(Python COMPONENTS Interpreter REQUIRED)
@@ -47,15 +48,16 @@ if(ORIGAMI_ENABLE_PYTHON)
     set(ORIGAMI_INSTALL_LIBDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
     set(ORIGAMI_INSTALL_PYTHON_BINDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/origami")
     
-    file(APPEND "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install"
-        "# Python tests\n"
-        "add_test(origami_python_test \"${Python_EXECUTABLE}\" \"origami_test.py\")\n"
-        "add_test(origami_python_grid_test \"${Python_EXECUTABLE}\" \"origami_grid_test.py\")\n"
-        "\n"
-        "set_tests_properties(origami_python_test origami_python_grid_test PROPERTIES\n"
-        "    ENVIRONMENT \"LD_LIBRARY_PATH=${ORIGAMI_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH};PYTHONPATH=${ORIGAMI_INSTALL_PYTHON_BINDIR}:$ENV{PYTHONPATH}\"\n"
-        ")\n"
-    )
+    string(APPEND _ctest_content [=[
+# Python tests
+add_test(origami_python_test "${Python_EXECUTABLE}" "origami_test.py")
+add_test(origami_python_grid_test "${Python_EXECUTABLE}" "origami_grid_test.py")
+
+set_tests_properties(origami_python_test origami_python_grid_test PROPERTIES
+    LABELS "python"
+    ENVIRONMENT "LD_LIBRARY_PATH=${ORIGAMI_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH};PYTHONPATH=${ORIGAMI_INSTALL_PYTHON_BINDIR}:$ENV{PYTHONPATH}"
+)
+]=])
     
     rocm_install(
         FILES 
@@ -65,6 +67,9 @@ if(ORIGAMI_ENABLE_PYTHON)
         COMPONENT tests
     )
 endif()
+
+string(CONFIGURE "${_ctest_content}" _ctest_content)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install" "${_ctest_content}")
 
 rocm_install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install"
