@@ -26,8 +26,8 @@
 
 #include <miopen/activ.hpp>
 #include <miopen/batch_norm.hpp>
+#include <miopen/ford.hpp>
 
-#include "../../src/include/miopen/ford.hpp"
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
 #include "random.hpp"
