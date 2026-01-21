@@ -101,7 +101,11 @@ class OrigamiMatmulSelector:
                                             self._configs)
 
         if streamk:
-            self._grid = self._compute_sk_grid()
+            self._grid = origami.select_grid_size(self._problem,
+                                                  self._hardware,
+                                                  self._result.config,
+                                                  origami.grid_selection_t.data_parallel,
+                                                  self._hardware.N_CU)
         else:
             self._grid = self._hardware.N_CU
 
@@ -151,99 +155,6 @@ class OrigamiMatmulSelector:
     @property
     def sk_grid(self):
         return self._grid
-
-
-    def _compute_sk_grid(self):
-        # Grid model constants for StreamK
-        split_factors  = [8, 6, 4, 3, 2, 1]
-        tile_fractions = [0.0,
-                          1.0 / 2.0,
-                          1.0 / 8.0,
-                          1.0 / 5.0,
-                          1.0 / 4.0,
-                          1.0 / 3.0]
-        max_workspace  = 128 * 1024 * 1024
-
-        M, N, K = self._m, self._n, self._k
-        BLK_M, BLK_N, BLK_K = self.block_m, self.block_n, self._result.block_k
-        cu_count = self._hardware.N_CU
-
-        # Fallback if no better fractional split is found
-        tiles = ceil(M / BLK_M) * ceil(N / BLK_N)
-        sk_grid = tiles
-        iters_per_tile = max(1, ceil(K / BLK_K))
-
-        # More tiles than CUs: try fractional splits to distribute work
-        if tiles > cu_count:
-            virt_cu_count = cu_count
-            # if size_mapping.CUOccupancy > 1:
-            # virt_cu_count *= size_mapping.CUOccupancy
-
-            # Try these fractional denominators in order
-            min_even_tiles = tiles / virt_cu_count
-
-            for frac in tile_fractions:
-                # Compute candidate grid with rounding
-                frac_grid = int((tiles / (min_even_tiles + frac)) + 0.5)
-
-                # Skip if this split leaves a remainder AND workspace is too large
-                if (
-                    tiles % frac_grid != 0
-                    and self._partial_tile_size(frac_grid) > max_workspace
-                ):
-                    continue
-
-                # Accept the first grid no larger than the virtual CU count
-                if frac_grid <= virt_cu_count:
-                    sk_grid = frac_grid
-                    break
-
-        # Fewer tiles than CUs: split along k-dimension up to some factor
-        elif tiles < cu_count:
-            for factor in split_factors:
-                split_grid = tiles * factor
-                iters_per_cu = iters_per_tile // factor
-
-                if split_grid <= cu_count and iters_per_cu >= 8:
-                    sk_grid = split_grid
-                    break
-
-        # Final check: if the chosen grid leaves a remainder AND
-        # workspace exceeds what the problem allows, fall back to no split
-        if tiles % sk_grid != 0:
-            sk_grid = tiles
-
-        if tiles >= cu_count:
-            last_wave_remainder = tiles % cu_count
-            last_wave_occupancy = last_wave_remainder / cu_count
-
-            # Really bad last wave, which would have originally been compensated for
-            # by changing tile size, but triton tile sizes are limited
-            if last_wave_remainder < 128 and last_wave_remainder > 0 and cu_count == 304:
-                sk_grid = 256
-        return sk_grid
-
-
-    def _partial_tile_size(self, sk_grid: int) -> int:
-        """
-        Python equivalent of ContractionSolution::partialTileSize.
-
-        workspaceSizePerElemC = (element_size_out bits) / 8 → bytes per output element
-
-        tileSize = BLK_M * BLK_N * workspaceSizePerElemC
-        return tileSize * sk_grid
-        """
-        # get the macro-tile dims you already compute
-        BLK_M, BLK_N, GSIZE = self.block_m, self.block_n, self.group_m
-
-        # bytes per C element
-        bytes_per_elem = self._out_dtype_bitsize // 8
-
-        # size of one partial tile per WG
-        tile_size = BLK_M * BLK_N * bytes_per_elem
-
-        # scale by the number of partial‑tiles per WG
-        return tile_size * sk_grid
 
 
     def _generate_configs(self, config_gen):
