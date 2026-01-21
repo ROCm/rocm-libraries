@@ -111,8 +111,7 @@ void mloKthvalueFwdRunHostMT(TIO* input,
 
     size_t numSlice = inputSize / dimSize;
 
-    miopen::par_walk(size_t{0}, numSlice, [&](size_t chunk_begin, size_t chunk_end)
-    {
+    miopen::par_walk(size_t{0}, numSlice, [&](size_t chunk_begin, size_t chunk_end) {
         std::vector<size_t> ids(dimSize);
         for(int i = 0; i < dimSize; ++i)
         {
@@ -310,13 +309,13 @@ int KthvalueDriver<TIO>::AllocateBuffersAndCopy()
     indices_dev = std::unique_ptr<GPUMem>(new GPUMem(ctx, idx_sz, sizeof(size_t)));
     output_dev  = std::unique_ptr<GPUMem>(new GPUMem(ctx, out_sz, sizeof(TIO)));
 
-    input       = std::vector<TIO>(in_sz, static_cast<TIO>(0));
-    indices     = std::vector<size_t>(idx_sz, 0);
-    indicesHost = std::vector<size_t>(idx_sz, 0);
+    input         = std::vector<TIO>(in_sz, static_cast<TIO>(0));
+    indices       = std::vector<size_t>(idx_sz, 0);
+    indicesHost   = std::vector<size_t>(idx_sz, 0);
     indicesHostMT = std::vector<size_t>(idx_sz, 0);
-    output      = std::vector<TIO>(out_sz, static_cast<TIO>(0));
-    outputHost  = std::vector<TIO>(out_sz, static_cast<TIO>(0));
-    outputHostMT = std::vector<TIO>(out_sz, static_cast<TIO>(0));
+    output        = std::vector<TIO>(out_sz, static_cast<TIO>(0));
+    outputHost    = std::vector<TIO>(out_sz, static_cast<TIO>(0));
+    outputHostMT  = std::vector<TIO>(out_sz, static_cast<TIO>(0));
 
     for(int i = 0; i < in_sz; i++)
     {
@@ -410,13 +409,13 @@ template <typename TIO>
 int KthvalueDriver<TIO>::RunForwardCPUMT()
 {
     mloKthvalueFwdRunHostMT<TIO>(input.data(),
-                               inputDesc,
-                               outputHostMT.data(),
-                               outputDesc,
-                               indicesHostMT.data(),
-                               indicesDesc,
-                               k,
-                               dim);
+                                 inputDesc,
+                                 outputHostMT.data(),
+                                 outputDesc,
+                                 indicesHostMT.data(),
+                                 indicesDesc,
+                                 k,
+                                 dim);
 
     return miopenStatusSuccess;
 }
@@ -444,13 +443,13 @@ int KthvalueDriver<TIO>::VerifyForward()
         if(!std::isfinite(errorOutput) || errorOutput > tolerance)
         {
             std::cout << "Forward Kthvalue output FAILED: " << errorOutput << " > " << tolerance
-                    << std::endl;
+                      << std::endl;
             return EC_VerifyFwd;
         }
         else
         {
             std::cout << "Forward Kthvalue Verifies OK on CPU reference (" << errorOutput << "< "
-                    << tolerance << ')' << std::endl;
+                      << tolerance << ')' << std::endl;
         }
     }
     else
@@ -459,14 +458,14 @@ int KthvalueDriver<TIO>::VerifyForward()
         auto errorOutputHostMT = miopen::rms_range(outputHostMT, output);
         if(!std::isfinite(errorOutputHostMT) || errorOutputHostMT > tolerance)
         {
-            std::cout << "CPU MT version of Forward Kthvalue output FAILED: " << errorOutputHostMT << " > " << tolerance
-                    << std::endl;
+            std::cout << "CPU MT version of Forward Kthvalue output FAILED: " << errorOutputHostMT
+                      << " > " << tolerance << std::endl;
             return EC_VerifyFwd;
         }
         else
         {
-            std::cout << "CPU MT version of forward Kthvalue Verifies OK on CPU reference (" << errorOutputHostMT << "< "
-                    << tolerance << ')' << std::endl;
+            std::cout << "CPU MT version of forward Kthvalue Verifies OK on CPU reference ("
+                      << errorOutputHostMT << "< " << tolerance << ')' << std::endl;
         }
     }
 

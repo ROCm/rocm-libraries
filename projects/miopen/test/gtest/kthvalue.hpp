@@ -150,7 +150,7 @@ protected:
 
         miopenStatus_t status;
 
-        status = miopen::KthvalueForward(handle,
+        status                                        = miopen::KthvalueForward(handle,
                                          input.desc,
                                          input_dev.get(),
                                          output.desc,
@@ -160,8 +160,8 @@ protected:
                                          config.k,
                                          config.dim,
                                          config.keepDim);
-        miopenTensorDescriptor_t inputDesc = &input.desc;
-        miopenTensorDescriptor_t outputDesc = &outputHost.desc;
+        miopenTensorDescriptor_t inputDesc            = &input.desc;
+        miopenTensorDescriptor_t outputDesc           = &outputHost.desc;
         miopenTensorDescriptor_t indicesDescNonObject = &indicesDesc;
         mloKthvalueFwdRunHost<TIO>(input.data.data(),
                                    inputDesc,

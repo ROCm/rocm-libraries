@@ -394,28 +394,35 @@ int TensorOpDriver<Tgpu, Tref>::RunForwardCPUMT()
     for(auto idx = 0; idx < iters; ++idx)
     {
         if(is_set)
-            miopen::par_transform(a_mt_verif.begin(), a_mt_verif.end(), a_mt_verif.begin(), [&](auto) {
-                return static_cast<Tgpu>(tensor_val);
-            });
+            miopen::par_transform(a_mt_verif.begin(),
+                                  a_mt_verif.end(),
+                                  a_mt_verif.begin(),
+                                  [&](auto) { return static_cast<Tgpu>(tensor_val); });
         else if(is_scale)
-            miopen::par_transform(a_mt_verif.begin(), a_mt_verif.end(), a_mt_verif.begin(), [&](auto element) {
-                return (element * static_cast<Tgpu>(tensor_val));
-            });
+            miopen::par_transform(
+                a_mt_verif.begin(), a_mt_verif.end(), a_mt_verif.begin(), [&](auto element) {
+                    return (element * static_cast<Tgpu>(tensor_val));
+                });
         else
         {
             auto op_fn = TensorOpFn(op);
             if(miopen::float_equal(beta, 0.0))
-                miopen::par_transform(
-                    a_mt_verif.begin(), a_mt_verif.end(), b_mt_verif.begin(), c_mt_verif.begin(), op_fn);
+                miopen::par_transform(a_mt_verif.begin(),
+                                      a_mt_verif.end(),
+                                      b_mt_verif.begin(),
+                                      c_mt_verif.begin(),
+                                      op_fn);
             else
             {
                 std::vector<Tgpu> tmp(a_mt_verif.size(), static_cast<Tgpu>(0.0));
-                miopen::par_transform(a_mt_verif.begin(), a_mt_verif.end(), b_mt_verif.begin(), tmp.begin(), op_fn);
-                miopen::par_transform(tmp.begin(),
-                               tmp.end(),
-                               c_mt_verif.begin(),
-                               c_mt_verif.begin(),
-                               [&](auto el_tmp, auto el_c) { return el_tmp + (beta * el_c); });
+                miopen::par_transform(
+                    a_mt_verif.begin(), a_mt_verif.end(), b_mt_verif.begin(), tmp.begin(), op_fn);
+                miopen::par_transform(
+                    tmp.begin(),
+                    tmp.end(),
+                    c_mt_verif.begin(),
+                    c_mt_verif.begin(),
+                    [&](auto el_tmp, auto el_c) { return el_tmp + (beta * el_c); });
             }
         }
     }
@@ -470,8 +477,9 @@ int TensorOpDriver<Tgpu, Tref>::VerifyForward()
 
         RunForwardCPUMT();
 
-        match = CheckTensor(
-            (!is_set && !is_scale) ? c_mt_verif : a_mt_verif, (!is_set && !is_scale) ? c : a, allowedEps);
+        match = CheckTensor((!is_set && !is_scale) ? c_mt_verif : a_mt_verif,
+                            (!is_set && !is_scale) ? c : a,
+                            allowedEps);
 
         if(!match)
             return miopenStatusInternalError;
