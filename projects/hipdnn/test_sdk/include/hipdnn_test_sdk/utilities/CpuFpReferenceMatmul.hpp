@@ -107,12 +107,12 @@ private:
         }
 
         const auto rank = aDims.size();
-        if(rank < 2)
+        if(rank < K_BATCH_IDX)
         {
             throw std::invalid_argument("Matmul expects matrices with rank >= 2");
         }
 
-        const auto batchDims = rank - 2;
+        const auto batchDims = rank - K_BATCH_IDX;
         if(!validateBroadcastableBatchDims(batchDims, aDims, bDims, cDims))
         {
             throw std::invalid_argument("Matmul batch dimensions are not broadcast-compatible");
@@ -120,16 +120,16 @@ private:
 
         // Matrix dimensions:
         // A[..., M, K] x B[..., K, N] -> C[..., M, N]
-        const int64_t mDim = aDims[rank - 2];
-        const int64_t kDimA = aDims[rank - 1];
-        const int64_t kDimB = bDims[rank - 2];
-        const int64_t nDim = bDims[rank - 1];
+        const int64_t mDim = *(aDims.rbegin() + K_M_IDX);
+        const int64_t kDimA = *(aDims.rbegin() + K_K_IDX_A);
+        const int64_t kDimB = *(bDims.rbegin() + K_K_IDX_B);
+        const int64_t nDim = *(bDims.rbegin() + K_N_IDX);
 
         if(kDimA != kDimB)
         {
             throw std::invalid_argument("Matmul shape mismatch: A.K must equal B.K");
         }
-        if(cDims[rank - 2] != mDim || cDims[rank - 1] != nDim)
+        if((*(cDims.rbegin() + K_M_IDX)) != mDim || (*(cDims.rbegin() + K_N_IDX)) != nDim)
         {
             throw std::invalid_argument("Matmul shape mismatch: C must be [..., A.M, B.N]");
         }
@@ -142,9 +142,9 @@ private:
     {
         for(size_t i = 0; i < batchDims; ++i)
         {
-            const auto aDimVal = static_cast<int64_t>(aDims[i]);
-            const auto bDimVal = static_cast<int64_t>(bDims[i]);
-            const auto cDimVal = static_cast<int64_t>(cDims[i]);
+            const auto aDimVal = aDims[i];
+            const auto bDimVal = bDims[i];
+            const auto cDimVal = cDims[i];
 
             if(aDimVal <= 0 || bDimVal <= 0 || cDimVal <= 0)
             {
