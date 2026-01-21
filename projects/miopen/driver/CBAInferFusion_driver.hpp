@@ -723,8 +723,8 @@ int CBAInferFusionDriver<Tgpu, Tref>::createRunningBuffers()
         runningVariance_dev = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(float));
 
         // GPU host allocation
-        runningMean     = std::vector<float>(sb_sz, static_cast<float>(0));
-        runningVariance = std::vector<float>(sb_sz, static_cast<float>(0));
+        runningMean     = std::vector<float>(sb_sz, 0.0f);
+        runningVariance = std::vector<float>(sb_sz, 0.0f);
 
         // Populate
         for(int i = 0; i < sb_sz; i++)
@@ -809,8 +809,8 @@ int CBAInferFusionDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
     if(useBatchNorm)
     {
-        scale       = std::vector<float>(sb_sz, static_cast<float>(0));
-        bias        = std::vector<float>(sb_sz, static_cast<float>(0));
+        scale       = std::vector<float>(sb_sz, 0.0f);
+        bias        = std::vector<float>(sb_sz, 0.0f);
         bn_res      = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
         bn_res_host = std::vector<Tref>(out_sz, static_cast<Tref>(0));
 

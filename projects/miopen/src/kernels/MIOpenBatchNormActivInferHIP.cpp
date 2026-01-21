@@ -86,15 +86,14 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     FLOAT_ACCUM invVariance[MIOPEN_READ_UNIT];
     if constexpr(MIO_LAYOUT_NHWC)
     {
-        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pmean)) = *(
-            reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedMean + c_i * MIOPEN_READ_UNIT));
+        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pmean)) =
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedMean + c_offset));
         *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pvar)) =
-            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedVariance +
-                                                            c_i * MIOPEN_READ_UNIT));
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedVariance + c_offset));
         *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pscale)) =
-            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(scale + c_i * MIOPEN_READ_UNIT));
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(scale + c_offset));
         *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pbias)) =
-            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(bias + c_i * MIOPEN_READ_UNIT));
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(bias + c_offset));
     }
     else // NCHW layout
     {
