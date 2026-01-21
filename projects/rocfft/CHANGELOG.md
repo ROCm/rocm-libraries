@@ -9,6 +9,16 @@ Documentation for rocFFT is available at
 
 * Allow plans to share hipModules if they use the same kernels.  This reduces time spent and memory used when 
   creating plans that exist concurrently.
+* Improved performance of unit-strided, complex-interleaved, forward/inverse FFTs for lengths:
+  - (160,72,72)
+  - (160,80,72)
+  - (160,80,80)
+  - (72,72,72)
+  - (80,80,80)
+  - (84,84,72)
+  - (96,96,96)
+  - (108,108,80)
+  - (72,72,52)
 
 ### Changed
 
@@ -37,16 +47,6 @@ Documentation for rocFFT is available at
 
 * Removed a potential unnecessary global transpose operation from MPI 3D multi-GPU pencil decompositions.
 * Enabled optimization of 3D pencil decompositions for single-process multi-GPU transforms.
-* Improved performance of unit-strided, complex-interleaved, forward/inverse FFTs for lengths:
-  - (160,72,72)
-  - (160,80,72)
-  - (160,80,80)
-  - (72,72,72)
-  - (80,80,80)
-  - (84,84,72)
-  - (96,96,96)
-  - (108,108,80)
-  - (72,72,52)
 
 ### Resolved issues
 
