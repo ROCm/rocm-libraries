@@ -43,7 +43,8 @@ namespace rocRoller
         {
             class DataParallelGEMMSolution : public GEMMSolution
             {
-                Operations::OperationTag m_tagA, m_tagB, m_tagC, m_tagD;
+                Operations::OperationTag                m_tagA, m_tagB, m_tagC, m_tagD;
+                std::optional<Operations::OperationTag> m_tagCvt;
                 Operations::OperationTag m_tagTensorA, m_tagTensorB, m_tagTensorC, m_tagScalarAlpha,
                     m_tagScalarBeta, m_tagTensorD;
 
@@ -483,16 +484,34 @@ namespace rocRoller
                         {solutionParams.macM, solutionParams.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {wave_m, wave_n, wave_k, wave_b});
+
+                    // Determine if type conversion is needed
+                    bool needsConversion
+                        = (solutionParams.types.typeAcc != solutionParams.types.typeD);
+
+                    // m_tagD: If conversion is needed, use WAVE (not LDS) since it won't be stored directly
                     auto macTileD = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macM, solutionParams.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {wave_m, wave_n, wave_k, wave_b},
-                        solutionParams.storeLDSD ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+                        (solutionParams.storeLDSD && !needsConversion) ? MemoryType::WAVE_LDS
+                                                                       : MemoryType::WAVE);
 
                     params->setDimensionInfo(m_tagA, macTileA);
                     params->setDimensionInfo(m_tagB, macTileB);
                     params->setDimensionInfo(m_tagC, macTileC);
                     params->setDimensionInfo(m_tagD, macTileD);
+
+                    if(m_tagCvt.has_value())
+                    {
+                        // For type conversion, this is what gets stored - use WAVE_LDS if storeLDSD
+                        auto macTileCvt = KernelGraph::CoordinateGraph::MacroTile(
+                            {solutionParams.macM, solutionParams.macN},
+                            LayoutType::MATRIX_ACCUMULATOR,
+                            {wave_m, wave_n, wave_k, wave_b},
+                            solutionParams.storeLDSD ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+                        params->setDimensionInfo(*m_tagCvt, macTileCvt);
+                    }
 
                     if(solutionParams.types.scaleA == Operations::ScaleMode::Separate)
                     {
