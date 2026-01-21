@@ -743,6 +743,7 @@ class TestCustomScheduleTF32:
         (  True,  False,       False,       1,  0,    [16,16,32,1]),
         (  True,  False,       False,       1,  1,    [32,32,16,1]),
         (  False, False,       False,       1,  1,    [32,32,16,1]),
+        (  False, False,        True,       1,  1,    [32,32,16,1]),
         # fmt: on
         ])
     def test_schedule_128x128x32(self, transA, transB, lds_tr_inst, tr_lds, plr, mi):
@@ -751,14 +752,18 @@ class TestCustomScheduleTF32:
         kernel["ProblemType"].update({
             "TransposeA": transA, "TransposeB": transB
         })
+        macro_tile = (128,128,32)
+        mi_wave_group = (2,2)
+        mi_wave_tile = (macro_tile[0] // (mi[0] * mi_wave_group[0]), macro_tile[1] // (mi[1] * mi_wave_group[1]))
+
         kernel.update({
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
-            "ForceUnrollSubIter": True,
-            "MacroTile0": 128, "MacroTile1": 128, "DepthU": 32,
+            "ForceUnrollSubIter": (True if plr == 0 else False), # internal state/config that needs to be set explicitly 
+            "MacroTile0": macro_tile[0], "MacroTile1": macro_tile[1], "DepthU": macro_tile[2],
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": plr,
             "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
             "MatrixInstruction": mi, "MIWaveGroup": [2,2],
-            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 4, "MIWaveTileB": 4,
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": mi_wave_tile[0], "MIWaveTileB": mi_wave_tile[1],
         })
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
