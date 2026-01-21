@@ -1,27 +1,5 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 find_package(Catch2 3 QUIET CONFIG)
 if(NOT Catch2_FOUND)
@@ -53,36 +31,44 @@ catch_discover_tests(origami-tests
     DISCOVERY_MODE PRE_TEST
 )
 
-# Install CTestTestfile.cmake for TheRock CI testing
-if(ORIGAMI_ENABLE_PYTHON) 
+# Install CTestTestfile.cmake for installed Origami tests
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install"
+    "# Copyright Advanced Micro Devices, Inc., or its affiliates.\n"
+    "# SPDX-License-Identifier: MIT\n"
+    "\n"
+    "# C++ tests\n"
+    "add_test(origami-tests \"../origami-tests\")\n"
+    "\n"
+)
+
+if(ORIGAMI_ENABLE_PYTHON)
     find_package(Python COMPONENTS Interpreter REQUIRED)
     
     set(ORIGAMI_INSTALL_LIBDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
     set(ORIGAMI_INSTALL_PYTHON_BINDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/origami")
-    configure_file(CTestTestfile.cmake.in CTestTestfile.cmake.install @ONLY)
-    install(
-        FILES "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install"
-        DESTINATION "${CMAKE_INSTALL_BINDIR}/origami"
-        COMPONENT tests
-        RENAME CTestTestfile.cmake
+    
+    file(APPEND "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install"
+        "# Python tests\n"
+        "add_test(origami_python_test \"${Python_EXECUTABLE}\" \"origami_test.py\")\n"
+        "add_test(origami_python_grid_test \"${Python_EXECUTABLE}\" \"origami_grid_test.py\")\n"
+        "\n"
+        "set_tests_properties(origami_python_test origami_python_grid_test PROPERTIES\n"
+        "    ENVIRONMENT \"LD_LIBRARY_PATH=${ORIGAMI_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH};PYTHONPATH=${ORIGAMI_INSTALL_PYTHON_BINDIR}:$ENV{PYTHONPATH}\"\n"
+        ")\n"
     )
-    install(
+    
+    rocm_install(
         FILES 
             "${CMAKE_CURRENT_SOURCE_DIR}/../python/origami_test.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/../python/origami_grid_test.py"
         DESTINATION "${CMAKE_INSTALL_BINDIR}/origami"
         COMPONENT tests
     )
-else()
-    # Write CTestTestfile.cmake manually when only C++ tests are requested
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install"
-        "# CTestTestfile for installed Origami tests (C++ only)\n"
-        "add_test(origami-tests \"../origami-tests\")\n"
-    )
-    install(
-        FILES "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install"
-        DESTINATION "${CMAKE_INSTALL_BINDIR}/origami"
-        COMPONENT tests
-        RENAME CTestTestfile.cmake
-    )
 endif()
+
+rocm_install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install"
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/origami"
+    COMPONENT tests
+    RENAME CTestTestfile.cmake
+)
