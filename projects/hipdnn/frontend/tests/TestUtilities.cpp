@@ -573,6 +573,7 @@ TEST(TestUtilities, ValidateScalarParameterValidSingleElement1D)
 {
     auto param = std::make_shared<TensorAttributes>();
     param->set_dim({1});
+    param->set_value(1.0f);
     auto error = validateScalarParameter(param, "TestParameter");
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
@@ -581,8 +582,19 @@ TEST(TestUtilities, ValidateScalarParameterValidSingleElement4D)
 {
     auto param = std::make_shared<TensorAttributes>();
     param->set_dim({1, 1, 1, 1});
+    param->set_value(1.0f);
     auto error = validateScalarParameter(param, "TestParameter");
     EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateScalarParameterInvalidNotPassByValue)
+{
+    auto param = std::make_shared<TensorAttributes>();
+    param->set_dim({1});
+    // No value set
+    auto error = validateScalarParameter(param, "TestParameter");
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("must be a pass-by-value tensor") != std::string::npos);
 }
 
 TEST(TestUtilities, ValidateScalarParameterInvalidNonScalar)

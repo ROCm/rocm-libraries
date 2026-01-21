@@ -26,6 +26,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include "common.hpp"
 
 using Catch::Approx;
@@ -36,21 +37,70 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - faster clock yields higher GFLOPS") {
       // TODO: Add support for make_hardware using hipDeviceProperties
-      auto hardware_slow = make_hardware(gpu_arch, 304, 65536, 8, 1.0, 1.0, 1.0, 4000000, 1.4);
-      auto hardware_fast = make_hardware(gpu_arch, 304, 65536, 8, 1.0, 1.0, 1.0, 4000000, 1.8);
+      auto hardware_slow = make_hardware(gpu_arch);
+      auto hardware_fast = make_hardware(gpu_arch);
+
+      if (gpu_arch == 942) {
+        const std::string gpu_arch_str = "gfx" + std::to_string(gpu_arch);
+        auto gpu_arch_enum             = origami::hardware_t::arch_name_to_enum(gpu_arch_str);
+        hardware_slow                  = origami::hardware_t(gpu_arch_enum,
+                                            304,
+                                            65536,
+                                            8,
+                                            1.0,
+                                            1.0,
+                                            1.0,
+                                            4000000,
+                                            1.4,
+                                            1,
+                                            std::make_tuple(0, 0.015, 0));
+        hardware_fast                  = origami::hardware_t(gpu_arch_enum,
+                                            304,
+                                            65536,
+                                            8,
+                                            1.0,
+                                            1.0,
+                                            1.0,
+                                            4000000,
+                                            1.8,
+                                            1,
+                                            std::make_tuple(0, 0.015, 0));
+      } else if (gpu_arch == 950) {
+        const std::string gpu_arch_str = "gfx" + std::to_string(gpu_arch);
+        auto gpu_arch_enum             = origami::hardware_t::arch_name_to_enum(gpu_arch_str);
+        hardware_slow                  = origami::hardware_t(gpu_arch_enum,
+                                            256,
+                                            163840,
+                                            8,
+                                            1.0,
+                                            1.0,
+                                            1.0,
+                                            4000000,
+                                            1.4,
+                                            1,
+                                            std::make_tuple(0, 0.008, 0));
+        hardware_fast                  = origami::hardware_t(gpu_arch_enum,
+                                            256,
+                                            163840,
+                                            8,
+                                            1.0,
+                                            1.0,
+                                            1.0,
+                                            4000000,
+                                            1.8,
+                                            1,
+                                            std::make_tuple(0, 0.008, 0));
+      }
       auto problem =
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
-      auto config = make_config(128, 128, 64, 32, 32, 8, false, 1);
-
-      auto config_slow = config;
-      auto config_fast = config;
+      auto config = make_config(128, 128, 64, 32, 32, 8);
 
       auto latency_config_slow =
-          origami::compute_total_latency(problem, hardware_slow, config_slow, hardware_slow.N_CU);
+          origami::compute_total_latency(problem, hardware_slow, config, hardware_slow.N_CU);
       auto flops_slow = origami::compute_perf_gflops(hardware_slow, problem, latency_config_slow);
 
       auto latency_config_fast =
-          origami::compute_total_latency(problem, hardware_fast, config_fast, hardware_fast.N_CU);
+          origami::compute_total_latency(problem, hardware_fast, config, hardware_fast.N_CU);
       auto flops_fast = origami::compute_perf_gflops(hardware_fast, problem, latency_config_fast);
 
       REQUIRE(flops_fast > flops_slow);
@@ -184,7 +234,7 @@ TEST_CASE("Origami: select_workgroup_mapping", "[origami]") {
   }
 }
 
-TEST_CASE("GEMM: negative_occupancy", "[gemm]") {
+TEST_CASE("origami: negative_occupancy", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - test negative occupancy") {
       auto hardware              = make_hardware(gpu_arch);
@@ -193,7 +243,7 @@ TEST_CASE("GEMM: negative_occupancy", "[gemm]") {
           .batch           = 1,
           .a_transpose     = origami::transpose_t::N,
           .b_transpose     = origami::transpose_t::T,
-          .a_dtype         = origami::data_type_t::XFloat32,  // element_size_A = 16
+          .a_dtype         = origami::data_type_t::XFloat32,  // element_size_A = 32
           .b_dtype         = origami::data_type_t::XFloat32,
           .mi_dtype        = origami::data_type_t::XFloat32,
           .a_mx_block_size = 0,
@@ -220,7 +270,7 @@ TEST_CASE("GEMM: negative_occupancy", "[gemm]") {
   }
 }
 
-TEST_CASE("GEMM: deterministic_tie_breaking", "[gemm]") {
+TEST_CASE("origami: deterministic_tie_breaking", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - Verify deterministic selection") {
       auto hardware = make_hardware(gpu_arch);
@@ -272,7 +322,7 @@ TEST_CASE("GEMM: deterministic_tie_breaking", "[gemm]") {
   }
 }
 
-TEST_CASE("GEMM: Verify deterministic tile selection", "[gemm]") {
+TEST_CASE("origami: Verify deterministic tile selection", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - Verify deterministic selection") {
       auto hardware = make_hardware(gpu_arch);
@@ -286,16 +336,16 @@ TEST_CASE("GEMM: Verify deterministic tile selection", "[gemm]") {
       std::vector<origami::config_t> config_B;
 
       // config A[0]
-      config_A.push_back(make_config(256, 160, 32, 16, 16, 32, false, 1, 6, 0, 0));  // Tile A
+      config_A.push_back(make_config(256, 160, 32, 32, 32, 8, false, 1, 6, 0, 0));  // Tile A
       // config A[1]
-      config_A.push_back(make_config(192, 160, 64, 16, 16, 32, false, 1, 6, 0, 0));  // Tile B
+      config_A.push_back(make_config(192, 160, 64, 32, 32, 8, false, 1, 6, 0, 0));  // Tile B
 
       // config B[0] Previous two tiles + a new one
-      config_B.push_back(make_config(256, 160, 32, 16, 16, 32, false, 1, 6, 0, 0));  // Tile A
+      config_B.push_back(make_config(256, 160, 32, 32, 32, 8, false, 1, 6, 0, 0));  // Tile A
       // config B[1]
-      config_B.push_back(make_config(192, 160, 64, 16, 16, 32, false, 1, 6, 0, 0));  // Tile B
+      config_B.push_back(make_config(192, 160, 64, 32, 32, 8, false, 1, 6, 0, 0));  // Tile B
       // config B[2]
-      config_B.push_back(make_config(192, 160, 32, 16, 16, 32, false, 1, 6, 0, 0));  // Tile C
+      config_B.push_back(make_config(192, 160, 32, 32, 32, 8, false, 1, 6, 0, 0));  // Tile C
 
       // Call select_config with both tile configs
       auto best_tile_A = origami::select_config(problem, hardware, config_A);
@@ -319,6 +369,260 @@ TEST_CASE("GEMM: Verify deterministic tile selection", "[gemm]") {
       REQUIRE(winner_is_acceptable(MT_M2, MT_M1, config_B[2].mt.m));
       REQUIRE(winner_is_acceptable(MT_N2, MT_N1, config_B[2].mt.n));
       REQUIRE(winner_is_acceptable(MT_K2, MT_K1, config_B[2].mt.k));
+    }
+  }
+}
+
+// Unit tests
+TEST_CASE("Origami: rank_configs unit test", "[origami]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - rank_configs unit test") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(1024, 1024, 1024);
+
+      // Test 1: Test with empty config list (should throw)
+      std::vector<origami::config_t> empty_configs;
+      REQUIRE_THROWS_WITH(origami::rank_configs(problem, hardware, empty_configs),
+                          "No configurations provided.");
+
+      // Test 2: Test with all invalid configs (LDS capacity exceeded)
+      std::vector<origami::config_t> invalid_configs;
+      if (gpu_arch == 942) {
+        invalid_configs.push_back(make_config(256, 256, 128, 32, 32, 8, false, 1, 6, 0, 0));
+        invalid_configs.push_back(make_config(128, 128, 256, 32, 32, 8, false, 1, 6, 0, 0));
+        invalid_configs.push_back(make_config(64, 64, 512, 32, 32, 8, false, 1, 6, 0, 0));
+      } else if (gpu_arch == 950) {
+        invalid_configs.push_back(make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0));
+        invalid_configs.push_back(make_config(128, 128, 512, 32, 32, 8, false, 1, 6, 0, 0));
+        invalid_configs.push_back(make_config(256, 256, 512, 32, 32, 8, false, 1, 6, 0, 0));
+      }
+
+      REQUIRE_THROWS_WITH(origami::rank_configs(problem, hardware, invalid_configs),
+                          "No valid configs found.");
+
+      // Test 3: Test tie-breaking with arithmetic intensity (TODO: Find the pair which has same
+      // latency but different AI)
+      std::vector<origami::config_t> identical_latency_configs;
+      identical_latency_configs.push_back(make_config(64, 128, 64, 32, 32, 8, false, 1, 6, 0, 0));
+      identical_latency_configs.push_back(make_config(128, 64, 64, 32, 32, 8, false, 1, 6, 0, 0));
+
+      // Test 4: Test tie-breaking with problem dimension preferences
+      std::vector<origami::config_t> identical_ai_configs;
+      identical_ai_configs.push_back(make_config(128, 64, 128, 32, 32, 8, false, 1, 6, 0, 0));
+      identical_ai_configs.push_back(make_config(64, 128, 128, 32, 32, 8, false, 1, 6, 0, 0));
+
+      auto problem_m_greater_than_n = make_problem(2048, 1024, 1024);
+      auto results_m_greater_than_n =
+          origami::rank_configs(problem_m_greater_than_n, hardware, identical_ai_configs);
+      REQUIRE(identical_ai_configs[0].mt.m ==
+              results_m_greater_than_n[0].config.mt.m);  // If M > N, prefer tiles with larger MT_M
+
+      auto problem_n_greater_than_m = make_problem(1024, 4096, 1024);
+      auto results_n_greater_than_m =
+          origami::rank_configs(problem_n_greater_than_m, hardware, identical_ai_configs);
+      // REQUIRE(identical_ai_configs[1].mt.n == results_n_greater_than_m[0].config.mt.n); //If N >
+      // M, prefer tiles with larger MT_N
+
+      auto problem_m_equals_n = make_problem(1024, 1024, 1024);
+      auto results_m_equals_n =
+          origami::rank_configs(problem_m_equals_n, hardware, identical_ai_configs);
+      REQUIRE(identical_ai_configs[0].mt.m ==
+              results_m_equals_n[0].config.mt.m);  // If M == N, prefer tiles with larger MT_M
+
+      // Test 5: Test with different heuristics_variance values
+      setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "0.0", 1);
+      // Read back and parse
+      double env_val = origami::runtime_options::read_heuristics_variance_from_env();
+      REQUIRE(env_val == 0.01);  // Return default value 0.01 when
+                                 // ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to 0.0
+
+      setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "-1.0", 1);
+      // Read back and parse
+      env_val = origami::runtime_options::read_heuristics_variance_from_env();
+      REQUIRE(env_val == 0.01);  // Return default value 0.01 when
+                                 // ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to -1.0
+
+      setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "1.0", 1);
+      // Read back and parse
+      env_val = origami::runtime_options::read_heuristics_variance_from_env();
+      REQUIRE(env_val == 1.0);  // Return ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to 1.0
+    }
+  }
+}
+
+TEST_CASE("Origami: select_topk_configs unit test", "[origami]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - select_topk_configs unit test") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(2024, 4096, 768);
+      std::vector<origami::config_t> config;
+
+      config.push_back(make_config(256, 160, 32, 32, 32, 8, false, 1, 6, 0, 0));  // Tile A
+      config.push_back(make_config(192, 160, 64, 32, 32, 8, false, 1, 6, 0, 0));  // Tile B
+      config.push_back(make_config(64, 256, 32, 32, 32, 8, false, 1, 6, 0, 0));   // Tile C
+
+      // Test 1: Test with topk=1 (should return single best config)
+      auto single_config = origami::select_topk_configs(problem, hardware, config, 1);
+      REQUIRE(single_config.size() == 1);
+
+      // Test 2: Test with topk=3 (should return top 3 configs)
+      auto top_k_configs = origami::select_topk_configs(problem, hardware, config, 3);
+      REQUIRE(top_k_configs.size() == 3);
+
+      // Test 3: Test with topk larger than available configs (should return all configs)
+      top_k_configs = origami::select_topk_configs(problem, hardware, config, 5);
+      REQUIRE(top_k_configs.size() == 3);
+
+      // Test 4: Verify results are sorted by latency (best first)
+      for (size_t i = 0; i < top_k_configs.size() - 1; i++) {
+        REQUIRE(top_k_configs[i].latency < top_k_configs[i + 1].latency);
+      }
+
+      // Test 5: Test with empty config list (should throw)
+      std::vector<origami::config_t> empty_configs;
+      REQUIRE_THROWS_WITH(origami::select_topk_configs(problem, hardware, empty_configs, 5),
+                          "No configurations provided.");
+    }
+  }
+}
+
+TEST_CASE("Origami: select_config_mnk unit test", "[origami]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - select_config_mnk unit test") {
+      auto hardware = make_hardware(gpu_arch);
+      std::vector<origami::config_t> config;
+
+      config.push_back(make_config(256, 128, 64, 32, 32, 8, false, 1, 6, 0, 0));   // Tile A
+      config.push_back(make_config(192, 160, 64, 32, 32, 8, false, 1, 6, 0, 0));   // Tile B
+      config.push_back(make_config(128, 128, 256, 32, 32, 8, false, 1, 6, 0, 0));  // Tile C
+
+      // Test 1: Test with various M, N, K combinations
+      auto result_config = origami::select_config_mnk(4401, 3941, 456, hardware, config);  // M >
+                                                                                           // N,K
+      REQUIRE(result_config.config.mt.m == config[1].mt.m);
+
+      result_config = origami::select_config_mnk(4500, 8499, 4500, hardware, config);  // N > M,K
+      REQUIRE(result_config.config.mt.m == config[0].mt.m);
+
+      result_config = origami::select_config_mnk(3941, 4500, 8499, hardware, config);  // K > M,N
+      if (gpu_arch == 942)
+        REQUIRE(result_config.config.mt.m == config[0].mt.m);
+      else if (gpu_arch == 950)
+        REQUIRE(result_config.config.mt.m == config[1].mt.m);
+
+      result_config = origami::select_config_mnk(201, 201, 201, hardware, config);  // M = N = K
+      REQUIRE(result_config.config.mt.m == config[0].mt.m);
+
+      // Test 2: Verify default problem settings (transpose, data types)
+      origami::problem_t problem = {
+          .size            = {2024, 4096, 768},
+          .batch           = 1,
+          .a_transpose     = origami::transpose_t::T,
+          .b_transpose     = origami::transpose_t::N,
+          .a_dtype         = origami::data_type_t::Half,  // element_size_A = 16
+          .b_dtype         = origami::data_type_t::Half,
+          .mi_dtype        = origami::data_type_t::Half,
+          .a_mx_block_size = 0,
+          .b_mx_block_size = 0,
+      };
+      auto result_select_config_mnk = origami::select_config_mnk(2024, 4096, 768, hardware, config);
+      auto result_select_config     = origami::select_config(problem, hardware, config);
+      REQUIRE(result_select_config_mnk.config.mt.m == result_select_config.config.mt.m);
+      REQUIRE(result_select_config_mnk.config.mt.n == result_select_config.config.mt.n);
+      REQUIRE(result_select_config_mnk.config.mt.k == result_select_config.config.mt.k);
+    }
+  }
+}
+
+TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - select_workgroup_mapping unit test") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(4096, 4096, 8192);
+      auto config   = make_config(256, 256, 32, 32, 32, 8, false, 1, 6, 4, 5);
+      auto skGrid   = (4096 + 256 - 1) / 256 * (4096 + 256 - 1) / 256;
+
+      // Default values
+      size_t default_wgmxccchunk = 0;
+      size_t default_wgmxcc = hardware.NUM_XCD;
+
+      // Test 1: Test non-temporal cache hints (nta > 3, ntb < 4; nta < 4, ntb > 3; both > 3)
+      auto out_wgm_1 =
+          origami::select_workgroup_mapping(problem, hardware, config, skGrid);  // nta < 4, ntb > 3
+      REQUIRE(out_wgm_1.wgmxccchunk == default_wgmxccchunk);
+      REQUIRE(out_wgm_1.wgmxcc == default_wgmxcc);
+      REQUIRE(out_wgm_1.wgm == 1);
+
+      config.cache_hints_a = 3;
+      config.cache_hints_b = 4;
+      auto out_wgm_2 =
+          origami::select_workgroup_mapping(problem, hardware, config, skGrid);  // nta < 4, ntb > 3
+      REQUIRE(out_wgm_2.wgmxccchunk == default_wgmxccchunk);
+      REQUIRE(out_wgm_2.wgmxcc == default_wgmxcc);
+      REQUIRE(out_wgm_2.wgm == -1);
+
+      config.cache_hints_a = 4;
+      config.cache_hints_b = 4;
+      auto out_wgm_3 =
+          origami::select_workgroup_mapping(problem, hardware, config, skGrid);  // both > 3
+      REQUIRE(out_wgm_3.wgmxccchunk == default_wgmxccchunk);
+      REQUIRE(out_wgm_3.wgmxcc == default_wgmxcc);
+      REQUIRE(out_wgm_3.wgm == 1);
+
+      // reset cache_hints to 0
+      config.cache_hints_a = 0;
+      config.cache_hints_b = 0;
+
+      // Test 2: Test batched GEMM cases (batch > 1)
+      auto problem_batch =
+          make_problem(4096, 4096, 8192, origami::transpose_t::T, origami::transpose_t::N, 2);
+      auto out_wgm_batch =
+          origami::select_workgroup_mapping(problem_batch, hardware, config, skGrid);
+      REQUIRE(out_wgm_batch.wgmxccchunk == default_wgmxccchunk);
+      REQUIRE(out_wgm_batch.wgmxcc == 0);
+      REQUIRE(out_wgm_batch.wgm == 1);
+
+      // Test 3: Test small GEMMs (numMTs <= NUM_XCD)
+      auto problem_small = make_problem(1024, 1024, 1024);
+      auto skGrid_small  = (1024 + 256 - 1) / 256 * (1024 + 256 - 1) / 256;
+      auto out_wgm_problem_small =
+          origami::select_workgroup_mapping(problem_small, hardware, config, skGrid_small);
+      REQUIRE(out_wgm_problem_small.wgmxccchunk == default_wgmxccchunk);
+      REQUIRE(out_wgm_problem_small.wgmxcc == default_wgmxcc);
+      REQUIRE(out_wgm_problem_small.wgm == 1);
+
+      // Test 4: Test cases where splitFactor is multiple of NUM_XCD
+      auto out_wgm_split_multiple_num_xcd =
+          origami::select_workgroup_mapping(problem, hardware, config, 2048);
+      REQUIRE(out_wgm_split_multiple_num_xcd.wgmxccchunk == default_wgmxccchunk);
+      REQUIRE(out_wgm_split_multiple_num_xcd.wgmxcc == 0);
+      REQUIRE(out_wgm_split_multiple_num_xcd.wgm == 1);
+
+      // Test 5: Test cases tall cases (M >> N) with numMT_N <= 8
+      auto problem_tall = make_problem(409600, 256, 256);
+      auto skGrid_tall  = (409600 + 256 - 1) / 256 * (256 + 256 - 1) / 256;
+      auto out_wgm_tall =
+          origami::select_workgroup_mapping(problem_tall, hardware, config, skGrid_tall);
+      REQUIRE(out_wgm_tall.wgmxccchunk == default_wgmxccchunk);
+      REQUIRE(out_wgm_tall.wgmxcc == 8);
+      REQUIRE(out_wgm_tall.wgm == 1);
+
+      // Test 6: Test MallIsImportant cases
+      auto problem_mall_is_important = make_problem(7680, 7680, 256);
+      auto out_wgm_mall_is_important =
+          origami::select_workgroup_mapping(problem_mall_is_important, hardware, config, 900);
+      REQUIRE(out_wgm_mall_is_important.wgmxccchunk == default_wgmxccchunk);
+      REQUIRE(out_wgm_mall_is_important.wgmxcc == default_wgmxcc);
+      REQUIRE(out_wgm_mall_is_important.wgm == 5);
+
+      // Test 7: Test WGM prediction with various wgmList values
+      auto out_wgm = origami::select_workgroup_mapping(problem, hardware, config, skGrid);
+      REQUIRE(out_wgm.wgmxccchunk == default_wgmxccchunk);
+      REQUIRE(out_wgm.wgmxcc == default_wgmxcc);
+      if (gpu_arch == 942)
+        REQUIRE(out_wgm.wgm == 3);
+      else if (gpu_arch == 950)
+        REQUIRE(out_wgm.wgm == 4);
     }
   }
 }
