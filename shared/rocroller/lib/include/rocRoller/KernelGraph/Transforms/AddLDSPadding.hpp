@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,40 +25,36 @@
  *******************************************************************************/
 
 #pragma once
+#include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
 
-#include <string>
-
-#include "client/GEMMParameters.hpp"
-#include <rocRoller/Parameters/Solution/LoadOption.hpp>
-
-namespace CLI
+namespace rocRoller
 {
-    namespace detail
+    namespace KernelGraph
     {
-        inline bool lexical_cast(const std::string& s, rocRoller::Parameters::Solution::LoadPath& v)
-        {
-            v = rocRoller::fromString<rocRoller::Parameters::Solution::LoadPath>(s);
-            return true;
-        }
 
-        inline bool lexical_cast(const std::string& s, rocRoller::Client::GEMMClient::MNKTuple& v)
+        /**
+         * @brief Rewrite KernelGraph to add padding to LDS buffers.
+         * @ingroup Transformations
+         */
+        class AddLDSPadding : public GraphTransform
         {
-            return rocRoller::Client::GEMMClient::CLI::ParseMNK(s, v);
-        }
+        public:
+            AddLDSPadding(ContextPtr context, CommandParametersPtr params)
+                : m_context(context)
+                , m_params(params)
+            {
+            }
 
-        inline bool lexical_cast(const std::string& s, rocRoller::Client::GEMMClient::MNKBTuple& v)
-        {
-            return rocRoller::Client::GEMMClient::CLI::ParseMNKB(s, v);
-        }
+            KernelGraph apply(KernelGraph const& original) override;
+            std::string name() const override
+            {
+                return "AddLDSPadding";
+            }
 
-        inline bool lexical_cast(const std::string& s, rocRoller::Client::GEMMClient::MKNLTuple& v)
-        {
-            return rocRoller::Client::GEMMClient::CLI::ParseMKNL(s, v);
-        }
-
-        inline bool lexical_cast(const std::string& s, std::pair<int, int>& v)
-        {
-            return rocRoller::Client::GEMMClient::CLI::ParseIntPair(s, v);
-        }
+        private:
+            ContextPtr           m_context;
+            CommandParametersPtr m_params;
+        };
     }
 }
