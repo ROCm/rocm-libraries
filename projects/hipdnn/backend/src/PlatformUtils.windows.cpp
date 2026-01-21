@@ -14,40 +14,82 @@ namespace hipdnn_backend::platform_utilities
 
 std::filesystem::path getCurrentModuleDirectory()
 {
-    std::filesystem::path modulePath;
-
     HMODULE moduleHandle = nullptr;
-    if(GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+    if(GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
                               | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                          reinterpret_cast<LPCSTR>(&getCurrentModuleDirectory),
+                          reinterpret_cast<LPCWSTR>(&getCurrentModuleDirectory),
                           &moduleHandle)
-       == TRUE)
-    {
-        char* dst = new char[MAX_PATH];
-        DWORD len = GetModuleFileNameA(moduleHandle, dst, MAX_PATH);
-        std::string modulePathStr(dst);
-        delete[] dst;
-
-        if(len > 0 && len < MAX_PATH)
-        {
-            modulePath = std::filesystem::path(modulePathStr).parent_path();
-        }
-        else
-        {
-            throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR, "Failed to get module file name.");
-        }
-    }
-    else
+       == 0)
     {
         throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR, "Failed to get module handle.");
     }
 
-    return std::filesystem::weakly_canonical(std::filesystem::absolute(modulePath));
+    // Windows supports long paths up to 32,767 characters.
+    // Allocate the maximum possible size to ensure we can fetch the module path.
+    const DWORD maxPathSize = 32768;
+    std::vector<wchar_t> buffer(maxPathSize);
+
+    DWORD len = GetModuleFileNameW(moduleHandle, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if(len == 0)
+    {
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR, "Failed to get module file name.");
+    }
+
+    // If len == buffer.size(), the path was truncated. However, since we allocated
+    // the maximum supported path length, this should practically never happen.
+    if(len == buffer.size())
+    {
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                              "Module file name exceeds maximum supported length.");
+    }
+
+    std::filesystem::path modulePath(std::wstring(buffer.data(), len));
+    return std::filesystem::weakly_canonical(std::filesystem::absolute(modulePath)).parent_path();
 }
 
 PluginLibHandle openLibrary(const std::filesystem::path& libraryPath)
 {
-    PluginLibHandle handle = LoadLibraryW(libraryPath.wstring().c_str());
+    // 1. Determine absolute paths
+    auto absLibraryPath = std::filesystem::absolute(libraryPath);
+    auto pluginDir = absLibraryPath.parent_path();
+
+    // getCurrentModuleDirectory() returns the folder where hipdnn_backend.dll (and other ROCm
+    // libraries) resides.
+    auto baseDir = getCurrentModuleDirectory();
+
+    // 2. Add specific directories to the DLL search path
+    // cookies are used to remove them later
+    DLL_DIRECTORY_COOKIE cookiePlugin = AddDllDirectory(pluginDir.wstring().c_str());
+    DLL_DIRECTORY_COOKIE cookieBase = AddDllDirectory(baseDir.wstring().c_str());
+
+    // 3. Load with LOAD_LIBRARY_SEARCH_USER_DIRS
+    // This looks in: Application Dir, System32, and paths added via AddDllDirectory.
+    // It specifically includes our 'baseDir' where other ROCm libraries (e.g. MIOpen.dll) are
+    // located.
+    // NOTE: This EXCLUDES the PATH environment variable.
+    PluginLibHandle handle
+        = LoadLibraryExW(absLibraryPath.wstring().c_str(),
+                         nullptr,
+                         LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS);
+
+    // 4. Cleanup search paths
+    if(cookiePlugin)
+    {
+        RemoveDllDirectory(cookiePlugin);
+    }
+    if(cookieBase)
+    {
+        RemoveDllDirectory(cookieBase);
+    }
+
+    // 5. Fallback: If enhanced load failed, try standard load (searches PATH)
+    if(handle == nullptr)
+    {
+        // This attempts to load using the standard search order, which includes PATH.
+        // This ensures we don't break setups where dependencies are in the system PATH.
+        handle = LoadLibraryW(libraryPath.wstring().c_str());
+    }
+
     if(handle == nullptr)
     {
         auto errorCode = GetLastError();
