@@ -69,8 +69,8 @@ namespace rocRoller
              * @return The index of the control operation in allRecords
              * @throws AssertFatal if the control tag is not found in the records
              */
-            inline size_t getCrontrolOpIndexInAllRecords(int                   controlTag,
-                                                         RWTraceRecords const& allRecords)
+            inline size_t getControlOpIndexInAllRecords(int                   controlTag,
+                                                        RWTraceRecords const& allRecords)
             {
                 for(size_t i = 0; i < allRecords.size(); ++i)
                 {
@@ -553,9 +553,9 @@ namespace rocRoller
                                        readTag);
 
                             const auto writeRecordIndex
-                                = getCrontrolOpIndexInAllRecords(writeTag, allRecords);
+                                = getControlOpIndexInAllRecords(writeTag, allRecords);
                             const auto readRecordIndex
-                                = getCrontrolOpIndexInAllRecords(readTag, allRecords);
+                                = getControlOpIndexInAllRecords(readTag, allRecords);
 
                             // Determine which operation executes first and second based on
                             // their order in trace
@@ -695,9 +695,9 @@ namespace rocRoller
                     for(const auto& readTag : readOpTags)
                     {
                         const auto writeRecordIndex
-                            = getCrontrolOpIndexInAllRecords(writeTag, allRecords);
+                            = getControlOpIndexInAllRecords(writeTag, allRecords);
                         const auto readRecordIndex
-                            = getCrontrolOpIndexInAllRecords(readTag, allRecords);
+                            = getControlOpIndexInAllRecords(readTag, allRecords);
 
                         // Determine which operation executes first and second
                         const auto [firstOpTag, secondOpTag]
@@ -737,8 +737,8 @@ namespace rocRoller
                             allRecords.insert(it,
                                               ControlFlowRWTracer::ReadWriteRecord{
                                                   newBarrier, ldsCoord, ControlFlowRWTracer::READ});
-                            firstOpIndex  = getCrontrolOpIndexInAllRecords(firstOpTag, allRecords);
-                            secondOpIndex = getCrontrolOpIndexInAllRecords(secondOpTag, allRecords);
+                            firstOpIndex  = getControlOpIndexInAllRecords(firstOpTag, allRecords);
+                            secondOpIndex = getControlOpIndexInAllRecords(secondOpTag, allRecords);
                             const auto message
                                 = fmt::format("  Inserted new Barrier({}) before {} for forward "
                                               "dependency between {} & {} and LDS({})",
