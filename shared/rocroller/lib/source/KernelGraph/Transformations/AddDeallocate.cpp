@@ -250,20 +250,20 @@ namespace rocRoller::KernelGraph
         for(auto const& [controls, coords] : deallocateNodesToAdd)
         {
             {
+                // Create a Deallocate operation
+                auto deallocate = graph.control.addElement(Deallocate());
+                deallocateNodes.push_back(deallocate);
+
                 if(logger->should_log(LogLevel::Debug))
                 {
                     std::ostringstream msg;
                     msg << "After {";
                     streamJoin(msg, controls, ", ");
-                    msg << "}, Deallocate {";
+                    msg << "}, Deallocate(" << deallocate << ") {";
                     streamJoin(msg, coords, ", ");
                     msg << "}";
                     Log::debug(msg.str());
                 }
-
-                // Create a Deallocate operation
-                auto deallocate = graph.control.addElement(Deallocate());
-                deallocateNodes.push_back(deallocate);
 
                 int idx = 0;
                 for(int coordinate : coords)
