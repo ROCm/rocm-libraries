@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,12 +22,6 @@
 
 #pragma once
 
-// currently inlined in other kernel header as reusing other inline kernels
-// #include "check_numerics_matrix.hpp"
-// #include "check_numerics_vector.hpp"
-// #include "device_macros.hpp"
-// #include "rocblas_trsv.hpp"
-
 /**
  * @brief Optimized TRSV batched kernel that uses z-dimension of thread blocks
  * 
@@ -42,8 +36,8 @@
 // Block solve for lower triangular with z-dimension batching
 template <rocblas_int BLOCK, rocblas_int DIM_Z, bool UNIT, typename T>
 void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_lower_big_batch(const T* __restrict__ A,
-                                                                 rocblas_int lda,
-                                                                 T&          val)
+                                                                 int64_t lda,
+                                                                 T&      val)
 {
     // Shared memory per batch in z-dimension
     __shared__ T xs[DIM_Z];
@@ -76,8 +70,8 @@ void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_lower_big_batch(const T* __rest
 // Block solve for upper triangular with z-dimension batching
 template <rocblas_int BLOCK, rocblas_int DIM_Z, bool UNIT, typename T>
 void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_upper_big_batch(const T* __restrict__ A,
-                                                                 rocblas_int lda,
-                                                                 T&          val)
+                                                                 int64_t lda,
+                                                                 T&      val)
 {
     // Shared memory per batch in z-dimension
     __shared__ T xs[DIM_Z];
@@ -184,7 +178,7 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
         // Register storage for off-diagonal block
         T sAoff[DIM_X / DIM_Y];
 
-        const ptrdiff_t tid = DIM_X * ty + tx;
+        const int tid = DIM_X * ty + tx;
 
         // Assign to register row in each thread
         rocblas_int block_row = backwards_sub ? num_blocks - 1 - blockIdx.x : blockIdx.x;
@@ -459,12 +453,12 @@ rocblas_status rocblas_internal_trsv_substitution_big_batch_template(rocblas_han
                                                                      rocblas_int       n,
                                                                      ATYPE             dA,
                                                                      rocblas_stride    offset_A,
-                                                                     rocblas_int       lda,
+                                                                     int64_t           lda,
                                                                      rocblas_stride    stride_A,
                                                                      const T*          alpha,
                                                                      XTYPE             dx,
                                                                      rocblas_stride    offset_x,
-                                                                     rocblas_int       incx,
+                                                                     int64_t           incx,
                                                                      rocblas_stride    stride_x,
                                                                      rocblas_int       batch_count,
                                                                      rocblas_int* w_completed_sec)
@@ -476,7 +470,7 @@ rocblas_status rocblas_internal_trsv_substitution_big_batch_template(rocblas_han
     ROCBLAS_LAUNCH_KERNEL(
         rocblas_trsv_init, dim3(batch_count), dim3(1), 0, handle->get_stream(), w_completed_sec);
 
-    offset_x = incx < 0 ? offset_x + int64_t(incx) * (1 - n) : offset_x;
+    offset_x = incx < 0 ? offset_x + incx * (1 - n) : offset_x;
 
     int batches = handle->getBatchGridDim((int)batch_count);
 

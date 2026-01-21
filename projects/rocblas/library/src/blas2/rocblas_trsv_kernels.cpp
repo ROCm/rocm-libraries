@@ -812,7 +812,7 @@ inline bool should_use_big_batch_kernel(rocblas_int n, rocblas_int batch_count)
     constexpr rocblas_int BIG_BATCH_TO_N_RATIO = 8;
 
     // Don't use big batch kernel for very large matrices (single matrix load sufficient)
-    constexpr rocblas_int MAX_N_FOR_BIG_BATCH = 1024;
+    constexpr rocblas_int MAX_N_FOR_BIG_BATCH = 512;
 
     return (n <= MAX_N_FOR_BIG_BATCH) && (batch_count >= BIG_BATCH_TO_N_RATIO * n);
 }
@@ -841,7 +841,7 @@ rocblas_status rocblas_internal_trsv_substitution_template(rocblas_handle    han
     // Check if we should use the z-batched kernel
     if(should_use_big_batch_kernel(n, batch_count))
     {
-        // Select block size based on data type
+        // TODO: Select block size based on data type requires further tuning
         constexpr rocblas_int SDCTRSV_BB_NB = 8;
         constexpr rocblas_int ZTRSV_BB_NB   = 8;
 
@@ -876,7 +876,7 @@ rocblas_status rocblas_internal_trsv_substitution_template(rocblas_handle    han
         return rocblas_status_internal_error;
     }
 
-    offset_x = incx < 0 ? offset_x + int64_t(incx) * (1 - n) : offset_x;
+    offset_x = incx < 0 ? offset_x + incx * (1 - n) : offset_x;
 
     int batches = handle->getBatchGridDim((int)batch_count);
 
