@@ -400,7 +400,7 @@ TEST_F(TestGraph, BatchnormInferenceNodeVarianceExtCreation)
     bias->set_dim(derivedDims).set_stride(derivedStrides);
 
     auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_name("Epsilon").set_value(1e-5f);
+    epsilon->set_name("Epsilon").set_value(1e-5);
 
     BatchnormInferenceAttributesVarianceExt attributes;
     attributes.set_name("BatchnormNodeVariance");
@@ -707,7 +707,7 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceVarianceExtGraph)
         .set_stride(derivedStrides);
 
     auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_uid(6).set_name("Epsilon").set_value(1e-5f);
+    epsilon->set_uid(6).set_name("Epsilon").set_value(1e-5);
 
     BatchnormInferenceAttributesVarianceExt batchnormAttributes;
     batchnormAttributes.set_name("BatchnormNodeVariance");
