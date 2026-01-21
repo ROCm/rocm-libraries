@@ -115,9 +115,12 @@ const MiopenTensor& ConvFwdBiasActivParams::y() const
 ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handle,
                                            ConvFwdBiasActivParams&& params,
                                            bool compile,
-                                           bool getWsSize)
+                                           bool getWsSize,
+                                           bool benchmarkingEnabled)
     : _params(std::move(params))
+    , _benchmarkingEnabled(benchmarkingEnabled)
 {
+    (void)_benchmarkingEnabled;
     miopenFusionPlanDescriptor_t fusePlanDesc;
     THROW_ON_MIOPEN_FAILURE(miopenCreateFusionPlan(
         &fusePlanDesc, miopenVerticalFusion, _params.x().tensorDescriptor()));

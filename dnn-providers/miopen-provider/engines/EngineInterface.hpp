@@ -5,6 +5,7 @@
 
 #include <stdint.h>
 
+#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -33,6 +34,7 @@ public:
     virtual void
         initializeExecutionContext(const HipdnnEnginePluginHandle& handle,
                                    const hipdnn_plugin_sdk::IGraph& opGraph,
+                                   const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
                                    HipdnnEnginePluginExecutionContext& executionContext) const
         = 0;
 };

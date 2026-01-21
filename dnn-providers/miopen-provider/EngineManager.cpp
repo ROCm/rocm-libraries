@@ -58,7 +58,7 @@ void EngineManager::initializeExecutionContext(
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     auto& engine = getEngine(engineConfig.engineId());
-    engine.initializeExecutionContext(handle, opGraph, executionContext);
+    engine.initializeExecutionContext(handle, opGraph, engineConfig, executionContext);
 }
 
 IEngine& EngineManager::getEngine(int64_t engineId) const
