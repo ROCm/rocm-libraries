@@ -97,8 +97,8 @@ class OrigamiMatmulSelector:
 
         # Run Origami solution selection
         self._result = origami.select_config(self._problem,
-                                            self._hardware,
-                                            self._configs)
+                                             self._hardware,
+                                             self._configs)
 
         if streamk:
             self._grid = origami.select_grid_size(self._problem,
