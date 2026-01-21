@@ -44,10 +44,6 @@ rocsparse_status rocsparse::csr2coo_core(rocsparse_handle     handle,
 
     I nnz_per_row = nnz / m;
 
-
-    std::cout << "nnz_per_row: " << nnz_per_row << std::endl;
-
-
 #define CSR2COO_DIM 256
     if(nnz_per_row < 4)
     {
