@@ -145,6 +145,102 @@ struct XdlInstance
     XdlAlgorithm algorithm;
 };
 
+// V3 Algorithm with additional pipeline configuration
+struct XdlV3Algorithm
+{
+    using ConvSpecial = ckb::ConvSpecialization;
+    using GemmSpecial = ckb::GemmSpecialization;
+    using PipeSched   = ckb::PipelineScheduler;
+
+    struct ThreadBlock
+    {
+        std::size_t block_size;
+        struct TileSize
+        {
+            std::size_t m;
+            std::size_t n;
+            std::size_t k;
+        } tile_size;
+    } thread_block;
+
+    struct GridwiseGemm
+    {
+        std::size_t ak1;
+        std::size_t bk1;
+        struct XdlParams
+        {
+            std::size_t m_per_xdl      = 16;
+            std::size_t n_per_xdl      = 16;
+            std::size_t m_xdl_per_wave = 4;
+            std::size_t n_xdl_per_wave = 1;
+        } xdl_params;
+    } gridwise_gemm;
+
+    struct TransferABC
+    {
+        struct TransferAB
+        {
+            struct BlockTransfer
+            {
+                std::size_t k0;
+                std::size_t m_n;
+                std::size_t k1;
+            } block_transfer;
+            struct LdsTransfer
+            {
+                std::size_t src_vector_dim;
+                std::size_t src_scalar_per_vector;
+                std::size_t lds_dst_scalar_per_vector;
+                bool is_direct_load;
+                bool lds_padding;
+            } lds_transfer;
+            struct BlockTransferAccessOrder
+            {
+                std::array<size_t, 3> order{0, 2, 1};
+            } block_transfer_access_order;
+            struct SrcAccessOrder
+            {
+                std::array<size_t, 3> order{0, 2, 1};
+            } src_access_order;
+        };
+        TransferAB a;
+        TransferAB b;
+        struct TransferC
+        {
+            struct ThreadClusterDims
+            {
+                std::size_t m_block;
+                std::size_t m_wave_per_xdl;
+                std::size_t n_block;
+                std::size_t n_wave_per_xdl;
+            } thread_cluster_dims;
+            struct Epilogue
+            {
+                std::size_t m_xdl_per_wave_per_shuffle;
+                std::size_t n_per_wave_per_shuffle;
+                std::size_t scalar_per_vector;
+            } epilogue;
+        } c;
+    } transfer;
+
+    ConvSpecial fwd_specialization;
+    GemmSpecial gemm_specialization;
+    std::size_t num_gemm_k_prefetch_stages;
+    std::size_t num_conv_groups_to_merge;
+    PipeSched loop_scheduler;
+    
+    // V3-specific fields
+    ckb::PipelineVersion pipeline_version;
+    bool direct_load;
+};
+
+// V3 Instance struct
+struct XdlV3Instance
+{
+    XdlSignature signature;
+    XdlV3Algorithm algorithm;
+};
+
 template <auto KernelDescriptor>
 constexpr void instantiate_kernel(std::vector<BaseOperatorPtr>& kernels)
 {
@@ -341,6 +437,141 @@ constexpr XdlInstance make_xdl_instance_from_old_params(
              .num_gemm_k_prefetch_stages = num_gemm_k_prefetch_stage,
              .num_conv_groups_to_merge   = num_conv_groups_to_merge,
              .loop_scheduler             = loop_scheduler}};
+}
+
+// Constexpr function to create XdlV3Instance from old DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
+// template parameters. Parameters are in the same order as the template parameters, with V3-specific additions.
+constexpr XdlV3Instance make_xdl_v3_instance_from_old_params(
+    // 1. NDimSpatial
+    std::size_t spatial_dim,
+    // 2-5. Layouts
+    ckb::TensorLayout input_layout,
+    ckb::TensorLayout weight_layout,
+    ckb::TensorLayout output_layout,
+    // 6-11. Data types
+    ckb::DataType input_data_type,
+    ckb::DataType weight_data_type,
+    ckb::DataType acc_data_type,
+    ckb::DataType cshuffle_data_type,
+    ckb::DataType output_data_type,
+    // 12-14. Elementwise operations (not stored in XdlSignature/XdlAlgorithm currently)
+    // 15-16. Specializations
+    ckb::ConvSpecialization conv_fwd_specialization,
+    ckb::GemmSpecialization gemm_specialization,
+    // 17. NumGemmKPrefetchStage
+    std::size_t num_gemm_k_prefetch_stage,
+    // 18-21. Block dimensions
+    std::size_t block_size,
+    std::size_t m_per_block,
+    std::size_t n_per_block,
+    std::size_t k_per_block,
+    // 22-27. XDL parameters
+    std::size_t ak1,
+    std::size_t bk1,
+    std::size_t m_per_xdl,
+    std::size_t n_per_xdl,
+    std::size_t m_xdl_per_wave,
+    std::size_t n_xdl_per_wave,
+    // 28-34. A block transfer parameters
+    std::array<std::size_t, 3> a_thread_cluster_lengths,
+    std::array<std::size_t, 3> a_thread_cluster_arrange_order,
+    std::array<std::size_t, 3> a_block_transfer_src_access_order,
+    std::size_t a_block_transfer_src_vector_dim,
+    std::size_t a_block_transfer_src_scalar_per_vector,
+    std::size_t a_block_transfer_dst_scalar_per_vector_k1,
+    bool a_block_lds_extra_m,
+    // 35-41. B block transfer parameters
+    std::array<std::size_t, 3> b_thread_cluster_lengths,
+    std::array<std::size_t, 3> b_thread_cluster_arrange_order,
+    std::array<std::size_t, 3> b_block_transfer_src_access_order,
+    std::size_t b_block_transfer_src_vector_dim,
+    std::size_t b_block_transfer_src_scalar_per_vector,
+    std::size_t b_block_transfer_dst_scalar_per_vector_k1,
+    bool b_block_lds_extra_n,
+    // 42-45. C shuffle parameters
+    std::size_t c_shuffle_m_xdl_per_wave_per_shuffle,
+    std::size_t c_shuffle_n_xdl_per_wave_per_shuffle,
+    std::array<std::size_t, 4> c_thread_cluster_lengths,
+    std::size_t c_block_transfer_scalar_per_vector,
+    // 46-47. Compute data types
+    ckb::DataType input_compute_type,
+    ckb::DataType weight_compute_type,
+    // 48. Loop scheduler
+    ckb::PipelineScheduler loop_scheduler,
+    // 49. Pipeline version (V3-specific)
+    ckb::PipelineVersion pipeline_version,
+    // 50. Groups to merge
+    std::size_t num_conv_groups_to_merge = 1,
+    // 51. Direct load flag (V3-specific)
+    bool direct_load = false)
+{
+    return XdlV3Instance{
+        .signature = {.spatial_dim            = spatial_dim,
+                      .direction              = ckb::ConvDirection::FORWARD,
+                      .input                  = {.config = {.layout       = input_layout,
+                                           .data_type    = input_data_type,
+                                           .compute_type = input_compute_type}},
+                      .weight                 = {.config = {.layout       = weight_layout,
+                                            .data_type    = weight_data_type,
+                                            .compute_type = weight_compute_type}},
+                      .output                 = {.config =
+                                     {
+                                         .layout       = output_layout,
+                                         .data_type    = output_data_type,
+                                         .compute_type = output_data_type // Output compute type
+                                                                          // same as data type
+                                     }},
+                      .data_type              = input_data_type,
+                      .accumulation_data_type = acc_data_type},
+        .algorithm =
+            {.thread_block  = {.block_size = block_size,
+                              .tile_size  = {.m = m_per_block, .n = n_per_block, .k = k_per_block}},
+             .gridwise_gemm = {.ak1 = ak1,
+                               .bk1 = bk1,
+                               .xdl_params{.m_per_xdl      = m_per_xdl,
+                                           .n_per_xdl      = n_per_xdl,
+                                           .m_xdl_per_wave = m_xdl_per_wave,
+                                           .n_xdl_per_wave = n_xdl_per_wave}},
+             .transfer =
+                 {.a = {.block_transfer = {.k0  = a_thread_cluster_lengths[0],
+                                           .m_n = a_thread_cluster_lengths[1],
+                                           .k1  = a_thread_cluster_lengths[2]},
+                        .lds_transfer   = {.src_vector_dim = a_block_transfer_src_vector_dim,
+                                         .src_scalar_per_vector =
+                                             a_block_transfer_src_scalar_per_vector,
+                                         .lds_dst_scalar_per_vector =
+                                             a_block_transfer_dst_scalar_per_vector_k1,
+                                         .is_direct_load = direct_load,
+                                         .lds_padding    = a_block_lds_extra_m},
+                        .block_transfer_access_order = {.order = a_thread_cluster_arrange_order},
+                        .src_access_order = {.order = a_block_transfer_src_access_order}},
+                  .b = {.block_transfer = {.k0  = b_thread_cluster_lengths[0],
+                                           .m_n = b_thread_cluster_lengths[1],
+                                           .k1  = b_thread_cluster_lengths[2]},
+                        .lds_transfer   = {.src_vector_dim = b_block_transfer_src_vector_dim,
+                                         .src_scalar_per_vector =
+                                             b_block_transfer_src_scalar_per_vector,
+                                         .lds_dst_scalar_per_vector =
+                                             b_block_transfer_dst_scalar_per_vector_k1,
+                                         .is_direct_load = direct_load,
+                                         .lds_padding    = b_block_lds_extra_n},
+                        .block_transfer_access_order = {.order = b_thread_cluster_arrange_order},
+                        .src_access_order = {.order = b_block_transfer_src_access_order}},
+                  .c = {.thread_cluster_dims = {.m_block        = c_thread_cluster_lengths[0],
+                                                .m_wave_per_xdl = c_thread_cluster_lengths[1],
+                                                .n_block        = c_thread_cluster_lengths[2],
+                                                .n_wave_per_xdl = c_thread_cluster_lengths[3]},
+                        .epilogue            = {.m_xdl_per_wave_per_shuffle =
+                                         c_shuffle_m_xdl_per_wave_per_shuffle,
+                                     .n_per_wave_per_shuffle = c_shuffle_n_xdl_per_wave_per_shuffle,
+                                     .scalar_per_vector = c_block_transfer_scalar_per_vector}}},
+             .fwd_specialization         = conv_fwd_specialization,
+             .gemm_specialization        = gemm_specialization,
+             .num_gemm_k_prefetch_stages = num_gemm_k_prefetch_stage,
+             .num_conv_groups_to_merge   = num_conv_groups_to_merge,
+             .loop_scheduler             = loop_scheduler,
+             .pipeline_version           = pipeline_version,
+             .direct_load                = direct_load}};
 }
 
 namespace miopen {
@@ -593,6 +824,405 @@ void build_k()
     std::cout << s << std::endl;
 }
 
+constexpr auto create_device_grouped_conv_fwd_xdl_f32_16x16_instance_data(
+    std::size_t spatialDim,
+    ckb::TensorLayout inLayout,
+    ckb::TensorLayout weiLayout,
+    ckb::TensorLayout outLayout,
+    ckb::ConvSpecialization convSpecialization)
+{
+    // Adapted from the composable_kernel project, file:
+    // library/include/ck/library/tensor_operation_instance/gpu/grouped_conv_fwd/device_grouped_conv_fwd_xdl_instance.hpp
+    // device_grouped_conv_fwd_xdl_f32_16x16_instances
+
+    // clang-format off
+    std::array result = {
+        // Instance 1
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 256, 64, 64, 32, 8, 8, 16, 16, 2, 2,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 1, 8, true,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 2, 8, true,
+            1, 1, {1, 32, 1, 4}, 1,
+            FP32, FP32),
+        
+        // Instance 2
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 256, 64, 64, 32, 8, 8, 16, 16, 2, 2,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 2, 8, true,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 1, 8, true,
+            1, 1, {1, 32, 1, 4}, 2,
+            FP32, FP32),
+        
+        // Instance 3
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 256, 64, 64, 32, 8, 8, 16, 16, 2, 2,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 8, true,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 8, true,
+            1, 1, {1, 32, 1, 4}, 4,
+            FP32, FP32)
+    };
+    // clang-format on
+
+    return result;
+}
+
+constexpr auto create_device_grouped_conv_fwd_xdl_f32_comp_instance_data(
+    std::size_t spatialDim,
+    ckb::TensorLayout inLayout,
+    ckb::TensorLayout weiLayout,
+    ckb::TensorLayout outLayout,
+    ckb::ConvSpecialization convSpecialization)
+{
+    // Adapted from the composable_kernel project, file:
+    // library/include/ck/library/tensor_operation_instance/gpu/grouped_conv_fwd/device_grouped_conv_fwd_xdl_comp_instance.hpp
+    // device_grouped_conv_fwd_xdl_f32_comp_instances
+
+    // clang-format off
+    std::array result = {
+        // Instance 1: Intrawave v4
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            256, 128, 128, 32, 8, 8, 32, 32, 2, 2,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 32, 1, 8}, 8,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V4),
+        
+        // Instance 2: Intrawave v3
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            256, 128, 128, 64, 8, 8, 32, 32, 2, 2,
+            {8, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 32, 1, 8}, 8,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V3),
+        
+        // Instance 3: Intrawave v5
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            256, 128, 128, 64, 8, 8, 32, 32, 2, 2,
+            {8, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 32, 1, 8}, 8,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V5),
+        
+        // Instance 4: Interwave v1
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            256, 128, 128, 64, 8, 8, 32, 32, 2, 2,
+            {8, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 32, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 32, 1, 8}, 8,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V1)
+    };
+    // clang-format on
+
+    return result;
+}
+
+constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
+    std::size_t spatialDim,
+    ckb::TensorLayout inLayout,
+    ckb::TensorLayout weiLayout,
+    ckb::TensorLayout outLayout,
+    ckb::ConvSpecialization convSpecialization)
+{
+    // Adapted from the composable_kernel project, file:
+    // library/include/ck/library/tensor_operation_instance/gpu/grouped_conv_fwd/device_grouped_conv_fwd_xdl_mem_instance.hpp
+    // device_grouped_conv_fwd_xdl_f32_mem_instances with Intrawave scheduler
+
+    // clang-format off
+    std::array result = {
+        // Latency friendly instances (v1)
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            128, 32, 16, 64, 8, 8, 16, 16, 1, 1,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 8}, 2,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V1),
+        
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            64, 16, 16, 128, 8, 8, 16, 16, 1, 1,
+            {16, 4, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {16, 4, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 4}, 4,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V1),
+        
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            64, 16, 16, 64, 8, 8, 16, 16, 1, 1,
+            {8, 8, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 8, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 4}, 4,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V1),
+        
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            128, 16, 32, 64, 8, 8, 16, 16, 1, 1,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 8}, 4,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V2),
+        
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            128, 16, 64, 64, 8, 8, 16, 16, 1, 2,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 8}, 4,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V2),
+        
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            128, 32, 64, 64, 8, 8, 32, 32, 1, 1,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 8}, 8,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V2),
+        
+        // Memory friendly instances (v2)
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            128, 128, 32, 64, 8, 8, 32, 32, 2, 1,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 8}, 4,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V2),
+        
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            128, 128, 16, 64, 8, 8, 16, 16, 4, 1,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 8}, 2,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V2),
+        
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            128, 64, 32, 64, 8, 8, 32, 32, 1, 1,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 8}, 4,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V2),
+        
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            128, 64, 16, 64, 8, 8, 16, 16, 2, 1,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 8}, 2,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V2),
+        
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            128, 32, 16, 64, 8, 8, 16, 16, 1, 1,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 8}, 2,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V2)
+    };
+    // clang-format on
+
+    return result;
+}
+
+constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_inter_instance_data(
+    std::size_t spatialDim,
+    ckb::TensorLayout inLayout,
+    ckb::TensorLayout weiLayout,
+    ckb::TensorLayout outLayout,
+    ckb::ConvSpecialization convSpecialization)
+{
+    // Adapted from the composable_kernel project, file:
+    // library/include/ck/library/tensor_operation_instance/gpu/grouped_conv_fwd/device_grouped_conv_fwd_xdl_mem_instance.hpp
+    // device_grouped_conv_fwd_xdl_f32_mem_instances with Interwave scheduler
+
+    // clang-format off
+    std::array result = {
+        // Latency friendly instances (v1)
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            128, 32, 16, 64, 8, 8, 16, 16, 1, 1,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 8}, 2,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V1),
+        
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            64, 16, 16, 128, 8, 8, 16, 16, 1, 1,
+            {16, 4, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {16, 4, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 4}, 4,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V1),
+        
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            64, 16, 16, 64, 8, 8, 16, 16, 1, 1,
+            {8, 8, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 8, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 4}, 4,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2),
+        
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            128, 16, 32, 64, 8, 8, 16, 16, 1, 1,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 8}, 4,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2),
+        
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            128, 16, 64, 64, 8, 8, 16, 16, 1, 2,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 8}, 4,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2),
+        
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            128, 32, 64, 64, 8, 8, 32, 32, 1, 1,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 8}, 8,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2),
+        
+        // Memory friendly instances (v2)
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            128, 128, 32, 64, 8, 8, 32, 32, 2, 1,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 8}, 4,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2),
+        
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            128, 128, 16, 64, 8, 8, 16, 16, 4, 1,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 8}, 2,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2),
+        
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            128, 64, 32, 64, 8, 8, 32, 32, 1, 1,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 8}, 4,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2),
+        
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            128, 64, 16, 64, 8, 8, 16, 16, 2, 1,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 8}, 2,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2),
+        
+        make_xdl_v3_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            128, 32, 16, 64, 8, 8, 16, 16, 1, 1,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 4, 4, false,
+            1, 1, {1, 16, 1, 8}, 2,
+            FP32, FP32,
+            ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2)
+    };
+    // clang-format on
+
+    return result;
+}
+
 constexpr auto create_device_grouped_conv_fwd_xdl_merged_groups_f32_instance_data(
     std::size_t spatialDim,
     ckb::TensorLayout inLayout,
@@ -674,6 +1304,89 @@ constexpr auto create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_instan
         concat(defaultInstanceData, filter1x1Pad0InstanceData, filter1x1Stride1Pad0InstanceData);
 
     return instanceData;
+}
+
+constexpr auto create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_16x16_instance_data()
+{
+    // Adapted from the composable_kernel project, file:
+    // library/src/tensor_operation_instance/gpu/grouped_conv2d_fwd/xdl/device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_16x16_instance.cpp
+
+    constexpr auto defaultInstanceData =
+        create_device_grouped_conv_fwd_xdl_f32_16x16_instance_data(2,
+                                                                   ckb::TensorLayout::NGCHW,
+                                                                   ckb::TensorLayout::GKCYX,
+                                                                   ckb::TensorLayout::NGKHW,
+                                                                   ckb::ConvSpecialization::DEFAULT);
+
+    constexpr auto filter1x1Pad0InstanceData =
+        create_device_grouped_conv_fwd_xdl_f32_16x16_instance_data(
+            2,
+            ckb::TensorLayout::NGCHW,
+            ckb::TensorLayout::GKCYX,
+            ckb::TensorLayout::NGKHW,
+            ckb::ConvSpecialization::FILTER_1X1_PAD0);
+
+    constexpr auto filter1x1Stride1Pad0InstanceData =
+        create_device_grouped_conv_fwd_xdl_f32_16x16_instance_data(
+            2,
+            ckb::TensorLayout::NGCHW,
+            ckb::TensorLayout::GKCYX,
+            ckb::TensorLayout::NGKHW,
+            ckb::ConvSpecialization::FILTER_1X1_STRIDE1_PAD0);
+
+    constexpr auto instanceData =
+        concat(defaultInstanceData, filter1x1Pad0InstanceData, filter1x1Stride1Pad0InstanceData);
+
+    return instanceData;
+}
+
+constexpr auto create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_comp_instance_data()
+{
+    // Adapted from the composable_kernel project, file:
+    // library/src/tensor_operation_instance/gpu/grouped_conv2d_fwd/xdl/comp/device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_comp_instance.cpp
+
+    constexpr auto defaultInstanceData =
+        create_device_grouped_conv_fwd_xdl_f32_comp_instance_data(2,
+                                                                  ckb::TensorLayout::NGCHW,
+                                                                  ckb::TensorLayout::GKCYX,
+                                                                  ckb::TensorLayout::NGKHW,
+                                                                  ckb::ConvSpecialization::DEFAULT);
+
+    return defaultInstanceData;
+}
+
+constexpr auto
+create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_intra_instance_data()
+{
+    // Adapted from the composable_kernel project, file:
+    // library/src/tensor_operation_instance/gpu/grouped_conv2d_fwd/xdl/mem/device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_intra_instance.cpp
+
+    constexpr auto defaultInstanceData =
+        create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
+            2,
+            ckb::TensorLayout::NGCHW,
+            ckb::TensorLayout::GKCYX,
+            ckb::TensorLayout::NGKHW,
+            ckb::ConvSpecialization::DEFAULT);
+
+    return defaultInstanceData;
+}
+
+constexpr auto
+create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_inter_instance_data()
+{
+    // Adapted from the composable_kernel project, file:
+    // library/src/tensor_operation_instance/gpu/grouped_conv2d_fwd/xdl/mem/device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_inter_instance.cpp
+
+    constexpr auto defaultInstanceData =
+        create_device_grouped_conv_fwd_xdl_f32_mem_inter_instance_data(
+            2,
+            ckb::TensorLayout::NGCHW,
+            ckb::TensorLayout::GKCYX,
+            ckb::TensorLayout::NGKHW,
+            ckb::ConvSpecialization::DEFAULT);
+
+    return defaultInstanceData;
 }
 
 constexpr auto
