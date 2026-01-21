@@ -273,6 +273,20 @@ namespace rocRoller
                     m_tagTensorD
                         = command->addOperation(Operations::Tensor(2, typeD, {}, {(size_t)1})); // D
                     command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
+                    if(solutionParams.types.typeAcc == solutionParams.types.typeD)
+                    {
+                        command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
+                    }
+                    else
+                    {
+                        // If Matrix C and D are of different types, an explicit type conversion is required
+
+                        auto cvtOp = Operations::T_Execute(command->getNextTag());
+                        // (SR)Convert( alpha * (A * B) + beta * C )
+                        auto tagCvt = cvtOp.addXOp(Operations::E_Cvt(m_tagD, typeD));
+                        command->addOperation(std::move(cvtOp));
+                        command->addOperation(Operations::T_Store_Tiled(tagCvt, m_tagTensorD));
+                    }
 
                     if(solutionParams.workgroupMappingDim != -1)
                     {
