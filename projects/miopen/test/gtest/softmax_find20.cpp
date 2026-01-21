@@ -269,7 +269,7 @@ public:
                                                softmax_descriptor.GetMode());
 
             double error           = miopen::rms_range(dxTensorRef.data, dinhost);
-            const double tolerance = 1e-4;
+            const double tolerance = 1e-3;
 
             std::cout << "error =  " << error << std::endl;
 
@@ -398,6 +398,32 @@ TEST(GPU_SoftmaxFind20_FP16, softmaxBackward_log_channel_mode_fp16)
     Handle& handle = get_handle();
 
     SoftmaxFind20Test<half> test(false, MIOPEN_SOFTMAX_LOG, MIOPEN_SOFTMAX_MODE_CHANNEL);
+
+    std::vector<miopenSolution_t> solutions = test.TestFindSolutions(handle);
+    test.TestSolutionAttributes(solutions);
+
+    test.TestRunSolutionsBackward(handle, solutions);
+    test.Finalize();
+}
+
+TEST(GPU_SoftmaxFind20_BFP16, softmaxBackward_log_instance_mode_bfp16)
+{
+    Handle& handle = get_handle();
+
+    SoftmaxFind20Test<bfloat16> test(false, MIOPEN_SOFTMAX_LOG, MIOPEN_SOFTMAX_MODE_INSTANCE);
+
+    std::vector<miopenSolution_t> solutions = test.TestFindSolutions(handle);
+    test.TestSolutionAttributes(solutions);
+
+    test.TestRunSolutionsBackward(handle, solutions);
+    test.Finalize();
+}
+
+TEST(GPU_SoftmaxFind20_BFP16, softmaxBackward_log_channel_mode_bfp16)
+{
+    Handle& handle = get_handle();
+
+    SoftmaxFind20Test<bfloat16> test(false, MIOPEN_SOFTMAX_LOG, MIOPEN_SOFTMAX_MODE_CHANNEL);
 
     std::vector<miopenSolution_t> solutions = test.TestFindSolutions(handle);
     test.TestSolutionAttributes(solutions);

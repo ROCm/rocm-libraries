@@ -152,6 +152,7 @@ double arithmetic_intensity(double m, double n, double k, double bytes_per_eleme
   double numerator   = 2.0 * m * n * k;
   double denominator = (m * n + n * k + m * k) * bytes_per_element;
 
+  if (denominator == 0) return 0.0;
   return numerator / denominator;
 }
 
@@ -162,6 +163,7 @@ double emulated_tf32_arithmetic_intensity(double m, double n, double k, double b
   double numerator   = 3.0 * 2.0 * m * n * k;
   double denominator = (m * n + n * k + m * k) * bytes_per_element;
 
+  if (denominator == 0) return 0.0;
   return numerator / denominator;
 }
 
@@ -239,9 +241,9 @@ static inline double compute_cvt_overhead_x1(const problem_t& problem,
 }
 
 // Compute cvt overhead in tf32 emulation
-static inline double compute_cvt_overhead(const problem_t& problem,
-                                          const hardware_t& hardware,
-                                          const config_t& config) {
+double compute_cvt_overhead(const problem_t& problem,
+                            const hardware_t& hardware,
+                            const config_t& config) {
   // Wavefront tile sizes
   // TODO: Use kernel's actual wavetiles (wavefront's tile size).
   const double wave_tile_m = config.mt.m / 2.0;
@@ -591,22 +593,10 @@ double compute_memory_latency(const problem_t& problem,
   double H_mem2 = estimate_mall_hit(problem, hardware, config, num_active_cus, splitting_factor);
 
   // 3) Total loads are loads from A and loads from B
-  size_t MT_M_rounded_128bytes = round_elements_to_128B(MT_M, a_bits);
-  size_t MT_N_rounded_128bytes = round_elements_to_128B(MT_N, a_bits);
-  size_t MT_K_rounded_128bytes = round_elements_to_128B(MT_K, a_bits);
-
-  if (!a_trans && !b_trans) {
-    MT_N_rounded_128bytes = MT_N;
-    MT_K_rounded_128bytes = MT_K;
-  } else if (a_trans && !b_trans) {
-    MT_M_rounded_128bytes = MT_M;
-    MT_N_rounded_128bytes = MT_N;
-  } else if (!a_trans && b_trans) {
-    MT_K_rounded_128bytes = MT_K;
-  }
-
-  size_t Ld_A_value = MT_M_rounded_128bytes * MT_K_rounded_128bytes;
-  size_t Ld_B_value = MT_N_rounded_128bytes * MT_K_rounded_128bytes;
+  size_t Ld_A_value = a_trans ?
+      MT_M * round_elements_to_128B(MT_K, a_bits) : round_elements_to_128B(MT_M, a_bits) * MT_K;
+  size_t Ld_B_value = b_trans ?
+      round_elements_to_128B(MT_N, b_bits) * MT_K : MT_N * round_elements_to_128B(MT_K, b_bits);
   auto Ld_CU_bytes  = (Ld_A_value * a_bytes)    // A Bytes
                      + (Ld_B_value * b_bytes);  // B Bytes
 
@@ -780,16 +770,22 @@ double compute_tile_latency(const problem_t& problem,
     L_cvt = compute_cvt_overhead_x1(problem, hardware, config);
   }
 
-  // 5) Single-tile latency (always additive)
-  // Calculate the fraction of the work that is useful (not padding).
-
-  // 5) Single-tile latency (apply penalty after finding the bottleneck)
-  double L_tile_single = (std::max(L_compute, L_mem) * effective_tile_penalty) + L_cvt;
+  // 5)
+  // 5-0) Look up main_loop_efficiency from hardware map
+  double main_loop_efficiency = 1.0;
+  if (config.custom_mainloop_scheduling) {
+    main_loop_efficiency = hardware.get_adjusted_main_loop_efficiency(problem.a_transpose, 
+                                                                      problem.b_transpose, 
+                                                                      config.mt.m, 
+                                                                      config.mt.n, 
+                                                                      config.mt.k, 
+                                                                      problem.mi_dtype);
+  }
+  // 5-1) Single-tile latency (apply penalty after finding the bottleneck)
+  double L_tile_single = (std::max(L_compute, L_mem) * main_loop_efficiency * effective_tile_penalty) + L_cvt;
   L_prologue *= effective_tile_penalty;
+
   // 6) Number of K-iterations (excluding epilogue), at least 1
-  // long num_iter = static_cast<long>(((K + MT_K - 1) / MT_K)) - 1;
-  // num_iter      = std::ceil(num_iter / splitting_factor);
-  // num_iter      = std::max(num_iter, 1L);
   const long k_per_split = static_cast<long>(math::safe_ceil_div(K, splitting_factor));
   long num_iter =
       std::max(static_cast<long>(math::safe_ceil_div(static_cast<size_t>(k_per_split), MT_K) - 1),

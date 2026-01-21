@@ -424,6 +424,7 @@ class Solution(collections.abc.Mapping):
 
     state["UsePLRPack"] = False
     state["MfmaInitCVgprs"] = False
+    state["UseMFMAF32XEmulation"] = False
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
@@ -1447,8 +1448,8 @@ class Solution(collections.abc.Mapping):
 
     # Complex datatype restrictions.
     if state["ProblemType"]["DataType"].isComplex():
-      if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
-        reject(state, printRejectionReason, "Complex datatype kernel does not support GSU yet.")
+      if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) and (state["GlobalSplitUAlgorithm"] != "MultipleBuffer"):
+        reject(state, printRejectionReason, "Complex datatype kernel currently only supports MultiBuffer GSU.")
         return
       if state["MIArchVgpr"]:
         reject(state, printRejectionReason, "Complex datatype kernel does not support MIArchVgpr yet.")
@@ -1521,8 +1522,9 @@ class Solution(collections.abc.Mapping):
       state["numSubTiles"] = 1
 
     # Check if CMS is available for this solution
-    hasCMS,_ = hasCustomSchedule(state)
-    state["UseCustomMainLoopSchedule"] = hasCMS
+    if state["UseCustomMainLoopSchedule"] in [-1, 1]:
+      hasCMS,_ = hasCustomSchedule(state)
+      state["UseCustomMainLoopSchedule"] = hasCMS
 
     # 0: Normal mode. Hardware applies all of the normal data dependency checks
     # 1: Full expert mode (not suppoeted yet). Disable hardware checks against: VA_VDST, VA_SDST, VA_SSRC, VA_VCC, VM_VSRC and SA_SDST.
