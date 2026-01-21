@@ -593,6 +593,27 @@ void build_k()
     std::cout << s << std::endl;
 }
 
+constexpr auto create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_instance_data()
+{
+    // Adapted from the composable_kernel project, file:
+    // library/src/tensor_operation_instance/gpu/grouped_conv2d_fwd/xdl/device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_instance.cpp
+
+    constexpr auto defaultInstanceData = create_device_grouped_conv_fwd_xdl_f32_instance_data(
+        2, ckb::TensorLayout::NGCHW, ckb::TensorLayout::GKCYX, ckb::TensorLayout::NGKHW, ckb::ConvSpecialization::DEFAULT);
+
+    constexpr auto filter1x1Pad0InstanceData = create_device_grouped_conv_fwd_xdl_f32_instance_data(
+        2, ckb::TensorLayout::NGCHW, ckb::TensorLayout::GKCYX, ckb::TensorLayout::NGKHW, ckb::ConvSpecialization::FILTER_1X1_PAD0);
+
+    constexpr auto filter1x1Stride1Pad0InstanceData =
+        create_device_grouped_conv_fwd_xdl_f32_instance_data(
+            2, ckb::TensorLayout::NGCHW, ckb::TensorLayout::GKCYX, ckb::TensorLayout::NGKHW, ckb::ConvSpecialization::FILTER_1X1_STRIDE1_PAD0);
+
+    constexpr auto instanceData =
+        concat(defaultInstanceData, filter1x1Pad0InstanceData, filter1x1Stride1Pad0InstanceData);
+
+    return instanceData;
+}
+
 template <>
 struct DeviceOperationInstanceFactory<DeviceOpGFWdDefaultFloat>
 {
@@ -600,37 +621,8 @@ struct DeviceOperationInstanceFactory<DeviceOpGFWdDefaultFloat>
     {
         std::vector<BaseOperatorPtr> instances{};
 
-        constexpr std::array<XdlInstance, 17> defaultInstanceData =
-            create_device_grouped_conv_fwd_xdl_f32_instance_data(2,
-                                                                 ckb::TensorLayout::NGCHW,
-                                                                 ckb::TensorLayout::GKCYX,
-                                                                 ckb::TensorLayout::NGKHW,
-                                                                 ckb::ConvSpecialization::DEFAULT);
-        constexpr auto filter1x1Pad0InstanceData =
-            create_device_grouped_conv_fwd_xdl_f32_instance_data(
-                2,
-                ckb::TensorLayout::NGCHW,
-                ckb::TensorLayout::GKCYX,
-                ckb::TensorLayout::NGKHW,
-                ckb::ConvSpecialization::FILTER_1X1_PAD0);
-        constexpr auto filter1x1Stride1Pad0InstanceData =
-            create_device_grouped_conv_fwd_xdl_f32_instance_data(
-                2,
-                ckb::TensorLayout::NGCHW,
-                ckb::TensorLayout::GKCYX,
-                ckb::TensorLayout::NGKHW,
-                ckb::ConvSpecialization::FILTER_1X1_STRIDE1_PAD0);
-        constexpr auto oddCInstanceData =
-            create_device_grouped_conv_fwd_xdl_f32_instance_data(2,
-                                                                 ckb::TensorLayout::NGCHW,
-                                                                 ckb::TensorLayout::GKCYX,
-                                                                 ckb::TensorLayout::NGKHW,
-                                                                 ckb::ConvSpecialization::ODD_C);
-
-        constexpr auto instanceData = concat(defaultInstanceData,
-                                             filter1x1Pad0InstanceData,
-                                             filter1x1Stride1Pad0InstanceData,
-                                             oddCInstanceData);
+        constexpr auto instanceData =
+            create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_instance_data();
 
         build_kernels<instanceData>(instances);
 

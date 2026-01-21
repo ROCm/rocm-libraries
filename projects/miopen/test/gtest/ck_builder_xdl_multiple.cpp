@@ -69,7 +69,7 @@ void test_instance(const std::unique_ptr<T>& builderKernelInstance)
     print_closest_instance(builderKernelInstanceString, factoryInstances);
 }
 
-TEST(CKBuilderXdl, Multiple_Static_Instances)
+TEST(CKBuilderXdl, MultipleStaticInstances)
 {
     std::vector<BaseOperatorPtr> kernels{};
     constexpr auto instances = miopen::ck_builder::example_instances();
@@ -84,6 +84,79 @@ TEST(CKBuilderXdl, Multiple_Static_Instances)
     }
 }
 
+void print_instance_strings(std::vector<std::string>& instance_strings)
+{
+    for(auto&& s : instance_strings)
+    {
+        std::cout << "\t" << s << std::endl;
+    }
+}
+
+template <typename DeviceOpA, typename DeviceOpB>
+void compare_instance_vectors(std::vector<std::unique_ptr<DeviceOpA>>& instancesA,
+                              std::vector<std::unique_ptr<DeviceOpB>>& instancesB)
+{
+    EXPECT_EQ(instancesA.size(), instancesB.size());
+
+    // Convert instances to string lists
+    std::vector<std::string> stringsA;
+    std::vector<std::string> stringsB;
+
+    for(const auto& instance : instancesA)
+    {
+        stringsA.push_back(instance->GetInstanceString());
+    }
+
+    for(const auto& instance : instancesB)
+    {
+        stringsB.push_back(instance->GetInstanceString());
+    }
+
+    // Sort for efficient set operations
+    std::sort(stringsA.begin(), stringsA.end());
+    std::sort(stringsB.begin(), stringsB.end());
+
+    // Strings only in A
+    std::vector<std::string> only_in_A;
+    std::set_difference(stringsA.begin(),
+                        stringsA.end(),
+                        stringsB.begin(),
+                        stringsB.end(),
+                        std::back_inserter(only_in_A));
+
+    EXPECT_EQ(only_in_A.size(), 0);
+
+    // Strings only in B
+    std::vector<std::string> only_in_B;
+    std::set_difference(stringsB.begin(),
+                        stringsB.end(),
+                        stringsA.begin(),
+                        stringsA.end(),
+                        std::back_inserter(only_in_B));
+
+    EXPECT_EQ(only_in_B.size(), 0);
+
+    if(only_in_B.size() > 0)
+    {
+        std::cout << "There are " << only_in_B.size() << " kernels only in B: " << std::endl;
+        print_instance_strings(only_in_B);
+    }
+
+    // Strings in both
+    std::vector<std::string> in_both;
+    std::set_intersection(stringsA.begin(),
+                          stringsA.end(),
+                          stringsB.begin(),
+                          stringsB.end(),
+                          std::back_inserter(in_both));
+
+    if(in_both.size() > 0)
+    {
+        std::cout << "There are " << in_both.size() << " kernels in both: " << std::endl;
+        print_instance_strings(in_both);
+    }
+}
+
 template <typename DataType>
 using DeviceOpGFwdBuilderPtrs = miopen::conv::ck_builder::instance::DeviceOperationInstanceFactory<
     DeviceOpGFwdDefault<DataType>>;
@@ -94,7 +167,7 @@ void CompareInstanceLists()
     auto ckFactoryInstances      = DeviceOpGFwdDefaultPtrs<DataType>::GetInstances();
     auto builderFactoryInstances = DeviceOpGFwdBuilderPtrs<DataType>::GetInstances();
 
-    ASSERT_EQ(ckFactoryInstances.size(), builderFactoryInstances.size());
+    compare_instance_vectors(ckFactoryInstances, builderFactoryInstances);
 }
 
 TEST(CKBuilderGroupedFwdConv2D, CompareInstanceListsFloat) { CompareInstanceLists<float>(); }
