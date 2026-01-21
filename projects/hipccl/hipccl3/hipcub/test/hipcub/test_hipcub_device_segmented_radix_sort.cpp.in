@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -60,19 +60,20 @@
     INSTANTIATE(params<int,                short,          false,  0,  32, 0,      100    >) 
     INSTANTIATE(params<short,              int,            true,   0,  16, 0,      10000  >) 
     INSTANTIATE(params<long long,          char,           false,  0,  64, 4000,   8000   >)
-    INSTANTIATE(params<double,             unsigned int,   false,  0,  64, 2,      10     >) 
 #elif HIPCUB_TEST_TYPE_SLICE == 1
+    INSTANTIATE(params<double,             unsigned int,   false,  0,  64, 2,      10     >) 
     INSTANTIATE(params<double,             int,            true,   0,  64, 2000,   10000  >) 
     INSTANTIATE(params<float,              int,            false,  0,  32, 0,      1000   >) 
 
 // start_bit and end_bit
 
     INSTANTIATE(params<unsigned char,      int,            true,   2,  5,  0,      100    >) 
-    INSTANTIATE(params<unsigned short,     int,            true,   4,  10, 0,      10000  >) 
 #elif HIPCUB_TEST_TYPE_SLICE == 2
+    INSTANTIATE(params<unsigned short,     int,            true,   4,  10, 0,      10000  >) 
     INSTANTIATE(params<unsigned int,       short,          false,  3,  22, 1000,   10000  >) 
     INSTANTIATE(params<unsigned int,       double,         true,   4,  21, 100,    100000 >)
     INSTANTIATE(params<unsigned int,       short,          true,   0,  15, 100000, 200000 >) 
+#elif HIPCUB_TEST_TYPE_SLICE == 3
     INSTANTIATE(params<unsigned long long, char,           false,  8,  20, 0,      1000   >) 
     INSTANTIATE(params<unsigned short,     double,         false,  8,  11, 50,     200    >) 
 #endif
