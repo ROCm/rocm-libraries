@@ -50,7 +50,7 @@ EXCLUDE_PATHS = [
 
 # Extensions that can have licenses added
 EXTENSIONS_CPP = [".hpp", ".cpp", ".h", ".c", ".in", ".cl", ".ql", ".qll"]
-EXTENSIONS_HASH = [".py", ".sh", ".cmake", ".txt", ".yml", ".yaml"]
+EXTENSIONS_HASH = [".py", ".sh", ".cmake", ".txt"]
 
 
 def should_exclude(path: Path) -> bool:
