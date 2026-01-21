@@ -409,7 +409,7 @@ staggerU_t select_staggerU(const problem_t& problem,
     L2Tile_N = (wgm < numMT_N) ? wgm : numMT_N;
     size_t L2Tile_M_temp = math::safe_ceil_div(numMT_M, wgm);
     L2Tile_M = (L2Tile_M_temp < numMT_M) ? L2Tile_M_temp : numMT_M;
-    while(L2Tile_M * L2Tile_N < numWGsPerL2Tile - L2Tile_M)
+    while(L2Tile_M * L2Tile_N < numWGsPerL2Tile)
       L2Tile_N++;
   }
   else if (wgm < 0)
@@ -418,7 +418,7 @@ staggerU_t select_staggerU(const problem_t& problem,
     L2Tile_M = (abs_wgm < numMT_M) ? abs_wgm : numMT_M;
     size_t L2Tile_N_temp = math::safe_ceil_div(numMT_N, abs_wgm);
     L2Tile_N = (L2Tile_N_temp < numMT_N) ? L2Tile_N_temp : numMT_N;
-    while(L2Tile_M * L2Tile_N < numWGsPerL2Tile - L2Tile_N)
+    while(L2Tile_M * L2Tile_N < numWGsPerL2Tile)
       L2Tile_M++;
   }
   else
