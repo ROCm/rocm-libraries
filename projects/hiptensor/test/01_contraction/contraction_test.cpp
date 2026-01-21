@@ -41,7 +41,6 @@ namespace hiptensor
     template <typename DataType>
     using FillLaunchKernelFn = void (*)(DataType* data, uint32_t elementSize, uint32_t seed);
 
-
     static void logMessage(int32_t logLevel, const char* funcName /*=""*/, const char* msg /*=""*/)
     {
         ContractionTest::sAPILogBuff << msg;
@@ -403,39 +402,37 @@ namespace hiptensor
 
             uint32_t seed = static_cast<uint32_t>(256);
 
-            FillLaunchKernelFn<_Float16> fillFuncF16;
+            FillLaunchKernelFn<_Float16>     fillFuncF16;
             FillLaunchKernelFn<hip_bfloat16> fillFuncBF16;
-            FillLaunchKernelFn<float> fillFuncF32;
-            FillLaunchKernelFn<double> fillFuncF64;
+            FillLaunchKernelFn<float>        fillFuncF32;
+            FillLaunchKernelFn<double>       fillFuncF64;
 
-            if(operators[0] != HIPTENSOR_OP_IDENTITY || operators[1] != HIPTENSOR_OP_IDENTITY || operators[2] != HIPTENSOR_OP_IDENTITY)
+            if(operators[0] != HIPTENSOR_OP_IDENTITY || operators[1] != HIPTENSOR_OP_IDENTITY
+               || operators[2] != HIPTENSOR_OP_IDENTITY)
             {
-                // If all operators are identity, we can initialize tensors with signaling NaN to easily identify if any uninitialized values are used in computation
-                fillFuncF16 = fillPositiveValLaunchKernel<_Float16>;
+                // If any of the operators is not identity, we need to initialize tensors with positive values
+                fillFuncF16  = fillPositiveValLaunchKernel<_Float16>;
                 fillFuncBF16 = fillPositiveValLaunchKernel<hip_bfloat16>;
-                fillFuncF32 = fillPositiveValLaunchKernel<float>;
-                fillFuncF64 = fillPositiveValLaunchKernel<double>;
+                fillFuncF32  = fillPositiveValLaunchKernel<float>;
+                fillFuncF64  = fillPositiveValLaunchKernel<double>;
             }
             else
             {
-                // If any of the operators is not identity, we need to initialize tensors with positive values
-                fillFuncF16 = fillLaunchKernel<_Float16>;
+                fillFuncF16  = fillLaunchKernel<_Float16>;
                 fillFuncBF16 = fillLaunchKernel<hip_bfloat16>;
-                fillFuncF32 = fillLaunchKernel<float>;
-                fillFuncF64 = fillLaunchKernel<double>;
-            }     
+                fillFuncF32  = fillLaunchKernel<float>;
+                fillFuncF64  = fillLaunchKernel<double>;
+            }
 
             if(ADataType == HIPTENSOR_R_16F && BDataType == HIPTENSOR_R_16F
                && DDataType == HIPTENSOR_R_16F)
             {
                 // Initialize matrix data on device
-                fillFuncF16(
-                    (_Float16*)resource->deviceA().get(), elementsA, seed - 1);
+                fillFuncF16((_Float16*)resource->deviceA().get(), elementsA, seed - 1);
                 fillFuncF16((_Float16*)resource->deviceB().get(), elementsB, seed);
                 if(CDataType == HIPTENSOR_R_16F)
                 {
-                    fillFuncF16(
-                        (_Float16*)resource->deviceC().get(), elementsCD, seed + 1);
+                    fillFuncF16((_Float16*)resource->deviceC().get(), elementsCD, seed + 1);
                 }
                 fillValLaunchKernel<_Float16>((_Float16*)resource->deviceD().get(),
                                               elementsCD,
@@ -445,14 +442,11 @@ namespace hiptensor
                     && DDataType == HIPTENSOR_R_16BF)
             {
                 // Initialize matrix data on device
-                fillFuncBF16(
-                    (hip_bfloat16*)resource->deviceA().get(), elementsA, seed - 1);
-                fillFuncBF16(
-                    (hip_bfloat16*)resource->deviceB().get(), elementsB, seed);
+                fillFuncBF16((hip_bfloat16*)resource->deviceA().get(), elementsA, seed - 1);
+                fillFuncBF16((hip_bfloat16*)resource->deviceB().get(), elementsB, seed);
                 if(CDataType == HIPTENSOR_R_16BF)
                 {
-                    fillFuncBF16(
-                        (hip_bfloat16*)resource->deviceC().get(), elementsCD, seed + 1);
+                    fillFuncBF16((hip_bfloat16*)resource->deviceC().get(), elementsCD, seed + 1);
                 }
                 fillValLaunchKernel<hip_bfloat16>(
                     (hip_bfloat16*)resource->deviceD().get(),
@@ -467,8 +461,7 @@ namespace hiptensor
                 fillFuncF32((float*)resource->deviceB().get(), elementsB, seed);
                 if(CDataType == HIPTENSOR_R_32F)
                 {
-                    fillFuncF32(
-                        (float*)resource->deviceC().get(), elementsCD, seed + 1);
+                    fillFuncF32((float*)resource->deviceC().get(), elementsCD, seed + 1);
                 }
                 fillValLaunchKernel<float>((float*)resource->deviceD().get(),
                                            elementsCD,
@@ -482,8 +475,7 @@ namespace hiptensor
                 fillFuncF64((double*)resource->deviceB().get(), elementsB, seed);
                 if(CDataType == HIPTENSOR_R_64F)
                 {
-                    fillFuncF64(
-                        (double*)resource->deviceC().get(), elementsCD, seed + 1);
+                    fillFuncF64((double*)resource->deviceC().get(), elementsCD, seed + 1);
                 }
                 fillValLaunchKernel<double>((double*)resource->deviceD().get(),
                                             elementsCD,
@@ -908,32 +900,32 @@ namespace hiptensor
 
             if(testOptions->performValidation())
             {
-                CHECK_HIPTENSOR_ERROR(hiptensorContractionReference(plan,
-                                                                    (void*)&alphaBuf,
-                                                                    resource->hostA().get(),
-                                                                    resource->hostB().get(),
-                                                                    (void*)&betaBuf,
-                                                                    resource->hostC().get(),
-                                                                    resource->hostD().get(),
-                                                                    a_ms_ks->mLengths,
-                                                                    a_ms_ks->mStrides,
-                                                                    desc->mModeA,
-                                                                    b_ns_ks->mLengths,
-                                                                    b_ns_ks->mStrides,
-                                                                    desc->mModeB,
-                                                                    d_ms_ns->mLengths,
-                                                                    d_ms_ns->mStrides,
-                                                                    desc->mModeC,
-                                                                    d_ms_ns->mLengths,
-                                                                    d_ms_ns->mStrides,
-                                                                    desc->mModeD,
-                                                                    ADataType,
-                                                                    BDataType,
-                                                                    CDataType,
-                                                                    DDataType,
-                                                                    {plan->mOpDesc->mOpA, plan->mOpDesc->mOpB,
-                                                                     plan->mOpDesc->mOpC},
-                                                                    workspace));
+                CHECK_HIPTENSOR_ERROR(hiptensorContractionReference(
+                    plan,
+                    (void*)&alphaBuf,
+                    resource->hostA().get(),
+                    resource->hostB().get(),
+                    (void*)&betaBuf,
+                    resource->hostC().get(),
+                    resource->hostD().get(),
+                    a_ms_ks->mLengths,
+                    a_ms_ks->mStrides,
+                    desc->mModeA,
+                    b_ns_ks->mLengths,
+                    b_ns_ks->mStrides,
+                    desc->mModeB,
+                    d_ms_ns->mLengths,
+                    d_ms_ns->mStrides,
+                    desc->mModeC,
+                    d_ms_ns->mLengths,
+                    d_ms_ns->mStrides,
+                    desc->mModeD,
+                    ADataType,
+                    BDataType,
+                    CDataType,
+                    DDataType,
+                    {plan->mOpDesc->mOpA, plan->mOpDesc->mOpB, plan->mOpDesc->mOpC},
+                    workspace));
 
                 auto reference = resource->allocDevice(sizeD);
                 resource->copyData(reference, resource->hostD(), sizeD);
