@@ -15,8 +15,10 @@ from pathlib import Path
 repo_dir = Path(__file__).resolve().parent.parent
 
 # New license text for different file types
-NEW_LICENSE_CPP = """// Copyright Advanced Micro Devices, Inc., or its affiliates.
+NEW_LICENSE_CPP = """
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 """
 
 NEW_LICENSE_HASH = """# Copyright Advanced Micro Devices, Inc., or its affiliates.

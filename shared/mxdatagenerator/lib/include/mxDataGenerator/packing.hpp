@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #pragma once
 
 inline uint16_t getDataFP16(const uint8_t* dataBytes, index_t index)

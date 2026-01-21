@@ -1,5 +1,7 @@
+
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
 #pragma once
 
 inline uint8_t getDataFromPackedF6(uint8_t const* dataBytes, index_t index)
