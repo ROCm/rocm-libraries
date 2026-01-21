@@ -50,6 +50,9 @@ enum SplitType
     // and another dimension contiguous on output, remaining dims are
     // both split
     PENCIL_3D,
+    // split I/O as (single-process) hipfft would implicitly do for the
+    // considered number of devices
+    IMPLICIT_HIPFFT
 };
 
 std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const int ngpus)
@@ -155,6 +158,39 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
                 output_grid[1] = input_grid[1];
                 output_grid[3] = input_grid[2];
                 break;
+            case IMPLICIT_HIPFFT:
+                // unbatched 1D cases are irrelevant at the moment
+                if(p.length.size() < 2 && p.nbatch <= 1)
+                    continue;
+                if(p.nbatch == 1 && p.placement != fft_placement_inplace)
+                    continue; // only in-place is relevant for unbatched cases
+
+                if(p.nbatch > 1)
+                {
+                    // only the batch dimension is split
+                    input_grid[0] = output_grid[0]
+                        = std::min(p.nbatch, static_cast<size_t>(brickCount));
+                }
+                else
+                {
+                    // Slowest nonbatch dimension is split on input (resp. output)
+                    // of forward (resp. inverse) transforms. Second-slowest nonbatch
+                    // dimension is split on output (resp. input) of forward (resp.
+                    // inverse) transforms
+                    if(p.is_forward())
+                    {
+                        input_grid[1]  = brickCount;
+                        output_grid[2] = brickCount;
+                    }
+                    else
+                    {
+                        input_grid[2]  = brickCount;
+                        output_grid[1] = brickCount;
+                    }
+                }
+                break;
+            default:
+                throw std::invalid_argument("param_generator_multi_gpu: unkonwn split type");
             }
 
             p_dist.mp_lib = mp_lib;
@@ -210,15 +246,16 @@ INSTANTIATE_TEST_SUITE_P(multi_gpu_3d_pencils,
                          ::testing::ValuesIn(param_generator_multi_gpu(PENCIL_3D, ngpus)),
                          accuracy_test::TestName);
 
+// decompositions as hipFFT would define under the hood
+INSTANTIATE_TEST_SUITE_P(multi_gpu_implicit_hipfft,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_multi_gpu(IMPLICIT_HIPFFT, ngpus)),
+                         accuracy_test::TestName);
+
 TEST(multi_gpu_validate, catch_validation_errors)
 {
-    const auto all_split_types = {
-        SLOW_INOUT,
-        SLOW_IN,
-        SLOW_OUT,
-        SLOW_IN_FAST_OUT,
-        PENCIL_3D,
-    };
+    const auto all_split_types
+        = {SLOW_INOUT, SLOW_IN, SLOW_OUT, SLOW_IN_FAST_OUT, PENCIL_3D, IMPLICIT_HIPFFT};
 
     for(auto type : all_split_types)
     {
