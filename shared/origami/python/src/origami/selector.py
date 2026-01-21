@@ -66,8 +66,8 @@ class OrigamiMatmulSelector:
             except TypeError:
                 return torch.iinfo(dtype).bits
         self._a_dtype_bitsize = get_dtype_bits(a_dtype)
-        self._b_dtype_bitsize = get_dtype_bits(a_dtype)
-        self._out_dtype_bitsize = get_dtype_bits(a_dtype)
+        self._b_dtype_bitsize = get_dtype_bits(b_dtype)
+        self._out_dtype_bitsize = get_dtype_bits(out_dtype)
 
         # For matrix instruction latency lookup, use input dtype (not output dtype)
         # because the matrix instruction type is determined by input operand types
