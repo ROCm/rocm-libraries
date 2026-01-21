@@ -96,6 +96,36 @@ DEFINE_VECTOR_MAPPING(int, 4)
 DEFINE_VECTOR_MAPPING(unsigned int, 2)
 DEFINE_VECTOR_MAPPING(unsigned int, 4)
 
+// The following overloads with __half are needed due to a regression
+// in the current implementation of the RNNHiddenStateUpdate kernel
+// Moreover, __half is defined as a struct, thus the attribute
+// ext_vector_type, which is used here extensively, will fail
+
+template <>
+struct mapped_vector_type<__half, 1>
+{
+    using type = _Float16;
+};
+
+template <>
+struct mapped_vector_info<__half>
+{
+    using UnderlyingType         = _Float16;
+    static constexpr size_t size = 1;
+};
+
+template <>
+struct mapped_vector_type<__half, 2>
+{
+    using type = _Float16 __attribute__((ext_vector_type(2)));
+};
+
+template <>
+struct mapped_vector_type<__half, 4>
+{
+    using type = _Float16 __attribute__((ext_vector_type(4)));
+};
+
 namespace detail {
 
 template <typename OutType, typename InType>

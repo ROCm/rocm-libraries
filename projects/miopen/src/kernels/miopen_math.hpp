@@ -86,6 +86,54 @@ __forceinline__ __device__ _Float16 fma(_Float16 a, _Float16 b, _Float16 c)
     return __hfma(__half(a), __half(b), __half(c));
 }
 
+// The following overloads with __half are needed due to a regression
+// in the current implementation of the RNNHiddenStateUpdate kernel
+
+__forceinline__ __device__ __half exp(__half x)
+{
+    return static_cast<__half>(exp(static_cast<_Float16>(x)));
+}
+__forceinline__ __device__ __half log(__half x)
+{
+    return static_cast<__half>(log(static_cast<_Float16>(x)));
+}
+__forceinline__ __device__ __half sqrt(__half x)
+{
+    return static_cast<__half>(sqrt(static_cast<_Float16>(x)));
+}
+__forceinline__ __device__ __half rsqrt(__half x)
+{
+    return static_cast<__half>(rsqrt(static_cast<_Float16>(x)));
+}
+__forceinline__ __device__ __half sin(__half x)
+{
+    return static_cast<__half>(sin(static_cast<_Float16>(x)));
+}
+__forceinline__ __device__ __half cos(__half x)
+{
+    return static_cast<__half>(cos(static_cast<_Float16>(x)));
+}
+__forceinline__ __device__ __half fabs(__half x)
+{
+    return static_cast<__half>(fabs(static_cast<_Float16>(x)));
+}
+__forceinline__ __device__ __half fmin(__half x)
+{
+    return static_cast<__half>(fmin(static_cast<_Float16>(x)));
+}
+__forceinline__ __device__ __half fmax(__half x)
+{
+    return static_cast<__half>(fmax(static_cast<_Float16>(x)));
+}
+__forceinline__ __device__ __half pow(__half x)
+{
+    return static_cast<__half>(pow(static_cast<_Float16>(x)));
+}
+__forceinline__ __device__ __half tanh(__half x)
+{
+    return static_cast<__half>(tanh(static_cast<_Float16>(x)));
+}
+
 //=============================================================================
 // BFloat16 overloads
 //=============================================================================
