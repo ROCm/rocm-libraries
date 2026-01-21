@@ -20,6 +20,13 @@ endif()
 
 find_package(hip REQUIRED)
 
+include(FetchContent)
+FetchContent_Declare(
+    nanobind
+    GIT_REPOSITORY https://github.com/wjakob/nanobind.git
+    GIT_TAG        v1.9.2  # or latest stable version
+)
+FetchContent_MakeAvailable(nanobind)
 find_package(nanobind CONFIG REQUIRED)
 
 if(SKBUILD)
