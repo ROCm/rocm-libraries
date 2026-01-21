@@ -540,6 +540,11 @@ namespace rocRoller
                     }
                 }
 
+                auto getOpName = [&graph](int tag) {
+                    return std::visit([](auto op) { return op.name(); },
+                                      std::get<Operation>(graph.control.getElement(tag)));
+                };
+
                 // For each LDS coordinate, find dependent operations and check if barriers exist
                 for(int ldsCoord : ldsCoordinates)
                 {
@@ -552,11 +557,6 @@ namespace rocRoller
                     {
                         for(const auto readTag : readOpTags)
                         {
-                            auto getOpName = [graph](int tag) {
-                                return std::visit(
-                                    [](auto op) { return op.name(); },
-                                    std::get<Operation>(graph.control.getElement(tag)));
-                            };
                             Log::debug("Found {}({}) that writes LDS({}) and {}({}) that reads it.",
                                        getOpName(writeTag),
                                        writeTag,
