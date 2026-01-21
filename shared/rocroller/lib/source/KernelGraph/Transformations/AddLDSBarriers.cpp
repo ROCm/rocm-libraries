@@ -299,8 +299,10 @@ namespace rocRoller
                 const auto startPos = firstOpRecordIndex + 1;
                 const auto endPos   = secondOpRecordIndex - 1;
 
-                AssertFatal(startPos >= 0 && endPos < allRecords.size(),
+                AssertFatal(startPos >= 0 && endPos < allRecords.size() && startPos <= endPos,
                             "Invalid positions for firstOp and secondOp in trace.",
+                            ShowValue(startPos),
+                            ShowValue(endPos),
                             ShowValue(firstOpRecordIndex),
                             ShowValue(secondOpRecordIndex));
 
