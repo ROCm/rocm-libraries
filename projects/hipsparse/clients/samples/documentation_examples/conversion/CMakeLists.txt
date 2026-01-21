@@ -1,0 +1,173 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# C++ VARIANTS (from *_cpp.cpp files)
+add_executable(example_hipsparse_bsr2csr_cpp)
+target_sources(example_hipsparse_bsr2csr_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_bsr2csr_cpp.cpp")
+target_link_libraries(example_hipsparse_bsr2csr_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_coo2csr_cpp)
+target_sources(example_hipsparse_coo2csr_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_coo2csr_cpp.cpp")
+target_link_libraries(example_hipsparse_coo2csr_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_coosort_by_column_cpp)
+target_sources(example_hipsparse_coosort_by_column_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_coosort_by_column_cpp.cpp")
+target_link_libraries(example_hipsparse_coosort_by_column_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_coosort_by_row_cpp)
+target_sources(example_hipsparse_coosort_by_row_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_coosort_by_row_cpp.cpp")
+target_link_libraries(example_hipsparse_coosort_by_row_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_create_identity_permutation_cpp)
+target_sources(example_hipsparse_create_identity_permutation_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_create_identity_permutation_cpp.cpp")
+target_link_libraries(example_hipsparse_create_identity_permutation_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_cscsort_cpp)
+target_sources(example_hipsparse_cscsort_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_cscsort_cpp.cpp")
+target_link_libraries(example_hipsparse_cscsort_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_csr2bsr_cpp)
+target_sources(example_hipsparse_csr2bsr_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_csr2bsr_cpp.cpp")
+target_link_libraries(example_hipsparse_csr2bsr_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_csr2csc_cpp)
+target_sources(example_hipsparse_csr2csc_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_csr2csc_cpp.cpp")
+target_link_libraries(example_hipsparse_csr2csc_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_csr2csc_ex2_cpp)
+target_sources(example_hipsparse_csr2csc_ex2_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_csr2csc_ex2_cpp.cpp")
+target_link_libraries(example_hipsparse_csr2csc_ex2_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_csr2csr_compress_cpp)
+target_sources(example_hipsparse_csr2csr_compress_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_csr2csr_compress_cpp.cpp")
+target_link_libraries(example_hipsparse_csr2csr_compress_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_csr2dense_cpp)
+target_sources(example_hipsparse_csr2dense_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_csr2dense_cpp.cpp")
+target_link_libraries(example_hipsparse_csr2dense_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_csr2gebsr_cpp)
+target_sources(example_hipsparse_csr2gebsr_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_csr2gebsr_cpp.cpp")
+target_link_libraries(example_hipsparse_csr2gebsr_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_csr2hyb_cpp)
+target_sources(example_hipsparse_csr2hyb_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_csr2hyb_cpp.cpp")
+target_link_libraries(example_hipsparse_csr2hyb_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_csrsort_cpp)
+target_sources(example_hipsparse_csrsort_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_csrsort_cpp.cpp")
+target_link_libraries(example_hipsparse_csrsort_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_dense2csr_cpp)
+target_sources(example_hipsparse_dense2csr_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_dense2csr_cpp.cpp")
+target_link_libraries(example_hipsparse_dense2csr_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_gebsr2csr_cpp)
+target_sources(example_hipsparse_gebsr2csr_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_gebsr2csr_cpp.cpp")
+target_link_libraries(example_hipsparse_gebsr2csr_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_gebsr2gebsc_cpp)
+target_sources(example_hipsparse_gebsr2gebsc_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_gebsr2gebsc_cpp.cpp")
+target_link_libraries(example_hipsparse_gebsr2gebsc_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_gebsr2gebsr_cpp)
+target_sources(example_hipsparse_gebsr2gebsr_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_gebsr2gebsr_cpp.cpp")
+target_link_libraries(example_hipsparse_gebsr2gebsr_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_nnz_compress_cpp)
+target_sources(example_hipsparse_nnz_compress_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_nnz_compress_cpp.cpp")
+target_link_libraries(example_hipsparse_nnz_compress_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_prune_dense2csr_cpp)
+target_sources(example_hipsparse_prune_dense2csr_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_prune_dense2csr_cpp.cpp")
+target_link_libraries(example_hipsparse_prune_dense2csr_cpp PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_prune_dense2csr_by_percentage_cpp)
+target_sources(example_hipsparse_prune_dense2csr_by_percentage_cpp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_prune_dense2csr_by_percentage_cpp.cpp")
+target_link_libraries(example_hipsparse_prune_dense2csr_by_percentage_cpp PRIVATE hipsparse::samples-common)
+
+# C VARIANTS (from *_c.c files)
+add_executable(example_hipsparse_bsr2csr_c)
+target_sources(example_hipsparse_bsr2csr_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_bsr2csr_c.c")
+target_link_libraries(example_hipsparse_bsr2csr_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_coo2csr_c)
+target_sources(example_hipsparse_coo2csr_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_coo2csr_c.c")
+target_link_libraries(example_hipsparse_coo2csr_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_coosort_by_column_c)
+target_sources(example_hipsparse_coosort_by_column_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_coosort_by_column_c.c")
+target_link_libraries(example_hipsparse_coosort_by_column_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_coosort_by_row_c)
+target_sources(example_hipsparse_coosort_by_row_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_coosort_by_row_c.c")
+target_link_libraries(example_hipsparse_coosort_by_row_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_create_identity_permutation_c)
+target_sources(example_hipsparse_create_identity_permutation_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_create_identity_permutation_c.c")
+target_link_libraries(example_hipsparse_create_identity_permutation_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_cscsort_c)
+target_sources(example_hipsparse_cscsort_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_cscsort_c.c")
+target_link_libraries(example_hipsparse_cscsort_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_csr2bsr_c)
+target_sources(example_hipsparse_csr2bsr_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_csr2bsr_c.c")
+target_link_libraries(example_hipsparse_csr2bsr_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_csr2csc_c)
+target_sources(example_hipsparse_csr2csc_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_csr2csc_c.c")
+target_link_libraries(example_hipsparse_csr2csc_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_csr2csc_ex2_c)
+target_sources(example_hipsparse_csr2csc_ex2_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_csr2csc_ex2_c.c")
+target_link_libraries(example_hipsparse_csr2csc_ex2_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_csr2csr_compress_c)
+target_sources(example_hipsparse_csr2csr_compress_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_csr2csr_compress_c.c")
+target_link_libraries(example_hipsparse_csr2csr_compress_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_csr2dense_c)
+target_sources(example_hipsparse_csr2dense_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_csr2dense_c.c")
+target_link_libraries(example_hipsparse_csr2dense_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_csr2gebsr_c)
+target_sources(example_hipsparse_csr2gebsr_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_csr2gebsr_c.c")
+target_link_libraries(example_hipsparse_csr2gebsr_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_csr2hyb_c)
+target_sources(example_hipsparse_csr2hyb_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_csr2hyb_c.c")
+target_link_libraries(example_hipsparse_csr2hyb_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_csrsort_c)
+target_sources(example_hipsparse_csrsort_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_csrsort_c.c")
+target_link_libraries(example_hipsparse_csrsort_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_dense2csr_c)
+target_sources(example_hipsparse_dense2csr_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_dense2csr_c.c")
+target_link_libraries(example_hipsparse_dense2csr_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_gebsr2csr_c)
+target_sources(example_hipsparse_gebsr2csr_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_gebsr2csr_c.c")
+target_link_libraries(example_hipsparse_gebsr2csr_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_gebsr2gebsc_c)
+target_sources(example_hipsparse_gebsr2gebsc_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_gebsr2gebsc_c.c")
+target_link_libraries(example_hipsparse_gebsr2gebsc_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_gebsr2gebsr_c)
+target_sources(example_hipsparse_gebsr2gebsr_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_gebsr2gebsr_c.c")
+target_link_libraries(example_hipsparse_gebsr2gebsr_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_nnz_compress_c)
+target_sources(example_hipsparse_nnz_compress_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_nnz_compress_c.c")
+target_link_libraries(example_hipsparse_nnz_compress_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_prune_dense2csr_c)
+target_sources(example_hipsparse_prune_dense2csr_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_prune_dense2csr_c.c")
+target_link_libraries(example_hipsparse_prune_dense2csr_c PRIVATE hipsparse::samples-common)
+
+add_executable(example_hipsparse_prune_dense2csr_by_percentage_c)
+target_sources(example_hipsparse_prune_dense2csr_by_percentage_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_prune_dense2csr_by_percentage_c.c")
+target_link_libraries(example_hipsparse_prune_dense2csr_by_percentage_c PRIVATE hipsparse::samples-common)
+
