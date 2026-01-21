@@ -298,7 +298,7 @@ namespace rocRoller
                 // Look for Barrier nodes between firstOp and secondOp in trace order
                 for(auto i = startPos; i <= endPos; ++i)
                 {
-                    int ctrl = allRecords[i].control;
+                    int ctrl            = allRecords[i].control;
                     int barrierLdsCoord = allRecords[i].coordinate;
                     if(graph.control.get<Barrier>(ctrl) and isBarrierForLDS(graph, ctrl)
                        and areInSameLoopBody(graph, ctrl, allRecords[secondOpRecordIndex].control)
@@ -378,7 +378,7 @@ namespace rocRoller
              */
             std::optional<int> findBarrierForLoopCarried(KernelGraph const&    graph,
                                                          RWTraceRecords const& allRecords,
-                                                         int ldsCoord,
+                                                         int                   ldsCoord,
                                                          int    commonAncestorLoopTag,
                                                          size_t firstOpRecordIndex,
                                                          size_t secondOpRecordIndex)
@@ -402,7 +402,7 @@ namespace rocRoller
                 // Check for Barrier nodes before firstOp (in common loop body)
                 for(size_t i = 0; i < firstOpRecordIndex; ++i)
                 {
-                    int ctrl = allRecords[i].control;
+                    int ctrl            = allRecords[i].control;
                     int barrierLdsCoord = allRecords[i].coordinate;
                     if(graph.control.get<Barrier>(ctrl) && isBarrierForLDS(graph, ctrl)
                        && barrierLdsCoord == ldsCoord)
@@ -429,7 +429,7 @@ namespace rocRoller
                 // Check for Barrier nodes after secondOp (in common loop body)
                 for(auto i = afterSecondOpPos; i < allRecords.size(); ++i)
                 {
-                    int ctrl = allRecords[i].control;
+                    int ctrl            = allRecords[i].control;
                     int barrierLdsCoord = allRecords[i].coordinate;
                     if(graph.control.get<Barrier>(ctrl) && isBarrierForLDS(graph, ctrl)
                        && barrierLdsCoord == ldsCoord)
@@ -475,7 +475,7 @@ namespace rocRoller
              */
             bool hasBarrierBetweenSecondAndFirstOpsInLoop(KernelGraph const&    graph,
                                                           RWTraceRecords const& allRecords,
-                                                          int ldsCoord,
+                                                          int                   ldsCoord,
                                                           int    commonAncestorLoopTag,
                                                           int    firstOpTag,
                                                           int    secondOpTag,
@@ -685,8 +685,8 @@ namespace rocRoller
 
             auto graph = original;
 
-            auto tracer = std::make_unique<ControlFlowRWTracer>(graph);
-            auto                allRecords = tracer->coordinatesReadWrite();
+            auto tracer     = std::make_unique<ControlFlowRWTracer>(graph);
+            auto allRecords = tracer->coordinatesReadWrite();
 
             // Collect all LDS coordinates that are accessed
             const auto ldsCoordinates = collectAllLDSCoordinatesInRWTrace(graph, allRecords);

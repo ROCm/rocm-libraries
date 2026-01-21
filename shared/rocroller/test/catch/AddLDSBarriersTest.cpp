@@ -191,10 +191,8 @@ TEST_CASE("VerifyLDSBarriers - Barrier connected to different LDS coordinate fai
     auto result      = graph.checkConstraints(constraints);
 
     // The barrier is connected to LDS but to a DIFFERENT LDS coordinate,
-    // so it should still be considered as an LDS barrier.
-    // Note: The implementation considers ANY LDS-connected barrier valid.
-    // The test verifies the current implementation behavior.
-    CHECK(result.satisfied);
+    // so it should fail.
+    CHECK_FALSE(result.satisfied);
 }
 
 TEST_CASE("VerifyLDSBarriers - Multiple LDS coordinates require barriers for each",
@@ -210,23 +208,26 @@ TEST_CASE("VerifyLDSBarriers - Multiple LDS coordinates require barriers for eac
     auto kernel    = graph.control.addElement(Kernel());
     auto storeLDS1 = graph.control.addElement(StoreLDSTile());
     auto storeLDS2 = graph.control.addElement(StoreLDSTile());
-    auto barrier   = graph.control.addElement(Barrier());
+    auto barrier1  = graph.control.addElement(Barrier());
+    auto barrier2  = graph.control.addElement(Barrier());
     auto loadLDS1  = graph.control.addElement(LoadLDSTile());
     auto loadLDS2  = graph.control.addElement(LoadLDSTile());
 
     graph.control.addElement(Body(), {kernel}, {storeLDS1});
     graph.control.addElement(Sequence(), {storeLDS1}, {storeLDS2});
-    graph.control.addElement(Sequence(), {storeLDS2}, {barrier});
-    graph.control.addElement(Sequence(), {barrier}, {loadLDS1});
-    graph.control.addElement(Sequence(), {loadLDS1}, {loadLDS2});
+    graph.control.addElement(Sequence(), {storeLDS2}, {barrier1});
+    graph.control.addElement(Sequence(), {barrier1}, {loadLDS1});
+    graph.control.addElement(Sequence(), {loadLDS1}, {barrier2});
+    graph.control.addElement(Sequence(), {barrier2}, {loadLDS2});
 
     graph.mapper.connect<MacroTile>(storeLDS1, tile1);
     graph.mapper.connect<LDS>(storeLDS1, lds1);
     graph.mapper.connect<MacroTile>(storeLDS2, tile2);
     graph.mapper.connect<LDS>(storeLDS2, lds2);
-    graph.mapper.connect<LDS>(barrier, lds1);
+    graph.mapper.connect<LDS>(barrier1, lds1);
     graph.mapper.connect<MacroTile>(loadLDS1, tile1);
     graph.mapper.connect<LDS>(loadLDS1, lds1);
+    graph.mapper.connect<LDS>(barrier2, lds2);
     graph.mapper.connect<MacroTile>(loadLDS2, tile2);
     graph.mapper.connect<LDS>(loadLDS2, lds2);
 
