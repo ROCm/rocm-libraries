@@ -118,23 +118,17 @@ namespace rocsparse
             {
             case rocsparse_spsv_stage_buffer_size:
             {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_buffer_size(handle,
-                                                                       trans,
-                                                                       mat->rows,
-                                                                       mat->nnz,
-                                                                       mat->descr,
-                                                                       mat->data_type,
-                                                                       mat->const_val_data,
-                                                                       mat->row_type,
-                                                                       mat->const_row_data,
-                                                                       mat->col_type,
-                                                                       mat->const_col_data,
-                                                                       mat->info,
-                                                                       buffer_size));
-
+                size_t buffer_size_analysis;
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_analysis_buffer_size(
+                    handle, trans, mat, &buffer_size_analysis));
+                size_t buffer_size_solve;
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::csrsv_solve_buffer_size(handle, trans, mat, &buffer_size_solve));
+                *buffer_size = rocsparse::max(buffer_size_analysis, buffer_size_solve);
                 *buffer_size = rocsparse::max(static_cast<size_t>(4), *buffer_size);
                 return rocsparse_status_success;
             }
+
             case rocsparse_spsv_stage_preprocess:
             {
                 if(mat->analysed == false)
@@ -143,16 +137,7 @@ namespace rocsparse
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::csrsv_analysis(handle,
                                                    trans,
-                                                   mat->rows,
-                                                   mat->nnz,
-                                                   mat->descr,
-                                                   mat->data_type,
-                                                   mat->const_val_data,
-                                                   mat->row_type,
-                                                   mat->const_row_data,
-                                                   mat->col_type,
-                                                   mat->const_col_data,
-                                                   mat->info,
+                                                   mat,
                                                    rocsparse_analysis_policy_force,
                                                    rocsparse_solve_policy_auto,
                                                    &csrsv_info,
@@ -167,23 +152,12 @@ namespace rocsparse
                 const rocsparse_datatype datatype = mat->data_type;
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve(handle,
                                                                  trans,
-                                                                 mat->rows,
-                                                                 mat->nnz,
                                                                  datatype,
                                                                  alpha,
-                                                                 mat->descr,
-                                                                 datatype,
-                                                                 mat->const_val_data,
-                                                                 mat->row_type,
-                                                                 mat->const_row_data,
-                                                                 mat->col_type,
-                                                                 mat->const_col_data,
-                                                                 mat->info,
-                                                                 datatype,
-                                                                 x->const_values,
-                                                                 (int64_t)1,
-                                                                 datatype,
-                                                                 y->values,
+                                                                 0,
+                                                                 mat,
+                                                                 x,
+                                                                 y,
                                                                  rocsparse_solve_policy_auto,
                                                                  mat->info->get_csrsv_info(),
                                                                  temp_buffer));
@@ -203,19 +177,13 @@ namespace rocsparse
             {
             case rocsparse_spsv_stage_buffer_size:
             {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosv_buffer_size(handle,
-                                                                       trans,
-                                                                       mat->rows,
-                                                                       mat->nnz,
-                                                                       mat->descr,
-                                                                       mat->data_type,
-                                                                       mat->const_val_data,
-                                                                       mat->row_type,
-                                                                       mat->const_row_data,
-                                                                       mat->col_type,
-                                                                       mat->const_col_data,
-                                                                       mat->info,
-                                                                       buffer_size));
+                size_t buffer_size_analysis;
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosv_analysis_buffer_size(
+                    handle, trans, mat, &buffer_size_analysis));
+                size_t buffer_size_solve;
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::coosv_solve_buffer_size(handle, trans, mat, &buffer_size_solve));
+                *buffer_size = rocsparse::max(buffer_size_analysis, buffer_size_solve);
                 *buffer_size = rocsparse::max(static_cast<size_t>(4), *buffer_size);
                 return rocsparse_status_success;
             }
@@ -227,16 +195,7 @@ namespace rocsparse
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::coosv_analysis(handle,
                                                    trans,
-                                                   mat->rows,
-                                                   mat->nnz,
-                                                   mat->descr,
-                                                   mat->data_type,
-                                                   mat->const_val_data,
-                                                   mat->row_type,
-                                                   mat->const_row_data,
-                                                   mat->col_type,
-                                                   mat->const_col_data,
-                                                   mat->info,
+                                                   mat,
                                                    rocsparse_analysis_policy_force,
                                                    rocsparse_solve_policy_auto,
                                                    &csrsv_info,
@@ -251,22 +210,12 @@ namespace rocsparse
                 const rocsparse_datatype datatype = mat->data_type;
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosv_solve(handle,
                                                                  trans,
-                                                                 mat->rows,
-                                                                 mat->nnz,
                                                                  datatype,
                                                                  alpha,
-                                                                 mat->descr,
-                                                                 datatype,
-                                                                 mat->const_val_data,
-                                                                 mat->row_type,
-                                                                 mat->const_row_data,
-                                                                 mat->col_type,
-                                                                 mat->const_col_data,
-                                                                 mat->info,
-                                                                 datatype,
-                                                                 x->const_values,
-                                                                 datatype,
-                                                                 y->values,
+                                                                 static_cast<int64_t>(0),
+                                                                 mat,
+                                                                 x,
+                                                                 y,
                                                                  rocsparse_solve_policy_auto,
                                                                  mat->info->get_csrsv_info(),
                                                                  temp_buffer));
@@ -318,7 +267,6 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
-
     ROCSPARSE_CHECKARG_ENUM(1, trans);
     ROCSPARSE_CHECKARG_POINTER(2, alpha);
     ROCSPARSE_CHECKARG_POINTER(3, mat);
@@ -341,6 +289,9 @@ try
     ROCSPARSE_CHECKARG(4, x, (x->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(5, y, (y->init == false), rocsparse_status_not_initialized);
     // LCOV_EXCL_STOP
+    ROCSPARSE_CHECKARG(3, mat, (mat->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, x, (x->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(5, y, (y->batch_count != 1), rocsparse_status_not_implemented);
 
     // Check for matching types while we do not support mixed precision computation
     ROCSPARSE_CHECKARG(3, mat, (mat->data_type != compute_type), rocsparse_status_not_implemented);

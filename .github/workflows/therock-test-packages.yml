@@ -31,7 +31,7 @@ jobs:
           sparse-checkout: build_tools
           path: "prejob"
           repository: "ROCm/TheRock"
-          ref: a1f6b57cc31890c05ab0094212ae0b269765db8e # 2025-11-25 commit
+          ref: 6a91147f22b525b79b19e909ea832d4f21e71306 # 2026-01-14 commit
 
       # Checkout failure is possible on Windows, as it's the first job on a GPU test runner.
       # Post-job cleanup isn't necessary since no executables are launched in this job.
@@ -44,7 +44,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: a1f6b57cc31890c05ab0094212ae0b269765db8e # 2025-11-25 commit
+          ref: 6a91147f22b525b79b19e909ea832d4f21e71306 # 2026-01-14 commit
 
       - name: Setting up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0

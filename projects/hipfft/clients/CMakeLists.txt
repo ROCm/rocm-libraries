@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2020 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2020 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,8 +23,8 @@
 # CMake version according to latest ROCm platform requirements
 cmake_minimum_required( VERSION 3.16 )
 
-# We use C++17 features, this will add compile option: -std=c++17
-set( CMAKE_CXX_STANDARD 17 )
+# We use C++20 features, this will add compile option: -std=c++20
+set( CMAKE_CXX_STANDARD 20 )
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Consider removing this in the future

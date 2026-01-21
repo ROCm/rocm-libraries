@@ -65,10 +65,11 @@ namespace rocRoller
                     }
                     else
                     {
-                        AssertFatal(
-                            storeLDSTags.size() <= 2,
-                            "AddDirect2LDS: More than 2 ComputeIndex operation required for "
-                            "StoreLDSTile.");
+                        AssertFatal(storeLDSTags.size() >= 2,
+                                    "AddDirect2LDS: At least 2 Assign operations required for "
+                                    "StoreLDSTile.",
+                                    ShowValue(loadGlobal),
+                                    ShowValue(storeLDSTags.size()));
                         for(const auto& storeLDS : storeLDSTags)
                         {
                             auto maybeForLoopOfLoad

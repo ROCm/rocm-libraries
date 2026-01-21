@@ -40,618 +40,587 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-template<unsigned int arch, class data_type, class enable = void>
-struct default_search_n_config : default_search_n_config_base<data_type>::type
-{};
-
-// Based on data_type = double
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
-                      && (sizeof(data_type) > 4))>> : search_n_config<512, 4, 8>
-{};
-
-// Based on data_type = float
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
-                      && (sizeof(data_type) > 2))>> : search_n_config<256, 4, 8>
-{};
-
-// Based on data_type = rocprim::half
-template<class data_type>
-struct default_search_n_config<static_cast<unsigned int>(target_arch::gfx1030),
-                               data_type,
-                               std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value)
-                                                 && (sizeof(data_type) <= 2))>>
-    : search_n_config<1024, 8, 16>
-{};
-
-// Based on data_type = rocprim::int128_t
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8))>>
-    : search_n_config<1024, 1, 8>
-{};
-
-// Based on data_type = int64_t
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4))>>
-    : search_n_config<512, 4, 16>
-{};
-
-// Based on data_type = int
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2))>>
-    : search_n_config<256, 4, 8>
-{};
-
-// Based on data_type = short
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx1030),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1))>>
-    : search_n_config<1024, 8, 16>
-{};
-
-// Based on data_type = int8_t
-template<class data_type>
-struct default_search_n_config<static_cast<unsigned int>(target_arch::gfx1030),
-                               data_type,
-                               std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                                                 && (sizeof(data_type) <= 1))>>
-    : search_n_config<1024, 16, 16>
-{};
-
-// Based on data_type = double
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
-                      && (sizeof(data_type) > 4))>> : search_n_config<256, 4, 8>
-{};
-
-// Based on data_type = float
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
-                      && (sizeof(data_type) > 2))>> : search_n_config<256, 4, 8>
-{};
-
-// Based on data_type = rocprim::half
-template<class data_type>
-struct default_search_n_config<static_cast<unsigned int>(target_arch::gfx1100),
-                               data_type,
-                               std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value)
-                                                 && (sizeof(data_type) <= 2))>>
-    : search_n_config<1024, 16, 16>
-{};
-
-// Based on data_type = rocprim::int128_t
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8))>>
-    : search_n_config<256, 1, 8>
-{};
-
-// Based on data_type = int64_t
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4))>>
-    : search_n_config<256, 4, 8>
-{};
-
-// Based on data_type = int
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2))>>
-    : search_n_config<512, 4, 12>
-{};
-
-// Based on data_type = short
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx1100),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1))>>
-    : search_n_config<1024, 16, 16>
-{};
-
-// Based on data_type = int8_t
-template<class data_type>
-struct default_search_n_config<static_cast<unsigned int>(target_arch::gfx1100),
-                               data_type,
-                               std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                                                 && (sizeof(data_type) <= 1))>>
-    : search_n_config<1024, 16, 16>
-{};
-
-// Based on data_type = double
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
-                      && (sizeof(data_type) > 4))>> : search_n_config<128, 2, 8>
-{};
-
-// Based on data_type = float
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
-                      && (sizeof(data_type) > 2))>> : search_n_config<256, 2, 8>
-{};
-
-// Based on data_type = rocprim::half
-template<class data_type>
-struct default_search_n_config<static_cast<unsigned int>(target_arch::gfx906),
-                               data_type,
-                               std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value)
-                                                 && (sizeof(data_type) <= 2))>>
-    : search_n_config<256, 4, 8>
-{};
-
-// Based on data_type = rocprim::int128_t
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8))>>
-    : search_n_config<256, 1, 4>
-{};
-
-// Based on data_type = int64_t
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4))>>
-    : search_n_config<128, 2, 4>
-{};
-
-// Based on data_type = int
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2))>>
-    : search_n_config<256, 2, 8>
-{};
-
-// Based on data_type = short
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx906),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1))>>
-    : search_n_config<256, 4, 8>
-{};
-
-// Based on data_type = int8_t
-template<class data_type>
-struct default_search_n_config<static_cast<unsigned int>(target_arch::gfx906),
-                               data_type,
-                               std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                                                 && (sizeof(data_type) <= 1))>>
-    : search_n_config<256, 4, 8>
-{};
-
-// Based on data_type = double
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
-                      && (sizeof(data_type) > 4))>> : search_n_config<1024, 2, 4>
-{};
-
-// Based on data_type = float
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
-                      && (sizeof(data_type) > 2))>> : search_n_config<256, 2, 8>
-{};
-
-// Based on data_type = rocprim::half
-template<class data_type>
-struct default_search_n_config<static_cast<unsigned int>(target_arch::gfx908),
-                               data_type,
-                               std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value)
-                                                 && (sizeof(data_type) <= 2))>>
-    : search_n_config<256, 4, 12>
-{};
-
-// Based on data_type = rocprim::int128_t
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8))>>
-    : search_n_config<512, 1, 12>
-{};
-
-// Based on data_type = int64_t
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4))>>
-    : search_n_config<1024, 2, 12>
-{};
-
-// Based on data_type = int
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2))>>
-    : search_n_config<256, 2, 8>
-{};
-
-// Based on data_type = short
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx908),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1))>>
-    : search_n_config<1024, 4, 8>
-{};
-
-// Based on data_type = int8_t
-template<class data_type>
-struct default_search_n_config<static_cast<unsigned int>(target_arch::gfx908),
-                               data_type,
-                               std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                                                 && (sizeof(data_type) <= 1))>>
-    : search_n_config<512, 4, 8>
-{};
-
-// Based on data_type = double
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
-                      && (sizeof(data_type) > 4))>> : search_n_config<128, 2, 8>
-{};
-
-// Based on data_type = float
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
-                      && (sizeof(data_type) > 2))>> : search_n_config<256, 2, 8>
-{};
-
-// Based on data_type = rocprim::half
-template<class data_type>
-struct default_search_n_config<static_cast<unsigned int>(target_arch::gfx90a),
-                               data_type,
-                               std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value)
-                                                 && (sizeof(data_type) <= 2))>>
-    : search_n_config<128, 4, 8>
-{};
-
-// Based on data_type = rocprim::int128_t
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8))>>
-    : search_n_config<128, 1, 4>
-{};
-
-// Based on data_type = int64_t
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4))>>
-    : search_n_config<128, 2, 8>
-{};
-
-// Based on data_type = int
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2))>>
-    : search_n_config<256, 2, 8>
-{};
-
-// Based on data_type = short
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1))>>
-    : search_n_config<128, 4, 8>
-{};
-
-// Based on data_type = int8_t
-template<class data_type>
-struct default_search_n_config<static_cast<unsigned int>(target_arch::gfx90a),
-                               data_type,
-                               std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                                                 && (sizeof(data_type) <= 1))>>
-    : search_n_config<128, 4, 8>
-{};
-
-// Based on data_type = double
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
-                      && (sizeof(data_type) > 4))>> : search_n_config<1024, 2, 4>
-{};
-
-// Based on data_type = float
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
-                      && (sizeof(data_type) > 2))>> : search_n_config<256, 2, 4>
-{};
-
-// Based on data_type = rocprim::half
-template<class data_type>
-struct default_search_n_config<static_cast<unsigned int>(target_arch::unknown),
-                               data_type,
-                               std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value)
-                                                 && (sizeof(data_type) <= 2))>>
-    : search_n_config<256, 4, 12>
-{};
-
-// Based on data_type = rocprim::int128_t
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8))>>
-    : search_n_config<512, 1, 12>
-{};
-
-// Based on data_type = int64_t
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4))>>
-    : search_n_config<1024, 2, 16>
-{};
-
-// Based on data_type = int
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2))>>
-    : search_n_config<256, 2, 8>
-{};
-
-// Based on data_type = short
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::unknown),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1))>>
-    : search_n_config<1024, 4, 8>
-{};
-
-// Based on data_type = int8_t
-template<class data_type>
-struct default_search_n_config<static_cast<unsigned int>(target_arch::unknown),
-                               data_type,
-                               std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                                                 && (sizeof(data_type) <= 1))>>
-    : search_n_config<512, 4, 8>
-{};
-
-// Based on data_type = double
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
-                      && (sizeof(data_type) > 4))>> : search_n_config<64, 2, 4>
-{};
-
-// Based on data_type = float
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
-                      && (sizeof(data_type) > 2))>> : search_n_config<128, 4, 12>
-{};
-
-// Based on data_type = rocprim::half
-template<class data_type>
-struct default_search_n_config<static_cast<unsigned int>(target_arch::gfx1201),
-                               data_type,
-                               std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value)
-                                                 && (sizeof(data_type) <= 2))>>
-    : search_n_config<128, 8, 12>
-{};
-
-// Based on data_type = rocprim::int128_t
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8))>>
-    : search_n_config<64, 1, 8>
-{};
-
-// Based on data_type = int64_t
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4))>>
-    : search_n_config<64, 2, 12>
-{};
-
-// Based on data_type = int
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2))>>
-    : search_n_config<64, 4, 4>
-{};
-
-// Based on data_type = short
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1))>>
-    : search_n_config<64, 8, 8>
-{};
-
-// Based on data_type = int8_t
-template<class data_type>
-struct default_search_n_config<static_cast<unsigned int>(target_arch::gfx1201),
-                               data_type,
-                               std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                                                 && (sizeof(data_type) <= 1))>>
-    : search_n_config<64, 16, 4>
-{};
-
-// Based on data_type = double
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
-                      && (sizeof(data_type) > 4))>> : search_n_config<256, 2, 8>
-{};
-
-// Based on data_type = float
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    data_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
-                      && (sizeof(data_type) > 2))>> : search_n_config<128, 4, 12>
-{};
-
-// Based on data_type = rocprim::half
-template<class data_type>
-struct default_search_n_config<static_cast<unsigned int>(target_arch::gfx942),
-                               data_type,
-                               std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value)
-                                                 && (sizeof(data_type) <= 2))>>
-    : search_n_config<256, 4, 16>
-{};
-
-// Based on data_type = rocprim::int128_t
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8))>>
-    : search_n_config<128, 2, 12>
-{};
-
-// Based on data_type = int64_t
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4))>>
-    : search_n_config<256, 2, 12>
-{};
-
-// Based on data_type = int
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2))>>
-    : search_n_config<128, 4, 16>
-{};
-
-// Based on data_type = short
-template<class data_type>
-struct default_search_n_config<
-    static_cast<unsigned int>(target_arch::gfx942),
-    data_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1))>>
-    : search_n_config<256, 4, 8>
-{};
-
-// Based on data_type = int8_t
-template<class data_type>
-struct default_search_n_config<static_cast<unsigned int>(target_arch::gfx942),
-                               data_type,
-                               std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
-                                                 && (sizeof(data_type) <= 1))>>
-    : search_n_config<1024, 8, 8>
-{};
+template<class Target, class data_type>
+constexpr auto search_n_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>>::value,
+    search_n_config_params>
+{
+    // Based on data_type = double
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return search_n_config_params{
+            {512, 4},
+            8
+        };
+    }
+    // Based on data_type = float
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return search_n_config_params{
+            {256, 4},
+            8
+        };
+    }
+    // Based on data_type = rocprim::half
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
+    {
+        return search_n_config_params{
+            {1024, 8},
+            16
+        };
+    }
+    // Based on data_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+                  && (sizeof(data_type) > 8)))
+    {
+        return search_n_config_params{
+            {1024, 1},
+            8
+        };
+    }
+    // Based on data_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return search_n_config_params{
+            {512, 4},
+            16
+        };
+    }
+    // Based on data_type = int
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return search_n_config_params{
+            {256, 4},
+            8
+        };
+    }
+    // Based on data_type = short
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                  && (sizeof(data_type) > 1)))
+    {
+        return search_n_config_params{
+            {1024, 8},
+            16
+        };
+    }
+    // Based on data_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
+    {
+        return search_n_config_params{
+            {1024, 16},
+            16
+        };
+    }
+    // Default case if none of the conditions match
+    return search_n_config_params_base<data_type>();
+}
+
+template<class Target, class data_type>
+constexpr auto search_n_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>>::value,
+    search_n_config_params>
+{
+    // Based on data_type = double
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return search_n_config_params{
+            {256, 4},
+            8
+        };
+    }
+    // Based on data_type = float
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return search_n_config_params{
+            {256, 4},
+            8
+        };
+    }
+    // Based on data_type = rocprim::half
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
+    {
+        return search_n_config_params{
+            {1024, 16},
+            16
+        };
+    }
+    // Based on data_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+                  && (sizeof(data_type) > 8)))
+    {
+        return search_n_config_params{
+            {256, 1},
+            8
+        };
+    }
+    // Based on data_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return search_n_config_params{
+            {256, 4},
+            8
+        };
+    }
+    // Based on data_type = int
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return search_n_config_params{
+            {512, 4},
+            12
+        };
+    }
+    // Based on data_type = short
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                  && (sizeof(data_type) > 1)))
+    {
+        return search_n_config_params{
+            {1024, 16},
+            16
+        };
+    }
+    // Based on data_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
+    {
+        return search_n_config_params{
+            {1024, 16},
+            16
+        };
+    }
+    // Default case if none of the conditions match
+    return search_n_config_params_base<data_type>();
+}
+
+template<class Target, class data_type>
+constexpr auto search_n_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>::value,
+    search_n_config_params>
+{
+    // Based on data_type = double
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return search_n_config_params{
+            {128, 2},
+            8
+        };
+    }
+    // Based on data_type = float
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return search_n_config_params{
+            {256, 2},
+            8
+        };
+    }
+    // Based on data_type = rocprim::half
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
+    {
+        return search_n_config_params{
+            {256, 4},
+            8
+        };
+    }
+    // Based on data_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+                  && (sizeof(data_type) > 8)))
+    {
+        return search_n_config_params{
+            {256, 1},
+            4
+        };
+    }
+    // Based on data_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return search_n_config_params{
+            {128, 2},
+            4
+        };
+    }
+    // Based on data_type = int
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return search_n_config_params{
+            {256, 2},
+            8
+        };
+    }
+    // Based on data_type = short
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                  && (sizeof(data_type) > 1)))
+    {
+        return search_n_config_params{
+            {256, 4},
+            8
+        };
+    }
+    // Based on data_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
+    {
+        return search_n_config_params{
+            {256, 4},
+            8
+        };
+    }
+    // Default case if none of the conditions match
+    return search_n_config_params_base<data_type>();
+}
+
+template<class Target, class data_type>
+constexpr auto search_n_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>>::value,
+    search_n_config_params>
+{
+    // Based on data_type = double
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return search_n_config_params{
+            {1024, 2},
+            4
+        };
+    }
+    // Based on data_type = float
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return search_n_config_params{
+            {256, 2},
+            8
+        };
+    }
+    // Based on data_type = rocprim::half
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
+    {
+        return search_n_config_params{
+            {256, 4},
+            12
+        };
+    }
+    // Based on data_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+                  && (sizeof(data_type) > 8)))
+    {
+        return search_n_config_params{
+            {512, 1},
+            12
+        };
+    }
+    // Based on data_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return search_n_config_params{
+            {1024, 2},
+            12
+        };
+    }
+    // Based on data_type = int
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return search_n_config_params{
+            {256, 2},
+            8
+        };
+    }
+    // Based on data_type = short
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                  && (sizeof(data_type) > 1)))
+    {
+        return search_n_config_params{
+            {1024, 4},
+            8
+        };
+    }
+    // Based on data_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
+    {
+        return search_n_config_params{
+            {512, 4},
+            8
+        };
+    }
+    // Default case if none of the conditions match
+    return search_n_config_params_base<data_type>();
+}
+
+template<class Target, class data_type>
+constexpr auto search_n_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>>::value,
+    search_n_config_params>
+{
+    // Based on data_type = double
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return search_n_config_params{
+            {128, 2},
+            8
+        };
+    }
+    // Based on data_type = float
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return search_n_config_params{
+            {256, 2},
+            8
+        };
+    }
+    // Based on data_type = rocprim::half
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
+    {
+        return search_n_config_params{
+            {128, 4},
+            8
+        };
+    }
+    // Based on data_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+                  && (sizeof(data_type) > 8)))
+    {
+        return search_n_config_params{
+            {128, 1},
+            4
+        };
+    }
+    // Based on data_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return search_n_config_params{
+            {128, 2},
+            8
+        };
+    }
+    // Based on data_type = int
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return search_n_config_params{
+            {256, 2},
+            8
+        };
+    }
+    // Based on data_type = short
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                  && (sizeof(data_type) > 1)))
+    {
+        return search_n_config_params{
+            {128, 4},
+            8
+        };
+    }
+    // Based on data_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
+    {
+        return search_n_config_params{
+            {128, 4},
+            8
+        };
+    }
+    // Default case if none of the conditions match
+    return search_n_config_params_base<data_type>();
+}
+
+template<class Target, class data_type>
+constexpr auto search_n_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>>::value,
+    search_n_config_params>
+{
+    // Based on data_type = double
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return search_n_config_params{
+            {64, 2},
+            4
+        };
+    }
+    // Based on data_type = float
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return search_n_config_params{
+            {128, 4},
+            12
+        };
+    }
+    // Based on data_type = rocprim::half
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
+    {
+        return search_n_config_params{
+            {128, 8},
+            12
+        };
+    }
+    // Based on data_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+                  && (sizeof(data_type) > 8)))
+    {
+        return search_n_config_params{
+            {64, 1},
+            8
+        };
+    }
+    // Based on data_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return search_n_config_params{
+            {64, 2},
+            12
+        };
+    }
+    // Based on data_type = int
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return search_n_config_params{
+            {64, 4},
+            4
+        };
+    }
+    // Based on data_type = short
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                  && (sizeof(data_type) > 1)))
+    {
+        return search_n_config_params{
+            {64, 8},
+            8
+        };
+    }
+    // Based on data_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
+    {
+        return search_n_config_params{
+            {64, 16},
+            4
+        };
+    }
+    // Default case if none of the conditions match
+    return search_n_config_params_base<data_type>();
+}
+
+template<class Target, class data_type>
+constexpr auto search_n_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>>::value,
+    search_n_config_params>
+{
+    // Based on data_type = double
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return search_n_config_params{
+            {256, 2},
+            8
+        };
+    }
+    // Based on data_type = float
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return search_n_config_params{
+            {128, 4},
+            12
+        };
+    }
+    // Based on data_type = rocprim::half
+    if constexpr((bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)))
+    {
+        return search_n_config_params{
+            {256, 4},
+            16
+        };
+    }
+    // Based on data_type = rocprim::int128_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 16)
+                  && (sizeof(data_type) > 8)))
+    {
+        return search_n_config_params{
+            {128, 2},
+            12
+        };
+    }
+    // Based on data_type = int64_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                  && (sizeof(data_type) > 4)))
+    {
+        return search_n_config_params{
+            {256, 2},
+            12
+        };
+    }
+    // Based on data_type = int
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                  && (sizeof(data_type) > 2)))
+    {
+        return search_n_config_params{
+            {128, 4},
+            16
+        };
+    }
+    // Based on data_type = short
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                  && (sizeof(data_type) > 1)))
+    {
+        return search_n_config_params{
+            {256, 4},
+            8
+        };
+    }
+    // Based on data_type = int8_t
+    if constexpr((!bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 1)))
+    {
+        return search_n_config_params{
+            {1024, 8},
+            8
+        };
+    }
+    // Default case if none of the conditions match
+    return search_n_config_params_base<data_type>();
+}
+
+template<class Target, class data_type>
+constexpr auto search_n_config_picker() -> std::enable_if_t<
+    std::is_same<Target,
+                 comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>::value,
+    search_n_config_params>
+{
+    return search_n_config_picker<
+        comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
+        data_type>();
+}
+
+// All the existing configs should be auto generated
+using search_n_targets
+    = comp_targets<comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>,
+                   comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>,
+                   comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>,
+                   comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
+                   comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>,
+                   comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>,
+                   comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>,
+                   comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
 
 } // end namespace detail
 

@@ -157,7 +157,7 @@ void testing_gemvi_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_gemvi(Arguments argus)
+void testing_gemvi(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                  m        = argus.M;
@@ -333,8 +333,6 @@ hipsparseStatus_t testing_gemvi(Arguments argus)
 
     CHECK_HIP_ERROR(hipFree(externalBuffer));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_GEMVI_HPP

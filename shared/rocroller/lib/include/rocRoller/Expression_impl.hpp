@@ -371,6 +371,26 @@ namespace rocRoller
             return convert(DATATYPE, a);
         }
 
+        inline ExpressionPtr reinterpret(DataType dt, ExpressionPtr a)
+        {
+            auto argType = resultVariableType(a);
+            auto srcSize = DataTypeInfo::Get(argType.dataType).elementBytes;
+            auto dstSize = DataTypeInfo::Get(dt).elementBytes;
+
+            AssertFatal(srcSize == dstSize,
+                        "Reinterpret requires same size types: source type ",
+                        toString(argType.dataType),
+                        " (",
+                        srcSize,
+                        " bytes) != destination type ",
+                        toString(dt),
+                        " (",
+                        dstSize,
+                        " bytes)");
+
+            return std::make_shared<Expression>(Reinterpret{{.arg{a}}, dt});
+        }
+
         template <CCommandArgumentValue T>
         inline ExpressionPtr literal(T value)
         {
@@ -490,6 +510,8 @@ namespace rocRoller
         EXPRESSION_INFO(BitFieldExtract);
 
         EXPRESSION_INFO(Convert);
+
+        EXPRESSION_INFO(Reinterpret);
 
         EXPRESSION_INFO(Concatenate);
 
@@ -706,6 +728,5 @@ namespace rocRoller
                 return std::make_tuple(exp.lhs, exp.r1hs, exp.r2hs);
             }
         }
-
     }
 }

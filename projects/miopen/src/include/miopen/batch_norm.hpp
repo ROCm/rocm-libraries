@@ -29,6 +29,7 @@
 #include <miopen/common.hpp>
 #include <miopen/miopen.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -180,7 +181,7 @@ MIOPEN_INTERNALS_EXPORT void BatchNormForwardInference(const Handle& handle,
                                                        ConstData_t bnBias,
                                                        ConstData_t estimatedMean,
                                                        ConstData_t estimatedVariance,
-                                                       double epsilon,
+                                                       std::optional<double> epsilonOpt,
                                                        const ActivationDescriptor& activDesc);
 
 MIOPEN_INTERNALS_EXPORT void BatchNormForwardTraining(const Handle& handle,
@@ -200,6 +201,30 @@ MIOPEN_INTERNALS_EXPORT void BatchNormForwardTraining(const Handle& handle,
                                                       double expAvgFactor,
                                                       Data_t resultRunningMean,
                                                       Data_t resultRunningVariance,
+                                                      double epsilon,
+                                                      Data_t resultSaveMean,
+                                                      Data_t resultSaveInvVariance,
+                                                      const ActivationDescriptor& activDesc);
+
+MIOPEN_INTERNALS_EXPORT void BatchNormForwardTraining(const Handle& handle,
+                                                      miopenBatchNormMode_t bn_mode,
+                                                      const void* alpha,
+                                                      const void* beta,
+                                                      const TensorDescriptor& xDesc,
+                                                      ConstData_t x,
+                                                      const TensorDescriptor& yDesc,
+                                                      Data_t y,
+                                                      const TensorDescriptor& scaleDesc,
+                                                      const TensorDescriptor& biasDesc,
+                                                      const TensorDescriptor& savedMeanDesc,
+                                                      const TensorDescriptor& savedVarianceDesc,
+                                                      ConstData_t bnScale,
+                                                      ConstData_t bnBias,
+                                                      double expAvgFactor,
+                                                      ConstData_t prevResultRunningMean,
+                                                      ConstData_t prevResultRunningVariance,
+                                                      Data_t nextResultRunningMean,
+                                                      Data_t nextResultRunningVariance,
                                                       double epsilon,
                                                       Data_t resultSaveMean,
                                                       Data_t resultSaveInvVariance,

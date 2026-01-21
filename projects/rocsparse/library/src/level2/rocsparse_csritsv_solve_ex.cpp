@@ -304,6 +304,7 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
         else
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_async(
+                1,
                 reinterpret_cast<rocsparse_int*>(info->csritsv_info->get_zero_pivot()),
                 (rocsparse_int)descr->base,
                 stream));

@@ -162,12 +162,12 @@ if(COMMAND rocm_check_target_ids)
         TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+")
     else()
       rocm_check_target_ids(DEFAULT_GPU_TARGETS
-          TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201")
+          TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
     endif()
 else()
     # Use target ID syntax if supported for GPU_TARGETS
     if(TARGET_ID_SUPPORT)
-        set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201")
+        set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
     else()
         set(DEFAULT_GPU_TARGETS "gfx803;gfx900;gfx906;gfx908")
     endif()
@@ -199,7 +199,7 @@ endif()
 message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
 
 # Setup version
-set(VERSION_STRING "4.2.0")
+set(VERSION_STRING "4.3.0")
 set(SOVERSION_STRING "1.0")
 set(MIN_ROCPRIM_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM.")
 set(MIN_ROCBLAS_VERSION "4.1.0" CACHE STRING "Minimum version of rocBLAS.")

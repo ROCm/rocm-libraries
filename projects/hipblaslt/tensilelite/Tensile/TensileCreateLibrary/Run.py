@@ -322,6 +322,7 @@ def writeSolutionsAndKernels(
             assemblyTmpPath,
             compress,
         )
+        
         buildSourceCodeObjectFiles(
             srcToolchain.compiler,
             srcToolchain.bundler,
@@ -421,6 +422,7 @@ def writeSolutionsAndKernelsTCL(
 
     writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
     srcKernelFile = Path(outputPath) / "Kernels.cpp"
+
     buildSourceCodeObjectFiles(
         srcToolchain.compiler,
         srcToolchain.bundler,

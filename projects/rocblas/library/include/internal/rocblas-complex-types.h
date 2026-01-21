@@ -78,13 +78,13 @@ static_assert(sizeof(hipDoubleComplex) == 2 * sizeof(double),
 // If this is a C compiler, C++ compiler below C++14, or a host-only compiler, we only
 // include minimal definitions of rocblas_float_complex and rocblas_double_complex
 
-/*! \brief Struct to represent a complex number with single precision real and imaginary parts. */
+/*! \brief Struct to represent a complex number with single-precision real and imaginary parts. */
 typedef struct
 {
     float x, y;
 } rocblas_float_complex;
 
-/*! \brief Struct to represent a complex number with double precision real and imaginary parts. */
+/*! \brief Struct to represent a complex number with double-precision real and imaginary parts. */
 typedef struct
 {
     double x, y;

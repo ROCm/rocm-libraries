@@ -2,7 +2,15 @@
 
 Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hiptensor](https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html).
 
-## (Unreleased) hipTensor 2.2.0 for ROCm 7.2.0
+## (Unreleased) hipTensor 2.3.0
+
+### Added
+
+* Added support for the following new GPU targets:
+  * gfx11: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153.
+  * gfx12: gfx1200, gfx1201.
+
+## hipTensor 2.2.0 for ROCm 7.2.0
 
 ### Added
 
@@ -12,11 +20,13 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 * Added `simple_contraction_plan_cache` to demonstrate plan cache usages.
 * Added `plan_cache_test` to test the plan cache across various tensor ranks.
 * Added C API headers to enable compatibility with C programs.
-* Added cmake function to allow projects querying about architecture support.
-* Added option to configure memory layout for tests and benchmarks.
+* Added a CMake function to allow projects to query architecture support.
+* Added an option to configure the memory layout for tests and benchmarks.
 
 ### Changed
 
+* hipTensor has been moved into the new rocm-libraries "monorepo" repository (https://github.com/ROCm/rocm-libraries). This repository consolidates a number of separate ROCm libraries and shared components.
+  * The repository migration requires a few changes to the CMake configuration of hipTensor.
 * Updated C++ standard from C++17 to C++20.
 * Include files `hiptensor/hiptensor.hpp` and `hiptensor/hiptensor_types.hpp` are now deprecated. Use `hiptensor/hiptensor.h` and `hiptensor/hiptensor_types.h` instead.
 * Converted include guards from #ifndef/#define/#endif to #pragma once.
@@ -29,7 +39,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
-* Added large tensor lengths in benchmark yaml files.
+* Added large tensor lengths in benchmark YAML files.
 * Added a new "-l" option to tests for redirecting logs to a file.
 
 ### Changed

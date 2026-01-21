@@ -28,7 +28,7 @@
 
 #include <array>
 
-#include <dataTypeInfo.hpp>
+#include <mxDataGenerator/dataTypeInfo.hpp>
 
 // Approximated to 40 decimal places
 constexpr std::array<double, 256> e8m0Values

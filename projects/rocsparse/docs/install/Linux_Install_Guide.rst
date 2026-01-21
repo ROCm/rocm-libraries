@@ -124,6 +124,12 @@ Using install.sh to build rocSPARSE with dependencies
 
 The following table lists the common ways to use ``install.sh`` to build the rocSPARSE dependencies and library.
 
+.. note::
+
+   By default, rocBLAS is a dependency and the build will fail if it isn't found.
+   To opt out of using rocBLAS when building from source with
+   the ``install.sh`` script, use the ``no-rocblas`` option. 
+
 .. csv-table::
    :header: "Command","Description"
    :widths: 40, 90
@@ -231,3 +237,29 @@ after successfully compiling the library with the clients.
 
       # Execute rocSPARSE example
       ./example_csrmv 1000
+
+For more comprehensive testing, you can run the entire unit test suite using the command:
+
+.. code-block:: shell
+
+      # Navigate to clients binary directory
+      cd build/release/clients/staging
+
+      # Execute rocSPARSE example
+      ./rocsparse-test
+
+For more focused testing, you can run a specific test by running the following command:
+
+.. code-block:: shell
+
+      # Navigate to clients binary directory
+      cd build/release/clients/staging
+
+      # Execute rocSPARSE example
+      ./rocsparse-test --gtest_filter=TestName
+
+.. warning::
+
+   The unit test suite is a comprehensive test of the rocSPARSE library and takes multiple hours to finish. Consider running 
+   more focused tests for quicker feedback.
+

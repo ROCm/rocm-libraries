@@ -21,6 +21,7 @@
 # THE SOFTWARE.
 
 import argparse
+from dataclasses import dataclass
 import json
 import re
 import sys
@@ -38,6 +39,129 @@ noisy_rejected_count = 0
 slower_rejected_count = 0
 marginal_improvements_rejected_count = 0
 
+TARGET_GPUS_DICT = {
+    "MI350X": "mi350x",
+    "MI325X": "mi325x",
+    "MI308X": "mi308x",
+    "MI300A": "mi300a",
+    "MI300X": "mi300x",
+    "MI210": "mi210",
+    "MI100": "mi100",
+    "RX 9060": "rx9060",
+    "RX 9070": "rx9070",
+    "V620": "v620",
+    "RX 7900": "rx7900",
+    "RX 6900": "rx6900"
+}
+
+def get_gen_from_architecture(arch):
+    match arch:
+        case "target_arch::gfx803":
+            return "gen::gcn3"
+        case "target_arch::gfx900" | "target_arch::gfx906":
+            return "gen::gcn5"
+        case "target_arch::gfx908":
+            return "gen::cdna1"
+        case "target_arch::gfx90a":
+            return "gen::cdna2"
+        case "target_arch::gfx942":
+            return "gen::cdna3"
+        case "target_arch::gfx950":
+            return "gen::cdna4"
+        case (
+            "target_arch::gfx1010"
+            | "target_arch::gfx1011"
+            | "target_arch::gfx1012"
+        ):
+            return "gen::rdna1"
+        case "target_arch::gfx1030":
+            return "gen::rdna2"
+        case (
+            "target_arch::gfx1100"
+            | "target_arch::gfx1101"
+            | "target_arch::gfx1102"
+            | "target_arch::gfx1103"
+            | "target_arch::gfx1150"
+            | "target_arch::gfx1151"
+            | "target_arch::gfx1152"
+            | "target_arch::gfx1153"
+        ):
+            return "gen::rdna3"
+        case "target_arch::gfx1200" | "target_arch::gfx1201":
+            return "gen::rdna4"
+        case "target_arch::unknown" | "target_arch::invalid":
+            return "gen::unknown"
+        case _:
+            return "gen::unknown"
+
+
+def get_target_gpu_from_context(context):
+    """
+    Uses the benchmark run context embedded into the benchmark output json to retrieve the targeted gpu
+    """
+
+    gpu_from_context = context['hdp_name']
+
+    ret = "gpu::generic"
+
+    for gpu in TARGET_GPUS_DICT.keys():
+        if gpu in gpu_from_context:
+            ret = f'gpu::{TARGET_GPUS_DICT[gpu]}'
+
+    if ret == "gpu::generic":
+        print(f"WARNING: Unrecognized GPU '{gpu_from_context}', so using gpu::generic", file=sys.stderr, flush=True)
+    return ret
+
+@dataclass(frozen=True, eq=True)
+class Target:
+    """
+    Data class describing the target of the benchmark
+    """
+    gen: str = "gen::unknown"
+    arch: str = "target_arch::unknown"
+    gpu: str = "gpu::generic"
+    rep: str = "rep::amdgcn"
+
+    def __iter__(self):
+        yield from (self.gen, self.arch, self.gpu, self.rep)
+
+    def as_str(self) -> str:
+        return ", ".join(str(v) for v in self)
+    
+    @classmethod
+    def from_string(self, raw: str) -> "Target":
+        """Create Target instance from a raw string with key::value pairs"""
+        # Split by commas and strip whitespace/newlines
+        parts = [p.strip() for p in raw.split(",") if p.strip()]
+
+        # Default data
+        data = {
+            "gen": self.gen,
+            "arch": self.arch,
+            "gpu": self.gpu,
+            "rep": self.rep,
+        }
+
+        # Assign fields based on prefixes
+        for part in parts:
+            if part.startswith("gen::"):
+                data["gen"] = part
+            elif part.startswith("target_arch::"):
+                data["arch"] = part
+            elif part.startswith("gpu::"):
+                data["gpu"] = part
+            elif part.startswith("rep::"):
+                data["rep"] = part
+
+        return self(**data)
+    
+
+def get_target(context):
+    arch = f"target_arch::{context["hdp_gcn_arch_name"].split(":")[0]}"
+    gpu = get_target_gpu_from_context(context)
+    gen = get_gen_from_architecture(arch)
+    rep = "rep::amdgcn"
+    return Target(gen, arch, gpu, rep)
 
 class colors:
     OK = "\033[92m"
@@ -90,7 +214,8 @@ def add_new_contenders(
     new_config: Dict[str, Any],
     new_alg_data: Dict[str, Any],
     score_assigner: Callable[[List[Dict[str, Any]]], None],
-    contenders: Dict[Tuple[Any, str], Contender],
+    contenders: Dict[Target, Dict[Any, Contender]],
+    picker_strings: Dict[Tuple[Target, str], str],
     improvement_threshold_percentage: float,
 ) -> bool:
     global warnings, total_specializations, improvement_count, new_specialization_count, noisy_rejected_count, slower_rejected_count, marginal_improvements_rejected_count
@@ -100,23 +225,25 @@ def add_new_contenders(
     Z_SCORE = 1.96  # 95% confidence
 
     # Collect all rows first to determine max widths
-    for arch, new_arch_specializations in new_config["specializations"].items():
-        if arch not in new_alg_data and (
-            arch != "unknown" or "gfx908" not in new_alg_data
-        ):
+    for target, new_target_specializations in new_config["specializations"].items():
+        if Target() == target:
+            continue
+        if target not in new_alg_data:
             warnings.append(
-                f"{colors.WARN}The new JSON data is missing {arch} for {algorithm_name}{colors.END_COLOR}"
+                f"{colors.WARN}The new JSON data is missing {target} for {algorithm_name}{colors.END_COLOR}"
             )
             continue
 
-        # create_optimization.py its create_config_file_content() chose to make "unknown" a copy of "gfx908"
-        new_arch_data = new_alg_data["gfx908" if arch == "unknown" else arch]
-        for instance_key, new_instance_data in new_arch_specializations.items():
-            if instance_key not in new_arch_data:
+        new_target_data = new_alg_data[target]
+        for instance_key, new_instance_data in list(new_target_specializations.items()):
+            if instance_key in {"begin_of_picker", "end_of_picker"}:
+                picker_strings[(target, instance_key)] = new_instance_data
+                continue
+            if instance_key not in new_target_data:
                 sys.exit(
-                    f"{colors.FAIL}The new JSON data is missing {arch} specialization '{stringify_instance_key(instance_key)}' for {algorithm_name}{colors.END_COLOR}"
+                    f"{colors.FAIL}The new JSON data is missing {target} specialization '{stringify_instance_key(instance_key)}' for {algorithm_name}{colors.END_COLOR}"
                 )
-            new_instances = new_arch_data[instance_key]
+            new_instances = new_target_data[instance_key]
 
             add_base_args(new_instance_data["base_args"], new_instances)
             score_assigner(new_instances)
@@ -125,15 +252,13 @@ def add_new_contenders(
             total_specializations += 1
 
             row = {}
-            row["arch"] = str(arch)
+            row["target"] = target.as_str()
             row["key"] = stringify_instance_key(instance_key)
             row["new_family_index"] = new_best_instance["family_index"]
             row["new_bps"] = f"{new_best_instance['bytes_per_second']:.2e}"
 
-            key = (instance_key, arch)
-
             # If there is no old config specialization, we always accept the new one.
-            if key not in contenders:
+            if target not in contenders or instance_key not in contenders[target]:
                 status = "New"
                 colored_status = f"{colors.OK}{status}{colors.END_COLOR}"
                 row["status"] = colored_status
@@ -147,12 +272,14 @@ def add_new_contenders(
                 rows.append(row)
                 new_specialization_count += 1
                 improved = True
-                contenders[key] = Contender(
+                if target not in contenders:
+                    contenders[target] = {}
+                contenders[target][instance_key] = Contender(
                     instance=new_best_instance, string=new_instance_data["string"]
                 )
                 continue
 
-            old_best_instance = contenders[key].instance
+            old_best_instance = contenders[target][instance_key].instance
 
             row["old_family_index"] = old_best_instance.get("family_index", "-")
             row["old_bps"] = (
@@ -217,7 +344,7 @@ def add_new_contenders(
             rows.append(row)
             improvement_count += 1
             improved = True
-            contenders[key] = Contender(
+            contenders[target][instance_key] = Contender(
                 instance=new_best_instance, string=new_instance_data["string"]
             )
 
@@ -225,7 +352,7 @@ def add_new_contenders(
         ("status", f"Status of {algorithm_name}"),
         ("noise", "Noise (old/new)"),
         ("bps", "Bytes/sec (old/new)"),
-        ("arch", "Arch"),
+        ("target", "Target"),
         ("key", "Specialization"),
         ("family_index", "Family index (old/new)"),
     ]
@@ -281,35 +408,40 @@ def get_old_contenders(
     old_config: Dict[str, Any],
     old_alg_data: Dict[str, Any],
     score_assigner: Callable[[List[Dict[str, Any]]], None],
-) -> Dict[Tuple[Any, str], Contender]:
+):
     global warnings
 
-    contenders: Dict[Tuple[Any, str], Contender] = {}
+    contenders: Dict[Target, Dict[Any, Contender]] = {}
+    picker_strings: Dict[Tuple[str, str], str] = {}
 
     old_config.setdefault("specializations", {})
 
-    for arch, old_arch_specializations in old_config["specializations"].items():
+    for target, old_target_specializations in old_config["specializations"].items():
+        if Target() == target:
+            continue
+        contenders[target] = {}
         # Always keep every old specialization, even if missing in old_alg_data
-        if arch not in old_alg_data and (
-            arch != "unknown" or "gfx908" not in old_alg_data
-        ):
+        if target not in old_alg_data:
             warnings.append(
-                f"{colors.WARN}The old JSON data is missing {arch} for {algorithm_name}{colors.END_COLOR}"
+                f"{colors.WARN}The old JSON data is missing {target} for {algorithm_name}{colors.END_COLOR}"
             )
-            old_arch_data = {}
+            old_target_data = {}
         else:
-            old_arch_data = old_alg_data["gfx908" if arch == "unknown" else arch]
+            old_target_data = old_alg_data[target]
 
-        for instance_key, old_instance_data in old_arch_specializations.items():
-            if instance_key not in old_arch_data:
-                # If old_arch_data is falsy, then a warning was already printed
-                if old_arch_data:
+        for instance_key, old_instance_data in old_target_specializations.items():
+            if instance_key in {"begin_of_picker", "end_of_picker"}:
+                picker_strings[(target, instance_key)] = old_instance_data
+                continue
+            if instance_key not in old_target_data:
+                # If old_target_data is falsy, then a warning was already printed
+                if old_target_data:
                     warnings.append(
-                        f"{colors.WARN}The old JSON data is missing {arch} specialization '{stringify_instance_key(instance_key)}' for {algorithm_name}{colors.END_COLOR}"
+                        f"{colors.WARN}The old JSON data is missing {target} specialization '{stringify_instance_key(instance_key)}' for {algorithm_name}{colors.END_COLOR}"
                     )
                 old_instances = []
             else:
-                old_instances = old_arch_data[instance_key]
+                old_instances = old_target_data[instance_key]
 
             add_base_args(old_instance_data["base_args"], old_instances)
             score_assigner(old_instances)
@@ -319,17 +451,38 @@ def get_old_contenders(
                 get_best_instance(old_instances) if old_instances else {}
             )
 
-            key = (instance_key, arch)
-            contenders[key] = Contender(
+            contenders[target][instance_key] = Contender(
                 instance=old_best_instance, string=old_instance_data["string"]
             )
 
-    return contenders
+    return (contenders, picker_strings)
 
+
+def get_comp_targets(old_config: Dict[str, Any], new_config: Dict[str, Any], algorithm_name: str):
+    ret = f"// All existing configs\nusing {algorithm_name}_targets = comp_targets<"
+
+    unique_targets = []
+    for target in new_config["specializations"].keys():
+        if target != Target() and target not in unique_targets:
+            unique_targets.append(target)
+    for target in old_config["specializations"].keys():
+        if target != Target() and target not in unique_targets:
+            unique_targets.append(target)
+    
+    for unique_target in unique_targets:
+        ret += f"comp_target<{unique_target.as_str()}>,"
+
+    ret += f"comp_target<{Target().as_str()}>>;"
+    return ret
 
 def get_best_instance(instances):
     return max(instances, key=lambda x: x["score"])
 
+def parse_args(base_args):
+    numbers = []
+    for item in base_args:
+        numbers.extend(map(int, re.findall(r'\d+', item)))
+    return numbers
 
 def add_base_args(base_args, instances):
     """
@@ -337,8 +490,9 @@ def add_base_args(base_args, instances):
     """
     for instance in instances:
         if instance["algo"] in {"merge_sort_block_sort", "radix_sort_block_sort"}:
-            instance["bs"] = int(base_args[0])
-            instance["ipt"] = int(base_args[1])
+            args = parse_args(base_args)
+            instance["bs"] = int(args[0])
+            instance["ipt"] = int(args[1])
 
 
 def score_assigner_default(instances: List[Dict[str, Any]]) -> None:
@@ -399,7 +553,7 @@ def generate_improved_configs(
         new_alg_data = new_data.get(algorithm_name, {})
 
         score_assigner = get_score_assigner(algorithm_name)
-        contenders = get_old_contenders(
+        contenders, picker_strings = get_old_contenders(
             algorithm_name, old_config or {}, old_alg_data or {}, score_assigner
         )
         improved = add_new_contenders(
@@ -408,6 +562,7 @@ def generate_improved_configs(
             new_alg_data,
             score_assigner,
             contenders,
+            picker_strings,
             improvement_threshold_percentage,
         )
         if not improved:
@@ -420,14 +575,32 @@ def generate_improved_configs(
                 if old_config
                 else new_config["start_of_config"]
             )
-            for contender in contenders.values():
-                f.write(contender.string)
+            # Add every picker for every different target
+            for target, target_contenders in contenders.items():
+                f.write(picker_strings[(target, "begin_of_picker")])
+                for contender in target_contenders.values():
+                    f.write(contender.string)
+                f.write(picker_strings[(target, "end_of_picker")])
+
+            # Add unknown target fallback case
+            unknown_target_contender = (
+                old_config["specializations"][Target()]["begin_of_picker"]
+                if old_config
+                else new_config["specializations"][Target()]["begin_of_picker"]
+            ).lstrip("\n")
+
+            f.write(unknown_target_contender)
+
+            # Add comp_targets
+            comp_targets = get_comp_targets(old_config, new_config, algorithm_name)
+            f.write(comp_targets)
+            
             # Remove leading newlines from end_of_config to avoid triple newlines
             end = (
                 old_config["end_of_config"]
                 if old_config
                 else new_config["end_of_config"]
-            ).lstrip("\n")
+            )
             if not end.endswith("\n"):
                 end += "\n"
             f.write(end)
@@ -437,24 +610,30 @@ def extract_template_arguments(code: str) -> list[str]:
     """
     Extracts the top-level template arguments from a base config class in a C++ struct specialization.
 
-    Assumes the input contains a line ending in `: XXX_config<...> {`, where `XXX_config` is
-    the name of the base config class and the angle brackets contain template arguments.
+    Assumes the input contains a line ending in `: XXX_config_params{...} {`, where `XXX_config_params` is
+    the name of the base config params class and the curly brackets contain template arguments.
 
     Args:
         code (str): A string containing the C++ struct definition.
 
     Returns:
         List[str]: A list of top-level template arguments as strings.
-                   Nested templates like `kernel_config<1024, 1>` are preserved as single items.
+                   Nested structs like `kernel_config_params{1024, 1}` are preserved as single items.
 
     Example:
         Input:
-            'struct foo : some_config<256, kernel_config<128, 2>, 1 << 2> {'
+            ```
+            if constexpr(true)
+            {
+                return some_config_params{256, kernel_config_params{128, 2}, 1 << 2};
+            }
+            ```
         Output:
-            ['256', 'kernel_config<128, 2>', '1 << 2']
+            ['256', 'kernel_config_params{128, 2}', '1 << 2']
     """
     # Match the base class ending in `_config<...> {`
-    match = re.search(r":\s*\w+_config<(.+?)>\s*{", code, re.DOTALL)
+    match = re.search(r"return\s+\w+_config_params\s*\{\s*([\s\S]*?)\s*\};", code, re.DOTALL)
+
     if not match:
         return []
 
@@ -466,15 +645,15 @@ def extract_template_arguments(code: str) -> list[str]:
     depth = 0
     i = 0
     while i < len(template_args):
-        if template_args[i : i + 2] in ("<<", ">>"):
+        if template_args[i : i + 2] in ("{{", "}}"):
             current += template_args[i : i + 2]
             i += 2
             continue
 
         char = template_args[i]
-        if char == "<":
+        if char == "{":
             depth += 1
-        elif char == ">":
+        elif char == "}":
             depth -= 1
 
         if char == "," and depth == 0:
@@ -501,21 +680,24 @@ def get_specialization_key(specialization_string: str) -> Any:
 #     'select_flag': {
 #         'full_name': 'device_select_flag.hpp',
 #         'start_of_config': '// Copyright ...',
+#         'comp_targets': 'using select_flag_targets = comp_targets< ... >;'
 #         'end_of_config': '} // end namespace detail ...',
 #         'specializations': {
-#             'gfx1200': {
+#             Target(gen::rdna2, target_arch::gfx1030, gpu::v620, rep::amdgcn): {
+#                 'begin_of_picker': 'template<class Target, class data_type> constexpr auto select_flag_config_picker() ... {\n',
+#                 'end_of_picker': `// Default case if none of the conditions match\nreturn partition_config_params_base<data_type>();}\n`,
 #                 Instance(key_type='double'): {
-#                     'string': '// Based on key_type = double\n ... select_config<512, kernel_config<128, 2>>\n{};\n\n',
+#                     'string': '// Based on key_type = double\n ... partition_config_params{512, kernel_config_params{128, 2}};\n',
 #                     'base_args': [
 #                         '512',
-#                         'kernel_config<128, 2>'
+#                         'kernel_config_params{128, 2}'
 #                     ]
 #                 },
 #                 Instance(key_type='float'): {
-#                     'string': '// Based on key_type = float\n ... select_config<1024, kernel_config<128, 2>>\n{};\n\n',
+#                     'string': '// Based on key_type = float\n ... partition_config_params{1024, kernel_config_params{128, 2}};\n',
 #                     'base_args': [
 #                         '1024',
-#                         'kernel_config<128, 2>'
+#                         'kernel_config_params{128, 2}'
 #                     ]
 #                 }
 #             }
@@ -531,32 +713,55 @@ def read_configs(dir_path: Path) -> Dict[str, Any]:
         config["full_name"] = hpp_path.name
 
         text = hpp_path.read_text()
-        matches = re.split(r"(// Based on .*?{\s*};\n\n)", text, flags=re.DOTALL)
-        matches = list(filter(None, matches))
-        config["start_of_config"] = matches[0]
-        config["end_of_config"] = matches[-1]
+        pickers = re.split(r"(template\s*<[\s\S]*?>\s*\{[\s\S]*?}\n\n)", text, flags=re.DOTALL)
+        pickers = list(filter(None, pickers))
+        # Remove spaces from picker functions to have a more consistent input.
+        pickers = [picker for picker in pickers if picker.strip() != ""]
+
+        # All the code before the picker functions.
+        config["start_of_config"] = pickers[0]
+
+        # The code after the picker functions need to be divided in comp_targets and the end.
+        comp_target = re.split(r"(// .*\nusing[\s\S]*?;)", pickers[-1], flags=re.DOTALL)
+        comp_target = list(filter(None, comp_target))
+        config["comp_targets"] = comp_target[0]
+        config["end_of_config"] = comp_target[-1]
 
         all_specializations = config.setdefault("specializations", {})
 
-        specialization_strings = matches[1:-1]
-        for specialization_string in specialization_strings:
-            arch_match = re.search(r"target_arch::(.*?)\)", specialization_string)
-            if not arch_match:
-                sys.exit(
-                    f"{colors.FAIL}Could not find arch in specialization: {specialization_string}{colors.END_COLOR}"
-                )
-            arch = arch_match.group(1)
+        picker_strings = pickers[1:-1]
+        for picker_string in picker_strings:
+            target_match = re.search(r"comp_target<((.||\s)*?)>", picker_string)
 
-            specialization_key = get_specialization_key(specialization_string)
-            arch_specializations = all_specializations.setdefault(arch, {})
-            if specialization_key in arch_specializations:
+            if not target_match:
                 sys.exit(
-                    f"{colors.FAIL}Specialization key duplicate '{specialization_key}'{colors.END_COLOR}"
+                    f"{colors.FAIL}Could not find arch in specialization: {picker_string}{colors.END_COLOR}"
                 )
-            arch_specializations[specialization_key] = {
-                "string": specialization_string,
-                "base_args": extract_template_arguments(specialization_string),
-            }
+
+            target = Target.from_string(target_match.group(1))
+
+            specializations = re.split(r"(\s*// Based on[\s\S]*?\}\n(?=\s*//))", picker_string, flags=re.DOTALL)
+            specializations = list(filter(None, specializations))
+            target_specializations = all_specializations.setdefault(target, {})
+            target_specializations["begin_of_picker"] = specializations[0]
+            target_specializations["end_of_picker"] = specializations[-1]
+
+            for specialization_string in specializations[1:-1]:
+                specialization_key = get_specialization_key(specialization_string)
+
+                if specialization_key in target_specializations:
+                    sys.exit(
+                        f"{colors.FAIL}Specialization key duplicate '{specialization_key}'{colors.END_COLOR}"
+                    )
+                args = extract_template_arguments(specialization_string)
+                if args is []:
+                    sys.exit(
+                        f"{colors.FAIL}Arguments are empty '{specialization_key}'{colors.END_COLOR}"
+                    )
+                target_specializations[specialization_key] = {
+                    "string": specialization_string,
+                    "base_args": args,
+                }
 
     return configs
 
@@ -575,7 +780,7 @@ def get_instance_key(instanced_types: Dict[str, Any], selectors: List[str]) -> A
 # This is the format of the returned dictionary:
 # {
 #     'select_flag': {
-#         'gfx1200': {
+#         Target(gen::rdna2, target_arch::gfx1030, gpu::v620, rep::amdgcn): {
 #             Instance(key_type='double'): [
 #                 { 'items_per_second': 200, 'segment_count': 10 },
 #                 { 'items_per_second': 300, 'segment_count': 20 }
@@ -592,7 +797,7 @@ def read_data(dir_path: Path, selectors: Dict[str, List[str]]) -> Dict[str, Any]
 
     for json_path in dir_path.rglob("*.json"):
         json_data = json.loads(json_path.read_text())
-        arch = json_data["context"]["hdp_gcn_arch_name"].split(":")[0]
+        target = get_target(json_data["context"])
 
         for benchmark in json_data["benchmarks"]:
             name = benchmark["name"]
@@ -614,14 +819,14 @@ def read_data(dir_path: Path, selectors: Dict[str, List[str]]) -> Dict[str, Any]
                 algorithm_name += "_" + data["subalgo"]
 
             alg_data = all_data.setdefault(algorithm_name, {})
-            arch_data = alg_data.setdefault(arch, defaultdict(list))
+            target_data = alg_data.setdefault(target, defaultdict(list))
 
             if algorithm_name not in selectors:
                 sys.exit(
                     f"{colors.FAIL}No selectors found for algorithm '{algorithm_name}' in the selectors JSON{colors.END_COLOR}"
                 )
             instance_key = get_instance_key(data, selectors[algorithm_name])
-            arch_data[instance_key].append(data)
+            target_data[instance_key].append(data)
 
     return all_data
 
@@ -706,21 +911,23 @@ def add_arguments(parser: StrictArgumentParser) -> None:
 class TestExtractTemplateArguments(unittest.TestCase):
     def test_complex(self):
         specialization = """
-        struct default_radix_sort_onesweep_config<
-            static_cast<unsigned int>(target_arch::gfx1030),
-            key_type,
-            value_type,
-            std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
-                              && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
-                              && (sizeof(value_type) > 8))>>
-            : radix_sort_onesweep_config<kernel_config<1024, 1>, (1 << 17) + 1 >> 2 + 70000,
-                                         8,
-                                         block_radix_rank_algorithm::match>
-        {};
+        // Based on key_type = double, value_type = rocprim::int128_t
+        if constexpr((bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                    && (sizeof(key_type) > 4) && (sizeof(value_type) <= 16)
+                    && (sizeof(value_type) > 8)))
+        {
+            return radix_sort_onesweep_config_params{
+                kernel_config_params{1024, 1},
+                (1 << 17) + 1 >> 2 + 70000,
+                8,
+                block_radix_rank_algorithm::match
+            };
+        }
+        // Needs a comment after it.
         """
 
         expected = [
-            "kernel_config<1024, 1>",
+            "kernel_config_params{1024, 1}",
             "(1 << 17) + 1 >> 2 + 70000",
             "8",
             "block_radix_rank_algorithm::match",
@@ -752,6 +959,11 @@ def main() -> None:
         new_configs,
         args.improved_configs_dir,
     )
+
+    if total_specializations == 0:
+        warnings.append(
+            f"{colors.WARN}No specializations are found in the config files!{colors.END_COLOR}"
+        )
 
     if warnings:
         print("\n".join(warnings))

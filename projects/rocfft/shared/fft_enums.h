@@ -101,7 +101,7 @@ struct is_fft_enum<fft_transform_type, true> : std::true_type
 {
 };
 
-// Floating-point precison and corresponding helpers
+// Floating-point precision and corresponding helpers
 
 enum fft_precision
 {

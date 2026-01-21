@@ -68,6 +68,7 @@ namespace rocsparse
         skip_diag,                                                    \
         conj,                                                         \
         m,                                                            \
+        n,                                                            \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
         csr_row_ptr_begin,                                            \
         csr_row_ptr_end,                                              \
@@ -137,6 +138,7 @@ namespace rocsparse
     void csrmvt_general_kernel(bool skip_diag,
                                bool conj,
                                J    m,
+                               J    size_y,
                                ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                const I* csr_row_ptr_begin,
                                const I* csr_row_ptr_end,
@@ -153,6 +155,7 @@ namespace rocsparse
             rocsparse::csrmvt_general_device<BLOCKSIZE, WF_SIZE>(skip_diag,
                                                                  conj,
                                                                  m,
+                                                                 size_y,
                                                                  alpha,
                                                                  csr_row_ptr_begin,
                                                                  csr_row_ptr_end,
@@ -481,9 +484,15 @@ INSTANTIATE(float, int64_t, int64_t, int8_t, int8_t, float);
 INSTANTIATE(float, int32_t, int32_t, _Float16, _Float16, float);
 INSTANTIATE(float, int64_t, int32_t, _Float16, _Float16, float);
 INSTANTIATE(float, int64_t, int64_t, _Float16, _Float16, float);
+INSTANTIATE(float, int32_t, int32_t, _Float16, _Float16, _Float16);
+INSTANTIATE(float, int64_t, int32_t, _Float16, _Float16, _Float16);
+INSTANTIATE(float, int64_t, int64_t, _Float16, _Float16, _Float16);
 INSTANTIATE(float, int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE(float, int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE(float, int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE(float, int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
+INSTANTIATE(float, int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
+INSTANTIATE(float, int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
 INSTANTIATE(rocsparse_float_complex,
             int32_t,
             int32_t,

@@ -108,6 +108,7 @@ set(rocblas_no_tensile_test_source
     blas_ex/gemmt_gtest.cpp
     blas_ex/geam_ex_gtest.cpp
     blas_ex/syrk_ex_gtest.cpp
+    blas_ex/herk_ex_gtest.cpp
   )
 
 # Keep ${rocblas_tensile_test_source} first, so that multiheaded tests are the
@@ -138,7 +139,7 @@ target_compile_options(rocblas-test PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_C
 
 target_compile_definitions( rocblas-test PRIVATE ROCM_USE_FLOAT16 ROCBLAS_INTERNAL_API ROCBLAS_NO_DEPRECATED_WARNINGS )
 
-if (WIN32)
+if (CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)
   # for now adding in all .dll as dependency chain is not cmake based on win32
   file( GLOB third_party_dlls
     LIST_DIRECTORIES OFF

@@ -129,6 +129,89 @@ namespace rocRoller
          * VGPR indexes.
          */
 
+        std::tuple<int, int, int, int>
+            addLoadMacroTileCTPreTiled(KernelGraph&                     graph,
+                                       std::vector<DeferredConnection>& connections,
+                                       int                              macTileTag,
+                                       std::vector<int> const&          sdim)
+        {
+            namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+            using ET     = rocRoller::Expression::EvaluationTime;
+
+            AssertFatal(sdim.size() == 4, "Expected 4 sub-dimensions for Pretiled MacroTile CT.");
+
+            auto tile = graph.coordinates.getNode<MacroTile>(macTileTag);
+
+            auto sdimPTXTile = sdim[0];
+            auto sdimPTYTile = sdim[1];
+            auto sdimX       = sdim[2];
+            auto sdimY       = sdim[3];
+
+            auto numPTTilesX = graph.coordinates.get<SubDimension>(sdimPTXTile)->size;
+            auto numPTTilesY = graph.coordinates.get<SubDimension>(sdimPTYTile)->size;
+
+            auto sizePTTileXExpr = graph.coordinates.get<SubDimension>(sdimX)->size;
+            AssertFatal(
+                evaluationTimes(sizePTTileXExpr)[ET::Translate],
+                "Size of pre-tile tile must be known at translate time (ie, must be literal).");
+
+            auto sizePTTileYExpr = graph.coordinates.get<SubDimension>(sdimY)->size;
+            AssertFatal(
+                evaluationTimes(sizePTTileYExpr)[ET::Translate],
+                "Size of pre-tile tile must be known at translate time (ie, must be literal).");
+
+            auto sizePTTileX = getUnsignedInt(evaluate(sizePTTileXExpr));
+            auto sizePTTileY = getUnsignedInt(evaluate(sizePTTileYExpr));
+
+            auto nPTX = graph.coordinates.addElement(CT::WaveTileNumber(0, numPTTilesX, nullptr));
+            auto nPTY = graph.coordinates.addElement(CT::WaveTileNumber(1, numPTTilesY, nullptr));
+            auto iPTX
+                = graph.coordinates.addElement(CT::WaveTileIndex(0, literal(sizePTTileX), nullptr));
+            auto iPTY
+                = graph.coordinates.addElement(CT::WaveTileIndex(1, literal(sizePTTileY), nullptr));
+
+            graph.coordinates.addElement(PassThrough(), {sdimPTXTile}, {nPTX});
+            graph.coordinates.addElement(PassThrough(), {sdimPTYTile}, {nPTY});
+
+            graph.coordinates.addElement(PassThrough(), {sdimX}, {iPTX});
+            graph.coordinates.addElement(PassThrough(), {sdimY}, {iPTY});
+
+            connections.push_back(DC<SubDimension>(sdimX, 0));
+            connections.push_back(DC<SubDimension>(sdimY, 1));
+
+            auto numTilesX = tileCeilDivide(numPTTilesX * literal(sizePTTileX), tile.sizes[0]);
+            auto numTilesY = tileCeilDivide(numPTTilesY * literal(sizePTTileY), tile.sizes[1]);
+
+            auto nX = graph.coordinates.addElement(tile.tileNumber(0, numTilesX));
+            auto nY = graph.coordinates.addElement(tile.tileNumber(1, numTilesY));
+            auto iX = graph.coordinates.addElement(tile.tileIndex(0));
+            auto iY = graph.coordinates.addElement(tile.tileIndex(1));
+
+            AssertFatal(tile.sizes[0] % sizePTTileX == 0, "Pre-tile size mismatch.");
+            AssertFatal(tile.sizes[1] % sizePTTileY == 0, "Pre-tile size mismatch.");
+            AssertFatal(tile.sizes[0] / sizePTTileX > 0, "Bad pre-tile size.");
+            AssertFatal(tile.sizes[1] / sizePTTileY > 0, "Bad pre-tile size.");
+
+            auto numPTTilesPerTileX = tile.sizes[0] / sizePTTileX;
+            auto numPTTilesPerTileY = tile.sizes[1] / sizePTTileY;
+
+            auto nPTSubX = graph.coordinates.addElement(
+                CT::WaveTileNumber(0, literal(numPTTilesPerTileX), nullptr));
+            auto nPTSubY = graph.coordinates.addElement(
+                CT::WaveTileNumber(1, literal(numPTTilesPerTileY), nullptr));
+
+            graph.coordinates.addElement(Tile(), {nPTX}, {nX, nPTSubX});
+            graph.coordinates.addElement(Tile(), {nPTY}, {nY, nPTSubY});
+
+            graph.coordinates.addElement(Flatten(), {nPTSubX, iPTX}, {iX});
+            graph.coordinates.addElement(Flatten(), {nPTSubY, iPTY}, {iY});
+
+            connections.push_back(DC<MacroTileNumber>(nX, 0));
+            connections.push_back(DC<MacroTileNumber>(nY, 1));
+
+            return {nX, iX, nY, iY};
+        }
+
         /**
          * @brief Add coordinate-transforms for tiling two
          * SubDimension coordinates into macro number/index
@@ -149,6 +232,9 @@ namespace rocRoller
                                int                              macTileTag,
                                std::vector<int> const&          sdim)
         {
+            if(sdim.size() == 4)
+                return addLoadMacroTileCTPreTiled(graph, connections, macTileTag, sdim);
+
             auto macTile   = graph.coordinates.getNode<MacroTile>(macTileTag);
             auto sdimX     = sdim[0];
             auto sdimY     = sdim[1];
@@ -1390,8 +1476,10 @@ namespace rocRoller
                                           GPUCapability::HasWiderDirectToLds);
 
             // Enable the use of longer word instructions if possible
-            if(params->enableLongDwordInstructions && (packed || packFactor <= 1)
-               && (!direct2LDS || useWiderDirect2LDS))
+            auto update = params->enableLongDwordInstructions;
+            update      = update && (packed || packFactor <= 1);
+            update      = update && (!direct2LDS || useWiderDirect2LDS);
+            if(update)
             {
                 auto maxWidth = std::min(context->kernelOptions()->storeGlobalWidth,
                                          context->kernelOptions()->loadLocalWidth);
@@ -1402,8 +1490,13 @@ namespace rocRoller
 
                 auto macTileFastMovingDimSize = !useSwappedAccess ? macTileM : macTileN;
 
-                updateThreadTileForLongDwords(
-                    thrTileM, thrTileN, maxWidth, macTileFastMovingDimSize, numDwordsPerElement);
+                auto avoidDWordX2 = direct2LDS;
+                updateThreadTileForLongDwords(thrTileM,
+                                              thrTileN,
+                                              maxWidth,
+                                              macTileFastMovingDimSize,
+                                              numDwordsPerElement,
+                                              avoidDWordX2);
             }
 
             if(!useSwappedAccess)
@@ -1845,6 +1938,7 @@ namespace rocRoller
                         graph, connections, userTag, tileTag, sdims, {1, 1}, m_params, m_context);
                     break;
                 case MemoryType::WAVE:
+                case MemoryType::WAVE_FROM_GLOBAL:
                     loadMacroTile_WAVE(graph,
                                        connections,
                                        userTag,
@@ -1933,7 +2027,8 @@ namespace rocRoller
                 auto iMacX = graph.coordinates.addElement(tile.tileIndex(0));
                 auto iMacY = graph.coordinates.addElement(tile.tileIndex(1));
 
-                if(tile.memoryType == MemoryType::WAVE)
+                if(tile.memoryType == MemoryType::WAVE
+                   || tile.memoryType == MemoryType::WAVE_FROM_GLOBAL)
                 {
                     auto              varType     = getVariableType(graph, loadTag);
                     std::vector<uint> jammedTiles = wavetilesPerWavefront;

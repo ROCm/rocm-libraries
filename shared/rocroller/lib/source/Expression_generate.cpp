@@ -941,6 +941,14 @@ namespace rocRoller
                 co_yield generateOp<BitFieldExtract>(dest, arg, expr);
             }
 
+            Generator<Instruction> operator()(Register::ValuePtr& dest, Reinterpret const& expr)
+            {
+                co_yield call(dest, expr.arg);
+                AssertFatal(dest != nullptr,
+                            "Reinterpret expression must have a destination register.");
+                dest->setVariableType(expr.destinationType);
+            }
+
             Generator<Instruction> operator()(Register::ValuePtr& dest, ScaledMatrixMultiply expr)
             {
 
@@ -1037,9 +1045,12 @@ namespace rocRoller
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, Concatenate const& expr)
             {
-                auto                    destResultType = resultType(expr);
+                // TODO: this transform is required the copier generates incorrect code for 64 bit literals
+                auto cpy = splitConcatenate(expr);
+
+                auto                    destResultType = resultType(cpy);
                 std::vector<ResultType> operandResultTypes;
-                std::ranges::transform(expr.operands,
+                std::ranges::transform(cpy.operands,
                                        std::back_inserter(operandResultTypes),
                                        [](auto const& operand) { return resultType(operand); });
 
@@ -1060,9 +1071,9 @@ namespace rocRoller
                 }
 
                 unsigned offset = 0;
-                for(size_t i = 0; i < expr.operands.size(); ++i)
+                for(size_t i = 0; i < cpy.operands.size(); ++i)
                 {
-                    auto const& operand           = expr.operands[i];
+                    auto const& operand           = cpy.operands[i];
                     auto const& operandResultType = operandResultTypes[i];
                     auto        length = DataTypeInfo::Get(operandResultType.varType).registerCount;
 
@@ -1297,7 +1308,6 @@ namespace rocRoller
                    && getConsolidationCount(tree) == 0))
             {
                 // Don't use CSE in this case
-
                 tree.resize(0);
                 co_yield v.call(dest, expr);
             }

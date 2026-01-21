@@ -37,6 +37,9 @@ from dataclasses import dataclass
 
 import pytest
 import yaml
+import shutil
+
+SOLUTION_NOT_SUPPORTED_ON_ARCH = 3
 
 build = pathlib.Path(__file__).parent.parent / "build"
 if os.getenv("ROCROLLER_BUILD_DIR") is not None:
@@ -108,7 +111,6 @@ def check_returncode(p):
 
     Returns False if the GEMM client returned 0 (ie, OK).
     """
-    SOLUTION_NOT_SUPPORTED_ON_ARCH = 3
     if p.returncode != 0:
         if p.returncode == SOLUTION_NOT_SUPPORTED_ON_ARCH:
             return True
@@ -173,7 +175,7 @@ class Scale:
 
     argument: str  # A or B
     mode: str  # Separate, SingleScale, etc
-    lds: bool  # load through LDS
+    path: bool  # load through LDS
     value: float  # for SingleScale, the value
     blockSize: int  # for scale block size
     scaleType: str  # data type of the scale values
@@ -184,8 +186,8 @@ class Scale:
             params.extend(["--scale_" + self.argument, self.mode])
             if self.value is not None:
                 params.extend(["--scaleValue_" + self.argument, str(self.value)])
-            if self.lds:
-                params.append("--loadLDSScale_" + self.argument)
+            if self.path is not None:
+                params.extend(["--loadScale_" + self.argument, self.path])
 
             if self.mode == "Separate" or self.mode == "SingleScale":
                 if self.scaleType is not None:
@@ -269,6 +271,8 @@ types:
   scale_B: None
   scaleType_B: None
   scaleBlockSize: 0
+  scalePreTileA: []
+  scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: false
@@ -276,8 +280,8 @@ streamK: false
 streamKTwoTile: false
 streamKTwoTileDPFirst: false
 matchMemoryAccess: true
-loadLDSScale_A: false
-loadLDSScale_B: false
+loadScale_A: BufferToVGPR
+loadScale_B: BufferToVGPR
 swizzleScale: false
 swizzleTileSize:
   m: 0
@@ -333,11 +337,13 @@ types:
   scale_B: None
   scaleType_B: None
   scaleBlockSize: 0
+  scalePreTileA: []
+  scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: false
-loadLDSScale_A: false
-loadLDSScale_B: false
+loadScale_A: BufferToVGPR
+loadScale_B: BufferToVGPR
 swizzleScale: false
 swizzleTileSize:
   m: 0
@@ -395,11 +401,13 @@ types:
   scale_B: None
   scaleType_B: None
   scaleBlockSize: 0
+  scalePreTileA: []
+  scalePreTileB: []
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: false
-loadLDSScale_A: false
-loadLDSScale_B: false
+loadScale_A: BufferToVGPR
+loadScale_B: BufferToVGPR
 swizzleScale: false
 swizzleTileSize:
   m: 0
@@ -425,7 +433,7 @@ def type_configurations():
 def scale_configurations(argument):
     """Return list of MX scale modes to test for each of A and B."""
     modes = [None, "None", "Separate", "SingleScale"]
-    ldss = [True, False]
+    paths = ["BufferToVGPR", "BufferToLDSViaVGPR"]
     values = [0.5, 1.0]
     blockSize = 32
     scaleType = "E8M0"
@@ -434,17 +442,20 @@ def scale_configurations(argument):
     for mode in modes:
         if mode is not None and mode == "Separate":
             rv.extend(
-                [Scale(argument, mode, lds, None, blockSize, scaleType) for lds in ldss]
+                [
+                    Scale(argument, mode, path, None, blockSize, scaleType)
+                    for path in paths
+                ]
             )
         elif mode is not None and mode == "SingleScale":
             rv.extend(
                 [
-                    Scale(argument, mode, False, value, None, scaleType)
+                    Scale(argument, mode, None, value, None, scaleType)
                     for value in values
                 ]
             )
         else:
-            rv.append(Scale(argument, mode, False, None, None, None))
+            rv.append(Scale(argument, mode, None, None, None, None))
     return rv
 
 
@@ -700,14 +711,20 @@ def test_gemm_options(tmp_path):
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--mxlds=AB"]
     )
-    assert post["loadLDSScale_A"]
-    assert post["loadLDSScale_B"]
+    assert post["loadScale_A"] == "BufferToLDSViaVGPR"
+    assert post["loadScale_B"] == "BufferToLDSViaVGPR"
 
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--mxlds=B"]
     )
-    assert not post["loadLDSScale_A"]
-    assert post["loadLDSScale_B"]
+    assert post["loadScale_A"] == "BufferToVGPR"
+    assert post["loadScale_B"] == "BufferToLDSViaVGPR"
+
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--mxd2lds=AB"]
+    )
+    assert post["loadScale_A"] == "BufferToLDS"
+    assert post["loadScale_B"] == "BufferToLDS"
 
     # setting swizzle tile size
     post = run_and_load_example_yaml(
@@ -901,6 +918,123 @@ def test_gemm_wgm(tmp_path, solution_params, problem_params):
         return
 
     gemm_validate_single_stage(tmp_path, solution_params, problem_params)
+
+
+def test_kernel_graph_dot_truncation(tmp_path):
+    """Validate Graphviz DOT rendering succeeds when node labels are truncated.
+    - With truncation enabled (small max label length), kgraph.py should succeed and produce non-empty outputs.
+    - With truncation disabled (0), kgraph.py should report a parse error.
+    """
+    arch = rocm_gfx()
+    if arch is not None and arch.startswith("gfx12"):
+        pytest.skip("Skipping KernelGraph DOT truncation test on gfx12")
+
+    if not gemm.exists():
+        pytest.skip("rocroller-gemm binary not found")
+
+    kgraph = (pathlib.Path(__file__).parent.parent / "scripts" / "kgraph.py").resolve()
+    if not kgraph.exists():
+        pytest.skip("kgraph.py script not found")
+
+    if shutil.which("dot") is None:
+        pytest.skip("Graphviz 'dot' not available in PATH")
+
+    def run_cmd(cmd, env=None, cwd=None):
+        return subprocess.run(cmd, cwd=cwd, env=env, text=True, capture_output=True)
+
+    def assert_non_empty(path: pathlib.Path):
+        assert path.exists(), f"Expected file to exist: {path}"
+        assert path.stat().st_size > 0, f"Expected file to be non-empty: {path}"
+
+    def generate_asm(asm_path: pathlib.Path, extra_env: dict):
+        env = os.environ.copy()
+        env.update(extra_env)
+
+        cmd = [
+            str(gemm),
+            "--workgroupMappingDim=0",
+            "--workgroupMappingValue=6",
+            "generate",
+            "--asm",
+            str(asm_path),
+        ]
+
+        p = run_cmd(cmd, env=env, cwd=tmp_path)
+
+        if p.returncode == SOLUTION_NOT_SUPPORTED_ON_ARCH:
+            pytest.skip("GEMM solution not supported on this architecture")
+
+        assert p.returncode == 0, (
+            "rocroller-gemm failed\n"
+            f"cmd: {cmd}\n"
+            f"stdout:\n{p.stdout}\n"
+            f"stderr:\n{p.stderr}\n"
+        )
+        assert_non_empty(asm_path)
+
+    def run_kgraph(asm_path: pathlib.Path, pdf_path: pathlib.Path):
+        cmd = [str(kgraph), str(asm_path), "-o", str(pdf_path)]
+        p = run_cmd(cmd, env=os.environ.copy(), cwd=tmp_path)
+        combined = (p.stdout or "") + "\n" + (p.stderr or "")
+        return p, combined
+
+    # Case 1 : truncation enabled(should succeed)
+    asm_trunc = tmp_path / "workgroupmapping_truncated5.s"
+    pdf_trunc = tmp_path / "workgroupmapping_truncated5.pdf"
+
+    generate_asm(
+        asm_trunc,
+        {
+            "ROCROLLER_SERIALIZE_KERNEL_GRAPH_DOT": "1",
+            "ROCROLLER_KGRAPH_NODE_LABEL_MAX_LENGTH": "5",
+        },
+    )
+
+    p, combined = run_kgraph(asm_trunc, pdf_trunc)
+    assert p.returncode == 0, (
+        "kgraph.py expected to succeed with truncation enabled\n"
+        f"output:\n{combined}\n"
+    )
+
+    dot_trunc = pdf_trunc.with_suffix(".dot")
+    norm_trunc = pdf_trunc.with_name(pdf_trunc.stem + "_normalized.s")
+    assert_non_empty(dot_trunc)
+    assert_non_empty(pdf_trunc)
+    assert_non_empty(norm_trunc)
+
+    # Case 2 : truncation disabled(should error in kgraph parse)
+    asm_untrunc = tmp_path / "workgroupmapping_untruncated.s"
+    pdf_untrunc = tmp_path / "workgroupmapping_untruncated.pdf"
+
+    generate_asm(
+        asm_untrunc,
+        {
+            "ROCROLLER_SERIALIZE_KERNEL_GRAPH_DOT": "1",
+            "ROCROLLER_KGRAPH_NODE_LABEL_MAX_LENGTH": "0",
+        },
+    )
+
+    p2, combined2 = run_kgraph(asm_untrunc, pdf_untrunc)
+
+    assert (
+        p2.returncode != 0
+        or "syntax error" in combined2
+        or "longer than 16384" in combined2
+    ), (
+        "Expected Graphviz parse error when truncation is disabled\n"
+        f"returncode: {p2.returncode}\n"
+        f"output:\n{combined2}\n"
+    )
+
+    dot_untrunc = pdf_untrunc.with_suffix(".dot")
+    assert_non_empty(dot_untrunc)
+    max_line2 = max(
+        len(line)
+        for line in dot_untrunc.read_text(errors="ignore").splitlines() or [""]
+    )
+    assert (
+        max_line2 >= 16384
+    ), f"Expected an extremely long DOT line without truncation, got max {max_line2}"
 
 
 if __name__ == "__main__":

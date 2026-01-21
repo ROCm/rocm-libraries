@@ -62,7 +62,7 @@ int log_graph_fd    = -1;
  *                              Name of environment variable that contains
  *                              the full logfile path.
  *
- *  @parm[out]
+ *  @param[out]
  *  log_fd      int&
  *              Output file descriptor.
  */
@@ -71,8 +71,7 @@ static void open_log_stream(const char* environment_variable_name, int& log_fd)
 
 {
     // if environment variable is set, open file at logfile_pathname contained in
-    // the
-    // environment variable
+    // the environment variable
     auto logfile_pathname = rocfft_getenv(environment_variable_name);
     if(!logfile_pathname.empty())
     {

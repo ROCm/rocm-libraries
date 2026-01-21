@@ -123,7 +123,7 @@ void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_
     size_t streams = numStreams > 1 ? numStreams : 1;
     for(size_t i = 0; i < devices; ++i)
     {
-        hipSetDevice(i);
+        CHECK_HIP_ERROR(hipSetDevice(i));
         for(size_t j = 0; j < streams; ++j)
         {
             if(numStreams)
@@ -268,6 +268,13 @@ bool match_test_category(const Arguments& arg, const char* category)
                 break;
             }
         }
+    }
+
+    // TODO: periodically review if this can be removed after support is added
+    if(arg.graph_test)
+    {
+        // We know that underlying arg object is non-const, so we can use const_cast
+        *(const_cast<bool*>(&arg.pointer_mode_device)) = false;
     }
 
     // we are now bypassing the category key

@@ -36,6 +36,23 @@ namespace nb = nanobind;
 
 namespace rocisa
 {
+    // Helper function to safely parse sgpr name and add offset
+    std::string getSgprWithOffset(const std::string& sgprName, int offset)
+    {
+        try
+        {
+            // Try to parse as integer
+            int baseIdx = std::stoi(sgprName);
+            return std::to_string(baseIdx + offset);
+        }
+        catch(const std::invalid_argument&)
+        {
+            // If parsing fails, assume it's a variable name and append offset
+            return sgprName + "+" + std::to_string(offset);
+        }
+        return sgprName + "+" + std::to_string(offset);
+    }
+
     std::shared_ptr<Module> BranchIfZero(const std::string& sgprName,
                                          const DataType     computeDataType,
                                          const int          tmpSgprIdx,
@@ -52,9 +69,7 @@ namespace rocisa
             auto tmpSgpr = sgpr(tmpSgprIdx, laneSC);
             module->addT<VCmpEQF64>(
                 tmpSgpr, sgpr(sgprName, 2), 0.0, std::nullopt, sgprStr + ".real == 0.0 ?");
-            std::string sgprVar = (std::is_same<decltype(sgprName), std::string>::value)
-                                      ? sgprName + "+2"
-                                      : std::to_string(std::stoi(sgprName) + 2);
+            std::string sgprVar = getSgprWithOffset(sgprName, 2);
             module->addT<VCmpEQF64>(
                 pVCC, sgpr(sgprVar, 2), 0.0, std::nullopt, sgprStr + ".imag == 0.0 ?");
             if(waveFrontSize == 32)
@@ -80,9 +95,7 @@ namespace rocisa
             auto tmpSgpr = sgpr(tmpSgprIdx, laneSC);
             module->addT<VCmpEQF32>(
                 tmpSgpr, sgpr(sgprName), 0.0, std::nullopt, sgprStr + ".real == 0.0f ?");
-            std::string sgprVar = (std::is_same<decltype(sgprName), std::string>::value)
-                                      ? sgprName + "+1"
-                                      : std::to_string(std::stoi(sgprName) + 1);
+            std::string sgprVar = getSgprWithOffset(sgprName, 1);
             module->addT<VCmpEQF32>(
                 pVCC, sgpr(sgprVar), 0.0, std::nullopt, sgprStr + ".imag == 0.0f ?");
             if(waveFrontSize == 32)
@@ -135,9 +148,7 @@ namespace rocisa
             module->addT<VCmpEQF64>(
                 pVCC, sgpr(sgprName, 2), 0.0, std::nullopt, sgprStr + ".real == 0.0 ?");
             module->addT<SCBranchVCCZ>(label.getLabelName(), "branch if " + sgprStr + ".real != 0");
-            std::string sgprVar = (std::is_same<decltype(sgprName), std::string>::value)
-                                      ? sgprName + "+2"
-                                      : std::to_string(std::stoi(sgprName) + 2);
+            std::string sgprVar = getSgprWithOffset(sgprName, 2);
             module->addT<VCmpEQF64>(
                 pVCC, sgpr(sgprVar, 2), 0.0, std::nullopt, sgprStr + ".imag == 0.0 ?");
             module->addT<SCBranchVCCZ>(label.getLabelName(), "branch if " + sgprStr + ".imag != 0");
@@ -153,9 +164,7 @@ namespace rocisa
             module->addT<VCmpEQF32>(
                 pVCC, sgpr(sgprName), 0.0, std::nullopt, sgprStr + ".real == 0.0f ?");
             module->addT<SCBranchVCCZ>(label.getLabelName(), "branch if " + sgprStr + ".real != 0");
-            std::string sgprVar = (std::is_same<decltype(sgprName), std::string>::value)
-                                      ? sgprName + "+1"
-                                      : std::to_string(std::stoi(sgprName) + 1);
+            std::string sgprVar = getSgprWithOffset(sgprName, 1);
             module->addT<VCmpEQF32>(
                 pVCC, sgpr(sgprVar), 0.0, std::nullopt, sgprStr + ".imag == 0.0f ?");
             module->addT<SCBranchVCCZ>(label.getLabelName(), "branch if " + sgprStr + ".imag != 0");
