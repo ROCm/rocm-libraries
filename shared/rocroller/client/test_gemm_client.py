@@ -248,6 +248,8 @@ workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
 storeLDS_D: true
 prefetch: false
 prefetchInFlight: 0
@@ -311,6 +313,8 @@ workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
 storeLDS_D: true
 prefetch: false
 prefetchInFlight: 0
@@ -373,6 +377,8 @@ workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
 storeLDS_D: true
 prefetch: false
 prefetchInFlight: 0
@@ -700,6 +706,19 @@ def test_gemm_options(tmp_path):
     )
     assert post["load_A"] == "BufferToLDS"
     assert post["load_B"] == "BufferToVGPR"
+
+    post = run_and_load_example_yaml(
+        [
+            gemm,
+            "example",
+            example,
+            "--arch=gfx950",
+            "--padLDS_A=22,33",
+            "--padLDS_B=44,55",
+        ]
+    )
+    assert post["padLDS_A"] == [22, 33]
+    assert post["padLDS_B"] == [44, 55]
 
     # setting mxlds options
     post = run_and_load_example_yaml(
