@@ -151,16 +151,17 @@ namespace rocRoller
             }
 
             /**
-             * @brief Find the innermost loop (ForLoopOp or DoWhileOp) containing an operation.
+             * @brief Find the immediate parent loop (ForLoopOp or DoWhileOp) containing an operation.
              *
              * Collects all loops containing the operation and returns the one that does not
-             * contain any other ForLoopOp or DoWhileOp in its body (i.e., the innermost loop).
+             * contain any other ForLoopOp or DoWhileOp in its body (i.e., the deepest loop containing
+             * the operation).
              *
              * @param graph The kernel graph
              * @param opTag Tag of the operation
-             * @return The tag of the innermost containing loop, or std::nullopt if not in any loop
+             * @return The tag of the immediate parent loop of opTag, or std::nullopt if not in any loop
              */
-            std::optional<int> findInnermostLoop(KernelGraph const& graph, int opTag)
+            std::optional<int> findImmediateParentLoop(KernelGraph const& graph, int opTag)
             {
                 // Collect all loops containing the operation
                 std::vector<int> containingLoops;
@@ -205,11 +206,11 @@ namespace rocRoller
                     }
                 }
 
-                AssertFatal(
-                    false,
-                    "Operation is contained by loop(s) but innermost loop could not be found.",
-                    ShowValue(opTag),
-                    ShowValue(containingLoops));
+                AssertFatal(false,
+                            "Operation is contained by loop(s) but no immediate parent loop could "
+                            "be found.",
+                            ShowValue(opTag),
+                            ShowValue(containingLoops));
                 return std::nullopt;
             }
 
@@ -224,12 +225,12 @@ namespace rocRoller
              * @param graph The kernel graph
              * @param barrierTag Tag of the barrier operation
              * @param opTag Tag of the operation to check
-             * @return true if both are in the body of the same innermost loop (or both outside any loop)
+             * @return true if both are in the body of the same loop (or both outside any loop)
              */
             inline bool areInSameLoopBody(KernelGraph const& graph, int barrierTag, int opTag)
             {
-                auto barrierLoop = findInnermostLoop(graph, barrierTag);
-                auto opLoop      = findInnermostLoop(graph, opTag);
+                auto barrierLoop = findImmediateParentLoop(graph, barrierTag);
+                auto opLoop      = findImmediateParentLoop(graph, opTag);
 
                 // Both must be in the same loop (or both not in any loop)
                 if(barrierLoop.has_value() && opLoop.has_value())
@@ -247,23 +248,31 @@ namespace rocRoller
              * @param graph The kernel graph
              * @param opA First operation tag
              * @param opB Second operation tag
-             * @return The tag of the common ancestor loop, or std::nullopt if none exists
+             * @return The tag of the closest common ancestor loop, or std::nullopt if none exists
              */
             std::optional<int> findCommonAncestorLoop(KernelGraph const& graph, int opA, int opB)
             {
                 // Get all nodes containing opA (ancestors)
-                const auto ancestorsA = graph.control.nodesContaining(opA).to<std::set>();
+                // const auto ancestorsA = graph.control.nodesContaining(opA).to<std::set>();
+                const auto tagOfimmediateParentLoopOfA = findImmediateParentLoop(graph, opA);
+
+                if(not tagOfimmediateParentLoopOfA.has_value())
+                {
+                    // opA is not in any loop, so no common ancestor loop exists
+                    return std::nullopt;
+                }
 
                 // Iterate through ancestors of opB to find a common loop ancestor
                 for(const auto node : graph.control.nodesContaining(opB))
                 {
-                    if(ancestorsA.contains(node))
+                    // Check if it's a loop operation and is also one of the
+                    // loops that contains opA and opB, then it is the
+                    // closest common ancestor loop.
+                    const auto isLoop
+                        = graph.control.get<ForLoopOp>(node) || graph.control.get<DoWhileOp>(node);
+                    if(isLoop && node == tagOfimmediateParentLoopOfA.value())
                     {
-                        // Check if it's a loop operation
-                        if(graph.control.get<ForLoopOp>(node) || graph.control.get<DoWhileOp>(node))
-                        {
-                            return {node};
-                        }
+                        return {node};
                     }
                 }
 
