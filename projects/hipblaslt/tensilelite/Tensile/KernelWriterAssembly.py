@@ -1338,8 +1338,6 @@ class KernelWriterAssembly(KernelWriter):
             src0=destLo, src1=pendingOffset, \
             comment="accumulate final pendingOffset"))
 
-      # NOTE: KRingShift dependency on BAddrInterleave is normalized in KernelWriter._initKernel
-      # (force-disable KRingShift when BAddrInterleave is off). Codegen only needs to key off KRingShift.
       if kernel["KRingShift"] and tc in ("A", "B"):
         macro.add(VAddU32(dst=vgpr("Addr+0", isMacro=True), src0="v[\\vgprAddr+0]", src1=sgpr("KRingShift"),
                          comment="KRS: KRingShift addr += shift"))
@@ -1787,10 +1785,7 @@ class KernelWriterAssembly(KernelWriter):
       # B address interleave (restricted) - compute runtime G once and reuse later.
       if kernel["BAddrInterleave"]:
         moduleRegInit.addComment1("Interleave: define SGPR and init runtime G once")
-        # Use defineSgprIdx + explicit RegSet here (instead of defineSgpr) to avoid interacting
-        # with freeSgprVarPool state transitions during pre-loop init.
         sgprG  = self.defineSgprIdx("BInterleaveG", 1)
-        # Keep these SGPRs live into post-loop (store) - prevent endSummation from undefining them.
         if "BInterleaveG" not in self.states.nonPostLoopSgpr:
           self.states.nonPostLoopSgpr.append("BInterleaveG")
         moduleRegInit.add(RegSet("s", "sgprBInterleaveG", sgprG))
@@ -1799,13 +1794,11 @@ class KernelWriterAssembly(KernelWriter):
       # K ring-shift (restricted) - compute per-WG shift once and reuse later.
       if kernel["KRingShift"]:
         moduleRegInit.addComment1("KRS: KRingShift define SGPR and init per-WG shift once")
-        # Use defineSgprIdx + explicit RegSet here to avoid interacting with freeSgprVarPool transitions.
         sgprShift = self.defineSgprIdx("KRingShift", 1)
         # Keep this SGPR live into post-loop (tail + store) - prevent endSummation from undefining it.
         if "KRingShift" not in self.states.nonPostLoopSgpr:
           self.states.nonPostLoopSgpr.append("KRingShift")
         moduleRegInit.add(RegSet("s", "sgprKRingShift", sgprShift))
-        # IMPORTANT: WorkGroup1 may be remapped later (e.g., StreamK). Compute shift only after WG mapping is finalized.
 
     self.sgprPool.checkIn(sgprPackedArgs)
 
