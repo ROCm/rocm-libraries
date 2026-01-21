@@ -63,24 +63,22 @@ struct HipGraphTestCase
 std::vector<HipGraphTestCase> GenSmokeTestCases()
 {
     // Use smaller shapes and --iter=1 to speed up tests
-    return {{"conv",
-             "-n 1 -c 3 -H 32 -W 32 -k 16 -y 3 -x 3 "
-             "-p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1 --iter 1",
-             "conv_hip_graph",
-             true},
-            {"activ",
-             "-n 8 -c 3 -H 16 -W 16 -m 3 -A 1 -B 1 -G 1 -F 0 -i 1 -V 1 -t 1",
-             "activ_hip_graph",
-             true},
-            {"bnorm",
-             "-F 2 -n 8 -c 64 -H 8 -W 8 -m 1 -r 1 -i 1 -V 1 -t 1",
-             "bnorm_hip_graph",
-             true},
-            {"conv",
-             "-n 1 -c 3 -H 32 -W 32 -k 16 -y 3 -x 3 "
-             "-p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1 --iter 1 --use_hip_graph 0",
-             "no_graph",
-             false}};
+    return {
+        {"conv",
+         "-n 1 -c 3 -H 32 -W 32 -k 16 -y 3 -x 3 "
+         "-p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1 --iter 1",
+         "conv_hip_graph",
+         true},
+        {"activ",
+         "-n 8 -c 3 -H 16 -W 16 -m 3 -A 1 -B 1 -G 1 -F 0 -i 1 -V 1 -t 1",
+         "activ_hip_graph",
+         true},
+        {"bnorm", "-F 2 -n 8 -c 64 -H 8 -W 8 -m 1 -r 1 -i 1 -V 1 -t 1", "bnorm_hip_graph", true},
+        {"conv",
+         "-n 1 -c 3 -H 32 -W 32 -k 16 -y 3 -x 3 "
+         "-p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1 --iter 1 --use_hip_graph 0",
+         "no_graph",
+         false}};
 }
 
 } // namespace
@@ -310,7 +308,8 @@ protected:
         std::string captured_stderr = testing::internal::GetCapturedStderr();
 
         // Verify no workspace warnings were emitted
-        EXPECT_THAT(captured_stderr, ::testing::Not(::testing::HasSubstr("Warning [IsEnoughWorkspace]")));
+        EXPECT_THAT(captured_stderr,
+                    ::testing::Not(::testing::HasSubstr("Warning [IsEnoughWorkspace]")));
 
         if(expect_graph)
         {

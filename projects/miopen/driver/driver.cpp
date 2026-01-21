@@ -100,9 +100,10 @@ int Driver::HipGraphCaptureCapturing(hipGraphFuncPtrType functPtr)
     }
 
     int rc = functPtr();
-    
+
     he = hipStreamEndCapture(q, &hipGraph);
-    if(rc != miopenStatusSuccess || he != hipSuccess) {
+    if(rc != miopenStatusSuccess || he != hipSuccess)
+    {
         hipGraphDestroy(hipGraph);
         if(rc != miopenStatusSuccess)
             return rc;

@@ -97,10 +97,10 @@ struct AutoMiopenWarmupMode
         miopen::debug::FindEnforceDisable = true;
         miopen::debug::IsWarmupOngoing    = true;
     }
-    AutoMiopenWarmupMode(const AutoMiopenWarmupMode&) = delete;
-    AutoMiopenWarmupMode(AutoMiopenWarmupMode&&)      = delete;
+    AutoMiopenWarmupMode(const AutoMiopenWarmupMode&)            = delete;
+    AutoMiopenWarmupMode(AutoMiopenWarmupMode&&)                 = delete;
     AutoMiopenWarmupMode& operator=(const AutoMiopenWarmupMode&) = delete;
-    AutoMiopenWarmupMode& operator=(AutoMiopenWarmupMode&&) = delete;
+    AutoMiopenWarmupMode& operator=(AutoMiopenWarmupMode&&)      = delete;
     ~AutoMiopenWarmupMode()
     {
         miopen::debug::LoggingQuiet       = debug_logging_quiet_prev;
@@ -123,10 +123,10 @@ struct AutoPrepareForGpuReference
         miopen::debug::AlwaysEnableConvDirectNaive = true;
         miopen::debug::LoggingQuiet                = true;
     }
-    AutoPrepareForGpuReference(const AutoPrepareForGpuReference&) = delete;
-    AutoPrepareForGpuReference(AutoPrepareForGpuReference&&)      = delete;
+    AutoPrepareForGpuReference(const AutoPrepareForGpuReference&)            = delete;
+    AutoPrepareForGpuReference(AutoPrepareForGpuReference&&)                 = delete;
     AutoPrepareForGpuReference& operator=(const AutoPrepareForGpuReference&) = delete;
-    AutoPrepareForGpuReference& operator=(AutoPrepareForGpuReference&&) = delete;
+    AutoPrepareForGpuReference& operator=(AutoPrepareForGpuReference&&)      = delete;
     ~AutoPrepareForGpuReference()
     {
         miopen::debug::LoggingQuiet                = quiet_prev;
@@ -1533,8 +1533,7 @@ int ConvDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
         if(!doutRead)
         {
-            auto gen = [&]() -> auto
-            {
+            auto gen = [&]() -> auto {
                 return is_fp8 ? prng::gen_A_to_B(Data_min, Data_max) : prng::gen_0_to_B(Data_scale);
             };
             dout.InitHostData(out_sz, is_bwd || is_wrw, gen);
@@ -2116,7 +2115,6 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuFind(const bool is_transform)
     wall.start(wall_enabled);
 
     int return_code = HipGraphCapture([&]() -> int {
-
         rc = miopenConvolutionForward(GetHandle(),
                                       &alpha,
                                       in_tens,
@@ -2141,7 +2139,7 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuFind(const bool is_transform)
         {
             out.FillGpuBufferWithNans(handle, outputTensor);
         }
-        
+
         HipGraphExecute();
 
         if(wall_enabled && i == 0)
@@ -2315,7 +2313,7 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuImmed(const bool is_transform)
         {
             out.FillGpuBufferWithNans(handle, outputTensor);
         }
-        
+
         HipGraphExecute();
 
         if(wall_enabled && i == 0)
@@ -3631,10 +3629,8 @@ std::string ConvDriver<Tgpu, Tref>::GetVerificationCacheFileName(
     miopen::LogRange(ss << "_", trans_output_pads, "x");
     ss << "_" << inflags.GetValueInt("pad_val");
     ss << "_" << inflags.GetValueInt("bias");
-    ss << "_"
-       << "GPU" << get_datatype_string(Tgpu{});
-    ss << "_"
-       << "REF" << get_datatype_string(Tref{});
+    ss << "_" << "GPU" << get_datatype_string(Tgpu{});
+    ss << "_" << "REF" << get_datatype_string(Tref{});
 
     return ss.str();
 }

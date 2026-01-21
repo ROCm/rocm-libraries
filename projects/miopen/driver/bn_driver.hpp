@@ -1151,8 +1151,9 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunForwardGPU()
         // if run fwd train
         if(forw == 1)
         { // training only
-            eAF = static_cast<Tref>(0.1); // This is the standard value used in PyTorch, TensorFlow, etc.
-            // eAF = 1 / (i + 1) is Cumulative Moving Average (CMA), cannot be used 
+            eAF = static_cast<Tref>(
+                0.1); // This is the standard value used in PyTorch, TensorFlow, etc.
+            // eAF = 1 / (i + 1) is Cumulative Moving Average (CMA), cannot be used
             // because HIP graph wrapper need a constant
             if(activ_mode == 0)
             {
