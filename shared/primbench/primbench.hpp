@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -93,6 +93,10 @@
 
 namespace primbench
 {
+
+constexpr size_t KiB = 1024;
+constexpr size_t MiB = 1024 * KiB;
+constexpr size_t GiB = 1024 * MiB;
 
 // Forward declarations for the detail namespace.
 extern const size_t MiB;
@@ -3179,6 +3183,30 @@ public:
                           << it->second << "\"\n";
                 std::exit(EXIT_FAILURE);
             }
+
+            // When "--bytes" is specified, the number can optionally be suffixed with KiB/MiB/GiB
+            if(key == "bytes")
+            {
+                if constexpr(std::is_same_v<T, size_t>)
+                {
+                    std::string suffix;
+                    ss >> suffix;
+
+                    if(!suffix.empty())
+                    {
+                        if(suffix == "KiB") out *= KiB;
+                        else if(suffix == "MiB") out *= MiB;
+                        else if(suffix == "GiB") out *= GiB;
+                        else
+                        {
+                            std::cerr << "Error: Failed to parse --" << key << ": unknown suffix \""
+                            << suffix << "\"\n";
+                            std::exit(EXIT_FAILURE);
+                        }
+                    }
+                }
+            }
+
             return out;
         }
     }
@@ -3370,10 +3398,6 @@ private:
 }; // class cli
 
 } // namespace detail
-
-constexpr size_t KiB = 1024;
-constexpr size_t MiB = 1024 * KiB;
-constexpr size_t GiB = 1024 * MiB;
 
 using json  = detail::json;
 using state = detail::state;
@@ -3713,7 +3737,8 @@ private:
         s.bytes = cli.get<size_t>("bytes",
                                   default_bytes,
                                   "Sets the size (in bytes) of the randomly generated input array, "
-                                  "overriding the value provided to `primbench::executor`.");
+                                  "overriding the value provided to `primbench::executor`."
+                                  "Optionally supports the suffixes KiB/MiB/GiB, e.g. `--bytes 256KiB.`");
         if(s.bytes == 0)
         {
             std::cerr << "Error: --bytes must be greater than 0\n";
