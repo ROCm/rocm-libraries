@@ -2373,125 +2373,126 @@ public:
     {
     }
 
-    // Create bricks in the specified field.  brick_grid has an
-    // integer per dimension (batch and FFT dimensions), with the
-    // number of bricks to split that dimension on.  Field length
-    // starts with batch dimension, followed by FFT dimensions
-    // slowest to fastest.
-    // num_ranks represents the number of ranks used in the parallel
-    // computer, which are assumed to have at least gpusperrank each
+    /**
+     * @brief create one input (resp. output) field with as many bricks
+     * as desired along every field dimension for the current object.
+     * 
+     * @tparam io enum flag specifying whether the input (`io == fft_io::fft_io_in`)
+     * or output (`io == fft_io::fft_io_in`) field is being considered.
+     * 
+     * @param[in] gpusperrank number of GPU devices available to each process
+     * @param[in] brick_count_along desired (strictly positive) numbers of
+     * bricks per dimension: `brick_count_along[i]` if the number of bricks
+     * desired along the `i`-th field dimension.
+     * @param[in] num_ranks number of processes used in the parallel computer
+     * (default value is one)
+     * 
+     * NOTES:
+     * - the input/output field is created only if an actual division is requested,
+     * i.e., if product(brick_count_along.begin(), brick_count_along.end()) > 1;
+     * - data layouts within bricks are set to be compact, i.e., contiguous for
+     * bricks in complex domain, padded in real domain for in-place operations
+     * (only if the fastest dimension is not divided itself, i.e., if
+     * brick_count_along.last() == 1)
+     * - if more bricks than available devices are requested, some bricks may be
+     * assigned to the same device.
+     */
+    template <fft_io io>
     void distribute_field(int                              gpusperrank,
-                          const std::vector<unsigned int>& brick_grid,
-                          std::vector<fft_field>&          fields,
-                          const std::vector<size_t>&       field_length,
-                          int                              num_ranks)
-    {
-        if(brick_grid.size() != field_length.size())
-            throw std::runtime_error(
-                "distribute field requires same number of dims for grid and field length");
-
-        // if nothing's actually split, don't bother making bricks
-        if(std::all_of(
-               brick_grid.begin(), brick_grid.end(), [](const unsigned int g) { return g == 1; }))
-            return;
-
-        size_t total_bricks = product(brick_grid.begin(), brick_grid.end());
-
-        auto& field = fields.emplace_back();
-
-        // Start with empty brick in field
-        field.bricks.reserve(total_bricks);
-        field.bricks.emplace_back();
-
-        // Go over the grid
-        for(size_t i = 0; i < brick_grid.size(); ++i)
-        {
-            std::vector<fft_brick> cur_bricks;
-            cur_bricks.swap(field.bricks);
-            field.bricks.reserve(total_bricks);
-
-            auto brick_count = brick_grid[i];
-            auto cur_length  = field_length[i];
-
-            // split current length, apply to all current bricks and
-            // append bricks to field
-            for(size_t ibrick = 0; ibrick < brick_count; ++ibrick)
-            {
-                for(const auto& b : cur_bricks)
-                {
-                    auto& new_brick = field.bricks.emplace_back(b);
-                    new_brick.lower.push_back(cur_length / brick_count * ibrick);
-                    // last brick needs to include the whole split len
-                    if(ibrick == brick_count - 1)
-                    {
-                        new_brick.upper.push_back(cur_length);
-                    }
-                    else
-                    {
-                        new_brick.upper.push_back(std::min(
-                            cur_length, new_brick.lower.back() + cur_length / brick_count));
-                    }
-                }
-            }
-        }
-
-        // Give all bricks contiguous strides
-        int brickIdx = 0;
-        for(auto& b : field.bricks)
-        {
-            b.stride.resize(b.upper.size());
-
-            // Fill strides from fastest to slowest
-            size_t brick_dist = 1;
-            for(size_t distIdx = 0; distIdx < b.upper.size(); ++distIdx)
-            {
-                *(b.stride.rbegin() + distIdx) = brick_dist;
-                brick_dist *= *(b.upper.rbegin() + distIdx) - *(b.lower.rbegin() + distIdx);
-            }
-
-            // Split across ranks for a multi-process transform,
-            // otherwise split across bricks.  assume there's one
-            // rank/device per brick
-            if(mp_lib == fft_mp_lib_none)
-            {
-                b.device = brickIdx;
-            }
-            else
-            {
-                int rank = brickIdx / gpusperrank; // determine MPI rank
-                int gpu  = brickIdx % gpusperrank; // determine GPU within rank
-
-                b.rank   = rank;
-                b.device = gpu;
-            }
-            brickIdx++;
-        }
-    }
-
-    // Distribute problem input among specified grid of devices/processors.
-    // Grid specifies number of bricks per dimension, starting with batch
-    // and ending with fastest FFT dimension. For single-proc single-proc
-    // multi-gpu, gpusperrank represents the number of GPUs to use;
-    // while for multi-proc it represents the number of GPUs on each rank.
-    void distribute_input(int                              gpusperrank,
-                          const std::vector<unsigned int>& brick_grid,
+                          const std::vector<unsigned int>& brick_count_along,
                           int                              num_ranks = 1)
     {
-        auto len = length;
-        len.insert(len.begin(), nbatch);
-        distribute_field(gpusperrank, brick_grid, ifields, len, num_ranks);
-    }
+        static_assert(io == fft_io::fft_io_in || io == fft_io::fft_io_out);
 
-    // Distribute problem output among specified grid of devices/processors.
-    // Grid specifies number of bricks per dimension, starting with batch
-    // and ending with fastest FFT dimension.
-    void distribute_output(int                              gpusperrank,
-                           const std::vector<unsigned int>& brick_grid,
-                           int                              num_ranks = 1)
-    {
-        auto len = olength();
-        len.insert(len.begin(), nbatch);
-        distribute_field(gpusperrank, brick_grid, ofields, len, num_ranks);
+        auto& iofields       = io == fft_io::fft_io_in ? ifields : ofields;
+        auto  iofield_length = io == fft_io::fft_io_in ? ilength() : olength();
+        iofield_length.insert(iofield_length.begin(), nbatch);
+        const auto field_size = iofield_length.size(); // --> field_size > 0
+        // arg validation
+        if(brick_count_along.size() != field_size)
+            throw std::runtime_error(
+                "fft_params::distribute_field inconsistent size between desired number of bricks "
+                "per dimension and number of dimensions");
+        if(std::any_of(
+               brick_count_along.begin(),
+               brick_count_along.end(),
+               [](const auto& brick_count_along_dim) { return brick_count_along_dim == 0; }))
+            throw std::invalid_argument("brick_count_per_dim must not be 0.");
+        if(gpusperrank < 1 || num_ranks < 1)
+            throw std::invalid_argument(
+                "fft_params::distribute_field requires strictly positive number of processes and "
+                "number of available device(s) per process.");
+
+        const auto total_bricks = product(brick_count_along.begin(), brick_count_along.end());
+        if(total_bricks == 1)
+        {
+            // nothing to split, no field required
+            iofields.clear();
+            return;
+        }
+
+        struct length_division
+        {
+            size_t min_length;
+            size_t remainder;
+        };
+        std::vector<length_division> field_division_along(field_size);
+        for(auto field_dim = field_size; field_dim-- > 0;)
+        {
+            field_division_along[field_dim].min_length
+                = iofield_length[field_dim] / brick_count_along[field_dim];
+            field_division_along[field_dim].remainder
+                = iofield_length[field_dim] % brick_count_along[field_dim];
+        }
+
+        // make ONE field with as many bricks as required along every field dimension
+        iofields.resize(1);
+        auto& iofield  = iofields[0];
+        auto& iobricks = iofield.bricks;
+        // Create the required number of bricks
+        iobricks.resize(total_bricks);
+        // define them
+        for(size_t b_idx = 0; b_idx < total_bricks; b_idx++)
+        {
+            auto&               iobrick = iobricks[b_idx];
+            std::vector<size_t> brick_dim_idx(field_size, 0);
+            iobrick.lower.resize(field_size);
+            iobrick.upper.resize(field_size);
+            iobrick.stride.resize(field_size);
+            auto tmp_idx = b_idx;
+            for(auto field_dim = field_size; field_dim-- > 0;
+                tmp_idx /= brick_count_along[field_dim])
+            {
+                const auto brick_idx_along_dim = tmp_idx % brick_count_along[field_dim];
+                const auto brick_length_along_dim
+                    = field_division_along[field_dim].min_length
+                      + (brick_idx_along_dim < field_division_along[field_dim].remainder ? 1 : 0);
+                iobrick.lower[field_dim]
+                    = brick_idx_along_dim * field_division_along[field_dim].min_length
+                      + std::min(brick_idx_along_dim, field_division_along[field_dim].remainder);
+                iobrick.upper[field_dim] = iobrick.lower[field_dim] + brick_length_along_dim;
+                if(field_dim == field_size - 1)
+                    iobrick.stride[field_dim] = 1; // contiguous along fastest dimension
+                else
+                {
+                    auto stride_multiplier
+                        = iobrick.upper[field_dim + 1] - iobrick.lower[field_dim + 1];
+                    if(field_dim == field_size - 2 && is_real()
+                       && placement == fft_placement_inplace
+                       && (is_forward() ^ (io == fft_io::fft_io_out)) /* <-- brick in real domain */
+                       && brick_count_along[field_size - 1] == 1)
+                    {
+                        // real in-place case with fastest dimension that is NOT divided
+                        // --> most likely use case is *with* padding
+                        stride_multiplier = 2 * (stride_multiplier / 2 + 1);
+                    }
+                    iobrick.stride[field_dim] = iobrick.stride[field_dim + 1] * stride_multiplier;
+                }
+            }
+
+            iobrick.device = b_idx % gpusperrank; // determine GPU within rank
+            iobrick.rank   = (b_idx / gpusperrank) % num_ranks; // determine MPI rank
+        }
     }
 
     // Apply load operations specified by this struct to the host-side

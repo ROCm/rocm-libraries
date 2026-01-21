@@ -799,8 +799,8 @@ TEST(manual, vs_fftw) // MANUAL TESTS HERE
         std::vector<unsigned int> deviceGrid(params.length.size() + 1, 1);
         deviceGrid[1] = manual_devices;
 
-        params.distribute_input(manual_devices, deviceGrid);
-        params.distribute_output(manual_devices, deviceGrid);
+        params.distribute_field<fft_io::fft_io_in>(manual_devices, deviceGrid);
+        params.distribute_field<fft_io::fft_io_out>(manual_devices, deviceGrid);
     }
 
     // Run an individual test using the provided command-line parameters.
