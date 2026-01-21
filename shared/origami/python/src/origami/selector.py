@@ -116,7 +116,7 @@ class OrigamiMatmulSelector:
         else:
             self._grid = self._hardware.N_CU
 
-        self._xcc_workgroup_mapping, self._workgroup_mapping = (
+        self._workgroup_mapping = (
             origami.select_workgroup_mapping(self._problem,
                                              self._hardware,
                                              self._result.config,
@@ -141,12 +141,12 @@ class OrigamiMatmulSelector:
 
     @property
     def group_m(self):
-        return self._workgroup_mapping
+        return self._workgroup_mapping.wgm
 
 
     @property
     def num_sms(self):
-        return self._xcc_workgroup_mapping
+        return self._xcc_workgroup_mapping.wgmxcc
 
 
     @property
