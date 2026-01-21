@@ -51,7 +51,7 @@ Tests:
   category: nightly
   function: doti
   precision: *single_double_precisions_complex_real
-  M: [50000]
+  M: [500000]
   nnz: [23512, 84412, 311983]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
