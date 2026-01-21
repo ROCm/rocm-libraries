@@ -93,13 +93,6 @@ int Driver::HipGraphCapture(hipGraphFuncPtrType functPtr)
 int Driver::HipGraphCaptureCapturing(hipGraphFuncPtrType functPtr)
 {
 
-    // // warm up:
-    // int rc = functPtr();
-    // if(rc != miopenStatusSuccess)
-    // {
-    //     return rc;
-    // }
-
     hipError_t he = hipStreamBeginCapture(q, hipStreamCaptureModeGlobal);
     if(he != hipSuccess)
     {
@@ -107,16 +100,12 @@ int Driver::HipGraphCaptureCapturing(hipGraphFuncPtrType functPtr)
     }
 
     int rc = functPtr();
-
-    if(rc != miopenStatusSuccess)
-    {
-        hipStreamEndCapture(q, &hipGraph);
-        return rc;
-    }
-
+    
     he = hipStreamEndCapture(q, &hipGraph);
-    if(he != hipSuccess)
-    {
+    if(rc != miopenStatusSuccess || he != hipSuccess) {
+        hipGraphDestroy(hipGraph);
+        if(rc != miopenStatusSuccess)
+            return rc;
         return miopenStatusInternalError;
     }
 
@@ -124,6 +113,12 @@ int Driver::HipGraphCaptureCapturing(hipGraphFuncPtrType functPtr)
     if(he != hipSuccess)
     {
         hipGraphDestroy(hipGraph);
+        return miopenStatusInternalError;
+    }
+
+    he = hipGraphDestroy(hipGraph);
+    if(he != hipSuccess)
+    {
         return miopenStatusInternalError;
     }
 

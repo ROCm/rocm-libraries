@@ -1943,21 +1943,38 @@ int ConvDriver<Tgpu, Tref>::RunForwardGPU()
     {
         float alpha = static_cast<float>(1), beta = static_cast<float>(0);
 
-        miopenConvolutionForwardBias(GetHandle(),
-                                     &alpha,
-                                     biasTensor,
-                                     b.GetDevicePtr(),
-                                     &beta,
-                                     outputTensor,
-                                     out.GetDevicePtr());
+        int bias_return_code = HipGraphCapture([&]() -> int {
+            miopenConvolutionForwardBias(GetHandle(),
+                                         &alpha,
+                                         biasTensor,
+                                         b.GetDevicePtr(),
+                                         &beta,
+                                         outputTensor,
+                                         out.GetDevicePtr());
+            return miopenStatusSuccess;
+        });
+
+        if(bias_return_code != miopenStatusSuccess)
+            return bias_return_code;
+
+        HipGraphExecute();
 
         if(time_enabled)
         {
-            float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
-
+            use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
+            float time    = 0.0;
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             printf("GPU Kernel Time Forward Conv. Bias Elapsed: %f ms\n", time);
         }
+
+        HipGraphFinalize();
     }
 
     bool is_int8 = data_type == miopenInt8 || data_type == miopenInt8x4;
@@ -2080,10 +2097,6 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuFind(const bool is_transform)
     wall.start(wall_enabled);
 
     int return_code = HipGraphCapture([&]() -> int {
-        if(init_output_nan)
-        {
-            out.FillGpuBufferWithNans(handle, outputTensor);
-        }
 
         rc = miopenConvolutionForward(GetHandle(),
                                       &alpha,
@@ -2105,6 +2118,11 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuFind(const bool is_transform)
 
     for(int i = 0; i < num_iterations; i++)
     {
+        if(init_output_nan)
+        {
+            out.FillGpuBufferWithNans(handle, outputTensor);
+        }
+        
         HipGraphExecute();
 
         if(wall_enabled && i == 0)
@@ -2255,11 +2273,6 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuImmed(const bool is_transform)
     wall.start(wall_enabled);
 
     int return_code = HipGraphCapture([&]() -> int {
-        if(init_output_nan)
-        {
-            out.FillGpuBufferWithNans(handle, outputTensor);
-        }
-
         rc = miopenConvolutionForwardImmediate(
             handle,
             (is_transform ? weightTensor_vect4 : weightTensor),
@@ -2279,6 +2292,11 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuImmed(const bool is_transform)
 
     for(int i = 0; i < num_iterations; i++)
     {
+        if(init_output_nan)
+        {
+            out.FillGpuBufferWithNans(handle, outputTensor);
+        }
+        
         HipGraphExecute();
 
         if(wall_enabled && i == 0)
@@ -2530,19 +2548,41 @@ int ConvDriver<Tgpu, Tref>::RunBackwardGPU()
     {
         float alpha = static_cast<float>(1), beta = static_cast<float>(0);
 
-        ret |= miopenConvolutionBackwardBias(GetHandle(),
-                                             &alpha,
-                                             outputTensor,
-                                             dout.GetDevicePtr(),
-                                             &beta,
-                                             biasTensor,
-                                             db.GetDevicePtr());
+        int bias_return_code = HipGraphCapture([&]() -> int {
+            miopenConvolutionBackwardBias(GetHandle(),
+                                          &alpha,
+                                          outputTensor,
+                                          dout.GetDevicePtr(),
+                                          &beta,
+                                          biasTensor,
+                                          db.GetDevicePtr());
+            return miopenStatusSuccess;
+        });
 
-        if(time_enabled)
+        if(bias_return_code != miopenStatusSuccess)
         {
-            float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
-            printf("GPU Kernel Time Backward Bias Conv. Elapsed: %f ms\n", time);
+            ret |= bias_return_code;
+        }
+        else
+        {
+            HipGraphExecute();
+
+            if(time_enabled)
+            {
+                use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
+                float time    = 0.0;
+                if(use_hip_graph)
+                {
+                    time = GetHipGraphExecutionTime();
+                }
+                else
+                {
+                    miopenGetKernelTime(GetHandle(), &time);
+                }
+                printf("GPU Kernel Time Backward Bias Conv. Elapsed: %f ms\n", time);
+            }
+
+            HipGraphFinalize();
         }
 
         db.CopyFromDeviceToHost(GetStream());
