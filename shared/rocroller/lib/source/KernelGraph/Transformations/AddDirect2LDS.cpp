@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -59,15 +59,17 @@ namespace rocRoller
                     const auto storeLDSTags{
                         getAssociatedOps<LoadTiled, StoreLDSTile>(kgraph, loadGlobal)};
 
-                    AssertFatal(storeLDSTags.size() > 0,
-                                "LoadTiled must be associated with a StoreLDSTile");
-
                     if(storeLDSTags.size() == 1)
                     {
                         result.push_back({loadGlobal, storeLDSTags[0]});
                     }
                     else
                     {
+                        AssertFatal(storeLDSTags.size() >= 2,
+                                    "AddDirect2LDS: At least 2 Assign operations required for "
+                                    "StoreLDSTile.",
+                                    ShowValue(loadGlobal),
+                                    ShowValue(storeLDSTags.size()));
                         for(const auto& storeLDS : storeLDSTags)
                         {
                             auto maybeForLoopOfLoad
@@ -89,9 +91,6 @@ namespace rocRoller
                                 result.push_back({loadGlobal, storeLDS});
                             }
                         }
-                        AssertFatal(result.back().first == loadGlobal,
-                                    "Couldn't match the associated StoreLDSTile",
-                                    ShowValue(loadGlobal));
                     }
                 }
                 return result;
