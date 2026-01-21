@@ -95,7 +95,9 @@ Tests:
              mc2depi,
              ASIC_320k,
              scircuit,
-             Chevron2]
+             Chevron2,
+             bibd_22_8,
+             qc2534]
 
 - name: csr2coo_graph_test
   category: pre_checkin
@@ -124,8 +126,7 @@ Tests:
   N: 1
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [bibd_22_8,
-             bmwcra_1,
+  filename: [bmwcra_1,
              amazon0312,
              Chebyshev4,
              sme3Dc,

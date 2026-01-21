@@ -34,61 +34,61 @@ Tests:
 - name: csr2bsr
   category: quick
   function: csr2bsr
-  precision: *single_only_precisions
+  precision: *single_only_precisions_complex_real
   M: [0, 1107]
   N: [0, 1089]
   block_dim: [1, 6, 10, 14]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_random, rocsparse_matrix_zero]
 
 - name: csr2bsr
   category: quick
   function: csr2bsr
-  precision: *double_only_precisions
+  precision: *single_only_precisions_complex_real
   M: [325]
   N: [435]
   block_dim: [2, 7, 11, 15]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_zero]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_random]
 
 - name: csr2bsr
   category: quick
   function: csr2bsr
-  precision: *single_only_precisions_complex
+  precision: *single_only_precisions_complex_real
   M: [541]
   N: [347]
   block_dim: [3, 8, 12, 16]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_zero]
 
 - name: csr2bsr
   category: quick
   function: csr2bsr
-  precision: *double_only_precisions_complex
+  precision: *single_only_precisions_complex_real
   M: [757]
   N: [559]
   block_dim: [4, 9, 13, 17]
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_random]
 
 - name: csr2bsr
   category: quick
   function: csr2bsr
-  precision: *single_only_precisions
+  precision: *single_only_precisions_complex_real
   M: 1
   N: 1
   block_dim: [5, 10, 14, 18]
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos1,
              nos2,
@@ -104,7 +104,7 @@ Tests:
   precision: *double_only_precisions
   M: [10245, 50687, 92835]
   N: [11200, 51023, 78583]
-  block_dim: [5, 22, 71]
+  block_dim: [5, 22, 37, 71]
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row, rocsparse_direction_column]

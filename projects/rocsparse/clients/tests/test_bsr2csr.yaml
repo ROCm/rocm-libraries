@@ -34,61 +34,61 @@ Tests:
 - name: bsr2csr
   category: quick
   function: bsr2csr
-  precision: *single_only_precisions
+  precision: *single_double_precisions_complex_real
   M: [1, 872]
   N: [1, 623]
   block_dim: [1, 7, 150, 256]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_random]
 
 - name: bsr2csr
   category: quick
   function: bsr2csr
-  precision: *double_only_precisions
+  precision: *single_double_precisions_complex_real
   M: [1205]
   N: [2134]
   block_dim: [2, 5, 8, 11]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_zero]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_random]
 
 - name: bsr2csr
   category: quick
   function: bsr2csr
-  precision: *single_only_precisions_complex
+  precision: *single_double_precisions_complex_real
   M: [1725]
   N: [1846]
   block_dim: [3, 6, 9, 12]
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_random]
 
 - name: bsr2csr
   category: quick
   function: bsr2csr
-  precision: *double_only_precisions_complex
+  precision: *single_double_precisions_complex_real
   M: [981]
   N: [994]
   block_dim: [13, 14, 15, 16]
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_random]
 
 - name: bsr2csr_file
   category: quick
   function: bsr2csr
-  precision: *single_only_precisions
+  precision: *single_double_precisions_complex_real
   M: 1
   N: 1
-  block_dim: [5, 9, 25]
+  block_dim: [4, 5, 9, 25]
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos1,
              nos2,
@@ -100,7 +100,7 @@ Tests:
 - name: bsr2csr
   category: pre_checkin
   function: bsr2csr
-  precision: *single_only_precisions
+  precision: *single_double_precisions_complex_real
   M: [18746]
   N: [22957]
   block_dim: [20, 21, 22, 23, 24]
@@ -112,7 +112,7 @@ Tests:
 - name: bsr2csr
   category: pre_checkin
   function: bsr2csr
-  precision: *single_only_precisions
+  precision: *single_double_precisions_complex_real
   M: [32968]
   N: [38465]
   block_dim: [32, 37, 64]
@@ -210,7 +210,40 @@ Tests:
 - name: bsr2csr_file
   category: nightly
   function: bsr2csr
+  precision: *single_only_precisions
+  M: 1
+  N: 1
+  block_dim: [4]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [bmwcra_1,
+             shipsec1,
+             qc2534]
+
+- name: bsr2csr_file
+  category: nightly
+  function: bsr2csr
   precision: *double_only_precisions
+  M: 1
+  N: 1
+  block_dim: [8]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [sme3Dc,
+             webbase-1M,
+             Chebyshev4,
+             scircuit,
+             amazon0312, 
+             mac_econ_fwd500]
+
+- name: bsr2csr_file
+  category: nightly
+  function: bsr2csr
+  precision: *single_only_precisions
   M: 1
   N: 1
   block_dim: [9]
@@ -218,12 +251,6 @@ Tests:
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [bmwcra_1,
-             shipsec1,
-             qc2534,
-             sme3Dc,
-             webbase-1M,
-             Chebyshev4,
-             scircuit,
+  filename: [scircuit,
              amazon0312, 
              mac_econ_fwd500]

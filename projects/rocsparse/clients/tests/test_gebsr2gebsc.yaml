@@ -26,11 +26,7 @@ include: rocsparse_common.yaml
 
 
 Tests:
-- name: gebsr2gebsc_bad_arg
-  category: pre_checkin
-  function: gebsr2gebsc_bad_arg
-  precision: *single_double_precisions_complex_real
-
+# Quick
 - name: gebsr2gebsc
   category: quick
   function: gebsr2gebsc
@@ -42,6 +38,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_row, rocsparse_direction_column]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_zero]
 
 - name: gebsr2gebsc
@@ -55,6 +52,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_random]
 
 - name: gebsr2gebsc
@@ -68,6 +66,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_row]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_random]
 
 - name: gebsr2gebsc
@@ -81,6 +80,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_random]
 
 - name: gebsr2gebsc
@@ -94,6 +94,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_row]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_random]
 
 - name: gebsr2gebsc_file
@@ -106,9 +107,16 @@ Tests:
   col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_zero]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos5]
 
+# Pre-checkin
+- name: gebsr2gebsc_bad_arg
+  category: pre_checkin
+  function: gebsr2gebsc_bad_arg
+  precision: *single_double_precisions_complex_real
+  
 - name: gebsr2gebsc
   category: pre_checkin
   function: gebsr2gebsc
@@ -120,6 +128,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_random]
 
 - name: gebsr2gebsc
@@ -133,6 +142,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_column]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_random]
 
 - name: gebsr2gebsc
@@ -146,6 +156,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_row]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_random]
 
 - name: gebsr2gebsc
@@ -159,12 +170,11 @@ Tests:
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_row]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_random]
   graph_test: true
 
-
-
-
+# Nightly
 - name: gebsr2gebsc
   category: nightly
   function: gebsr2gebsc
@@ -176,6 +186,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_row]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_random]
 
 - name: gebsr2gebsc_file
@@ -185,10 +196,11 @@ Tests:
   M: 1
   N: 1
   row_block_dimA: [7]
-  col_block_dimA: [7, 14]
+  col_block_dimA: [8, 14]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [mplate]
 
@@ -203,6 +215,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_column]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron2]
 
@@ -217,6 +230,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron3]
 
@@ -231,6 +245,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_column]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4]
 
@@ -245,6 +260,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [amazon0312]
 
@@ -259,6 +275,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_column]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [bmwcra_1]
 
@@ -273,6 +290,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [mac_econ_fwd500]
 
@@ -287,6 +305,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_column]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [sme3Dc]
 
@@ -301,6 +320,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [webbase-1M]
 
@@ -315,6 +335,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_column]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chebyshev4]
 
@@ -329,5 +350,6 @@ Tests:
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [rma10]

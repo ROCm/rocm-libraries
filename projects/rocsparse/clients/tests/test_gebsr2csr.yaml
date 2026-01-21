@@ -26,11 +26,7 @@ include: rocsparse_common.yaml
 
 
 Tests:
-- name: gebsr2csr_bad_arg
-  category: pre_checkin
-  function: gebsr2csr_bad_arg
-  precision: *single_double_precisions_complex_real
-
+# Quick
 - name: gebsr2csr
   category: quick
   function: gebsr2csr
@@ -109,6 +105,12 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos5]
 
+# Pre-checkin
+- name: gebsr2csr_bad_arg
+  category: pre_checkin
+  function: gebsr2csr_bad_arg
+  precision: *single_double_precisions_complex_real
+  
 - name: gebsr2csr
   category: pre_checkin
   function: gebsr2csr
@@ -162,9 +164,20 @@ Tests:
   matrix: [rocsparse_matrix_random]
   graph_test: true
 
+- name: gebsr2csr_file
+  category: pre_checkin
+  function: gebsr2csr
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  row_block_dimA: [1, 3, 8, 16, 32, 64, 128]
+  col_block_dimA: [2, 4, 5, 11, 22, 33, 70]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [qc2534]
 
-
-
+# Nightly
 - name: gebsr2csr
   category: nightly
   function: gebsr2csr

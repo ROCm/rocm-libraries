@@ -244,7 +244,7 @@ Tests:
   N: 1
   row_block_dimA: [40]
   col_block_dimA: [32]
-  row_block_dimB: [45]
+  row_block_dimB: [30, 45]
   col_block_dimB: [37]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_zero]
@@ -260,7 +260,7 @@ Tests:
   N: 1
   row_block_dimA: [62]
   col_block_dimA: [44]
-  row_block_dimB: [36]
+  row_block_dimB: [31, 36]
   col_block_dimB: [55]
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_one]
@@ -283,6 +283,22 @@ Tests:
   direction: [rocsparse_direction_row, rocsparse_direction_column]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [scircuit]
+
+- name: gebsr2gebsr_file
+  category: pre_checkin
+  function: gebsr2gebsr
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  row_block_dimA: [10]
+  col_block_dimA: [14]
+  row_block_dimB: [2, 3, 7, 11, 17]
+  col_block_dimB: [8]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1]
 
 # Nightly
 - name: gebsr2gebsr

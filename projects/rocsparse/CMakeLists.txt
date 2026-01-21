@@ -388,31 +388,15 @@ if(BUILD_CODE_COVERAGE)
     PATHS /opt/rocm/llvm/bin
   )
 
-  find_program(LCOV lcov)
-
-  if(LCOV)
-    # With lcov: apply LCOV_EXCL markers
-    add_custom_target(
-      coverage
-      DEPENDS coverage_analysis
-      COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocsparse-coverage_*.profraw -o ./coverage-report/rocsparse.profdata
-      COMMAND ${LLVM_COV} report -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata
-      COMMAND ${LLVM_COV} export -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata -format=lcov > ./coverage-report/raw_coverage.info
-      COMMAND ${LCOV} --rc lcov_excl_line=LCOV_EXCL_LINE --rc lcov_excl_start=LCOV_EXCL_START --rc lcov_excl_stop=LCOV_EXCL_STOP -a ./coverage-report/raw_coverage.info --include '${CMAKE_SOURCE_DIR}/library/*' -o ./coverage-report/coverage.info
-      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
-  else()
-    message(STATUS "lcov not found - LCOV_EXCL markers will not be processed")
-    # Without lcov: export directly (no exclusion processing)
-    add_custom_target(
-      coverage
-      DEPENDS coverage_analysis
-      COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocsparse-coverage_*.profraw -o ./coverage-report/rocsparse.profdata
-      COMMAND ${LLVM_COV} report -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata
-      COMMAND ${LLVM_COV} export -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata -format=lcov > ./coverage-report/coverage.info
-      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
-  endif()
+  add_custom_target(
+    coverage
+    DEPENDS coverage_analysis
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocsparse-coverage_*.profraw -o ./coverage-report/rocsparse.profdata
+    COMMAND ${LLVM_COV} report -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata
+    COMMAND ${LLVM_COV} show -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata -format=lcov > ./coverage-report/coverage.info
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
 
   #
   # Coverage cleanup
