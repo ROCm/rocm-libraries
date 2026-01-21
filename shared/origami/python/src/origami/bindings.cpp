@@ -182,9 +182,11 @@ NB_MODULE(origami, m) {
         "Create hardware object for a specific architecture with specified parameters.");
 
   m.def("datatype_to_bits", &origami::datatype_to_bits, "Return the number of bits in a datatype");
+  
   m.def("string_to_datatype",
         &origami::string_to_datatype,
         "Convert a string representation of a datatype into data_type_t enum");
+
   m.def("datatype_to_string",
         &origami::datatype_to_string,
         "Convert data_type_t enum to string representation");
@@ -192,6 +194,7 @@ NB_MODULE(origami, m) {
   m.def("select_config",
         &origami::select_config,
         "Select best configuration based on problem and hardware");
+
   m.def("select_grid_size",
         &origami::streamk::select_grid_size,
         "Select best grid size for the given configuration");
@@ -210,11 +213,30 @@ NB_MODULE(origami, m) {
         "hardware"_a,
         "configs"_a,
         "Rank configurations by performance");
+
   m.def("select_config_mnk",
         &origami::select_config_mnk,
         "Select best configuration for M,N,K dimensions");
+<<<<<<< HEAD:shared/origami/python/src/origami/bindings.cpp
   m.def("select_topk_configs", &origami::select_topk_configs, "Select topk configurations");
   m.def("compute_perf_gflops", &origami::compute_perf_gflops, "Compute performance in GFLOPS");
+=======
+
+  m.def("select_topk_configs",
+        &origami::select_topk_configs,
+        "problem"_a,
+        "hardware"_a,
+        "configs"_a,
+        "topk"_a,
+        "Select topk configurations");
+
+  m.def("compute_perf_gflops",
+        &origami::compute_perf_gflops,
+        "hardware"_a,
+        "problem"_a,
+        "latency"_a,
+        "Compute performance in GFLOPS");
+>>>>>>> c1d7051fea (Formatting):shared/origami/python/origami_module.cpp
 
   // StreamK functions
   m.def("select_reduction",
