@@ -114,6 +114,7 @@ NB_MODULE(origami, m) {
       .def(nanobind::init<>())
       .def_rw("mt", &origami::config_t::mt)
       .def_rw("mi", &origami::config_t::mi)
+      .def_rw("custom_mainloop_scheduling", &origami::config_t::custom_mainloop_scheduling)
       .def_rw("occupancy", &origami::config_t::occupancy)
       .def_rw("workgroup_mapping", &origami::config_t::workgroup_mapping)
       .def_rw("cache_hints_a", &origami::config_t::cache_hints_a)

@@ -80,6 +80,8 @@ target_sources(
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/origami.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/streamk.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/types.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast_simulator.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast.hpp>
 )
 
 target_link_libraries(origami PUBLIC roc::origami-headers)
@@ -91,6 +93,8 @@ target_sources(
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/origami.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/streamk.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/types.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast_simulator.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast.cpp"
 )
 
 target_link_libraries(origami PUBLIC hip::host)
