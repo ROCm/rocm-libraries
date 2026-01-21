@@ -739,12 +739,14 @@ class TestCustomScheduleTF32:
 
     @pytest.mark.parametrize(
         # fmt: off
-        "transA, transB, lds_tr_inst,  tr_lds", [
-        (  True,  False,       False,       1),
+        "transA, transB, lds_tr_inst,  tr_lds,  plr,  mi", [
+        (  True,  False,       False,       1,  0,    [16,16,32,1]),
+        (  True,  False,       False,       1,  1,    [32,32,16,1]),
+        (  False, False,       False,       1,  1,    [32,32,16,1]),
         # fmt: on
         ])
-    def test_schedule_128x128x32(self, transA, transB, lds_tr_inst, tr_lds):
-        """Tests the 129x128x32 TF32 TN schedule."""
+    def test_schedule_128x128x32(self, transA, transB, lds_tr_inst, tr_lds, plr, mi):
+        """Tests the 129x128x32 TF32 schedule."""
         kernel = create_base_kernel()
         kernel["ProblemType"].update({
             "TransposeA": transA, "TransposeB": transB
@@ -753,9 +755,9 @@ class TestCustomScheduleTF32:
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "ForceUnrollSubIter": True,
             "MacroTile0": 128, "MacroTile1": 128, "DepthU": 32,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": plr,
             "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
-            "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
+            "MatrixInstruction": mi, "MIWaveGroup": [2,2],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 4, "MIWaveTileB": 4,
         })
 
@@ -763,9 +765,11 @@ class TestCustomScheduleTF32:
         assert has_schedule
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 1
+        schedule_info.pretty_print()
         numMfma = ((kernel["MacroTile0"] // kernel["MIWaveGroup"][0] // kernel["MatrixInstruction"][0]) *
                    (kernel["MacroTile1"] // kernel["MIWaveGroup"][1] // kernel["MatrixInstruction"][1]) *
-                    3 # tf32 emulated with 3 bf16
+                    3 * # tf32 emulated with 3 bf16
+                    (1 if plr == 0 else 2)   # two sub-iterations with PLR=1
         )
         assert schedule_info.numMfma == numMfma
         valid, message = isValid(schedule_info, {"kernel" : kernel})

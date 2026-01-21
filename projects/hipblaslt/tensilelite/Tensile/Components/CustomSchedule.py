@@ -3140,7 +3140,8 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         pack_b1= [                                                              18,18,18,18, 20,20, 22,22,22,22,
                                                                                  19,19,19,19, 20,20, 22,22,23,23]
         lwsa   = [                                                                          20] # use delay before mfma4x4x4
-        lwsb   = [                                                                          20]    
+        lwsb   = [                                                                          20]
+        
     elif isNN(kernel) and TLDS==1:
         lra0   = [0,0,0,0,
                    1,1,1,1,
@@ -3213,7 +3214,6 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     nglshift = nllshift = num_gr
 
     opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift)
-    opt1.pretty_print()
     return True, opt1
 
 @RegisterSchedule(
