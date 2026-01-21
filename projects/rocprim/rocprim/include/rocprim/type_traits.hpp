@@ -625,37 +625,25 @@ struct radix_key_codec
 
         template<bool KillNegativeZeros>
         ROCPRIM_HOST_DEVICE
-        static Key twiddle_in(bit_key_type bit_key)
+        static Key twiddle_in(Key bit_key)
         {
-            using matched_int_t = get_bit_key_type<bit_key_type>;
-            static_assert(!std::is_same<matched_int_t, void>::value,
+            static_assert(!std::is_same<bit_key_type, void>::value,
                             "Input type not supported");
-            static_assert(sizeof(bit_key_type) == sizeof(matched_int_t),
+            static_assert(sizeof(Key) == sizeof(bit_key_type),
                             "Size of mathed_int_t is not the same as key_in_t");
             // Might have undefined behavior, kill negative zeros
             if constexpr(KillNegativeZeros)
             {
-                bit_key = bit_key == bit_key_type{-0.0} ? bit_key_type{+0.0} : bit_key;
+                const Key zero{0};
+                const Key plus = bit_key + zero;
+                bit_key = bit_cast<bit_key_type>(plus);
             }
             // Cast to integral type, so we can flip the two’s complement
-            const auto bits = traits::radix_key_codec::bit_cast<matched_int_t>(bit_key);
-            constexpr matched_int_t mask = matched_int_t{1} << (sizeof(bit_key_type) * 8 - 1);
+            const auto bits = traits::radix_key_codec::bit_cast<bit_key_type>(bit_key);
             // For negative values, flip the whole number
             // For positive values, flip only two’s complement
             // Cast back when passing bits into extract_digit, in order to let extract_digit know that this is a floating point type
-            return traits::radix_key_codec::bit_cast<bit_key_type, matched_int_t>(bits & mask ? ~bits : bits ^ mask);
-           /* if constexpr(KillNegativeZeros)
-            {
-               // bit_key = bit_key == bit_key_type{-0.0} ? bit_key_type{+0.0} : bit_key;
-
-                const bit_key_type zero{0};
-                const bit_key_type a_plus = bit_key + zero;
-
-                bit_key = bit_cast<bit_key_type>(a_plus);
-
-
-
-            }*/
+            return traits::radix_key_codec::bit_cast<Key, bit_key_type>(bits & sign_bit ? ~bits : bits ^ sign_bit);
         }
     };
 
