@@ -627,23 +627,23 @@ struct radix_key_codec
         ROCPRIM_HOST_DEVICE
         static Key twiddle_in(Key bit_key)
         {
-            static_assert(!std::is_same<bit_key_type, void>::value,
-                            "Input type not supported");
+            static_assert(!std::is_same<bit_key_type, void>::value, "Input type not supported");
             static_assert(sizeof(Key) == sizeof(bit_key_type),
-                            "Size of mathed_int_t is not the same as key_in_t");
+                          "Size of mathed_int_t is not the same as key_in_t");
             // Might have undefined behavior, kill negative zeros
             if constexpr(KillNegativeZeros)
             {
                 const Key zero{0};
                 const Key plus = bit_key + zero;
-                bit_key = bit_cast<bit_key_type>(plus);
+                bit_key        = bit_cast<bit_key_type>(plus);
             }
             // Cast to integral type, so we can flip the two’s complement
             const auto bits = traits::radix_key_codec::bit_cast<bit_key_type>(bit_key);
             // For negative values, flip the whole number
             // For positive values, flip only two’s complement
             // Cast back when passing bits into extract_digit, in order to let extract_digit know that this is a floating point type
-            return traits::radix_key_codec::bit_cast<Key, bit_key_type>(bits & sign_bit ? ~bits : bits ^ sign_bit);
+            return traits::radix_key_codec::bit_cast<Key, bit_key_type>(
+                bits & sign_bit ? ~bits : bits ^ sign_bit);
         }
     };
 

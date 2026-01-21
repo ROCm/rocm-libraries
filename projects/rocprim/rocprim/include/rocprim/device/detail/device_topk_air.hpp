@@ -424,15 +424,15 @@ struct device_topk_air_impl
         constexpr auto histogram_size
             = Iteration == (num_iterations - 1) ? num_buckets_last_iteration : num_buckets;
 
-
         digit_t digit = device_air_topk_impl::key_codec::template extract_digit<Decomposer>(
-                    // Extracts digit values. Digits are extracted from the most
-                    // significant bit to the least significant bit. For signed or floating-point
-                    // types, the position must be adjusted for negative values.
-                traits::radix_key_codec::codec_base<key_in_t>::template twiddle_in<KillNegativeZeros>(key),
-                start_bits, // Start bit of the sequence of bits to extract
-                cur_bits, // How many bits to extract
-                decomposer);
+            // Extracts digit values. Digits are extracted from the most
+            // significant bit to the least significant bit. For signed or floating-point
+            // types, the position must be adjusted for negative values.
+            traits::radix_key_codec::codec_base<key_in_t>::template twiddle_in<KillNegativeZeros>(
+                key),
+            start_bits, // Start bit of the sequence of bits to extract
+            cur_bits, // How many bits to extract
+            decomposer);
 
         if constexpr(SelectMin)
         {
