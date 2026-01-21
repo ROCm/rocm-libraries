@@ -2,23 +2,29 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsBfp8.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp8.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceMatmul.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceMatmul.hpp>
+#include "cpu_graph_executor/MatmulGraphUtils.hpp"
+#include "cpu_graph_executor/MatmulTensorBundles.hpp"
+#include "cpu_graph_executor/PointwiseGraphUtils.hpp"
 
 #include <vector>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_plugin_sdk;
+using namespace hipdnn_sdk_test_utils;
 
 namespace
 {
@@ -49,6 +55,137 @@ void expectTensorValues(const Tensor<Type>& tensor, const std::vector<float>& ex
 }
 
 } // namespace
+
+/* ============================= Unit tests ============================= */
+
+class TestCpuFpReferenceMatmul : public ::testing::Test
+{
+};
+
+TEST_F(TestCpuFpReferenceMatmul, IsApplicable)
+{
+    // CpuFpReferenceMatmul::isApplicable should return true for Matmul node
+    {
+        std::vector<int64_t> aDims = {2, 2, 3};
+        std::vector<int64_t> bDims = {2, 3, 4};
+        std::vector<int64_t> cDims = {2, 2, 4};
+
+        MatmulTensorBundle<float> tensorBundle(aDims, bDims, cDims, false, false, 1);
+        auto graphTuple = buildMatmulGraph(tensorBundle, DataType::FLOAT, DataType::FLOAT);
+
+        auto& graph = std::get<0>(graphTuple);
+        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+
+        hipdnn_plugin_sdk::GraphWrapper graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
+        EXPECT_TRUE(CpuFpReferenceMatmul::isApplicable(graphWrap.getNode(0)));
+    }
+
+    // CpuFpReferenceMatmul::isApplicable should return false for any other node type
+    {
+        std::vector<int64_t> dims = {1, 3, 4, 4};
+
+        auto graphTuple = buildPointwiseUnaryGraph(dims,
+                                                   dims,
+                                                   DataType::FLOAT,
+                                                   DataType::FLOAT,
+                                                   DataType::FLOAT,
+                                                   hipdnn_frontend::PointwiseMode::RELU_FWD,
+                                                   1,
+                                                   TensorLayout::NCHW);
+
+        auto& graph = std::get<0>(graphTuple);
+        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+
+        hipdnn_plugin_sdk::GraphWrapper graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
+        EXPECT_FALSE(CpuFpReferenceMatmul::isApplicable(graphWrap.getNode(0)));
+    }
+}
+
+TEST_F(TestCpuFpReferenceMatmul, validateInput)
+{
+    // Rank mismatching
+    {
+        auto tensorA = createTensor<float>({2, 2, 3});
+        auto tensorB = createTensor<float>({3, 4});
+        auto tensorC = createTensor<float>({2, 2, 4});
+
+        EXPECT_THROW(
+            (CpuFpReferenceMatmul::matmul<float, float, float, float>(tensorA, tensorB, tensorC)),
+            std::invalid_argument);
+    }
+
+    // Rank less than 2
+    {
+        auto tensorA = createTensor<float>({3});
+        auto tensorB = createTensor<float>({3});
+        auto tensorC = createTensor<float>({3});
+
+        EXPECT_THROW(
+            (CpuFpReferenceMatmul::matmul<float, float, float, float>(tensorA, tensorB, tensorC)),
+            std::invalid_argument);
+    }
+
+    // Mismatched K dimensions
+    {
+        auto tensorA = createTensor<float>({2, 2, 5});
+        auto tensorB = createTensor<float>({2, 2, 5});
+        auto tensorC = createTensor<float>({2, 2, 2});
+
+        EXPECT_THROW(
+            (CpuFpReferenceMatmul::matmul<float, float, float, float>(tensorA, tensorB, tensorC)),
+            std::invalid_argument);
+    }
+
+    // Incorrect output shape
+    {
+        auto tensorA = createTensor<float>({2, 3, 5});
+        auto tensorB = createTensor<float>({2, 5, 4});
+        auto tensorC = createTensor<float>({2, 4, 3});
+
+        EXPECT_THROW(
+            (CpuFpReferenceMatmul::matmul<float, float, float, float>(tensorA, tensorB, tensorC)),
+            std::invalid_argument);
+    }
+}
+
+TEST_F(TestCpuFpReferenceMatmul, validateBroadcastableBatchDims)
+{
+    // Correct case
+    {
+        auto tensorA = createTensor<float>({2, 1, 2, 3});
+        auto tensorB = createTensor<float>({1, 2, 3, 4});
+        auto tensorC = createTensor<float>({2, 2, 2, 4});
+
+        EXPECT_NO_THROW(
+            (CpuFpReferenceMatmul::matmul<float, float, float, float>(tensorA, tensorB, tensorC)));
+    }
+
+    // Non-divisible batch dims
+    {
+        auto tensorA = createTensor<float>({2, 2, 2, 3});
+        auto tensorB = createTensor<float>({3, 2, 3, 4});
+        auto tensorC = createTensor<float>({2, 2, 3, 4});
+
+        EXPECT_THROW(
+            (CpuFpReferenceMatmul::matmul<float, float, float, float>(tensorA, tensorB, tensorC)),
+            std::invalid_argument);
+    }
+
+    // Incorrect output batch dims
+    {
+        auto tensorA = createTensor<float>({2, 1, 2, 3});
+        auto tensorB = createTensor<float>({1, 2, 3, 4});
+        auto tensorC = createTensor<float>({1, 1, 2, 4});
+
+        EXPECT_THROW(
+            (CpuFpReferenceMatmul::matmul<float, float, float, float>(tensorA, tensorB, tensorC)),
+            std::invalid_argument);
+    }
+}
+
+/* ====================================================================== */
+
+/* ============================= Func tests ============================= */
 
 template <typename T1, typename T2, typename T3, typename T4>
 struct TypePair
@@ -352,3 +489,5 @@ TYPED_TEST(CpuFpReferenceMatmulBasic, Matmul4DBroadcast)
         tensorC,
         {-31.0f, -13.0f, -45.0f, -19.0f, -59.0f, -25.0f, 5.0f, 23.0f, 7.0f, 33.0f, 9.0f, 43.0f});
 }
+
+/* ====================================================================== */
