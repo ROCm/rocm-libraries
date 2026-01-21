@@ -452,6 +452,13 @@ private:
         constexpr bool is_bfp8 = std::is_same<Tgpu, bfloat8_fnuz>::value;
         if(is_bfp8 || is_fp8 || TensorsCasted())
             tolerance *= 37.0;
+
+        { // tf32 has same mantissa length as fp16
+            auto math_type_ = inflags.GetValueInt("math_type");
+            if(std::is_same_v<Tgpu, float> &&
+               (miopen::EnvEnableTF32() || (math_type_ == miopenMathDefault)))
+                tolerance = 8.2e-3;
+        }
         return tolerance;
     }
 
@@ -864,6 +871,8 @@ int ConvDriver<Tgpu, Tref>::GetandSetData()
             warmupConvDesc,
             static_cast<int>(miopenConvolutionFindModeNormal)); // Repeat via hidden API.
         miopenSetConvolutionGroupCount(warmupConvDesc, group_count);
+        miopenSetConvolutionAttribute(
+            warmupConvDesc, MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, inflags.GetValueInt("math_type"));
 
         int warmup_out_len_size = miopen::deref(warmupInputTensor).GetNumDims();
         std::vector<int> warmup_out_len(warmup_out_len_size);
@@ -1018,6 +1027,8 @@ int ConvDriver<Tgpu, Tref>::AddCmdLineArgs()
                          "0",
                          "MIOpen tuning policy (Default=0, or no tuning policy set)",
                          "int");
+    // TODO:(LYM) change back to 0 when TF32 is fully supported
+    inflags.AddInputFlag("math_type", 'M', "1", "math type of compute (Default=1)", "int");
 
     return 0;
 }
@@ -1221,6 +1232,14 @@ int ConvDriver<Tgpu, Tref>::SetConvDescriptorFromCmdLineArgs()
     {
         miopenSetTransposeConvNdOutputPadding(convDesc, spatial_dim, trans_output_pads.data());
     }
+
+    auto math_type_ = inflags.GetValueInt("math_type");
+    if(math_type_ < miopenMathDefault || math_type_ > miopenMathPedantic)
+    {
+        std::cout << "Invalid math_type value: " << math_type_ << std::endl;
+        exit(0); // NOLINT (concurrency-mt-unsafe)
+    }
+    miopenSetConvolutionAttribute(convDesc, MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, math_type_);
 
     return miopenStatusSuccess;
 }

@@ -65,9 +65,13 @@ bool ConvFwdParams::validTensors() const
     return _tensorsValid;
 }
 
-ConvFwdPlan::ConvFwdPlan(const HipdnnEnginePluginHandle& handle, ConvFwdParams&& params)
+ConvFwdPlan::ConvFwdPlan(const HipdnnEnginePluginHandle& handle,
+                         ConvFwdParams&& params,
+                         bool benchmarkingEnabled)
     : _params(std::move(params))
+    , _benchmarkingEnabled(benchmarkingEnabled)
 {
+    (void)_benchmarkingEnabled;
     // MIOpen Find 2.0 API
     miopenProblem_t problem;
     THROW_ON_MIOPEN_FAILURE(miopenCreateConvProblem(
