@@ -593,23 +593,112 @@ void build_k()
     std::cout << s << std::endl;
 }
 
+constexpr auto create_device_grouped_conv_fwd_xdl_merged_groups_f32_instance_data(
+    std::size_t spatialDim,
+    ckb::TensorLayout inLayout,
+    ckb::TensorLayout weiLayout,
+    ckb::TensorLayout outLayout,
+    ckb::ConvSpecialization convSpecialization)
+{
+    // Adapted from the composable_kernel project, file:
+    // library/include/ck/library/tensor_operation_instance/gpu/grouped_conv_fwd/device_grouped_conv_fwd_xdl_merged_groups_instance.hpp
+
+    // clang-format off
+    std::array result = {
+        // Instance 1: NumGroupsToMerge = 8
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 64, 64, 16, 16, 4, 4, 16, 16, 4, 1,
+            {4, 16, 1}, {0, 2, 1}, {0, 2, 1}, 1, 4, 4, true,
+            {4, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 1, 4, true,
+            1, 1, {1, 16, 1, 4}, 1,
+            FP32, FP32, ckb::PipelineScheduler::DEFAULT, 8),
+        
+        // Instance 2: NumGroupsToMerge = 16
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 64, 64, 16, 16, 4, 4, 16, 16, 4, 1,
+            {4, 16, 1}, {0, 2, 1}, {0, 2, 1}, 1, 4, 4, true,
+            {4, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 1, 4, true,
+            1, 1, {1, 16, 1, 4}, 1,
+            FP32, FP32, ckb::PipelineScheduler::DEFAULT, 16),
+        
+        // Instance 3: NumGroupsToMerge = 32
+        make_xdl_instance_from_old_params(
+            spatialDim, inLayout, weiLayout, outLayout,
+            FP32, FP32, FP32, FP32, FP32,
+            convSpecialization, ckb::GemmSpecialization::MNKPadding,
+            1, 64, 64, 16, 16, 4, 4, 16, 16, 4, 1,
+            {4, 16, 1}, {0, 2, 1}, {0, 2, 1}, 1, 4, 4, true,
+            {4, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 1, 4, true,
+            1, 1, {1, 16, 1, 4}, 1,
+            FP32, FP32, ckb::PipelineScheduler::DEFAULT, 32)
+    };
+    // clang-format on
+
+    return result;
+}
+
 constexpr auto create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_instance_data()
 {
     // Adapted from the composable_kernel project, file:
     // library/src/tensor_operation_instance/gpu/grouped_conv2d_fwd/xdl/device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_instance.cpp
 
-    constexpr auto defaultInstanceData = create_device_grouped_conv_fwd_xdl_f32_instance_data(
-        2, ckb::TensorLayout::NGCHW, ckb::TensorLayout::GKCYX, ckb::TensorLayout::NGKHW, ckb::ConvSpecialization::DEFAULT);
+    constexpr auto defaultInstanceData =
+        create_device_grouped_conv_fwd_xdl_f32_instance_data(2,
+                                                             ckb::TensorLayout::NGCHW,
+                                                             ckb::TensorLayout::GKCYX,
+                                                             ckb::TensorLayout::NGKHW,
+                                                             ckb::ConvSpecialization::DEFAULT);
 
     constexpr auto filter1x1Pad0InstanceData = create_device_grouped_conv_fwd_xdl_f32_instance_data(
-        2, ckb::TensorLayout::NGCHW, ckb::TensorLayout::GKCYX, ckb::TensorLayout::NGKHW, ckb::ConvSpecialization::FILTER_1X1_PAD0);
+        2,
+        ckb::TensorLayout::NGCHW,
+        ckb::TensorLayout::GKCYX,
+        ckb::TensorLayout::NGKHW,
+        ckb::ConvSpecialization::FILTER_1X1_PAD0);
 
     constexpr auto filter1x1Stride1Pad0InstanceData =
         create_device_grouped_conv_fwd_xdl_f32_instance_data(
-            2, ckb::TensorLayout::NGCHW, ckb::TensorLayout::GKCYX, ckb::TensorLayout::NGKHW, ckb::ConvSpecialization::FILTER_1X1_STRIDE1_PAD0);
+            2,
+            ckb::TensorLayout::NGCHW,
+            ckb::TensorLayout::GKCYX,
+            ckb::TensorLayout::NGKHW,
+            ckb::ConvSpecialization::FILTER_1X1_STRIDE1_PAD0);
 
     constexpr auto instanceData =
         concat(defaultInstanceData, filter1x1Pad0InstanceData, filter1x1Stride1Pad0InstanceData);
+
+    return instanceData;
+}
+
+constexpr auto
+create_device_grouped_conv2d_fwd_xdl_merged_groups_ngchw_gkcyx_ngkhw_f32_instance_data()
+{
+    // Adapted from the composable_kernel project, file:
+    // library/src/tensor_operation_instance/gpu/grouped_conv2d_fwd/xdl/merged_groups/device_grouped_conv2d_fwd_xdl_merged_groups_ngchw_gkcyx_ngkhw_f32_instance.cpp
+
+    constexpr auto defaultInstanceData =
+        create_device_grouped_conv_fwd_xdl_merged_groups_f32_instance_data(
+            2,
+            ckb::TensorLayout::NGCHW,
+            ckb::TensorLayout::GKCYX,
+            ckb::TensorLayout::NGKHW,
+            ckb::ConvSpecialization::DEFAULT);
+
+    constexpr auto filter3x3InstanceData =
+        create_device_grouped_conv_fwd_xdl_merged_groups_f32_instance_data(
+            2,
+            ckb::TensorLayout::NGCHW,
+            ckb::TensorLayout::GKCYX,
+            ckb::TensorLayout::NGKHW,
+            ckb::ConvSpecialization::FILTER_3x3);
+
+    constexpr auto instanceData = concat(defaultInstanceData, filter3x3InstanceData);
 
     return instanceData;
 }
@@ -619,10 +708,17 @@ struct DeviceOperationInstanceFactory<DeviceOpGFWdDefaultFloat>
 {
     static std::vector<BaseOperatorPtr> GetInstances()
     {
+        // Adapted from GetInstances() in the composable_kernel project's file:
+        // library/include/ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp
         std::vector<BaseOperatorPtr> instances{};
 
-        constexpr auto instanceData =
+        constexpr auto xdlMergedInstanceData =
+            create_device_grouped_conv2d_fwd_xdl_merged_groups_ngchw_gkcyx_ngkhw_f32_instance_data();
+
+        constexpr auto xdlInstanceData =
             create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_instance_data();
+
+        constexpr auto instanceData = concat(xdlMergedInstanceData, xdlInstanceData);
 
         build_kernels<instanceData>(instances);
 
