@@ -233,9 +233,14 @@ namespace rocRoller
                 auto t = (arithmeticShiftR(numerator - q, one)) + q;
                 setComment(t, "Magic t (unsigned)");
 
-                result = conditional(denominator == literal(1, denominatorType),
-                                     numerator,
-                                     arithmeticShiftR(t, numShiftsExpr));
+                //result = conditional(denominator == literal(1, denominatorType),
+                //                     numerator,
+                //                     arithmeticShiftR(t, numShiftsExpr));
+
+                auto isDenominatorOne = (numShiftsExpr & literal(1u << 31u));
+                result                = conditional(
+                    isDenominatorOne == literal(0u), arithmeticShiftR(t, numShiftsExpr), numerator);
+
                 //result = arithmeticShiftR(t, numShiftsExpr);
                 setComment(result, "Magic result (unsigned)");
             }
