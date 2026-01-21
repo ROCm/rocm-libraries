@@ -272,7 +272,7 @@ namespace rocRoller
 
                     m_tagTensorD
                         = command->addOperation(Operations::Tensor(2, typeD, {}, {(size_t)1})); // D
-                    command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
+                    // command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
                     if(solutionParams.types.typeAcc == solutionParams.types.typeD)
                     {
                         command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
