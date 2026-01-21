@@ -643,9 +643,6 @@ namespace GEMMTests
 
         // Note: The following cases are filtered out by FilterValidStreamKGEMMMXF8F6F4Params:
         // - Direct2LDS not yet supported for FP6/BF6
-        // - FP8/BF8 with MFMAK=64, both paths BufferToLDS, and Standard mode -- intermittent incorrect results
-        // - TwoTile and TwoTileDPFirst with BufferToLDSViaVGPR for non-FP4 -- runs out of registers
-        // - TwoTile and TwoTileDPFirst with BufferToLDS -- need to fix Direct2LDS
 
         AssertFatal(loadPathA == SolutionParams::LoadPath::BufferToLDSViaVGPR
                         || loadPathA == SolutionParams::LoadPath::BufferToLDS,
@@ -886,29 +883,6 @@ namespace GEMMTests
 
             // Direct2LDS not yet supported for FP6/BF6
             if((typeAB == DT::FP6 || typeAB == DT::BF6)
-               && (loadPathA == LP::BufferToLDS || loadPathB == LP::BufferToLDS))
-            {
-                continue;
-            }
-
-            // Skip FP8/BF8 with MFMAK=64, both paths BufferToLDS, and Standard mode -- intermittent incorrect results
-            auto const& MFMAK = std::get<1>(params);
-            if((typeAB == DT::FP8 || typeAB == DT::BF8) && MFMAK == 64
-               && loadPathA == LP::BufferToLDS && loadPathB == LP::BufferToLDS
-               && mode == SM::Standard)
-            {
-                continue;
-            }
-
-            // Skip TwoTile and TwoTileDPFirst with BufferToLDSViaVGPR for non-FP4 -- runs out of registers
-            if(typeAB != DT::FP4 && (mode == SM::TwoTile || mode == SM::TwoTileDPFirst)
-               && (loadPathA == LP::BufferToLDSViaVGPR || loadPathB == LP::BufferToLDSViaVGPR))
-            {
-                continue;
-            }
-
-            // Skip TwoTile and TwoTileDPFirst with BufferToLDS -- need to fix Direct2LDS
-            if((mode == SM::TwoTile || mode == SM::TwoTileDPFirst)
                && (loadPathA == LP::BufferToLDS || loadPathB == LP::BufferToLDS))
             {
                 continue;
