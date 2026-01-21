@@ -208,7 +208,7 @@ auto GetCases()
 
 } // namespace
 
-class GPU_SolverTest_NONE : public ::testing::TestWithParam<TestCase>
+class CPU_SolverTest_NONE : public ::testing::TestWithParam<TestCase>
 {
 public:
     void SetUp() override { prng::reset_seed(); }
@@ -262,9 +262,9 @@ protected:
     }
 };
 
-TEST_P(GPU_SolverTest_NONE, TestSolver) { Run(); }
+TEST_P(CPU_SolverTest_NONE, TestSolver) { Run(); }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_SolverTest_NONE,
+                         CPU_SolverTest_NONE,
                          ::testing::ValuesIn(GetCases()),
                          [](auto const&) { return "SearchesDoneTest"; });
