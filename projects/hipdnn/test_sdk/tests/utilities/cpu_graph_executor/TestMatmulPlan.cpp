@@ -127,7 +127,7 @@ TEST(TestMatmulPlanBuilder, IsApplicable)
                                                graphWrapPointwise.getTensorMap()));
 }
 
-TEST(TestMatmulPlanBuilder, buildNodePlan)
+TEST(TestMatmulPlanBuilder, BuildNodePlan)
 {
     MatmulPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
 

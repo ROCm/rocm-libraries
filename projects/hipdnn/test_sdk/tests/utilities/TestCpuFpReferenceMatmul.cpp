@@ -101,7 +101,7 @@ TEST_F(TestCpuFpReferenceMatmul, IsApplicable)
     }
 }
 
-TEST_F(TestCpuFpReferenceMatmul, validateInput)
+TEST_F(TestCpuFpReferenceMatmul, ValidateInput)
 {
     // Rank mismatching
     {
@@ -148,7 +148,7 @@ TEST_F(TestCpuFpReferenceMatmul, validateInput)
     }
 }
 
-TEST_F(TestCpuFpReferenceMatmul, validateBroadcastableBatchDims)
+TEST_F(TestCpuFpReferenceMatmul, ValidateBroadcastableBatchDims)
 {
     // Correct case
     {
