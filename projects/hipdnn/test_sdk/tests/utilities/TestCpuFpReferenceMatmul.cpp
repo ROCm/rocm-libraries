@@ -315,3 +315,40 @@ TYPED_TEST(CpuFpReferenceMatmulBasic, MatmulMultipleBatchDims4D)
     // output[1, 1] : 7x14 + 8x15 = 218
     expectTensorValues(tensorC, {26.0f, 74.0f, 138.0f, 218.0f});
 }
+
+TYPED_TEST(CpuFpReferenceMatmulBasic, Matmul4DBroadcast)
+{
+    auto tensorA = createTensor<typename TypeParam::ADataType>({2, 1, 2, 2});
+    auto tensorB = createTensor<typename TypeParam::BDataType>({1, 3, 2, 1});
+    auto tensorC = createTensor<typename TypeParam::CDataType>({2, 3, 2, 1});
+
+    const int tensorAElementCount = static_cast<int>(tensorA.elementCount());
+    const int tensorBElementCount = static_cast<int>(tensorB.elementCount());
+    for(int i = 0; i < tensorAElementCount; ++i)
+    {
+        tensorA.memory().hostData()[i] = static_cast<typename TypeParam::ADataType>(
+            static_cast<float>(i - tensorAElementCount / 2));
+    }
+    for(int i = 0; i < tensorBElementCount; ++i)
+    {
+        tensorB.memory().hostData()[i] = static_cast<typename TypeParam::BDataType>(
+            static_cast<float>(i + tensorAElementCount / 2));
+    }
+
+    hipdnn_test_sdk::utilities::CpuFpReferenceMatmul::matmul<typename TypeParam::ADataType,
+                                                             typename TypeParam::BDataType,
+                                                             typename TypeParam::CDataType,
+                                                             typename TypeParam::ComputeDataType>(
+        tensorA, tensorB, tensorC);
+
+    // Expected output:
+    // output[0, 0]: (-4)x4 + (-3)x5 = -31,  (-2)x4 + (-1)x5 = -13
+    // output[0, 1]: (-4)x6 + (-3)x7 = -45,  (-2)x6 + (-1)x7 = -19
+    // output[0, 2]: (-4)x8 + (-3)x9 = -59,  (-2)x8 + (-1)x9 = -25
+    // output[1, 0]: 0x4  + 1x5      = 5,    2x4  + 3x5      = 23
+    // output[1, 1]: 0x6  + 1x7      = 7,    2x6  + 3x7      = 33
+    // output[1, 2]: 0x8  + 1x9      = 9,    2x8  + 3x9      = 43
+    expectTensorValues(
+        tensorC,
+        {-31.0f, -13.0f, -45.0f, -19.0f, -59.0f, -25.0f, 5.0f, 23.0f, 7.0f, 33.0f, 9.0f, 43.0f});
+}
