@@ -69,7 +69,7 @@ protected:
 
         // Epsilon (pass-by-value)
         auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
-        epsilonTensorAttr->set_name("epsilon").set_value(1e-5f);
+        epsilonTensorAttr->set_name("epsilon").set_value(1e-5);
 
         graph::BatchnormInferenceAttributesVarianceExt bnAttrs;
 

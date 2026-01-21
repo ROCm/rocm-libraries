@@ -279,7 +279,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
 int main(int argc, char* argv[])
 {
-    auto config = parseCommandLineArgs(argc, argv);
+    auto config = parseCommandLineArgs(argc, argv, SampleType::BN_TRAINING);
 
     initializeFrontendLogging();
 
