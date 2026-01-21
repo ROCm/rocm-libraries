@@ -231,7 +231,6 @@ private:
     int iter       = 0;
 
     miopenDataType_t grad_type;
-    bool use_hip_graph = false;
 };
 
 template <typename Tgpu, typename Tref, typename Tgrad>
