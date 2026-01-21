@@ -369,10 +369,26 @@ namespace TensileLite
 
             static void enumeration(IO& io, rocisa::DataType& value)
             {
-                for(int i = 0; i < static_cast<int>(rocisa::DataType::Count); i++)
+                try
                 {
-                    auto const& info = DataTypeInfo::Get(i);
-                    iot::enumCase(io, value, info.name.c_str(), info.dataType);
+                    for(int i = 0; i < static_cast<int>(rocisa::DataType::Count); i++)
+                    {
+                        auto const& info = DataTypeInfo::Get(i);
+                        if(!info.name.empty())
+                        {
+                            iot::enumCase(io, value, info.name.c_str(), info.dataType);
+                        }
+                    }
+                }
+                catch(const std::exception& e)
+                {
+                    if(!iot::outputting(io))
+                    {
+                        std::cerr << "[ERROR] Failed to enumerate DataType: " << e.what() << std::endl;
+                        std::cerr << "[ERROR] This likely means the msgpack library files are incompatible with current code" << std::endl;
+                        std::cerr << "[ERROR] You need to rebuild the solution library files" << std::endl;
+                    }
+                    throw;
                 }
             }
         };

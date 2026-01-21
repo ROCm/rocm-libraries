@@ -2258,7 +2258,6 @@ namespace
                         std::string deviceString
                             = deviceFullString.substr(0, deviceFullString.find(":"));
                         m_devicePropMap[deviceString] = std::make_shared<hipDeviceProp_t>(prop);
-                        // Cache the Hardware object (includes PCI chip ID, queried once)
                         m_hardwareMap[deviceString] = TensileLite::hip::GetDevice(devId);
                     }
                 }
@@ -2271,7 +2270,6 @@ namespace
                 hipDeviceProp_t prop;
                 HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceId));
                 m_deviceProp = std::make_shared<hipDeviceProp_t>(prop);
-                // Cache the Hardware object (includes PCI chip ID, queried once)
                 m_hardware = TensileLite::hip::GetDevice(deviceId);
 
                 // Load library

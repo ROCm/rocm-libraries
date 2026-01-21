@@ -174,7 +174,23 @@ namespace TensileLite
                                 else if(value.type == msgpack::type::ARRAY)
                                 {
                                     auto arr = value.as<std::vector<msgpack::object>>();
-                                    std::cout << ", array_size=" << arr.size() << ", array_item=" << arr[0];
+                                    std::cout << ", array_size=" << arr.size();
+                                    if(arr.size() > 0)
+                                    {
+                                        if(arr[0].type == msgpack::type::POSITIVE_INTEGER ||
+                                           arr[0].type == msgpack::type::NEGATIVE_INTEGER)
+                                        {
+                                            int64_t firstVal;
+                                            arr[0].convert(firstVal);
+                                            std::cout << ", first_element=" << firstVal;
+                                        }
+                                        else if(arr[0].type == msgpack::type::STR)
+                                        {
+                                            std::string firstVal;
+                                            arr[0].convert(firstVal);
+                                            std::cout << ", first_element=\"" << firstVal << "\"";
+                                        }
+                                    }
                                 }
                             }
                             catch(...)
@@ -326,14 +342,37 @@ namespace TensileLite
             template <typename T>
             void enumCase(T& member, const char* key, T value)
             {
-                assert(object.type == msgpack::type::object_type::STR);
-                std::string result;
-                object.convert(result);
-
-                if(result == key)
+                // Handle both string-based and integer-based enum serialization
+                if(object.type == msgpack::type::object_type::STR)
                 {
-                    enumFound++;
-                    member = value;
+                    // String-based: msgpack contains enum name like "Float", "Double"
+                    std::string result;
+                    object.convert(result);
+
+                    if(result == key)
+                    {
+                        enumFound++;
+                        member = value;
+                    }
+                }
+                else if(object.type == msgpack::type::POSITIVE_INTEGER ||
+                        object.type == msgpack::type::NEGATIVE_INTEGER)
+                {
+                    // Integer-based: msgpack contains enum value like 0, 4, 7
+                    int64_t intValue;
+                    object.convert(intValue);
+
+                    if(static_cast<int64_t>(value) == intValue)
+                    {
+                        enumFound++;
+                        member = value;
+                    }
+                }
+                else
+                {
+                    // Unexpected type
+                    addError(concatenate("Unexpected msgpack type for enum: ", (int)object.type,
+                                       " (expected STRING or INTEGER)"));
                 }
             }
         };
