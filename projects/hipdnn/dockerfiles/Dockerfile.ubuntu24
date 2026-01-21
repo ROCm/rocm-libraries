@@ -36,6 +36,9 @@ RUN apt-get update && apt-get install -y \
     rsync \
     ca-certificates \
     wget \
+    texinfo \
+    bison \
+    flex \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
@@ -105,6 +108,7 @@ ARG THEROCK_BUILD_MODE=Release
 ARG THEROCK_BUILD_PRESET=linux-release-package
 ARG BUILD_JOBS=0
 ARG ROCM_LIBRARIES_REF=default
+ARG ROCM_SYSTEMS_REF=default
 
 RUN git config --global user.email "docker@build.local" && \
     git config --global user.name "Docker Build"
@@ -134,6 +138,19 @@ RUN if [ "$ROCM_LIBRARIES_REF" != "default" ]; then \
         git commit -m "Update rocm-libraries submodule to $ROCM_LIBRARIES_REF"; \
     fi
 
+# Update rocm-systems submodule to specific ref if provided
+# we need to commit the change so that fetch_sources.py does not overwrite the change
+RUN if [ "$ROCM_SYSTEMS_REF" != "default" ]; then \
+        echo "Updating rocm-systems submodule to: $ROCM_SYSTEMS_REF"; \
+        git submodule update --init rocm-systems && \
+        cd rocm-systems && \
+        git fetch origin && \
+        git checkout $ROCM_SYSTEMS_REF && \
+        cd .. && \
+        git add rocm-systems && \
+        git commit -m "Update rocm-systems submodule to $ROCM_SYSTEMS_REF"; \
+    fi
+
 RUN python3 -m venv /opt/venv
 
 # Adding the venv into the path activates the python virtual env in a way.  We cant source it the
@@ -145,9 +162,6 @@ RUN pip install -r requirements.txt
 RUN git config --global url."https://github.com/".insteadOf git@github.com: && \
     git config --global credential.helper "!f() { echo username=anonymous; echo password=; }; f" && \
     python ./build_tools/fetch_sources.py
-
-# Do this after fetch_sources.py or you wont have the repos pulled this file references.
-RUN pip install -r requirements-external.txt
 
 RUN mkdir build
 WORKDIR /TheRock/build

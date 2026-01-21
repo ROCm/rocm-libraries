@@ -143,7 +143,7 @@ void testing_dense_to_sparse_csr_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename J, typename T>
-hipsparseStatus_t testing_dense_to_sparse_csr(Arguments argus)
+void testing_dense_to_sparse_csr(Arguments argus)
 {
 #if(!defined(CUDART_VERSION))
     J                           m        = argus.M;
@@ -368,8 +368,6 @@ hipsparseStatus_t testing_dense_to_sparse_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matA));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matB));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_DENSE_TO_SPARSE_CSR_HPP

@@ -83,9 +83,9 @@ int main()
 
     // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory, plz follow this practice
     std::vector<hipblasHalf> hx(N);
-    hipblasHalf*             dx;
+    hipblasHalf*             dx = nullptr;
 
-    double gpu_time_used;
+    double gpu_time_used = 0.0;
 
     hipblasHandle_t handle;
     hipblasCreate(&handle);

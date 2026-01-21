@@ -619,6 +619,32 @@ void ref_syrk(hipblasFillMode_t  uplo,
               T*                 C,
               int64_t            ldc);
 
+// syrk_ex
+template <typename T, typename U = T, typename Tc = U>
+void ref_syrk_ex(hipblasFillMode_t  uplo,
+                 hipblasOperation_t transA,
+                 int64_t            n,
+                 int64_t            k,
+                 Tc                 alpha,
+                 const T*           A,
+                 int64_t            lda,
+                 Tc                 beta,
+                 U*                 C,
+                 int64_t            ldc);
+
+// herk_ex
+template <typename T, typename U, typename Tc>
+void ref_herk_ex(hipblasFillMode_t  uplo,
+                 hipblasOperation_t transA,
+                 int64_t            n,
+                 int64_t            k,
+                 Tc                 alpha,
+                 const T*           A,
+                 int64_t            lda,
+                 Tc                 beta,
+                 U*                 C,
+                 int64_t            ldc);
+
 // syr2k
 template <typename T>
 void ref_syr2k(hipblasFillMode_t  uplo,

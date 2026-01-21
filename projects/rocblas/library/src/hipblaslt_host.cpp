@@ -509,15 +509,15 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         }
 
         hipblaslt_ext::UserArguments* userArgs;
-        hipHostMalloc(&userArgs, userArgsSize);
+        RETURN_IF_HIP_ERROR(hipHostMalloc(&userArgs, userArgsSize));
         gemm.getDefaultValueForDeviceUserArguments(userArgs);
 
         // Copy them to device memory
         hipblaslt_ext::UserArguments* d_userArgs
             = (hipblaslt_ext::UserArguments*)((char*)(prob.handle->gsu_workspace)
                                               + (workspace_size - userArgsSize));
-        hipMemcpy(d_userArgs, userArgs, userArgsSize, hipMemcpyHostToDevice);
-        hipFree(userArgs);
+        RETURN_IF_HIP_ERROR(hipMemcpy(d_userArgs, userArgs, userArgsSize, hipMemcpyHostToDevice));
+        RETURN_IF_HIP_ERROR(hipFree(userArgs));
 
         if(gemm.run(d_userArgs, prob.handle->get_stream()) != HIPBLAS_STATUS_SUCCESS)
         {

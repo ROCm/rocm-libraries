@@ -1,27 +1,5 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """
 Origami: Analytical GEMM Solution Selection
@@ -29,25 +7,119 @@ Origami: Analytical GEMM Solution Selection
 Python bindings for the Origami C++ library.
 """
 
-# Import the compiled extension module
-HAS_CORE = False
 try:
-    from .origami import *
-    HAS_CORE = True
+    # Import the compiled extension module
+    from .origami import (
+        # Enums
+        architecture_t,
+        data_type_t,
+        transpose_t,
+        grid_selection_t,
+        reduction_t,
+        # Data structures
+        dim3_t,
+        config_t,
+        prediction_result_t,
+        workgroup_mapping_t,
+        problem_t,
+        hardware_t,
+        # Hardware functions
+        get_hardware_for_device,
+        # Data type functions
+        int_to_data_type,
+        datatype_to_bits,
+        string_to_datatype,
+        datatype_to_string,
+        # Configuration selection functions
+        select_config,
+        rank_configs,
+        select_config_mnk,
+        select_topk_configs,
+        # Performance functions
+        compute_perf_gflops,
+        compute_total_latency,
+        compute_number_matrix_instructions,
+        compute_mt_compute_latency,
+        # Memory functions
+        check_lds_capacity,
+        estimate_l2_hit,
+        estimate_mall_hit,
+        compute_memory_latency,
+        # Latency functions
+        compute_tile_latency,
+        compute_timestep_latency,
+        # StreamK functions
+        select_grid_size,
+        select_reduction,
+        select_workgroup_mapping,
+        compute_number_of_output_tiles,
+        # Reduction functions
+        int_to_reduction_t,
+    )
 except ImportError as e:
     raise ImportError(
         f"Failed to import origami extension module: {e}. "
         "Please ensure the package is properly installed."
     ) from e
 
-# Import the torch heuristic selection module if possible
-HAS_PYTHON_SELECTION = False
-try:
-    from .selector import *
-    HAS_PYTHON_SELECTION = True
-except ImportError:
-    pass
-
-__all__ = ["HAS_CORE", "HAS_PYTHON_SELECTION"]
 __version__ = "0.1.0"
+
+__all__ = [
+    # Version
+    "__version__",
+    # Enums
+    "architecture_t",
+    "data_type_t",
+    "transpose_t",
+    "grid_selection_t",
+    "reduction_t",
+    # Data structures
+    "dim3_t",
+    "config_t",
+    "prediction_result_t",
+    "workgroup_mapping_t",
+    "problem_t",
+    "hardware_t",
+    # Hardware functions
+    "get_hardware_for_device",
+    # Data type functions
+    "int_to_data_type",
+    "datatype_to_bits",
+    "string_to_datatype",
+    "datatype_to_string",
+    # Configuration selection functions
+    "select_config",
+    "rank_configs",
+    "select_config_mnk",
+    "select_topk_configs",
+    # Performance functions
+    "compute_perf_gflops",
+    "compute_total_latency",
+    "compute_number_matrix_instructions",
+    "compute_mt_compute_latency",
+    # Memory functions
+    "check_lds_capacity",
+    "estimate_l2_hit",
+    "estimate_mall_hit",
+    "compute_memory_latency",
+    # Latency functions
+    "compute_tile_latency",
+    "compute_timestep_latency",
+    # StreamK functions
+    "select_grid_size",
+    "select_reduction",
+    "select_workgroup_mapping",
+    "compute_number_of_output_tiles",
+    # Reduction functions
+    "int_to_reduction_t",
+]
+
+try:
+    # Import the python selector if possible (requires torch)
+    from .selector import OrigamiMatmulSelector
+    __all__.append("OrigamiMatmulSelector")
+except ImportError:
+    # Do not raise this error if import fails - compiled Origami bindings still
+    # work without the dedicated Python selector
+    pass
 

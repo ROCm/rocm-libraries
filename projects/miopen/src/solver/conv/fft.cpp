@@ -463,7 +463,7 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
                 case 4: {
                     k(workSpace0,
                       reinterpret_cast<const char*>(workSpace1) +
-                          N * (in_n * in_c + padding) * (sizeof(float) * 2),
+                          sizeof(float) * 2 * N * (in_n * in_c + padding),
                       workSpace1,
                       out_c,
                       out_n * out_c + padding,

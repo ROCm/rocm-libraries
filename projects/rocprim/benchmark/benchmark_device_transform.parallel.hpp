@@ -65,7 +65,6 @@ template<typename T,
          typename Config = rocprim::default_config>
 struct device_transform_benchmark : public benchmark_utils::autotune_interface
 {
-
     std::string name() const override
     {
 
@@ -122,13 +121,15 @@ struct device_transform_benchmark : public benchmark_utils::autotune_interface
         {
             const auto launch = [&]
             {
+                using Selector    = rocprim::detail::transform_config_selector<T, IsPointer>;
                 auto transform_op = [](T v) { return v + T(5); };
-                return rocprim::detail::transform_impl<IsPointer, Config>(d_input.get(),
-                                                                          d_output.get(),
-                                                                          size,
-                                                                          transform_op,
-                                                                          stream,
-                                                                          debug_synchronous);
+                return rocprim::detail::transform_impl<IsPointer, Config, Selector>(
+                    d_input.get(),
+                    d_output.get(),
+                    size,
+                    transform_op,
+                    stream,
+                    debug_synchronous);
             };
 
             state.run([&] { HIP_CHECK(launch()); });

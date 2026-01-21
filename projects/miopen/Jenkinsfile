@@ -1,9 +1,6 @@
-def repoName = scm.getUserRemoteConfigs()[0].getUrl().tokenize('/').last().replace('.git', '')
-
-def repoDir = "./"
-if (repoName == "rocm-libraries") {
-    repoDir = "projects/miopen"
-}
+def projDir = "projects"
+def miopenDir = "${projDir}/miopen"
+def ckDir = "${projDir}/composablekernel"
 
 def rocmnode(name) {
     return '(rocmtest || miopen) && (' + name + ')'
@@ -41,7 +38,7 @@ utils = null
 
 def withWorkingDir(Closure body) {
     checkout scm
-    dir("${env.WORKSPACE}/${env.REPO_DIR}") {
+    dir("${env.WORKSPACE}/${env.MIOPEN_DIR}") {
         if (utils == null) {
             utils = load "vars/utils.groovy"
         }
@@ -157,6 +154,10 @@ pipeline {
             defaultValue: true,
             description: "")
         booleanParam(
+            name: "DATATYPE_TF32",
+            defaultValue: true,
+            description: "")
+        booleanParam(
             name: "DATATYPE_FP16",
             defaultValue: true,
             description: "")
@@ -199,6 +200,7 @@ pipeline {
         Bf16_flags      = " -DMIOPEN_TEST_BFLOAT16=On"
         Int8_flags      = " -DMIOPEN_TEST_INT8=On"
         Full_test       = " -DMIOPEN_TEST_ALL=On"
+        Tf32_flags      = " -DMIOPEN_TEST_TF32=On"
 
         gfx908_flags    = " -DMIOPEN_INSTALL_GPU_DATABASES=gfx908"
         gfx90a_flags    = " -DMIOPEN_INSTALL_GPU_DATABASES=gfx90a"
@@ -209,13 +211,11 @@ pipeline {
         Smoke_targets   = " check MIOpenDriver"
         NOCOMGR_flags   = " -DMIOPEN_USE_COMGR=Off"
         NOMLIR_flags    = " -DMIOPEN_USE_MLIR=Off"
-        REPO_DIR        = "${repoDir}"
-        REPO_NAME       = "${repoName}"
+        CK_DIR          = "${ckDir}"
+        MIOPEN_DIR      = "${miopenDir}"
+        PROJ_DIR        = "${projDir}"
 
         Build_timeout_minutes = 420
-
-
-        
     }
     stages{
         stage('Build Docker'){
@@ -492,6 +492,24 @@ pipeline {
                     agent{ label rocmnode("gfx942") }
                     steps{
                         runBuildAndSingleGtestJob(Full_test + gfx942_flags, Build_timeout_minutes)
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
+                }
+                stage('TF32 Hip Install All gfx942') {
+                    when {
+                        beforeAgent true
+                        expression { params.TARGET_GFX942 && params.DATATYPE_TF32 }
+                    }
+                    options {
+                        retry(2)
+                    }
+                    agent{ label rocmnode("gfx942") }
+                    steps{
+                        runBuildAndSingleGtestJob(Full_test + Tf32_flags + gfx942_flags, Build_timeout_minutes)
                     }
                     post {
                         always {
@@ -948,6 +966,19 @@ pipeline {
                     }
                 }
             }
+        }
+    }
+
+    post {
+        success {
+            githubNotify context: 'Math CI Summary',
+                         status: 'SUCCESS',
+                         description: 'All checks have passed'
+        }
+        failure {
+            githubNotify context: 'Math CI Summary',
+                         status: 'FAILURE',
+                         description: 'Some checks have failed'
         }
     }
 }

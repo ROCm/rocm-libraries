@@ -26,10 +26,7 @@
 #ifndef GUARD_MIOPEN_LSTM_VERIFY_GEMM_HPP
 #define GUARD_MIOPEN_LSTM_VERIFY_GEMM_HPP
 
-#define ADNN_MM_TRANSPOSE 1
-
 #include "dropout_gpu_emulator.hpp"
-#include "mloConvHost.hpp" // ADNN_mm_cpu
 
 #include <../test/rnn_util.hpp>
 
@@ -210,23 +207,22 @@ void RunLSTMForwardGEMMCPUVerify(miopenHandle_t handle,
             }
             else
             {
-                ADNN_mm_cpu<Tref>(in_state.data(),
-                                  in_h,
-                                  batch_n,
-                                  in_stride,
-                                  0,
-                                  wei_state.data(),
-                                  in_h,
-                                  hy_h * bi * 4,
-                                  in_stride,
-                                  ADNN_MM_TRANSPOSE,
-                                  &hid_state[hid_shift],
-                                  hy_h * bi * 4,
-                                  batch_n,
-                                  hy_stride,
-                                  0,
-                                  1,
-                                  1);
+                gemm_cpu<Tref>(in_state.data(),
+                               in_h,
+                               batch_n,
+                               in_stride,
+                               false,
+                               wei_state.data(),
+                               in_h,
+                               hy_h * bi * 4,
+                               in_stride,
+                               true,
+                               &hid_state[hid_shift],
+                               hy_h * bi * 4,
+                               batch_n,
+                               hy_stride,
+                               1,
+                               1);
 
                 // from bias
                 if(biased)
@@ -268,24 +264,23 @@ void RunLSTMForwardGEMMCPUVerify(miopenHandle_t handle,
                 prelayer_shift = drop_out_offset;
             }
 
-            ADNN_mm_cpu<Tref>(use_dropout ? &dropout_hid_state[prelayer_shift]
-                                          : &hid_state[prelayer_shift],
-                              hy_h * bi,
-                              batch_n,
-                              use_dropout ? hy_h * bi : hy_stride,
-                              0,
-                              &wei_state[wei_shift],
-                              hy_h * bi,
-                              hy_h * bi * 4,
-                              bi_stride,
-                              ADNN_MM_TRANSPOSE,
-                              &hid_state[hid_shift],
-                              hy_h * bi * 4,
-                              batch_n,
-                              hy_stride,
-                              0,
-                              1,
-                              1);
+            gemm_cpu<Tref>(use_dropout ? &dropout_hid_state[prelayer_shift]
+                                       : &hid_state[prelayer_shift],
+                           hy_h * bi,
+                           batch_n,
+                           use_dropout ? hy_h * bi : hy_stride,
+                           false,
+                           &wei_state[wei_shift],
+                           hy_h * bi,
+                           hy_h * bi * 4,
+                           bi_stride,
+                           true,
+                           &hid_state[hid_shift],
+                           hy_h * bi * 4,
+                           batch_n,
+                           hy_stride,
+                           1,
+                           1);
 
             // from bias
             if(biased)
@@ -315,23 +310,22 @@ void RunLSTMForwardGEMMCPUVerify(miopenHandle_t handle,
             {
                 if(!hx_is_null)
                 {
-                    ADNN_mm_cpu<Tref>(&hx_state[hx_shift],
-                                      hy_h,
-                                      in_n.at(ti),
-                                      uni_stride,
-                                      0,
-                                      &wei_state[wei_shift],
-                                      hy_h,
-                                      hy_h * 4,
-                                      uni_stride,
-                                      ADNN_MM_TRANSPOSE,
-                                      &hid_state[hid_shift + bacc * hy_stride],
-                                      hy_h * 4,
-                                      in_n.at(ti),
-                                      hy_stride,
-                                      0,
-                                      1,
-                                      1);
+                    gemm_cpu<Tref>(&hx_state[hx_shift],
+                                   hy_h,
+                                   in_n.at(ti),
+                                   uni_stride,
+                                   false,
+                                   &wei_state[wei_shift],
+                                   hy_h,
+                                   hy_h * 4,
+                                   uni_stride,
+                                   true,
+                                   &hid_state[hid_shift + bacc * hy_stride],
+                                   hy_h * 4,
+                                   in_n.at(ti),
+                                   hy_stride,
+                                   1,
+                                   1);
 
                     // from bias
                     if(biased)
@@ -350,23 +344,22 @@ void RunLSTMForwardGEMMCPUVerify(miopenHandle_t handle,
 
                     if(bidirection)
                     {
-                        ADNN_mm_cpu<Tref>(&hx_state[hx_shift + hy_n * hy_h],
-                                          hy_h,
-                                          in_n.at(seqLength - 1 - ti),
-                                          uni_stride,
-                                          0,
-                                          &wei_state[wei_shift + 4 * hy_h * uni_stride],
-                                          hy_h,
-                                          hy_h * 4,
-                                          uni_stride,
-                                          ADNN_MM_TRANSPOSE,
-                                          &hid_state[hid_shift + baccbi * hy_stride + 4 * hy_h],
-                                          hy_h * 4,
-                                          in_n.at(seqLength - 1 - ti),
-                                          hy_stride,
-                                          0,
-                                          1,
-                                          1);
+                        gemm_cpu<Tref>(&hx_state[hx_shift + hy_n * hy_h],
+                                       hy_h,
+                                       in_n.at(seqLength - 1 - ti),
+                                       uni_stride,
+                                       false,
+                                       &wei_state[wei_shift + 4 * hy_h * uni_stride],
+                                       hy_h,
+                                       hy_h * 4,
+                                       uni_stride,
+                                       true,
+                                       &hid_state[hid_shift + baccbi * hy_stride + 4 * hy_h],
+                                       hy_h * 4,
+                                       in_n.at(seqLength - 1 - ti),
+                                       hy_stride,
+                                       1,
+                                       1);
 
                         // from bias
                         if(biased)
@@ -388,23 +381,22 @@ void RunLSTMForwardGEMMCPUVerify(miopenHandle_t handle,
             }
             else
             {
-                ADNN_mm_cpu<Tref>(&hy_state[hx_shift],
-                                  hy_h,
-                                  in_n.at(ti),
-                                  uni_stride,
-                                  0,
-                                  &wei_state[wei_shift],
-                                  hy_h,
-                                  hy_h * 4,
-                                  uni_stride,
-                                  ADNN_MM_TRANSPOSE,
-                                  &hid_state[hid_shift + bacc * hy_stride],
-                                  hy_h * 4,
-                                  in_n.at(ti),
-                                  hy_stride,
-                                  0,
-                                  1,
-                                  1);
+                gemm_cpu<Tref>(&hy_state[hx_shift],
+                               hy_h,
+                               in_n.at(ti),
+                               uni_stride,
+                               false,
+                               &wei_state[wei_shift],
+                               hy_h,
+                               hy_h * 4,
+                               uni_stride,
+                               true,
+                               &hid_state[hid_shift + bacc * hy_stride],
+                               hy_h * 4,
+                               in_n.at(ti),
+                               hy_stride,
+                               1,
+                               1);
 
                 // from bias
                 if(biased)
@@ -426,23 +418,22 @@ void RunLSTMForwardGEMMCPUVerify(miopenHandle_t handle,
 
                     if(!hx_is_null && in_n.at(seqLength - 1 - ti) > in_n.at(seqLength - ti))
                     {
-                        ADNN_mm_cpu<Tref>(
+                        gemm_cpu<Tref>(
                             &hx_state[hx_shift + hy_n * hy_h + in_n.at(seqLength - ti) * hy_h],
                             hy_h,
                             (in_n.at(seqLength - 1 - ti) - in_n.at(seqLength - ti)),
                             uni_stride,
-                            0,
+                            false,
                             &wei_state[wei_shift + 4 * hy_h * uni_stride],
                             hy_h,
                             hy_h * 4,
                             uni_stride,
-                            ADNN_MM_TRANSPOSE,
+                            true,
                             &hid_state[hid_shift + (baccbi + in_n.at(seqLength - ti)) * hy_stride +
                                        4 * hy_h],
                             hy_h * 4,
                             (in_n.at(seqLength - 1 - ti) - in_n.at(seqLength - ti)),
                             hy_stride,
-                            0,
                             1,
                             1);
 
@@ -464,23 +455,22 @@ void RunLSTMForwardGEMMCPUVerify(miopenHandle_t handle,
                         }
                     }
 
-                    ADNN_mm_cpu<Tref>(&hy_state[hx_shift + hy_n * hy_h],
-                                      hy_h,
-                                      in_n.at(seqLength - ti),
-                                      uni_stride,
-                                      0,
-                                      &wei_state[wei_shift + 4 * hy_h * uni_stride],
-                                      hy_h,
-                                      hy_h * 4,
-                                      uni_stride,
-                                      ADNN_MM_TRANSPOSE,
-                                      &hid_state[hid_shift + baccbi * hy_stride + 4 * hy_h],
-                                      hy_h * 4,
-                                      in_n.at(seqLength - ti),
-                                      hy_stride,
-                                      0,
-                                      1,
-                                      1);
+                    gemm_cpu<Tref>(&hy_state[hx_shift + hy_n * hy_h],
+                                   hy_h,
+                                   in_n.at(seqLength - ti),
+                                   uni_stride,
+                                   false,
+                                   &wei_state[wei_shift + 4 * hy_h * uni_stride],
+                                   hy_h,
+                                   hy_h * 4,
+                                   uni_stride,
+                                   true,
+                                   &hid_state[hid_shift + baccbi * hy_stride + 4 * hy_h],
+                                   hy_h * 4,
+                                   in_n.at(seqLength - ti),
+                                   hy_stride,
+                                   1,
+                                   1);
 
                     // from bias
                     if(biased)
@@ -865,23 +855,22 @@ void RunLSTMBackwardDataGEMMCPUVerify(
         {
             size_t prelayer_shift = (li + 1) * batch_n * hy_stride;
 
-            ADNN_mm_cpu<Tref>(&dh_state[prelayer_shift],
-                              hy_h * bi * 4,
-                              batch_n,
-                              hy_stride,
-                              0,
-                              &wei_state[wei_shift],
-                              hy_h * bi,
-                              hy_h * bi * 4,
-                              bi_stride,
-                              0,
-                              &dh_state[hid_shift + bi * 5 * hy_h],
-                              hy_h * bi,
-                              batch_n,
-                              hy_stride,
-                              0,
-                              1,
-                              1);
+            gemm_cpu<Tref>(&dh_state[prelayer_shift],
+                           hy_h * bi * 4,
+                           batch_n,
+                           hy_stride,
+                           false,
+                           &wei_state[wei_shift],
+                           hy_h * bi,
+                           hy_h * bi * 4,
+                           bi_stride,
+                           false,
+                           &dh_state[hid_shift + bi * 5 * hy_h],
+                           hy_h * bi,
+                           batch_n,
+                           hy_stride,
+                           1,
+                           1);
 
             if(use_dropout)
             {
@@ -975,23 +964,22 @@ void RunLSTMBackwardDataGEMMCPUVerify(
                 size_t pretime_shift = li * batch_n * hy_stride + (bacc + in_n[ti]) * hy_stride;
                 size_t weitime_shift = in_h * wei_stride + li * (bi * hy_h + hy_h) * wei_stride;
 
-                ADNN_mm_cpu<Tref>(&dh_state[pretime_shift],
-                                  hy_h * 4,
-                                  in_n[ti + 1],
-                                  hy_stride,
-                                  0,
-                                  &wei_state[weitime_shift],
-                                  hy_h,
-                                  hy_h * 4,
-                                  uni_stride,
-                                  0,
-                                  &dh_state[hid_shift + bacc * hy_stride + bi * 5 * hy_h],
-                                  hy_h,
-                                  in_n[ti + 1],
-                                  hy_stride,
-                                  0,
-                                  1,
-                                  1);
+                gemm_cpu<Tref>(&dh_state[pretime_shift],
+                               hy_h * 4,
+                               in_n[ti + 1],
+                               hy_stride,
+                               false,
+                               &wei_state[weitime_shift],
+                               hy_h,
+                               hy_h * 4,
+                               uni_stride,
+                               false,
+                               &dh_state[hid_shift + bacc * hy_stride + bi * 5 * hy_h],
+                               hy_h,
+                               in_n[ti + 1],
+                               hy_stride,
+                               1,
+                               1);
 
                 if(bidirection)
                 {
@@ -1000,24 +988,22 @@ void RunLSTMBackwardDataGEMMCPUVerify(
                     weitime_shift = in_h * wei_stride + li * (bi * hy_h + hy_h) * wei_stride +
                                     hy_h * 4 * uni_stride;
 
-                    ADNN_mm_cpu<Tref>(
-                        &dh_state[pretime_shift],
-                        hy_h * 4,
-                        in_n[seqLength - 1 - ti],
-                        hy_stride,
-                        0,
-                        &wei_state[weitime_shift],
-                        hy_h,
-                        hy_h * 4,
-                        uni_stride,
-                        0,
-                        &dh_state[hid_shift + baccbi * hy_stride + bi * 5 * hy_h + hy_h],
-                        hy_h,
-                        in_n[seqLength - 1 - ti],
-                        hy_stride,
-                        0,
-                        1,
-                        1);
+                    gemm_cpu<Tref>(&dh_state[pretime_shift],
+                                   hy_h * 4,
+                                   in_n[seqLength - 1 - ti],
+                                   hy_stride,
+                                   false,
+                                   &wei_state[weitime_shift],
+                                   hy_h,
+                                   hy_h * 4,
+                                   uni_stride,
+                                   false,
+                                   &dh_state[hid_shift + baccbi * hy_stride + bi * 5 * hy_h + hy_h],
+                                   hy_h,
+                                   in_n[seqLength - 1 - ti],
+                                   hy_stride,
+                                   1,
+                                   1);
                 }
             }
 
@@ -1204,23 +1190,22 @@ void RunLSTMBackwardDataGEMMCPUVerify(
         size_t pretime_shift = li * batch_n * hy_stride;
         size_t weitime_shift = in_h * wei_stride + li * (bi * hy_h + hy_h) * wei_stride;
 
-        ADNN_mm_cpu<Tref>(&dh_state[pretime_shift],
-                          hy_h * 4,
-                          in_n[0],
-                          hy_stride,
-                          0,
-                          &wei_state[weitime_shift],
-                          hy_h,
-                          hy_h * 4,
-                          uni_stride,
-                          0,
-                          &dhx_state[hx_shift],
-                          hy_h,
-                          in_n[0],
-                          uni_stride,
-                          0,
-                          1,
-                          1);
+        gemm_cpu<Tref>(&dh_state[pretime_shift],
+                       hy_h * 4,
+                       in_n[0],
+                       hy_stride,
+                       false,
+                       &wei_state[weitime_shift],
+                       hy_h,
+                       hy_h * 4,
+                       uni_stride,
+                       false,
+                       &dhx_state[hx_shift],
+                       hy_h,
+                       in_n[0],
+                       uni_stride,
+                       1,
+                       1);
 
         for(int bs = 0; bs < in_n.at(0); bs++)
         {
@@ -1243,23 +1228,22 @@ void RunLSTMBackwardDataGEMMCPUVerify(
                 {
                     pretime_shift = li * batch_n * hy_stride + (pre_bat + cur_bat) * hy_stride;
 
-                    ADNN_mm_cpu<Tref>(&dh_state[pretime_shift + 4 * hy_h],
-                                      hy_h * 4,
-                                      (in_n.at(ti) - cur_bat),
-                                      hy_stride,
-                                      0,
-                                      &wei_state[weitime_shift + 4 * hy_h * uni_stride],
-                                      hy_h,
-                                      hy_h * 4,
-                                      uni_stride,
-                                      0,
-                                      &dhx_state[hx_shift + hy_n * hy_h + cur_bat * hy_h],
-                                      hy_h,
-                                      (in_n.at(ti) - cur_bat),
-                                      uni_stride,
-                                      0,
-                                      1,
-                                      1);
+                    gemm_cpu<Tref>(&dh_state[pretime_shift + 4 * hy_h],
+                                   hy_h * 4,
+                                   (in_n.at(ti) - cur_bat),
+                                   hy_stride,
+                                   false,
+                                   &wei_state[weitime_shift + 4 * hy_h * uni_stride],
+                                   hy_h,
+                                   hy_h * 4,
+                                   uni_stride,
+                                   false,
+                                   &dhx_state[hx_shift + hy_n * hy_h + cur_bat * hy_h],
+                                   hy_h,
+                                   (in_n.at(ti) - cur_bat),
+                                   uni_stride,
+                                   1,
+                                   1);
 
                     for(int bs = cur_bat; bs < in_n.at(ti); bs++)
                     {
@@ -1300,23 +1284,22 @@ void RunLSTMBackwardDataGEMMCPUVerify(
     }
     else
     {
-        ADNN_mm_cpu<Tref>(dh_state.data(),
-                          hy_h * bi * 4,
-                          batch_n,
-                          hy_stride,
-                          0,
-                          wei_state.data(),
-                          in_h,
-                          hy_h * bi * 4,
-                          in_stride,
-                          0,
-                          din_state.data(),
-                          in_h,
-                          batch_n,
-                          in_stride,
-                          0,
-                          1,
-                          1);
+        gemm_cpu<Tref>(dh_state.data(),
+                       hy_h * bi * 4,
+                       batch_n,
+                       hy_stride,
+                       false,
+                       wei_state.data(),
+                       in_h,
+                       hy_h * bi * 4,
+                       in_stride,
+                       false,
+                       din_state.data(),
+                       in_h,
+                       batch_n,
+                       in_stride,
+                       1,
+                       1);
     }
 
     for(int i = 0; i < numlayer * batch_n * hy_stride; i++)
@@ -1448,23 +1431,22 @@ void RunLSTMBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
         {
             if(inputMode != 1)
             {
-                ADNN_mm_cpu<Tref>(wkspace_state.data(),
-                                  hy_h * bi * 4,
-                                  batch_n,
-                                  hy_stride,
-                                  ADNN_MM_TRANSPOSE,
-                                  in_state.data(),
-                                  in_h,
-                                  batch_n,
-                                  in_stride,
-                                  0,
-                                  dwei_state.data(),
-                                  in_h,
-                                  hy_h * bi * 4,
-                                  in_stride,
-                                  0,
-                                  1,
-                                  1);
+                gemm_cpu<Tref>(wkspace_state.data(),
+                               hy_h * bi * 4,
+                               batch_n,
+                               hy_stride,
+                               true,
+                               in_state.data(),
+                               in_h,
+                               batch_n,
+                               in_stride,
+                               false,
+                               dwei_state.data(),
+                               in_h,
+                               hy_h * bi * 4,
+                               in_stride,
+                               1,
+                               1);
             }
 
             if(biased)
@@ -1487,23 +1469,22 @@ void RunLSTMBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
             size_t wei_shift =
                 (in_h + hy_h) * wei_stride + (li - 1) * (bi * hy_h + hy_h) * wei_stride;
 
-            ADNN_mm_cpu<Tref>(&wkspace_state[hid_shift],
-                              hy_h * bi * 4,
-                              batch_n,
-                              hy_stride,
-                              ADNN_MM_TRANSPOSE,
-                              &rsvspace_state[prelayer_shift],
-                              hy_h * bi,
-                              batch_n,
-                              use_dropout ? hy_h * bi : hy_stride,
-                              0,
-                              &dwei_state[wei_shift],
-                              hy_h * bi,
-                              hy_h * bi * 4,
-                              bi_stride,
-                              0,
-                              1,
-                              1);
+            gemm_cpu<Tref>(&wkspace_state[hid_shift],
+                           hy_h * bi * 4,
+                           batch_n,
+                           hy_stride,
+                           true,
+                           &rsvspace_state[prelayer_shift],
+                           hy_h * bi,
+                           batch_n,
+                           use_dropout ? hy_h * bi : hy_stride,
+                           false,
+                           &dwei_state[wei_shift],
+                           hy_h * bi,
+                           hy_h * bi * 4,
+                           bi_stride,
+                           1,
+                           1);
 
             if(biased)
             {
@@ -1533,23 +1514,22 @@ void RunLSTMBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
             {
                 if(!hx_is_null)
                 {
-                    ADNN_mm_cpu<Tref>(&wkspace_state[hid_shift],
-                                      hy_h * 4,
-                                      in_n[ti],
-                                      hy_stride,
-                                      ADNN_MM_TRANSPOSE,
-                                      &hx_state[hx_shift],
-                                      hy_h,
-                                      in_n[ti],
-                                      uni_stride,
-                                      0,
-                                      &dwei_state[wei_shift],
-                                      hy_h,
-                                      hy_h * 4,
-                                      uni_stride,
-                                      0,
-                                      1,
-                                      1);
+                    gemm_cpu<Tref>(&wkspace_state[hid_shift],
+                                   hy_h * 4,
+                                   in_n[ti],
+                                   hy_stride,
+                                   true,
+                                   &hx_state[hx_shift],
+                                   hy_h,
+                                   in_n[ti],
+                                   uni_stride,
+                                   false,
+                                   &dwei_state[wei_shift],
+                                   hy_h,
+                                   hy_h * 4,
+                                   uni_stride,
+                                   1,
+                                   1);
 
                     if(biased)
                     {
@@ -1571,23 +1551,22 @@ void RunLSTMBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
                 pretime_shift =
                     li * batch_n * hy_stride + (bacc - in_n[ti - 1]) * hy_stride + bi * 5 * hy_h;
 
-                ADNN_mm_cpu<Tref>(&wkspace_state[hid_shift],
-                                  hy_h * 4,
-                                  in_n[ti],
-                                  hy_stride,
-                                  ADNN_MM_TRANSPOSE,
-                                  &rsvspace_state[pretime_shift],
-                                  hy_h,
-                                  in_n[ti],
-                                  hy_stride,
-                                  0,
-                                  &dwei_state[wei_shift],
-                                  hy_h,
-                                  hy_h * 4,
-                                  uni_stride,
-                                  0,
-                                  1,
-                                  1);
+                gemm_cpu<Tref>(&wkspace_state[hid_shift],
+                               hy_h * 4,
+                               in_n[ti],
+                               hy_stride,
+                               true,
+                               &rsvspace_state[pretime_shift],
+                               hy_h,
+                               in_n[ti],
+                               hy_stride,
+                               false,
+                               &dwei_state[wei_shift],
+                               hy_h,
+                               hy_h * 4,
+                               uni_stride,
+                               1,
+                               1);
 
                 if(biased)
                 {
@@ -1610,23 +1589,22 @@ void RunLSTMBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
                 {
                     if(!hx_is_null)
                     {
-                        ADNN_mm_cpu<Tref>(&wkspace_state[hid_shift + 4 * hy_h],
-                                          hy_h * 4,
-                                          in_n[ti],
-                                          hy_stride,
-                                          ADNN_MM_TRANSPOSE,
-                                          &hx_state[hx_shift + hy_n * hy_h],
-                                          hy_h,
-                                          in_n[ti],
-                                          uni_stride,
-                                          0,
-                                          &dwei_state[wei_shift + 4 * hy_h * uni_stride],
-                                          hy_h,
-                                          hy_h * 4,
-                                          uni_stride,
-                                          0,
-                                          1,
-                                          1);
+                        gemm_cpu<Tref>(&wkspace_state[hid_shift + 4 * hy_h],
+                                       hy_h * 4,
+                                       in_n[ti],
+                                       hy_stride,
+                                       true,
+                                       &hx_state[hx_shift + hy_n * hy_h],
+                                       hy_h,
+                                       in_n[ti],
+                                       uni_stride,
+                                       false,
+                                       &dwei_state[wei_shift + 4 * hy_h * uni_stride],
+                                       hy_h,
+                                       hy_h * 4,
+                                       uni_stride,
+                                       1,
+                                       1);
 
                         if(biased)
                         {
@@ -1647,22 +1625,21 @@ void RunLSTMBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
                 {
                     if(!hx_is_null && in_n.at(ti) > in_n.at(ti + 1))
                     {
-                        ADNN_mm_cpu<Tref>(
+                        gemm_cpu<Tref>(
                             &wkspace_state[hid_shift + 4 * hy_h + in_n.at(ti + 1) * hy_stride],
                             hy_h * 4,
                             (in_n.at(ti) - in_n.at(ti + 1)),
                             hy_stride,
-                            ADNN_MM_TRANSPOSE,
+                            true,
                             &hx_state[hx_shift + hy_n * hy_h + in_n.at(ti + 1) * hy_h],
                             hy_h,
                             (in_n.at(ti) - in_n.at(ti + 1)),
                             uni_stride,
-                            0,
+                            false,
                             &dwei_state[wei_shift + 4 * hy_h * uni_stride],
                             hy_h,
                             hy_h * 4,
                             uni_stride,
-                            0,
                             1,
                             1);
 
@@ -1684,23 +1661,22 @@ void RunLSTMBackwardWeightGEMMCPUVerify(std::vector<Tgpu>& in,
                     pretime_shift =
                         li * batch_n * hy_stride + (bacc + in_n[ti]) * hy_stride + bi * 5 * hy_h;
 
-                    ADNN_mm_cpu<Tref>(&wkspace_state[hid_shift + 4 * hy_h],
-                                      hy_h * 4,
-                                      in_n[ti + 1],
-                                      hy_stride,
-                                      ADNN_MM_TRANSPOSE,
-                                      &rsvspace_state[pretime_shift + hy_h],
-                                      hy_h,
-                                      in_n[ti + 1],
-                                      hy_stride,
-                                      0,
-                                      &dwei_state[wei_shift + 4 * hy_h * uni_stride],
-                                      hy_h,
-                                      hy_h * 4,
-                                      uni_stride,
-                                      0,
-                                      1,
-                                      1);
+                    gemm_cpu<Tref>(&wkspace_state[hid_shift + 4 * hy_h],
+                                   hy_h * 4,
+                                   in_n[ti + 1],
+                                   hy_stride,
+                                   true,
+                                   &rsvspace_state[pretime_shift + hy_h],
+                                   hy_h,
+                                   in_n[ti + 1],
+                                   hy_stride,
+                                   false,
+                                   &dwei_state[wei_shift + 4 * hy_h * uni_stride],
+                                   hy_h,
+                                   hy_h * 4,
+                                   uni_stride,
+                                   1,
+                                   1);
 
                     if(biased)
                     {

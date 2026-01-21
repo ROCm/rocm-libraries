@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_graph.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -52,8 +53,7 @@ void testing_rot_bad_arg(const Arguments& argus)
     hipsparseIndexBase_t idxBase  = HIPSPARSE_INDEX_BASE_ZERO;
     hipDataType          dataType = HIP_R_32F;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto dx_val_managed = hipsparse_unique_ptr{device_malloc(sizeof(float) * nnz), device_free};
     auto dx_ind_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * nnz), device_free};
@@ -89,7 +89,7 @@ void testing_rot_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_rot(Arguments argus)
+void testing_rot(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 13000))
     I size = argus.N;
@@ -105,8 +105,7 @@ hipsparseStatus_t testing_rot(Arguments argus)
     hipDataType          dataType = getDataType<T>();
 
     // hipSPARSE handle
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures
     std::vector<I> hx_ind(nnz);
@@ -169,11 +168,11 @@ hipsparseStatus_t testing_rot(Arguments argus)
     {
         // hipSPARSE pointer mode host
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-        CHECK_HIPSPARSE_ERROR(hipsparseRot(handle, &hc_coeff, &hs_coeff, x1, y1));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseRot(handle, &hc_coeff, &hs_coeff, x1, y1));
 
         // hipSPARSE pointer mode device
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
-        CHECK_HIPSPARSE_ERROR(hipsparseRot(handle, dc_coeff, ds_coeff, x2, y2));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseRot(handle, dc_coeff, ds_coeff, x2, y2));
 
         // Copy output from device to CPU
         CHECK_HIP_ERROR(
@@ -191,8 +190,8 @@ hipsparseStatus_t testing_rot(Arguments argus)
             T x = hx_val_gold[i];
             T y = hy_gold[idx];
 
-            hx_val_gold[i] = testing_mult(hc_coeff, x) + testing_mult(hs_coeff, y);
-            hy_gold[idx]   = testing_mult(hc_coeff, y) - testing_mult(hs_coeff, x);
+            hx_val_gold[i] = testing_fma(hc_coeff, x, testing_mult(hs_coeff, y));
+            hy_gold[idx]   = testing_fma(hc_coeff, y, testing_mult(-hs_coeff, x));
         }
 
         // Verify results against host
@@ -212,7 +211,7 @@ hipsparseStatus_t testing_rot(Arguments argus)
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseRot(handle, &hc_coeff, &hs_coeff, x1, y1));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseRot(handle, &hc_coeff, &hs_coeff, x1, y1));
         }
 
         double gpu_time_used = get_time_us();
@@ -220,7 +219,7 @@ hipsparseStatus_t testing_rot(Arguments argus)
         // Performance run
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseRot(handle, &hc_coeff, &hs_coeff, x1, y1));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseRot(handle, &hc_coeff, &hs_coeff, x1, y1));
         }
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
@@ -246,8 +245,6 @@ hipsparseStatus_t testing_rot(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_ROT_HPP

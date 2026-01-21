@@ -328,10 +328,9 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
                                          std::multiplies<std::size_t>()) *
                          conv.group_count;
 
-    if(ws_size > gemm::MaxMemAllocSz(handle, problem))
+    if(ws_size > handle.GetMaxMemoryAllocSize())
     {
-        MIOPEN_LOG_I2("GemmWrwUniversal: " << ws_size << " > "
-                                           << gemm::MaxMemAllocSz(handle, problem));
+        MIOPEN_LOG_I2("GemmWrwUniversal: " << ws_size << " > " << handle.GetMaxMemoryAllocSize());
         return 0;
     }
     return ws_size;

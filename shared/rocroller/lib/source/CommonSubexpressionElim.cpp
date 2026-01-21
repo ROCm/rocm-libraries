@@ -354,6 +354,62 @@ namespace rocRoller
                 return tree;
             }
 
+            ExpressionTree operator()(Reinterpret const& expr) const
+            {
+                auto tree = callUnary(expr);
+                if(tree.empty())
+                {
+                    // Bail
+                    return {};
+                }
+
+                AssertFatal(tree.back().deps.size() == 1);
+                auto        depIdx = *tree.back().deps.begin();
+                auto const& dep    = tree.at(depIdx);
+
+                auto depTypeInfo = DataTypeInfo::Get(dep.reg->variableType());
+                auto expTypeInfo = DataTypeInfo::Get(expr.destinationType);
+
+                AssertFatal(depTypeInfo.elementBytes == expTypeInfo.elementBytes,
+                            "Reinterpret requires same size types: source type ",
+                            toString(dep.reg->variableType().dataType),
+                            " (",
+                            depTypeInfo.elementBytes,
+                            " bytes) != destination type ",
+                            toString(expr.destinationType),
+                            " (",
+                            expTypeInfo.elementBytes,
+                            " bytes)");
+
+                auto registerCount = dep.reg->registerCount();
+                AssertFatal(registerCount == expTypeInfo.registerCount,
+                            "Reinterpret requires same number of registers: source type ",
+                            toString(dep.reg->variableType().dataType),
+                            " (",
+                            registerCount,
+                            " registers) != destination type ",
+                            toString(expr.destinationType),
+                            " (",
+                            expTypeInfo.registerCount,
+                            " registers)");
+
+                // Sets the destination register for Reinterpret as the argument register
+                // but with the reinterpreted type
+                Register::ValuePtr reg
+                    = std::make_shared<Register::Value>(dep.reg->allocation(),
+                                                        dep.reg->regType(),
+                                                        expr.destinationType,
+                                                        dep.reg->allocationCoord());
+                tree.back().reg = reg;
+
+                dep.reg->setName(dep.reg->name() + " reinterpret");
+                Log::trace("Reinterpreting {} to {}",
+                           dep.reg->description(),
+                           tree.back().reg->description());
+
+                return tree;
+            }
+
             ExpressionTree operator()(BitFieldExtract const& expr) const
             {
                 auto tree = callUnary(expr);

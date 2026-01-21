@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -100,6 +100,34 @@ namespace rocRoller
         std::string toString(UnrollColouring const&);
 
         /**
+         * @brief Colouring of operations and coordinates by NaryArgument.
+         *
+         * Return value of `colourByNaryArgument`.
+         */
+        struct NaryArgumentColouring
+        {
+            std::map<int, NaryArgument> coordinateColour; //< Coordinate colouring.
+            std::map<int, NaryArgument> operationColour; //< Control operation colouring.
+        };
+
+        /**
+         * @brief Colour coordinates and operations by NaryArgument
+         * based on Multiply operations.
+         *
+         * Traverses the graph starting from `start` (or the entire
+         * graph if `start` is -1) and finds all Multiply
+         * operations. For each multiply, determines which coordinates
+         * and control operations contribute to each argument (LHS,
+         * LHS_SCALE, RHS, RHS_SCALE) by tracing backward
+         * dependencies.
+         *
+         * @param graph The kernel graph to analyze
+         * @param start Starting control operation (-1 for entire graph)
+         * @return NaryArgumentColouring with coordinate and control mappings
+         */
+        NaryArgumentColouring colourByNaryArgument(KernelGraph const& graph, int start = -1);
+
+        /**
          * @brief Colour operations and coordinates by unroll value.
          *
          * Starts at `topOp` (or the top of the graph if `topOp` is
@@ -138,6 +166,7 @@ namespace rocRoller
         /**
          * @brief Return DataFlowTag of LHS of binary expression in Assign node.
          */
+
         template <Expression::CBinary T>
         std::tuple<int, Expression::ExpressionPtr> getBinaryLHS(KernelGraph const& kgraph,
                                                                 int                assign);
@@ -148,6 +177,12 @@ namespace rocRoller
         template <Expression::CBinary T>
         std::tuple<int, Expression::ExpressionPtr> getBinaryRHS(KernelGraph const& kgraph,
                                                                 int                assign);
+
+        /**
+         * @brief Return the edge tag of type EdgeType connected to tag in direction Direction.
+         */
+        template <Graph::Direction Direction, typename EdgeType>
+        std::optional<int> GetEdgeTag(KernelGraph const& graph, int tag);
 
         /**
          * @brief Create a range-based for loop.
@@ -319,11 +354,15 @@ namespace rocRoller
          *
          * @param size
          * @param varType
+         * @param policy The scratch policy to use for allocation
          * @param context
          * @return User
          */
-        rocRoller::KernelGraph::CoordinateGraph::User newScratchCoordinate(
-            Expression::ExpressionPtr size, VariableType varType, ContextPtr context);
+        rocRoller::KernelGraph::CoordinateGraph::User
+            newScratchCoordinate(Expression::ExpressionPtr size,
+                                 VariableType              varType,
+                                 Operations::ScratchPolicy policy,
+                                 ContextPtr                context);
 
         /**
          * @brief Replace operation with a new operation.
@@ -356,10 +395,9 @@ namespace rocRoller
         void insertWithBody(KernelGraph& graph, int op, int newOp);
 
         /**
-         * @brief Find load/store operations that need their indexes
-         * precomputed by ComputeIndex.
+         * @brief Find load/store operations that need their indexes precomputed.
          */
-        std::vector<int> findComputeIndexCandidates(KernelGraph const& kgraph, int start);
+        std::vector<int> findIndexAssignmentCandidates(KernelGraph const& kgraph, int start);
 
         /**
          * Removes all CommandArgruments found within an expression
@@ -756,6 +794,11 @@ namespace rocRoller
         std::vector<int> getCodeGeneratorCoordinates(KernelGraph const& graph,
                                                      int                tag,
                                                      bool isStorePartOfGlobalToLDSOp = false);
+
+        /**
+         * @brief Get the number of LDS elements for a given LDS tag.
+         */
+        int GetNumLDSElements(KernelGraph const& graph, int ldsTag);
 
         /**
          * @brief Get the first and last nodes from a set of nodes that are totally ordered

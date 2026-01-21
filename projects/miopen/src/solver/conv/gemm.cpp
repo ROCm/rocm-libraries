@@ -211,10 +211,9 @@ size_t GemmFwd1x1_0_2::GetWorkspaceSize(const ExecutionContext& context,
     const auto y_t_size   = yDesc.GetElementSize() * GetTypeSize(yDesc.GetType());
     const auto gemm_trans = x_t_size + y_t_size;
 
-    if(gemm_trans > gemm::MaxMemAllocSz(handle, problem))
+    if(gemm_trans > handle.GetMaxMemoryAllocSize())
     {
-        MIOPEN_LOG_I2("GemmFwd1x1_0_2:" << gemm_trans << " > "
-                                        << gemm::MaxMemAllocSz(handle, problem));
+        MIOPEN_LOG_I2("GemmFwd1x1_0_2:" << gemm_trans << " > " << handle.GetMaxMemoryAllocSize());
         return 0;
     }
     return gemm_trans;
@@ -475,10 +474,9 @@ size_t GemmFwd1x1_0_1_int8::GetWorkspaceSize(const ExecutionContext& context,
                                          std::multiplies<std::size_t>()) *
                          GetTypeSize(wDesc.GetType()) * conv.group_count;
 
-    if(ws_size > gemm::MaxMemAllocSz(handle, problem))
+    if(ws_size > handle.GetMaxMemoryAllocSize())
     {
-        MIOPEN_LOG_I2("GemmFwd1x1_0_1_int8:" << ws_size << " > "
-                                             << gemm::MaxMemAllocSz(handle, problem));
+        MIOPEN_LOG_I2("GemmFwd1x1_0_1_int8:" << ws_size << " > " << handle.GetMaxMemoryAllocSize());
         return 0;
     }
     return ws_size;
@@ -848,10 +846,9 @@ size_t GemmFwdRest::GetWorkspaceSize(const ExecutionContext& context,
 
     const auto ws_sz = (wDesc.GetType() == miopenInt8 ? 2 * workspace_size : workspace_size);
 
-    if(ws_sz > gemm::MaxMemAllocSz(handle, problem, true))
+    if(ws_sz > handle.GetMaxMemoryAllocSize())
     {
-        MIOPEN_LOG_I2("GemmFwdRest: " << ws_sz << " > "
-                                      << gemm::MaxMemAllocSz(handle, problem, true));
+        MIOPEN_LOG_I2("GemmFwdRest: " << ws_sz << " > " << handle.GetMaxMemoryAllocSize());
         return 0;
     }
     return ws_sz;

@@ -120,20 +120,25 @@ public:
 
     FrequencyMonitorImp()
     {
+        if(!enabled())
+            return;
+
         initThread();
     }
 
     ~FrequencyMonitorImp()
     {
-        m_stop = true;
-        m_exit = true;
+        if(!enabled())
+            return;
 
-        m_cv.notify_all();
-        m_thread.join();
+        stopThread();
     }
 
     void set_device_id(int deviceId)
     {
+        if(!enabled())
+            return;
+
         m_smiDeviceIndex = GetROCmSMIIndex(deviceId);
         m_XCDCount       = 1;
 
@@ -274,6 +279,15 @@ private:
 
         m_thread = std::thread([=]() { this->runLoop(); });
         return;
+    }
+
+    void stopThread()
+    {
+        m_stop = true;
+        m_exit = true;
+
+        m_cv.notify_all();
+        m_thread.join();
     }
 
     void runBetweenEvents()

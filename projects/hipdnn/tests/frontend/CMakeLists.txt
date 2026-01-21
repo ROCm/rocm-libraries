@@ -7,8 +7,12 @@ find_package(Threads REQUIRED)
 
 add_executable(
     public_hipdnn_frontend_tests
-    main.cpp IntegrationBatchnormForwardInference.cpp IntegrationConvForward.cpp
-    IntegrationConvolutionBackwardData.cpp IntegrationConvolutionBackwardWeight.cpp
+    main.cpp
+    IntegrationBatchnormForwardInference.cpp
+    IntegrationBatchnormForwardInferenceVarianceExt.cpp
+    IntegrationConvForward.cpp
+    IntegrationConvolutionBackwardData.cpp
+    IntegrationConvolutionBackwardWeight.cpp
     IntegrationGraphEngineFiltering.cpp
 )
 
@@ -18,9 +22,8 @@ target_link_libraries(
     GTest::gtest
     GTest::gtest_main
     Threads::Threads
-    hipdnn_sdk
+    hipdnn_test_sdk
     hipdnn_backend
-    hipdnn_frontend
     hip::host
 )
 
