@@ -1338,7 +1338,7 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
     std::vector<TempBufferLease>   gatherPackBufs;
     std::optional<TempBufferLease> gatherDestBuf;
 
-    std::vector<BufferPtr> outputBufs = GatherUserBuffers(BufferPtr::user_input, bricks);
+    std::vector<BufferPtr> inputBufs = GatherUserBuffers(BufferPtr::user_input, bricks);
 
     const auto local_comm_rank = get_local_comm_rank();
 
@@ -1391,9 +1391,12 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
         if(brick.is_contiguous())
         {
             // Contiguous brick, just copy the data
-            gather->AddOperation(
-                local_comm_rank,
-                {brick.location, outputBufs[brickIdx], 0, gatherOffset, brick.count_elems()});
+            gather->AddOperation(local_comm_rank,
+                                 {brick.location,
+                                  inputBufs[brickIdx],
+                                  0,
+                                  gatherToTemp ? gatherOffset : brick.offset_in_field(field_stride),
+                                  brick.count_elems()});
         }
         else
         {
@@ -1409,7 +1412,7 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
                                                    brick.length(),
                                                    precision,
                                                    arrayType,
-                                                   outputBufs[brickIdx],
+                                                   inputBufs[brickIdx],
                                                    0,
                                                    brick.stride,
                                                    BufferPtr::temp(gatherPackBufs.back().data()),
@@ -1522,7 +1525,11 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
             // contiguous brick, just copy the data
             scatter->AddOperation(
                 local_comm_rank,
-                {brick.location, outputBufs[brickIdx], scatterOffset, 0, brick.count_elems()});
+                {brick.location,
+                 outputBufs[brickIdx],
+                 scatterFromTemp ? scatterOffset : brick.offset_in_field(field_stride),
+                 0,
+                 brick.count_elems()});
         }
         else
         {
