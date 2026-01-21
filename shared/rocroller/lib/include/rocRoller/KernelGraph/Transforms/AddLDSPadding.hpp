@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright 2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -11,8 +11,8 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -23,28 +23,38 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#ifndef GUARD_MIOPEN_DB_PATH_HPP
-#define GUARD_MIOPEN_DB_PATH_HPP
 
-#include <miopen/config.hpp>
-#include <miopen/filesystem.hpp>
-#include <string>
+#pragma once
+#include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
 
-namespace miopen {
+namespace rocRoller
+{
+    namespace KernelGraph
+    {
 
-MIOPEN_INTERNALS_EXPORT fs::path GetSystemDbPath();
-MIOPEN_INTERNALS_EXPORT const fs::path& GetUserDbPath();
-MIOPEN_INTERNALS_EXPORT std::string GetUserDbSuffix();
-MIOPEN_INTERNALS_EXPORT std::string GetSystemFindDbSuffix();
+        /**
+         * @brief Rewrite KernelGraph to add padding to LDS buffers.
+         * @ingroup Transformations
+         */
+        class AddLDSPadding : public GraphTransform
+        {
+        public:
+            AddLDSPadding(ContextPtr context, CommandParametersPtr params)
+                : m_context(context)
+                , m_params(params)
+            {
+            }
 
-#ifdef MIOPEN_BUILD_TESTING
-namespace testing {
-/// Reset cached user DB path for testing purposes
-/// This allows tests to reinitialize the path with different mocks/env vars
-MIOPEN_INTERNALS_EXPORT void ResetUserDbPath();
-} // namespace testing
-#endif
+            KernelGraph apply(KernelGraph const& original) override;
+            std::string name() const override
+            {
+                return "AddLDSPadding";
+            }
 
-} // namespace miopen
-
-#endif
+        private:
+            ContextPtr           m_context;
+            CommandParametersPtr m_params;
+        };
+    }
+}
