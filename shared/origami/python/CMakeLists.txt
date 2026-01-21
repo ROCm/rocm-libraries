@@ -42,8 +42,11 @@ if(SKBUILD)
   # When building a wheel via pip/scikit-build-core
   set(PYTHON_INSTALL_DIR "${SKBUILD_PLATLIB_DIR}/origami")
 else()
-  # When building standalone with CMake
-  set(PYTHON_INSTALL_DIR "${Python_SITEARCH}/origami")
+  # When building standalone with CMake, install under the CMake prefix.
+  include(GNUInstallDirs)
+  set(PYTHON_INSTALL_DIR
+      "${CMAKE_INSTALL_LIBDIR}/python${Python_VERSION_MAJOR}.${Python_VERSION_MINOR}/site-packages/origami"
+  )
 endif()
 
 nanobind_add_module(_pyorigami "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/bindings.cpp")
