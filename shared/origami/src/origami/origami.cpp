@@ -348,44 +348,92 @@ staggerU_t select_staggerU(const problem_t& problem,
   // -------------------
   // General Cases
   // -------------------
+  // In a typical GEMM, CUs compete to access the first K-slice.
+  // There are two tiers of memory contention:
+  // 1. Inter-XCD (MALL): XCDs compete to access the first K-slice in MALL (MALL -> L2).
+  //    - Important when CUs within each XCD are underutilized
+  //    - Distributes work across XCDs to utilize all compute resources
+  // 2. Intra-XCD (L2): CUs on the same XCD compete to access K-slices in L2 (L2 -> L1).
+  //    - Critical when CUs within each XCD are saturated
+  //    - Each XCD has only 16 L2 slices, creating local contention
+  //
+  // StaggerU Strategy based on workgroup distribution:
+  // - If numWGsPerL2Tile < numXCD / 2: Sparse distribution -> use Mall stagger (inter-XCD)
+  // - Otherwise: Dense distribution -> use L2 stagger (intra-XCD)
+  //
+  // When using L2 stagger: Stagger TWO L2 tiles instead of one
+  // - This spreads K-slice access across more offsets
+  //
+  // The L2 tile size is determined by WGM, which partitions the output matrix across XCDs.
+  
   size_t out_staggerUMapping = 0;
   size_t out_staggerU = 0;
   size_t out_staggerUStrideShift = 0;
-  // In a typicall GEMM, CUs compete to access the first K-slice.
-  // While the first K-slice is in MALL, CUs on the same XCD compete to access the K-slice in L2.
-  // Thus, there are two tiers of contention:
-  // 1. XCDs compete to access the first K-slice in MALL (MALL -> L2).
-  // 2. CUs on the same XCD compete to access the K-slice in L2 (L2 -> L1).
-  // The first one is not critical. GFX950 has 8 XCDs, so the contention is not severe.
-  // The second tier is the more critical one, as it determines the latency of accessing the K-slice in L2.
-  // To minimize the contention, we can stagger the K-slice in L2.
-  // For that, we need to know the size of the L2 tile which is determined by the WGM.
-  // Note that not all L2 tiles residing on the same XCD always have the same size (becuase of wrapping that usually happens
-  // in for the last XCD L2 tile).
-  // In those cases, the performance is affected by inefficient use of L2 (for the last XCD) and the L2 contention is masked,
-  // but the MALL contention is not masked.
-
-  // Early Exit: splitK and Batch and num_timesteps are not supported yet
-  if(split_factor != 1 || batch != 1 || num_timesteps != 1)
+  
+  // Early Exit: Batch and num_timesteps are not supported yet
+  if(batch != 1 || num_timesteps != 1)
     return staggerU_t{0, 0, 0};
 
-  if(wgm < 0)
+  // Early Exit: splitK 
+  if(split_factor > 1)
   {
-    std::cout << "Invalid WGM value: " << wgm << std::endl;
-    return staggerU_t{0, 0, 0};
+    // Check for memory channel conflicts in split-K case
+    size_t split_k_bytes = math::safe_ceil_div(K, split_factor);
+    size_t stride_bytes = static_cast<size_t>(split_k_bytes * data_type_to_bytes(problem.a_dtype));
+    bool has_stride_conflict = ((stride_bytes & (stride_bytes - 1)) == 0) && (stride_bytes >= 4096);
+    if(has_stride_conflict)
+    {
+      out_staggerUMapping = 0;
+      out_staggerU = 16;
+      out_staggerUStrideShift = 1;
+      return staggerU_t{out_staggerUMapping, out_staggerU, out_staggerUStrideShift};
+    }
   }
   
+  // Find WGM
+  size_t abs_wgm = std::abs(wgm);
+
   // Find Mall Tile (the tile that is accessed by all CUs in one time step)
+  size_t numWGsPerMallTile = numMT_M * numMT_N;
   size_t MallTile_N    = numMT_N;
   size_t MallTile_M    = numMT_M;
-  size_t numWGsPerMallTile = numMT_M * numMT_N;
-  // Find L2 Tile (the tile that is accessed by all CUs in one time step)
-  size_t L2Tile_N      = (wgm < numMT_N) ? wgm : numMT_N;
-  size_t L2Tile_M_temp = math::safe_ceil_div(numMT_M, wgm);
-  size_t L2Tile_M      = (L2Tile_M_temp < numMT_M) ? L2Tile_M_temp : numMT_M;
+  
+  // Find L2 Tile (the tile that is accessed by CUs on one XCD in one time step)
+  size_t L2Tile_M = 0;
+  size_t L2Tile_N = 0;
   size_t numWGsPerL2Tile = skGrid > numMTs ? math::safe_ceil_div(skGrid, numXCD) : math::safe_ceil_div(numMTs, numXCD);
   numWGsPerL2Tile = (numWGsPerL2Tile < numCUsPerXCD) ? numWGsPerL2Tile : numCUsPerXCD;
-  
+  if (wgm > 0)
+  {
+    // Positive WGM: row-major mapping
+    L2Tile_N = (wgm < numMT_N) ? wgm : numMT_N;
+    size_t L2Tile_M_temp = math::safe_ceil_div(numMT_M, wgm);
+    L2Tile_M = (L2Tile_M_temp < numMT_M) ? L2Tile_M_temp : numMT_M;
+    while(L2Tile_M * L2Tile_N < numWGsPerL2Tile - L2Tile_M)
+      L2Tile_N++;
+  }
+  else if (wgm < 0)
+  {
+    // Negative WGM: column-major mapping
+    L2Tile_M = (abs_wgm < numMT_M) ? abs_wgm : numMT_M;
+    size_t L2Tile_N_temp = math::safe_ceil_div(numMT_N, abs_wgm);
+    L2Tile_N = (L2Tile_N_temp < numMT_N) ? L2Tile_N_temp : numMT_N;
+    while(L2Tile_M * L2Tile_N < numWGsPerL2Tile - L2Tile_N)
+      L2Tile_M++;
+  }
+  else
+  {
+    std::cerr << "[ORIGAMI]: Invalid WGM value " << wgm << " in select_staggerU" << std::endl;
+    return staggerU_t{0, 0, 0};
+  }
+
+  // Early Exit: if the whole data doesn't fit in L2, then we have to fetch data from MALL
+  // In this case, we better wait for data to be accessible in L2 rather than issuing another
+  // MALL read.
+  if((MT_M * L2Tile_M * data_type_to_bytes(problem.a_dtype) + 
+      MT_N * L2Tile_N * data_type_to_bytes(problem.b_dtype)) * K > hardware.L2_capacity)
+    return staggerU_t{0, 0, 0};
+
   // Find StaggerU for L2
   size_t L2_staggerUMapping = 0;
   size_t L2_staggerU = 0;
@@ -414,16 +462,22 @@ staggerU_t select_staggerU(const problem_t& problem,
     Mall_staggerU = MallTile_N;
   }
   
-  // Compute StaggerU
-  if(Mall_staggerU > 2 * L2_staggerU)
+  // Decision: Check workgroup distribution across XCDs
+  // If we have very few workgroups per XCD (less than half the number of XCDs),
+  // it indicates sparse work distribution -> use Mall stagger for inter-XCD distribution
+  // Otherwise, use L2 stagger for intra-XCD contention reduction
+  if(numWGsPerL2Tile < numXCD / 2)
   {
-    out_staggerUMapping = L2_staggerUMapping;
-    out_staggerU = L2_staggerU;
+    // Sparse work distribution: use Mall stagger to distribute work across XCDs
+    out_staggerUMapping = Mall_staggerUMapping;
+    out_staggerU = Mall_staggerU;
   }
   else
   {
-    out_staggerUMapping = Mall_staggerUMapping;
-    out_staggerU = Mall_staggerU;
+    // Dense work distribution: use L2 stagger to reduce intra-XCD contention
+    // Stagger TWO L2 tiles to spread K-slice access across more offsets
+    out_staggerUMapping = L2_staggerUMapping;
+    out_staggerU = 2 * L2_staggerU;
   }
 
   // Compute smallest power of 2 larger than or equal to out_staggerU
