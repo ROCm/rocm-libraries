@@ -87,25 +87,27 @@ __include/\<component\>\_version.h.in__
 Note: The `configure_file` cmake function will replace the names between the at signs with matching cmake variables, and the modified file will be installed with the component.
 
 ### 4.2 Version bumps
-Our versioning follows the guidelines of [semantic versioning](https://semver.org/), unless otherwise specified. The version follows the format `MAJOR.MINOR.PATCH.TWEAK`
+Our versioning follows the guidelines of [semantic versioning](https://semver.org/), unless otherwise specified. The version follows the format `MAJOR.MINOR.PATCH.TWEAK`.
+
+If a PR requires a version bump, the version must be updated as part of the PR or its merging process. Doing this manually within the PR will be necessary initially, but this will create merge conflicts for any PRs changing the same component. To alleviate this, this process should be automated using labels, PR comments, or some similar mechanism as soon as feasible.
+
+**Note**: Comments and documentation do not require a version update (though the tweak version will still change)
+
 #### Major version
 In major version updates, API breaking changes may be made, and deprecated features may be removed. Updates must coincide with a rocm major release. Note that a rocm major release will not require a hipDNN major version bump. However, if any component undergoes a major version bump every component should, ensuring that all components will share a major version.
 
 The process for major version bumps is TBD, however we will be ensuring that breaking changes are deprecated ahead of time to give consumers advanced notice.
 
 #### Minor version
-API and features additions can be added within a minor version bump, but nothing can be removed. If a function or class is no longer needed, it should be marked as deprecated using the deprecated attribute. If appropriate, logging should be added to warn about its usage.
+API and features additions can be added within a minor version bump, but nothing can be removed. If a function or class is no longer needed, it should be marked as deprecated using the `deprecated` attribute. If appropriate, logging should be added to warn about its usage.
+
+Any API feature additions should have an associated comment identifying the version they were introduced. This will require special handling when version bumping is automated and the version isn't known until the PR has been merged.
 
 **Note**: There is a distinction between C and C++ APIs. In our C++ APIs, new overloads can be added. In C APIs, overloads are considered a breaking change, and only new functions may be added.
-
-Version bumps should be made with a dedicated PR on an approximately weekly schedule. During a minor version bump, the changelog should be updated with all of the changes that have been made since the last minor version increase. While this will not be in place to start, this process will be eventually automated. Details on how this process will work, and the eventual automation will come in a follow-up RFC describing how we will track changes inside hipDNN.
-
-The exception to this are API and schema changes. If either of these are changed, the minor version must be updated in the same PR.
 
 #### Patch version
 The patch is updated on backward compatible bug fixes.
 
-Version bumps should be handled using the same process and/or automation as for minor versions
 #### Tweak version
 The tweak version is a fourth identifier added to the version determined by the short commit hash of rocm-libraries, and updates automatically as a result.
 
@@ -126,30 +128,21 @@ Excluding components that are compatible within major versions (See section 4.6)
 Excluding the exception below, everything included in headers available to the user are part of the public API. Some of the library components have been split into multiple APIs with a user-facing header.
 
 If something must be included in a user-facing header, but shouldn't be part of the public API, it should be put inside a `detail` namespace. Anything in a detail namespace should not be used outside of the library internals, as it can be changed or removed at any time.
+
 ### 4.5 Versioned components
 In the proposed design, the following table lists the components of hipDNN, and the other internal components that they depend on (omitting the hipdnn_ at the start of each)
 
-| Target | Requirements |
-| -- | -- |
-| schema [^1] | |
-| data_sdk | - schema |
-| plugin_sdk | - data_sdk |
-| plugin_sdk_api [^2] | - plugin_sdk<br>- data_sdk |
-| plugin_sdk_engine_api [^2]  | - plugin_sdk_api<br>- data_sdk |
-| plugin_sdk_heuristic_api [^2] [^3] | - plugin_sdk_api<br>- data_sdk |
-| backend_private | - data_sdk<br>- plugin_sdk<br>- plugin_sdk_api<br>- plugin_sdk_engine_api<br>- plugin_sdk_heuristic_api |
-| backend | - backend_private |
-| frontend | - backend<br>- backend_private (dynamic)<br>- data_sdk<br>- schema (static/dynamic) [^4] |
+| Target | Requirements | Dynamic version query? |
+| -- | -- | -- |
+| schema [^1] | | Yes |
+| data_sdk | - schema | No |
+| plugin_sdk | - data_sdk | No |
+| backend | - data_sdk<br>- data_sdk<br>- plugin_sdk<br> | Yes |
+| frontend | - backend<br>- data_sdk<br>- schema | No |
 [^1]: Schema refers to both serialized formats of flatbuffers and json.
-[^2]: These components do not form their own project, and will be bundled with the plugin_sdk
-[^3]: The heuristic API hasn't yet been implemented
-[^4]: Static schema version is determined by the data_sdk compiled with, dynamic schema version comes from the schema version used for a serialization being consumed. Described in more detail below
 
 ### 4.6 Individual component details
 #### 4.6.1 Schema
-
-**Scope**: Serialized flatbuffer schemas and corresponding json serializations
-
 The schema covers both the flatbuffer serialization and the json serialization. These two serializations should change in lockstep as new fields, enums and structs are added. The version should be encoded directly within the schema for every root_type. Currently that's `Graph`, `EngineConfig` and `EngineDetails`.
 
 Schemas should be backwards and forward compatible within a major release. To this aim, the following changes can be made within the same major version:
@@ -172,42 +165,23 @@ Json serialization changes should be made in concert with flatbuffer schema file
 > Consideration: Should schema files only have a major version?
 
 #### 4.6.2 Backend
-**Scope**:  hipdnn_backend, hipdnn_backend_private
+The backend has two components: hipdnn_backend (the API) and hipdnn_backend_private (the implementation). These components share a single version.
 
-The backend has two components: hipdnn_backend (the API) and hipdnn_backend_private (the implementation). Both of these components need independent versions. While the hipdnn_backend will typically be consumed in a statically at build time, hipdnn_backend_private will exclusively be used dynamically at runtime.
-
-The hipdnn_backend_private should have functions to return both its internal version, as well as the version of the API it was built with.
-
-The backend must be entirely agnostic to the schema version (Note, this is not the current behaviour).
+The backend must be entirely agnostic to the schema version within the same major version (Note, this is not the current behaviour).
 
 #### 4.6.3 Frontend
-**Scope**: hipdnn_frontend
+For the time being, the frontend must be forward compatible with the hipdnn_backend.
 
-The frontend must be forward and backward compatible with any hipdnn_backend version within a major release. This must be handled statically with hipdnn_backend, and dynamically with hipdnn_backend_private.
+In the future, when the library is updated to use dlopen to link to the backend, backwards compatibility will be required as well. The frontend should be robust to all compatible backend libraries, even those that it wasn't compiled against.
 
-When new functionality is added dependent on a backend feature that was added since the last major release, there must be static and dynamic guards placed to ensure that it is supported by both the backend api and the backend library. The `IHipdnnBackend` interface from `frontend/include/HipdnnBackendInterface.hpp` is a good location to place these guards when appropriate.
+When new functionality is added dependent on a backend feature that was added since the last major release (or the moment when we commit to backwards compatibility), there must dynamic guards placed to ensure that the backend version is new enough to support that feature. The `IHipdnnBackend` interface from `frontend/include/HipdnnBackendInterface.hpp` is a good location to place these guards when appropriate.
 
-When a function is called that is not supported by one of the backends, the frontend should fail gracefully and either throw an appropriate exception or log an error.
-
->Note: using a macro that handles the static and dynamic checks would likely be a good way to handle both at once without duplication
+When a function is called that is not supported by the linked backend version, the frontend should fail gracefully and either throw an appropriate exception or log an error.
 
 #### 4.6.4 Plugins
-Plugins must have a function that reports the plugin API versions they were compiled with.
+Plugins must have a function that reports the plugin version they support. The plugin is required to have implemented every function in its corresponding plugin API for this version, and tests will be put in place to verify that every function has a definition. Note, the supported version may be different from the version they have been compiled with.
 
 Plugins are responsible for failing gracefully on unsupported schemas. Typically this will involve logging a warning, and registering the plugin as not applicable.
-
-#### 4.6.5 Plugin sdk
- Currently the `hipdnn_plugin_sdk` is a single component. This document proposes splitting it into 4 different components each with its own version
-
- | component | headers |
- | -- | -- |
- | plugin_sdk_api | PluginApi.h |
- | plugin_sdk_engine_api.h | EnginePluginApi.h |
- | plugin_sdk_heuristics_api | HeuristcsPluginApi.h [^5] |
- | plugin_sdk | All remaining headers in the hipdnn_plugin_sdk folder |
- [^5]: File does not yet exist
-
- While each of these components will have their own version, from a packaging perspective they'll be bundled together under the plugin_sdk version. As a result of this, any time one of the API versions are bumped, the corresponding plugin_sdk version must be bumped as well. Unlike the other components listed in secion 4.5, these components all belong to a single project.
 
 ### 4.7 Compatibility summary
 
@@ -278,6 +252,7 @@ project(<component> VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH})
 **Risk** Backwards or Forwards compatibility could become broken accidentally for some time before it's noticed. While this can often be remedied, it could lead to versions of library components that are not forward and backward compatible with each other.
 **Mitigation**
 - Have CI run backward/forward compatibility tests on PRs
+
 ## 7. Execution Plan
 
 ### 7.1 Phase 1 (Prerequisites)
