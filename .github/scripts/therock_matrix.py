@@ -5,6 +5,7 @@ This dictionary is used to map specific file directory changes to the correspond
 import os
 
 subtree_to_project_map = {
+    "dnn-providers/miopen-provider": "miopen-provider",
     "projects/hipblas": "blas",
     "projects/hipblas-common": "blas",
     "projects/hipblaslt": "blas",
@@ -83,6 +84,23 @@ project_map = {
             ],
         },
         "project_to_test": ["hipdnn", "miopen_plugin"],
+    },
+    "miopen-provider": {
+        "cmake_options": ["-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON"],
+        "additional_flags": {
+            # As composable_kernel is not enabled for Windows, we only enable these flags during Linux builds
+            "linux": [
+                "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+                "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
+                "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
+            ],
+            "windows": [
+                "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+                "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
+                "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
+            ],
+        },
+        "project_to_test": ["miopen_plugin"],
     },
     "rocwmma": {
         "cmake_options": ["-DTHEROCK_ENABLE_ROCWMMA=ON"],
