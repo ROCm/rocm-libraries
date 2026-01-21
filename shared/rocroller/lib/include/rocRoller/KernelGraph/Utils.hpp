@@ -179,6 +179,12 @@ namespace rocRoller
                                                                 int                assign);
 
         /**
+         * @brief Return the edge tag of type EdgeType connected to tag in direction Direction.
+         */
+        template <Graph::Direction Direction, typename EdgeType>
+        std::optional<int> GetEdgeTag(KernelGraph const& graph, int tag);
+
+        /**
          * @brief Create a range-based for loop.
          *
          * returns {dimension, operation}
@@ -788,6 +794,11 @@ namespace rocRoller
         std::vector<int> getCodeGeneratorCoordinates(KernelGraph const& graph,
                                                      int                tag,
                                                      bool isStorePartOfGlobalToLDSOp = false);
+
+        /**
+         * @brief Get the number of LDS elements for a given LDS tag.
+         */
+        int GetNumLDSElements(KernelGraph const& graph, int ldsTag);
 
         /**
          * @brief Get the first and last nodes from a set of nodes that are totally ordered

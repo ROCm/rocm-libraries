@@ -37,6 +37,10 @@ namespace GEMMTests
     using namespace rocRoller;
     namespace SolutionParams = rocRoller::Parameters::Solution;
 
+    class GEMMDirectLDSTestBasicGPU : public BaseGEMMContextFixture<>
+    {
+    };
+
     // Params are: A & B type, M tile size, (transA, transB), load A Path, load B Path
     class GEMMDirectLDSTestGPU
         : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
@@ -207,7 +211,7 @@ namespace GEMMTests
                         problem.workgroupSizeX * problem.workgroupSizeY);
     }
 
-    TEST_P(GEMMDirectLDSTestGPU, GPU_BasicGEMMFP32D2L)
+    TEST_P(GEMMDirectLDSTestBasicGPU, GPU_BasicGEMMFP32D2L)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -219,6 +223,42 @@ namespace GEMMTests
         gemm.n         = 4096;
         gemm.k         = 4096;
         basicGEMM<float>(gemm);
+    }
+
+    TEST_P(GEMMDirectLDSTestBasicGPU, GPU_BasicGEMMFP32D2LPadded)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+
+        GEMMProblem gemm;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDS;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDS;
+        gemm.storeLDSD = false;
+        gemm.transA    = "T";
+        gemm.transB    = "N";
+        gemm.m         = 3072;
+        gemm.n         = 4096;
+        gemm.k         = 4096;
+
+        // This kernel uses 32bit buffer_load instructions; and
+        // therefore each workgroup loads 1024 bytes per instruction
+        gemm.padA = {1024, 64};
+        gemm.padB = {1024, 96};
+        basicGEMM<float>(gemm);
+
+        auto instructions    = m_context->instructions()->toString();
+        auto ldsWriteStrides = direct2LDSWriteStrides(instructions);
+
+        std::set<int> expectedLDSWriteStrides;
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWiderDirectToLds))
+        {
+            expectedLDSWriteStrides = {4 * (1024 + 64), 4 * (1024 + 96)};
+        }
+        else
+        {
+            expectedLDSWriteStrides = {1024 + 64, 1024 + 96};
+        }
+        EXPECT_EQ(ldsWriteStrides, expectedLDSWriteStrides);
     }
 
     TEST_P(GEMMDirectLDSTestGPU, GPU_BasicGEMMFP32)
@@ -401,6 +441,8 @@ namespace GEMMTests
 
         return ::testing::ValuesIn(filtered);
     }
+
+    INSTANTIATE_TEST_SUITE_P(GEMMDirectLDSTestBasic, GEMMDirectLDSTestBasicGPU, currentGPUISA());
 
     INSTANTIATE_TEST_SUITE_P(
         GEMMDirectLDSTest,
