@@ -35,7 +35,7 @@ Tests:
   category: quick
   function: doti
   precision: *single_double_precisions_complex_real
-  M: [300]
+  M: [500]
   nnz: [5, 10, 500]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -43,7 +43,7 @@ Tests:
   category: pre_checkin
   function: doti
   precision: *single_double_precisions_complex_real
-  M: [2000]
+  M: [12000]
   nnz: [0, 1543, 7111, 10000]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -51,7 +51,7 @@ Tests:
   category: nightly
   function: doti
   precision: *single_double_precisions_complex_real
-  M: [5000]
+  M: [50000]
   nnz: [23512, 84412, 311983]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 

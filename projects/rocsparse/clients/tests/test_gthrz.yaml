@@ -35,7 +35,7 @@ Tests:
   category: quick
   function: gthrz
   precision: *single_double_precisions_complex_real
-  M: [300]
+  M: [500]
   nnz: [5, 10, 500]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -43,7 +43,7 @@ Tests:
   category: pre_checkin
   function: gthrz
   precision: *single_double_precisions_complex_real
-  M: [2000]
+  M: [22000]
   nnz: [0, 1543, 7111, 10000]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -51,7 +51,7 @@ Tests:
   category: nightly
   function: gthrz
   precision: *single_double_precisions_complex_real
-  M: [5000]
+  M: [557684]
   nnz: [23512, 84412, 311983]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
