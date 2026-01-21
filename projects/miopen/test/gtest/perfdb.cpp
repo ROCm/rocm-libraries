@@ -1566,7 +1566,11 @@ int RunChildProcess(int argc, char** argv)
 
 int main(int argc, char** argv)
 {
+#ifdef _WIN32
+    miopen::tests::exe_path() = fs::absolute(argv[0]);
+#else
     miopen::tests::exe_path() = argv[0];
+#endif
 
     // Check for child process mode before gtest init
     if(IsChildProcessMode(argc, argv))
