@@ -4488,9 +4488,9 @@ class KernelWriterAssembly(KernelWriter):
         label = Label("StaggerUMapping_%d"%(i + 1), comment="")
         module.add(SCmpEQU32(src0=sgpr(staggerUMapping), src1=hex(i << 13)))
         if i != 4:
-          module.add(SCBranchSCC1(labelName=label.getLabelName()))
+          module.add(SCBranchSCC0(labelName=label.getLabelName()))
         else:
-          module.add(SCBranchSCC1(labelName=staggerLabel.getLabelName()))
+          module.add(SCBranchSCC0(labelName=staggerLabel.getLabelName()))
         if i == 0:
           module.add(SMovB32(dst=sgpr(staggerInput), src=sgpr("WorkGroup0")))
         elif i == 1:
@@ -14071,8 +14071,9 @@ class KernelWriterAssembly(KernelWriter):
     loopChar = self.states.indexChars[kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
 
     if numCodePath == 1:
+      module.add(Label("LoopBegin%s_0"%(loopChar), "" ))
       module.add(MacroInstruction(name="MAINLOOP", args=[0]))
-      module.add(SCBranchSCC0(labelName="label_LoopBegin%s"%(loopChar), comment="" ))
+      module.add(SCBranchSCC0(labelName="label_LoopBegin%s_0"%(loopChar), comment="" ))
       module.add(Label("LoopEnd%s"%(loopChar), "" ))
       return module
 

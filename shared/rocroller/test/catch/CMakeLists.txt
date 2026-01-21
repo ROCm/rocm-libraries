@@ -29,6 +29,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/TestKernels.cpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/AddDeallocateTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AddLDSPaddingTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddPrefetchTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddStreamKTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AliasDataFlowTagsTest.cpp"
