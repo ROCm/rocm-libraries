@@ -233,7 +233,7 @@ namespace GEMMTests
         GEMMProblem gemm;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDS;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDS;
-        gemm.store     = VGPRToGlobalMemoryWithBuffer;
+        gemm.storePath = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
         gemm.transA    = "T";
         gemm.transB    = "N";
         gemm.m         = 3072;
