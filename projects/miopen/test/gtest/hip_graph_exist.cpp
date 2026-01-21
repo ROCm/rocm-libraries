@@ -1,8 +1,7 @@
 /*******************************************************************************
  *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +24,7 @@
  *******************************************************************************/
 
 #include <gtest/gtest.h>
+#include <gmock/gmock.h>
 #include <fstream>
 #include <string>
 #include <cstdlib>
@@ -62,22 +62,23 @@ struct HipGraphTestCase
 
 std::vector<HipGraphTestCase> GenSmokeTestCases()
 {
+    // Use smaller shapes and --iter=1 to speed up tests
     return {{"conv",
-             "-n 4 -c 3 -H 224 -W 224 -k 64 -y 3 -x 3 "
-             "-p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1",
+             "-n 1 -c 3 -H 32 -W 32 -k 16 -y 3 -x 3 "
+             "-p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1 --iter 1",
              "conv_hip_graph",
              true},
             {"activ",
-             "-n 100 -c 3 -H 32 -W 32 -m 3 -A 1 -B 1 -G 1 -F 0 -i 10 -V 1 -t 1",
+             "-n 8 -c 3 -H 16 -W 16 -m 3 -A 1 -B 1 -G 1 -F 0 -i 1 -V 1 -t 1",
              "activ_hip_graph",
              true},
             {"bnorm",
-             "-F 2 -n 32 -c 512 -H 16 -W 16 -m 1 -r 1 -i 10 -V 1 -t 1",
+             "-F 2 -n 8 -c 64 -H 8 -W 8 -m 1 -r 1 -i 1 -V 1 -t 1",
              "bnorm_hip_graph",
              true},
             {"conv",
-             "-n 4 -c 3 -H 224 -W 224 -k 64 -y 3 -x 3 "
-             "-p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1 --use_hip_graph 0",
+             "-n 1 -c 3 -H 32 -W 32 -k 16 -y 3 -x 3 "
+             "-p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1 --iter 1 --use_hip_graph 0",
              "no_graph",
              false}};
 }
@@ -93,14 +94,8 @@ protected:
 
     void SetUp() override
     {
-        // Create temporary directory for test outputs
-#ifdef _WIN32
-        char temp_path[MAX_PATH];
-        GetTempPathA(MAX_PATH, temp_path);
-        temp_dir = std::string(temp_path) + "miopen_hip_graph_test";
-#else
-        temp_dir    = "/tmp/miopen_hip_graph_test";
-#endif
+        // Create temporary directory for test outputs using std::filesystem
+        temp_dir = (fs::temp_directory_path() / "miopen_hip_graph_test").string();
 
         // Create directory if it doesn't exist
         fs::create_directories(temp_dir);
@@ -204,6 +199,9 @@ protected:
                          const std::string& test_name,
                          bool expect_graph)
     {
+        // Capture stderr to reduce test noise and allow verification
+        testing::internal::CaptureStderr();
+
         // Skip test if rocprof is not available
         std::string rocprof_check = ExecuteCommand(rocprof_cmd + " --version 2>&1");
         if(rocprof_check.empty() || rocprof_check.find("rocprof") == std::string::npos)
@@ -308,6 +306,12 @@ protected:
         std::cout << "hipGraphLaunch:        " << graph_launch_count << std::endl;
         std::cout << "hipGraphDestroy:       " << graph_destroy_count << std::endl;
 
+        // Get captured stderr and verify no unexpected warnings
+        std::string captured_stderr = testing::internal::GetCapturedStderr();
+
+        // Verify no workspace warnings were emitted
+        EXPECT_THAT(captured_stderr, ::testing::Not(::testing::HasSubstr("Warning [IsEnoughWorkspace]")));
+
         if(expect_graph)
         {
             // Verify HIP Graph was created via Stream Capture API
@@ -320,47 +324,10 @@ protected:
             EXPECT_GT(graph_launch_count, 0)
                 << "hipGraphLaunch not called - HIP Graph was not executed";
 
-            // Verify graph was reused (launched multiple times for iterations)
-            // The driver runs with -t 1 (timing enabled) which typically does multiple iterations
-            if(graph_launch_count > 1)
-            {
-                std::cout << "\n✓ Graph reused across " << graph_launch_count << " iterations"
-                          << std::endl;
-            }
-            else
-            {
-                std::cout
-                    << "\nNote: Graph launched only once (may be expected for single iteration)"
-                    << std::endl;
-            }
-
             // Overall success check
             bool hip_graph_detected =
                 (stream_begin_capture_count > 0 && stream_end_capture_count > 0 &&
                  graph_instantiate_count > 0 && graph_launch_count > 0);
-
-            if(hip_graph_detected)
-            {
-                std::cout << "\n✓ SUCCESS: HIP Graph was created and executed" << std::endl;
-            }
-            else
-            {
-                std::cout << "\n✗ FAILED: HIP Graph operations not detected" << std::endl;
-                std::cout << "Expected: hipStreamBeginCapture, hipStreamEndCapture, "
-                             "hipGraphInstantiate, "
-                             "hipGraphLaunch"
-                          << std::endl;
-
-                // Print trace file content for debugging
-                std::cout << "\nTrace file content (first 50 lines):" << std::endl;
-                std::ifstream trace(trace_file);
-                std::string line;
-                int line_count = 0;
-                while(std::getline(trace, line) && line_count++ < 50)
-                {
-                    std::cout << line << std::endl;
-                }
-            }
 
             ASSERT_TRUE(hip_graph_detected)
                 << "HIP Graph was not properly created/executed for " << driver_type;
@@ -374,12 +341,6 @@ protected:
                 << "hipStreamEndCapture was called even though HIP Graph should be disabled";
             EXPECT_EQ(graph_launch_count, 0)
                 << "hipGraphLaunch was called even though HIP Graph should be disabled";
-
-            if(stream_begin_capture_count == 0 && stream_end_capture_count == 0 &&
-               graph_launch_count == 0)
-            {
-                std::cout << "\n✓ SUCCESS: HIP Graph correctly NOT used when disabled" << std::endl;
-            }
         }
     }
 };

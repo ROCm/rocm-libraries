@@ -315,8 +315,6 @@ int AdamDriver<Tgpu, Tref, Tgrad>::AddCmdLineArgs()
     inflags.AddInputFlag(
         "wall", 'w', "0", "Wall-clock Time Each Layer, Requires time == 1 (Default=0)", "int");
 
-    AddHipGraphFlag(inflags);
-
     return miopenStatusSuccess;
 }
 
