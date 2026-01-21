@@ -116,9 +116,11 @@ const std::optional<MiopenTensor>& BatchnormBwdParams::optBias() const
     return _optBias;
 }
 
-BatchnormBwdPlan::BatchnormBwdPlan(BatchnormBwdParams&& params)
+BatchnormBwdPlan::BatchnormBwdPlan(BatchnormBwdParams&& params, bool benchmarkingEnabled)
     : _params(std::move(params))
+    , _benchmarkingEnabled(benchmarkingEnabled)
 {
+    (void)_benchmarkingEnabled;
 }
 
 size_t BatchnormBwdPlan::getWorkspaceSize(

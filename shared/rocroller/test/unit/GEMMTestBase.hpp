@@ -35,6 +35,9 @@
 
 namespace GEMMTests
 {
+    std::set<int> nonZeroDSReadOffsets(std::string const& instruction, std::string const& s);
+    std::set<int> direct2LDSWriteStrides(std::string const& s);
+
     template <typename T>
     concept isF8 = std::is_same_v<T, rocRoller::FP8> || std::is_same_v<T, rocRoller::BF8>;
 
@@ -490,6 +493,10 @@ namespace GEMMTests
                  static_cast<uint>(gemm.macN / gemm.waveN / wavetilePerWavefrontN)});
             params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
             params->setSplitStoreTileIntoWaveBlocks(gemm.splitStoreTileIntoWaveBlocks);
+
+            // Set LDS padding for MATRIX_A and MATRIX_B
+            params->ldsPadding[LayoutType::MATRIX_A] = gemm.padA;
+            params->ldsPadding[LayoutType::MATRIX_B] = gemm.padB;
 
             params->swizzleScale                  = gemm.swizzleScale;
             params->prefetchScale                 = gemm.prefetchScale;
