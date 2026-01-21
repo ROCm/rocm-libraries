@@ -9,7 +9,16 @@ project(origami-python VERSION 0.1.0 LANGUAGES CXX)
 find_package(Python 3.9 COMPONENTS Interpreter Development.Module REQUIRED)
 
 option(ORIGAMI_BUILD_FROM_SOURCE "Build origami from source instead of finding installed version" ON)
-if(ORIGAMI_BUILD_FROM_SOURCE)
+set(ORIGAMI_TARGET "")
+if(TARGET roc::origami)
+    set(ORIGAMI_TARGET roc::origami)
+elseif(TARGET origami)
+    set(ORIGAMI_TARGET origami)
+endif()
+
+if(ORIGAMI_TARGET)
+    # Origami already exists in this CMake tree; reuse it to avoid duplicate targets.
+elseif(ORIGAMI_BUILD_FROM_SOURCE)
     set(ORIGAMI_ENABLE_PYTHON OFF CACHE BOOL "Build origami python bindings" FORCE)
     add_subdirectory("${PROJECT_SOURCE_DIR}/.." origami_build EXCLUDE_FROM_ALL)
     set(ORIGAMI_TARGET roc::origami)
