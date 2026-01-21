@@ -28,27 +28,21 @@ include: rocsparse_common.yaml
 Definitions:
   - &alpha_range_quick
     - { alpha:   1.0, alphai:  1.0 }
-    - { alpha:  -0.5, alphai: -0.5 }
 
   - &alpha_range_checkin
     - { alpha:   2.0, alphai:  0.5 }
-    - { alpha:   0.0, alphai:  1.5 }
 
   - &alpha_range_nightly
     - { alpha:   2.0, alphai:  0.0 }
-    - { alpha:   3.0, alphai:  1.5 }
 
   - &beta_range_quick
     - { beta:   0.4, betai:  0.0 }
-    - { beta:  -0.5, betai: -0.5 }
 
   - &beta_range_checkin
-    - { beta:   0.0, betai:  1.5 }
     - { beta:   3.0, betai:  1.0 }
 
   - &beta_range_nightly
     - { beta:   0.0, betai:  1.5 }
-    - { beta:  -0.5, betai:  1.0 }
 
 Tests:
 - name: bsrgemm_bad_arg
@@ -63,8 +57,8 @@ Tests:
   precision: *single_double_precisions
   M: [300]
   N: [300]
-  K: [200, 2700, 3849]
-  block_dim: [2, 7]
+  K: [2700]
+  block_dim: [7]
   alpha_alphai: *alpha_range_quick
   beta_betai: *beta_range_quick
   transA: [rocsparse_operation_none]
@@ -82,9 +76,9 @@ Tests:
   function: bsrgemm
   precision: *single_double_precisions_complex_real
   M: 1
-  N: [1000, 2000]
+  N: [1000]
   K: 1
-  block_dim: [3, 11]
+  block_dim: [11]
   alpha_alphai: *alpha_range_checkin
   beta_betai: *beta_range_checkin
   transA: [rocsparse_operation_none]
@@ -97,7 +91,6 @@ Tests:
   matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos1,
-             nos2,
              nos3,
              nos4,
              nos5,

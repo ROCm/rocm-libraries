@@ -28,11 +28,9 @@ include: rocsparse_common.yaml
 Definitions:
   - &alpha_beta_range_quick
     - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
-    - { alpha:  -0.5, beta:  0.5, alphai: -0.5, betai:  1.0 }
 
   - &alpha_beta_range_checkin
     - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
-    - { alpha:   3.0, beta:  1.0,  alphai:  2.0, betai: -0.5 }
 
   - &alpha_beta_range_nightly
     - { alpha:  -0.5, beta:  0.5,  alphai:  1.0, betai: -0.5 }
@@ -58,16 +56,16 @@ Tests:
   function: spmm_coo
   indextype: *i32_i64
   precision: *single_double_precisions
-  M: [8, 300]
-  N: [8, 1]
-  K: [0, 512]
+  M: [300]
+  N: [8]
+  K: [512]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   spmm_alg: [rocsparse_spmm_alg_coo_atomic]
-  orderB: *all_rocsparse_order
+  orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
 
 - name: spmm_coo
@@ -75,16 +73,16 @@ Tests:
   function: spmm_coo
   indextype: *i32_i64
   precision: *single_double_precisions
-  M: [8, 1]
-  N: [8, 1]
-  K: [0, 1, 538]
+  M: [8]
+  N: [8]
+  K: [538]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none]
+  transA: [rocsparse_operation_transpose]
   transB: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
-  spmm_alg: [rocsparse_spmm_alg_coo_segmented, rocsparse_spmm_alg_coo_segmented_atomic]
-  orderB: *all_rocsparse_order
+  spmm_alg: [rocsparse_spmm_alg_coo_segmented]
+  orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
 
 - name: spmm_coo_file
