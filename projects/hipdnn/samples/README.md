@@ -11,7 +11,10 @@
    - A ROCm-compatible GPU is required to run the samples
 
    > [!IMPORTANT]
-   > **AMD Clang++ is required.** GCC cannot compile hipDNN samples because they use HIP device code that requires the AMD Clang compiler included with ROCm. Make sure to specify the compiler as shown in the build command below.
+   > **AMD Clang++ Requirement for Samples**
+   > **AMD Clang++ is required** to compile hipDNN samples and tests. These components utilize `Tensor.hpp` and reference validation implementations that depend on HIP device headers for GPU buffer allocation.
+   >
+   > **Note for API Consumers:** This requirement **does not** apply to standard usage of the `hipDNN` Frontend. Projects consuming the library API without using these specific `data_sdk` utilities for validation & GPU memory allocation do not require AMD Clang++.
 
 2. **Build Samples:** From this `samples` directory:
    ```bash

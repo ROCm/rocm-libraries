@@ -57,8 +57,6 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto y = graph->batchnorm_inference_variance_ext(
         x, mean, variance, scale, bias, epsilon, bnAttributes);
 
-    y->set_data_type(computeType);
-
     // Step 2: Pointwise ReLU Activation
     auto pwAttributes = graph::PointwiseAttributes();
     pwAttributes.set_name("activation_node");
