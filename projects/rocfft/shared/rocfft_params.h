@@ -446,7 +446,7 @@ public:
 
             for(const auto& b : field.bricks)
             {
-                const size_t brick_size_elems = compute_ptrdiff(b.length(), b.stride, 0, 0);
+                const size_t brick_size_elems = compute_ptrdiff(b.length(), b.stride);
                 const size_t brick_size_bytes = brick_size_elems * elem_size_bytes;
 
                 // set device for the alloc, but we want to return to the
@@ -538,7 +538,7 @@ public:
         {
             const auto& b = ofields.front().bricks[i];
 
-            const size_t brick_size_elems = compute_ptrdiff(b.length(), b.stride, 0, 0);
+            const size_t brick_size_elems = compute_ptrdiff(b.length(), b.stride);
             const size_t brick_size_bytes = brick_size_elems * elem_size_bytes;
 
             // get this brick's starting offset in the field

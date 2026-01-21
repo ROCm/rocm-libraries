@@ -20,7 +20,6 @@ public:
 
     virtual const hipdnn_data_sdk::data_objects::Knob& getKnob() const = 0;
     virtual bool isValid() const = 0;
-    virtual int64_t knobId() const = 0;
     virtual std::string knobIdStr() const = 0;
     virtual std::string description() const = 0;
     virtual bool isDeprecated() const = 0;
@@ -104,12 +103,6 @@ public:
     bool isValid() const override
     {
         return _shallowKnob != nullptr;
-    }
-
-    int64_t knobId() const override
-    {
-        throwIfNotValid();
-        return _shallowKnob->knob_id();
     }
 
     std::string knobIdStr() const override

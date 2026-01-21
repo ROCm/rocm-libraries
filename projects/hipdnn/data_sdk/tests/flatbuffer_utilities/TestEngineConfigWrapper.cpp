@@ -17,9 +17,8 @@ flatbuffers::FlatBufferBuilder buildValidEngineConfigBuffer(int64_t engineId)
     return builder;
 }
 
-flatbuffers::FlatBufferBuilder
-    buildEngineConfigWithKnobSettings(int64_t engineId,
-                                      const std::vector<std::pair<int64_t, int64_t>>& knobIdValues)
+flatbuffers::FlatBufferBuilder buildEngineConfigWithKnobSettings(
+    int64_t engineId, const std::vector<std::pair<std::string, int64_t>>& knobIdValues)
 {
     flatbuffers::FlatBufferBuilder builder;
 
@@ -28,9 +27,10 @@ flatbuffers::FlatBufferBuilder
 
     for(const auto& [knobId, value] : knobIdValues)
     {
+        auto knobIdOffset = builder.CreateString(knobId);
         auto intValue = hipdnn_data_sdk::data_objects::CreateIntValue(builder, value);
         hipdnn_data_sdk::data_objects::KnobSettingBuilder settingBuilder(builder);
-        settingBuilder.add_knob_id(knobId);
+        settingBuilder.add_knob_id(knobIdOffset);
         settingBuilder.add_value_type(hipdnn_data_sdk::data_objects::KnobValue::IntValue);
         settingBuilder.add_value(intValue.Union());
         knobSettings.push_back(settingBuilder.Finish());
@@ -78,7 +78,8 @@ TEST(TestEngineConfigWrapper, KnobSettingCountEmpty)
 
 TEST(TestEngineConfigWrapper, KnobSettingCountNonEmpty)
 {
-    auto builder = buildEngineConfigWithKnobSettings(42, {{1, 100}, {2, 200}, {3, 300}});
+    auto builder = buildEngineConfigWithKnobSettings(
+        42, {{"knob_1", 100}, {"knob_2", 200}, {"knob_3", 300}});
     EngineConfigWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
     EXPECT_TRUE(wrapper.isValid());
     EXPECT_EQ(wrapper.knobSettingCount(), 3u);
@@ -94,50 +95,30 @@ TEST(TestEngineConfigWrapper, KnobSettingWrappersEmpty)
 
 TEST(TestEngineConfigWrapper, KnobSettingWrappersPopulated)
 {
-    auto builder = buildEngineConfigWithKnobSettings(42, {{1, 100}, {2, 200}});
+    auto builder = buildEngineConfigWithKnobSettings(42, {{"knob_1", 100}, {"knob_2", 200}});
     EngineConfigWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
     const auto& wrappers = wrapper.knobSettingWrappers();
     EXPECT_EQ(wrappers.size(), 2u);
-    EXPECT_EQ(wrappers[0]->knobId(), 1);
-    EXPECT_EQ(wrappers[1]->knobId(), 2);
-}
-
-TEST(TestEngineConfigWrapper, GetKnobSettingByIdFound)
-{
-    auto builder = buildEngineConfigWithKnobSettings(42, {{100, 1000}, {200, 2000}});
-    EngineConfigWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
-
-    const auto& knobSetting = wrapper.getKnobSettingById(100);
-    EXPECT_EQ(knobSetting.knobId(), 100);
-
-    const auto& knobSetting2 = wrapper.getKnobSettingById(200);
-    EXPECT_EQ(knobSetting2.knobId(), 200);
-}
-
-TEST(TestEngineConfigWrapper, GetKnobSettingByIdNotFound)
-{
-    auto builder = buildEngineConfigWithKnobSettings(42, {{100, 1000}});
-    EngineConfigWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
-
-    EXPECT_THROW(wrapper.getKnobSettingById(999), std::out_of_range);
+    EXPECT_EQ(wrappers[0]->knobId(), "knob_1");
+    EXPECT_EQ(wrappers[1]->knobId(), "knob_2");
 }
 
 TEST(TestEngineConfigWrapper, GetKnobSettingByNameFound)
 {
-    // Use fnv1aHash to generate a known knob ID from a name
-    auto knobName = "TEST_KNOB";
-    auto knobId = static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash(knobName));
-
-    auto builder = buildEngineConfigWithKnobSettings(42, {{knobId, 500}});
+    auto builder
+        = buildEngineConfigWithKnobSettings(42, {{"test_knob_100", 1000}, {"test_knob_200", 2000}});
     EngineConfigWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
 
-    const auto& knobSetting = wrapper.getKnobSettingByName(knobName);
-    EXPECT_EQ(knobSetting.knobId(), knobId);
+    const auto& knobSetting = wrapper.getKnobSettingByName("test_knob_100");
+    EXPECT_EQ(knobSetting.knobId(), "test_knob_100");
+
+    const auto& knobSetting2 = wrapper.getKnobSettingByName("test_knob_200");
+    EXPECT_EQ(knobSetting2.knobId(), "test_knob_200");
 }
 
 TEST(TestEngineConfigWrapper, GetKnobSettingByNameNotFound)
 {
-    auto builder = buildEngineConfigWithKnobSettings(42, {{100, 1000}});
+    auto builder = buildEngineConfigWithKnobSettings(42, {{"test_knob_100", 1000}});
     EngineConfigWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_THROW(wrapper.getKnobSettingByName("NONEXISTENT_KNOB"), std::out_of_range);
@@ -150,30 +131,17 @@ TEST(TestEngineConfigWrapper, KnobSettingMethodsOnInvalidWrapperThrow)
 
     EXPECT_THROW(wrapper.knobSettingCount(), std::invalid_argument);
     EXPECT_THROW(wrapper.knobSettingWrappers(), std::invalid_argument);
-    EXPECT_THROW(wrapper.getKnobSettingById(1), std::invalid_argument);
     EXPECT_THROW(wrapper.getKnobSettingByName("test"), std::invalid_argument);
-    EXPECT_THROW(wrapper.hasKnobSetting(1), std::invalid_argument);
     EXPECT_THROW(wrapper.hasKnobSetting("test"), std::invalid_argument);
-}
-
-TEST(TestEngineConfigWrapper, HasKnobSettingById)
-{
-    auto builder = buildEngineConfigWithKnobSettings(42, {{100, 1000}, {200, 2000}});
-    EngineConfigWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
-
-    EXPECT_TRUE(wrapper.hasKnobSetting(100));
-    EXPECT_TRUE(wrapper.hasKnobSetting(200));
-    EXPECT_FALSE(wrapper.hasKnobSetting(300));
 }
 
 TEST(TestEngineConfigWrapper, HasKnobSettingByName)
 {
-    auto knobName = "TEST_KNOB";
-    auto knobId = static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash(knobName));
-
-    auto builder = buildEngineConfigWithKnobSettings(42, {{knobId, 500}});
+    auto builder
+        = buildEngineConfigWithKnobSettings(42, {{"test_knob_100", 1000}, {"test_knob_200", 2000}});
     EngineConfigWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
 
-    EXPECT_TRUE(wrapper.hasKnobSetting(knobName));
-    EXPECT_FALSE(wrapper.hasKnobSetting("NONEXISTENT_KNOB"));
+    EXPECT_TRUE(wrapper.hasKnobSetting("test_knob_100"));
+    EXPECT_TRUE(wrapper.hasKnobSetting("test_knob_200"));
+    EXPECT_FALSE(wrapper.hasKnobSetting("test_knob_300"));
 }
