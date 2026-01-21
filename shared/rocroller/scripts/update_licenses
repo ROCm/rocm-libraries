@@ -20,13 +20,13 @@ sys.path.append(str(repo_dir / "scripts" / "lib"))
 from rrperf import git  # noqa: E402
 
 # New license text for different file types
-LICENSE_CPP = """
+LICENSE_CPP = """\
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 """
 
-LICENSE_HASH = """
+LICENSE_HASH = """\
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
