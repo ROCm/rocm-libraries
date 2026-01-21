@@ -48,7 +48,7 @@ namespace conv {
 using ProblemDescription = miopen::conv::ProblemDescription;
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGFwd = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<
     2,
     ck::tensor_layout::convolution::NHWGC,
@@ -61,11 +61,12 @@ using DeviceOpGFwd = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleA
     DataType,
     ck::tensor_operation::element_wise::PassThrough,
     ck::tensor_operation::element_wise::PassThrough,
-    ck::tensor_operation::element_wise::PassThrough>;
+    ck::tensor_operation::element_wise::PassThrough,
+    ComputeType>;
 
-template <typename DataType>
-using DeviceOpGFwdPtrs =
-    ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<DeviceOpGFwd<DataType>>;
+template <typename DataType, typename ComputeType = DataType>
+using DeviceOpGFwdPtrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+    DeviceOpGFwd<DataType, ComputeType>>;
 
 namespace {
 struct CKArgs
@@ -185,7 +186,26 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::Init(
     const ProblemDescription& problem) // should be parameterized with execution context
 {
     if(valid_kernels.empty())
-        valid_kernels = FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType>, CKArgs>(problem);
+    {
+        if constexpr(std::is_same_v<DataType, float>)
+        {
+            if(problem.UseTF32())
+            {
+                use_tf32 = true;
+                valid_kernels =
+                    FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType, ck::tf32_t>, CKArgs>(problem);
+            }
+            if(valid_kernels.empty())
+            {
+                use_tf32      = false;
+                valid_kernels = FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType>, CKArgs>(problem);
+            }
+        }
+        else
+        {
+            valid_kernels = FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType>, CKArgs>(problem);
+        }
+    }
     index     = 0;
     kernel_id = valid_kernels[index];
 }
@@ -194,6 +214,16 @@ template <typename DataType>
 bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::CheckIsSupportCKArgs(
     const ProblemDescription& problem) const
 {
+    if constexpr(std::is_same_v<DataType, float>)
+    {
+        if(problem.UseTF32() &&
+           IsCKArgsSupported<DeviceOpGFwdPtrs<DataType, ck::tf32_t>, CKArgs>(problem, kernel_id))
+        {
+            use_tf32 = true;
+            return true;
+        }
+        use_tf32 = false;
+    }
     return IsCKArgsSupported<DeviceOpGFwdPtrs<DataType>, CKArgs>(problem, kernel_id);
 }
 
@@ -201,6 +231,14 @@ template <typename DataType>
 bool ConvHipImplicitGemmGroupFwdXdlops::CheckCKApplicability(
     const ProblemDescription& problem) const
 {
+    if constexpr(std::is_same_v<DataType, float>)
+    {
+        if(problem.UseTF32() &&
+           IsCKApplicable<DeviceOpGFwdPtrs<DataType, ck::tf32_t>, CKArgs>(problem))
+        {
+            return true;
+        }
+    }
     return IsCKApplicable<DeviceOpGFwdPtrs<DataType>, CKArgs>(problem);
 }
 
@@ -326,8 +364,19 @@ template <typename DataType>
 bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::RunParameterPredictionModel(
     const ExecutionContext& ctx, const ProblemDescription& problem)
 {
-    valid_kernels = FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType>, CKArgs>(
-        problem); // filter valid_kernel ID's
+    // filter valid_kernel ID's
+    if constexpr(std::is_same_v<DataType, float>)
+    {
+        if(problem.UseTF32())
+        {
+            valid_kernels =
+                FillValidKernelsIDs<DeviceOpGFwdPtrs<float, ck::tf32_t>, CKArgs>(problem);
+        }
+    }
+    if(valid_kernels.empty())
+    {
+        valid_kernels = FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType>, CKArgs>(problem);
+    }
     static const std::string& arch = ctx.GetStream().GetDeviceName();
     if(arch == "gfx90a")
         InitHeuristicKernelIDs("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle");
@@ -555,23 +604,26 @@ ConvSolution ConvHipImplicitGemmGroupFwdXdlops::GetSolution(
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     return MakeSolutionGroupConvImplicitGemmXdlops(
         problem,
-        [&](auto data_type_val) {
-            using T = decltype(data_type_val);
+        [&](auto data_type_val, auto compute_type_val) {
+            using T        = decltype(data_type_val);
+            using TCompute = decltype(compute_type_val);
             return InitInvokerFactoryFwdNCHW<2,
                                              false,
-                                             DeviceOpGFwdPtrs<T>,
+                                             DeviceOpGFwdPtrs<T, TCompute>,
                                              CKArgs,
                                              miopen::conv::DataInvokeParams>(
                 ctx, problem, config.kernel_id);
         },
-        [&](auto data_type_val) {
-            using T = decltype(data_type_val);
+        [&](auto data_type_val, auto compute_type_val) {
+            using T        = decltype(data_type_val);
+            using TCompute = decltype(compute_type_val);
             return InitInvokerFactoryNHWC<false,
-                                          DeviceOpGFwdPtrs<T>,
+                                          DeviceOpGFwdPtrs<T, TCompute>,
                                           CKArgs,
                                           miopen::conv::DataInvokeParams>(
                 ctx, problem, config.kernel_id);
-        });
+        },
+        config.UseTF32());
 #else
     return {};
 #endif

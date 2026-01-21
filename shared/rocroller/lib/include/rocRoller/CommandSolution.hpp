@@ -145,6 +145,22 @@ namespace rocRoller
         std::optional<int> workgroupMappingDim = {};
         std::optional<int> workgroupRemapXCC   = {};
 
+        /**
+         * @brief Padding for LDS.
+         *
+         * Map from LayoutType to LDS padding specification.
+         *
+         * An LDS padding specification is a pair of integers: the
+         * first integer is how many contiguous bytes, followed by
+         * size of padding (gap) in bytes.
+         *
+         * A specification of {0, 0} means no padding.  This is the default.
+         *
+         * A specification of {-1, -1} means automatic padding.
+         */
+        std::map<LayoutType, std::pair<int, int>> ldsPadding
+            = {{LayoutType::MATRIX_A, {0, 0}}, {LayoutType::MATRIX_B, {0, 0}}};
+
     private:
         std::map<Operations::OperationTag, KernelGraph::CoordinateGraph::Dimension> m_dimInfo;
         std::optional<std::array<unsigned int, 3>>                                  m_workgroupSize;
