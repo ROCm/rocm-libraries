@@ -27,8 +27,6 @@ public:
     virtual const std::vector<std::unique_ptr<hipdnn_data_sdk::flatbuffer_utilities::IKnob>>&
         knobWrappers() const
         = 0;
-    virtual const hipdnn_data_sdk::flatbuffer_utilities::IKnob& getKnobById(int64_t knobId) const
-        = 0;
     virtual const hipdnn_data_sdk::flatbuffer_utilities::IKnob&
         getKnobByName(const std::string& knobName) const
         = 0;
@@ -93,25 +91,19 @@ public:
         return _knobWrappers;
     }
 
-    const hipdnn_data_sdk::flatbuffer_utilities::IKnob& getKnobById(int64_t knobId) const override
+    const hipdnn_data_sdk::flatbuffer_utilities::IKnob&
+        getKnobByName(const std::string& knobName) const override
     {
         throwIfNotValid();
         populateKnobWrappers();
 
-        auto it = _knobIdToIndex.find(knobId);
-        if(it == _knobIdToIndex.end())
+        auto it = _knobNameToIndex.find(knobName);
+        if(it == _knobNameToIndex.end())
         {
-            throw std::out_of_range("Knob with id " + std::to_string(knobId) + " not found");
+            throw std::out_of_range("Knob with name '" + knobName + "' not found");
         }
 
         return *_knobWrappers[it->second];
-    }
-
-    const hipdnn_data_sdk::flatbuffer_utilities::IKnob&
-        getKnobByName(const std::string& knobName) const override
-    {
-        auto knobId = static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash(knobName));
-        return getKnobById(knobId);
     }
 
 private:
@@ -139,8 +131,8 @@ private:
                 auto knob = knobs->Get(i);
                 auto wrapper
                     = std::make_unique<hipdnn_data_sdk::flatbuffer_utilities::KnobWrapper>(knob);
-                auto knobId = wrapper->knobId();
-                _knobIdToIndex[knobId] = i;
+                auto knobName = wrapper->knobIdStr();
+                _knobNameToIndex[knobName] = i;
                 _knobWrappers.push_back(std::move(wrapper));
             }
         }
@@ -154,7 +146,7 @@ private:
     // Lazily populated cache of knob wrappers
     mutable std::vector<std::unique_ptr<hipdnn_data_sdk::flatbuffer_utilities::IKnob>>
         _knobWrappers;
-    mutable std::unordered_map<int64_t, size_t> _knobIdToIndex;
+    mutable std::unordered_map<std::string, size_t> _knobNameToIndex;
     mutable bool _knobsPopulated = false;
 };
 
