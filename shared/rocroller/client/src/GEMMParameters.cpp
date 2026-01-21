@@ -273,6 +273,7 @@ namespace rocRoller
                 s << "SwizzleTileSize: " << x.swizzleTileSize << std::endl;
                 s << "Load A:          " << x.loadPathA << std::endl;
                 s << "Load B:          " << x.loadPathB << std::endl;
+                s << "LDS Padding B:   " << x.padLDSB << std::endl;
                 s << "Store D Path:    " << x.storePath << std::endl;
                 s << "Load AScale:     " << x.loadPathAScale << std::endl;
                 s << "Load BScale:     " << x.loadPathBScale << std::endl;

@@ -250,6 +250,8 @@ unroll_x: 0
 unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
 store: VGPRToGlobalMemoryViaLDSWithBuffer
 prefetch: false
 prefetchInFlight: 0
@@ -315,6 +317,8 @@ unroll_x: 0
 unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
 store: VGPRToGlobalMemoryViaLDSWithBuffer
 prefetch: false
 prefetchInFlight: 0
@@ -379,6 +383,8 @@ unroll_x: 0
 unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
 store: VGPRToGlobalMemoryViaLDSWithBuffer
 prefetch: false
 prefetchInFlight: 0

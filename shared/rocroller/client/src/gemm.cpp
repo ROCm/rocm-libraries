@@ -1248,6 +1248,8 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::make_pair("--prefetchScale", &SolutionParameters::prefetchScale),
         std::make_pair("--load_A", &SolutionParameters::loadPathA),
         std::make_pair("--load_B", &SolutionParameters::loadPathB),
+        std::make_pair("--padLDS_A", &SolutionParameters::padLDSA),
+        std::make_pair("--padLDS_B", &SolutionParameters::padLDSB),
         std::make_pair("--store", &SolutionParameters::storePath),
         std::make_pair("--prefetch", &SolutionParameters::prefetch),
         std::make_pair("--prefetchInFlight", &SolutionParameters::prefetchInFlight),
