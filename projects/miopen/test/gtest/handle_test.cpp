@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2020 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -46,10 +46,14 @@
 #include <miopen/hip_build_utils.hpp>
 #endif
 
-#include "get_handle.hpp"
 #include <vector>
 #include <thread>
-#include "test.hpp"
+
+#include "get_handle.hpp"
+#include "gtest_common.hpp"
+#include "test_parameter_name_generator.hpp"
+
+namespace {
 
 enum kernel_type_t
 {
@@ -57,7 +61,9 @@ enum kernel_type_t
     miopenOpenCLKernelType
 };
 
-std::string Write2s(kernel_type_t kern_type)
+using TestCase = NamedParameter<bool>;
+
+static std::string Write2s(kernel_type_t kern_type)
 {
     if(kern_type == miopenHIPKernelType)
     {
@@ -98,7 +104,7 @@ std::string Write2s(kernel_type_t kern_type)
     }
 }
 
-void run2s(const miopen::Handle& h, std::size_t n, kernel_type_t kern_type)
+static void run2s(const miopen::Handle& h, std::size_t n, kernel_type_t kern_type)
 {
     std::vector<int> data_in(n, 1);
     auto data_dev = h.Write(data_in);
@@ -133,10 +139,10 @@ void run2s(const miopen::Handle& h, std::size_t n, kernel_type_t kern_type)
     std::fill(data_in.begin(), data_in.end(), 2);
 
     auto data_out = h.Read<int>(data_dev, n);
-    CHECK(data_out == data_in);
+    EXPECT_EQ(data_out, data_in);
 }
 
-void test_multithreads(kernel_type_t kern_type, const bool with_stream = false)
+static void test_multithreads(kernel_type_t kern_type, const bool with_stream = false)
 {
     auto&& h1 = get_handle();
     auto&& h2 = get_handle_with_stream(h1);
@@ -148,7 +154,7 @@ void test_multithreads(kernel_type_t kern_type, const bool with_stream = false)
     run2s(with_stream ? h2 : h1, 4, kern_type);
 }
 
-std::string WriteError(kernel_type_t kern_type)
+static std::string WriteError(kernel_type_t kern_type)
 {
     if(kern_type == miopenOpenCLKernelType)
     {
@@ -171,22 +177,21 @@ std::string WriteError(kernel_type_t kern_type)
     }
 }
 
-void test_errors(kernel_type_t kern_type)
+static void test_errors(kernel_type_t kern_type)
 {
     auto&& h = get_handle();
     if(kern_type == miopenOpenCLKernelType)
     {
-        EXPECT(throws([&] {
-            h.AddKernel("NoAlgo",
-                        "",
-                        "error_ocl.cl",
-                        "write",
-                        {1, 1, 1},
-                        {1, 1, 1},
-                        "",
-                        0,
-                        WriteError(kern_type));
-        }));
+        EXPECT_ANY_THROW(h.AddKernel("NoAlgo",
+                                     "",
+                                     "error_ocl.cl",
+                                     "write",
+                                     {1, 1, 1},
+                                     {1, 1, 1},
+                                     "",
+                                     0,
+                                     WriteError(kern_type)));
+
         try
         {
             h.AddKernel("NoAlgo",
@@ -201,22 +206,21 @@ void test_errors(kernel_type_t kern_type)
         }
         catch(miopen::Exception& e)
         {
-            EXPECT(!std::string(e.what()).empty());
+            EXPECT_FALSE(std::string(e.what()).empty());
         }
     }
     else if(kern_type == miopenHIPKernelType)
     {
-        EXPECT(throws([&] {
-            h.AddKernel("NoAlgo",
-                        "",
-                        "error_hip.cpp",
-                        "write",
-                        {1, 1, 1},
-                        {1, 1, 1},
-                        "",
-                        0,
-                        WriteError(miopenHIPKernelType));
-        }));
+        EXPECT_ANY_THROW(h.AddKernel("NoAlgo",
+                                     "",
+                                     "error_hip.cpp",
+                                     "write",
+                                     {1, 1, 1},
+                                     {1, 1, 1},
+                                     "",
+                                     0,
+                                     WriteError(miopenHIPKernelType)));
+
         try
         {
             h.AddKernel("NoAlgo",
@@ -231,12 +235,13 @@ void test_errors(kernel_type_t kern_type)
         }
         catch(miopen::Exception& e)
         {
-            EXPECT(!std::string(e.what()).empty());
+            EXPECT_FALSE(std::string(e.what()).empty());
         }
     }
 }
 
-std::string WriteNop(kernel_type_t kern_type)
+#if MIOPEN_BUILD_DEV && !WORKAROUND_ISSUE_2600 && !MIOPEN_WORKAROUND_COMPILER_CHANGE
+static std::string WriteNop(kernel_type_t kern_type)
 {
     if(kern_type == miopenOpenCLKernelType)
     {
@@ -257,91 +262,136 @@ std::string WriteNop(kernel_type_t kern_type)
         MIOPEN_THROW("Unsupported kernel type");
     }
 }
+#endif
 
-void test_warnings(kernel_type_t kern_type)
+static void test_warnings([[maybe_unused]] kernel_type_t kern_type)
 {
-    auto&& h = get_handle();
 #if MIOPEN_BUILD_DEV && !WORKAROUND_ISSUE_2600 && !MIOPEN_WORKAROUND_COMPILER_CHANGE
+    auto&& h = get_handle();
     if(kern_type == miopenOpenCLKernelType)
     {
-        EXPECT(throws([&] {
-            h.AddKernel("NoAlgo",
-                        "",
-                        "nop_ocl.cl",
-                        "write",
-                        {1, 1, 1},
-                        {1, 1, 1},
-                        "",
-                        0,
-                        WriteNop(kern_type));
-            MIOPEN_LOG_E("FAILED: Build of the OpenCL kernel should produce warnings");
-        }));
+        EXPECT_ANY_THROW(h.AddKernel(
+            "NoAlgo", "", "nop_ocl.cl", "write", {1, 1, 1}, {1, 1, 1}, "", 0, WriteNop(kern_type)));
     }
     else if(kern_type == miopenHIPKernelType)
     {
-        EXPECT(throws([&] {
-            h.AddKernel("NoAlgo",
-                        "",
-                        "nop_hip.cpp",
-                        "write",
-                        {1, 1, 1},
-                        {1, 1, 1},
-                        "",
-                        0,
-                        WriteNop(kern_type));
-            MIOPEN_LOG_E("FAILED: Build of the HIP kernel 'nop_hip.cpp' should produce warnings");
-        }));
+        EXPECT_ANY_THROW(h.AddKernel("NoAlgo",
+                                     "",
+                                     "nop_hip.cpp",
+                                     "write",
+                                     {1, 1, 1},
+                                     {1, 1, 1},
+                                     "",
+                                     0,
+                                     WriteNop(kern_type)));
     }
-#else
-    (void)kern_type;
-    (void)h; // To silence warnings.
 #endif
 }
 
-void test_arch_name()
+static void test_arch_name()
 {
-    auto&& h        = get_handle();
-    auto known_arch = {"gfx908",
-                       "gfx90a",
-                       "gfx906",
-                       "gfx900",
-                       "gfx942",
-                       "gfx950",
-                       "gfx803",
-                       "gfx1030",
-                       "gfx1031",
-                       "gfx1100",
-                       "gfx1101",
-                       "gfx1102",
-                       "gfx1150",
-                       "gfx1151",
-                       "gfx1152",
-                       "gfx1153",
-                       "gfx1200",
-                       "gfx1201"};
-    auto this_arch  = h.GetDeviceName();
-    EXPECT(std::any_of(
+    auto&& h = get_handle();
+
+    const auto known_arch = {"gfx908",
+                             "gfx90a",
+                             "gfx906",
+                             "gfx900",
+                             "gfx942",
+                             "gfx950",
+                             "gfx803",
+                             "gfx1030",
+                             "gfx1031",
+                             "gfx1100",
+                             "gfx1101",
+                             "gfx1102",
+                             "gfx1150",
+                             "gfx1151",
+                             "gfx1152",
+                             "gfx1153",
+                             "gfx1200",
+                             "gfx1201"};
+
+    const auto this_arch = h.GetDeviceName();
+
+    EXPECT_TRUE(std::any_of(
         known_arch.begin(), known_arch.end(), [&](std::string arch) { return arch == this_arch; }));
 }
 
-int main()
+static inline auto GenCases() { return MakeNamedParameterValues<bool>("with_stream", false, true); }
+
+static inline auto GetCases()
 {
-    auto&& h = get_handle();
-    if(h.GetDeviceName() != "gfx803" && miopen::IsHipKernelsEnabled())
+    static const auto cases = GenCases();
+    return cases;
+}
+
+} // namespace
+
+struct HandleTest : testing::TestWithParam<TestCase>
+{
+    void SetUp() override
     {
-        test_multithreads(miopenHIPKernelType);
-        test_errors(miopenHIPKernelType);
-// Warnings currently dont work in opencl
+        prng::reset_seed();
+        with_stream = GetParam();
+    }
+
+    void RunHIP()
+    {
+        auto&& h = get_handle();
+
+        if(h.GetDeviceName() != "gfx803" && miopen::IsHipKernelsEnabled())
+        {
+            test_multithreads(miopenHIPKernelType, with_stream);
+            test_errors(miopenHIPKernelType);
+            // Warnings currently don't work in OpenCL
 #if !MIOPEN_BACKEND_OPENCL
-        test_warnings(miopenHIPKernelType);
+            test_warnings(miopenHIPKernelType);
+#endif
+        }
+
+        test_arch_name();
+    }
+
+    void RunCL()
+    {
+        test_multithreads(miopenOpenCLKernelType, with_stream);
+        test_errors(miopenOpenCLKernelType);
+        test_arch_name();
+        // Warnings currently don't work in OpenCL
+#if !MIOPEN_BACKEND_OPENCL
+        test_warnings(miopenOpenCLKernelType);
 #endif
     }
-    test_multithreads(miopenOpenCLKernelType);
-    test_multithreads(miopenOpenCLKernelType, true);
-    test_errors(miopenOpenCLKernelType);
-    test_arch_name();
-// Warnings currently dont work in opencl
-#if !MIOPEN_BACKEND_OPENCL
-    test_warnings(miopenOpenCLKernelType);
-#endif
-}
+
+private:
+    bool with_stream{};
+};
+
+struct TestNameGenerator
+{
+    std::string operator()(const auto& info)
+    {
+        const auto& with_stream = info.param;
+        std::stringstream ss;
+        std::string str;
+
+        ss << "with_stream_" << std::boolalpha << with_stream() << "_test_id_" << info.index;
+
+        str = ss.str();
+
+        // Name format only supports letters, numbers and underscores.
+        std::transform(str.begin(), str.end(), str.begin(), [](char c) -> char {
+            return (c == '.') ? 'p' : (std::isalnum(c) ? c : '_');
+        });
+
+        return str;
+    }
+};
+
+using CPU_Handle_NONE = HandleTest;
+
+TEST_P(CPU_Handle_NONE, TestHIP) { this->RunHIP(); }
+
+TEST_P(CPU_Handle_NONE, TestCL) { this->RunCL(); }
+
+INSTANTIATE_TEST_SUITE_P(Smoke, CPU_Handle_NONE, GetCases(), TestNameGenerator{});

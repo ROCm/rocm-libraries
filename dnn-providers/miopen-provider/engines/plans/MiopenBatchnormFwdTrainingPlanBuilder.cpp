@@ -348,7 +348,8 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
                   .attributesAs<hipdnn_data_sdk::data_objects::BatchnormAttributes>();
 
         BatchnormFwdTrainingParams params(bnAttr, opGraph.getTensorMap());
-        auto plan = std::make_unique<BatchnormFwdTrainingPlan>(std::move(params));
+        auto plan = std::make_unique<BatchnormFwdTrainingPlan>(
+            std::move(params), executionContext.benchmarkingEnabled());
         executionContext.setPlan(std::move(plan));
     }
     else if(opGraph.nodeCount() == 2)
@@ -362,7 +363,8 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
                   .attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
 
         BatchnormFwdTrainingParams params(bnAttr, activAttr, opGraph.getTensorMap());
-        auto plan = std::make_unique<BatchnormFwdTrainingPlan>(std::move(params));
+        auto plan = std::make_unique<BatchnormFwdTrainingPlan>(
+            std::move(params), executionContext.benchmarkingEnabled());
         executionContext.setPlan(std::move(plan));
     }
     else

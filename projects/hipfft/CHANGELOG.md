@@ -33,6 +33,9 @@ Documentation for hipFFT is available at
 * Moved library to C++20 standard.
 * Removed Boost as a dependency for clients and samples.
 
+### Added
+* Support for gfx1150 architecture.
+
 ### Resolved issues
 
 * Fixed potential launch failure of data generation kernels in test and benchmark programs.
