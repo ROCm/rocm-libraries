@@ -70,6 +70,12 @@ def get_license_format(path: Path) -> str | None:
         return "cpp"
     elif path.suffix in EXTENSIONS_HASH:
         return "hash"
+    elif "dockerfile" in path.name.lower():
+        # Dockerfiles use # comments but have no extension
+        return "hash"
+    elif "doxyfile" in path.name.lower():
+        # Doxyfiles use # comments
+        return "hash"
     elif path.suffix == "" and path.name not in EXCLUDE_NAMES:
         # Scripts without extension - check for shebang
         try:
