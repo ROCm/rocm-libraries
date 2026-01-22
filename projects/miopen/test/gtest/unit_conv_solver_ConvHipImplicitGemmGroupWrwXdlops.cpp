@@ -76,7 +76,8 @@ const auto& GetTestParams()
         {
             supportedDevices = Gpu::gfx94X | Gpu::gfx950;
         }
-        else if constexpr(type == TestDataType::TF32){
+        else if constexpr(type == TestDataType::TF32)
+        {
             supportedDevices = Gpu::gfx94X;
         }
         else
