@@ -32,12 +32,12 @@ import functools
 import itertools
 import os
 import pathlib
+import shutil
 import subprocess
 from dataclasses import dataclass
 
 import pytest
 import yaml
-import shutil
 
 SOLUTION_NOT_SUPPORTED_ON_ARCH = 3
 
@@ -278,9 +278,7 @@ types:
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: false
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 matchMemoryAccess: true
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
@@ -355,9 +353,7 @@ swizzleTileSize:
   n: 0
   l: 0
 prefetchScale: false
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 ...
 """
 
@@ -421,9 +417,7 @@ swizzleTileSize:
   n: 0
   l: 0
 prefetchScale: false
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 ...
 """
 
