@@ -28,6 +28,7 @@
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 #include <hipdnn_data_sdk/utilities/json/Graph.hpp>
 #endif
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <spdlog/fmt/ranges.h>
 
 namespace hipdnn_frontend::graph
@@ -1121,6 +1122,13 @@ public:
         return graph_attributes.get_io_data_type();
     }
 
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::optional<int64_t> get_preferred_engine_id_ext() const
+    // NOLINTEND(readability-identifier-naming)
+    {
+        return _preferredEngineId;
+    }
+
     // Forwarding setters
     Graph& set_name(const std::string& name) // NOLINT(readability-identifier-naming)
     {
@@ -1483,10 +1491,29 @@ public:
     }
 
     // NOLINTBEGIN(readability-identifier-naming)
-    void set_preferred_engine_id_ext(std::optional<int64_t> engineId)
+    Graph& set_preferred_engine_id_ext(std::optional<int64_t> engineId)
     // NOLINTEND(readability-identifier-naming)
     {
         _preferredEngineId = engineId;
+        return *this;
+    }
+
+    // NOLINTBEGIN(readability-identifier-naming)
+    Graph& set_preferred_engine_id_ext(const std::string& engineName)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(engineName.empty())
+        {
+            _preferredEngineId = std::nullopt;
+            HIPDNN_FE_LOG_INFO("Cleared preferred engine ID (empty string)");
+            return *this;
+        }
+
+        auto engineId = hipdnn_data_sdk::utilities::engineNameToId(engineName);
+        _preferredEngineId = engineId;
+
+        HIPDNN_FE_LOG_INFO("Engine name '{}' mapped to ID: {}", engineName, engineId);
+        return *this;
     }
 
     // NOLINTBEGIN(readability-identifier-naming)
