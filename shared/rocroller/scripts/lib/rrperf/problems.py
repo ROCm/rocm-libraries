@@ -243,10 +243,8 @@ class GEMMSolution:
     prefetchScale: bool = False
     pretileScale: bool = False
 
-    streamK: bool = False
+    streamK: str = "None"
     numWGs: int = 0
-    streamKTwoTile: bool = False
-    streamKTwoTileDPFirst: bool = False
 
     architecture: GPUArchitectureTarget = GPUArchitectureTarget()
     matchMemoryAccess: bool = True
@@ -421,9 +419,7 @@ class GEMMResult(GEMM, RRPerfResult):
             + "/"
             + str(self.prefetchLDSFactor),
             "SCH": self.scheduler[0],
-            "SK": TF(self.streamK) + "/" + str(self.numWGs),
-            "2TSK": TF(self.streamKTwoTile),
-            "DPFirst": TF(self.streamKTwoTileDPFirst),
+            "SK": self.streamK + "/" + str(self.numWGs),
             "iters": "/".join(
                 [str(getattr(self, "num" + x)) for x in ["WarmUp", "Outer", "Inner"]]
             ),
