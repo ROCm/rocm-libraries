@@ -10,7 +10,7 @@ This project provides Python bindings for the hipDNN frontend library using the 
 The project is organized as follows:
 
 ```
-hipdnn-python-bindings
+python
 ├── src
 │   ├── module.cpp               # Main entry point for the nanobind module
 │   ├── graph_bindings.cpp       # Bindings for the Graph class and its methods
@@ -19,14 +19,13 @@ hipdnn-python-bindings
 │   ├── tensor_bindings.cpp      # Bindings for tensor-related functionalities
 │   ├── attributes_bindings.cpp  # Bindings for attribute classes
 │   └── types_bindings.cpp       # Bindings for custom types and enums
-├── python
-│   └── hipdnn_frontend
-│       ├── __init__.py          # Initializes the hipdnn_frontend package
-│       └── samples
-│           ├── bn_inference.py   # Batch normalization inference sample(DISABLED)
-│           ├── conv_fprop.py     # Convolution forward propagation sample
-│           ├── conv_dgrad.py     # Convolution backward data gradient sample
-│           └── conv_wgrad.py     # Convolution backward weight gradient sample
+├── hipdnn_frontend
+│   ├── __init__.py          # Initializes the hipdnn_frontend package
+│   └── samples
+│       ├── bn_inference.py    # Batch normalization inference sample(DISABLED)
+│       ├── conv_fprop.py      # Convolution forward propagation sample
+│       ├── conv_dgrad.py      # Convolution backward data gradient sample
+│       └── conv_wgrad.py      # Convolution backward weight gradient sample
 ├── CMakeLists.txt               # CMake configuration file
 ├── pyproject.toml               # Python project configuration
 └── README.md                    # Project documentation
@@ -65,8 +64,8 @@ pip install --upgrade pip
 The Python bindings use scikit-build to handle the CMake build process automatically through pip:
 
 ```bash
-# Navigate to the hipdnn-python-bindings directory
-cd hipdnn-python-bindings
+# Navigate to the hipdnn python directory
+cd python
 
 export CMAKE_PREFIX_PATH=/path/to/hipdnn/install:$CMAKE_PREFIX_PATH
 pip install -v .
@@ -82,7 +81,7 @@ For development work where you want to rebuild and apply the changes you have tw
 
 #### Editable Installation
 ```bash
-# from within the hipdnn-python-bindings directory
+# from within the hipdnn python directory
 pip install -e .
 ```
 
@@ -90,7 +89,7 @@ pip install -e .
 Instead of doing an editable install, if you prefer a full reinstall after C++ changes:
 
 ```bash
-# from within the hipdnn-python-bindings directory
+# from within the hipdnn python directory
 pip uninstall hipdnn-frontend -y
 pip install -v .
 ```
