@@ -150,7 +150,8 @@ def initBetaOnlyKernelObjects(solution):
 
 def initConversionKernelObjects(solution, isaInfoMap):
   conversionKernelObjects = []
-  loadVectorWidth = [1, 2] if solution["ProblemType"]["DataType"].isDouble() else [1, 2, 4]
+  loadVectorWidth = [1] if solution["ProblemType"]["DataType"].numBytes() > 8 else \
+    [1, 2] if solution["ProblemType"]["DataType"].numBytes() > 4 else [1, 2, 4]
   genPGRPostKernels = True
   gsuList = [internalParameters["GlobalSplitUPGR"]]
   if solution["GlobalSplitUAlgorithm"] == "SingleBuffer":
