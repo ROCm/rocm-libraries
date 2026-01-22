@@ -1563,7 +1563,7 @@ private:
         add_bool("has_memory_pools", dev_prop.memoryPoolsSupported);
         add_bool("can_use_host_pointer_for_registered_mem", dev_prop.canUseHostPointerForRegisteredMem);
 
-        ss << "\"global\":{";
+        ss << ",\"global\":{";
         first = true;
         add_field("total", dev_prop.totalGlobalMem);
         add_field("pitch", dev_prop.memPitch);
