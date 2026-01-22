@@ -155,24 +155,22 @@ target_link_libraries(miopen_plugin_private PUBLIC MIOpen hipdnn_data_sdk hipdnn
 # Backwards compatibility alias
 add_library(miopen_legacy_plugin_private ALIAS miopen_plugin_private)
 
-# Shared library properties common to both targets
-set(MIOPEN_PLUGIN_SHARED_PROPERTIES
-    CXX_VISIBILITY_PRESET hidden
-    LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
-    RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
-    ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
-    INSTALL_RPATH "${ROCM_PATH}/lib"
-    INSTALL_RPATH_USE_LINK_PATH TRUE
-    BUILD_WITH_INSTALL_RPATH TRUE
-)
-
 # miopen_legacy_plugin - REAL target for current TheRock compatibility
 add_library(miopen_legacy_plugin SHARED $<TARGET_OBJECTS:miopen_plugin_impl>)
 target_compile_definitions(miopen_legacy_plugin PRIVATE COMPONENT_NAME="miopen_plugin")
 target_link_libraries(miopen_legacy_plugin PRIVATE MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
 target_link_libraries(miopen_legacy_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
 target_compile_options(miopen_legacy_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-set_target_properties(miopen_legacy_plugin PROPERTIES ${MIOPEN_PLUGIN_SHARED_PROPERTIES})
+set_target_properties(
+    miopen_legacy_plugin
+    PROPERTIES CXX_VISIBILITY_PRESET hidden
+               LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
+               RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
+               ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
+               INSTALL_RPATH "${ROCM_PATH}/lib"
+               INSTALL_RPATH_USE_LINK_PATH TRUE
+               BUILD_WITH_INSTALL_RPATH TRUE
+)
 
 # miopen_plugin - REAL target for updated TheRock
 add_library(miopen_plugin SHARED $<TARGET_OBJECTS:miopen_plugin_impl>)
@@ -180,7 +178,16 @@ target_compile_definitions(miopen_plugin PRIVATE COMPONENT_NAME="miopen_plugin")
 target_link_libraries(miopen_plugin PRIVATE MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
 target_link_libraries(miopen_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
 target_compile_options(miopen_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-set_target_properties(miopen_plugin PROPERTIES ${MIOPEN_PLUGIN_SHARED_PROPERTIES})
+set_target_properties(
+    miopen_plugin
+    PROPERTIES CXX_VISIBILITY_PRESET hidden
+               LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
+               RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
+               ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
+               INSTALL_RPATH "${ROCM_PATH}/lib"
+               INSTALL_RPATH_USE_LINK_PATH TRUE
+               BUILD_WITH_INSTALL_RPATH TRUE
+)
 
 if(NOT HIPDNN_SKIP_TESTS)
     add_subdirectory(tests)
