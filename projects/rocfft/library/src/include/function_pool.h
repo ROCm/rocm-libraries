@@ -413,10 +413,10 @@ static void insert_default_entry(const FMKey&     def_key,
     auto is_device_visible = check_any_devices_visible();
 
     // Specifically add the current device's max LDS size if not a generic arch entry.
-    def_key_with_lds.lds_size_bytes = def_key.gcn_arch_name == generic_gcn_arch_name
-                                          ? lds_size_bytes
-                                      : is_device_visible ? get_curr_device_prop().sharedMemPerBlock
-                                                          : 0;
+    def_key_with_lds.lds_size_bytes
+        = def_key.gcn_arch_name == generic_gcn_arch_name
+              ? lds_size_bytes
+              : (is_device_visible ? get_curr_device_prop().sharedMemPerBlock : 0);
 
     // simple_key means the same thing as def_key, but we just remove kernel-config
     // so we don't need to know the exact config when we're lookin' for the default kernel
@@ -444,10 +444,10 @@ static void insert_default_entry(const PPFMKey&   def_key,
     auto is_device_visible = check_any_devices_visible();
 
     // Specifically add the current device's max LDS size if not a generic arch entry.
-    def_key_with_lds.lds_size_bytes = def_key.gcn_arch_name == generic_gcn_arch_name
-                                          ? lds_size_bytes
-                                      : is_device_visible ? get_curr_device_prop().sharedMemPerBlock
-                                                          : 0;
+    def_key_with_lds.lds_size_bytes
+        = def_key.gcn_arch_name == generic_gcn_arch_name
+              ? lds_size_bytes
+              : (is_device_visible ? get_curr_device_prop().sharedMemPerBlock : 0);
 
     PPFMKey simple_key(def_key_with_lds);
 

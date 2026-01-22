@@ -332,7 +332,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     {
         NO_GUARD,
         GUARD_BY_IF,
-        GURAD_BY_FUNC_ARG,
+        GUARD_BY_FUNC_ARG,
     };
 
     virtual StatementList real_trans_pre_post()
@@ -521,7 +521,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
 
         const auto thread_guard_cond = length / width;
 
-        // do thread gurad when guard_by_if or guard_by_arg
+        // do thread guard when guard_by_if or guard_by_arg
         if(guard != ThreadGuardMode::NO_GUARD)
         {
             // using ">" : no need to test "if(thread < XXX)"" if it is always true
@@ -560,7 +560,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
             stmts += CommentLines{"not enough threads, some threads do extra work"};
             unsigned int dt = iheight * threads_per_transform;
 
-            // always do thread gurad
+            // always do thread guard
             if(writeGuard)
                 guard_expr = Expression{write && (thread + dt < thread_guard_cond)};
             else

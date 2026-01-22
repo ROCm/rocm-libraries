@@ -138,7 +138,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         const auto work_length       = pp_factors_prod;
         const auto thread_guard_cond = work_length / width;
 
-        // do thread gurad when guard_by_if or guard_by_arg
+        // do thread guard when guard_by_if or guard_by_arg
         if(guard != ThreadGuardMode::NO_GUARD)
         {
             // using ">" : no need to test "if(thread < XXX)"" if it is always true
@@ -177,7 +177,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
             stmts += CommentLines{"not enough threads, some threads do extra work"};
             unsigned int dt = iheight * threads_per_transform_pp;
 
-            // always do thread gurad
+            // always do thread guard
             if(writeGuard)
                 guard_expr = Expression{write && (thread + dt < thread_guard_cond)};
             else

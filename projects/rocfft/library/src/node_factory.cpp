@@ -1068,14 +1068,12 @@ bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData
                    CS_3D_PP)))
         return false;
 
-    auto find_length = [](std::vector<std::vector<size_t>> exceptions,
-                          const std::vector<size_t>&       length) -> bool {
-        for(const auto& len : exceptions)
-        {
-            if(length == len)
-                return true;
-        }
-        return false;
+    auto find_length = [](const std::vector<std::vector<size_t>>& exceptions,
+                          const std::vector<size_t>&              length) -> bool {
+        const bool length_found
+            = std::find(exceptions.begin(), exceptions.end(), length) != exceptions.end();
+
+        return length_found;
     };
 
     // Batch size cut-off for enabling partial-pass 3D kernels may vary
