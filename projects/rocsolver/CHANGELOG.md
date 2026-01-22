@@ -6,6 +6,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## (Unreleased) rocSOLVER
 
 ### Added
+
+* Support added for the gfx1150, gfx1152, and gfx1153 architectures
+
 ### Changed
 ### Removed
 ### Optimized
@@ -19,10 +22,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 
 ## rocSOLVER 3.32.0 for ROCm 7.2.0
-
-### Added
-
-* Support added for the gfx1150, gfx1152, and gfx1153 architectures
 
 ### Optimized
 
