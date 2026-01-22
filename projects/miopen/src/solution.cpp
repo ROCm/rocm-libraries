@@ -231,6 +231,7 @@ void Solution::RunImpl(const Handle& handle,
     {
         auto ctx = ExecutionContext{&handle};
         conv_problem.SetupFloats(ctx);
+        conv_problem.SetupComputeType(ctx);
         const auto invoker_factory =
             GetSolver().GetSolver().GetInvokeFactory(ctx, conv_problem, perf_cfg.value_or(""));
         auto kernel_handles = std::vector<Kernel>{std::begin(kernels), std::end(kernels)};
@@ -254,6 +255,7 @@ void Solution::RunImpl(const Handle& handle,
 
     auto conv_ctx = ExecutionContext{&handle};
     conv_problem.SetupFloats(conv_ctx);
+    conv_problem.SetupComputeType(conv_ctx);
 
     decltype(auto) db        = MakeConvDbGetter(conv_ctx);
     const auto conv_solution = GetSolver().GetSolver().FindSolution(
@@ -588,8 +590,8 @@ void Solution::RunImpl(const Handle& handle,
 
 void Solution::RunImpl(const Handle& handle,
                        const std::unordered_map<miopenTensorArgumentId_t, RunInput>& inputs,
-                       Data_t /*workspace*/,
-                       std::size_t /*workspace_size*/,
+                       Data_t workspace,
+                       std::size_t workspace_size,
                        const FusedProblem& problem_)
 {
     const auto buffer_getter = [&](auto id, auto&& descriptor) {
@@ -603,8 +605,12 @@ void Solution::RunImpl(const Handle& handle,
         return found->second.buffer;
     };
 
+    const auto workspace_getter = [&]() {
+        return FindOptions::Workspace{workspace, workspace_size};
+    };
+
     OperatorArgs op_args;
-    const auto invoke_params = problem_.MakeInvokeParams(buffer_getter, op_args);
+    const auto invoke_params = problem_.MakeInvokeParams(buffer_getter, workspace_getter, op_args);
 
     if(invoker)
     {

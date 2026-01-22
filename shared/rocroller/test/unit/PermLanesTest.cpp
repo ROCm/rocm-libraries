@@ -34,6 +34,7 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
+#include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 
 #include "GPUContextFixture.hpp"
@@ -111,11 +112,6 @@ namespace PermLanesTest
 
         auto k = context->kernel();
 
-        k->addArgument(
-            {"a", {DataType::E8M0, PointerType::PointerGlobal}, DataDirection::ReadOnly});
-        k->addArgument(
-            {"result", {DataType::E8M0, PointerType::PointerGlobal}, DataDirection::WriteOnly});
-
         k->setKernelDimensions(2);
         auto one               = Expression::literal(1u);
         auto workitemCountExpr = Expression::literal(256u);
@@ -129,12 +125,26 @@ namespace PermLanesTest
         kgraph                     = kgraph.transform(lowerTile);
         auto updateWavefrontParams = std::make_shared<UpdateWavefrontParameters>(params);
         kgraph                     = kgraph.transform(updateWavefrontParams);
-        auto addComputeIndex       = std::make_shared<AddComputeIndex>();
-        kgraph                     = kgraph.transform(addComputeIndex);
-        kgraph                     = kgraph.transform(std::make_shared<LoadPacked>(context));
+
+        auto command = std::make_shared<rocRoller::Command>();
+        command->allocateArgument({DataType::E8M0, PointerType::PointerGlobal},
+                                  Operations::OperationTag(0),
+                                  ArgumentType::Value,
+                                  DataDirection::WriteOnly,
+                                  "result");
+        command->allocateArgument({DataType::E8M0, PointerType::PointerGlobal},
+                                  Operations::OperationTag(1),
+                                  ArgumentType::Value,
+                                  DataDirection::ReadOnly,
+                                  "a");
+        auto assignIndexExprs = std::make_shared<AssignIndexExpressions>(context, command);
+        kgraph                = kgraph.transform(assignIndexExprs);
+
+        kgraph = kgraph.transform(std::make_shared<LoadPacked>(context));
         if(context->kernelOptions()->removeSetCoordinate)
             kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
-        kgraph = kgraph.transform(std::make_shared<AssignComputeIndex>(context));
+
+        kgraph = kgraph.transform(std::make_shared<CleanArguments>(context, command));
 
         context->schedule(k->preamble());
         context->schedule(k->prolog());

@@ -4,9 +4,9 @@
 #pragma once
 
 #include <functional>
-#include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferTensorAttributesUtils.hpp>
@@ -24,20 +24,22 @@ struct BatchnormTrainParams
 {
     BatchnormTrainParams() = default;
     BatchnormTrainParams(
-        const hipdnn_sdk::data_objects::TensorAttributes& xAttributes,
-        const hipdnn_sdk::data_objects::TensorAttributes& scaleAttributes,
-        const hipdnn_sdk::data_objects::TensorAttributes& biasAttributes,
-        const hipdnn_sdk::data_objects::TensorAttributes& yAttributes,
-        const hipdnn_sdk::data_objects::TensorAttributes& epsilonAttributes,
+        const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
+        const hipdnn_data_sdk::data_objects::TensorAttributes& scaleAttributes,
+        const hipdnn_data_sdk::data_objects::TensorAttributes& biasAttributes,
+        const hipdnn_data_sdk::data_objects::TensorAttributes& yAttributes,
+        const hipdnn_data_sdk::data_objects::TensorAttributes& epsilonAttributes,
         // Optional mean/variance tensors
-        const hipdnn_sdk::data_objects::TensorAttributes* meanAttributes = nullptr,
-        const hipdnn_sdk::data_objects::TensorAttributes* invVarianceAttributes = nullptr,
+        const hipdnn_data_sdk::data_objects::TensorAttributes* meanAttributes = nullptr,
+        const hipdnn_data_sdk::data_objects::TensorAttributes* invVarianceAttributes = nullptr,
         // Optional running mean/variance tensors
-        const hipdnn_sdk::data_objects::TensorAttributes* momentumAttributes = nullptr,
-        const hipdnn_sdk::data_objects::TensorAttributes* prevRunningMeanAttributes = nullptr,
-        const hipdnn_sdk::data_objects::TensorAttributes* prevRunningVarianceAttributes = nullptr,
-        const hipdnn_sdk::data_objects::TensorAttributes* nextRunningMeanAttributes = nullptr,
-        const hipdnn_sdk::data_objects::TensorAttributes* nextRunningVarianceAttributes = nullptr)
+        const hipdnn_data_sdk::data_objects::TensorAttributes* momentumAttributes = nullptr,
+        const hipdnn_data_sdk::data_objects::TensorAttributes* prevRunningMeanAttributes = nullptr,
+        const hipdnn_data_sdk::data_objects::TensorAttributes* prevRunningVarianceAttributes
+        = nullptr,
+        const hipdnn_data_sdk::data_objects::TensorAttributes* nextRunningMeanAttributes = nullptr,
+        const hipdnn_data_sdk::data_objects::TensorAttributes* nextRunningVarianceAttributes
+        = nullptr)
         : xTensor(unpackTensorAttributes(xAttributes))
         , scaleTensor(unpackTensorAttributes(scaleAttributes))
         , biasTensor(unpackTensorAttributes(biasAttributes))
@@ -71,18 +73,18 @@ struct BatchnormTrainParams
     {
     }
 
-    hipdnn_sdk::data_objects::TensorAttributesT xTensor;
-    hipdnn_sdk::data_objects::TensorAttributesT scaleTensor;
-    hipdnn_sdk::data_objects::TensorAttributesT biasTensor;
-    hipdnn_sdk::data_objects::TensorAttributesT epsilonTensor;
-    hipdnn_sdk::data_objects::TensorAttributesT yTensor;
-    std::optional<hipdnn_sdk::data_objects::TensorAttributesT> meanTensor;
-    std::optional<hipdnn_sdk::data_objects::TensorAttributesT> invVarianceTensor;
-    std::optional<hipdnn_sdk::data_objects::TensorAttributesT> momentumTensor;
-    std::optional<hipdnn_sdk::data_objects::TensorAttributesT> prevRunningMeanTensor;
-    std::optional<hipdnn_sdk::data_objects::TensorAttributesT> prevRunningVarianceTensor;
-    std::optional<hipdnn_sdk::data_objects::TensorAttributesT> nextRunningMeanTensor;
-    std::optional<hipdnn_sdk::data_objects::TensorAttributesT> nextRunningVarianceTensor;
+    hipdnn_data_sdk::data_objects::TensorAttributesT xTensor;
+    hipdnn_data_sdk::data_objects::TensorAttributesT scaleTensor;
+    hipdnn_data_sdk::data_objects::TensorAttributesT biasTensor;
+    hipdnn_data_sdk::data_objects::TensorAttributesT epsilonTensor;
+    hipdnn_data_sdk::data_objects::TensorAttributesT yTensor;
+    std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> meanTensor;
+    std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> invVarianceTensor;
+    std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> momentumTensor;
+    std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> prevRunningMeanTensor;
+    std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> prevRunningVarianceTensor;
+    std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> nextRunningMeanTensor;
+    std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> nextRunningVarianceTensor;
 };
 
 template <typename XDataType,
@@ -110,14 +112,14 @@ public:
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
         // Extract epsilon from pass-by-value tensor (cast to double)
-        double epsilon
-            = hipdnn_sdk::utilities::extractDoubleFromTensorValue(_params.epsilonTensor, "Epsilon");
+        double epsilon = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
+            _params.epsilonTensor, "Epsilon");
 
         // Optional batch statistics tensors
-        std::unique_ptr<hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>> mean;
-        std::unique_ptr<hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>> invVariance;
-        hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>* meanPtr = nullptr;
-        hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>* invVariancePtr = nullptr;
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>> mean;
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>> invVariance;
+        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* meanPtr = nullptr;
+        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* invVariancePtr = nullptr;
 
         if(_params.meanTensor.has_value())
         {
@@ -135,22 +137,26 @@ public:
         }
 
         // Optional momentum and running statistics tensors
-        std::unique_ptr<hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>> prevRunningMean;
-        std::unique_ptr<hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>>
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>>
+            prevRunningMean;
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>>
             prevRunningVariance;
-        std::unique_ptr<hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>> nextRunningMean;
-        std::unique_ptr<hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>>
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>>
+            nextRunningMean;
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>>
             nextRunningVariance;
-        hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>* prevRunningMeanPtr = nullptr;
-        hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>* prevRunningVariancePtr = nullptr;
-        hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>* nextRunningMeanPtr = nullptr;
-        hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>* nextRunningVariancePtr = nullptr;
+        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* prevRunningMeanPtr = nullptr;
+        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* prevRunningVariancePtr
+            = nullptr;
+        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* nextRunningMeanPtr = nullptr;
+        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* nextRunningVariancePtr
+            = nullptr;
 
         // Extract momentum from pass-by-value tensor if present (cast to double)
         double momentumValue = 0.1;
         if(_params.momentumTensor.has_value())
         {
-            momentumValue = hipdnn_sdk::utilities::extractDoubleFromTensorValue(
+            momentumValue = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
                 _params.momentumTensor.value(), "Momentum");
         }
 
@@ -201,11 +207,11 @@ private:
     BatchnormTrainParams<MeanVarianceDataType> _params;
 };
 
-template <hipdnn_sdk::data_objects::DataType XDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType OutputDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum>
+template <hipdnn_data_sdk::data_objects::DataType XDataTypeEnum,
+          hipdnn_data_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
+          hipdnn_data_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
+          hipdnn_data_sdk::data_objects::DataType OutputDataTypeEnum,
+          hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum>
 class BatchnormTrainPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
@@ -216,8 +222,8 @@ public:
     using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
-        const hipdnn_sdk::data_objects::Node& node,
-        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_data_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
         if(node.compute_data_type() != ComputeDataTypeEnum)
@@ -303,8 +309,8 @@ public:
     }
 
     std::unique_ptr<IGraphNodePlanExecutor>
-        buildNodePlan(const hipdnn_plugin::IGraph& graph,
-                      const hipdnn_sdk::data_objects::Node& node) const override
+        buildNodePlan(const hipdnn_plugin_sdk::IGraph& graph,
+                      const hipdnn_data_sdk::data_objects::Node& node) const override
     {
         const auto* nodeAttributes = node.attributes_as_BatchnormAttributes();
         if(nodeAttributes == nullptr)
@@ -314,13 +320,13 @@ public:
 
         const auto& tensorMap = graph.getTensorMap();
 
-        const hipdnn_sdk::data_objects::TensorAttributes* mean = nullptr;
-        const hipdnn_sdk::data_objects::TensorAttributes* invVariance = nullptr;
-        const hipdnn_sdk::data_objects::TensorAttributes* momentum = nullptr;
-        const hipdnn_sdk::data_objects::TensorAttributes* prevRunningMean = nullptr;
-        const hipdnn_sdk::data_objects::TensorAttributes* prevRunningVariance = nullptr;
-        const hipdnn_sdk::data_objects::TensorAttributes* nextRunningMean = nullptr;
-        const hipdnn_sdk::data_objects::TensorAttributes* nextRunningVariance = nullptr;
+        const hipdnn_data_sdk::data_objects::TensorAttributes* mean = nullptr;
+        const hipdnn_data_sdk::data_objects::TensorAttributes* invVariance = nullptr;
+        const hipdnn_data_sdk::data_objects::TensorAttributes* momentum = nullptr;
+        const hipdnn_data_sdk::data_objects::TensorAttributes* prevRunningMean = nullptr;
+        const hipdnn_data_sdk::data_objects::TensorAttributes* prevRunningVariance = nullptr;
+        const hipdnn_data_sdk::data_objects::TensorAttributes* nextRunningMean = nullptr;
+        const hipdnn_data_sdk::data_objects::TensorAttributes* nextRunningVariance = nullptr;
 
         if(nodeAttributes->mean_tensor_uid().has_value())
         {

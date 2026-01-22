@@ -26,58 +26,57 @@
 
 #pragma once
 
-#include <origami/utils.hpp>
+#include <origami/origami.hpp>
 #include <rocisa/include/enum.hpp>
 
 namespace TensileLite
 {
- 
+
     inline origami::data_type_t datatypeToAnalyticalDatatype(rocisa::DataType type)
     {
         switch(type)
         {
-            case rocisa::DataType::Float:
-                return origami::data_type_t::Float;
-            case rocisa::DataType::Double:
-                return origami::data_type_t::Double;
-            case rocisa::DataType::ComplexFloat:
-                return origami::data_type_t::ComplexFloat;
-            case rocisa::DataType::ComplexDouble:
-                return origami::data_type_t::ComplexDouble;
-            case rocisa::DataType::Half:
-                return origami::data_type_t::Half;
-            case rocisa::DataType::Int8x4:
-                return origami::data_type_t::Int8x4;
-            case rocisa::DataType::Int32:
-                return origami::data_type_t::Int32;
-            case rocisa::DataType::BFloat16:
-                return origami::data_type_t::BFloat16;
-            case rocisa::DataType::Int8:
-                return origami::data_type_t::Int8;
-            case rocisa::DataType::Int64:
-                return origami::data_type_t::Int64;
-            case rocisa::DataType::XFloat32:
-                return origami::data_type_t::XFloat32;
-            case rocisa::DataType::Float8_fnuz:
-                return origami::data_type_t::Float8_fnuz;
-            case rocisa::DataType::BFloat8_fnuz:
-                return origami::data_type_t::BFloat8_fnuz;
-            case rocisa::DataType::Float8BFloat8_fnuz:
-                return origami::data_type_t::Float8BFloat8_fnuz;
-            case rocisa::DataType::BFloat8Float8_fnuz:
-                return origami::data_type_t::BFloat8Float8_fnuz;
-            case rocisa::DataType::Float8:
-                return origami::data_type_t::Float8;
-            case rocisa::DataType::BFloat8:
-                return origami::data_type_t::BFloat8;
-            case rocisa::DataType::Float8BFloat8:
-                return origami::data_type_t::Float8BFloat8;
-            case rocisa::DataType::BFloat8Float8:
-                return origami::data_type_t::BFloat8Float8;
+        case rocisa::DataType::Float:
+            return origami::data_type_t::Float;
+        case rocisa::DataType::Double:
+            return origami::data_type_t::Double;
+        case rocisa::DataType::ComplexFloat:
+            return origami::data_type_t::ComplexFloat;
+        case rocisa::DataType::ComplexDouble:
+            return origami::data_type_t::ComplexDouble;
+        case rocisa::DataType::Half:
+            return origami::data_type_t::Half;
+        case rocisa::DataType::Int8x4:
+            return origami::data_type_t::Int8x4;
+        case rocisa::DataType::Int32:
+            return origami::data_type_t::Int32;
+        case rocisa::DataType::BFloat16:
+            return origami::data_type_t::BFloat16;
+        case rocisa::DataType::Int8:
+            return origami::data_type_t::Int8;
+        case rocisa::DataType::Int64:
+            return origami::data_type_t::Int64;
+        case rocisa::DataType::XFloat32:
+            return origami::data_type_t::XFloat32;
+        case rocisa::DataType::Float8_fnuz:
+            return origami::data_type_t::Float8_fnuz;
+        case rocisa::DataType::BFloat8_fnuz:
+            return origami::data_type_t::BFloat8_fnuz;
+        case rocisa::DataType::Float8BFloat8_fnuz:
+            return origami::data_type_t::Float8BFloat8_fnuz;
+        case rocisa::DataType::BFloat8Float8_fnuz:
+            return origami::data_type_t::BFloat8Float8_fnuz;
+        case rocisa::DataType::Float8:
+            return origami::data_type_t::Float8;
+        case rocisa::DataType::BFloat8:
+            return origami::data_type_t::BFloat8;
+        case rocisa::DataType::Float8BFloat8:
+            return origami::data_type_t::Float8BFloat8;
+        case rocisa::DataType::BFloat8Float8:
+            return origami::data_type_t::BFloat8Float8;
 
-            default:
-                return origami::data_type_t::None;
+        default:
+            return origami::data_type_t::None;
         }
     }
 } // namespace TensileLite
-  

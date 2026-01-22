@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - develop
+      - release/therock-*
   pull_request:
     types:
       - opened
@@ -51,7 +52,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: bfcaf6e0bcd4bfe3c21990f49bbccb7d2a087d5d # 2025-12-15 commit
+          ref: 6a91147f22b525b79b19e909ea832d4f21e71306 # 2026-01-14 commit
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
@@ -86,7 +87,10 @@ jobs:
           AMDGPU_FAMILIES: "gfx94X, gfx950"
           # Variable comes from ROCm organization variable 'ROCM_THEROCK_TEST_RUNNERS'
           ROCM_THEROCK_TEST_RUNNERS: ${{ vars.ROCM_THEROCK_TEST_RUNNERS }}
-          LOAD_TEST_RUNNERS_FROM_VAR: true
+          # TODO(#2656): Migrate the organization variable to S3 file. Below code is a temporary resolution
+          # If it is a forked repo, we cannot access organization variables (so load in the file)
+          # Otherwise, we use the organization variable directly
+          LOAD_TEST_RUNNERS_FROM_VAR: ${{ github.event.pull_request.head.repo.full_name == 'ROCm/rocm-libraries' }}
         id: configure_linux
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
 
@@ -97,7 +101,10 @@ jobs:
           AMDGPU_FAMILIES: "gfx1151"
           # Variable comes from ROCm organization variable 'ROCM_THEROCK_TEST_RUNNERS'
           ROCM_THEROCK_TEST_RUNNERS: ${{ vars.ROCM_THEROCK_TEST_RUNNERS }}
-          LOAD_TEST_RUNNERS_FROM_VAR: true
+          # TODO(#2656): Migrate the organization variable to S3 file. Below code is a temporary resolution
+          # If it is a forked repo, we cannot access organization variables (so load in the file)
+          # Otherwise, we use the organization variable directly
+          LOAD_TEST_RUNNERS_FROM_VAR: ${{ github.event.pull_request.head.repo.full_name == 'ROCm/rocm-libraries' }}
         id: configure_windows
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
 

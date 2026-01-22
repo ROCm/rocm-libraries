@@ -1104,16 +1104,17 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
     ROCPRIM_RETURN_ON_ERROR(std::visit(
         [&](auto use_atomic_block_id)
         {
-            using config = wrapped_batch_memcpy_config<
-                Config,
-                typename std::iterator_traits<InputBufferItType>::value_type,
-                IsMemCpy>;
+            using Selector = batch_memcpy_config_selector<InputBufferItType, IsMemCpy>;
 
-            detail::target_arch target_arch;
-            ROCPRIM_RETURN_ON_ERROR(detail::host_target_arch(stream, target_arch));
+            target_arch target_arch;
+            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
 
-            const detail::batch_memcpy_config_params params
-                = detail::dispatch_target_arch<config, false>(target_arch);
+            gpu target_gpu;
+            ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
+
+            const target current_target(target_arch, target_gpu);
+
+            const auto params = get_config<Selector>(Config{}, current_target);
 
             using BufferOffsetType = unsigned int;
             using BlockOffsetType  = unsigned int;
@@ -1241,10 +1242,9 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
             };
 
             auto blev_memcpy_launch_plan
-                = make_launch_plan<config,
-                                   decltype(blev_memcpy_kernel),
-                                   blev_batch_memcpy_config_selector>(target_arch,
-                                                                      blev_memcpy_kernel);
+                = make_launch_plan<Config, Selector, blev_batch_memcpy_config_static_selector>(
+                    current_target,
+                    blev_memcpy_kernel);
 
             int        blev_occupancy{};
             hipError_t error
@@ -1320,14 +1320,13 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
             start_timer();
 
             ROCPRIM_RETURN_ON_ERROR(
-                execute_launch_plan<config,
-                                    decltype(non_blev_memcpy_kernel),
-                                    non_blev_batch_memcpy_config_selector>(target_arch,
-                                                                           non_blev_memcpy_kernel,
-                                                                           batch_memcpy_grid_size,
-                                                                           non_blev_block_size,
-                                                                           0,
-                                                                           stream));
+                execute_launch_plan<Config, Selector, non_blev_batch_memcpy_config_static_selector>(
+                    current_target,
+                    non_blev_memcpy_kernel,
+                    batch_memcpy_grid_size,
+                    non_blev_block_size,
+                    0,
+                    stream));
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("non_blev_memcpy_kernel",
                                                         num_copies,
                                                         start);

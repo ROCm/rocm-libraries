@@ -33,7 +33,7 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 
-#include <origami/utils.hpp>
+#include "origami/types.hpp"
 
 /**
  * @brief Convert rocRoller::Datatype to analytical::DataType

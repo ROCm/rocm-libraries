@@ -271,7 +271,7 @@ int main(int argc, char* argv[])
     const hiptensorDataType_t          typeA       = HIPTENSOR_R_32F;
     const hiptensorDataType_t          typeB       = HIPTENSOR_R_32F;
     const hiptensorDataType_t          typeC       = HIPTENSOR_R_32F;
-    const hiptensorComputeDescriptor_t typeCompute = HIPTENSOR_COMPUTE_DESC_32F;
+    const hiptensorComputeDescriptor_t typeCompute = HIPTENSOR_COMPUTE_DESC_16F;
 
     floatTypeCompute alpha = (floatTypeCompute)1.0f;
     floatTypeCompute beta  = (floatTypeCompute)1.0f;

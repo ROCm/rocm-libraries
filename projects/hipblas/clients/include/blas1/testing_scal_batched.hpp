@@ -103,10 +103,10 @@ void testing_scal_batched(const Arguments& arg)
         return;
     }
 
-    size_t sizeX         = size_t(N) * incx;
-    U      alpha         = arg.get_alpha<U>();
-    double gpu_time_used = 0.0, cpu_time_used = 0.0;
-    double hipblas_error = 0.0;
+    size_t sizeX = size_t(N) * incx;
+    U      alpha = arg.get_alpha<U>();
+
+    double hipblas_error{0};
 
     // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory, plz follow this practice
     host_batch_vector<T> hx(N, incx, batch_count);
@@ -156,6 +156,7 @@ void testing_scal_batched(const Arguments& arg)
 
     if(timing)
     {
+        double      gpu_time_used{0};
         hipStream_t stream;
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));
 

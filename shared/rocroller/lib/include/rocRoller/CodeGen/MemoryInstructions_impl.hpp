@@ -819,7 +819,7 @@ namespace rocRoller
         //
         // If an offset modifier is present, we can't use a 64bit
         // vaddr.  This can happen when: the offset register created
-        // by a ComputeIndex operation for a StoreTiled operation is
+        // by AssignIndexExpressions for a StoreTiled operation is
         // 64bit.
         if(!offsetModifier.empty())
             addr = addr->subset({0});

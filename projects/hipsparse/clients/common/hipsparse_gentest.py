@@ -406,7 +406,7 @@ def generate(test, function):
                     #
                     if ((not os.path.isdir(filename_arg))
                         and (not glob.glob(filename_arg))
-                        and (not glob.glob(filename_arg + ".csr"))):
+                        and (not glob.glob(filename_arg + ".bin"))):
                         print("skip unrecognized filename, directory or filename glob expression: '" + test[key] + "'")
                     else:
                         cleanlist.append(test[key])
@@ -439,7 +439,7 @@ def generate(test, function):
                         #
                         names = glob.glob(filename_arg)
                         if not names:
-                            names = glob.glob(filename_arg + ".csr")
+                            names = glob.glob(filename_arg + ".bin")
                             generate(test,function)
 
                         else:

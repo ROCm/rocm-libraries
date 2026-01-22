@@ -84,7 +84,7 @@ namespace GEMMTests
     void checkGEMMF16(rocRoller::ContextPtr m_context,
                       std::string           mfma,
                       uint                  numMFMAs,
-                      uint                  numBufferLoads,
+                      uint                  numBufferAndGlobalLoads,
                       uint                  numDSWrites,
                       uint                  numDSReads,
                       uint                  numTrLoads)
@@ -94,9 +94,16 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "v_mfma"), numMFMAs);
         EXPECT_EQ(countSubstring(generatedCode, mfma), numMFMAs);
 
-        EXPECT_EQ(countSubstring(generatedCode, "buffer_load"), numBufferLoads);
-        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx4 "), numBufferLoads);
-        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
+        const auto allBufferLoads     = countSubstring(generatedCode, "buffer_load");
+        const auto allGlobalLoads     = countSubstring(generatedCode, "global_load");
+        const auto dwordX4BufferLoads = countSubstring(generatedCode, "buffer_load_dwordx4 ");
+        const auto dwordX4GlobalLoads = countSubstring(generatedCode, "global_load_dwordx4 ");
+        const auto dwordBufferLoads   = countSubstring(generatedCode, "buffer_load_dword ");
+        const auto dwordGlobalLoads   = countSubstring(generatedCode, "global_load_dword ");
+
+        EXPECT_EQ(allBufferLoads + allGlobalLoads, numBufferAndGlobalLoads);
+        EXPECT_EQ(dwordX4BufferLoads + dwordX4GlobalLoads, numBufferAndGlobalLoads);
+        EXPECT_EQ(dwordBufferLoads + dwordGlobalLoads, 0);
 
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b"), numDSWrites);
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128 "), numDSWrites);
@@ -315,14 +322,18 @@ namespace GEMMTests
                                                  std::pair<std::string, std::string>("N", "T"),
                                                  std::pair<std::string, std::string>("T", "N"),
                                                  std::pair<std::string, std::string>("T", "T")),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR))));
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 
     INSTANTIATE_TEST_SUITE_P(
         GEMMF16Test,
         GEMMF16NTTestGPU,
         ::testing::Combine(
             currentGPUISA(),
-            ::testing::Combine(::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR))));
+            ::testing::Combine(::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 } // namespace GEMMTests

@@ -1080,6 +1080,10 @@ try
     ROCSPARSE_CHECKARG_ENUM(5, stage);
     ROCSPARSE_CHECKARG_POINTER(6, buffer_size_in_bytes);
 
+    ROCSPARSE_CHECKARG(2, mat, (mat->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(3, x, (x->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, y, (y->batch_count != 1), rocsparse_status_not_implemented);
+
     //
     // Validate spmv_inputs.
     //
@@ -1167,6 +1171,10 @@ try
                        buffer,
                        (buffer == nullptr && buffer_size_in_bytes > 0),
                        rocsparse_status_invalid_pointer);
+
+    ROCSPARSE_CHECKARG(3, mat, (mat->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, x, (x->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(6, y, (y->batch_count != 1), rocsparse_status_not_implemented);
 
     //
     // Validate spmv_inputs.
@@ -1422,6 +1430,8 @@ INSTANTIATE_GAMMA_DEVICE_ARRAY(double)
 INSTANTIATE_GAMMA_DEVICE_ARRAY(rocsparse_float_complex)
 INSTANTIATE_GAMMA_DEVICE_ARRAY(rocsparse_double_complex)
 INSTANTIATE_GAMMA_DEVICE_ARRAY(int)
+INSTANTIATE_GAMMA_DEVICE_ARRAY(_Float16)
+INSTANTIATE_GAMMA_DEVICE_ARRAY(rocsparse_bfloat16)
 
 // ETI for z array
 INSTANTIATE_Z_ARRAY(float)
@@ -1429,6 +1439,8 @@ INSTANTIATE_Z_ARRAY(double)
 INSTANTIATE_Z_ARRAY(rocsparse_float_complex)
 INSTANTIATE_Z_ARRAY(rocsparse_double_complex)
 INSTANTIATE_Z_ARRAY(int)
+INSTANTIATE_Z_ARRAY(_Float16)
+INSTANTIATE_Z_ARRAY(rocsparse_bfloat16)
 
 // Cleanup macros
 #undef INSTANTIATE_GAMMA_DEVICE_ARRAY
