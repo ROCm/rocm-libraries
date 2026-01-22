@@ -312,7 +312,6 @@ int main(int argc, char** argv)
   // otherwise 20 tests related to the optional header fail. Issue #149.
   nvrtcArguments.emplace_back("-DCCCL_ENABLE_OPTIONAL_REF");
   nvrtcArguments.emplace_back("-DCCCL_ENABLE_ASSERTIONS");
-
   if (!skipOutput)
   {
     std::ofstream ostr(outputTemplate + ".build.yml");
