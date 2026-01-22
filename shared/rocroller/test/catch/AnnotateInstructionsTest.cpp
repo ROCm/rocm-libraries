@@ -23,14 +23,14 @@ TEST_CASE("AddLocation works", "[codegen][utility]")
     // or contracted to make the line numbers
     // below line up.
 
-    CHECK(AddLocation().comment() == "49");
+    CHECK(AddLocation().comment() == "26");
     CHECK(AddLocation({SourceLocationPart::File}).comment()
           == "shared/rocroller/test/catch/AnnotateInstructionsTest.cpp");
 
     CHECK_THAT(
         AddLocation(EnumBitset<SourceLocationPart>::All()).comment(),
         ContainsSubstring("void CATCH2")
-            && ContainsSubstring("shared/rocroller/test/catch/AnnotateInstructionsTest.cpp:56:99"));
+            && ContainsSubstring("shared/rocroller/test/catch/AnnotateInstructionsTest.cpp:33:99"));
 
     auto generatorOne = []() -> Generator<Instruction> {
         co_yield_(Instruction("v_add_u32", {}, {}, {}, ""));
@@ -40,12 +40,12 @@ TEST_CASE("AddLocation works", "[codegen][utility]")
     };
 
     for(auto inst : generatorOne().map(AddLocation()))
-        CHECK_THAT(inst.comments(), Contains("65"));
+        CHECK_THAT(inst.comments(), Contains("42"));
 
     for(auto inst :
         generatorOne().map(AddLocation({SourceLocationPart::File, SourceLocationPart::Line})))
         CHECK_THAT(inst.comments(),
-                   Contains("shared/rocroller/test/catch/AnnotateInstructionsTest.cpp:69"));
+                   Contains("shared/rocroller/test/catch/AnnotateInstructionsTest.cpp:46"));
 }
 
 TEST_CASE("AddComment works", "[codegen][utility]")
