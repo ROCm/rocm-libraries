@@ -4,19 +4,32 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
-// Fwd decl for perfdb multi-process graceful spawn support
-// Rationale: perfdb is the only test that spawns a lot of child processes
-// in form of invocation of own binary with special arguments, which
-// means we'll invoke gtest init and it's not supposed to be called by the child process,
-// Solution: associate invocations with single point of initial entry
-// which is here - in main_hip.cpp this fwd decl resolves this issue providing
-// single point of child process catch before the gtest init
+// Using here"weak default implementations" for perfdb's multi-process support.
+// Rationale: perfdb is the only test that spawns child processes which are not supposed to call
+// gtest init. Solution: we have to check for their mode before InitGoogleTest (they have to call
+// only WorkItem() and exit)
+//
+// These weak symbols provide default no-op stubs for tests that don't link perfdb.cpp.
+// When perfdb.cpp is linked (e.g., in miopen_gtest) its strong symbols override these.
+// unfortunately, this was the only way, since alternatives include either disabling combined
+// mode, or creating an additional binary with it's own main() which will result in maintenance
+// overhead and having separate handling for one test only.
 namespace miopen {
 namespace tests {
 namespace perfdb {
-void SetExePath(const char* path);
-bool IsChildProcessMode(int argc, char** argv);
-int RunChildProcess(int argc, char** argv);
+
+#if defined(_MSC_VER)
+// MSVC: use selectany for weak linkage
+__declspec(selectany) void SetExePath(const char*) {}
+__declspec(selectany) bool IsChildProcessMode(int, char**) { return false; }
+__declspec(selectany) int RunChildProcess(int, char**) { return 0; }
+#else
+// GCC/Clang: use weak attribute
+__attribute__((weak)) void SetExePath(const char*) {}
+__attribute__((weak)) bool IsChildProcessMode(int, char**) { return false; }
+__attribute__((weak)) int RunChildProcess(int, char**) { return 0; }
+#endif
+
 } // namespace perfdb
 } // namespace tests
 } // namespace miopen
