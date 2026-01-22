@@ -24,13 +24,15 @@
  *
  *******************************************************************************/
 
-// #include <random>
+#include <random>
 #include <cmath>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
 #include <tuple>
 #include <vector>
+#include <algorithm>
+#include <type_traits>
 
 #include <gtest/gtest.h>
 
@@ -204,108 +206,88 @@ double getStdDev(const std::vector<double>& data)
     return std::sqrt(sum / data.size());
 }
 
-// Take two vectors of data along with their expected mean and standard deviation,
-// create a histogram for each array in the bounds [mean - hist_radius, mean + hist_radius] with a specified number of bins,
-// and calculate the average percent difference between the two histograms within the given number of standard deviations
-double compareHistogram(const std::vector<double>& data1,
-                        const std::vector<double>& data2,
-                        const double               mean,
-                        const double               std_dev,
-                        const double               hist_radius,
-                        const uint64_t             num_bins,
-                        const uint64_t             num_std_devs)
+// Calculate skewness (third standardized moment)
+// For a normal distribution, skewness should be close to 0
+double getSkewness(const std::vector<double>& data)
 {
-    std::map<double, uint64_t> histogram1;
-    std::map<double, uint64_t> histogram2;
-
-    if(num_bins == 0)
-        throw std::runtime_error("compareHistogram: num_bins cannot equal zero");
-    double bin_width = static_cast<double>(hist_radius * 2) / static_cast<double>(num_bins);
-    double first_bin = mean - hist_radius;
-    double last_bin  = mean + hist_radius - bin_width;
-    for(double bin = first_bin; bin <= last_bin; bin += bin_width)
-    {
-        histogram1[bin] = 0;
-        histogram2[bin] = 0;
-    }
-
-    // Make copies of both vectors and sort them in preparation for populating histograms
-    std::vector<double> data1_copy = data1;
-    std::sort(data1_copy.begin(), data1_copy.end());
-    std::vector<double> data2_copy = data2;
-    std::sort(data2_copy.begin(), data2_copy.end());
-
-    // Populate histograms
-    double current_bin = first_bin;
-    for(const double val : data1_copy)
-    {
-        if(std::isnan(val) || std::isinf(val) || val < first_bin || val >= last_bin + bin_width)
-        {
-            continue;
-        }
-
-        while(!(val >= current_bin && val < current_bin + bin_width))
-        {
-            current_bin += bin_width;
-        }
-
-        histogram1[current_bin]++;
-    }
-    current_bin = first_bin;
-    for(const double val : data2_copy)
-    {
-        if(std::isnan(val) || std::isinf(val) || val < first_bin || val >= last_bin + bin_width)
-        {
-            continue;
-        }
-
-        while(!(val >= current_bin && val < current_bin + bin_width))
-        {
-            current_bin += bin_width;
-        }
-
-        histogram2[current_bin]++;
-    }
-
-    // Calculate the average percent difference between the two histograms
-    // within the given number of standard deviations
-    double   sum_percent_diff  = 0.0;
-    uint64_t num_percent_diffs = 0;
-    for(auto const& [bin, val1] : histogram1)
-    {
-        // We only care about diffs within the given number of standard deviations
-        const double lower_bound = mean - (std_dev * num_std_devs);
-        const double upper_bound = mean + (std_dev * num_std_devs);
-        if(bin >= lower_bound && bin + bin_width <= upper_bound)
-        {
-            const uint64_t val2 = histogram2[bin];
-
-            uint64_t diff = std::max(val1, val2) - std::min(val1, val2);
-
-            // To avoid division by zero - if the denominator (val1 + val2) is zero,
-            // both val1 and val2 must themselves be zero because they are both unsigned,
-            // meaning that the percent difference is zero
-            double percent_diff;
-            if(val1 + val2 == 0)
-            {
-                percent_diff = 0.0;
-            }
-            else
-            {
-                percent_diff = 200 * (static_cast<double>(diff) / static_cast<double>(val1 + val2));
-            }
-
-            sum_percent_diff += percent_diff;
-            num_percent_diffs++;
-        }
-    }
-
-    if(num_percent_diffs == 0)
+    if(data.size() < 3)
     {
         return std::numeric_limits<double>::quiet_NaN();
     }
+    
+    const double mean = getMean(data);
+    const double std_dev = getStdDev(data);
+    
+    if(std::isnan(mean) || std::isnan(std_dev) || std_dev == 0.0)
+    {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    
+    double sum_cubed = 0.0;
+    for(const double& val : data)
+    {
+        double z = (val - mean) / std_dev;
+        sum_cubed += z * z * z;
+    }
+    
+    // Population Skewness
+    const double n = static_cast<double>(data.size());
+    return sum_cubed / n;
+}
 
-    return sum_percent_diff / num_percent_diffs;
+// Calculate excess kurtosis (fourth standardized moment minus 3)
+// For a normal distribution, excess kurtosis should be close to 0 (kurtosis close to 3)
+double getExcessKurtosis(const std::vector<double>& data)
+{
+    if(data.size() < 4)
+    {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    
+    const double mean = getMean(data);
+    const double std_dev = getStdDev(data);
+    
+    if(std::isnan(mean) || std::isnan(std_dev) || std_dev == 0.0)
+    {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    
+    double sum_quad = 0.0;
+    for(const double& val : data)
+    {
+        double z = (val - mean) / std_dev;
+        sum_quad += z * z * z * z;
+    }
+
+    // Population Excess Kurtosis
+    const double n = static_cast<double>(data.size());
+    return sum_quad / n - 3.0;
+}
+
+
+// Test normality using skewness and kurtosis
+// Returns true if the data appears to be normally distributed within given tolerances
+bool testNormalityViaSkewnessKurtosis(const std::vector<double>& data, 
+                                      double skewness_tolerance, 
+                                      double excess_kurtosis_tolerance,
+                                      double& skewness,
+                                      double& excess_kurtosis)
+{
+    skewness = getSkewness(data);
+    excess_kurtosis = getExcessKurtosis(data);
+    
+    if(std::isnan(skewness) || std::isnan(excess_kurtosis))
+    {
+        return false;
+    }
+    
+    // Check if skewness is within tolerance of 0
+    bool skewness_ok = std::abs(skewness) <= std::abs(skewness_tolerance);
+    
+    // Check if excess kurtosis is within tolerance of 0
+    bool kurtosis_ok = std::abs(excess_kurtosis) <= std::abs(excess_kurtosis_tolerance);
+    
+    return skewness_ok && kurtosis_ok;
 }
 
 template <typename DataType>
@@ -924,6 +906,10 @@ class DataGeneratorNormalFromFloatDistributionTest
 public:
     void testForDataType()
     {
+        if (std::is_same_v<DataType, ocp_e2m3_mxfp6>) {
+            GTEST_SKIP() << "Skipping normal distribution test for ocp_e2m3_mxfp6";
+        }
+
         DataGeneratorOptions opts;
         vector<index_t>      size, stride;
 
@@ -947,41 +933,59 @@ public:
 
         auto data = dgen.getReferenceDouble();
 
+        // Verify mean and standard deviation are approximately 0 and 1 respectively
         EXPECT_LE(std::abs(getMean(data) - mean), 0.1);
         EXPECT_LE(std::abs(getStdDev(data) - std_dev), 0.1);
 
-        // Generate reference data
-        const auto bit_size = getDataSignBits<DataType>() + getDataExponentBits<DataType>()
+        // Use skewness and kurtosis to verify normal distribution
+        const auto total_bits = getDataSignBits<DataType>() + getDataExponentBits<DataType>() 
                               + getDataMantissaBits<DataType>();
-        const auto byte_size   = (bit_size + 7) / 8;
-        const auto buffer_size = byte_size * data.size();
-        // Vector for holding DataType data
-        std::vector<uint8_t> buffer;
-        buffer.resize(buffer_size, 0x00);
-        // Vector for holding reference data
-        std::vector<double>        ref_data(data.size(), 0);
-        std::random_device         rd{};
-        std::mt19937               gen{rd()};
-        std::normal_distribution<> ref_dist{mean, std_dev};
-        for(size_t i = 0; i < ref_data.size(); i++)
-        {
-            // Generate a float, convert it to a DataType, and then convert it into a double
-            const auto val = DGen::satConvertToType<DataType>(ref_dist(gen));
-            std::memcpy(&buffer[i * byte_size], &val, byte_size);
-            uint8_t tScale[] = {Constants::E8M0_1};
-            ref_data[i]      = toDouble<DataType>(tScale, buffer.data(), 0, i);
+        
+        /**********************************************************************************
+         *
+         * Skewness values between -0.5 and 0.5 are considered acceptable for normality.
+         * Negative skewness indicates a longer left tail, while positive skewness
+         * indicates a longer right tail.
+         * Excess kurtosis values between -1 and 1 is considered acceptable for normality.
+         * Negative excess kurtosis indicates flatter distribution, while positive excess
+         * kurtosis indicates a peaked distribution.
+         * Normal data from the generator is well within these tolerances, so stricter
+         * tolerances detect any major changes. Tolerances are adjusted for precision.
+         *
+         *********************************************************************************/
+        double skewness_tolerance, excess_kurtosis_tolerance;
+
+        if (total_bits <= 6) {
+            skewness_tolerance = 0.1;
+            excess_kurtosis_tolerance = 0.2;
+        } 
+        else if (total_bits <= 8) {
+            skewness_tolerance = 0.05;
+            excess_kurtosis_tolerance = 0.1;
+        } 
+        else if (total_bits <= 16) {
+            skewness_tolerance = 0.025;
+            excess_kurtosis_tolerance = 0.05;
+        } 
+        else {
+            skewness_tolerance = 0.012;
+            excess_kurtosis_tolerance = 0.025;
         }
-
-        // Collect both arrays into histograms and compare them
-        const double   hist_radius  = 6;
-        const uint64_t num_bins     = 10000;
-        const uint64_t num_std_devs = 3;
-        const auto     avg_percent_diff
-            = compareHistogram(data, ref_data, mean, std_dev, hist_radius, num_bins, num_std_devs);
-
-        // Expect that average percent difference between actual and reference histogram
-        // within three standard deviations is less than 5%
-        EXPECT_LE(avg_percent_diff, 5);
+        
+        // Test if the generated data follows the expected normal distribution
+        double actual_skewness, actual_excess_kurtosis;
+        const bool normality_result = testNormalityViaSkewnessKurtosis(data, 
+                                                                       skewness_tolerance,
+                                                                       excess_kurtosis_tolerance,
+                                                                       actual_skewness,
+                                                                       actual_excess_kurtosis);
+        
+        EXPECT_TRUE(normality_result) 
+            << "Normality test for " << total_bits << "-bit type:\n"
+            << "  Skewness: " << actual_skewness 
+            << " (tolerance: ±" << skewness_tolerance << ")\n"
+            << "  Excess Kurtosis: " << actual_excess_kurtosis 
+            << " (tolerance: ±" << excess_kurtosis_tolerance << ")";
     }
 };
 

@@ -58,7 +58,8 @@ public:
     ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handle,
                          ConvFwdBiasActivParams&& params,
                          bool compile = true,
-                         bool getWsSize = true);
+                         bool getWsSize = true,
+                         bool benchmarkingEnabled = false);
     ~ConvFwdBiasActivPlan() override = default;
 
     ConvFwdBiasActivPlan(const ConvFwdBiasActivPlan&) = delete;
@@ -78,6 +79,7 @@ private:
     ConvFwdBiasActivParams _params;
     hipdnn_data_sdk::utilities::ScopedResource<miopenFusionPlanDescriptor_t> _fusePlanDesc;
     size_t _workspaceSize = 0;
+    bool _benchmarkingEnabled;
 };
 
 } // namespace miopen_legacy_plugin
