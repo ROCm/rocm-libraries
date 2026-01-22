@@ -31,6 +31,7 @@
 
 #include "../../../config.hpp"
 #include "../../../util_deprecated.hpp"
+#include "../thread/thread_operators.hpp" // for Difference
 
 #include <cub/device/device_adjacent_difference.cuh> // IWYU pragma: export
 
@@ -40,7 +41,7 @@ struct DeviceAdjacentDifference
 {
     template<typename InputIteratorT,
              typename OutputIteratorT,
-             typename DifferenceOpT = ::cub::Difference,
+             typename DifferenceOpT = ::hipcub::Difference,
              typename NumItemsT     = uint32_t>
     static HIPCUB_RUNTIME_FUNCTION
     hipError_t SubtractLeftCopy(void*           d_temp_storage,
@@ -62,7 +63,7 @@ struct DeviceAdjacentDifference
     }
 
     template<typename RandomAccessIteratorT,
-             typename DifferenceOpT = ::cub::Difference,
+             typename DifferenceOpT = ::hipcub::Difference,
              typename NumItemsT     = uint32_t>
     static HIPCUB_RUNTIME_FUNCTION
     hipError_t SubtractLeft(void*                 d_temp_storage,
@@ -83,7 +84,7 @@ struct DeviceAdjacentDifference
 
     template<typename InputIteratorT,
              typename OutputIteratorT,
-             typename DifferenceOpT = ::cub::Difference,
+             typename DifferenceOpT = ::hipcub::Difference,
              typename NumItemsT     = uint32_t>
     static HIPCUB_RUNTIME_FUNCTION
     hipError_t SubtractRightCopy(void*           d_temp_storage,
@@ -105,7 +106,7 @@ struct DeviceAdjacentDifference
     }
 
     template<typename RandomAccessIteratorT,
-             typename DifferenceOpT = ::cub::Difference,
+             typename DifferenceOpT = ::hipcub::Difference,
              typename NumItemsT     = uint32_t>
     static HIPCUB_RUNTIME_FUNCTION
     hipError_t SubtractRight(void*                 d_temp_storage,
