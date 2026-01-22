@@ -26,6 +26,10 @@ NetworkConfig ProblemDescription::MakeNetworkConfig() const
     ss << "b" << beta;
     ss << "algo" << static_cast<int>(algorithm);
     ss << "mode" << static_cast<int>(mode);
+    ss << "x_offset" << x_offset;
+    ss << "y_offset" << y_offset;
+    ss << "dx_offset" << dx_offset;
+    ss << "dy_offset" << dy_offset;
 
     auto printStrides = [&ss](std::string_view name, const miopen::TensorDescriptor& d) {
         const auto [n, c, h, w] = tien<4>(d.GetStrides());

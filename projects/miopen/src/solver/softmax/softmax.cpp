@@ -155,6 +155,10 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
         {"USE_SOFTMAX_LOG", algorithm == MIOPEN_SOFTMAX_LOG},
         {"USE_SOFTMAX_MODE_INSTANCE", mode == MIOPEN_SOFTMAX_MODE_INSTANCE},
         {"USE_SOFTMAX_MODE_CHANNEL", mode == MIOPEN_SOFTMAX_MODE_CHANNEL},
+        {"X_OFFSET", problem.GetXOffset()},
+        {"Y_OFFSET", problem.GetYOffset()},
+        {"DX_OFFSET", problem.GetdXOffset()},
+        {"DY_OFFSET", problem.GetdYOffset()},
         {"HEIGHT", lengths[2]},
         {"WIDTH", lengths[3]},
         {"N_STRIDE", strides[0]},
@@ -193,12 +197,7 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
                 decltype(auto) kernel_ = handle_.Run(kernels.front());
                 decltype(auto) params  = raw_params.CastTo<miopen::softmax::InvokeParams>();
 
-                kernel_(params.x,
-                        params.forward_y,
-                        params.xdx_offset,
-                        params.y_offset,
-                        params.alpha,
-                        params.beta);
+                kernel_(params.x, params.forward_y, params.alpha, params.beta);
             };
         };
     }
@@ -209,14 +208,7 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
                 decltype(auto) kernel_ = handle_.Run(kernels.front());
                 decltype(auto) params  = raw_params.CastTo<miopen::softmax::InvokeParams>();
 
-                kernel_(params.backward_y,
-                        params.dy,
-                        params.dx,
-                        params.y_offset,
-                        params.dy_offset,
-                        params.xdx_offset,
-                        params.alpha,
-                        params.beta);
+                kernel_(params.backward_y, params.dy, params.dx, params.alpha, params.beta);
             };
         };
     }

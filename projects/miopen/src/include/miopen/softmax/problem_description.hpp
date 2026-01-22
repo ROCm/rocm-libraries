@@ -34,13 +34,19 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
                        const TensorDescriptor& xDesc_,
                        const TensorDescriptor& yDesc_,
                        miopenSoftmaxAlgorithm_t algorithm_,
-                       miopenSoftmaxMode_t mode_)
+                       miopenSoftmaxMode_t mode_,
+                       int x_offset_ = 0,
+                       int y_offset_ = 0)
         : isForward(true),
           xdxDesc(xDesc_),
           yDesc(yDesc_),
 
           algorithm(algorithm_),
-          mode(mode_)
+          mode(mode_),
+          x_offset(x_offset_),
+          y_offset(y_offset_),
+          dx_offset(0),
+          dy_offset(0)
     {
         CheckAndAssignAlphaBeta(alpha_, beta_);
 
@@ -61,13 +67,20 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
                        const TensorDescriptor& dyDesc_,
                        const TensorDescriptor& dxDesc_,
                        miopenSoftmaxAlgorithm_t algorithm_,
-                       miopenSoftmaxMode_t mode_)
+                       miopenSoftmaxMode_t mode_,
+                       int y_offset_  = 0,
+                       int dy_offset_ = 0,
+                       int dx_offset_ = 0)
         : isForward(false),
           xdxDesc(dxDesc_),
           yDesc(yDesc_),
           dyDesc(dyDesc_),
           algorithm(algorithm_),
-          mode(mode_)
+          mode(mode_),
+          x_offset(0),
+          y_offset(y_offset_),
+          dx_offset(dx_offset_),
+          dy_offset(dy_offset_)
     {
         CheckAndAssignAlphaBeta(alpha_, beta_);
 
@@ -90,6 +103,10 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
     bool IsForward() const { return isForward; }
     miopenSoftmaxAlgorithm_t GetAlgorithm() const { return algorithm; }
     miopenSoftmaxMode_t GetMode() const { return mode; }
+    int GetXOffset() const { return x_offset; }
+    int GetYOffset() const { return y_offset; }
+    int GetdXOffset() const { return dx_offset; }
+    int GetdYOffset() const { return dy_offset; }
     float GetAlpha() const { return alpha; }
     float GetBeta() const { return beta; }
 
@@ -116,6 +133,10 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
         f(self.GetWidth(), "in_w");
         f(static_cast<uint64_t>(self.algorithm), "algorithm");
         f(static_cast<uint64_t>(self.mode), "mode");
+        f(static_cast<uint64_t>(self.x_offset), "x_offset");
+        f(static_cast<uint64_t>(self.y_offset), "y_offset");
+        f(static_cast<uint64_t>(self.dx_offset), "dx_offset");
+        f(static_cast<uint64_t>(self.dy_offset), "dy_offset");
     }
 
     template <class Self>
@@ -168,6 +189,11 @@ private:
 
     const miopenSoftmaxAlgorithm_t algorithm;
     const miopenSoftmaxMode_t mode;
+
+    int x_offset;
+    int y_offset;
+    int dx_offset;
+    int dy_offset;
 
     std::size_t GetBatchSize() const { return yDesc.GetLengths()[0]; }
     std::size_t GetChannels() const { return yDesc.GetLengths()[1]; }
