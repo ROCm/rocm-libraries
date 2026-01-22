@@ -79,13 +79,8 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [2048, 3072, 1, 1880]
-          - Exact: [2048, 3072, 1, 1920]
-          - Exact: [2048, 3072, 1, 2046]
-          - Exact: [2048, 3072, 1, 2047]
-          - Exact: [2048, 3072, 1, 2048]
-          - Exact: [2048, 3072, 1, 2064]
-          - Exact: [2048, 3072, 1, 2176]
+          - Range: [[2048], [3072], [1], [1880, 32, 2176]]
+          - Range: [[128], [192], [1], [128, 32, 512]]
 
   ########################################
   # FP16 TN - KRingShift coverage
@@ -145,13 +140,8 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [2048, 3072, 1, 1880]
-          - Exact: [2048, 3072, 1, 1920]
-          - Exact: [2048, 3072, 1, 2046]
-          - Exact: [2048, 3072, 1, 2047]
-          - Exact: [2048, 3072, 1, 2048]
-          - Exact: [2048, 3072, 1, 2064]
-          - Exact: [2048, 3072, 1, 2176]
+          - Range: [[2048], [3072], [1], [1880, 32, 2176]]
+          - Range: [[128], [192], [1], [128, 32, 512]]
 
   ########################################
   # FP8 (F8->F16) TN - KRingShift coverage
@@ -203,6 +193,6 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [2048, 3072, 1, 1880]
-          - Exact: [2048, 3072, 1, 1920]
+          - Range: [[2048], [3072], [1], [1880, 32, 2176]]
+          - Range: [[128], [192], [1], [128, 32, 512]]
 
