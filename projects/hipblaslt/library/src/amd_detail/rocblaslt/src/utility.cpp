@@ -327,6 +327,10 @@ const char* rocblaslt_epilogue_to_string(rocblaslt_epilogue epilogue)
         return "ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT";
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
         return "ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT";
+    case ROCBLASLT_EPILOGUE_SIGMOID_EXT:
+        return "ROCBLASLT_EPILOGUE_SIGMOID_EXT";
+    case ROCBLASLT_EPILOGUE_SIGMOID_BIAS_EXT:
+        return "ROCBLASLT_EPILOGUE_SIGMOID_BIAS_EXT";
     default:
         return "Invalid epilogue";
     }

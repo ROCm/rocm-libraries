@@ -2,17 +2,24 @@
 
 Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).
 
+## hipBLASLt 1.2.2 for ROCm 7.2.1
+
+### Changed
+
+* Enumeration value update for the Sigmoid Activation Function feature.
+
 ## hipBLASLt 1.2.1 for ROCm 7.2.1
-
-### Resolved issues
-
-* Fix issue where users might encounter a `HIPBLAS_STATUS_INTERNAL_ERROR` with various sizes in CPX mode.
-
-## hipBLASLt 1.2.0 for ROCm 7.2.0
 
 ### Added
 
 * Support for the 'BF16' data type for gfx90a.
+* Support for 'BF16' input with 'FP32' output data type for gfx90a.
+* Support for hipBLASLtExt operation APIs on gfx11XX and gfx12XX.
+* Support for Sigmoid Activation Function.
+
+### Resolved issues
+
+* Fix issue where users might encounter a `HIPBLAS_STATUS_INTERNAL_ERROR` with various sizes in CPX mode.
 
 ## hipBLASLt 1.1.0 for ROCm 7.1.0
 
