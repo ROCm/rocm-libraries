@@ -317,15 +317,17 @@ namespace TensileLite
         template <typename Any>
         bool operator()(Any const& problem, Hardware const& hardware) const
         {
-            bool debug = Debug::Instance().printDeviceSelection();
+            bool debug  = Debug::Instance().printDeviceSelection();
+            bool result = (*value)(hardware);
 
             if(debug)
             {
+                PredicateDebugger::printHeader(std::cout, "ExactLogic: Hardware");
                 value->debugEval(hardware, std::cout);
-                std::cout << std::endl;
+                PredicateDebugger::printFooter(std::cout, result);
             }
 
-            return (*value)(hardware);
+            return result;
         }
     };
 
@@ -369,15 +371,17 @@ namespace TensileLite
 
         bool operator()(MyProblem const& problem, Hardware const& hardware) const
         {
-            bool debug = Debug::Instance().printPredicateEvaluation();
+            bool debug  = Debug::Instance().printPredicateEvaluation();
+            bool result = (*value)(problem);
 
             if(debug)
             {
+                PredicateDebugger::printHeader(std::cout, "ExactLogic: Problem");
                 value->debugEval(problem, std::cout);
-                std::cout << std::endl;
+                PredicateDebugger::printFooter(std::cout, result);
             }
 
-            return (*value)(problem);
+            return result;
         }
     };
 
