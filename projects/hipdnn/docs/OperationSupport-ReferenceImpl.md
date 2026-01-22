@@ -25,6 +25,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | Convolution Backward Data | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
 | Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
 | Convolution Backward Weights | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | CPU Reference |  |
+| Matmul | FP16, BFP16, FP32 | NCHW, NCDHW | CPU Reference |  |
 | Pointwise Unary | FP16, BFP16, FP32 | All | CPU Reference |  |
 | Pointwise Binary | FP16, BFP16, FP32 | All | CPU Reference |  |
 
@@ -46,6 +47,12 @@ The following table lists all operations currently supported in the CPU Referenc
 | Convolution Forward | `ConvolutionFwdPlanBuilder` | `ConvolutionFwdSignatureKey` | Forward convolution |
 | Convolution Backward Data | `ConvolutionBwdPlanBuilder` | `ConvolutionBwdSignatureKey` | Data gradient computation |
 | Convolution Backward Weights | `ConvolutionWrwPlanBuilder` | `ConvolutionWrwSignatureKey` | Weight gradient computation |
+
+### Matmul Operations
+
+| Operation | Plan Builder | Signature Key | Description |
+|-----------|-------------|---------------|-------------|
+| Matmul | `MatmulPlanBuilder` | `MatmulSignatureKey` | Generic matrix multiplication |
 
 ### Pointwise Operations
 
