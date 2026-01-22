@@ -52,6 +52,9 @@ __device__ __forceinline__ void BNFwdInferPerActivationImpl(unsigned int adjInde
     FLOAT value[MIO_BN_VEC_SIZE];
 
     // loop over the batches
+    // NOTE: We use zlocalsize = 1 and zgridsize = min(batchSize, maxGridSizeToFillTheGPU). So the
+    // idea here is to use the blocks in z-dimension to cover the batch dimension first, and then
+    // each block will loop over the remaining batches with stride of gridDim.z if necessary.
     for(unsigned int n = blockIdx.z; n < batchSize; n += gridDim.z)
     {
         // load input value
@@ -91,7 +94,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 {
     unsigned int tidx = blockIdx.x * MIO_BN_GRP0 + threadIdx.x;
     unsigned int tidy = blockIdx.y * MIO_BN_GRP1 + threadIdx.y;
-    unsigned int tidz = blockIdx.z * MIO_BN_GRP2 + threadIdx.z;
+    unsigned int tidz = blockIdx.z;
 
     // decide vector sizes based on problem layout
     constexpr unsigned int vecSizeX = MIO_LAYOUT_NHWC ? MIO_BN_VEC_SIZE : 1;
@@ -148,7 +151,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 {
     unsigned int tidx = blockIdx.x * MIO_BN_GRP0 + threadIdx.x;
     unsigned int tidy = blockIdx.y * MIO_BN_GRP1 + threadIdx.y;
-    unsigned int tidz = blockIdx.z * MIO_BN_GRP2 + threadIdx.z;
+    unsigned int tidz = blockIdx.z;
 
     // decide vector sizes based on problem layout
     constexpr unsigned int vecSizeX = MIO_LAYOUT_NHWC ? MIO_BN_VEC_SIZE : 1;
