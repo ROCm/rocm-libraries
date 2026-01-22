@@ -1607,13 +1607,13 @@ private:
         add_field("max_1d", dev_prop.maxTexture1D);
         add_field("max_1d_mipmap", dev_prop.maxTexture1DMipmap);
         add_field("max_1d_linear", dev_prop.maxTexture1DLinear);
+        add_field("max_cubemap", dev_prop.maxTextureCubemap);
         add_dim2("max_2d", dev_prop.maxTexture2D);
         add_dim2("max_2d_mipmap", dev_prop.maxTexture2DMipmap);
         add_dim2("max_2d_linear", dev_prop.maxTexture2DLinear);
         add_dim2("max_2d_gather", dev_prop.maxTexture2DGather);
         add_dim3("max_3d", dev_prop.maxTexture3D);
         add_dim3("max_3d_alt", dev_prop.maxTexture3DAlt);
-        add_field("max_cubemap", dev_prop.maxTextureCubemap);
         add_dim2("max_1d_layered", dev_prop.maxTexture1DLayered);
         add_dim3("max_2d_layered", dev_prop.maxTexture2DLayered);
         add_dim2("max_cubemap_layered", dev_prop.maxTextureCubemapLayered);
