@@ -235,7 +235,7 @@ public:
                 if(!fs::create_directories(directory))
                     MIOPEN_LOG_W("Unable to create a directory: " << directory);
                 else
-                    fs::permissions(directory, std::filesystem::perms::all);
+                    fs::permissions(directory, miopen::fs::perms::all);
             }
         }
         sql = SQLite{filename_, is_system};
