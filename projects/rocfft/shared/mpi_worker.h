@@ -61,7 +61,7 @@ static MPI_Datatype get_mpi_type(size_t elem_size)
 
 static size_t add_brick_elems(size_t val, const fft_params::fft_brick& b)
 {
-    return val + compute_ptrdiff(b.length(), b.stride, 0, 0);
+    return val + compute_ptrdiff(b.length(), b.stride);
 }
 
 // Test if any rank uses multiple devices.
@@ -196,8 +196,7 @@ static void gather_field_v(MPI_Comm                                  mpi_comm,
                              {0},
                              {0});
 
-                size_t brick_bytes
-                    = compute_ptrdiff(brick.length(), brick.stride, 0, 0) * elem_size;
+                size_t brick_bytes = compute_ptrdiff(brick.length(), brick.stride) * elem_size;
                 cur_brick_offset_bytes += brick_bytes;
             }
         }
@@ -230,7 +229,7 @@ static void gather_field_p2p(MPI_Comm                                  mpi_comm,
     for(unsigned int i = 0; i < bricks.size(); ++i)
     {
         const auto& brick       = bricks[i];
-        size_t      brick_elems = compute_ptrdiff(brick.length(), brick.stride, 0, 0);
+        size_t      brick_elems = compute_ptrdiff(brick.length(), brick.stride);
 
         // The rank that this brick is on needs to send to rank 0,
         // and rank 0 needs to receive all bricks
@@ -380,7 +379,7 @@ static void alloc_local_bricks(int                                       mpi_ran
     for(auto brick = local_range.first; brick != local_range.second; ++brick)
     {
         buffer_sizes.insert({brick->device, static_cast<size_t>(0)}).first->second
-            += compute_ptrdiff(brick->length(), brick->stride, 0, 0);
+            += compute_ptrdiff(brick->length(), brick->stride);
     }
 
     // Alloc buffers for each device
@@ -404,7 +403,7 @@ static void alloc_local_bricks(int                                       mpi_ran
         // Use buffer_sizes to count down bricks for each device
         auto& remaining_size = buffer_sizes[brick->device];
         auto  offset_elems   = (buf.size() / elem_size) - remaining_size;
-        remaining_size -= compute_ptrdiff(brick->length(), brick->stride, 0, 0);
+        remaining_size -= compute_ptrdiff(brick->length(), brick->stride);
 
         buffer_ptrs.push_back(buf.data_offset(offset_elems * elem_size));
     }

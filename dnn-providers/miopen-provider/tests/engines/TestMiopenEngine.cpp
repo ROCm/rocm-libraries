@@ -202,12 +202,13 @@ TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingEnabled)
     MockHipdnnEnginePluginExecutionContext ctx;
 
     flatbuffers::FlatBufferBuilder builder;
+    auto knobIdOffset = builder.CreateString("global.benchmarking");
     auto knobValue = hipdnn_data_sdk::data_objects::CreateIntValue(builder, 1);
-    auto knobSetting = hipdnn_data_sdk::data_objects::CreateKnobSetting(
-        builder,
-        static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash("global.benchmarking")),
-        hipdnn_data_sdk::data_objects::KnobValue::IntValue,
-        knobValue.Union());
+    hipdnn_data_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
+    knobSettingBuilder.add_knob_id(knobIdOffset);
+    knobSettingBuilder.add_value_type(hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+    knobSettingBuilder.add_value(knobValue.Union());
+    auto knobSetting = knobSettingBuilder.Finish();
 
     std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>> knobsVector;
     knobsVector.push_back(knobSetting);
@@ -232,13 +233,14 @@ TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingDisabled)
     MockHipdnnEnginePluginExecutionContext ctx;
 
     flatbuffers::FlatBufferBuilder builder;
+    auto knobIdOffset = builder.CreateString("global.benchmarking");
     auto knobValue
         = hipdnn_data_sdk::data_objects::CreateIntValue(builder, static_cast<int64_t>(0));
-    auto knobSetting = hipdnn_data_sdk::data_objects::CreateKnobSetting(
-        builder,
-        static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash("global.benchmarking")),
-        hipdnn_data_sdk::data_objects::KnobValue::IntValue,
-        knobValue.Union());
+    hipdnn_data_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
+    knobSettingBuilder.add_knob_id(knobIdOffset);
+    knobSettingBuilder.add_value_type(hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+    knobSettingBuilder.add_value(knobValue.Union());
+    auto knobSetting = knobSettingBuilder.Finish();
 
     std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>> knobsVector;
     knobsVector.push_back(knobSetting);
