@@ -888,7 +888,7 @@ else()
         )
 endif()
 
-if (BUILD_CODE_COVERAGE)
+if (MIOPEN_ENABLE_COVERAGE)
 	target_compile_options(MIOpen PRIVATE
     -w
     -fprofile-instr-generate

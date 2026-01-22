@@ -666,8 +666,8 @@ function(add_custom_test NAME)
     foreach(__environment ${PARSE_ENVIRONMENT})
         set_tests_properties(${NAME} PROPERTIES ENVIRONMENT "${__environment}")
     endforeach()
-    set_tests_properties(${NAME} PROPERTIES ENVIRONMENT
-        "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/coverage-report/profraw/MIOpen-coverage-%p-%m.profraw"
+    set_property(TEST ${NAME} APPEND PROPERTY ENVIRONMENT
+        "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/coverage-report/profraw/%p.%m.profraw"
     )
 
     # The tests often change the contents of the user databases, which may affect performance after testing.
@@ -861,7 +861,6 @@ if (MIOPEN_ENABLE_COVERAGE)
   add_custom_target(
     coverage_setup
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-    COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
@@ -883,7 +882,7 @@ if (MIOPEN_ENABLE_COVERAGE)
   )
   add_custom_target(
     coverage
-    DEPENDS coverage_setup test_group_conv2d_fwd
+    DEPENDS coverage_setup check
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/MIOpen-coverage_*.profraw -o ./coverage-report/MIOpen.profdata
     COMMAND ${LLVM_COV} report -object ./lib/libMIOpen.so -instr-profile=./coverage-report/MIOpen.profdata
     COMMAND ${LLVM_COV} show -object ./lib/libMIOpen.so -instr-profile=./coverage-report/MIOpen.profdata -format=html -output-dir=coverage-report
