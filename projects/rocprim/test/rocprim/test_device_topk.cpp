@@ -301,9 +301,9 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkKey)
     using config                                          = typename TestFixture::config;
     using size_in_type                                    = unsigned int;
     using size_out_type                                   = unsigned int;
-    [[maybe_unused]] constexpr bool ordered               = TestFixture::ordered;
-    [[maybe_unused]] constexpr bool deterministic         = TestFixture::deterministic;
-    [[maybe_unused]] constexpr bool stable                = TestFixture::stable;
+    constexpr bool ordered               = TestFixture::ordered;
+    constexpr bool deterministic         = TestFixture::deterministic;
+    constexpr bool stable                = TestFixture::stable;
     const bool     debug_synchronous     = TestFixture::debug_synchronous;
     constexpr bool use_graphs            = TestFixture::use_graphs;
     constexpr bool use_indirect_iterator = TestFixture::use_indirect_iterator;
@@ -422,7 +422,7 @@ TYPED_TEST(RocprimDeviceTopkTests, TopkKey)
     }
 }
 
-TYPED_TEST(RocprimDeviceTopkTests, TopkPairsStable)
+TYPED_TEST(RocprimDeviceTopkTests, TopkPairs)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
