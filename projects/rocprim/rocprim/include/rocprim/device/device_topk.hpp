@@ -24,7 +24,7 @@
 #include "../common.hpp"
 #include "../config.hpp"
 #include "../detail/temp_storage.hpp"
-#include "detail/device_topk_air_topk.hpp"
+#include "detail/device_topk_air.hpp"
 
 #include "device_merge_sort.hpp"
 #include "device_radix_sort.hpp"
@@ -159,29 +159,18 @@ struct TopKImpl
         }
         else
         {
-            // TODO: Launch plan need to be added
-            using topk = rocprim::detail::device_air_topk_impl<256,
-                                                               4,
-                                                               8,
-                                                               radix_checker::ascending,
-                                                               KeysInputIterator,
-                                                               KeysOutputIterator,
-                                                               ValuesInputIterator,
-                                                               ValuesOutputIterator,
-                                                               SizeIn,
-                                                               SizeOut,
-                                                               Decomposer>;
-            return topk{}(temporary_storage,
-                          storage_size,
-                          keys_input,
-                          keys_output,
-                          values_input,
-                          values_output,
-                          size,
-                          K,
-                          decomposer,
-                          stream,
-                          debug_synchronous);
+            return rocprim::detail::device_topk_air<config, radix_checker::ascending>(
+                temporary_storage,
+                storage_size,
+                keys_input,
+                keys_output,
+                values_input,
+                values_output,
+                size,
+                K,
+                decomposer,
+                stream,
+                debug_synchronous);
         }
     }
 };

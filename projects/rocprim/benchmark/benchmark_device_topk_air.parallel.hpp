@@ -37,7 +37,7 @@
 
 // rocPRIM
 #include <rocprim/device/config_types.hpp>
-#include <rocprim/device/detail/device_topk_air_topk.hpp>
+#include <rocprim/device/detail/device_topk_air.hpp>
 #include <rocprim/types.hpp>
 
 #include <cstddef>
@@ -45,6 +45,24 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+template<typename Config>
+inline std::string device_air_topk_config_name()
+{
+    if constexpr(std::is_same_v<rocprim::default_config, Config>)
+    {
+        return "default_config";
+    }
+    else
+    {
+        constexpr auto config = Config{};
+        return "{bs:" + std::to_string(config.kernel_config.block_size)
+               + ",ipt:" + std::to_string(config.kernel_config.items_per_thread)
+               + ",radix_bits:" + std::to_string(config.radix_bits)
+               + ",adapt_coeff:" + std::to_string(config.candidate_buffer_coefficient)
+               + ",limit:" + std::to_string(config.thread_counter_limit) + "}";
+    }
+}
 
 template<typename Key,
          typename Value  = rocprim::empty_type,
@@ -62,16 +80,17 @@ struct device_air_topk_benchmark : public benchmark_utils::autotune_interface
     {
         return bench_naming::format_name(
             std::string("{lvl:device,algo:topk,subalgo:air_topk,k:") + (small_k ? "small" : "large")
-            + "_" + (adversarial_distribution ? "adversarial" : "natural")
-            + ",key_type:" + std::string(Traits<Key>::name())
-            + ",value_type:" + std::string(Traits<Value>::name()) + ", cfg: default_config}");
+            + "_" + (adversarial_distribution ? "adversarial" : "natural") + ",key_type:"
+            + std::string(Traits<Key>::name()) + ",value_type:" + std::string(Traits<Value>::name())
+            + ", cfg: " + device_air_topk_config_name<Config>() + "}");
     }
+
     template<class SizeT, class SeedT>
     inline auto generate_input(SizeT const& size, SeedT const& seed) const
     {
         using key_type = Key;
         using matched_int_t =
-            typename rocprim::detail::device_air_topk_helper::matched_int<key_type>::type;
+            typename rocprim::detail::device_topk_air_helper::matched_int<key_type>::type;
         static_assert(!std::is_same<matched_int_t, void>::value, "Input type not supported");
         static_assert(sizeof(key_type) == sizeof(matched_int_t),
                       "Size of mathed_int_t is not the same as input key_type");
@@ -123,16 +142,16 @@ struct device_air_topk_benchmark : public benchmark_utils::autotune_interface
 
         // Get size of d_temporary_storage
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK(invoke_topk(nullptr,
-                              temporary_storage_bytes,
-                              d_keys_input.get(),
-                              d_keys_output.get(),
-                              static_cast<Value*>(nullptr),
-                              static_cast<Value*>(nullptr),
-                              size,
-                              k,
-                              stream,
-                              false));
+        HIP_CHECK(invoke_topk_air(nullptr,
+                                  temporary_storage_bytes,
+                                  d_keys_input.get(),
+                                  d_keys_output.get(),
+                                  static_cast<Value*>(nullptr),
+                                  static_cast<Value*>(nullptr),
+                                  size,
+                                  k,
+                                  stream,
+                                  false));
 
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
@@ -140,16 +159,16 @@ struct device_air_topk_benchmark : public benchmark_utils::autotune_interface
         state.run(
             [&]
             {
-                HIP_CHECK(invoke_topk(d_temporary_storage.get(),
-                                      temporary_storage_bytes,
-                                      d_keys_input.get(),
-                                      d_keys_output.get(),
-                                      static_cast<Value*>(nullptr),
-                                      static_cast<Value*>(nullptr),
-                                      size,
-                                      k,
-                                      stream,
-                                      false));
+                HIP_CHECK(invoke_topk_air(d_temporary_storage.get(),
+                                          temporary_storage_bytes,
+                                          d_keys_input.get(),
+                                          d_keys_output.get(),
+                                          static_cast<Value*>(nullptr),
+                                          static_cast<Value*>(nullptr),
+                                          size,
+                                          k,
+                                          stream,
+                                          false));
             });
 
         state.set_throughput(size, sizeof(key_type));
@@ -193,16 +212,16 @@ struct device_air_topk_benchmark : public benchmark_utils::autotune_interface
 
         // Get size of d_temporary_storage
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK(invoke_topk(nullptr,
-                              temporary_storage_bytes,
-                              d_keys_input.get(),
-                              d_keys_output.get(),
-                              d_values_input.get(),
-                              d_values_output.get(),
-                              size,
-                              k,
-                              stream,
-                              false));
+        HIP_CHECK(invoke_topk_air(nullptr,
+                                  temporary_storage_bytes,
+                                  d_keys_input.get(),
+                                  d_keys_output.get(),
+                                  d_values_input.get(),
+                                  d_values_output.get(),
+                                  size,
+                                  k,
+                                  stream,
+                                  false));
 
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
@@ -210,16 +229,16 @@ struct device_air_topk_benchmark : public benchmark_utils::autotune_interface
         state.run(
             [&]
             {
-                HIP_CHECK(invoke_topk(d_temporary_storage.get(),
-                                      temporary_storage_bytes,
-                                      d_keys_input.get(),
-                                      d_keys_output.get(),
-                                      d_values_input.get(),
-                                      d_values_output.get(),
-                                      size,
-                                      k,
-                                      stream,
-                                      false));
+                HIP_CHECK(invoke_topk_air(d_temporary_storage.get(),
+                                          temporary_storage_bytes,
+                                          d_keys_input.get(),
+                                          d_keys_output.get(),
+                                          d_values_input.get(),
+                                          d_values_output.get(),
+                                          size,
+                                          k,
+                                          stream,
+                                          false));
             });
 
         state.set_throughput(size, sizeof(key_type) + sizeof(value_type));
@@ -231,69 +250,80 @@ struct device_air_topk_benchmark : public benchmark_utils::autotune_interface
     }
 
 private:
-    static hipError_t invoke_topk(void*       d_temporary_storage,
-                                  size_t&     temp_storage_bytes,
-                                  Key*        keys_input,
-                                  Key*        keys_output,
-                                  Value*      values_input,
-                                  Value*      values_output,
-                                  size_t      size,
-                                  size_t      k,
-                                  hipStream_t stream,
-                                  bool        debug_synchronous)
+    static hipError_t invoke_topk_air(void*       d_temporary_storage,
+                                      size_t&     temp_storage_bytes,
+                                      Key*        keys_input,
+                                      Key*        keys_output,
+                                      Value*      values_input,
+                                      Value*      values_output,
+                                      size_t      size,
+                                      size_t      k,
+                                      hipStream_t stream,
+                                      bool        debug_synchronous)
     {
         using decomposer = std::conditional_t<common::is_custom_type<Key>::value,
                                               custom_type_decomposer<Key>,
                                               ::rocprim::identity_decomposer>;
-        // TODO: need to despatch the Config, then get these values
-        constexpr unsigned int block_size        = 256;
-        constexpr unsigned int items_per_threads = 3;
-        constexpr unsigned int radix_bits        = 8;
-        constexpr bool         select_min        = true;
-
-        using topk = rocprim::detail::device_air_topk_impl<block_size,
-                                                           items_per_threads,
-                                                           radix_bits,
-                                                           select_min,
-                                                           Key*,
-                                                           Key*,
-                                                           Value*,
-                                                           Value*,
-                                                           size_t,
-                                                           size_t,
-                                                           decomposer>;
         if constexpr(std::is_same<Value, rocprim::empty_type>::value)
         {
             (void)values_input;
             (void)values_output;
 
-            return topk{}(d_temporary_storage,
-                          temp_storage_bytes,
-                          keys_input,
-                          keys_output,
-                          nullptr,
-                          nullptr,
-                          size,
-                          k,
-                          decomposer{},
-                          stream,
-                          debug_synchronous);
+            return rocprim::detail::device_topk_air<Config>(d_temporary_storage,
+                                                            temp_storage_bytes,
+                                                            keys_input,
+                                                            keys_output,
+                                                            nullptr,
+                                                            nullptr,
+                                                            size,
+                                                            k,
+                                                            decomposer{},
+                                                            stream,
+                                                            debug_synchronous);
         }
         else
         {
-            return topk{}(d_temporary_storage,
-                          temp_storage_bytes,
-                          keys_input,
-                          keys_output,
-                          values_input,
-                          values_output,
-                          size,
-                          k,
-                          decomposer{},
-                          stream,
-                          debug_synchronous);
+            return rocprim::detail::device_topk_air<Config>(d_temporary_storage,
+                                                            temp_storage_bytes,
+                                                            keys_input,
+                                                            keys_output,
+                                                            values_input,
+                                                            values_output,
+                                                            size,
+                                                            k,
+                                                            decomposer{},
+                                                            stream,
+                                                            debug_synchronous);
         }
     }
 };
+
+#ifdef BENCHMARK_CONFIG_TUNING
+
+template<typename Key,
+         typename Value,
+         unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         unsigned int RadixBits,
+         unsigned int AdaptCoeff,
+         unsigned int Limit>
+struct device_topk_air_benchmark_generator
+{
+    static void create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
+    {
+        using config
+            = rocprim::topk_air_config<BlockSize, ItemsPerThread, RadixBits, AdaptCoeff, Limit>;
+        storage.emplace_back(
+            std::make_unique<device_air_topk_benchmark<Key, Value, config>>(true, true));
+        storage.emplace_back(
+            std::make_unique<device_air_topk_benchmark<Key, Value, config>>(true, false));
+        storage.emplace_back(
+            std::make_unique<device_air_topk_benchmark<Key, Value, config>>(false, true));
+        storage.emplace_back(
+            std::make_unique<device_air_topk_benchmark<Key, Value, config>>(false, false));
+    }
+};
+
+#endif // BENCHMARK_CONFIG_TUNING
 
 #endif // ROCPRIM_BENCHMARK_DEVICE_TOPK_AIR_TOPK_PARALLEL_HPP_

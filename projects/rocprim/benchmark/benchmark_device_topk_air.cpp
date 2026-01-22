@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_topk_air_topk.hpp"
+#include "benchmark_device_topk_air.parallel.hpp"
 #include "benchmark_utils.hpp"
 
 // HIP API

@@ -25,14 +25,26 @@
 #include "../../block/block_scan.hpp"
 #include "../../block/block_store_func.hpp"
 #include "../../detail/temp_storage.hpp"
+#include "../config_types.hpp"
+#include "../device_topk_config.hpp"
 #include "../device_transform.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-namespace device_air_topk_helper
+namespace device_topk_air_helper
 {
+
+template<class T>
+struct iterator_traits : public std::iterator_traits<T>
+{};
+
+template<>
+struct iterator_traits<std::nullptr_t>
+{
+    using value_type = empty_type;
+};
 
 // Find the integral type which has the same size as input floating point type
 template<class T>
@@ -58,9 +70,9 @@ constexpr bool has_operator_left_shift_v = false;
 template<class T>
 constexpr bool has_operator_left_shift_v<T, std::void_t<decltype(std::declval<T&>() << sizeof(T))>>
     = true;
-} // namespace device_air_topk_helper
+} // namespace device_topk_air_helper
 
-/// \brief TODO: This is a implementation of TopK algorithm.
+/// \brief This is an implementation of the TopK algorithm.
 /// AIR stands for Adaptive Iteration-fused Radix TopK:
 ///
 /// - **Adaptive** means the algorithm can automatically choose between two
@@ -69,9 +81,6 @@ constexpr bool has_operator_left_shift_v<T, std::void_t<decltype(std::declval<T&
 /// - **Iteration-fused** means that in each iteration, the algorithm performs
 ///   filtering for the current iteration and histogramming for the next
 ///   iteration simultaneously.
-///
-/// TODO: I think this description needs to be changed, this algorithm is
-/// similar, the idea is the same, but the actual implementation is different.
 ///
 /// \note This algorithm only supports unstable output. Therefore, when values
 /// are written to the output array, the relative order of equivalent elements
@@ -107,7 +116,10 @@ constexpr bool has_operator_left_shift_v<T, std::void_t<decltype(std::declval<T&
 template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int RadixBits,
+         unsigned int CandidateBufferCoefficient,
+         unsigned int ThreadCounterLimit,
          bool         SelectMin,
+         bool         Adaptive,
          typename KeysInputIterator,
          typename KeysOutputIterator,
          typename ValuesInputIterator,
@@ -115,17 +127,33 @@ template<unsigned int BlockSize,
          typename SizeIn,
          typename SizeOut,
          typename Decomposer    = ::rocprim::identity_decomposer,
-         bool Adaptive          = true,
          bool UseThreadCounter  = true,
          bool UseNativeOperator = true,
          bool KillNegativeZeros = false>
-struct device_air_topk_impl
+struct device_topk_air_impl
 {
     // Constant member variables
-    using key_in_t    = typename std::iterator_traits<KeysInputIterator>::value_type;
-    using key_out_t   = typename std::iterator_traits<KeysOutputIterator>::value_type;
-    using value_in_t  = typename std::iterator_traits<ValuesInputIterator>::value_type;
-    using value_out_t = typename std::iterator_traits<ValuesOutputIterator>::value_type;
+    using key_in_t =
+        typename device_topk_air_helper::iterator_traits<KeysInputIterator>::value_type;
+    using key_out_t =
+        typename device_topk_air_helper::iterator_traits<KeysOutputIterator>::value_type;
+    using value_in_t =
+        typename device_topk_air_helper::iterator_traits<ValuesInputIterator>::value_type;
+    using value_out_t =
+        typename device_topk_air_helper::iterator_traits<ValuesOutputIterator>::value_type;
+
+    static_assert(!std::is_same_v<key_in_t, empty_type>, "Invalid KeysInputIterator");
+    static_assert(!std::is_same_v<key_out_t, empty_type>, "Invalid KeysOutputIterator");
+    static_assert(std::is_same_v<key_in_t, key_out_t>,
+                  "KeysInputIterator and KeysOutputIterator must have the same value_type");
+    static_assert(std::is_same_v<value_in_t, value_out_t>,
+                  "ValuesInputIterator and ValuesOutputIterator must have the same value_type");
+    static_assert(rocprim::is_integral<SizeIn>::value, "SizeIn must be integral");
+    static_assert(rocprim::is_integral<SizeOut>::value, "SizeOut must be integral");
+    static_assert(
+        sizeof(SizeIn) >= sizeof(int) && sizeof(SizeIn) <= sizeof(std::int64_t),
+        "The SizeIn must be a integral type with size between 32 bits and 64 bits. This is because "
+        "atomic operation does not support any smaller or larger integral types");
 
     using key_codec = decltype(::rocprim::traits::get<key_in_t>().template radix_key_codec<true>());
     using digit_t
@@ -155,16 +183,20 @@ struct device_air_topk_impl
 
     static constexpr unsigned int bins_per_thread = ceiling_div(num_buckets, block_size);
 
+    // If both value_in_t and value_out_t are empty, then no value will be output.
+    static constexpr bool output_value
+        = !std::is_same_v<value_in_t, empty_type> || !std::is_same_v<value_out_t, empty_type>;
+
     /// TODO: This likely needs further tuning.
     ///
-    /// \brief `coefficient_for_candidate_buffer` is used to determine whether
+    /// \brief `candidate_buffer_coefficient` is used to determine whether
     /// or not to use an adaptive buffer to store the indices of the input data.
     ///
     /// \note If Adaptive is true, two adaptive buffers will be created.
-    /// Each has a size of `sizeof(SizeIn) * (size / coefficient_for_candidate_buffer)`.
-    static constexpr SizeIn coefficient_for_candidate_buffer = 128;
+    /// Each has a size of `sizeof(SizeIn) * (size / candidate_buffer_coefficient)`.
+    static constexpr SizeIn candidate_buffer_coefficient = CandidateBufferCoefficient;
 
-    /// \brief This is the threshold of items_per_thread to enable thread_counter
+    /// \brief This is the limit of `items_per_thread` to disable `thread_counter`
     ///
     /// For smaller types such as unsigned char, thread_counter can be slow.
     /// This may be an occupancy issue and needs further investigation.
@@ -175,15 +207,11 @@ struct device_air_topk_impl
     ///
     /// Also, for naturally distributed data, the benefits of thread_counter may be limited.
     ///
-    /// TODO: after tuning, this needs to be adjusted, thread_counter reduces the amount
-    static constexpr decltype(items_per_thread) thread_counter_threshold = 16;
-
-    static_assert(std::is_same_v<key_in_t, key_out_t>,
-                  "KeysInputIterator and KeysOutputIterator must have the same value_type");
-    static_assert(std::is_same_v<value_in_t, value_out_t>,
-                  "ValuesInputIterator and ValuesOutputIterator must have the same value_type");
-    static_assert(rocprim::is_integral<SizeIn>::value, "SizeIn must be integral");
-    static_assert(rocprim::is_integral<SizeOut>::value, "SizeOut must be integral");
+    /// TODO: after tuning, this needs to be adjusted, thread_counter reduces the amount.
+    /// However, it's hard to tune this parameter, since it depends on items_per_thread.
+    /// If during compile time, items_per_thread is 8, then it makes no sense to tryout any
+    /// larger number for thread_counter_limit.
+    static constexpr decltype(items_per_thread) thread_counter_limit = ThreadCounterLimit;
 
     /// \brief This class is used to store the bits of each iteration. Because the
     /// total number of bits across all iterations equals the bit size of
@@ -196,7 +224,7 @@ struct device_air_topk_impl
     struct digits_array
     {
     private:
-        using int_key_t = typename device_air_topk_helper::matched_int<key_in_t>::type;
+        using int_key_t = typename device_topk_air_helper::matched_int<key_in_t>::type;
         static constexpr auto bits_total = sizeof(key_in_t) * 8;
         int_key_t             data;
 
@@ -430,7 +458,7 @@ struct device_air_topk_impl
         else if constexpr(FlipStrategy == flip_strategy::output_flip)
         {
             if constexpr(rocprim::is_integral<key_in_t>::value
-                         && device_air_topk_helper::has_operator_left_shift_v<key_in_t>)
+                         && device_topk_air_helper::has_operator_left_shift_v<key_in_t>)
             { // Builtin integral types (including rocprim::int128_t and rocprim::uint128_t)
                 return KeyCodec::template extract_digit<Decomposer>(
                     key ^ (key_in_t{1} << (sizeof(key_in_t) * 8 - 1)), // Flip only two’s complement
@@ -439,9 +467,9 @@ struct device_air_topk_impl
                     decomposer);
             }
             else if constexpr(rocprim::is_integral<key_in_t>::value
-                              && !device_air_topk_helper::has_operator_left_shift_v<key_in_t>)
+                              && !device_topk_air_helper::has_operator_left_shift_v<key_in_t>)
             { // Custom types may not support `operator<<`, so they are `bit_cast` to integral types instead.
-                using matched_int_t = typename device_air_topk_helper::matched_int<key_in_t>::type;
+                using matched_int_t = typename device_topk_air_helper::matched_int<key_in_t>::type;
                 static_assert(!std::is_same<matched_int_t, void>::value,
                               "Input type not supported");
                 static_assert(sizeof(key_in_t) == sizeof(matched_int_t),
@@ -457,7 +485,7 @@ struct device_air_topk_impl
             }
             else if constexpr(rocprim::is_floating_point<key_in_t>::value)
             { // Floating point types
-                using matched_int_t = typename device_air_topk_helper::matched_int<key_in_t>::type;
+                using matched_int_t = typename device_topk_air_helper::matched_int<key_in_t>::type;
                 static_assert(!std::is_same<matched_int_t, void>::value,
                               "Input type not supported");
                 static_assert(sizeof(key_in_t) == sizeof(matched_int_t),
@@ -627,7 +655,7 @@ struct device_air_topk_impl
         {
             return {(iteration > 1) && p_global_storage->adaptive_buf_size,
                     (iteration >= 1)
-                        && (p_global_storage->N <= (size / coefficient_for_candidate_buffer)),
+                        && (p_global_storage->N <= (size / candidate_buffer_coefficient)),
                     p_global_storage->adaptive_buf_size};
         }
         else
@@ -639,7 +667,7 @@ struct device_air_topk_impl
     /// \brief This function calculates the histogram and calls `record_to_histogram_fn`
     /// to store the results into the histogram.
     /// It also writes data to keys_output (or values_output when using pairs).
-    template<unsigned int Iteration, bool OutputValues, class OffsetT, class F>
+    template<unsigned int Iteration, class OffsetT, class F>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void 
     thread_histogram_and_filter_prev(
         storage_type* __restrict__ p_global_storage,
@@ -708,7 +736,7 @@ struct device_air_topk_impl
                             // TODO: use thread counter
                             const auto output_pos   = ::atomicAdd(&p_global_storage->output_pos, 1);
                             keys_output[output_pos] = key;
-                            if constexpr(OutputValues)
+                            if constexpr(output_value)
                             {
                                 values_output[output_pos] = values_input[index];
                             }
@@ -739,7 +767,7 @@ struct device_air_topk_impl
         }
     }
 
-    template<unsigned int Iteration, bool OutputValues, class OffsetT, class StorageT>
+    template<unsigned int Iteration, class OffsetT, class StorageT>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void 
     launch_thread_histogram_and_filter_prev(
         storage_type* __restrict__ p_global_storage,
@@ -759,7 +787,7 @@ struct device_air_topk_impl
                      && items_per_thread
                             != 1 // When items_per_thread is 1 UseThreadCounter is useless
                      && (items_per_thread < ~(count_t{0})) // Ensure count_t is capable
-                     && items_per_thread < thread_counter_threshold // Ensure thread_counter is fast
+                     && items_per_thread < thread_counter_limit // Ensure thread_counter is fast
         )
         {
             // Use thread_counter to record thread histogram values, and add to block histogram at once
@@ -801,17 +829,17 @@ struct device_air_topk_impl
                 }
             };
 
-            thread_histogram_and_filter_prev<Iteration, OutputValues>(p_global_storage,
-                                                                      in_idx_buf,
-                                                                      out_idx_buf,
-                                                                      keys_input,
-                                                                      keys_output,
-                                                                      values_input,
-                                                                      values_output,
-                                                                      size,
-                                                                      decomposer,
-                                                                      global_offset,
-                                                                      record_to_counter_fn);
+            thread_histogram_and_filter_prev<Iteration>(p_global_storage,
+                                                        in_idx_buf,
+                                                        out_idx_buf,
+                                                        keys_input,
+                                                        keys_output,
+                                                        values_input,
+                                                        values_output,
+                                                        size,
+                                                        decomposer,
+                                                        global_offset,
+                                                        record_to_counter_fn);
             // Store counter into shared memory
             ROCPRIM_UNROLL
             for(decltype(thread_counter_size) i = 0; i < items_per_thread; ++i)
@@ -826,17 +854,17 @@ struct device_air_topk_impl
         {
             auto record_to_histogram_fn
                 = [&](auto digit) { ::atomicAdd(&storage.block_local_histogram[digit], 1); };
-            thread_histogram_and_filter_prev<Iteration, OutputValues>(p_global_storage,
-                                                                      in_idx_buf,
-                                                                      out_idx_buf,
-                                                                      keys_input,
-                                                                      keys_output,
-                                                                      values_input,
-                                                                      values_output,
-                                                                      size,
-                                                                      decomposer,
-                                                                      global_offset,
-                                                                      record_to_histogram_fn);
+            thread_histogram_and_filter_prev<Iteration>(p_global_storage,
+                                                        in_idx_buf,
+                                                        out_idx_buf,
+                                                        keys_input,
+                                                        keys_output,
+                                                        values_input,
+                                                        values_output,
+                                                        size,
+                                                        decomposer,
+                                                        global_offset,
+                                                        record_to_histogram_fn);
         }
     }
 
@@ -901,7 +929,7 @@ struct device_air_topk_impl
     ///
     /// Why not store the pivot bin of the current iteration?
     /// - Because the histogram result is not available until the end of this function.
-    template<unsigned int Iteration, bool OutputValues>
+    template<unsigned int Iteration>
     ROCPRIM_KERNEL ROCPRIM_FORCE_INLINE ROCPRIM_LAUNCH_BOUNDS(
         ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) 
     static void 
@@ -958,17 +986,17 @@ struct device_air_topk_impl
         // Sync to make sure all write operations are done
         ::rocprim::syncthreads();
 
-        launch_thread_histogram_and_filter_prev<Iteration, OutputValues>(p_global_storage,
-                                                                         in_idx_buf,
-                                                                         out_idx_buf,
-                                                                         keys_input,
-                                                                         keys_output,
-                                                                         values_input,
-                                                                         values_output,
-                                                                         size,
-                                                                         decomposer,
-                                                                         global_offset,
-                                                                         storage);
+        launch_thread_histogram_and_filter_prev<Iteration>(p_global_storage,
+                                                           in_idx_buf,
+                                                           out_idx_buf,
+                                                           keys_input,
+                                                           keys_output,
+                                                           values_input,
+                                                           values_output,
+                                                           size,
+                                                           decomposer,
+                                                           global_offset,
+                                                           storage);
         // Make sure block_local_histogram write is finished
         ::rocprim::syncthreads();
 
@@ -1038,7 +1066,6 @@ struct device_air_topk_impl
     ///
     /// Because `histogram_and_filter` only performs filtering for earlier
     /// iterations, this function is needed to run the final round of filtering.
-    template<bool OutputValues>
     ROCPRIM_KERNEL ROCPRIM_FORCE_INLINE ROCPRIM_LAUNCH_BOUNDS(
         ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) 
     static void 
@@ -1136,7 +1163,7 @@ struct device_air_topk_impl
                 // output
                 const auto output_pos   = ::atomicAdd(&p_global_storage->output_pos, 1);
                 keys_output[output_pos] = key;
-                if constexpr(OutputValues)
+                if constexpr(output_value)
                 {
                     values_output[output_pos] = values_input[index];
                 }
@@ -1148,7 +1175,7 @@ struct device_air_topk_impl
                 // bin should be stored into output.
                 const auto output_pos   = ::atomicAdd(&p_global_storage->output_pos, 1);
                 keys_output[output_pos] = key;
-                if constexpr(OutputValues)
+                if constexpr(output_value)
                 {
                     values_output[output_pos] = values_input[index];
                 }
@@ -1160,7 +1187,7 @@ struct device_air_topk_impl
                 // Write to the output
                 const auto output_pos   = ::atomicAdd(&p_global_storage->output_pos, 1);
                 keys_output[output_pos] = key;
-                if constexpr(OutputValues)
+                if constexpr(output_value)
                 {
                     values_output[output_pos] = values_input[index];
                 }
@@ -1177,7 +1204,7 @@ struct device_air_topk_impl
     ///
     /// This is similar to a static/constexpr unroll, but since it returns
     /// `hipError_t`, it cannot be replaced by `constexpr_for_*`.
-    template<unsigned int IterationLeft, bool OutputValues>
+    template<unsigned int IterationLeft>
     ROCPRIM_FORCE_INLINE static constexpr hipError_t launch_iterations(
                                     storage_type*                         p_global_storage,
                                     SizeIn*                                      in_idx_buf,
@@ -1216,7 +1243,7 @@ struct device_air_topk_impl
             }
 
             // Launch histogram and filter for current iteration
-            histogram_and_filter<current_iteration, OutputValues>
+            histogram_and_filter<current_iteration>
                 <<<num_blocks, block_size, 0, stream>>>(p_global_storage,
                                                         in_idx_buf,
                                                         out_idx_buf,
@@ -1230,34 +1257,34 @@ struct device_air_topk_impl
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("rocprim::detail::histogram_and_filter",
                                                         size,
                                                         start);
-            return launch_iterations<IterationLeft - 1, OutputValues>(p_global_storage,
-                                                                      in_idx_buf,
-                                                                      out_idx_buf,
-                                                                      keys_input,
-                                                                      keys_output,
-                                                                      values_input,
-                                                                      values_output,
-                                                                      size,
-                                                                      K,
-                                                                      decomposer,
-                                                                      num_blocks,
-                                                                      stream,
-                                                                      debug_synchronous,
-                                                                      start);
+            return launch_iterations<IterationLeft - 1>(p_global_storage,
+                                                        in_idx_buf,
+                                                        out_idx_buf,
+                                                        keys_input,
+                                                        keys_output,
+                                                        values_input,
+                                                        values_output,
+                                                        size,
+                                                        K,
+                                                        decomposer,
+                                                        num_blocks,
+                                                        stream,
+                                                        debug_synchronous,
+                                                        start);
         }
         else
         {
             // Launch last filter
-            last_filter<OutputValues><<<num_blocks, block_size, 0, stream>>>(p_global_storage,
-                                                                             in_idx_buf,
-                                                                             out_idx_buf,
-                                                                             keys_input,
-                                                                             keys_output,
-                                                                             values_input,
-                                                                             values_output,
-                                                                             size,
-                                                                             K,
-                                                                             decomposer);
+            last_filter<<<num_blocks, block_size, 0, stream>>>(p_global_storage,
+                                                               in_idx_buf,
+                                                               out_idx_buf,
+                                                               keys_input,
+                                                               keys_output,
+                                                               values_input,
+                                                               values_output,
+                                                               size,
+                                                               K,
+                                                               decomposer);
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("rocprim::detail::last_filter",
                                                         size,
                                                         start);
@@ -1290,12 +1317,12 @@ struct device_air_topk_impl
                 detail::temp_storage::make_linear_partition(
                     detail::temp_storage::ptr_aligned_array(&p_global_storage,
                                                             sizeof(p_global_storage)),
-                    temp_storage::ptr_aligned_array(
-                        &in_idx_buf,
-                        sizeof(SizeIn) * (size / coefficient_for_candidate_buffer)),
-                    temp_storage::ptr_aligned_array(
-                        &out_idx_buf,
-                        sizeof(SizeIn) * (size / coefficient_for_candidate_buffer)))));
+                    temp_storage::ptr_aligned_array(&in_idx_buf,
+                                                    sizeof(SizeIn)
+                                                        * (size / candidate_buffer_coefficient)),
+                    temp_storage::ptr_aligned_array(&out_idx_buf,
+                                                    sizeof(SizeIn)
+                                                        * (size / candidate_buffer_coefficient)))));
         }
         else
         {
@@ -1323,9 +1350,6 @@ struct device_air_topk_impl
             start = std::chrono::steady_clock::now();
         }
 
-        const bool output_value = !(values_input == nullptr || values_output == nullptr
-                                    || std::is_same<value_in_t, rocprim::empty_type>::value
-                                    || std::is_same<value_out_t, rocprim::empty_type>::value);
         if(size == K)
         { // Write output directly
             ROCPRIM_RETURN_ON_ERROR(transform(keys_input,
@@ -1334,7 +1358,7 @@ struct device_air_topk_impl
                                               ::rocprim::identity<>(),
                                               stream,
                                               debug_synchronous));
-            if(output_value)
+            if constexpr(output_value)
             {
                 ROCPRIM_RETURN_ON_ERROR(transform(values_input,
                                                   values_output,
@@ -1345,29 +1369,209 @@ struct device_air_topk_impl
             }
             return hipSuccess;
         }
-        const auto with_output_value_variant
-            = ::rocprim::detail::constexpr_value_variant<bool, false, true>::create(output_value);
-        return std::visit(
-            [&](auto with_output_value)
-            {
-                return launch_iterations<num_iterations, with_output_value>(p_global_storage,
-                                                                            in_idx_buf,
-                                                                            out_idx_buf,
-                                                                            keys_input,
-                                                                            keys_output,
-                                                                            values_input,
-                                                                            values_output,
-                                                                            size,
-                                                                            K,
-                                                                            decomposer,
-                                                                            num_blocks,
-                                                                            stream,
-                                                                            debug_synchronous,
-                                                                            start);
-            },
-            with_output_value_variant);
+        return launch_iterations<num_iterations>(p_global_storage,
+                                                 in_idx_buf,
+                                                 out_idx_buf,
+                                                 keys_input,
+                                                 keys_output,
+                                                 values_input,
+                                                 values_output,
+                                                 size,
+                                                 K,
+                                                 decomposer,
+                                                 num_blocks,
+                                                 stream,
+                                                 debug_synchronous,
+                                                 start);
     }
 };
+
+// SizeIn is sensitive, this invoker will check which type is the actual
+// SizeIn needed by the algorithm
+// It's annoying to compile all of these types, but it's faster in theory
+template<class Config,
+         bool SelectMin,
+         bool Adaptive,
+         typename KeysInputIterator,
+         typename KeysOutputIterator,
+         typename ValuesInputIterator,
+         typename ValuesOutputIterator,
+         typename SizeIn,
+         typename SizeOut>
+struct device_topk_air_impl_invoker
+{
+private:
+    template<unsigned int BlockSize,
+             unsigned int ItemsPerThread,
+             unsigned int RadixBits,
+             unsigned int CandidateBufferCoefficient,
+             unsigned int ThreadCounterLimit,
+             class ActualSizeIn>
+    using simplified_type = device_topk_air_impl<BlockSize,
+                                                 ItemsPerThread,
+                                                 RadixBits,
+                                                 CandidateBufferCoefficient,
+                                                 ThreadCounterLimit,
+                                                 SelectMin,
+                                                 Adaptive,
+                                                 KeysInputIterator,
+                                                 KeysOutputIterator,
+                                                 ValuesInputIterator,
+                                                 ValuesOutputIterator,
+                                                 ActualSizeIn,
+                                                 SizeOut>;
+
+    template<class SizeType>
+    static inline constexpr auto in_range(const SizeIn& size)
+    {
+        using common_t = std::common_type_t<SizeIn, SizeType>;
+        return static_cast<common_t>(size)
+               < static_cast<common_t>(std::numeric_limits<SizeType>::max());
+    }
+
+    // If `DecaySizeIn` is true, launch topk with a decayed SizeIn according
+    // to the actual runtime input size. Otherwise, launch topk with the original
+    // SizeIn type.
+    template<unsigned int BlockSize,
+             unsigned int ItemsPerThread,
+             unsigned int RadixBits,
+             unsigned int CandidateBufferCoefficient,
+             unsigned int ThreadCounterLimit,
+             bool         DecaySizeIn = true,
+             class Args>
+    static inline constexpr hipError_t invoke_impl(const SizeIn& size, Args&& args)
+    {
+        if constexpr(DecaySizeIn)
+        {
+            if(in_range<std::uint32_t>(size))
+            {
+                return std::apply(simplified_type<BlockSize,
+                                                  ItemsPerThread,
+                                                  RadixBits,
+                                                  CandidateBufferCoefficient,
+                                                  ThreadCounterLimit,
+                                                  std::uint32_t>{},
+                                  args);
+            }
+            else
+            {
+                return std::apply(simplified_type<BlockSize,
+                                                  ItemsPerThread,
+                                                  RadixBits,
+                                                  CandidateBufferCoefficient,
+                                                  ThreadCounterLimit,
+                                                  std::uint64_t>{},
+                                  args);
+            }
+        }
+        else
+        {
+            return std::apply(simplified_type<BlockSize,
+                                              ItemsPerThread,
+                                              RadixBits,
+                                              CandidateBufferCoefficient,
+                                              ThreadCounterLimit,
+                                              SizeIn>{},
+                              args);
+        }
+    }
+
+public:
+    template<class Args>
+    static inline constexpr hipError_t invoke(const SizeIn& size, Args&& args)
+    {
+        using key_in_t =
+            typename device_topk_air_helper::iterator_traits<KeysInputIterator>::value_type;
+        using value_in_t =
+            typename device_topk_air_helper::iterator_traits<ValuesInputIterator>::value_type;
+
+        using Selector     = topk_air_config_selector<key_in_t, value_in_t, SizeOut>;
+        using Targets      = typename Selector::targets;
+        const auto& stream = std::get<hipStream_t const&>(args);
+        target_arch target_arch{};
+        ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
+        gpu target_gpu{};
+        ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
+
+        const auto current_target = target{target_arch, target_gpu};
+        const auto target_config  = most_common_config<Targets>(current_target);
+
+        hipError_t ret = hipSuccess;
+        if constexpr(std::is_same_v<Config, rocprim::default_config>)
+        {
+
+            Targets::for_each(
+                [&](auto candidate)
+                {
+                    if(target{candidate} == target_config)
+                    {
+                        constexpr auto params = Selector{candidate}.params;
+                        // If one day we upgraded to c++20, then we can move params into template
+                        ret = invoke_impl<params.kernel_config.block_size,
+                                          params.kernel_config.items_per_thread,
+                                          params.radix_bits,
+                                          params.candidate_buffer_coefficient,
+                                          params.thread_counter_limit>(size, args);
+                    }
+                });
+        }
+        else
+        {
+            constexpr auto params = Config{};
+            // If one day we upgraded to c++20, then we can move params into template
+            ret = invoke_impl<params.kernel_config.block_size,
+                              params.kernel_config.items_per_thread,
+                              params.radix_bits,
+                              params.candidate_buffer_coefficient,
+                              params.thread_counter_limit>(size, args);
+        }
+        return ret;
+    }
+};
+
+template<typename Config = rocprim::default_config,
+         bool         SelectMin = true,
+         bool         Adaptive = true,
+         typename KeysInputIterator,
+         typename KeysOutputIterator,
+         typename ValuesInputIterator,
+         typename ValuesOutputIterator,
+         typename SizeIn,
+         typename SizeOut,
+         typename Decomposer = ::rocprim::identity_decomposer>
+ROCPRIM_FORCE_INLINE hipError_t device_topk_air(void* temporary_storage,
+                                        size_t&              storage_size,
+                                        KeysInputIterator    keys_input,
+                                        KeysOutputIterator   keys_output,
+                                        ValuesInputIterator  values_input,
+                                        ValuesOutputIterator values_output,
+                                        const SizeIn         size,
+                                        const SizeOut        K,
+                                        const Decomposer     decomposer        = {},
+                                        const hipStream_t    stream            = 0,
+                                        const bool           debug_synchronous = false)
+{
+    return device_topk_air_impl_invoker<Config,
+                                        SelectMin,
+                                        Adaptive,
+                                        KeysInputIterator,
+                                        KeysOutputIterator,
+                                        ValuesInputIterator,
+                                        ValuesOutputIterator,
+                                        SizeIn,
+                                        SizeOut>::invoke(size,
+                                                         std::tie(temporary_storage,
+                                                                  storage_size,
+                                                                  keys_input,
+                                                                  keys_output,
+                                                                  values_input,
+                                                                  values_output,
+                                                                  size,
+                                                                  K,
+                                                                  decomposer,
+                                                                  stream,
+                                                                  debug_synchronous));
+}
 
 } // namespace detail
 
