@@ -3584,7 +3584,7 @@ def _get_schedule_64x128x64_TF32(kernel, useLDSTr, TLDS):
     syncCode = []
     gr_inc_step = 0
 
-    if isTN(kernel) and not useLDSTr and TLDS==1 and kernel["UseDirect32XEmulation"]:
+    if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UsePLRPack"] = True
 
