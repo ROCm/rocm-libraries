@@ -30,6 +30,7 @@ public:
     void initializeExecutionContext(
         const HipdnnEnginePluginHandle& handle,
         const hipdnn_plugin_sdk::IGraph& opGraph,
+        const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
         HipdnnEnginePluginExecutionContext& executionContext) const override;
 
     void addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder);
