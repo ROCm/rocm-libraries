@@ -91,14 +91,6 @@ NB_MODULE(origami, m) {
       .def("nk", &origami::dim3_t::nk)
       .def("mnk", &origami::dim3_t::mnk);
 
-  nanobind::class_<origami::matrix_instruction>(m, "matrix_instruction")
-      .def(nanobind::init<>())
-      .def(nanobind::init<size_t, size_t, size_t, origami::data_type_t>())
-      .def_rw("MI_M", &origami::matrix_instruction::MI_M)
-      .def_rw("MI_N", &origami::matrix_instruction::MI_N)
-      .def_rw("MI_K", &origami::matrix_instruction::MI_K)
-      .def_rw("mi_input_type", &origami::matrix_instruction::mi_input_type);
-
   nanobind::class_<origami::config_t>(m, "config_t")
       .def(nanobind::init<>())
       .def_rw("mt", &origami::config_t::mt)
