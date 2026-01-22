@@ -103,8 +103,11 @@ file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
 find_package(miopen CONFIG REQUIRED)
 
+# OBJECT library with all implementation - shared by both target names
+# This allows both miopen_legacy_plugin and miopen_plugin to be REAL targets
+# (not aliases) so TheRock can use set_target_properties on either one.
 add_library(
-    miopen_plugin_private
+    miopen_plugin_impl OBJECT
     engines/MiopenEngine.cpp
     engines/plans/MiopenBatchnormApplicabilityChecks.cpp
     engines/plans/MiopenBatchnormPlanBuilder.cpp
@@ -127,42 +130,57 @@ add_library(
     MiopenUtils.cpp
     MiopenTensor.cpp
     MiopenPlugin.cpp
+    MiopenPluginPublic.cpp
 )
 target_compile_definitions(
-    miopen_plugin_private PRIVATE COMPONENT_NAME="miopen_plugin"
+    miopen_plugin_impl PRIVATE COMPONENT_NAME="miopen_plugin"
 )
+target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
+target_compile_options(miopen_plugin_impl PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+set_target_properties(miopen_plugin_impl PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    POSITION_INDEPENDENT_CODE ON
+)
+
+if(BUILD_PLUGIN_AS_DEPENDENCY)
+    clang_tidy_check(miopen_plugin_impl)
+endif()
+
+# Static library for unit tests to link against (provides access to internal implementation)
+add_library(miopen_plugin_private STATIC $<TARGET_OBJECTS:miopen_plugin_impl>)
+target_compile_definitions(miopen_plugin_private PRIVATE COMPONENT_NAME="miopen_plugin")
 target_include_directories(miopen_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miopen_plugin_private PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
-target_compile_options(miopen_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+# Backwards compatibility alias
+add_library(miopen_legacy_plugin_private ALIAS miopen_plugin_private)
 
-if(BUILD_PLUGIN_AS_DEPENDENCY)
-    clang_tidy_check(miopen_plugin_private)
-endif()
-
-add_library(miopen_plugin SHARED MiopenPluginPublic.cpp)
-target_compile_definitions(miopen_plugin PRIVATE COMPONENT_NAME="miopen_plugin")
-target_link_libraries(miopen_plugin PRIVATE miopen_plugin_private)
-target_link_libraries(
-    miopen_plugin PRIVATE "-Xlinker --exclude-libs=ALL"
-) # Hide symbols from linked static libs
-target_compile_options(miopen_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-set_target_properties(
-    miopen_plugin
-    PROPERTIES CXX_VISIBILITY_PRESET hidden
-               LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
-               RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
-               ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
-               INSTALL_RPATH "${ROCM_PATH}/lib"
-               INSTALL_RPATH_USE_LINK_PATH TRUE
-               BUILD_WITH_INSTALL_RPATH TRUE
+# Shared library properties common to both targets
+set(MIOPEN_PLUGIN_SHARED_PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
+    ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
+    INSTALL_RPATH "${ROCM_PATH}/lib"
+    INSTALL_RPATH_USE_LINK_PATH TRUE
+    BUILD_WITH_INSTALL_RPATH TRUE
 )
 
-# Backwards compatibility alias for TheRock until submodule is bumped
-add_library(miopen_legacy_plugin ALIAS miopen_plugin)
+# miopen_legacy_plugin - REAL target for current TheRock compatibility
+add_library(miopen_legacy_plugin SHARED $<TARGET_OBJECTS:miopen_plugin_impl>)
+target_compile_definitions(miopen_legacy_plugin PRIVATE COMPONENT_NAME="miopen_plugin")
+target_link_libraries(miopen_legacy_plugin PRIVATE MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
+target_link_libraries(miopen_legacy_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
+target_compile_options(miopen_legacy_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+set_target_properties(miopen_legacy_plugin PROPERTIES ${MIOPEN_PLUGIN_SHARED_PROPERTIES})
 
-if(BUILD_PLUGIN_AS_DEPENDENCY)
-    clang_tidy_check(miopen_plugin)
-endif()
+# miopen_plugin - REAL target for updated TheRock
+add_library(miopen_plugin SHARED $<TARGET_OBJECTS:miopen_plugin_impl>)
+target_compile_definitions(miopen_plugin PRIVATE COMPONENT_NAME="miopen_plugin")
+target_link_libraries(miopen_plugin PRIVATE MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
+target_link_libraries(miopen_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
+target_compile_options(miopen_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+set_target_properties(miopen_plugin PROPERTIES ${MIOPEN_PLUGIN_SHARED_PROPERTIES})
 
 if(NOT HIPDNN_SKIP_TESTS)
     add_subdirectory(tests)
@@ -178,14 +196,15 @@ if(NOT HIPDNN_SKIP_TESTS)
     endif()
 endif()
 
+# Install both library targets
+# miopen_plugin is the canonical name going forward
 install(TARGETS miopen_plugin EXPORT miopen-plugin
         LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
 
-# Backwards compatibility symlinks for TheRock until submodule is bumped
-install(CODE "
-    execute_process(COMMAND \${CMAKE_COMMAND} -E create_symlink
-        libmiopen_plugin.so
-        \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/libmiopen_legacy_plugin.so)
-")
+# miopen_legacy_plugin for current TheRock compatibility
+install(TARGETS miopen_legacy_plugin EXPORT miopen-legacy-plugin
+        LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
+        RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
+)
