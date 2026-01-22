@@ -318,16 +318,7 @@ using IntegrationGpuBatchnormFwdTrainingActivNdhwcBfp16
 // NCHW 2D Tests
 // ============================================================================
 
-// NOTE: FullTraining tests are disabled due to API mismatch between hipDNN and MIOpen.
-// hipDNN's graph API uses separate prev_running_mean/variance (input) and next_running_mean/variance (output)
-// buffers, but MIOpen's API requires single IN/OUT buffers for running statistics.
-// This cannot be correctly bridged without either:
-// 1. Updating MIOpen API to support separate input/output buffers, or
-// 2. Implementing buffer copy operations (with performance overhead)
-// Until MIOpen is updated, batchnorm training with running statistics is not supported.
-// BatchStatsOnly tests (without running statistics) continue to work correctly.
-
-TEST_P(IntegrationGpuBatchnormFwdTrainingActivNchwFp32, DISABLED_FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNchwFp32, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<float>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
@@ -341,7 +332,7 @@ TEST_P(IntegrationGpuBatchnormFwdTrainingActivNchwFp32, BatchStatsOnly)
                              TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingActivNchwFp16, DISABLED_FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNchwFp16, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<half>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
@@ -355,7 +346,7 @@ TEST_P(IntegrationGpuBatchnormFwdTrainingActivNchwFp16, BatchStatsOnly)
                              TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingActivNchwBfp16, DISABLED_FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNchwBfp16, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<hip_bfloat16>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
@@ -373,7 +364,7 @@ TEST_P(IntegrationGpuBatchnormFwdTrainingActivNchwBfp16, BatchStatsOnly)
 // NHWC 2D Tests
 // ============================================================================
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingActivNhwcFp32, DISABLED_FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNhwcFp32, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<float>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
@@ -387,7 +378,7 @@ TEST_P(IntegrationGpuBatchnormFwdTrainingActivNhwcFp32, BatchStatsOnly)
                              TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingActivNhwcFp16, DISABLED_FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNhwcFp16, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<half>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
@@ -401,7 +392,7 @@ TEST_P(IntegrationGpuBatchnormFwdTrainingActivNhwcFp16, BatchStatsOnly)
                              TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingActivNhwcBfp16, DISABLED_FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNhwcBfp16, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<hip_bfloat16>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
@@ -419,7 +410,7 @@ TEST_P(IntegrationGpuBatchnormFwdTrainingActivNhwcBfp16, BatchStatsOnly)
 // NCDHW 3D Tests
 // ============================================================================
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingActivNcdhwFp32, DISABLED_FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNcdhwFp32, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<float>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
@@ -433,7 +424,7 @@ TEST_P(IntegrationGpuBatchnormFwdTrainingActivNcdhwFp32, BatchStatsOnly)
                              TensorLayout::NCDHW);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingActivNcdhwFp16, DISABLED_FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNcdhwFp16, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<half>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
@@ -447,7 +438,7 @@ TEST_P(IntegrationGpuBatchnormFwdTrainingActivNcdhwFp16, BatchStatsOnly)
                              TensorLayout::NCDHW);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingActivNcdhwBfp16, DISABLED_FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNcdhwBfp16, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<hip_bfloat16>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
@@ -465,7 +456,7 @@ TEST_P(IntegrationGpuBatchnormFwdTrainingActivNcdhwBfp16, BatchStatsOnly)
 // NDHWC 3D Tests
 // ============================================================================
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingActivNdhwcFp32, DISABLED_FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNdhwcFp32, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<float>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
@@ -479,7 +470,7 @@ TEST_P(IntegrationGpuBatchnormFwdTrainingActivNdhwcFp32, BatchStatsOnly)
                              TensorLayout::NDHWC);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingActivNdhwcFp16, DISABLED_FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNdhwcFp16, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<half>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
@@ -493,7 +484,7 @@ TEST_P(IntegrationGpuBatchnormFwdTrainingActivNdhwcFp16, BatchStatsOnly)
                              TensorLayout::NDHWC);
 }
 
-TEST_P(IntegrationGpuBatchnormFwdTrainingActivNdhwcBfp16, DISABLED_FullTraining)
+TEST_P(IntegrationGpuBatchnormFwdTrainingActivNdhwcBfp16, FullTraining)
 {
     runGraphTestWithScenario(batchnorm::getToleranceTraining<hip_bfloat16>(),
                              BatchnormTrainingScenario::FULL_TRAINING,
