@@ -15,6 +15,7 @@ namespace rocRoller
         using RWTracer       = KernelGraph::ControlFlowRWTracer;
         using RWTraceRecords = std::vector<KernelGraph::ControlFlowRWTracer::ReadWriteRecord>;
         using KernelGraph    = KernelGraph::KernelGraph;
+
         /**
           * @brief Check if a Barrier is connected to an LDS coordinate via mapper connections.
           *
@@ -127,16 +128,16 @@ namespace rocRoller
         }
 
         /**
-             * @brief Find the immediate parent loop (ForLoopOp or DoWhileOp) containing an operation.
-             *
-             * Collects all loops containing the operation and returns the one that does not
-             * contain any other ForLoopOp or DoWhileOp in its body (i.e., the deepest loop containing
-             * the operation).
-             *
-             * @param graph The kernel graph
-             * @param opTag Tag of the operation
-             * @return The tag of the immediate parent loop of opTag, or std::nullopt if not in any loop
-             */
+          * @brief Find the immediate parent loop (ForLoopOp or DoWhileOp) containing an operation.
+          *
+          * Collects all loops containing the operation and returns the one that does not
+          * contain any other ForLoopOp or DoWhileOp in its body (i.e., the deepest loop containing
+          * the operation).
+          *
+          * @param graph The kernel graph
+          * @param opTag Tag of the operation
+          * @return The tag of the immediate parent loop of opTag, or std::nullopt if not in any loop
+          */
         inline std::optional<int> FindImmediateParentLoop(KernelGraph const& graph, int opTag)
         {
             // Collect all loops containing the operation
@@ -186,18 +187,18 @@ namespace rocRoller
         }
 
         /**
-             * @brief Check if a barrier and an operation are in the body of the same loop.
-             *
-             * This function determines if both the barrier and the operation are
-             * immediately contained within the same loop body (ForLoopOp or DoWhileOp).
-             * If neither is in any loop, they are considered to be in the same body
-             * (the kernel body).
-             *
-             * @param graph The kernel graph
-             * @param barrierTag Tag of the barrier operation
-             * @param opTag Tag of the operation to check
-             * @return true if both are in the body of the same loop (or both outside any loop)
-             */
+          * @brief Check if a barrier and an operation are in the body of the same loop.
+          *
+          * This function determines if both the barrier and the operation are
+          * immediately contained within the same loop body (ForLoopOp or DoWhileOp).
+          * If neither is in any loop, they are considered to be in the same body
+          * (the kernel body).
+          *
+          * @param graph The kernel graph
+          * @param barrierTag Tag of the barrier operation
+          * @param opTag Tag of the operation to check
+          * @return true if both are in the body of the same loop (or both outside any loop)
+          */
         inline bool AreInSameLoopBody(KernelGraph const& graph, int barrierTag, int opTag)
         {
             auto barrierLoop = FindImmediateParentLoop(graph, barrierTag);
