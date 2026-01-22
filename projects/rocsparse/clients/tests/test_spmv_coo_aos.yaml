@@ -122,7 +122,10 @@ Tests:
              nos1,
              nos3,
              nos5,
-             nos7]
+             nos7,
+             bibd_22_8,
+             Chebyshev4,
+             mac_econ_fwd500]
 
 - name: spmv_coo_aos_file
   category: nightly

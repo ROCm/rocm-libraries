@@ -272,7 +272,11 @@ Tests:
              nos4,
              nos5,
              nos6,
-             nos7]
+             nos7,
+             bibd_22_8,
+             Chebyshev4,
+             ASIC_320k,
+             mac_econ_fwd500]
 
 - name: bsrmv_file
   category: pre_checkin
@@ -290,7 +294,11 @@ Tests:
   filename: [scircuit,
              nos3,
              nos5,
-             nos7]
+             nos7,
+             bibd_22_8,
+             Chebyshev4,
+             ASIC_320k,
+             mac_econ_fwd500]
 
 - name: bsrmv_file
   category: pre_checkin
