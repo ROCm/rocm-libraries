@@ -1,41 +1,112 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_data_sdk/logging/Logger.hpp>
-
-#include "EngineManager.hpp"
 #include "MiopenContainer.hpp"
+#include "EngineManager.hpp"
 #include "engines/MiopenEngine.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
 #include "engines/plans/MiopenBatchnormPlanBuilder.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
 
+#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+
 namespace miopen_legacy_plugin
 {
+
+// ============================================================================
+// Engine Registration
+// ============================================================================
+// For plugins that are not yet globally registered (by adding a call to
+// HIPDNN_REGISTER_ENGINE() in "hipdnn_data_sdk/utilities/EngineNames.hpp"),
+// use HIPDNN_REGISTER_ENGINE to register the engine names here. This will:
+// 1. Create _NAME and _ID constants for the engine
+// 2. Detect hash collisions with other formally-registered engines
+//
+// Example for new engines:
+// HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE, "MY_CUSTOM_ENGINE")
+// HIPDNN_REGISTER_ENGINE(MY_OTHER_ENGINE, "MY_OTHER_ENGINE")
+//
+// Note: MIOPEN_ENGINE is already registered in EngineNames.hpp via
+// HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE, "MIOPEN_ENGINE"), so we can use
+// the MIOPEN_ENGINE_NAME and MIOPEN_ENGINE_ID constants directly from there.
+// ============================================================================
+
+const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngineDefinitions()
+{
+    using namespace hipdnn_data_sdk::utilities;
+
+    static const std::vector<EngineDefinition> s_engineDefinitions = {
+        // MIOPEN_ENGINE
+        {MIOPEN_ENGINE_ID,
+         []() -> std::unique_ptr<IEngine> {
+             auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_ID);
+             engine->addPlanBuilder(std::make_unique<MiopenBatchnormPlanBuilder>());
+             engine->addPlanBuilder(std::make_unique<MiopenBatchnormFwdTrainingPlanBuilder>());
+             engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>());
+             engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>());
+             return engine;
+         }}
+
+        // ====================================================================
+        // Additional engines would be added here
+        // ====================================================================
+        // Example:
+        // ,{MY_CUSTOM_ENGINE_ID, []() -> std::unique_ptr<IEngine> {
+        //     auto engine = std::make_unique<MyCustomEngine>(MY_CUSTOM_ENGINE_ID);
+        //     engine->addPlanBuilder(std::make_unique<CustomPlanBuilder>());
+        //     // ... configure plan builders for this engine
+        //     return engine;
+        // }}
+        // ,{MY_OTHER_ENGINE_ID, []() -> std::unique_ptr<IEngine> {
+        //     auto engine = std::make_unique<MyOtherEngine>(MY_OTHER_ENGINE_ID);
+        //     engine->addPlanBuilder(std::make_unique<OtherPlanBuilder>());
+        //     // ... configure plan builders for this engine
+        //     return engine;
+        // }}
+        // ====================================================================
+    };
+
+    return s_engineDefinitions;
+}
+
+uint32_t
+    MiopenContainer::copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t& numEngines)
+{
+    const auto& engineDefinitions = getEngineDefinitions();
+    auto totalEngines = static_cast<uint32_t>(engineDefinitions.size());
+
+    if(maxEngines == 0)
+    {
+        // When maxEngines is 0, set numEngines to total count
+        numEngines = totalEngines;
+        return totalEngines;
+    }
+
+    // Copy up to maxEngines IDs using index-based loop
+    auto enginesToCopy = std::min(maxEngines, totalEngines);
+    for(uint32_t i = 0; i < enginesToCopy; ++i)
+    {
+        engineIds[i] = engineDefinitions[i].id;
+    }
+
+    // When maxEngines > 0, set numEngines to number copied
+    numEngines = enginesToCopy;
+
+    return totalEngines;
+}
 
 MiopenContainer::MiopenContainer()
 {
     HIPDNN_LOG_INFO("Creating MiopenContainer");
 
-    int64_t engineId = 1;
-    auto miopenEngine = std::make_unique<MiopenEngine>(engineId++);
-
-    auto batchnormPlanBuilder = std::make_unique<MiopenBatchnormPlanBuilder>();
-    miopenEngine->addPlanBuilder(std::move(batchnormPlanBuilder));
-
-    auto batchnormFwdTrainingPlanBuilder
-        = std::make_unique<MiopenBatchnormFwdTrainingPlanBuilder>();
-    miopenEngine->addPlanBuilder(std::move(batchnormFwdTrainingPlanBuilder));
-
-    auto convPlanBuilder = std::make_unique<MiopenConvPlanBuilder>();
-    miopenEngine->addPlanBuilder(std::move(convPlanBuilder));
-
-    auto convFwdBiasActivPlanBuilder = std::make_unique<MiopenConvFwdBiasActivPlanBuilder>();
-    miopenEngine->addPlanBuilder(std::move(convFwdBiasActivPlanBuilder));
-
     _engineManager = std::make_unique<EngineManager>();
-    _engineManager->addEngine(std::move(miopenEngine));
+
+    for(const auto& engineDefinition : getEngineDefinitions())
+    {
+        _engineManager->addEngine(engineDefinition.createEngine());
+    }
 }
 
 MiopenContainer::~MiopenContainer()

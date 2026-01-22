@@ -20,7 +20,7 @@
 #include "MiopenHandleFactory.hpp"
 #include "MiopenLegacyPlugin.hpp"
 
-static const char* pluginName = "miopen_legacy_plugin";
+static const char* pluginName = "miopen_provider_plugin";
 static const char* pluginVersion = "1.0.0";
 
 using namespace hipdnn_plugin_sdk;
@@ -116,39 +116,9 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIdsImpl(int64_t* engineIds,
         }
         throwIfNull(numEngines);
 
-        // For now, we will just return a single engine ID.
-        auto allEngineIds = std::vector<int64_t>({1});
-        if(allEngineIds.size() > std::numeric_limits<uint32_t>::max())
-        {
-            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                        "Number of engines exceeds maximum uint32_t value.");
-        }
+        auto totalEngines = MiopenContainer::copyEngineIds(engineIds, maxEngines, *numEngines);
 
-        if(maxEngines == 0)
-        {
-            *numEngines = static_cast<uint32_t>(allEngineIds.size());
-        }
-        else
-        {
-            *numEngines = 0;
-            for(auto engineId : allEngineIds)
-            {
-                if(*numEngines == maxEngines)
-                {
-                    *numEngines = static_cast<uint32_t>(allEngineIds.size());
-                    HIPDNN_LOG_INFO("Maximum number of engines reached ({}), ignoring additional "
-                                    "engines, numEngines count: {}",
-                                    maxEngines,
-                                    *numEngines);
-                    break;
-                }
-
-                engineIds[*numEngines] = engineId;
-                (*numEngines)++;
-            }
-        }
-
-        LOG_API_SUCCESS(apiName, "numEngines={}", *numEngines);
+        LOG_API_SUCCESS(apiName, "numEngines={} totalEngines={}", *numEngines, totalEngines);
     });
 }
 

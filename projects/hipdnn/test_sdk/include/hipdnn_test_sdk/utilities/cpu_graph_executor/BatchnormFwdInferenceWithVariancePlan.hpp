@@ -9,6 +9,7 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
+#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferTensorAttributesUtils.hpp>
@@ -28,13 +29,15 @@ struct BatchnormFwdInferenceWithVarianceParams
         const hipdnn_data_sdk::data_objects::TensorAttributes& scaleAttributes,
         const hipdnn_data_sdk::data_objects::TensorAttributes& biasAttributes,
         const hipdnn_data_sdk::data_objects::TensorAttributes& meanAttributes,
-        const hipdnn_data_sdk::data_objects::TensorAttributes& varianceAttributes)
+        const hipdnn_data_sdk::data_objects::TensorAttributes& varianceAttributes,
+        const hipdnn_data_sdk::data_objects::TensorAttributes& epsilonAttributes)
         : xTensor(unpackTensorAttributes(xAttributes))
         , yTensor(unpackTensorAttributes(yAttributes))
         , scaleTensor(unpackTensorAttributes(scaleAttributes))
         , biasTensor(unpackTensorAttributes(biasAttributes))
         , meanTensor(unpackTensorAttributes(meanAttributes))
         , varianceTensor(unpackTensorAttributes(varianceAttributes))
+        , epsilonTensor(unpackTensorAttributes(epsilonAttributes))
     {
     }
 
@@ -44,6 +47,7 @@ struct BatchnormFwdInferenceWithVarianceParams
     hipdnn_data_sdk::data_objects::TensorAttributesT biasTensor;
     hipdnn_data_sdk::data_objects::TensorAttributesT meanTensor;
     hipdnn_data_sdk::data_objects::TensorAttributesT varianceTensor;
+    hipdnn_data_sdk::data_objects::TensorAttributesT epsilonTensor;
 };
 
 template <typename XDataType,
@@ -79,12 +83,16 @@ public:
         auto shallowVarianceTensor = createShallowTensor<MeanVarianceDataType>(
             _params.varianceTensor, variantPack.at(_params.varianceTensor.uid));
 
+        double epsilonVal = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
+            _params.epsilonTensor, "Epsilon");
+
         CpuFpReferenceBatchnorm::fwdInferenceWithVariance(*shallowXTensor,
                                                           *shallowScaleTensor,
                                                           *shallowBiasTensor,
                                                           *shallowMeanTensor,
                                                           *shallowVarianceTensor,
-                                                          *shallowYTensor);
+                                                          *shallowYTensor,
+                                                          epsilonVal);
     }
 
 private:
@@ -127,6 +135,7 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->bias_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->variance_tensor_uid());
+        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->epsilon_tensor_uid());
 
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), XDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), OutputDataTypeEnum);
@@ -135,6 +144,9 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->mean_tensor_uid(), MeanVarianceDataTypeEnum);
         CHECK_TENSOR_TYPE(
             tensorMap, nodeAttributes->variance_tensor_uid(), MeanVarianceDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap,
+                          nodeAttributes->epsilon_tensor_uid(),
+                          hipdnn_data_sdk::data_objects::DataType::DOUBLE);
 
         return true;
     }
@@ -157,7 +169,8 @@ public:
             *tensorMap.at(nodeAttributes->scale_tensor_uid()),
             *tensorMap.at(nodeAttributes->bias_tensor_uid()),
             *tensorMap.at(nodeAttributes->mean_tensor_uid()),
-            *tensorMap.at(nodeAttributes->variance_tensor_uid()));
+            *tensorMap.at(nodeAttributes->variance_tensor_uid()),
+            *tensorMap.at(nodeAttributes->epsilon_tensor_uid()));
 
         return std::make_unique<BatchnormFwdInferenceWithVariancePlan<XDataType,
                                                                       ScaleBiasDataType,
