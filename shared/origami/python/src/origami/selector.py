@@ -14,6 +14,20 @@ Python bindings for the Origami C++ library.
 
 
 class OrigamiMatmulSelector:
+    """
+    Analytical GEMM configuration selector for GPUs.
+    
+    This class uses the Origami analytical model to select optimal GEMM kernel
+    configurations based on problem dimensions, data types, and hardware characteristics.
+    It provides a high-level interface for integrating with PyTorch-based frameworks.
+    
+    The selector analyzes a set of candidate configurations and predicts their performance
+    using analytical models of compute, memory, and synchronization costs. It returns
+    the configuration with the lowest predicted latency.
+    
+    Attributes:
+        dtype_to_str (dict): Mapping from PyTorch dtypes to Origami dtype strings.
+    """
     # https://docs.pytorch.org/docs/stable/tensors.html
     dtype_to_str = {
         torch.float32: "f32",
@@ -44,13 +58,36 @@ class OrigamiMatmulSelector:
         b_dtype: torch.dtype,
         out_dtype: torch.dtype,
         device: torch.device,
+        batch: int = 1,
         mx_block_size=0,
         streamk=False
     ):
+        """
+        Initialize the Origami matmul configuration selector.
+        
+        Args:
+            config_gen: Iterable of Triton-style config objects with kwargs containing
+                       'BLOCK_M', 'BLOCK_N', 'BLOCK_K', and 'waves_per_eu'.
+            m: M dimension of the GEMM (number of rows in A and output).
+            n: N dimension of the GEMM (number of columns in B and output).
+            k: K dimension of the GEMM (shared dimension between A and B).
+            a_dtype: PyTorch dtype for matrix A.
+            b_dtype: PyTorch dtype for matrix B.
+            out_dtype: PyTorch dtype for output matrix.
+            device: PyTorch CUDA device (must be ROCm-capable).
+            batch: Batch size of the GEMM (default: 1).
+            mx_block_size: Block size for MX format dtypes (default: 0 for non-MX types).
+            streamk: Whether to use StreamK scheduling (default: False).
+        
+        Raises:
+            RuntimeError: If no ROCm-capable device is detected.
+            ValueError: If the hardware architecture is unsupported or data types are incompatible.
+        """
         # Save tensor sizes
         self._m = m
         self._n = n
         self._k = k
+        self._batch = batch
 
         # Save tensor dtypes as strings
         self._a_dtype_str   = OrigamiMatmulSelector.dtype_to_str.get(a_dtype, a_dtype)
@@ -111,10 +148,14 @@ class OrigamiMatmulSelector:
             self._grid = origami.select_grid_size(self._problem,
                                                   self._hardware,
                                                   self._result.config,
-                                                  origami.grid_selection_t.data_parallel,
+                                                  origami.grid_selection_t.k_split_aware,
                                                   self._hardware.N_CU)
         else:
-            self._grid = self._hardware.N_CU
+            self._grid = origami.select_grid_size(self._problem,
+                                                  self._hardware,
+                                                  self._result.config,
+                                                  origami.grid_selection_t.data_parallel,
+                                                  self._hardware.N_CU)
 
         self._workgroup_mapping = (
             origami.select_workgroup_mapping(self._problem,
@@ -125,56 +166,160 @@ class OrigamiMatmulSelector:
 
 
     @property
-    def block_m(self):
+    def macrotile_m(self):
+        """
+        M dimension of the selected macrotile (block size in M dimension).
+        
+        Returns:
+            int: Number of rows processed per workgroup.
+        """
         return self._result.config.mt.m
 
 
     @property
-    def block_n(self):
+    def macrotile_n(self):
+        """
+        N dimension of the selected macrotile (block size in N dimension).
+        
+        Returns:
+            int: Number of columns processed per workgroup.
+        """
         return self._result.config.mt.n
 
 
     @property
-    def block_k(self):
+    def macrotile_k(self):
+        """
+        K dimension of the selected macrotile (block size in K dimension).
+        
+        Returns:
+            int: Number of elements in the reduction dimension processed per iteration.
+        """
         return self._result.config.mt.k
 
 
     @property
-    def group_m(self):
+    def wgm(self):
+        """
+        Workgroup mapping parameter for tiling in the M-N plane.
+        
+        This controls how output tiles are grouped together for better cache locality.
+        
+        Returns:
+            int: Workgroup mapping size.
+        """
         return self._workgroup_mapping.wgm
+    
+    @property
+    def wgmxcc(self):
+        """
+        Workgroup mapping size across XCCs (chiplets).
+        
+        For multi-chiplet GPUs (e.g., MI300 series), this controls how work is
+        distributed across the different chiplets.
+        
+        Returns:
+            int: Number of workgroups mapped per XCC.
+        """
+        return self._workgroup_mapping.wgmxcc
+    
+    @property
+    def wgmxccchunk(self):
+        """
+        Workgroup mapping chunk size for XCC distribution.
+        
+        Controls the granularity of work distribution across chiplets.
+        
+        Returns:
+            int: Chunk size for XCC workgroup mapping.
+        """
+        return self._workgroup_mapping.wgmxccchunk
+
+    @property
+    def number_of_cus(self):
+        """
+        Number of compute units (CUs) available on the target GPU.
+        
+        This is a hardware property that indicates the total parallelism available.
+        Common values:
+        - MI200 (gfx90a): 104 CUs
+        - MI300A (gfx942): 228 CUs
+        - MI300X (gfx942): 304 CUs
+        - MI350 (gfx950): 256 CUs
+        
+        Returns:
+            int: Total number of compute units on the device.
+        """
+        return self._hardware.N_CU
 
 
     @property
-    def num_sms(self):
-        return self._xcc_workgroup_mapping.wgmxcc
-
-
-    @property
-    def waves_per_eu(self):
+    def occupancy(self):
+        """
+        Number of wavefronts resident per SIMD unit (occupancy).
+        
+        Higher occupancy can hide memory latency but reduces register availability.
+        Typical values are 1-4 for efficient schedules, though hardware supports more.
+        
+        Returns:
+            int: Number of concurrent wavefronts per EU (1-64, typically 1-2 for performance).
+        """
         return self._result.config.occupancy
 
 
     @property
     def even_k(self):
-        return math.gcd(self._k, self.block_k) == self.block_k
+        """
+        Whether the K dimension is evenly divisible by the macrotile K size.
+        
+        When True, the kernel can avoid bounds checking in the K loop, improving performance.
+        When False, the kernel must handle the remainder iteration.
+        
+        Returns:
+            bool: True if K is evenly divisible by macrotile_k, False otherwise.
+        """
+        return math.gcd(self._k, self.macrotile_k) == self.macrotile_k
 
 
     @property
-    def sk_grid(self):
+    def grid_size(self):
+        """
+        Grid size (number of workgroups) to launch for the kernel.
+        
+        For StreamK scheduling, this is analytically determined to balance
+        load across CUs while minimizing synchronization overhead.
+        
+        Returns:
+            int: Number of workgroups to launch.
+        """
         return self._grid
 
 
     def _generate_configs(self, config_gen):
+        """
+        Convert Triton-style configs to Origami config_t objects.
+        
+        Takes an iterable of Triton autotuner configs and converts them to
+        Origami's internal config_t representation, inferring matrix instruction
+        dimensions based on hardware and data types.
+        
+        Args:
+            config_gen: Iterable of config objects with kwargs containing
+                       'BLOCK_M', 'BLOCK_N', 'BLOCK_K', and 'waves_per_eu'.
+        
+        Returns:
+            list[origami.config_t]: List of Origami configuration objects.
+        """
         configs_list = []
 
         for config in config_gen:
             # config is type triton.runtime.autotuner.Config
 
-            # Create special dim3_t object for BLK_* sizes
+            # Create special dim3_t object for BLK_* sizes (macrotile dimensions)
             mt = origami.dim3_t(config.kwargs['BLOCK_M'],
                                 config.kwargs['BLOCK_N'],
                                 config.kwargs['BLOCK_K'])
-            # Get matrix instruction dimentions, also in dim3_t object
+            # Get matrix instruction dimensions, also in dim3_t object
             mi = self._infer_matrix_instruction_dimensions()
 
             # Create and set new config_t values
@@ -189,6 +334,16 @@ class OrigamiMatmulSelector:
 
 
     def _make_problem(self) -> origami.problem_t:
+        """
+        Create an Origami problem_t object from the GEMM problem specification.
+        
+        Converts PyTorch-style problem parameters (dimensions, dtypes) into
+        Origami's internal problem representation. Assumes standard GEMM
+        operation: D = A^T @ B + C (with A transposed).
+        
+        Returns:
+            origami.problem_t: Problem specification for Origami analytical model.
+        """
         # Create special dim3_t object for problem sizes
         size = origami.dim3_t(self._m, self._n, self._k)
 
@@ -200,7 +355,7 @@ class OrigamiMatmulSelector:
         # Create and set new problem_t values
         problem = origami.problem_t()
         problem.size            = size
-        problem.batch           = 1
+        problem.batch           = self._batch
         problem.a_transpose     = origami.transpose_t.T
         problem.b_transpose     = origami.transpose_t.N
         problem.a_dtype         = a_origami_dtype
