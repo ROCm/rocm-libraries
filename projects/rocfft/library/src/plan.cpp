@@ -45,6 +45,7 @@
 #include <algorithm>
 #include <assert.h>
 #include <functional>
+#include <cstring>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -62,10 +63,10 @@
 #define TO_STR(x) TO_STR2(x)
 
 // clang-format off
-#define ROCFFT_VERSION_STRING (TO_STR(rocfft_version_major) "." \
-                               TO_STR(rocfft_version_minor) "." \
-                               TO_STR(rocfft_version_patch) "." \
-                               TO_STR(rocfft_version_tweak) )
+const char* ROCFFT_VERSION_STRING = (TO_STR(rocfft_version_major) "." \
+                                     TO_STR(rocfft_version_minor) "." \
+                                     TO_STR(rocfft_version_patch) "." \
+                                     TO_STR(rocfft_version_tweak) );
 // clang-format on
 
 rocfft_status rocfft_plan_description_set_scale_factor(rocfft_plan_description description,
@@ -3780,12 +3781,13 @@ ROCFFT_EXPORT rocfft_status rocfft_get_version_string(char* buf, const size_t le
 try
 {
     log_trace(__func__, "buf", static_cast<void*>(buf), "len", len);
-    static constexpr char v[] = ROCFFT_VERSION_STRING;
+    // include nul terminator
+    const auto version_len = std::strlen(ROCFFT_VERSION_STRING) + 1;
     if(!buf)
         return rocfft_status_failure;
-    if(len < sizeof(v))
+    if(len < version_len)
         return rocfft_status_invalid_arg_value;
-    memcpy(buf, v, sizeof(v));
+    std::memcpy(buf, ROCFFT_VERSION_STRING, version_len);
     return rocfft_status_success;
 }
 catch(...)

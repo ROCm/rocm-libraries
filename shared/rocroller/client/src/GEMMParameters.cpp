@@ -222,6 +222,12 @@ namespace rocRoller
                 return s;
             }
 
+            std::ostream& operator<<(std::ostream& s, std::pair<int, int> const& x)
+            {
+                s << fmt::format("{},{}", x.first, x.second);
+                return s;
+            }
+
             std::ostream& operator<<(std::ostream& s, TypeParameters const& x)
             {
                 s << "Type:      A:" << x.typeA << " B:" << x.typeB << " C:" << x.typeC
@@ -272,7 +278,9 @@ namespace rocRoller
                 s << "PrefetchScale:   " << x.prefetchScale << std::endl;
                 s << "SwizzleTileSize: " << x.swizzleTileSize << std::endl;
                 s << "Load A:          " << x.loadPathA << std::endl;
+                s << "LDS Padding A:   " << x.padLDSA << std::endl;
                 s << "Load B:          " << x.loadPathB << std::endl;
+                s << "LDS Padding B:   " << x.padLDSB << std::endl;
                 s << "Store D LDS:     " << x.storeLDSD << std::endl;
                 s << "Load AScale:     " << x.loadPathAScale << std::endl;
                 s << "Load BScale:     " << x.loadPathBScale << std::endl;
@@ -307,6 +315,29 @@ namespace rocRoller
 
 namespace rocRoller::Client::GEMMClient::CLI
 {
+    bool ParseIntPair(const std::string& arg, std::pair<int, int>& x)
+    {
+        if(arg.empty())
+            return PARSE_FAILURE;
+
+        std::regex  pattern(R"((-?\d+),(-?\d+))");
+        std::smatch match;
+
+        bool matched = std::regex_match(arg, match, pattern);
+        if(matched)
+        {
+            x.first  = std::stoi(match[1]);
+            x.second = std::stoi(match[2]);
+        }
+        else
+        {
+            std::cerr << "Invalid format for X,Y pair.\n" << std::endl;
+            return PARSE_FAILURE;
+        }
+
+        return PARSE_SUCCESS;
+    }
+
     bool ParseMNKB(const std::string& arg, rocRoller::Client::GEMMClient::MNKBTuple& x)
     {
         if(arg.empty())
