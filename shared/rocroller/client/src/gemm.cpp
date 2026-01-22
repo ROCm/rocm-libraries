@@ -1762,7 +1762,8 @@ int main(int argc, const char* argv[])
     app.add_flag(SN(&SP::prefetchMixMemOps),
                  "Mix global and LDS memory operations during prefetching.");
     app.add_option(SN(&SP::streamK),
-                   "StreamK mode (None, Standard, TwoTile, TwoTileDPFirst). Default: None");
+                   "StreamK mode (None, Standard, TwoTile, TwoTileDPFirst). Default: None")
+        ->check(CLI::IsMember(rocRoller::enumStrings<StreamKMode>()));
 
     app.add_option(SN(&SP::loadPathAScale),
                    "How to load AScale (BufferToVGPR, BufferToLDSViaVGPR, BufferToLDS). Default: "
