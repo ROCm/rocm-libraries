@@ -41,6 +41,8 @@ def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, bo
     String yamlBackendFlag = useYamlCpp ? '' : '-DROCROLLER_ENABLE_YAML_CPP=OFF'
     String useCppCheck = staticAnalysis ? '-DROCROLLER_ENABLE_CPPCHECK=ON' : ''
 
+    def numThreads = 8
+
     withSSH(platform) {
         sshBlock ->
         def command = """#!/usr/bin/env bash
@@ -60,7 +62,8 @@ def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, bo
                     -DROCROLLER_ENABLE_FETCH=ON \\
                     -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm"
                 ccache --print-stats
-                make -j ${target}
+                echo Using ${numThreads} out of `nproc` threads for testing.
+                make -j ${numThreads} ${target}
                 ccache --print-stats
                 """
 
@@ -72,7 +75,7 @@ def runTestCommand (platform, project)
 {
     String testExclude = platform.jenkinsLabel.contains('compile') ? '-LE GPU' : ''
 
-    def numThreads = 8
+    def numThreads = 4
 
     def command = """#!/usr/bin/env bash
                 set -ex

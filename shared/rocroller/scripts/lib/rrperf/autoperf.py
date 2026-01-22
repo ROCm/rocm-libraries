@@ -48,7 +48,7 @@ def build_rocroller(
     checkout_dir: Path,
     project_dir: Path,
     commit: str,
-    threads: int = 32,
+    threads: int = 8,
 ) -> Path:
     """
     Build the rocRoller GEMM client in the project directory.
@@ -64,6 +64,8 @@ def build_rocroller(
 
     build_dir = project_dir / "build_perf"
     build_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Info: Using {threads} to build rocRoller at {commit}")
 
     subprocess.run(
         [
@@ -219,6 +221,7 @@ def autoperf(
             checkout_dir,
             checkout_dir / "shared" / "rocroller",
             target,
+            threads=min([os.cpu_count() or 8, 8]),
         )
         target_success, result_dir = suite_run.run_cli(
             build_dir=build_dir,
