@@ -947,6 +947,15 @@ class Solution(collections.abc.Mapping):
 
     Solution.assignProblemIndependentDerivedParameters(state, printRejectionReason, isaInfoMap)
 
+    # KRingShift currently only supported for TN (A transposed, B not transposed).
+    # Disallow enabling KRingShift on NN/NT/TT until those paths are validated.
+    if state["KRingShift"]:
+      ta = int(state["ProblemType"]["TransposeA"])
+      tb = int(state["ProblemType"]["TransposeB"])
+      if not (ta == 1 and tb == 0):
+        reject(state, printRejectionReason, f"KRingShift requires TN (TransposeA=1, TransposeB=0); got TransposeA={ta}, TransposeB={tb}")
+        return
+
     # KRingShift is defined to operate only in conjunction with BAddrInterleave (BInterleaveG).
     # If BAddrInterleave is not enabled, do not allow KRingShift to be enabled.
     if state["KRingShift"] and (not state["BAddrInterleave"]):
@@ -960,29 +969,6 @@ class Solution(collections.abc.Mapping):
     # Note: if lowbit(tiles1) == 1, then G==1 and the kernel disables BAddrInterleave.
     if state["BAddrInterleave"]:
       state["AssertFree1DivByMT1LowbitGT1"] = state["MacroTile1"]
-
-    # KRingShift wrap handling exists only in the tail loop.
-    # If (k + KRingShift) would wrap inside the main loop, the kernel will be incorrect (no main-loop wrap fix).
-    # Enforce a host-side runtime predicate which guarantees any KRS wrap happens only in tail.
-    if state["KRingShift"]:
-      # Pack predicate args (see ContractionProblemPredicates.hpp::KRingShiftTailWrapOnly):
-      #   [63:48]=cacheLineBytes, [47:32]=depthU, [31:16]=mt1, [15:8]=lvcb, [7:0]=bpeB
-      cacheLineBytes = int(isaInfoMap[isa].archCaps.get("vL1DCacheLineBytes", 0))
-      depthU         = int(state["DepthU"])
-      mt1            = int(state["MacroTile1"])
-      bpeB           = int(state["ProblemType"]["DataTypeB"].numBytes())
-      if "LVCB" in state:
-        lvcb = int(state["LVCB"])
-      else:
-        lscb  = int(state.get("LSCB", 0))
-        grvwB = int(state.get("GlobalReadVectorWidthB", 0))
-        lvcb  = int(roundupRatio(lscb, grvwB)) if (lscb > 0 and grvwB > 0) else 0
-
-      if (0 < cacheLineBytes < (1<<16)) and (0 < depthU < (1<<16)) and (0 < mt1 < (1<<16)) and (0 < lvcb < (1<<8)) and (0 < bpeB < (1<<8)):
-        state["AssertKRingShiftTailWrapOnly"] = (cacheLineBytes << 48) | (depthU << 32) | (mt1 << 16) | (lvcb << 8) | bpeB
-      else:
-        reject(state, printRejectionReason, "KRingShift requires encodable AssertKRingShiftTailWrapOnly predicate")
-        return
 
     if state["UseDirect32XEmulation"] == True:
       #   Turn off Direct32X for the following kernels:
@@ -2508,6 +2494,30 @@ class Solution(collections.abc.Mapping):
     state["LVPA"] = roundupRatio(state["LSPA"] , state["GlobalReadVectorWidthA"])
     state["LVCB"] = roundupRatio(state["LSCB"] , state["GlobalReadVectorWidthB"])
     state["LVPB"] = roundupRatio(state["LSPB"] , state["GlobalReadVectorWidthB"])
+
+    # KRingShift wrap handling exists only in the tail loop.
+    # If (k + KRingShift) would wrap inside the main loop, the kernel will be incorrect (no main-loop wrap fix).
+    # Enforce a host-side runtime predicate which guarantees any KRS wrap happens only in tail.
+    #
+    # NOTE: This must be encoded after LVCB/LSCB are computed above.
+    if state["KRingShift"]:
+      # Pack predicate args (see ContractionProblemPredicates.hpp::KRingShiftTailWrapOnly):
+      #   [63:48]=cacheLineBytes, [47:32]=depthU, [31:16]=mt1, [15:8]=lvcb, [7:0]=bpeB
+      cacheLineBytes = int(isaInfoMap[isa].archCaps.get("vL1DCacheLineBytes", 0))
+      depthU         = int(state["DepthU"])
+      mt1            = int(state["MacroTile1"])
+      bpeB           = int(state["ProblemType"]["DataTypeB"].numBytes())
+      lvcb           = int(state["LVCB"])
+
+      if (0 < cacheLineBytes < (1<<16)) and (0 < depthU < (1<<16)) and (0 < mt1 < (1<<16)) and (0 < lvcb < (1<<8)) and (0 < bpeB < (1<<8)):
+        state["AssertKRingShiftTailWrapOnly"] = (cacheLineBytes << 48) | (depthU << 32) | (mt1 << 16) | (lvcb << 8) | bpeB
+      else:
+        reject(state, printRejectionReason,
+               f"KRingShift requires encodable AssertKRingShiftTailWrapOnly predicate "
+               f"(cacheLineBytes={cacheLineBytes}, depthU={depthU}, mt1={mt1}, "
+               f"lvcb={lvcb}, lscb={state.get('LSCB', None)}, grvwB={state.get('GlobalReadVectorWidthB', None)}, "
+               f"bpeB={bpeB})")
+        return
 
     if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
       state["LVCMetadata"] = roundupRatio(state["LSCMetadata"] , state["GlobalReadVectorWidthMetadata"])
