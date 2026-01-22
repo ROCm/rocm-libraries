@@ -390,7 +390,6 @@ public:
                           "Testing " << ArgsHelper::db_class::Get<TDb>()
                                      << " for updating existing records...");
 
-        // Store record0 (key=id0:value0)
         DbRecord record0(DbKinds::PerfDb, key());
         ASSERT_TRUE(record0.SetValues(id0(), value0()));
 
@@ -400,7 +399,6 @@ public:
             ASSERT_TRUE(db.StoreRecord(record0));
         }
 
-        // Update with record1 (key=id1:value1)
         DbRecord record1(DbKinds::PerfDb, key());
         ASSERT_TRUE(record1.SetValues(id1(), value1()));
 
@@ -410,14 +408,12 @@ public:
             ASSERT_TRUE(db.UpdateRecord(record1));
         }
 
-        // Check record1 (key=id0:value0;id1:value1)
         TestData read0, read1;
         ASSERT_TRUE(record1.GetValues(id0(), read0));
         ASSERT_TRUE(record1.GetValues(id1(), read1));
         ASSERT_EQ(value0(), read0);
         ASSERT_EQ(value1(), read1);
 
-        // Check record that is stored in db (key=id0:value0;id1:value1)
         TDb db{DbKinds::PerfDb, temp_file};
         ValidateSingleEntry(key(), common_data(), db);
     }
@@ -525,19 +521,14 @@ public:
 
             ASSERT_TRUE(db.Update(key(), id0(), to_be_rewritten));
             ASSERT_TRUE(db.Update(key(), id1(), to_be_rewritten));
-
-            // Rewritting existing value with other.
             ASSERT_TRUE(db.Update(key(), id1(), value1()));
 
-            // Rewritting existing value with same. In fact no DB manipulation should be performed
-            // inside of store in such case.
+            // Rewritting existing value with same one. expecting no DB manipulations performed
             ASSERT_TRUE(db.Update(key(), id1(), value1()));
         }
 
         {
             TDb db(DbKinds::PerfDb, temp_file);
-
-            // Rewriting existing value to store it to file.
             ASSERT_TRUE(db.Update(key(), id0(), value0()));
         }
 
@@ -546,11 +537,9 @@ public:
             const auto read_missing_cmp(read_missing);
             TDb db(DbKinds::PerfDb, temp_file);
 
-            // Loading by id not present in record should execute well but return false as nothing
-            // was read.
             ASSERT_FALSE(db.Load(key(), missing_id(), read_missing));
 
-            // In such case value should not be changed.
+            // value should not be changed.
             ASSERT_EQ(read_missing, read_missing_cmp);
 
             ASSERT_TRUE(db.Load(key(), id0(), read0));
@@ -1479,22 +1468,26 @@ TEST_F(CPU_PerfDb_NONE, PlainTextDb_AllTests) { DbTests<PlainTextDb>(); }
 TEST_F(CPU_PerfDb_NONE, MultiFileDb_AllTests) { MultiFileDbTests(); }
 
 } // namespace tests
-} // namespace miopen
 
-namespace {
+namespace tests {
+namespace perfdb {
+
+void SetExePath(const char* path) { exe_path() = fs::absolute(path); }
 
 bool IsChildProcessMode(int argc, char** argv)
 {
     for(int i = 1; i < argc; ++i)
     {
         std::string arg = argv[i];
-        if(arg.find("--" + std::string(miopen::tests::ArgsHelper::id_arg)) != std::string::npos)
+        if(arg.find("--" + std::string(ArgsHelper::id_arg)) != std::string::npos)
         {
             return true;
         }
     }
     return false;
 }
+
+namespace {
 
 std::string GetArg(int argc, char** argv, const std::string& name)
 {
@@ -1522,10 +1515,10 @@ bool HasFlag(int argc, char** argv, const std::string& name)
     return false;
 }
 
+} // anonymous namespace
+
 int RunChildProcess(int argc, char** argv)
 {
-    using namespace miopen::tests;
-
     std::string logs_root         = GetArg(argc, argv, ArgsHelper::logs_path_arg);
     bool test_write               = HasFlag(argc, argv, ArgsHelper::write_arg);
     std::string mt_child_id_s     = GetArg(argc, argv, ArgsHelper::id_arg);
@@ -1562,22 +1555,6 @@ int RunChildProcess(int argc, char** argv)
     return 0;
 }
 
-} // anonymous namespace
-
-int main(int argc, char** argv)
-{
-#ifdef _WIN32
-    miopen::tests::exe_path() = fs::absolute(argv[0]);
-#else
-    miopen::tests::exe_path() = argv[0];
-#endif
-
-    // Check for child process mode before gtest init
-    if(IsChildProcessMode(argc, argv))
-    {
-        return RunChildProcess(argc, argv);
-    }
-
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
-}
+} // namespace perfdb
+} // namespace tests
+} // namespace miopen
