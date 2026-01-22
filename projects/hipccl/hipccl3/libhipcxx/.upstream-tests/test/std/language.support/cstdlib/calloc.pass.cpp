@@ -9,7 +9,7 @@
 
 // MIT License
 //
-// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Modifications Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -60,6 +60,11 @@ template <class T>
 __host__ __device__ void test_calloc_fail(cuda::std::size_t n)
 {
   T* ptr = static_cast<T*>(cuda::std::calloc(n, sizeof(T)));
+
+  // NOTE(HIP/AMD): add a printf to avoid that the pointer is optimized out
+  if(ptr != nullptr){
+    printf("Error pointer %p is not a nullptr!\n", &ptr[0]);
+  }
 
   // check that the memory was not allocated
   assert(ptr == nullptr);
@@ -113,10 +118,7 @@ __host__ __device__ void test()
   test_calloc_success<BigStruct>(4);
   test_calloc_success<AlignedStruct>(16);
 
-  // NOTE(HIP/AMD): calloc currently misbehaves for large input sizes and does not return nullptr.
-  #ifndef __HIP_PLATFORM_AMD__
   test_calloc_fail<int>(cuda::std::numeric_limits<cuda::std::size_t>::max());
-  #endif
 }
 
 int main(int, char**)
