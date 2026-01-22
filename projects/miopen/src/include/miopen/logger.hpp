@@ -34,7 +34,6 @@
 #include <type_traits>
 #include <chrono>
 
-#include <miopen/each_args.hpp>
 #include <miopen/object.hpp>
 #include <miopen/config.hpp>
 
