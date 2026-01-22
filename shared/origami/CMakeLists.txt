@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.24.4)
+cmake_minimum_required(VERSION 3.25.2)
 
 project(Origami VERSION 1.0.0 LANGUAGES CXX)
 
@@ -22,7 +22,7 @@ rocm_setup_version(VERSION ${PROJECT_VERSION})
 
 option(ORIGAMI_BUILD_SHARED_LIBS "Build shared libraries." ${ORIGAMI_STANDALONE})
 option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
-option(ORIGAMI_BUILD_TESTING "Enable Python binding tests." OFF)
+option(ORIGAMI_BUILD_TESTING "Build tests." OFF)
 option(ORIGAMI_ENABLE_INSTALL "Configure origami installation" ON)
 option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
 
@@ -86,31 +86,7 @@ endif()
 
 if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     enable_testing()
-
     add_subdirectory(tests)
-
-    if(ORIGAMI_ENABLE_PYTHON)
-        find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
-
-        add_test(NAME origami_python_test COMMAND "${Python_EXECUTABLE}" "origami_test.py"
-                 WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python"
-        )
-
-        add_test(NAME origami_python_grid_test COMMAND "${Python_EXECUTABLE}" "origami_grid_test.py"
-                 WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python"
-        )
-
-        set_tests_properties(
-            origami_python_test origami_python_grid_test
-            PROPERTIES
-                ENVIRONMENT
-                "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python:${CMAKE_CURRENT_SOURCE_DIR}/python:$ENV{PYTHONPATH}"
-        )
-
-        set_tests_properties(
-            origami_python_test origami_python_grid_test PROPERTIES DEPENDS origami_python
-        )
-    endif()
 endif()
 
 if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
@@ -163,7 +139,7 @@ if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
 
     rocm_create_package(
         NAME origami
-        DESCRIPTION "Origami C++ library for analytical GEMM computations"
+        DESCRIPTION "Origami: Analytical Solution Selection for GEMM"
         MAINTAINER "Origami Maintainer <origami-maintainer@amd.com>"
         LDCONFIG
         LDCONFIG_DIR ${ORIGAMI_CONFIG_DIR}

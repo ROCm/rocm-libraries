@@ -50,23 +50,14 @@ if(ORIGAMI_ENABLE_PYTHON)
     set(ORIGAMI_INSTALL_PYTHON_BINDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/origami")
     
     string(APPEND _ctest_content [=[
-# Python tests
-add_test(origami_python_test python "origami_test.py")
-add_test(origami_python_grid_test python "origami_grid_test.py")
+# Python tests (using pytest)
+add_test(origami_python_tests python -m pytest tests/ -v)
 
-set_tests_properties(origami_python_test origami_python_grid_test PROPERTIES
+set_tests_properties(origami_python_tests PROPERTIES
     LABELS "python"
     ENVIRONMENT "LD_LIBRARY_PATH=@ORIGAMI_INSTALL_LIBDIR@:$ENV{LD_LIBRARY_PATH};PYTHONPATH=@ORIGAMI_INSTALL_PYTHON_BINDIR@:$ENV{PYTHONPATH}"
 )
 ]=])
-    
-    rocm_install(
-        FILES 
-            "${CMAKE_CURRENT_SOURCE_DIR}/../python/origami_test.py"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../python/origami_grid_test.py"
-        DESTINATION "${CMAKE_INSTALL_BINDIR}/origami"
-        COMPONENT tests
-    )
 endif()
 
 string(CONFIGURE "${_ctest_content}" _ctest_content @ONLY)
