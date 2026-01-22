@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2025-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,14 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+        /**
+         * Removes sequence edges that aren't strictly needed for correctness while preserving
+         * or re-adding edges that are required.
+         *
+         * Currently just does this for Multiply nodes.  It finds groups of Multiply nodes that
+         * have direct connections and deletes any Sequence edges that aren't required to
+         * preserve the accumulation in the K order.
+         */
         class RemoveImplicitScheduling : public GraphTransform
         {
         public:
