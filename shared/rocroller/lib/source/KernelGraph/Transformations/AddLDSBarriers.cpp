@@ -1,8 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp"
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowRWTracer.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddLDSBarriers.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
