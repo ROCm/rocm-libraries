@@ -326,6 +326,8 @@ namespace rocsparse
             w_scratch,
             v_scratch);
 
+        std::cout << "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA gridsize: " << gridsize << std::endl;
+
         // gridsize is always a power of 2
         if(gridsize == 2)
         {
@@ -548,6 +550,7 @@ rocsparse_status rocsparse::gtsv_template(rocsparse_handle handle,
     rocsparse_int block_dim = 2;
     rocsparse_int m_pad     = ((m - 1) / (block_dim * BLOCKSIZE) + 1) * (block_dim * BLOCKSIZE);
     rocsparse_int gridsize  = ((m_pad / block_dim - 1) / BLOCKSIZE + 1);
+    std::cout << "gridsize: " << gridsize << std::endl;
     while(gridsize > 512)
     {
         block_dim *= 2;
@@ -557,6 +560,8 @@ rocsparse_status rocsparse::gtsv_template(rocsparse_handle handle,
 
     // round up to next power of 2
     gridsize = fnp2(gridsize);
+
+    std::cout << "gridsize: " << gridsize << " block_dim: " << block_dim << std::endl;
 
     if(block_dim == 2)
     {
