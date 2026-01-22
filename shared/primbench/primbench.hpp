@@ -1539,9 +1539,14 @@ private:
         first = true;
         add_field("max_threads_per_block", dev_prop.maxThreadsPerBlock);
         add_field("max_threads_per_multiprocessor", dev_prop.maxThreadsPerMultiProcessor);
-        add_field("multi_processor_count", dev_prop.multiProcessorCount);
+        add_field("max_blocks_per_multiprocessor", dev_prop.maxBlocksPerMultiProcessor);
+        add_field("multiprocessor_count", dev_prop.multiProcessorCount);
         add_field("regs_per_block", dev_prop.regsPerBlock);
+        add_field("regs_per_multiprocessor", dev_prop.regsPerMultiprocessor);
         add_field("warp_size", dev_prop.warpSize);
+        add_field("async_engine_count", dev_prop.asyncEngineCount);
+        add_bool("cluster_launch", dev_prop.clusterLaunch);
+        add_bool("has_compute_preemption", dev_prop.computePreemptionSupported);
         ss << "}";
 
         ss << ",\"limits\":{";
@@ -1553,6 +1558,10 @@ private:
         ss << "}"; // End of "compute" object.
 
         ss << ",\"memory\":{";
+        first = true;
+        add_bool("unified_addressing", dev_prop.unifiedAddressing);
+        add_bool("has_memory_pools", dev_prop.memoryPoolsSupported);
+        add_bool("can_use_host_pointer_for_registered_mem", dev_prop.canUseHostPointerForRegisteredMem);
 
         ss << "\"global\":{";
         first = true;
@@ -1560,12 +1569,21 @@ private:
         add_field("pitch", dev_prop.memPitch);
         add_field("bus_width", dev_prop.memoryBusWidth);
         add_field("l2_cache_size", dev_prop.l2CacheSize);
+        add_field("persisting_l2_cache_size", dev_prop.persistingL2CacheMaxSize);
+        add_bool("has_global_l1_cache", dev_prop.globalL1CacheSupported);
         ss << "}";
 
         ss << ",\"shared\":{";
         first = true;
         add_field("per_block", dev_prop.sharedMemPerBlock);
-        add_field("per_multi_processor", dev_prop.maxSharedMemoryPerMultiProcessor);
+        add_field("reserved_per_block", dev_prop.reservedSharedMemPerBlock);
+        add_field("shared_mem_per_multiprocessor", dev_prop.sharedMemPerMultiprocessor);
+        add_field("max_shared_mem_per_multiprocessor", dev_prop.maxSharedMemoryPerMultiProcessor);
+        ss << "}";
+
+        ss << ",\"local\":{";
+        first = true;
+        add_bool("has_local_l1_cache", dev_prop.localL1CacheSupported);
         ss << "}";
 
         ss << ",\"const\":{";
@@ -1587,9 +1605,18 @@ private:
         add_field("alignment", dev_prop.textureAlignment);
         add_field("pitch_alignment", dev_prop.texturePitchAlignment);
         add_field("max_1d", dev_prop.maxTexture1D);
+        add_field("max_1d_mipmap", dev_prop.maxTexture1DMipmap);
         add_field("max_1d_linear", dev_prop.maxTexture1DLinear);
         add_dim2("max_2d", dev_prop.maxTexture2D);
+        add_dim2("max_2d_mipmap", dev_prop.maxTexture2DMipmap);
+        add_dim2("max_2d_linear", dev_prop.maxTexture2DLinear);
+        add_dim2("max_2d_gather", dev_prop.maxTexture2DGather);
         add_dim3("max_3d", dev_prop.maxTexture3D);
+        add_dim3("max_3d_alt", dev_prop.maxTexture3DAlt);
+        add_field("max_cubemap", dev_prop.maxTextureCubemap);
+        add_dim2("max_1d_layered", dev_prop.maxTexture1DLayered);
+        add_dim3("max_2d_layered", dev_prop.maxTexture2DLayered);
+        add_dim2("max_cubemap_layered", dev_prop.maxTextureCubemapLayered);
         ss << "}";
 
         ss << ",\"capabilities\":{";
