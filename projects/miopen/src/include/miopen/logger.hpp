@@ -369,29 +369,28 @@ constexpr std::string_view LoggingParseFunction(const std::string_view func,
 #define MIOPEN_GET_FN_NAME miopen::LoggingParseFunction(__func__, __PRETTY_FUNCTION__)
 #endif
 
-#define MIOPEN_LOG_XQ_CUSTOM(level, disableQuieting, category, fn_name, ...)            \
-    do                                                                                  \
-    {                                                                                   \
-        std::ostringstream miopen_log_ss;                                               \
-        miopen_log_ss << miopen::LoggingPrefix() << category << " [" << fn_name << "] " \
-                      << __VA_ARGS__ << std::endl;                                      \
-        if(miopen::IsLogging(level, disableQuieting))                                   \
-        {                                                                               \
-            std::cerr << miopen_log_ss.str();                                           \
-        }                                                                               \
-        if(!miopen::IsLogging(miopen::LoggingLevel::Info2, disableQuieting))            \
-        {                                                                               \
-            if(level < miopen::LoggingLevel::Trace)                                     \
-            {                                                                           \
-                miopen::log_buffer[miopen::log_buffer_i % miopen::log_buffer_size] =    \
-                    miopen_log_ss.str();                                                \
-                miopen::log_buffer_i++;                                                 \
-            }                                                                           \
-            if(level == miopen::LoggingLevel::Error)                                    \
-            {                                                                           \
-                miopen::OutputBufferedLogs();                                           \
-            }                                                                           \
-        }                                                                               \
+#define MIOPEN_LOG_XQ_CUSTOM(level, disableQuieting, category, fn_name, ...)                 \
+    do                                                                                       \
+    {                                                                                        \
+        std::ostringstream miopen_log_ss;                                                    \
+        miopen_log_ss << miopen::LoggingPrefix() << category << " [" << fn_name << "] "      \
+                      << __VA_ARGS__ << std::endl;                                           \
+        if(miopen::IsLogging(level, disableQuieting))                                        \
+        {                                                                                    \
+            std::cerr << miopen_log_ss.str();                                                \
+        }                                                                                    \
+        if(!miopen::IsLogging(miopen::LoggingLevel::Info2, disableQuieting))                 \
+        {                                                                                    \
+            if(level < miopen::LoggingLevel::Trace)                                          \
+            {                                                                                \
+                miopen::log_buffer[miopen::log_buffer_i] = miopen_log_ss.str();              \
+                miopen::log_buffer_i = (miopen::log_buffer_i + 1) % miopen::log_buffer_size; \
+            }                                                                                \
+            if(level == miopen::LoggingLevel::Error)                                         \
+            {                                                                                \
+                miopen::OutputBufferedLogs();                                                \
+            }                                                                                \
+        }                                                                                    \
     } while(false)
 
 #define MIOPEN_LOG_XQ_(level, disableQuieting, fn_name, ...) \

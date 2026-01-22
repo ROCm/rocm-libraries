@@ -80,10 +80,11 @@ thread_local std::vector<std::string> log_buffer(log_buffer_size, "");
 
 void OutputBufferedLogs()
 {
+    auto buffer_size = (log_buffer[log_buffer_size - 1] == "") ? log_buffer_i : log_buffer_size;
     auto filename =
         fs::temp_directory_path() / ("miopen_error_" + std::to_string(getpid()) + ".log");
-    std::cerr << "Buffered " << miopen::log_buffer_i << " messages to file: " << sysinfo::GetSystemHostname() << ":"<< filename.string()
-              << std::endl;
+    std::cerr << "Buffered " << buffer_size << " messages to file: " << sysinfo::GetSystemHostname()
+              << ":" << filename.string() << std::endl;
     auto err_file = std::ofstream{filename};
     size_t i      = miopen::log_buffer_i;
     do
