@@ -11,6 +11,7 @@
 
 struct OpKernelArg
 {
+
     OpKernelArg(char val, size_t sz) : buffer(sz) { std::fill(buffer.begin(), buffer.end(), val); }
 
     template <typename T>
@@ -22,7 +23,8 @@ struct OpKernelArg
     }
 
     template <typename T>
-    OpKernelArg(T* arg) : buffer(sizeof(T*))
+    OpKernelArg(T* arg) // NOLINT
+        : buffer(sizeof(T*))
     {
         *(reinterpret_cast<T**>(buffer.data())) = arg;
         is_ptr                                  = true;
