@@ -37,6 +37,14 @@ const fs::path& GetUserDbPath();
 std::string GetUserDbSuffix();
 std::string GetSystemFindDbSuffix();
 
+#ifdef MIOPEN_BUILD_TESTING
+namespace testing {
+/// Reset cached user DB path for testing purposes
+/// This allows tests to reinitialize the path with different mocks/env vars
+MIOPEN_INTERNALS_EXPORT void ResetUserDbPath();
+} // namespace testing
+#endif
+
 } // namespace miopen
 
 #endif
