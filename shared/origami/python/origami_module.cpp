@@ -110,6 +110,14 @@ NB_MODULE(origami, m) {
       .def("nk", &origami::dim3_t::nk)
       .def("mnk", &origami::dim3_t::mnk);
 
+  nanobind::class_<origami::matrix_instruction>(m, "matrix_instruction")
+      .def(nanobind::init<>())
+      .def(nanobind::init<size_t, size_t, size_t, origami::data_type_t>())
+      .def_rw("MI_M", &origami::matrix_instruction::MI_M)
+      .def_rw("MI_N", &origami::matrix_instruction::MI_N)
+      .def_rw("MI_K", &origami::matrix_instruction::MI_K)
+      .def_rw("mi_input_type", &origami::matrix_instruction::mi_input_type);
+
   nanobind::class_<origami::config_t>(m, "config_t")
       .def(nanobind::init<>())
       .def_rw("mt", &origami::config_t::mt)
@@ -155,6 +163,12 @@ NB_MODULE(origami, m) {
                           size_t,
                           std::tuple<double, double, double>>())
       .def("print", &hardware_t::print)
+      .def("get_valid_matrix_instructions", &hardware_t::get_valid_matrix_instructions,
+           "mi_input_type"_a,
+           "Get valid matrix instruction dimensions for a given datatype")
+      .def("get_recommended_matrix_instruction", &hardware_t::get_recommended_matrix_instruction,
+           "mi_input_type"_a,
+           "Get recommended matrix instruction dimension (highest throughput) for a given datatype")
       .def_rw("N_CU", &hardware_t::N_CU)
       .def_rw("lds_capacity", &hardware_t::lds_capacity)
       .def_rw("mem1_perf_ratio", &hardware_t::mem1_perf_ratio)
