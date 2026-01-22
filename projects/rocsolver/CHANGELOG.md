@@ -10,6 +10,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Removed
 ### Optimized
 ### Resolved issues
+
+* Fixed synchronization issue in GETF2.
+
 ### Known issues
 ### Upcoming changes
 
