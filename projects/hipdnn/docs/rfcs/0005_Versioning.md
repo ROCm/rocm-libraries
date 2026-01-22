@@ -25,7 +25,7 @@ This document also outlines the work and code infrastructure that is intended to
 hipDNN consists of many different components which all work together for the purpose of running DNN workflows. While many of these components are likely to be compiled or used in a context that guarantees compatible versions, there are contexts and components where this can't be relied upon. The consumer of each of these components, be they internal or external to hipDNN, needs a versioning system to ensure that component is in a state that they can support.
 
 We want the following guarantees from this system:
-- The frontend is forward and backward compatible with the hipdnn_backend and hipdnn_backend_private within a major version
+- The frontend is forward and eventually backward compatible with a dynamically linked hipdnn_backend within a major version
 - Within a major version, serialized schemas are forwards and backwards compatible with all other components of the library
 	- If they represent an operation that hasn't yet been supported by a plugin, it will gracefully fail to match
 - Increasing the version of a component of hipDNN is easy and unobtrusive
@@ -143,7 +143,7 @@ In the proposed design, the following table lists the components of hipDNN, and 
 
 ### 4.6 Individual component details
 #### 4.6.1 Schema
-The schema covers both the flatbuffer serialization and the json serialization. These two serializations should change in lockstep as new fields, enums and structs are added. The version should be encoded directly within the schema for every root_type. Currently that's `Graph`, `EngineConfig` and `EngineDetails`.
+The schema covers both the flatbuffer serialization and the json serialization. These two serializations should change in lockstep as new fields, enums and structs are added. The version should be stored in the `file_identifier` field of the schema, which will encode it at the beginning of every serialization. Unlike other versions, this should only be increased on a major release in which the schema undergoes breaking changes.
 
 Schemas should be backwards and forward compatible within a major release. To this aim, the following changes can be made within the same major version:
 - Adding new structs, tables, enums, unions
@@ -161,8 +161,6 @@ The following is a non-exhaustive list of changes that cannot be made within the
 On a new major release, all `deprecated` fields should be removed, and other breaking changes may occur.
 
 Json serialization changes should be made in concert with flatbuffer schema files.
-
-> Consideration: Should schema files only have a major version?
 
 #### 4.6.2 Backend
 The backend has two components: hipdnn_backend (the API) and hipdnn_backend_private (the implementation). These components share a single version.
@@ -190,7 +188,7 @@ Plugins are responsible for failing gracefully on unsupported schemas. Typically
 	- **Backwards compatibile** within major versions
 #### Backend &#8594; Frontend
 	- **Forwards compatible** within major versions
-	- **Backwards compatible** within major versions
+	- In the future, **Backwards compatible** within major versions
 #### All components &#8594; All consuming components
 	- **Forwards compatible** within major versions
 
@@ -259,19 +257,18 @@ project(<component> VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH})
 - Make hipdnn_backend agnostic to the schema version
 	- Ensure that it doesn't fail with an older or newer schema
 - Separate hipDNN into multiple projects
-	- As part of this, separate the plugin_sdk into multiple projects, and create a placeholder header for the plugin_sdk_heuristics_api
 	- If a version is required at the point of release, set it to 1.0.0
 - Ensure flatbuffer and json deserializations are robust to new parameters, unions, enums, etc...
 	- This impacts plugins, and the data_sdk
 - Add note to our documentation that the `detail` namespace is not part of the public API
+	- Move anything into the detail namespace that shouldn't be part of the public API
 ### 7.2 Phase 2 (Add necessary versioning)
 - Add versions to json and flatbuffer serializations
 - Add version.json files
 	- Have the version propagated properly from this file, to the cmake, to the version header
 	- Also fetch the rocm-libraries git commit for the tweak version
+- Have components use current dependencies version.json as their minimum required versions
 - Add api functions for reporting library version
-- Have libraries check that their dependencies match on the major version
-	- Note: May not be strictly necessary
 ### 7.3 Phase 3 (Expand on versioning)
 - Create automation for bumping version
 - Add frontend infrastructure for checking backend version
