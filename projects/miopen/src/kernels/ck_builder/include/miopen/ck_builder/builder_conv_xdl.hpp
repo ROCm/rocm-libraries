@@ -5,322 +5,10 @@
 
 #include <array>
 #include <cstddef>
-#include <ck_tile/builder/types.hpp>
-#include <ck_tile/builder/conv_builder.hpp>
 #include <miopen/ck_builder/builder_factory.hpp>
-
-namespace ckb = ck_tile::builder;
-
-struct XdlAlgorithm
-{
-    using ConvSpecial = ckb::ConvSpecialization;
-    using GemmSpecial = ckb::GemmSpecialization;
-    using PipeSched   = ckb::PipelineScheduler;
-
-    struct ThreadBlock
-    {
-        std::size_t block_size;
-        struct TileSize
-        {
-            std::size_t m;
-            std::size_t n;
-            std::size_t k;
-        } tile_size;
-    } thread_block;
-
-    static_assert(ckb::ThreadBlockDescriptor<ThreadBlock>);
-
-    struct GridwiseGemm
-    {
-        std::size_t ak1;
-        std::size_t bk1;
-        struct XdlParams
-        {
-            std::size_t m_per_xdl      = 16;
-            std::size_t n_per_xdl      = 16;
-            std::size_t m_xdl_per_wave = 4;
-            std::size_t n_xdl_per_wave = 1;
-        } xdl_params;
-        static_assert(ckb::GridwiseXdlGemmDescriptor<XdlParams>);
-    } gridwise_gemm;
-
-    static_assert(ckb::GridwiseFwdXdlGemmDescriptor<GridwiseGemm>);
-    struct TransferABC
-    {
-        struct TransferAB
-        {
-            struct BlockTransfer
-            {
-                std::size_t k0;
-                std::size_t m_n;
-                std::size_t k1;
-            } block_transfer;
-            struct LdsTransfer
-            {
-                std::size_t src_vector_dim;
-                std::size_t src_scalar_per_vector;
-                std::size_t lds_dst_scalar_per_vector;
-                bool is_direct_load;
-                bool lds_padding;
-            } lds_transfer;
-            struct BlockTransferAccessOrder
-            {
-                std::array<size_t, 3> order{0, 2, 1};
-            } block_transfer_access_order;
-            struct SrcAccessOrder
-            {
-                std::array<size_t, 3> order{0, 2, 1};
-            } src_access_order;
-        };
-        TransferAB a;
-        TransferAB b;
-        struct TransferC
-        {
-            struct ThreadClusterDims
-            {
-                std::size_t m_block;
-                std::size_t m_wave_per_xdl;
-                std::size_t n_block;
-                std::size_t n_wave_per_xdl;
-            } thread_cluster_dims;
-            struct Epilogue
-            {
-                std::size_t m_xdl_per_wave_per_shuffle;
-                std::size_t n_per_wave_per_shuffle;
-                std::size_t scalar_per_vector;
-            } epilogue;
-        } c;
-    } transfer;
-
-    // TODO: Fix CK Builder schema to not require these defaults.
-    ConvSpecial fwd_specialization;
-    GemmSpecial gemm_specialization;
-
-    std::size_t num_gemm_k_prefetch_stages;
-    std::size_t num_conv_groups_to_merge;
-    PipeSched loop_scheduler;
-};
-
-static_assert(ckb::factory::FwdXdlAlgorithm<XdlAlgorithm>);
-
-struct XdlSignature
-{
-    int spatial_dim;
-    ckb::ConvDirection direction;
-    struct InputTensorDescriptor
-    {
-        struct Config
-        {
-            ckb::TensorLayout layout;
-            ckb::DataType data_type;
-            ckb::DataType compute_type;
-        } config;
-    } input;
-
-    struct WeightTensorDescriptor
-    {
-        struct Config
-        {
-            ckb::TensorLayout layout;
-            ckb::DataType data_type;
-            ckb::DataType compute_type;
-        } config;
-    } weight;
-
-    struct OutputTensorDescriptor
-    {
-        struct Config
-        {
-            ckb::TensorLayout layout;
-            ckb::DataType data_type;
-            ckb::DataType compute_type;
-        } config;
-    } output;
-    ckb::DataType data_type;
-    ckb::DataType accumulation_data_type;
-};
-
-
-
-// Struct to hold both signature and algorithm
-struct XdlInstance
-{
-    XdlSignature signature;
-    XdlAlgorithm algorithm;
-};
-
-// V3 Algorithm with additional pipeline configuration
-struct XdlV3Algorithm
-{
-    using ConvSpecial = ckb::ConvSpecialization;
-    using GemmSpecial = ckb::GemmSpecialization;
-    using PipeSched   = ckb::PipelineScheduler;
-
-    struct ThreadBlock
-    {
-        std::size_t block_size;
-        struct TileSize
-        {
-            std::size_t m;
-            std::size_t n;
-            std::size_t k;
-        } tile_size;
-    } thread_block;
-
-    struct GridwiseGemm
-    {
-        std::size_t ak1;
-        std::size_t bk1;
-        struct XdlParams
-        {
-            std::size_t m_per_xdl      = 16;
-            std::size_t n_per_xdl      = 16;
-            std::size_t m_xdl_per_wave = 4;
-            std::size_t n_xdl_per_wave = 1;
-        } xdl_params;
-    } gridwise_gemm;
-
-    struct TransferABC
-    {
-        struct TransferAB
-        {
-            struct BlockTransfer
-            {
-                std::size_t k0;
-                std::size_t m_n;
-                std::size_t k1;
-            } block_transfer;
-            struct LdsTransfer
-            {
-                std::size_t src_vector_dim;
-                std::size_t src_scalar_per_vector;
-                std::size_t lds_dst_scalar_per_vector;
-                bool is_direct_load;
-                bool lds_padding;
-            } lds_transfer;
-            struct BlockTransferAccessOrder
-            {
-                std::array<size_t, 3> order{0, 2, 1};
-            } block_transfer_access_order;
-            struct SrcAccessOrder
-            {
-                std::array<size_t, 3> order{0, 2, 1};
-            } src_access_order;
-        };
-        TransferAB a;
-        TransferAB b;
-        struct TransferC
-        {
-            struct ThreadClusterDims
-            {
-                std::size_t m_block;
-                std::size_t m_wave_per_xdl;
-                std::size_t n_block;
-                std::size_t n_wave_per_xdl;
-            } thread_cluster_dims;
-            struct Epilogue
-            {
-                std::size_t m_xdl_per_wave_per_shuffle;
-                std::size_t n_per_wave_per_shuffle;
-                std::size_t scalar_per_vector;
-            } epilogue;
-        } c;
-    } transfer;
-
-    ConvSpecial fwd_specialization;
-    GemmSpecial gemm_specialization;
-    std::size_t num_gemm_k_prefetch_stages;
-    std::size_t num_conv_groups_to_merge;
-    
-    // V3-specific: BlockGemmPipelineDescriptor
-    struct BlockGemmPipelineDescriptor
-    {
-        ckb::PipelineScheduler scheduler;
-        ckb::PipelineVersion pipeline_version;
-    } block_gemm_pipeline;
-
-    static_assert(ckb::BlockGemmPipelineDescriptor<BlockGemmPipelineDescriptor>);
-    
-    bool direct_load;
-};
-
-static_assert(ckb::factory::FwdXdlV3Algorithm<XdlV3Algorithm>);
-
-// V3 Instance struct
-struct XdlV3Instance
-{
-    XdlSignature signature;
-    XdlV3Algorithm algorithm;
-};
-
-template <auto KernelDescriptor>
-constexpr void instantiate_kernel(std::vector<BaseOperatorPtr>& kernels)
-{
-    using Builder = ckb::ConvBuilder<KernelDescriptor.signature, KernelDescriptor.algorithm>;
-    do_builder_checks<Builder>();
-
-    kernels.push_back(std::make_unique<typename Builder::Instance>());
-}
-
-template <typename T, T... values>
-constexpr void build_kernels_helper(std::vector<BaseOperatorPtr>& kernels)
-{
-    std::array<BaseOperatorPtr, sizeof...(values)> result{};
-    ((instantiate_kernel<values>(kernels)), ...);
-}
-
-template <typename T, std::size_t N, std::array<T, N> arr, std::size_t... I>
-constexpr void build_kernels_impl(std::vector<BaseOperatorPtr>& kernels, std::index_sequence<I...>)
-{
-    build_kernels_helper<T, arr[I]...>(kernels);
-}
-
-template <typename ArrayType>
-struct array_traits;
-
-template <typename T, std::size_t N>
-struct array_traits<std::array<T, N>>
-{
-    using value_type                  = T;
-    static constexpr std::size_t size = N;
-};
-
-template <auto arr>
-constexpr void build_kernels(std::vector<BaseOperatorPtr>& kernels)
-{
-    using T                 = typename array_traits<decltype(arr)>::value_type;
-    constexpr std::size_t N = array_traits<decltype(arr)>::size;
-    build_kernels_impl<T, N, arr>(kernels, std::make_index_sequence<N>{});
-}
-
-template <typename T, std::size_t N1, std::size_t N2, std::size_t... I1, std::size_t... I2>
-constexpr std::array<T, N1 + N2> concat2_impl(const std::array<T, N1>& a,
-                                              const std::array<T, N2>& b,
-                                              std::index_sequence<I1...>,
-                                              std::index_sequence<I2...>)
-{
-    return {a[I1]..., b[I2]...};
-}
-
-template <typename T, std::size_t N1, std::size_t N2>
-constexpr std::array<T, N1 + N2> concat2(const std::array<T, N1>& a, const std::array<T, N2>& b)
-{
-    return concat2_impl(a, b, std::make_index_sequence<N1>{}, std::make_index_sequence<N2>{});
-}
-
-// Variadic: concatenate many arrays recursively
-template <typename T, std::size_t N>
-constexpr std::array<T, N> concat(const std::array<T, N>& a)
-{
-    return a;
-}
-
-template <typename T, std::size_t N1, std::size_t N2, std::size_t... Ns>
-constexpr auto
-concat(const std::array<T, N1>& a, const std::array<T, N2>& b, const std::array<T, Ns>&... rest)
-{
-    return concat(concat2(a, b), rest...);
-}
+#include <miopen/ck_builder/instances/xdl_v3.hpp>
+#include <miopen/ck_builder/instances/xdl.hpp>
+#include <miopen/ck_builder/kernel_instantiation.hpp>
 
 // Constexpr function to create XdlInstance from old DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
 // template parameters Parameters are in the same order as the template parameters
@@ -422,7 +110,7 @@ constexpr XdlInstance make_xdl_instance_from_old_params(
                                              a_block_transfer_dst_scalar_per_vector_k1,
                                          .is_direct_load = false,
                                          .lds_padding    = a_block_lds_extra_m},
-                        .block_transfer_access_order = {.order = a_thread_cluster_arrange_order},
+                        .thread_cluster_arrange_order = {.order = a_thread_cluster_arrange_order},
                         .src_access_order = {.order = a_block_transfer_src_access_order}},
                   .b = {.block_transfer = {.k0  = b_thread_cluster_lengths[0],
                                            .m_n = b_thread_cluster_lengths[1],
@@ -434,12 +122,13 @@ constexpr XdlInstance make_xdl_instance_from_old_params(
                                              b_block_transfer_dst_scalar_per_vector_k1,
                                          .is_direct_load = false,
                                          .lds_padding    = b_block_lds_extra_n},
-                        .block_transfer_access_order = {.order = b_thread_cluster_arrange_order},
+                        .thread_cluster_arrange_order = {.order = b_thread_cluster_arrange_order},
                         .src_access_order = {.order = b_block_transfer_src_access_order}},
                   .c = {.thread_cluster_dims = {.m_block        = c_thread_cluster_lengths[0],
                                                 .m_wave_per_xdl = c_thread_cluster_lengths[1],
                                                 .n_block        = c_thread_cluster_lengths[2],
                                                 .n_wave_per_xdl = c_thread_cluster_lengths[3]},
+                                                
                         .epilogue            = {.m_xdl_per_wave_per_shuffle =
                                          c_shuffle_m_xdl_per_wave_per_shuffle,
                                      .n_per_wave_per_shuffle = c_shuffle_n_xdl_per_wave_per_shuffle,
@@ -527,13 +216,9 @@ constexpr XdlV3Instance make_xdl_v3_instance_from_old_params(
                       .weight                 = {.config = {.layout       = weight_layout,
                                             .data_type    = weight_data_type,
                                             .compute_type = weight_compute_type}},
-                      .output                 = {.config =
-                                     {
-                                         .layout       = output_layout,
-                                         .data_type    = output_data_type,
-                                         .compute_type = output_data_type // Output compute type
-                                                                          // same as data type
-                                     }},
+                      .output                 = {.config = {.layout       = output_layout,
+                                            .data_type    = output_data_type,
+                                            .compute_type = output_data_type}},
                       .data_type              = input_data_type,
                       .accumulation_data_type = acc_data_type},
         .algorithm =
@@ -556,7 +241,7 @@ constexpr XdlV3Instance make_xdl_v3_instance_from_old_params(
                                              a_block_transfer_dst_scalar_per_vector_k1,
                                          .is_direct_load = direct_load,
                                          .lds_padding    = a_block_lds_extra_m},
-                        .block_transfer_access_order = {.order = a_thread_cluster_arrange_order},
+                        .thread_cluster_arrange_order = {.order = a_thread_cluster_arrange_order},
                         .src_access_order = {.order = a_block_transfer_src_access_order}},
                   .b = {.block_transfer = {.k0  = b_thread_cluster_lengths[0],
                                            .m_n = b_thread_cluster_lengths[1],
@@ -568,7 +253,7 @@ constexpr XdlV3Instance make_xdl_v3_instance_from_old_params(
                                              b_block_transfer_dst_scalar_per_vector_k1,
                                          .is_direct_load = direct_load,
                                          .lds_padding    = b_block_lds_extra_n},
-                        .block_transfer_access_order = {.order = b_thread_cluster_arrange_order},
+                        .thread_cluster_arrange_order = {.order = b_thread_cluster_arrange_order},
                         .src_access_order = {.order = b_block_transfer_src_access_order}},
                   .c = {.thread_cluster_dims = {.m_block        = c_thread_cluster_lengths[0],
                                                 .m_wave_per_xdl = c_thread_cluster_lengths[1],
@@ -582,7 +267,8 @@ constexpr XdlV3Instance make_xdl_v3_instance_from_old_params(
              .gemm_specialization        = gemm_specialization,
              .num_gemm_k_prefetch_stages = num_gemm_k_prefetch_stage,
              .num_conv_groups_to_merge   = num_conv_groups_to_merge,
-             .block_gemm_pipeline = {.scheduler = loop_scheduler, .pipeline_version = pipeline_version},
+             .block_gemm_pipeline        = {.scheduler        = loop_scheduler,
+                                     .pipeline_version = pipeline_version},
              .direct_load                = direct_load}};
 }
 
@@ -847,6 +533,12 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_16x16_instance_data(
     // library/include/ck/library/tensor_operation_instance/gpu/grouped_conv_fwd/device_grouped_conv_fwd_xdl_instance.hpp
     // device_grouped_conv_fwd_xdl_f32_16x16_instances
 
+    return std::array<XdlInstance,0>{};
+
+    // TODO - Investigate why a_block_transfer_dst_scalar_per_vector_k1 = 8 is invalid according to CK
+    // builder even though we are already creating kernels with it
+    
+    /*
     // clang-format off
     std::array result = {
         // Instance 1
@@ -885,6 +577,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_16x16_instance_data(
     // clang-format on
 
     return result;
+    */
 }
 
 constexpr auto create_device_grouped_conv_fwd_xdl_f32_comp_instance_data(
@@ -898,6 +591,11 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_comp_instance_data(
     // library/include/ck/library/tensor_operation_instance/gpu/grouped_conv_fwd/device_grouped_conv_fwd_xdl_comp_instance.hpp
     // device_grouped_conv_fwd_xdl_f32_comp_instances
 
+    return std::array<XdlV3Instance, 0>{};
+
+    // TODO - Investigate why c_block_transfer_scalar_per_vector = 8 is invalid according to CK
+    // builder even though we are already creating kernels with it
+    /*
     // clang-format off
     std::array result = {
         // Instance 1: Intrawave v4
@@ -911,7 +609,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_comp_instance_data(
             1, 1, {1, 32, 1, 8}, 8,
             FP32, FP32,
             ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V4),
-        
+
         // Instance 2: Intrawave v3
         make_xdl_v3_instance_from_old_params(
             spatialDim, inLayout, weiLayout, outLayout,
@@ -923,7 +621,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_comp_instance_data(
             1, 1, {1, 32, 1, 8}, 8,
             FP32, FP32,
             ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V3),
-        
+
         // Instance 3: Intrawave v5
         make_xdl_v3_instance_from_old_params(
             spatialDim, inLayout, weiLayout, outLayout,
@@ -935,7 +633,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_comp_instance_data(
             1, 1, {1, 32, 1, 8}, 8,
             FP32, FP32,
             ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V5),
-        
+
         // Instance 4: Interwave v1
         make_xdl_v3_instance_from_old_params(
             spatialDim, inLayout, weiLayout, outLayout,
@@ -951,6 +649,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_comp_instance_data(
     // clang-format on
 
     return result;
+    */
 }
 
 constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
@@ -1022,6 +721,8 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
             FP32, FP32,
             ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V2),
         
+            // TODO - Investigate why c_block_transfer_scalar_per_vector = 8 is invalid according to CK builder even though we are already creating kernels with it
+            /*
         make_xdl_v3_instance_from_old_params(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
@@ -1032,6 +733,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
             1, 1, {1, 16, 1, 8}, 8,
             FP32, FP32,
             ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V2),
+            */
         
         // Memory friendly instances (v2)
         make_xdl_v3_instance_from_old_params(
@@ -1163,6 +865,8 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_inter_instance_data(
             FP32, FP32,
             ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2),
         
+        // TODO - Investigate why c_block_transfer_scalar_per_vector = 8 is invalid according to CK builder even though we are already creating kernels with it
+        /*
         make_xdl_v3_instance_from_old_params(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
@@ -1173,6 +877,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_inter_instance_data(
             1, 1, {1, 16, 1, 8}, 8,
             FP32, FP32,
             ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2),
+        */
         
         // Memory friendly instances (v2)
         make_xdl_v3_instance_from_old_params(
@@ -1245,6 +950,11 @@ constexpr auto create_device_grouped_conv_fwd_xdl_merged_groups_f32_instance_dat
     // Adapted from the composable_kernel project, file:
     // library/include/ck/library/tensor_operation_instance/gpu/grouped_conv_fwd/device_grouped_conv_fwd_xdl_merged_groups_instance.hpp
 
+    return std::array<XdlInstance, 0>{};
+
+    // TODO: These instances have a a_block_transfer_src_vector_dim value of 1, which is invalid
+    // according to the CK Builder constraints
+    /*
     // clang-format off
     std::array result = {
         // Instance 1: NumGroupsToMerge = 8
@@ -1257,7 +967,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_merged_groups_f32_instance_dat
             {4, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 1, 4, true,
             1, 1, {1, 16, 1, 4}, 1,
             FP32, FP32, ckb::PipelineScheduler::DEFAULT, 8),
-        
+
         // Instance 2: NumGroupsToMerge = 16
         make_xdl_instance_from_old_params(
             spatialDim, inLayout, weiLayout, outLayout,
@@ -1268,7 +978,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_merged_groups_f32_instance_dat
             {4, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 1, 4, true,
             1, 1, {1, 16, 1, 4}, 1,
             FP32, FP32, ckb::PipelineScheduler::DEFAULT, 16),
-        
+
         // Instance 3: NumGroupsToMerge = 32
         make_xdl_instance_from_old_params(
             spatialDim, inLayout, weiLayout, outLayout,
@@ -1283,6 +993,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_merged_groups_f32_instance_dat
     // clang-format on
 
     return result;
+    */
 }
 
 constexpr auto create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_instance_data()
@@ -1444,13 +1155,13 @@ struct DeviceOperationInstanceFactory<DeviceOpGFWdDefaultFloat>
         constexpr auto xdl16x16InstanceData =
             create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_16x16_instance_data();
 
-        constexpr auto xdlCompInstanceData =
+        constexpr auto xdlV3CompInstanceData =
             create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_comp_instance_data();
 
-        constexpr auto xdlMemIntraInstanceData =
+        constexpr auto xdlV3MemIntraInstanceData =
             create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_intra_instance_data();
 
-        constexpr auto xdlMemInterInstanceData =
+        constexpr auto xdlV3MemInterInstanceData =
             create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_inter_instance_data();
 
         constexpr auto xdlAllInstanceData =
@@ -1458,7 +1169,7 @@ struct DeviceOperationInstanceFactory<DeviceOpGFWdDefaultFloat>
         build_kernels<xdlAllInstanceData>(instances);
 
         constexpr auto xdlV3AllInstanceData =
-            concat(xdlCompInstanceData, xdlMemIntraInstanceData, xdlMemInterInstanceData);
+            concat(xdlV3CompInstanceData, xdlV3MemIntraInstanceData, xdlV3MemInterInstanceData);
         build_kernels<xdlV3AllInstanceData>(instances);
 
         return instances;

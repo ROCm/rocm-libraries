@@ -251,6 +251,7 @@ TEST(CKBuilderXdl, CreateExistingInstance)
     }
 }
 
+/*
 TEST(CKBuilderXdl, StaticInstance)
 {
     constexpr XdlInstance instance = miopen::ck_builder::make_instance();
@@ -285,3 +286,4 @@ TEST(CKBuilderXdl, StaticInstance)
         << "Instance string " << builderKernelInstanceString
         << " not found in list of instances returned by factory.";
 }
+*/
