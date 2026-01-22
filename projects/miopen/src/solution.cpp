@@ -492,10 +492,8 @@ void Solution::RunImpl(const Handle& handle,
 
     const softmax::ProblemDescription problem_description = problem_casted.AsSoftmax();
 
-    float alpha                        = softmax_desc.GetAlpha();
-    float beta                         = softmax_desc.GetBeta();
-    miopenSoftmaxAlgorithm_t algorithm = softmax_desc.GetAlgorithm();
-    miopenSoftmaxMode_t mode           = softmax_desc.GetMode();
+    float alpha = softmax_desc.GetAlpha();
+    float beta  = softmax_desc.GetBeta();
 
     const auto invoke_ctx = [&]() -> AnyInvokeParams {
         switch(problem_casted.GetDirection())
@@ -505,7 +503,7 @@ void Solution::RunImpl(const Handle& handle,
             auto y = get_input_checked(miopenTensorSoftmaxY, "miopenTensorSoftmaxY");
 
             return softmax::InvokeParams(
-                &alpha, &beta, *x.descriptor, x.buffer, *y.descriptor, y.buffer, algorithm, mode);
+                &alpha, &beta, *x.descriptor, x.buffer, *y.descriptor, y.buffer);
         }
         case miopenProblemDirectionBackward: {
             auto y  = get_input_checked(miopenTensorSoftmaxY, "miopenTensorSoftmaxY");
@@ -519,9 +517,7 @@ void Solution::RunImpl(const Handle& handle,
                                          *dy.descriptor,
                                          dy.buffer,
                                          *dx.descriptor,
-                                         dx.buffer,
-                                         algorithm,
-                                         mode);
+                                         dx.buffer);
         }
 
         case miopenProblemDirectionBackwardWeights:

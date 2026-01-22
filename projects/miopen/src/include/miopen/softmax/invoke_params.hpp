@@ -39,15 +39,8 @@ struct InvokeParams : public miopen::InvokeParams
                  const TensorDescriptor& xDesc_,
                  ConstData_t x_,
                  const TensorDescriptor& yDesc_,
-                 Data_t y_,
-                 miopenSoftmaxAlgorithm_t algorithm_,
-                 miopenSoftmaxMode_t mode_,
-                 int x_offset_ = 0,
-                 int y_offset_ = 0)
-        : algorithm(algorithm_),
-          mode(mode_),
-
-          xdxDesc(xDesc_),
+                 Data_t y_)
+        : xdxDesc(xDesc_),
           x(x_),
           dx(nullptr),
 
@@ -55,11 +48,7 @@ struct InvokeParams : public miopen::InvokeParams
           forward_y(y_),
           backward_y(nullptr),
 
-          dy(nullptr),
-
-          xdx_offset(x_offset_),
-          y_offset(y_offset_),
-          dy_offset(0)
+          dy(nullptr)
     {
         InitializeAlphaBeta(alpha_, beta_);
     }
@@ -71,16 +60,8 @@ struct InvokeParams : public miopen::InvokeParams
                  const TensorDescriptor& dyDesc_,
                  ConstData_t dy_,
                  const TensorDescriptor& dxDesc_,
-                 Data_t dx_,
-                 miopenSoftmaxAlgorithm_t algorithm_,
-                 miopenSoftmaxMode_t mode_,
-                 int y_offset_  = 0,
-                 int dy_offset_ = 0,
-                 int dx_offset_ = 0)
-        : algorithm(algorithm_),
-          mode(mode_),
-
-          xdxDesc(dxDesc_),
+                 Data_t dx_)
+        : xdxDesc(dxDesc_),
           x(nullptr),
           dx(dx_),
 
@@ -89,11 +70,7 @@ struct InvokeParams : public miopen::InvokeParams
           backward_y(y_),
 
           dyDesc(dyDesc_),
-          dy(dy_),
-
-          xdx_offset(dx_offset_),
-          y_offset(y_offset_),
-          dy_offset(dy_offset_)
+          dy(dy_)
     {
         InitializeAlphaBeta(alpha_, beta_);
     }
@@ -104,8 +81,6 @@ struct InvokeParams : public miopen::InvokeParams
 public:
     float alpha;
     float beta;
-    miopenSoftmaxAlgorithm_t algorithm;
-    miopenSoftmaxMode_t mode;
 
     // xdxDesc is used for both forward and backward
     TensorDescriptor xdxDesc;
@@ -119,11 +94,6 @@ public:
     // backward specific part
     TensorDescriptor dyDesc;
     ConstData_t dy;
-
-    // xdx_offset is used for both forward and backward
-    int xdx_offset;
-    int y_offset;
-    int dy_offset;
 
 private:
     void InitializeAlphaBeta(const void* alpha_, const void* beta_)
