@@ -3,13 +3,8 @@
 
 #include <gtest/gtest.h>
 
-#include <half/half.hpp>
-#include <miopen/handle.hpp>
-#include <miopen/miopen.h>
 #include <miopen/convolution.hpp>
-#include <miopen/tensor.hpp>
 #include <miopen/tensor_layout.hpp>
-#include <miopen/bfloat16.hpp>
 
 #include "../cpu_conv.hpp"
 #include "../random.hpp"
