@@ -50,12 +50,12 @@ if(ORIGAMI_ENABLE_PYTHON)
     
     string(APPEND _ctest_content [=[
 # Python tests
-add_test(origami_python_test "${Python_EXECUTABLE}" "origami_test.py")
-add_test(origami_python_grid_test "${Python_EXECUTABLE}" "origami_grid_test.py")
+add_test(origami_python_test python "origami_test.py")
+add_test(origami_python_grid_test python "origami_grid_test.py")
 
 set_tests_properties(origami_python_test origami_python_grid_test PROPERTIES
     LABELS "python"
-    ENVIRONMENT "LD_LIBRARY_PATH=\${ORIGAMI_INSTALL_LIBDIR}:\$ENV{LD_LIBRARY_PATH};PYTHONPATH=\${ORIGAMI_INSTALL_PYTHON_BINDIR}:\$ENV{PYTHONPATH}"
+    ENVIRONMENT "LD_LIBRARY_PATH=${ORIGAMI_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH};PYTHONPATH=${ORIGAMI_INSTALL_PYTHON_BINDIR}:$ENV{PYTHONPATH}"
 )
 ]=])
     
