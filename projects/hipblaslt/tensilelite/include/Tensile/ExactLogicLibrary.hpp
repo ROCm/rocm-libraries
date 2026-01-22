@@ -117,6 +117,12 @@ namespace TensileLite
                         rv->tag = MySolution::MatchingTag::Equal;
 
                     if(rv)
+                    {
+                        if(Debug::Instance().printDeviceSelection())
+                        {
+                            std::cout << "  Solution found: " << rv->name()
+                                      << " [MatchingTag: " << rv->matchingTag() << "]" << std::endl;
+                        }
                         return rv;
                 }
             }

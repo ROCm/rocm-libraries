@@ -2542,7 +2542,8 @@ namespace TensileLite
     {
         calculateAutoGSU(problem, &hardware);
         if(Debug::Instance().printWinningKernelName())
-            std::cout << "Running kernel: " << this->KernelName() << std::endl;
+            std::cout << "Running kernel: " << this->KernelName()
+                      << " [MatchingTag: " << this->matchingTag() << "]" << std::endl;
 
         // retreive alpha/beta type set via setAlpha/BetaType()
         auto alphaType = problem.alphaType();
@@ -2692,7 +2693,8 @@ namespace TensileLite
         hipStream_t                                      stream) const
     {
         if(Debug::Instance().printWinningKernelName())
-            std::cout << "Running kernel: " << this->KernelName() << std::endl;
+            std::cout << "Running kernel: " << this->KernelName()
+                      << " [MatchingTag: " << this->matchingTag() << "]" << std::endl;
 
         // retreive alpha/beta type set via setAlpha/BetaType()
         auto alphaType = problems[0].alphaType();
