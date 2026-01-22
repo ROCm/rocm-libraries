@@ -71,7 +71,12 @@ void PerformanceConfigLayernorm::HeuristicInit(const miopen::layernorm::ProblemD
     {
     case miopenHalf:
     case miopenFloat:
-    case miopenBFloat16: local_size = 1; break;
+    case miopenBFloat16:
+        local_size = start_local_size;
+        vectorized = start_vectorized;
+        separate_stride = start_separate_stride;
+        stride_in_local_size = start_stride_in_local_size;
+        break;
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
