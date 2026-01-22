@@ -9,7 +9,16 @@ project(origami-python VERSION 0.1.0 LANGUAGES CXX)
 find_package(Python 3.9 COMPONENTS Interpreter Development.Module REQUIRED)
 
 option(ORIGAMI_BUILD_FROM_SOURCE "Build origami from source instead of finding installed version" ON)
-if(ORIGAMI_BUILD_FROM_SOURCE)
+set(ORIGAMI_TARGET "")
+if(TARGET roc::origami)
+    set(ORIGAMI_TARGET roc::origami)
+elseif(TARGET origami)
+    set(ORIGAMI_TARGET origami)
+endif()
+
+if(ORIGAMI_TARGET)
+    # Origami already exists in this CMake tree; reuse it to avoid duplicate targets.
+elseif(ORIGAMI_BUILD_FROM_SOURCE)
     set(ORIGAMI_ENABLE_PYTHON OFF CACHE BOOL "Build origami python bindings" FORCE)
     add_subdirectory("${PROJECT_SOURCE_DIR}/.." origami_build EXCLUDE_FROM_ALL)
     set(ORIGAMI_TARGET roc::origami)
@@ -20,19 +29,33 @@ endif()
 
 find_package(hip REQUIRED)
 
+include(FetchContent)
+FetchContent_Declare(
+    nanobind
+    GIT_REPOSITORY https://github.com/wjakob/nanobind.git
+    GIT_TAG        v2.0.0
+)
+FetchContent_MakeAvailable(nanobind)
+
 find_package(nanobind CONFIG REQUIRED)
 
 if(SKBUILD)
   # When building a wheel via pip/scikit-build-core
   set(PYTHON_INSTALL_DIR "${SKBUILD_PLATLIB_DIR}/origami")
 else()
-  # When building standalone with CMake
-  set(PYTHON_INSTALL_DIR "${Python_SITEARCH}/origami")
+  # When building standalone with CMake, install under the CMake prefix.
+  include(GNUInstallDirs)
+  set(PYTHON_INSTALL_DIR
+      "${CMAKE_INSTALL_LIBDIR}/python${Python_VERSION_MAJOR}.${Python_VERSION_MINOR}/site-packages/origami"
+  )
 endif()
 
 nanobind_add_module(_pyorigami "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/bindings.cpp")
 
 set_target_properties(_pyorigami PROPERTIES OUTPUT_NAME "origami")
+
+# CI expects this target name for building the Python bindings.
+add_custom_target(origami_python DEPENDS _pyorigami)
 
 # Link against origami library and HIP
 target_link_libraries(_pyorigami PRIVATE ${ORIGAMI_TARGET} hip::host)
