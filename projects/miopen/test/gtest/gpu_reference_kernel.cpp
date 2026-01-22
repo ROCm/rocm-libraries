@@ -1,22 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <cstdlib>
-#include <ctime>
-#include <functional>
 #include <gtest/gtest.h>
+
 #include <half/half.hpp>
-#include <numeric>
 #include <miopen/handle.hpp>
 #include <miopen/miopen.h>
 #include <miopen/convolution.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/tensor_layout.hpp>
 #include <miopen/bfloat16.hpp>
-#include <sstream>
-#include <type_traits>
-#include <utility>
-#include <vector>
 
 #include "../cpu_conv.hpp"
 #include "../random.hpp"
@@ -348,34 +341,20 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
 
     void Run()
     {
-        auto const& p = GetParam();
-        int n         = p.n;
-        int wi        = p.wi;
-        int hi        = p.hi;
-        int c         = p.c;
-        int k         = p.k;
-        int fx        = p.fx;
-        int fy        = p.fy;
-        int px        = p.px;
-        int py        = p.py;
-        int sx        = p.sx;
-        int sy        = p.sy;
-        int dx        = p.dx;
-        int dy        = p.dy;
-        int g         = p.g;
+        auto const& param = GetParam();
         miopenConvolutionDescriptor_t convDesc;
         miopenTensorDescriptor_t inDesc, weiDesc, outDesc;
 
-        int pads[]      = {py, px};
-        int strides[]   = {sy, sx};
-        int dilations[] = {dy, dx};
-        int ho          = conv_out_size(hi, py, dy, fy, sy);
-        int wo          = conv_out_size(wi, px, dx, fx, sx);
-        int c_per_group = c / g;
+        int pads[]      = {param.py, param.px};
+        int strides[]   = {param.sy, param.sx};
+        int dilations[] = {param.dy, param.dx};
+        int ho          = conv_out_size(param.hi, param.py, param.dy, param.fy, param.sy);
+        int wo          = conv_out_size(param.wi, param.px, param.dx, param.fx, param.sx);
+        int c_per_group = param.c / param.g;
 
-        std::vector<int> in_len({n, c, hi, wi});
-        std::vector<int> wei_len({k, c_per_group, fy, fx});
-        std::vector<int> out_len({n, k, ho, wo});
+        std::vector<int> in_len({param.n, param.c, param.hi, param.wi});
+        std::vector<int> wei_len({param.k, c_per_group, param.fy, param.fx});
+        std::vector<int> out_len({param.n, param.k, ho, wo});
 
         std::vector<int> in_strides;
         std::vector<int> wei_strides;
@@ -399,26 +378,14 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
         auto in_sz  = in.data.size();
         auto wei_sz = wei.data.size();
         auto out_sz = out.data.size();
-
-#if MIOPEN_BACKEND_OPENCL
-        cl_context ctx;
-        clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-        cl_int status = CL_SUCCESS;
-        cl_mem in_dev =
-            clCreateBuffer(ctx, CL_MEM_READ_WRITE, sizeof(TRef) * in_sz, nullptr, &status);
-        cl_mem wei_dev =
-            clCreateBuffer(ctx, CL_MEM_READ_WRITE, sizeof(TRef) * wei_sz, nullptr, nullptr);
-        cl_mem out_dev =
-            clCreateBuffer(ctx, CL_MEM_READ_WRITE, sizeof(Tout) * out_sz, nullptr, nullptr);
-        ASSERT_EQ(status, CL_SUCCESS);
-#elif MIOPEN_BACKEND_HIP
         void* in_dev;
         void* wei_dev;
         void* out_dev;
+
         ASSERT_EQ(hipMalloc(&in_dev, sizeof(TRef) * in_sz), hipSuccess);
         ASSERT_EQ(hipMalloc(&wei_dev, sizeof(TRef) * wei_sz), hipSuccess);
         ASSERT_EQ(hipMalloc(&out_dev, sizeof(Tout) * out_sz), hipSuccess);
-#endif
+
         ASSERT_EQ(miopenCreateConvolutionDescriptor(&convDesc), miopenStatusSuccess);
         ASSERT_EQ(miopenInitConvolutionNdDescriptor(convDesc,
                                                     2,
@@ -427,7 +394,7 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
                                                     static_cast<int*>(dilations),
                                                     miopenConvolution),
                   miopenStatusSuccess);
-        ASSERT_EQ(miopenSetConvolutionGroupCount(convDesc, g), miopenStatusSuccess);
+        ASSERT_EQ(miopenSetConvolutionGroupCount(convDesc, param.g), miopenStatusSuccess);
 
         ASSERT_EQ(miopenCreateTensorDescriptor(&inDesc), miopenStatusSuccess);
         ASSERT_EQ(miopenCreateTensorDescriptor(&weiDesc), miopenStatusSuccess);
@@ -454,20 +421,6 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
             rand_tensor_integer(wei);
             /// \ref copy_non_packed_output_before_convolution
             rand_tensor_integer(out);
-#if MIOPEN_BACKEND_OPENCL
-            status = clEnqueueWriteBuffer(
-                q, in_dev, CL_TRUE, 0, sizeof(TRef) * in_sz, in.data.data(), 0, nullptr, nullptr);
-            status |= clEnqueueWriteBuffer(q,
-                                           wei_dev,
-                                           CL_TRUE,
-                                           0,
-                                           sizeof(TRef) * wei_sz,
-                                           wei.data.data(),
-                                           0,
-                                           nullptr,
-                                           nullptr);
-            ASSERT_EQ(status, CL_SUCCESS);
-#elif MIOPEN_BACKEND_HIP
             ASSERT_EQ(
                 hipMemcpy(in_dev, in.data.data(), sizeof(TRef) * in_sz, hipMemcpyHostToDevice),
                 hipSuccess);
@@ -485,7 +438,6 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
             ASSERT_EQ(
                 hipMemcpy(out_dev, out.data.data(), sizeof(Tout) * out_sz, hipMemcpyHostToDevice),
                 hipSuccess);
-#endif
             cpu_convolution_forward(miopen::deref(convDesc).GetSpatialDimension(),
                                     in,
                                     wei,
@@ -525,27 +477,6 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
             rand_tensor_integer(wei);
             /// \ref copy_non_packed_output_before_convolution
             rand_tensor_integer(in);
-#if MIOPEN_BACKEND_OPENCL
-            status = clEnqueueWriteBuffer(q,
-                                          out_dev,
-                                          CL_TRUE,
-                                          0,
-                                          sizeof(TRef) * out_sz,
-                                          out.data.data(),
-                                          0,
-                                          nullptr,
-                                          nullptr);
-            status |= clEnqueueWriteBuffer(q,
-                                           wei_dev,
-                                           CL_TRUE,
-                                           0,
-                                           sizeof(TRef) * wei_sz,
-                                           wei.data.data(),
-                                           0,
-                                           nullptr,
-                                           nullptr);
-            ASSERT_EQ(status, CL_SUCCESS);
-#elif MIOPEN_BACKEND_HIP
             /// \ref copy_non_packed_output_before_convolution
             ASSERT_EQ(
                 hipMemcpy(in_dev, in.data.data(), sizeof(TRef) * in_sz, hipMemcpyHostToDevice),
@@ -556,7 +487,6 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
             ASSERT_EQ(
                 hipMemcpy(wei_dev, wei.data.data(), sizeof(TRef) * wei_sz, hipMemcpyHostToDevice),
                 hipSuccess);
-#endif
             cpu_convolution_backward_data(miopen::deref(convDesc).GetSpatialDimension(),
                                           in,
                                           wei,
@@ -595,20 +525,6 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
             rand_tensor_integer(out);
             /// \ref copy_non_packed_output_before_convolution
             rand_tensor_integer(wei);
-#if MIOPEN_BACKEND_OPENCL
-            status |= clEnqueueWriteBuffer(
-                q, in_dev, CL_TRUE, 0, sizeof(TRef) * in_sz, in.data.data(), 0, nullptr, nullptr);
-            status |= clEnqueueWriteBuffer(q,
-                                           out_dev,
-                                           CL_TRUE,
-                                           0,
-                                           sizeof(TRef) * out_sz,
-                                           out.data.data(),
-                                           0,
-                                           nullptr,
-                                           nullptr);
-            ASSERT_EQ(status, CL_SUCCESS);
-#elif MIOPEN_BACKEND_HIP
             ASSERT_EQ(
                 hipMemcpy(in_dev, in.data.data(), sizeof(TRef) * in_sz, hipMemcpyHostToDevice),
                 hipSuccess);
@@ -619,7 +535,6 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
             ASSERT_EQ(
                 hipMemcpy(out_dev, out.data.data(), sizeof(Tout) * out_sz, hipMemcpyHostToDevice),
                 hipSuccess);
-#endif
             cpu_convolution_backward_weight(miopen::deref(convDesc).GetSpatialDimension(),
                                             in,
                                             wei,
@@ -654,10 +569,11 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
             valid_result = verify_tensor(wei_host, wei);
         }
 
-        std::cout << "n:" << n << ", c:" << c << ", hi:" << hi << ", wi:" << wi << ", k:" << k
-                  << ", ho:" << ho << ", wo:" << wo << ", fy:" << fy << ",fx:" << fx
-                  << ", py:" << py << ", px:" << px << ", sy:" << sy << ", sx:" << sx
-                  << ", dy:" << dy << ",dx:" << dx << ", g:" << g
+        std::cout << "n:" << param.n << ", c:" << param.c << ", hi:" << param.hi
+                  << ", wi:" << param.wi << ", k:" << param.k << ", ho:" << ho << ", wo:" << wo
+                  << ", fy:" << param.fy << ",fx:" << param.fx << ", py:" << param.py
+                  << ", px:" << param.px << ", sy:" << param.sy << ", sx:" << param.sx
+                  << ", dy:" << param.dy << ",dx:" << param.dx << ", g:" << param.g
                   << ", dir:" << direction_to_string(direction)
                   << ", type:" << miopen_type_to_string(miopen_type<TRef>{})
                   << ", layout:" << layout_string << ", valid:" << valid_result << std::endl;
@@ -692,22 +608,22 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
 
     void Run()
     {
-        auto [n, di, wi, hi, c, k, fz, fx, fy, pz, px, py, sz, sx, sy, dz, dx, dy, g] = GetParam();
-
         miopenConvolutionDescriptor_t convDesc;
         miopenTensorDescriptor_t inDesc, weiDesc, outDesc;
 
-        int pads[]      = {pz, py, px};
-        int strides[]   = {sz, sy, sx};
-        int dilations[] = {dz, dy, dx};
-        int ho          = conv_out_size(hi, py, dy, fy, sy);
-        int wo          = conv_out_size(wi, px, dx, fx, sx);
-        int do_         = conv_out_size(di, pz, dz, fz, sz);
-        int c_per_group = c / g;
+        auto const& param = GetParam();
 
-        std::vector<int> in_len({n, c, di, hi, wi});
-        std::vector<int> wei_len({k, c_per_group, fz, fy, fx});
-        std::vector<int> out_len({n, k, do_, ho, wo});
+        int pads[]      = {param.pz, param.py, param.px};
+        int strides[]   = {param.sz, param.sy, param.sx};
+        int dilations[] = {param.dz, param.dy, param.dx};
+        int ho          = conv_out_size(param.hi, param.py, param.dy, param.fy, param.sy);
+        int wo          = conv_out_size(param.wi, param.px, param.dx, param.fx, param.sx);
+        int do_         = conv_out_size(param.di, param.pz, param.dz, param.fz, param.sz);
+        int c_per_group = param.c / param.g;
+
+        std::vector<int> in_len({param.n, param.c, param.di, param.hi, param.wi});
+        std::vector<int> wei_len({param.k, c_per_group, param.fz, param.fy, param.fx});
+        std::vector<int> out_len({param.n, param.k, do_, ho, wo});
 
         std::vector<int> in_strides;
         std::vector<int> wei_strides;
@@ -731,19 +647,6 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
         auto in_sz  = in.data.size();
         auto wei_sz = wei.data.size();
         auto out_sz = out.data.size();
-
-#if MIOPEN_BACKEND_OPENCL
-        cl_context ctx;
-        clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-        cl_int status = CL_SUCCESS;
-        cl_mem in_dev =
-            clCreateBuffer(ctx, CL_MEM_READ_WRITE, sizeof(TRef) * in_sz, nullptr, &status);
-        cl_mem wei_dev =
-            clCreateBuffer(ctx, CL_MEM_READ_WRITE, sizeof(TRef) * wei_sz, nullptr, nullptr);
-        cl_mem out_dev =
-            clCreateBuffer(ctx, CL_MEM_READ_WRITE, sizeof(Tout) * out_sz, nullptr, nullptr);
-        ASSERT_EQ(status, CL_SUCCESS);
-#elif MIOPEN_BACKEND_HIP
         void* in_dev;
         void* wei_dev;
         void* out_dev;
@@ -751,7 +654,6 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
         ASSERT_EQ(hipMalloc(&in_dev, sizeof(TRef) * in_sz), hipSuccess);
         ASSERT_EQ(hipMalloc(&wei_dev, sizeof(TRef) * wei_sz), hipSuccess);
         ASSERT_EQ(hipMalloc(&out_dev, sizeof(Tout) * out_sz), hipSuccess);
-#endif
         ASSERT_EQ(miopenCreateConvolutionDescriptor(&convDesc), miopenStatusSuccess);
         ASSERT_EQ(miopenInitConvolutionNdDescriptor(convDesc,
                                                     3,
@@ -760,7 +662,7 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
                                                     static_cast<int*>(dilations),
                                                     miopenConvolution),
                   miopenStatusSuccess);
-        ASSERT_EQ(miopenSetConvolutionGroupCount(convDesc, g), miopenStatusSuccess);
+        ASSERT_EQ(miopenSetConvolutionGroupCount(convDesc, param.g), miopenStatusSuccess);
 
         ASSERT_EQ(miopenCreateTensorDescriptor(&inDesc), miopenStatusSuccess);
         ASSERT_EQ(miopenCreateTensorDescriptor(&weiDesc), miopenStatusSuccess);
@@ -787,20 +689,6 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
             rand_tensor_integer(wei);
             /// \ref copy_non_packed_output_before_convolution
             rand_tensor_integer(out);
-#if MIOPEN_BACKEND_OPENCL
-            status = clEnqueueWriteBuffer(
-                q, in_dev, CL_TRUE, 0, sizeof(TRef) * in_sz, in.data.data(), 0, nullptr, nullptr);
-            status |= clEnqueueWriteBuffer(q,
-                                           wei_dev,
-                                           CL_TRUE,
-                                           0,
-                                           sizeof(TRef) * wei_sz,
-                                           wei.data.data(),
-                                           0,
-                                           nullptr,
-                                           nullptr);
-            ASSERT_EQ(status, CL_SUCCESS);
-#elif MIOPEN_BACKEND_HIP
             ASSERT_EQ(
                 hipMemcpy(in_dev, in.data.data(), sizeof(TRef) * in_sz, hipMemcpyHostToDevice),
                 hipSuccess);
@@ -811,7 +699,6 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
             ASSERT_EQ(
                 hipMemcpy(wei_dev, wei.data.data(), sizeof(TRef) * wei_sz, hipMemcpyHostToDevice),
                 hipSuccess);
-#endif
             cpu_convolution_forward(miopen::deref(convDesc).GetSpatialDimension(),
                                     in,
                                     wei,
@@ -852,27 +739,6 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
             rand_tensor_integer(wei);
             /// \ref copy_non_packed_output_before_convolution
             rand_tensor_integer(in);
-#if MIOPEN_BACKEND_OPENCL
-            status = clEnqueueWriteBuffer(q,
-                                          out_dev,
-                                          CL_TRUE,
-                                          0,
-                                          sizeof(TRef) * out_sz,
-                                          out.data.data(),
-                                          0,
-                                          nullptr,
-                                          nullptr);
-            status |= clEnqueueWriteBuffer(q,
-                                           wei_dev,
-                                           CL_TRUE,
-                                           0,
-                                           sizeof(TRef) * wei_sz,
-                                           wei.data.data(),
-                                           0,
-                                           nullptr,
-                                           nullptr);
-            ASSERT_EQ(status, CL_SUCCESS);
-#elif MIOPEN_BACKEND_HIP
             /// \ref copy_non_packed_output_before_convolution
             ASSERT_EQ(
                 hipMemcpy(in_dev, in.data.data(), sizeof(TRef) * in_sz, hipMemcpyHostToDevice),
@@ -883,7 +749,6 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
             ASSERT_EQ(
                 hipMemcpy(wei_dev, wei.data.data(), sizeof(TRef) * wei_sz, hipMemcpyHostToDevice),
                 hipSuccess);
-#endif
             cpu_convolution_backward_data(miopen::deref(convDesc).GetSpatialDimension(),
                                           in,
                                           wei,
@@ -922,20 +787,6 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
             rand_tensor_integer(out, 3, -2);
             /// \ref copy_non_packed_output_before_convolution
             rand_tensor_integer(wei);
-#if MIOPEN_BACKEND_OPENCL
-            status |= clEnqueueWriteBuffer(
-                q, in_dev, CL_TRUE, 0, sizeof(TRef) * in_sz, in.data.data(), 0, nullptr, nullptr);
-            status |= clEnqueueWriteBuffer(q,
-                                           out_dev,
-                                           CL_TRUE,
-                                           0,
-                                           sizeof(TRef) * out_sz,
-                                           out.data.data(),
-                                           0,
-                                           nullptr,
-                                           nullptr);
-            ASSERT_EQ(status, CL_SUCCESS);
-#elif MIOPEN_BACKEND_HIP
             ASSERT_EQ(
                 hipMemcpy(in_dev, in.data.data(), sizeof(TRef) * in_sz, hipMemcpyHostToDevice),
                 hipSuccess);
@@ -946,7 +797,6 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
             ASSERT_EQ(
                 hipMemcpy(out_dev, out.data.data(), sizeof(Tout) * out_sz, hipMemcpyHostToDevice),
                 hipSuccess);
-#endif
             cpu_convolution_backward_weight(miopen::deref(convDesc).GetSpatialDimension(),
                                             in,
                                             wei,
@@ -986,11 +836,13 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
         // auto error        = miopen::rms_range(out_host.data, out.data);
         // auto tolerance = get_default_tolerence<TRef>();
         // bool valid_result = error <= tolerance;
-        std::cout << "n:" << n << ", c:" << c << ", di:" << di << ", hi:" << hi << ", wi:" << wi
-                  << ", k:" << k << ", do:" << do_ << ", ho:" << ho << ", wo:" << wo
-                  << ", fz:" << fz << ", fy:" << fy << ",fx:" << fx << ", pz:" << pz
-                  << ", py:" << py << ", px:" << px << ", sz:" << sz << ", sy:" << sy
-                  << ", sx:" << sx << ", dz:" << dz << ", dy:" << dy << ", dx:" << dx << ", g:" << g
+        std::cout << "n:" << param.n << ", c:" << param.c << ", di:" << param.di
+                  << ", hi:" << param.hi << ", wi:" << param.wi << ", k:" << param.k
+                  << ", do:" << do_ << ", ho:" << ho << ", wo:" << wo << ", fz:" << param.fz
+                  << ", fy:" << param.fy << ",fx:" << param.fx << ", pz:" << param.pz
+                  << ", py:" << param.py << ", px:" << param.px << ", sz:" << param.sz
+                  << ", sy:" << param.sy << ", sx:" << param.sx << ", dz:" << param.dz
+                  << ", dy:" << param.dy << ", dx:" << param.dx << ", g:" << param.g
                   << ", dir:" << direction_to_string(direction)
                   << ", type:" << miopen_type_to_string(miopen_type<TRef>{})
                   << ", layout:" << layout_string << ", valid:" << valid_result << std::endl;
