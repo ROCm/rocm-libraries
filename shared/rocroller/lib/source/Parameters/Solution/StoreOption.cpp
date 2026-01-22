@@ -46,8 +46,6 @@ namespace rocRoller
                     return MemoryType::WAVE_LDS;
                 case StorePath::VGPRToGlobalMemoryViaLDSWithGlobal:
                     return MemoryType::WAVE_LDS_FROM_GLOBAL;
-                case StorePath::LDSToGlobalMemoryWithBuffer:
-                    return MemoryType::WAVE_Direct2LDS;
                 case StorePath::Count:
                     Throw<FatalError>(
                         fmt::format("No valid MemoryType available for mode {}\n", toString(mode)));
@@ -60,7 +58,6 @@ namespace rocRoller
                 {
                 case StorePath::VGPRToGlobalMemoryViaLDSWithBuffer:
                 case StorePath::VGPRToGlobalMemoryViaLDSWithGlobal:
-                case StorePath::LDSToGlobalMemoryWithBuffer:
                     return true;
                 default:
                     break;
@@ -80,8 +77,6 @@ namespace rocRoller
                     return "VGPRToGlobalMemoryViaLDSWithBuffer";
                 case StorePath::VGPRToGlobalMemoryViaLDSWithGlobal:
                     return "VGPRToGlobalMemoryViaLDSWithGlobal";
-                case StorePath::LDSToGlobalMemoryWithBuffer:
-                    return "LDSToGlobalMemoryWithBuffer";
                 default:
                     break;
                 }
@@ -93,28 +88,6 @@ namespace rocRoller
                 return stream << toString(mode);
             }
 
-            StorePath storePathFromString(std::string const& str)
-            {
-                if(str == "VGPRToGlobalMemoryWithBuffer")
-                    return StorePath::VGPRToGlobalMemoryWithBuffer;
-                if(str == "VGPRToGlobalMemoryWithGlobal")
-                    return StorePath::VGPRToGlobalMemoryWithGlobal;
-                if(str == "VGPRToGlobalMemoryViaLDSWithBuffer")
-                    return StorePath::VGPRToGlobalMemoryViaLDSWithBuffer;
-                if(str == "VGPRToGlobalMemoryViaLDSWithGlobal")
-                    return StorePath::VGPRToGlobalMemoryViaLDSWithGlobal;
-                if(str == "LDSToGlobalMemoryWithBuffer")
-                    return StorePath::LDSToGlobalMemoryWithBuffer;
-                Throw<FatalError>(fmt::format("Invalid StorePath: {}", str));
-            }
-
-            std::istream& operator>>(std::istream& stream, StorePath& path)
-            {
-                std::string str;
-                stream >> str;
-                path = storePathFromString(str);
-                return stream;
-            }
         } // namespace Solution
     } // namespace Parameters
 } // namespace rocRoller

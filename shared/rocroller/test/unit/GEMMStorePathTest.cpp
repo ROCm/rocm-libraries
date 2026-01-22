@@ -79,7 +79,6 @@ namespace GEMMTests
             ::testing::Values(SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer,
                               SolutionParams::StorePath::VGPRToGlobalMemoryWithGlobal,
                               SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer,
-                              SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithGlobal,
-                              SolutionParams::StorePath::LDSToGlobalMemoryWithBuffer)));
+                              SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithGlobal)));
 
 } // namespace GEMMTests

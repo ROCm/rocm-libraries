@@ -46,7 +46,6 @@ namespace rocRoller
             };
 
             std::string   toString(LoadPath path);
-            LoadPath      loadPathFromString(std::string const& str);
             std::ostream& operator<<(std::ostream& stream, LoadPath const& path);
             std::istream& operator>>(std::istream& stream, LoadPath& path);
 

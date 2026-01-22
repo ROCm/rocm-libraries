@@ -41,12 +41,10 @@ namespace rocRoller
                 VGPRToGlobalMemoryWithGlobal, // Store from VGPR to global using global_store_X
                 VGPRToGlobalMemoryViaLDSWithBuffer, // Store to LDS first, then to buffer (former storeLDSD=true)
                 VGPRToGlobalMemoryViaLDSWithGlobal, // Store to LDS first, then to global
-                LDSToGlobalMemoryWithBuffer, // Direct LDS to buffer store
                 Count,
             };
 
             std::string   toString(StorePath path);
-            StorePath     storePathFromString(std::string const& str);
             std::ostream& operator<<(std::ostream& stream, StorePath const& path);
             std::istream& operator>>(std::istream& stream, StorePath& path);
 

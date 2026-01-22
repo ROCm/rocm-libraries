@@ -98,28 +98,6 @@ namespace rocRoller
                 return stream << toString(mode);
             }
 
-            LoadPath loadPathFromString(std::string const& str)
-            {
-                if(str == "BufferToVGPR")
-                    return LoadPath::BufferToVGPR;
-                if(str == "BufferToLDSViaVGPR")
-                    return LoadPath::BufferToLDSViaVGPR;
-                if(str == "BufferToLDS")
-                    return LoadPath::BufferToLDS;
-                if(str == "GlobalToVGPR")
-                    return LoadPath::GlobalToVGPR;
-                if(str == "GlobalToLDSViaVGPR")
-                    return LoadPath::GlobalToLDSViaVGPR;
-                Throw<FatalError>(fmt::format("Invalid LoadPath: {}", str));
-            }
-
-            std::istream& operator>>(std::istream& stream, LoadPath& path)
-            {
-                std::string str;
-                stream >> str;
-                path = loadPathFromString(str);
-                return stream;
-            }
         } // namespace Solution
     } // namespace Parameters
 } // namespace rocRoller

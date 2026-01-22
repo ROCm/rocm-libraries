@@ -1747,7 +1747,7 @@ int main(int argc, const char* argv[])
     app.add_option(SN(&SP::storePath),
                    "How to store D (VGPRToGlobalMemoryWithBuffer, VGPRToGlobal, "
                    "VGPRToGlobalMemoryViaLDSWithBuffer, "
-                   "VGPRToGlobalMemoryViaLDSWithGlobal, LDSToGlobalMemoryWithBuffer). Default: "
+                   "VGPRToGlobalMemoryViaLDSWithGlobal). Default: "
                    "VGPRToGlobalMemoryViaLDSWithBuffer");
     app.add_option("--lds", "Use LDS for A/B/D.");
     app.add_option("--d2lds", "Use direct-to-LDS for A/B.");

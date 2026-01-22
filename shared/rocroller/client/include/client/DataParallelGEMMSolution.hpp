@@ -469,12 +469,12 @@ namespace rocRoller
                         {solutionParams.macM, solutionParams.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {wave_m, wave_n, wave_k, wave_b});
-                    auto macTileD = KernelGraph::CoordinateGraph::MacroTile(
+                    auto memoryTypeD = GetMemoryType(solutionParams.storePath);
+                    auto macTileD    = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macM, solutionParams.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {wave_m, wave_n, wave_k, wave_b},
-                        IsLDSStore(solutionParams.storePath) ? MemoryType::WAVE_LDS
-                                                             : MemoryType::WAVE);
+                        memoryTypeD);
 
                     params->setDimensionInfo(m_tagA, macTileA);
                     params->setDimensionInfo(m_tagB, macTileB);
