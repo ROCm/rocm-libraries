@@ -55,9 +55,6 @@ nanobind_add_module(_pyorigami "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/bindings
 
 set_target_properties(_pyorigami PROPERTIES OUTPUT_NAME "origami")
 
-# CI expects this target name for building the Python bindings.
-add_custom_target(origami_python DEPENDS _pyorigami)
-
 # Link against origami library and HIP
 target_link_libraries(_pyorigami PRIVATE ${ORIGAMI_TARGET} hip::host)
 
@@ -70,7 +67,6 @@ set_target_properties(_pyorigami PROPERTIES
 )
 target_compile_definitions(_pyorigami PRIVATE
     __HIP_PLATFORM_AMD__
-    NB_SHARED
 )
 
 if(ORIGAMI_PYTHON_ENABLE_WARNINGS)
