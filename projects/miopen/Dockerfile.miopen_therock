@@ -1,0 +1,398 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+# Build type selection - must be declared before first use in FROM
+ARG BUILD_TYPE=prebuilt
+
+# ============================================================================
+# Common base image with all dependencies
+# ============================================================================
+FROM ubuntu:24.04 AS base
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV HIP_PLATFORM=amd
+ARG GPU_ARCHS=none
+ARG PROJ="miopen"
+
+# Install DVC + other dependencies
+RUN apt-get update && apt-get install -y --allow-unauthenticated \
+    apt-utils \
+    ca-certificates \
+    curl \
+    libnuma-dev \
+    gnupg2 \
+    build-essential \
+    # clang-format-12 \
+    doxygen \
+    git \
+    gdb \
+    gfortran \
+    git-lfs \
+    # half \
+    lbzip2 \
+    lcov \
+    libncurses5-dev \
+    cmake \
+    g++ \
+    pkg-config \
+    xxd \
+    patchelf \
+    automake \
+    python3-venv \
+    python3-dev \
+    libegl1-mesa-dev \
+    curl \
+    unzip \
+    patchelf \
+    libtool \
+    python3-pip \
+    vim \
+    rsync \
+    ca-certificates \
+    wget \
+    texinfo \
+    bison \
+    flex \
+    stunnel \
+    pkg-config \
+    python3-dev \
+    python3-pip \
+    python3-venv \
+    redis \
+    rpm \
+    sudo \
+    software-properties-common && \
+# Install DVC
+    mkdir -p /etc/apt/keyrings && \
+    wget -qO - https://dvc.org/deb/iterative.asc | sudo gpg --dearmor -o /etc/apt/keyrings/packages.iterative.gpg && \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/packages.iterative.gpg] https://dvc.org/deb/ stable main" | sudo tee /etc/apt/sources.list.d/dvc.list && \
+    chmod 644 /etc/apt/keyrings/packages.iterative.gpg /etc/apt/sources.list.d/dvc.list && \
+    apt-get update && apt-get install -y dvc && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* 
+
+# ============================================================================
+# Prebuilt stage - downloads and extracts dev env prebuilt binaries tarball
+#
+# Example build command for default tarball build (gfx94X, 7.0.0rc20250909):
+# docker build -f Dockerfile.ubuntu24 -t miopen:prebuilt .
+# This will download and install prebuilt binaries using therock-dist-linux-gfx94X-dcgpu-7.0.0rc20250909.tar.gz
+#
+# Example build command to select tarball for asic family gfx950-dcgpu, build tag 7.0.0rc20250908:
+# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_TAG=7.0.0rc20250908 -t miopen:fullbuild .
+# This will download and install prebuilt binaries using therock-dist-linux-gfx950-dcgpu-7.0.0rc20250908.tar.gz
+#
+# Example build command to select tarball for asic family gfx950-all, build tag 7.9.0rc20251005:
+# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_PREBUILT_ID=gfx120X-all-7.9.0rc20251005 .
+# This will download and install prebuilt binaries using therock-dist-linux-gfx120X-all-7.9.0rc20251005.tar.gz
+#
+# Example build command to select tarball for asic family gfx950-all, build tag 7.9.0rc20251005:
+# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_TARBALL=therock-dist-linux-gfx120X-all-7.9.0rc20251005.tar.gz .
+# This will download and install prebuilt binaries using therock-dist-linux-gfx120X-all-7.9.0rc20251005.tar.gz
+# ============================================================================
+FROM base AS install_therock_prebuilt
+
+ARG THEROCK_ASIC=gfx90X
+ARG THEROCK_GIT_TAG=7.11.0a20260121
+ARG THEROCK_PREBUILT_ID=$THEROCK_ASIC-dcgpu-$THEROCK_GIT_TAG
+ARG THEROCK_TARBALL=therock-dist-linux-$THEROCK_PREBUILT_ID.tar.gz
+
+RUN mkdir -p /opt/rocm
+WORKDIR /tmp
+
+RUN wget --progress=dot:giga https://therock-nightly-tarball.s3.us-east-2.amazonaws.com/$THEROCK_TARBALL
+RUN tar -xf $THEROCK_TARBALL -C /opt/rocm --strip-components=1
+
+# ============================================================================
+# Build from source stage - clones and builds TheRock
+#
+# Example build command for default source build (default branch, gfx90a):
+# docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild -t miopen:fullbuild .
+#
+# Example build command for overriding ASIC and git hash:
+# docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_HASH=abc123def456 -t miopen:custom_source_build .
+#
+# Build mode options:
+# - THEROCK_BUILD_MODE can be: Preset, Debug, or Release (default)
+# - When using "Preset", specify the preset with THEROCK_BUILD_PRESET
+# - When using "Debug" or "Release", standard CMake build types are used
+#
+# Note: When THEROCK_BUILD_MODE=Preset, the THEROCK_BUILD_PRESET value is used.
+#       When THEROCK_BUILD_MODE=Debug/Release, THEROCK_BUILD_PRESET is ignored.
+#
+# Build parallelism:
+# - BUILD_JOBS controls the number of parallel build jobs
+# - Default is 0, which means use all available CPU cores
+#
+# Example build command for Debug build with 4 cores:
+# docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild --build-arg THEROCK_BUILD_MODE=Debug --build-arg BUILD_JOBS=4 -t miopen:debug .
+#
+# Example build command with custom TheRock preset:
+# docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild --build-arg THEROCK_BUILD_MODE=Preset --build-arg THEROCK_BUILD_PRESET=linux-debug-package -t miopen:custom-preset .
+# ============================================================================
+FROM base AS install_therock_fullbuild
+
+ARG THEROCK_ASIC=gfx90a
+ARG THEROCK_GIT_HASH=default
+ARG THEROCK_BUILD_MODE=Release
+ARG THEROCK_BUILD_PRESET=linux-release-package
+ARG BUILD_JOBS=0
+ARG ROCM_LIBRARIES_REF=default
+ARG ROCM_SYSTEMS_REF=default
+
+RUN git config --global user.email "docker@build.local" && \
+    git config --global user.name "Docker Build"
+
+RUN git clone https://github.com/ROCm/TheRock.git
+
+WORKDIR /TheRock
+
+RUN if [ "$THEROCK_GIT_HASH" != "default" ]; then \
+        echo "Checking out specific hash: $THEROCK_GIT_HASH"; \
+        git fetch; \
+        git checkout $THEROCK_GIT_HASH; \
+    else \
+        echo "Using default branch"; \
+    fi
+
+# Update rocm-libraries submodule to specific ref if provided
+# we need to commit the change so that fetch_sources.py does not overwrite the change
+RUN if [ "$ROCM_LIBRARIES_REF" != "default" ]; then \
+        echo "Updating rocm-libraries submodule to: $ROCM_LIBRARIES_REF"; \
+        git submodule update --init rocm-libraries && \
+        cd rocm-libraries && \
+        git fetch origin && \
+        git checkout $ROCM_LIBRARIES_REF && \
+        cd .. && \
+        git add rocm-libraries && \
+        git commit -m "Update rocm-libraries submodule to $ROCM_LIBRARIES_REF"; \
+    fi
+
+# Update rocm-systems submodule to specific ref if provided
+# we need to commit the change so that fetch_sources.py does not overwrite the change
+RUN if [ "$ROCM_SYSTEMS_REF" != "default" ]; then \
+        echo "Updating rocm-systems submodule to: $ROCM_SYSTEMS_REF"; \
+        git submodule update --init rocm-systems && \
+        cd rocm-systems && \
+        git fetch origin && \
+        git checkout $ROCM_SYSTEMS_REF && \
+        cd .. && \
+        git add rocm-systems && \
+        git commit -m "Update rocm-systems submodule to $ROCM_SYSTEMS_REF"; \
+    fi
+
+RUN python3 -m venv /opt/venv
+
+# Adding the venv into the path activates the python virtual env in a way.  We cant source it the
+# normal way due to how dockerfiles run
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install -r requirements.txt
+
+RUN git config --global url."https://github.com/".insteadOf git@github.com: && \
+    git config --global credential.helper "!f() { echo username=anonymous; echo password=; }; f" && \
+    python ./build_tools/fetch_sources.py
+
+RUN mkdir build
+WORKDIR /TheRock/build
+
+RUN apt-get update && apt-get install -y --allow-unauthenticated ninja-build
+ARG BUILD_JOBS=120
+RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
+        echo "Building with TheRock preset: $THEROCK_BUILD_PRESET"; \
+        cmake .. \
+            --preset=$THEROCK_BUILD_PRESET \
+            -DCMAKE_INSTALL_PREFIX=/opt/rocm \
+            -DTHEROCK_ENABLE_ALL=OFF \
+            -DTHEROCK_ENABLE_BLAS=ON \
+            -DTHEROCK_ENABLE_COMPILER=ON \
+            -DTHEROCK_ENABLE_CORE_RUNTIME=ON \
+            -DTHEROCK_ENABLE_HIP_RUNTIME=ON \
+            -DTHEROCK_ENABLE_RAND=ON \
+            -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
+    else \
+        echo "Building with CMake build type: $THEROCK_BUILD_MODE"; \
+        cmake .. \
+            -GNinja \
+            -DCMAKE_BUILD_TYPE=$THEROCK_BUILD_MODE \
+            -DCMAKE_INSTALL_PREFIX=/opt/rocm \
+            -DTHEROCK_ENABLE_ALL=OFF \
+            -DTHEROCK_ENABLE_BLAS=ON \
+            -DTHEROCK_ENABLE_COMPILER=ON \
+            -DTHEROCK_ENABLE_CORE_RUNTIME=ON \
+            -DTHEROCK_ENABLE_HIP_RUNTIME=ON \
+            -DTHEROCK_ENABLE_RAND=ON \
+            -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
+    fi
+
+RUN if [ "$BUILD_JOBS" = "0" ]; then \
+        cmake --build .; \
+    else \
+        echo "Building with $BUILD_JOBS parallel jobs"; \
+        cmake --build . -j$BUILD_JOBS; \
+    fi && \
+    cmake --install .
+
+# ============================================================================
+# Select which build stage to use
+# ============================================================================
+FROM install_therock_$BUILD_TYPE AS install_therock
+
+# ============================================================================
+# Build and install CK
+# ============================================================================
+
+# install to /opt/rocm will cause permission issue
+ARG PROJ="miopen"
+ARG PREFIX=/usr/local
+ARG USE_FIN="OFF"
+
+ARG CCACHE_SECONDARY_STORAGE=""
+ARG CCACHE_DIR="/tmp"
+ARG CCACHE_COMMIT=f6d9c169bb5b73d2442af0eb71b056630cad4d75
+ARG MIOPEN_SCCACHE=""
+ARG MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER="MiOpen-Docker-CK"
+
+ARG COMPILER_LAUNCHER=""
+ENV APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=DontWarn
+
+# Setup ubsan environment to printstacktrace
+ENV UBSAN_OPTIONS=print_stacktrace=1
+
+ENV LC_ALL=C.UTF-8
+ENV LANG=C.UTF-8
+
+# # Install an init system
+# RUN wget -O /tmp/ccache.tar.gz https://github.com/ccache/ccache/archive/${CCACHE_COMMIT}.tar.gz && \
+#     tar zxvf /tmp/ccache.tar.gz -C /tmp/ && mkdir /tmp/ccache-${CCACHE_COMMIT}/build && \
+#     cd /tmp/ccache-${CCACHE_COMMIT}/build && \
+#     cmake -DZSTD_FROM_INTERNET=ON -DHIREDIS_FROM_INTERNET=ON .. && make -j install && rm -rf /tmp/* && \
+#     ccache -s && \
+#     cd / && \
+# Install ccache
+RUN apt-get update && apt-get install -y --allow-unauthenticated ccache && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+# Composable Kernel requires this version cmake
+RUN pip3 install --break-system-packages --upgrade cmake==3.27.5
+
+# Make sure /opt/rocm is in the paths
+ENV PATH="/opt/rocm:${PATH}"
+
+ADD ${PROJ}/script/redis-cli.conf /redis-cli.conf
+ADD ${PROJ}/script/sccache_wrapper.sh /sccache_wrapper.sh
+
+## Sccache binary built from source for ROCm, only install if MIOPEN_SCCACHE is defined
+ARG SCCACHE_REPO_URL=http://compute-artifactory.amd.com/artifactory/rocm-generic-experimental/rocm-sccache
+ENV SCCACHE_INSTALL_LOCATION=/usr/local/.cargo/bin
+ENV PATH=$PATH:${SCCACHE_INSTALL_LOCATION}
+ENV MIOPEN_SCCACHE=$MIOPEN_SCCACHE
+
+RUN cd / && \
+    cat redis-cli.conf
+
+# Copy Composable Kernel
+COPY composablekernel /composable_kernel
+
+# Build and install Composable Kernel
+RUN echo Building for GPU Archs: ${GPU_ARCHS} && \
+    if [ "$MIOPEN_SCCACHE" != "" ]; then \
+    mkdir -p ${SCCACHE_INSTALL_LOCATION} && \
+    curl ${SCCACHE_REPO_URL}/portable/0.2.16/sccache-0.2.16-alpha.1-rocm --output ${SCCACHE_INSTALL_LOCATION}/sccache && \
+    chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache; \
+    export ROCM_PATH=/opt/rocm && \
+    export SCCACHE_ENABLED=true && \
+    export SCCACHE_LOG_LEVEL=debug && \
+    export SCCACHE_IDLE_TIMEOUT=14400 && \
+    export COMPILERS_HASH_DIR=/tmp/.sccache && \
+    export SCCACHE_BIN=/usr/local/.cargo/bin/sccache && \
+    export SCCACHE_EXTRAFILES=/tmp/.sccache/rocm_compilers_hash_file && \
+    export SCCACHE_REDIS="redis://$MIOPEN_SCCACHE" && \
+    cd / && \
+    echo "connect = $MIOPEN_SCCACHE" >> redis-cli.conf && \
+    export SCCACHE_C_CUSTOM_CACHE_BUSTER="${MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER}" && \
+    echo $SCCACHE_C_CUSTOM_CACHE_BUSTER && \
+    stunnel redis-cli.conf && \
+    export PATH=$PATH:${SCCACHE_INSTALL_LOCATION} && \
+    ./sccache_wrapper.sh --enforce_redis; \
+    fi &&\
+    cd /composable_kernel && \
+    mkdir build && cd build && \
+    num_threads=124 && \
+    echo Building CK with ${num_threads} threads && \
+    CXX=/opt/rocm/llvm/bin/amdclang++ cmake \
+    -D CMAKE_PREFIX_PATH=/opt/rocm \
+    -D CMAKE_CXX_COMPILER_LAUNCHER="${COMPILER_LAUNCHER}" \
+    -D CMAKE_C_COMPILER_LAUNCHER="${COMPILER_LAUNCHER}" \
+    -D CMAKE_BUILD_TYPE=Release \
+    -D GPU_ARCHS=${GPU_ARCHS} \
+    -D MIOPEN_REQ_LIBS_ONLY=ON \
+    -D CMAKE_CXX_FLAGS=" -O3 " .. && \
+    make -j ${num_threads} install && \
+    if [ "$MIOPEN_SCCACHE" != "" ]; then \
+    sccache -s; \
+    fi
+
+# ============================================================================
+# Common miopen development environment
+# ============================================================================
+FROM base AS miopen
+ARG PROJ="miopen"
+
+COPY --from=install_therock /opt/rocm /opt/rocm
+COPY --from=install_therock /usr/local/ /usr/local/
+
+ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"
+
+# Add requirements files
+ADD ${PROJ}/rbuild.ini /rbuild.ini
+ADD ${PROJ}/requirements.txt /requirements.txt
+ADD ${PROJ}/dev-requirements.txt /dev-requirements.txt
+ADD ${PROJ}/docs/sphinx/requirements.txt /doc-requirements.txt
+
+# Install an init system
+RUN wget https://github.com/Yelp/dumb-init/releases/download/v1.2.0/dumb-init_1.2.0_amd64.deb && \
+    dpkg -i dumb-init_*.deb && rm dumb-init_*.deb && \
+# Install cget && rbuild
+    pip3 install --break-system-packages https://github.com/pfultz2/cget/archive/a426e4e5147d87ea421a3101e6a3beca541c8df8.tar.gz && \
+    pip3 install --break-system-packages https://github.com/RadeonOpenCompute/rbuild/archive/6d78a0553babdaea8d2da5de15cbda7e869594b8.tar.gz && \
+# Add symlink to /opt/rocm
+    [ -d /opt/rocm ] || ln -sd $(realpath /opt/rocm-*) /opt/rocm && \
+# clear ccachc temp
+    rm -rf /tmp/ccache* && mkdir /tmp/ccache
+# Install selected Ccache commit
+    # wget -O /tmp/ccache.tar.gz https://github.com/ccache/ccache/archive/${CCACHE_COMMIT}.tar.gz && \
+    # tar zxvf /tmp/ccache.tar.gz -C /tmp/ && mkdir /tmp/ccache-${CCACHE_COMMIT}/build && \
+    # cd /tmp/ccache-${CCACHE_COMMIT}/build && \
+    # cmake -DZSTD_FROM_INTERNET=ON -DHIREDIS_FROM_INTERNET=ON .. && make -j install && rm -rf /tmp/* && \
+    # ccache -s && \
+    
+RUN apt-get update && apt-get install -y --allow-unauthenticated ccache && \
+    apt-get remove --purge -y python3-pyparsing python3-cryptography && \
+    cd / && \
+# Install doc requirements
+    pip3 install --break-system-packages -r /doc-requirements.txt && \
+# Composable Kernel requires this version cmake
+#    pip3 install --break-system-packages --upgrade cmake==3.27.5 && \
+# groupadd render && video
+    groupadd -f render && \
+    groupadd -f video && \
+    usermod -a -G render,video root
+
+ARG USE_FIN="OFF"
+ARG PREFIX=/usr/local
+
+# RUN rm -rf /opt/rocm/include/nlohmann /usr/local/include/nlohmann && \
+#     rm -rf /opt/rocm/share/cmake/nlohmann_json /usr/local/share/cmake/nlohmann_json
+
+# # rbuild is used to trigger build of requirements.txt, dev-requirements.txt.
+# # Composable Kernel install separated from rbuild 
+RUN sed -i '/composablekernel/d' /requirements.txt && \
+    if [ "$USE_FIN" = "ON" ]; then \
+        rbuild prepare -s fin -d ${PREFIX} -DGPU_ARCHS=${GPU_ARCHS}; \
+    else \
+        rbuild prepare -s develop -d ${PREFIX} -DGPU_ARCHS=${GPU_ARCHS}; \
+    fi && \
+    ccache -s
+
+WORKDIR /workspace
