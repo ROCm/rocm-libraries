@@ -50,8 +50,9 @@ Add a new plugin
 ================
 
 Plugins extend hipDNN to support new or additional implementations of kernel engines, benchmarking, and heuristics. 
-For comprehensive guidance on plugin development, including architecture details, implementation steps, and examples, see the [Plugin Development Guide](./PluginDevelopment.md).
+For comprehensive guidance on plugin development, including architecture details, implementation steps, and examples, see :ref:`develop-plugins`.
 
+.. _add-operation:
 Add a new operation
 ===================
 
@@ -75,7 +76,7 @@ If the operation is new to hipDNN, start by defining its data structures:
   
    Example: `data_sdk/schemas/batchnorm_attributes.fbs <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/data_sdk/schemas/batchnorm_attributes.fbs>`_
 
-1. Update the Graph schema:
+2. Update the Graph schema:
 
    1. Modify `data_sdk/schemas/graph.fbs <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/data_sdk/schemas/graph.fbs>`_.
    2. Add your new attributes to the ``NodeAttributes`` union.

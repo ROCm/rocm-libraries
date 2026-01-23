@@ -22,14 +22,14 @@ The call-stack demonstrated isn't exhaustive, it's mostly to illustrate the entr
 Execution Flow
 ==============
 
-When the backend requests a graph execution, the flow within the plugin is as follows:
+This the plugin flow when the backend requests a graph execution:
 
 1.  **Ingestion:** The C-API bridge receives the raw graph handle and forwards it to the ``MiopenContainer``.
 2.  **Selection:** The ``EngineManager`` iterates through registered engines to find a candidate.
 3.  **Compilation:** The selected Engine's ``PlanBuilder`` validates the graph and constructs an ``IPlan``.
 4.  **Execution:** The ``IPlan`` executes the operation, marshaling pointers from the backend's ``VariantPack`` to the underlying device kernels.
 
-This architecture effectively separates the plugin interface from the engine implementation details. However, currently, this infrastructure is largely internal to the MIOpen plugin. The goal of the Plugin SDK is to standardize and provide these as reusable components for plugin development, so developers can focus on the implementations of the underlying kernels and libraries.
+This architecture effectively separates the plugin interface from the engine implementation details. However, this infrastructure is largely internal to the MIOpen plugin. The goal of the Plugin SDK is to standardize and provide these as reusable components for plugin development, so developers can focus on the implementations of the underlying kernels and libraries.
 
 Backend descriptor types
 ========================

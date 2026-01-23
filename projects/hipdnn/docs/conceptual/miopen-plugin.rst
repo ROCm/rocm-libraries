@@ -51,7 +51,7 @@ This table lists all operations supported in hipDNN:
    * - Batchnorm Training + Activation
      - FP16, BFP16, FP32
      - NCHW, NHWC, NCDHW, NDHWC
-     - Fused graph³⁴
+     - Fused graph³ ⁴
    * - Batchnorm Backward 
      - FP16, BFP16, FP32
      - NCHW, NHWC, NCDHW, NDHWC
@@ -75,7 +75,7 @@ This table lists all operations supported in hipDNN:
 
 .. note::
 
-  - For annotations ¹-⁴, refer to :ref:`operations`
+  - For annotations ¹ through ⁴, refer to :ref:`operations`
   - For annotation ⁵, see :ref:`detailed` for more info.
 
 Legend

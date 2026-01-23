@@ -49,9 +49,10 @@ Frontend and plugin logging
 
 The frontend and plugins can be configured to use the same logging destination as the backend, which is lazy-initialized automatically:
 
-1. Initialize logging using the ``initializeCallbackLogging`` function
-2. Pass ``hipdnnLoggingCallback_ext`` as the callback function (accessible via plugin API or backend header)
-3. This ensures all components log to the same destination
+1. Initialize logging using the ``initializeCallbackLogging`` function.
+2. Pass ``hipdnnLoggingCallback_ext`` as the callback function (accessible via plugin API or backend header).
+
+This ensures all components log to the same destination.
 
 MIOpen plugin logging
 =====================
@@ -96,14 +97,14 @@ Here are some examples:
 Best practices
 --------------
 
-- Use the default seed (1) for CI/CD pipelines to ensure consistent test results
-- Use a specific numeric seed when debugging to reproduce exact test conditions
-- Use ``RANDOM`` during development to catch edge cases with different data patterns
+- Use the default seed (1) for CI/CD pipelines to ensure consistent test results.
+- Use a specific numeric seed when debugging to reproduce exact test conditions.
+- Use ``RANDOM`` during development to catch edge cases with different data patterns.
 
 Error handling
 ==============
 
-hipDNN provides functions for retrieving error information:
+hipDNN provides functions for retrieving error information.
 
 Getting error strings
 ---------------------
@@ -121,7 +122,7 @@ Getting error strings
 Best practices
 --------------
 
-1. Check return status codes from all hipDNN API calls
-2. Use ``hipdnnGetLastErrorString`` for detailed error context
-3. Enable appropriate logging levels during development and debugging
-4. Configure logging to files for production deployments
+- Check return status codes from all hipDNN API calls.
+- Use ``hipdnnGetLastErrorString`` for detailed error context.
+- Enable appropriate logging levels during development and debugging.
+- Configure logging to files for production deployments.

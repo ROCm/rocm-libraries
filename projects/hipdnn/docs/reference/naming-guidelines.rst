@@ -66,7 +66,7 @@ Use descriptive action-oriented verbs: ``createPlan``, ``finalizeConfig``, ``lau
 Unused function arguments
 --------------------------
 
-Prefer use of ``[[maybe_unused]]`` rather than commenting-out argument names or using std::ignore
+Prefer use of ``[[maybe_unused]]`` rather than commenting-out argument names or using ``std::ignore``.
 Exception is for arguments that *shall not* be used, such as the case in a legacy version of a method that has an argument that is no longer relevant and shouldn't be used.  
 In this case, comment-out the argument name and leave a comment indicating the reason.
 
@@ -81,7 +81,7 @@ Members
 - Private / protected data members: prefix single underscore ``_`` then camelCase (``_opGraph``).
 - Static data members: ``s_camelCase``.
 - Exposed constants inside a class: ``static constexpr`` UPPER_CASE.
-- Plain structs whose intent is a passive aggregate (all or mostly public data) DO NOT prefix member names with ``_``; just use camelCase.
+- Plain structs whose intent is a passive aggregate (all or mostly public data). Do *not* prefix member names with ``_``; just use camelCase.
   
   - Rationale: underscores communicate encapsulation; POD-style structs are transparent.
 
@@ -140,9 +140,9 @@ Namespaces
 - Do not use redundant namespace qualifiers (for example, do not use ``hipdnn_data_sdk::`` qualifier when inside the ``hipdnn_data_sdk`` namespace).
 - Most code should fit generally within a few namespaces:
   
-  - ``hipdnn_<component>``: (for example, hipdnn_frontend) Contains all basic code required for the component:
-  - ``utilities``: Contains code that can aid and assist in using component code
-  - ``test_utilities``: Contains code that can aid and assist in testing component code
+  - ``hipdnn_<component>``: (for example, ``hipdnn_frontend``) Contains all basic code required for the component.
+  - ``utilities``: Contains code that can aid and assist in using component code.
+  - ``test_utilities``: Contains code that can aid and assist in testing component code.
 
 Test naming guidelines
 ======================
@@ -298,6 +298,7 @@ Decision checklist
 ==================
 
 When adding new code, verify:
+
 - Names follow the table in Section 1.
 - File name matches main class (or is a justified utility collection).
 - Test suite names follow ordering & allowed tokens.

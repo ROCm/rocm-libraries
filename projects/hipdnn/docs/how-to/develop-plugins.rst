@@ -38,7 +38,7 @@ The Data SDK contains the FlatBuffers schemas and data structures for graph repr
 - Data structures for deserializing serialized graphs
 - Utilities for working with graph data
 
-For adding new operations to the Data SDK (schemas, nodes, attributes), see the [How-To Guide](./HowTo.md#adding-a-new-operation-to-existing-plugins).
+For adding new operations to the Data SDK (schemas, nodes, attributes), see :ref:`add-operation`.
 
 Plugin SDK (``plugin_sdk``)
 ---------------------------
@@ -76,9 +76,9 @@ hipDNN uses a deterministic hash-based system for managing engine IDs. This syst
 
 Here's the workflow:
 
-1. **Engine Names**: Define human-readable string names for your engines (e.g., "MIOPEN_PLUGIN", "MY_CUSTOM_ENGINE")
-2. **Hash Function**: The `hipdnn_plugin_sdk::engine_names::engineNameToId()` function converts names to IDs using a FNV-1a hash algorithm
-3. **Registration**: Engine names are registered in the Plugin SDK header for discoverability
+1. **Engine Names**: Define human-readable string names for your engines (e.g., ``MIOPEN_PLUGIN``, ``MY_CUSTOM_ENGINE``).
+2. **Hash Function**: The ``hipdnn_plugin_sdk::engine_names::engineNameToId()`` function converts names to IDs using a FNV-1a hash algorithm.
+3. **Registration**: Engine names are registered in the Plugin SDK header for discoverability.
 
 Use Engine IDs
 --------------
@@ -115,7 +115,7 @@ To add your engine name to the official registry:
    - Make the name match the value.
 
 .. link in this sentence is missing in the repo
-2. Add it to the registry. Submit a PR to add your engine name to `plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp` 
+2. Add it to the registry. Submit a PR to add your engine name to ``plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp`` 
    
    .. code:: cpp
 
@@ -150,7 +150,7 @@ Steps
 
 1. Create plugin structure.
    
-   1. Create a new project/repository for your plugin
+   1. Create a new project/repository for your plugin.
    2. Implement the plugin interface defined in `plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h>`_. See :ref:`miopen` for an implementation reference.
 
 2. Implement the plugin API functions.
@@ -473,7 +473,7 @@ Integration tests
 
 Integration tests validate end-to-end functionality of your plugin:
 
-- **Location**: `plugins/<plugin_name>/integration_tests/`
+- **Location**: ``plugins/<plugin_name>/integration_tests/``
 - **Purpose**: Validate correctness of graph execution and accuracy of results
 - **Requirements**:
 
@@ -486,9 +486,11 @@ Integration tests validate end-to-end functionality of your plugin:
     - **Smoke** - These tests are designed to test features using the smallest possible shape and run quickly (combined smoke test run time must be under 5 mins)
     - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
 
-For a comprehensive example of an integration test, see: `IntegrationGpuBatchnormForwardInference.cpp <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp>`_
+For a comprehensive example of an integration test, see `IntegrationGpuBatchnormForwardInference.cpp <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp>`_.
 
-Moreover, see our `general testing requirements <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp>`_
+.. important::
+
+  See our `general testing requirements <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp>`_.
 
 .. _example-miopen:
 
@@ -535,7 +537,7 @@ If you see errors like "Failed to create handle for plugin 'PluginName'", this t
 Null handle returned
 ~~~~~~~~~~~~~~~~~~~~~
 
-If you see "Plugin 'PluginName' returned null handle", the plugin's ``hipdnnEnginePluginCreate`` function returned a null pointer without throwing an exception.
+If you see ``"Plugin 'PluginName' returned null handle"``, the plugin's ``hipdnnEnginePluginCreate`` function returned a null pointer without throwing an exception.
 
 **Solution**: Review the plugin's handle creation logic to ensure it either returns a valid handle or throws an exception with a meaningful error message.
 
@@ -544,7 +546,7 @@ Symbol collisions between plugins
 
 When multiple plugins are loaded and one or more plugins don't properly hide their symbols, you may encounter:
 
-- Handle collision errors: "Plugin 'PluginName' returned a handle that collides with another plugin"
+- Handle collision errors: ``"Plugin 'PluginName' returned a handle that collides with another plugin"``
 - Unexpected behavior where one plugin's functions are called instead of another's
 - Crashes or undefined behavior during plugin operations
 
