@@ -64,7 +64,7 @@ def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, bo
                 ccache --print-stats
                 numExecutors=${executorCount}
                 numThreads=\$((nproc / numExecutors))
-                echo Using \$numThreads out of \$(nproc) threads per executor (\$numExecutors executors) for compiling.
+                echo Using \$numThreads out of \$(nproc) threads per executor for compiling. Total \$numExecutors executors.
                 make -j \${numThreads} ${target}
                 ccache --print-stats
                 """
@@ -86,7 +86,7 @@ def runTestCommand (platform, project)
                 pushd build
                 numExecutors=${executorCount}
                 numThreads=\$((nproc / numExecutors))
-                echo Using \$numThreads out of \$(nproc) threads per executor (\$numExecutors executors) for testing.
+                echo Using \$numThreads out of \$(nproc) threads per executor for testing. Total of \$numExecutors executors.
                 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=2 ctest -j \${numThreads} --output-on-failure ${testExclude}
                 export ROCROLLER_BUILD_DIR="\$(pwd)"
                 export ROCROLLER_NUMBER_OF_EXECUTORS_IN_CI=${executorCount}
