@@ -747,7 +747,7 @@ class TestCustomScheduleTF32:
         # fmt: on
         ])
     def test_schedule_128x128x32(self, transA, transB, lds_tr_inst, tr_lds, plr, mi):
-        """Tests the 129x128x32 TF32 schedule."""
+        """Tests the 128x128x32 TF32 schedule."""
         kernel = create_base_kernel()
         kernel["ProblemType"].update({
             "TransposeA": transA, "TransposeB": transB
@@ -771,10 +771,9 @@ class TestCustomScheduleTF32:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 1
         schedule_info.pretty_print()
-        numMfma = ((kernel["MacroTile0"] // kernel["MIWaveGroup"][0] // kernel["MatrixInstruction"][0]) *
-                   (kernel["MacroTile1"] // kernel["MIWaveGroup"][1] // kernel["MatrixInstruction"][1]) *
-                    3 * # tf32 emulated with 3 bf16
-                    (1 if plr == 0 else 2)   # two sub-iterations with PLR=1
+        numMfma = (mi_wave_tile[0] * mi_wave_tile[1] *
+                   3 *                      # tf32 emulated with 3 bf16
+                   (1 if plr == 0 else 2)   # two sub-iterations with PLR=1
         )
         assert schedule_info.numMfma == numMfma
         valid, message = isValid(schedule_info, {"kernel" : kernel})
