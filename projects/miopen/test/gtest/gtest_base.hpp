@@ -319,7 +319,12 @@ private:
 protected:
     miopenTestReference_t currentREF = REF;
     /**
-     * NOTE. These should be able to be called several times without invoking SetUp again.
+     * Invoking corresponding implementation. These should be able to be called several times
+     * without invoking SetUp again.
+     *
+     * Return value is:
+     * miopenStatusNotImplemented - if corresponding implementation does not exists.
+     * miopenStatusSuccess        - if correspongin implementation exists.
      */
     virtual miopenStatus_t runOptimizedGPU() = 0;
     virtual miopenStatus_t runNaiveGPU()     = 0;
