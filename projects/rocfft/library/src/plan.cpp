@@ -680,22 +680,6 @@ catch(...)
     return rocfft_handle_exception();
 }
 
-// internal API to create brick structs
-static rocfft_brick_t rocfft_brick_create_internal(const size_t* field_lower,
-                                                   const size_t* field_upper,
-                                                   const size_t* brick_stride,
-                                                   size_t        dim,
-                                                   int           deviceID)
-{
-    rocfft_brick_t brick;
-    std::copy_n(field_lower, dim, std::back_inserter(brick.lower));
-    std::copy_n(field_upper, dim, std::back_inserter(brick.upper));
-    std::copy_n(brick_stride, dim, std::back_inserter(brick.stride));
-
-    brick.location.device = deviceID;
-    return brick;
-}
-
 // public brick-creating API that logs calls
 rocfft_status rocfft_brick_create(rocfft_brick* brick,
                                   const size_t* field_lower,
@@ -721,9 +705,12 @@ try
     if(!brick)
         return rocfft_status_invalid_arg_value;
 
-    auto brick_ptr = std::make_unique<rocfft_brick_t>();
-    *brick_ptr
-        = rocfft_brick_create_internal(field_lower, field_upper, brick_stride, dim, deviceID);
+    // Assume comm rank 0, as we don't have a communicator at
+    // this point.  If this is actually an MPI transform, these
+    // bricks will be recreated with correct rank when we gather all
+    // of the brick data at plan creation time.
+    auto brick_ptr = std::make_unique<rocfft_brick_t>(
+        field_lower, field_upper, brick_stride, dim, rocfft_location_t{0, deviceID});
     *brick = brick_ptr.release();
     return rocfft_status_success;
 }
@@ -3164,16 +3151,11 @@ rocfft_status allgather_brick_params_lus_mpi(rocfft_plan&    plan,
         ++ibrick)
     {
         // Add bricks one by one.
-        rocfft_brick_t brick
-            = rocfft_brick_create_internal(global_lowers.data() + ibrick * global_brick_length,
-                                           global_uppers.data() + ibrick * global_brick_length,
-                                           global_strides.data() + ibrick * global_brick_length,
-                                           global_brick_length,
-                                           global_devices[ibrick]); // device id
-
-        // It should be possible to get the brick comm rank from global_brick_count, but for now we
-        // can just communicate it and set it.
-        brick.location.comm_rank = global_comm_ranks[ibrick];
+        rocfft_brick_t brick{global_lowers.data() + ibrick * global_brick_length,
+                             global_uppers.data() + ibrick * global_brick_length,
+                             global_strides.data() + ibrick * global_brick_length,
+                             global_brick_length,
+                             {global_comm_ranks[ibrick], global_devices[ibrick]}};
         rocfft_field_add_brick_internal(field, brick);
     }
 
