@@ -428,21 +428,21 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             switch(node.attributes_type())
             {
             case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
-                checkBatchnormTensorConfigSupported(*node.attributes_as_BatchnormAttributes(),
-                                                    opGraph.getTensorMap());
+                checkBatchnormFwdTrainingTensorConfigSupported(
+                    *node.attributes_as_BatchnormAttributes(), opGraph.getTensorMap());
                 break;
             case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
-                checkBatchnormTensorConfigSupported(
+                checkBatchnormInferenceTensorConfigSupported(
                     *node.attributes_as_BatchnormInferenceAttributes(), opGraph.getTensorMap());
                 break;
             case hipdnn_data_sdk::data_objects::NodeAttributes::
                 BatchnormInferenceAttributesVarianceExt:
-                checkBatchnormTensorConfigSupported(
+                checkBatchnormInferenceVarianceExtTensorConfigSupported(
                     *node.attributes_as_BatchnormInferenceAttributesVarianceExt(),
                     opGraph.getTensorMap());
                 break;
             case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
-                checkBatchnormTensorConfigSupported(
+                checkBatchnormBackwardTensorConfigSupported(
                     *node.attributes_as_BatchnormBackwardAttributes(), opGraph.getTensorMap());
                 break;
             default:
@@ -502,7 +502,8 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             // the checks manually.
             try
             {
-                checkBatchnormTensorConfigSupported(bnInfAttr, actAttr, opGraph.getTensorMap());
+                checkBatchnormInferenceActivationTensorConfigSupported(
+                    bnInfAttr, actAttr, opGraph.getTensorMap());
             }
             catch(const std::exception& e)
             {
@@ -524,7 +525,8 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
 
             try
             {
-                checkBatchnormTensorConfigSupported(bnInfAttr, actAttr, opGraph.getTensorMap());
+                checkBatchnormInferenceVarianceExtActivationTensorConfigSupported(
+                    bnInfAttr, actAttr, opGraph.getTensorMap());
             }
             catch(const std::exception& e)
             {
@@ -564,10 +566,11 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
         // checks manually.
         try
         {
-            checkBatchnormTensorConfigSupported(std::get<0>(nodeAttrs.value()),
-                                                std::get<1>(nodeAttrs.value()),
-                                                std::get<2>(nodeAttrs.value()),
-                                                opGraph.getTensorMap());
+            checkBatchnormInferenceActivationBackwardTensorConfigSupported(
+                std::get<0>(nodeAttrs.value()),
+                std::get<1>(nodeAttrs.value()),
+                std::get<2>(nodeAttrs.value()),
+                opGraph.getTensorMap());
             checkBatchnormBwdActivationModeSupported(std::get<1>(nodeAttrs.value()));
         }
         catch(const std::exception& e)

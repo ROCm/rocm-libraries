@@ -3089,12 +3089,13 @@ TEST_P(TestCheckBatchnormInferenceConfigSupported, ValidatesCorrectly)
 
     if(tc.shouldPass)
     {
-        EXPECT_NO_THROW({ checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); });
+        EXPECT_NO_THROW(
+            { checkBatchnormInferenceTensorConfigSupported(*attrs, graph.getTensorMap()); });
     }
     else
     {
         EXPECT_THROW(
-            { checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); },
+            { checkBatchnormInferenceTensorConfigSupported(*attrs, graph.getTensorMap()); },
             hipdnn_plugin_sdk::HipdnnPluginException);
     }
 }
@@ -3128,12 +3129,13 @@ TEST_P(TestCheckBatchnormTrainingConfigSupported, ValidatesCorrectly)
 
     if(tc.shouldPass)
     {
-        EXPECT_NO_THROW({ checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); });
+        EXPECT_NO_THROW(
+            { checkBatchnormFwdTrainingTensorConfigSupported(*attrs, graph.getTensorMap()); });
     }
     else
     {
         EXPECT_THROW(
-            { checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); },
+            { checkBatchnormFwdTrainingTensorConfigSupported(*attrs, graph.getTensorMap()); },
             hipdnn_plugin_sdk::HipdnnPluginException);
     }
 }
@@ -3168,12 +3170,13 @@ TEST_P(TestCheckBatchnormBackwardConfigSupported, ValidatesCorrectly)
 
     if(tc.shouldPass)
     {
-        EXPECT_NO_THROW({ checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); });
+        EXPECT_NO_THROW(
+            { checkBatchnormBackwardTensorConfigSupported(*attrs, graph.getTensorMap()); });
     }
     else
     {
         EXPECT_THROW(
-            { checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); },
+            { checkBatchnormBackwardTensorConfigSupported(*attrs, graph.getTensorMap()); },
             hipdnn_plugin_sdk::HipdnnPluginException);
     }
 }
@@ -3221,7 +3224,7 @@ TEST_P(TestCheckBatchnormFusedBackwardConfigSupported, ValidatesCorrectly)
     if(tc.shouldPass)
     {
         EXPECT_NO_THROW({
-            checkBatchnormTensorConfigSupported(
+            checkBatchnormInferenceActivationBackwardTensorConfigSupported(
                 *bnInfAttrs, *actAttrs, *bnBwdAttrs, graph.getTensorMap());
         });
     }
@@ -3229,7 +3232,7 @@ TEST_P(TestCheckBatchnormFusedBackwardConfigSupported, ValidatesCorrectly)
     {
         EXPECT_THROW(
             {
-                checkBatchnormTensorConfigSupported(
+                checkBatchnormInferenceActivationBackwardTensorConfigSupported(
                     *bnInfAttrs, *actAttrs, *bnBwdAttrs, graph.getTensorMap());
             },
             hipdnn_plugin_sdk::HipdnnPluginException);
@@ -3411,7 +3414,7 @@ TEST(TestBatchnormApplicabilityChecks, RejectsBatchnormFwdTrainingWithPeerStats)
 
     // Should throw because peer_stats is populated
     EXPECT_THROW(
-        { checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); },
+        { checkBatchnormFwdTrainingTensorConfigSupported(*attrs, graph.getTensorMap()); },
         hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -3719,12 +3722,17 @@ TEST_P(TestCheckBatchnormInferenceWithVarianceConfigSupported, ValidatesCorrectl
 
     if(tc.shouldPass)
     {
-        EXPECT_NO_THROW({ checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); });
+        EXPECT_NO_THROW({
+            checkBatchnormInferenceVarianceExtTensorConfigSupported(*attrs, graph.getTensorMap());
+        });
     }
     else
     {
         EXPECT_THROW(
-            { checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); },
+            {
+                checkBatchnormInferenceVarianceExtTensorConfigSupported(*attrs,
+                                                                        graph.getTensorMap());
+            },
             hipdnn_plugin_sdk::HipdnnPluginException);
     }
 }
@@ -3767,13 +3775,18 @@ TEST_P(TestCheckBatchnormInferenceWithVarianceFusedConfigSupported, ValidatesCor
 
     if(tc.shouldPass)
     {
-        EXPECT_NO_THROW(
-            { checkBatchnormTensorConfigSupported(*bnAttrs, *actAttrs, graph.getTensorMap()); });
+        EXPECT_NO_THROW({
+            checkBatchnormInferenceVarianceExtActivationTensorConfigSupported(
+                *bnAttrs, *actAttrs, graph.getTensorMap());
+        });
     }
     else
     {
         EXPECT_THROW(
-            { checkBatchnormTensorConfigSupported(*bnAttrs, *actAttrs, graph.getTensorMap()); },
+            {
+                checkBatchnormInferenceVarianceExtActivationTensorConfigSupported(
+                    *bnAttrs, *actAttrs, graph.getTensorMap());
+            },
             hipdnn_plugin_sdk::HipdnnPluginException);
     }
 }
@@ -3853,7 +3866,7 @@ TEST(TestBatchnormApplicabilityChecks, RejectsBatchnormBackwardWithPeerStats)
 
     // Should throw because peer_stats is populated
     EXPECT_THROW(
-        { checkBatchnormTensorConfigSupported(*attrs, graph.getTensorMap()); },
+        { checkBatchnormBackwardTensorConfigSupported(*attrs, graph.getTensorMap()); },
         hipdnn_plugin_sdk::HipdnnPluginException);
 }
 

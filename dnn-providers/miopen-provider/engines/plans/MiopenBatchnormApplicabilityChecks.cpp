@@ -454,21 +454,9 @@ void checkBatchnormTensorConfigSupported(
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds, tensorMap, isTraining);
 }
 
-void checkBatchnormTensorConfigSupported(
-    const std::vector<int64_t>& ioTensorIds,
-    const std::vector<int64_t>& affineTensorIds,
-    const std::vector<int64_t>& statTensorIds,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap,
-    bool isTraining)
-{
-    checkBatchnormTensorConfigSupported(
-        ioTensorIds, affineTensorIds, statTensorIds, {}, tensorMap, isTraining);
-}
-
 } // namespace
 
-void checkBatchnormTensorConfigSupported(
+void checkBatchnormInferenceTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap)
@@ -480,10 +468,10 @@ void checkBatchnormTensorConfigSupported(
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.inv_variance_tensor_uid()};
 
     checkBatchnormTensorConfigSupported(
-        ioTensorIds, affineTensorIds, statTensorIds, tensorMap, false);
+        ioTensorIds, affineTensorIds, statTensorIds, {}, tensorMap, false);
 }
 
-void checkBatchnormTensorConfigSupported(
+void checkBatchnormInferenceVarianceExtTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap)
@@ -495,10 +483,10 @@ void checkBatchnormTensorConfigSupported(
         = {bnInfAttr.mean_tensor_uid(), bnInfAttr.variance_tensor_uid()};
 
     checkBatchnormTensorConfigSupported(
-        ioTensorIds, affineTensorIds, statTensorIds, tensorMap, false);
+        ioTensorIds, affineTensorIds, statTensorIds, {}, tensorMap, false);
 }
 
-void checkBatchnormTensorConfigSupported(
+void checkBatchnormInferenceVarianceExtActivationTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
@@ -518,7 +506,7 @@ void checkBatchnormTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, tensorMap, false);
 }
 
-void checkBatchnormTensorConfigSupported(
+void checkBatchnormInferenceActivationTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
@@ -538,7 +526,7 @@ void checkBatchnormTensorConfigSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, tensorMap, false);
 }
 
-void checkBatchnormTensorConfigSupported(
+void checkBatchnormFwdTrainingTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap)
@@ -560,10 +548,10 @@ void checkBatchnormTensorConfigSupported(
     }
 
     checkBatchnormTensorConfigSupported(
-        ioTensorIds, affineTensorIds, statTensorIds, tensorMap, true);
+        ioTensorIds, affineTensorIds, statTensorIds, {}, tensorMap, true);
 }
 
-void checkBatchnormTensorConfigSupported(
+void checkBatchnormBackwardTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap)
@@ -586,10 +574,10 @@ void checkBatchnormTensorConfigSupported(
     }
 
     checkBatchnormTensorConfigSupported(
-        ioTensorIds, affineTensorIds, statTensorIds, tensorMap, true);
+        ioTensorIds, affineTensorIds, statTensorIds, {}, tensorMap, true);
 }
 
-void checkBatchnormTensorConfigSupported(
+void checkBatchnormInferenceActivationBackwardTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
     const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
@@ -619,7 +607,7 @@ void checkBatchnormTensorConfigSupported(
     }
 
     checkBatchnormTensorConfigSupported(
-        ioTensorIds, affineTensorIds, statTensorIds, tensorMap, true);
+        ioTensorIds, affineTensorIds, statTensorIds, {}, tensorMap, true);
 }
 
 // --- Activation Mode Validators ---
