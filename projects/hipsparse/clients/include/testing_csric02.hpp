@@ -177,14 +177,6 @@ void testing_csric02(Arguments argus)
     // Set matrix index base
     CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr, idx_base));
 
-    if(m == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        // cusparse only accepts m > 1
-        return;
-#endif
-    }
-
     srand(12345ULL);
 
     // Host structures

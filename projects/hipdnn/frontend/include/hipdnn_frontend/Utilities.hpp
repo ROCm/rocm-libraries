@@ -397,6 +397,11 @@ inline Error validateScalarParameter(const std::shared_ptr<TensorAttributes>& pa
                             + " must be a scalar (single element), but has "
                             + std::to_string(totalElements) + " elements");
 
+    HIPDNN_RETURN_IF_FALSE(param->get_pass_by_value(),
+                           ErrorCode::INVALID_VALUE,
+                           getTensorNameForError(param, fallbackName)
+                               + " must be a pass-by-value tensor");
+
     // Note: We can't validate the actual value (e.g., epsilon > 0) at pre-validation time
     // since the data isn't available yet. This validation is structural only.
 

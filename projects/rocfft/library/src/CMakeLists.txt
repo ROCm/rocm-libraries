@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -82,7 +82,7 @@ target_include_directories( rocfft_rtc_helper
 # To find rocm libraries need the relative RPATH
 set(APPEND_ROCMLIB_RPATH "\$ORIGIN/../../../lib")
 target_link_libraries( rocfft_rtc_helper PRIVATE rocfft-rtc-compile )
-set_target_properties( rocfft_rtc_helper PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON
+set_target_properties( rocfft_rtc_helper PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON
                                          INSTALL_RPATH "${APPEND_ROCMLIB_RPATH}" )
 target_link_directories( rocfft_rtc_helper PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
 
@@ -132,6 +132,7 @@ set( kgen_embed_files
      ${CMAKE_SOURCE_DIR}/shared/device_properties.h
      ${CMAKE_SOURCE_DIR}/shared/rocfft_hip.h
      ${CMAKE_SOURCE_DIR}/shared/gpubuf.h
+     ${CMAKE_SOURCE_DIR}/shared/hip_object_wrapper.h
      ${CMAKE_SOURCE_DIR}/library/src/include/rtc_kernel.h
      ${CMAKE_SOURCE_DIR}/library/src/rtc_kernel.cpp
      ${CMAKE_SOURCE_DIR}/library/src/rtc_test_harness_helper.cpp
@@ -342,7 +343,7 @@ foreach( target
   set_target_properties( ${target} PROPERTIES
     CXX_VISIBILITY_PRESET "hidden"
     VISIBILITY_INLINES_HIDDEN ON
-    CXX_STANDARD 17
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
     POSITION_INDEPENDENT_CODE ON
   )
@@ -449,7 +450,7 @@ foreach( target rocfft rocfft_offline_tuner rocfft_solmap_convert rocfft_aot_hel
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
   set_target_properties( ${target} PROPERTIES
-    CXX_STANDARD 17
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
   )
   rocfft_link_internal_lib( ${target} rocfft-rtc-cache )
@@ -554,6 +555,7 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx941 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1101 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1102 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx1150 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1151 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1152 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1153 )

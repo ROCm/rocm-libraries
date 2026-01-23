@@ -5,6 +5,18 @@ Documentation for rocFFT is available at
 
 ## (Unreleased) rocFFT 1.0.37
 
+### Optimized
+
+* Allow plans to share hipModules if they use the same kernels.  This reduces time spent and memory used when 
+  creating plans that exist concurrently.
+
+### Changed
+
+* Moved library to C++20 standard.
+* Removed Boost as a dependency for clients and samples.
+
+### Resolved issues
+
 * Fixed potential issue with data generation for multidimensional transforms in rocfft-tests and rocfft-bench.
 * Fixed issue that sometimes blocked complex-to-complex FFT plan creation when using noncontiguous strides in multiple dimensions.
 * Fixed issue that sometimes blocked complex-to-real FFT plan creation when using noncontiguous strides in multiple dimensions.
@@ -12,11 +24,13 @@ Documentation for rocFFT is available at
 * Fixed potential launch failure of data generation kernels in test and benchmark programs.
 * Fixed incorrect results on some strided real-complex FFTs on gfx90a.
 * Fixed incorrect results on some even-length real FFTs that have odd-length strides on higher dimensions.
+* Fixed callbacks on MPI transforms, when not all ranks have the same number of data bricks.
 
 ## rocFFT 1.0.36 for ROCm 7.2.0
 
 ### Added
 
+* Support for gfx1150 architecture.
 * Added support for per precision and architecture kernel configuration entries in the library.
 * Support for the gfx1152 and gfx1153 architectures.
 

@@ -289,13 +289,6 @@ void testing_gemmi(Arguments argus)
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
     hipsparseHandle_t              handle = unique_ptr_handle->handle;
 
-    if(M == 0 || N == 0 || K == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        return;
-#endif
-    }
-
     srand(12345ULL);
 
     // Host structures

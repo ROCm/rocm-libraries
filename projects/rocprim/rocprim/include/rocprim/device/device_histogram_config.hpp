@@ -32,49 +32,33 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<typename HistogramConfig, typename, unsigned int, unsigned int>
-struct wrapped_histogram_config
+template<class Config, class Selector, class Target>
+struct histogram_config_static_selector
 {
-    static_assert(std::is_same<typename HistogramConfig::tag, histogram_config_tag>::value,
-                  "Config must be a specialization of struct template histogram_config");
-
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr histogram_config_params params = HistogramConfig{};
-    };
+    static constexpr auto block_size
+        = target_config<Config, Selector, Target>::params.histogram_config.block_size;
 };
 
-template<typename Sample, unsigned int Channels, unsigned int ActiveChannels>
-struct wrapped_histogram_config<default_config, Sample, Channels, ActiveChannels>
+template<class Config, class Selector, class Target>
+struct histogram_global_config_static_selector
 {
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr histogram_config_params params
-            = default_histogram_config<static_cast<unsigned int>(Arch),
-                                       Sample,
-                                       Channels,
-                                       ActiveChannels>{};
-    };
+    static constexpr auto block_size
+        = target_config<Config, Selector, Target>::params.histogram_global_config.block_size;
 };
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-template<typename HistogramConfig,
-         typename Sample,
-         unsigned int Channels,
-         unsigned int ActiveChannels>
-template<target_arch Arch>
-constexpr histogram_config_params
-    wrapped_histogram_config<HistogramConfig, Sample, Channels, ActiveChannels>::
-        architecture_config<Arch>::params;
+template<class Sample, unsigned int Channels, unsigned int ActiveChannels>
+struct histogram_config_selector
+{
+    using targets    = histogram_targets;
+    using param_type = histogram_config_params;
 
-template<typename Sample, unsigned int Channels, unsigned int ActiveChannels>
-template<target_arch Arch>
-constexpr histogram_config_params
-    wrapped_histogram_config<default_config, Sample, Channels, ActiveChannels>::architecture_config<
-        Arch>::params;
-#endif // DOXYGEN_SHOULD_SKIP_THIS
+    param_type params;
+
+    template<class Target>
+    constexpr histogram_config_selector(Target)
+        : params(histogram_config_picker<Target, Sample, Channels, ActiveChannels>())
+    {}
+};
 
 } // end namespace detail
 

@@ -307,14 +307,6 @@ void testing_bsrmv(Arguments argus)
     int mb = (m + block_dim - 1) / block_dim;
     int nb = (n + block_dim - 1) / block_dim;
 
-    if(block_dim == 1 || mb == 0 || nb == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        // cusparse only accepts block_dim > 1
-        return;
-#endif
-    }
-
     srand(12345ULL);
 
     // Host structures

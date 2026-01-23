@@ -796,3 +796,41 @@ TEST(TestShapeUtils, CalculateGroupCountThrowsForNonDivisibleChannels)
 
     EXPECT_THROW(calculateGroupCount(inputDims, weightDims), std::invalid_argument);
 }
+
+TEST(TestShapeUtils, IsLayoutAgnosticTrueForAllOnes)
+{
+    // Degenerate tensors (all dims=1) are layout-agnostic
+    EXPECT_TRUE(isLayoutAgnostic({1, 1, 1, 1}));
+    EXPECT_TRUE(isLayoutAgnostic({1, 1, 1, 1, 1}));
+    EXPECT_TRUE(isLayoutAgnostic({1}));
+}
+
+TEST(TestShapeUtils, IsLayoutAgnosticTrueForSingleNonTrivialDim)
+{
+    // Channel-only/derived tensors (one non-trivial dimension)
+    EXPECT_TRUE(isLayoutAgnostic({1, 64, 1, 1}));
+    EXPECT_TRUE(isLayoutAgnostic({1, 128, 1, 1, 1}));
+    EXPECT_TRUE(isLayoutAgnostic({1, 1, 1, 32}));
+    EXPECT_TRUE(isLayoutAgnostic({10, 1, 1, 1}));
+}
+
+TEST(TestShapeUtils, IsLayoutAgnosticTrueForEmpty)
+{
+    EXPECT_TRUE(isLayoutAgnostic({}));
+}
+
+TEST(TestShapeUtils, IsLayoutAgnosticFalseForMultipleNonTrivialDims)
+{
+    // Standard input tensors with multiple non-trivial dimensions
+    EXPECT_FALSE(isLayoutAgnostic({2, 3, 4, 5}));
+    EXPECT_FALSE(isLayoutAgnostic({1, 64, 32, 32}));
+    EXPECT_FALSE(isLayoutAgnostic({2, 128, 1, 1}));
+    EXPECT_FALSE(isLayoutAgnostic({1, 1, 2, 3}));
+}
+
+TEST(TestShapeUtils, IsLayoutAgnosticBoundaryCase)
+{
+    // Exactly two non-trivial dims should be false
+    EXPECT_FALSE(isLayoutAgnostic({2, 2, 1, 1}));
+    EXPECT_FALSE(isLayoutAgnostic({1, 2, 2, 1}));
+}

@@ -304,6 +304,25 @@ static inline std::vector<int64_t> buildTensorIndices(int64_t batchIdx,
     return fullIndices;
 }
 
+// Checks if a tensor shape is layout-agnostic.
+// A tensor is layout-agnostic if it has at most one non-trivial dimension (size > 1).
+// This includes:
+// - Degenerate tensors (all dims=1): scalars
+// - Channel-only/derived tensors (dims like {1, C, 1, 1}): scale, bias, mean, variance
+// For these tensors, the stride order is ambiguous and doesn't affect memory access patterns.
+inline bool isLayoutAgnostic(const std::vector<int64_t>& dims)
+{
+    size_t nonTrivialDims = 0;
+    for(const auto dim : dims)
+    {
+        if(dim > 1)
+        {
+            ++nonTrivialDims;
+        }
+    }
+    return nonTrivialDims <= 1;
+}
+
 // Utility for calculating group count given weight and input tensors
 // For grouped convolutions, group count = input_channels / weight_channels_per_group
 inline int64_t calculateGroupCount(const std::vector<int64_t>& inputDims,

@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -366,7 +366,7 @@ defaultBenchmarkCommonParameters = [
     # Restricted address remap features (default off unless explicitly enabled in the solution config):
     {"BAddrInterleave": [False]},
     {"KRingShift": [False]},
-    {"DirectToLds": [False]},
+    {"DirectToLds": [0]},
     {"UseSgprForGRO": [-1]},
     {"UseInstOffsetForGRO": [0]},
     {"AssertSummationElementMultiple": [1]},
@@ -433,10 +433,14 @@ defaultBenchmarkCommonParameters = [
     {"LDSTrInst": [False]},
     {"WaveSplitK": [ False ]},
     {"MbskPrefetchMethod": [-1]},
-    {"UseCustomMainLoopSchedule": [1]},
+    {"UseCustomMainLoopSchedule": [-1]},
     {"SpaceFillingAlgo": [[]]},
     {"SFCWGM": [[[1,1],[1,1]]]},
-    {"AdaptiveGemm": [0]}
+    {"AdaptiveGemm": [0]},
+    {"ExtraMiLatencyLeft": [-1]},
+    {"ExtraLatencyForLR": [0]},
+    {"SwapGlobalReadOrder": [0]},
+    {"TailloopInNll": [False]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter

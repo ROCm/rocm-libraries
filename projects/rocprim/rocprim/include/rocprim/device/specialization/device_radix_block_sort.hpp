@@ -52,15 +52,17 @@ inline hipError_t radix_sort_block_sort(KeysInputIterator    keys_input,
     using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
 
-    using config = wrapped_radix_sort_block_sort_config<Config, key_type, value_type>;
+    using Selector = radix_sort_block_sort_config_selector<key_type, value_type>;
 
-    detail::target_arch target_arch;
-    hipError_t          result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const kernel_config_params params = dispatch_target_arch<config, false>(target_arch);
+    target_arch target_arch;
+    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
+
+    gpu target_gpu;
+    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
+
+    const target current_target(target_arch, target_gpu);
+
+    const auto params = get_config<Selector>(Config{}, current_target);
 
     sort_items_per_block                     = params.block_size * params.items_per_thread;
     const unsigned int sort_number_of_blocks = ceiling_div(size, sort_items_per_block);
@@ -99,14 +101,14 @@ inline hipError_t radix_sort_block_sort(KeysInputIterator    keys_input,
     };
 
     ROCPRIM_RETURN_ON_ERROR(
-        execute_launch_plan<config,
-                            decltype(radix_sort_block_sort_kernel),
-                            radix_sort_config_selector>(target_arch,
-                                                        radix_sort_block_sort_kernel,
-                                                        dim3(sort_number_of_blocks),
-                                                        dim3(params.block_size),
-                                                        0,
-                                                        stream));
+        execute_launch_plan<Config, Selector, radix_sort_block_sort_config_static_selector>(
+            current_target,
+            radix_sort_block_sort_kernel,
+            dim3(sort_number_of_blocks),
+            dim3(params.block_size),
+            0,
+            stream));
+
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("radix_sort_block_sort_kernel", size, start);
     return hipSuccess;
 }

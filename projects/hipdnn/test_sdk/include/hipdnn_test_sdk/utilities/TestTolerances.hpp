@@ -40,7 +40,7 @@ constexpr T getToleranceInference()
 }
 
 template <typename T>
-constexpr T getToleranceTraining()
+constexpr T getToleranceInferenceWithVariance()
 {
     if constexpr(std::is_same_v<T, double>)
     {
@@ -52,11 +52,38 @@ constexpr T getToleranceTraining()
     }
     else if constexpr(std::is_same_v<T, half>)
     {
-        return 5e-4_h;
+        // ~32% more lenient for BN with variance vs BN with inv variance (5e-4_h)
+        return 6.6e-4_h;
     }
     else if constexpr(std::is_same_v<T, hip_bfloat16>)
     {
-        return 5e-3_bf;
+        // ~4% more lenient for BN with variance vs BN with inv variance (5e-3_bf)
+        return 5.2e-3_bf;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
+template <typename T>
+constexpr T getToleranceTraining()
+{
+    if constexpr(std::is_same_v<T, double>)
+    {
+        return 1e-7; // this needs to be changed when double is supported
+    }
+    else if constexpr(std::is_same_v<T, float>)
+    {
+        return 4e-3f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 4e-3_h;
+    }
+    else if constexpr(std::is_same_v<T, hip_bfloat16>)
+    {
+        return 8e-3_bf;
     }
     else
     {
@@ -198,6 +225,32 @@ constexpr T getToleranceWrw()
 }
 
 } // namespace conv
+
+namespace matmul
+{
+
+template <typename T>
+constexpr T getTolerance()
+{
+    if constexpr(std::is_same_v<T, float>)
+    {
+        return 1e-5f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 1e-2_h;
+    }
+    else if constexpr(std::is_same_v<T, hip_bfloat16>)
+    {
+        return 1e-2_bf;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
+} // namespace matmul
 
 namespace pointwise
 {

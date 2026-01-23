@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -64,3 +64,24 @@ Tests:
              nos7,
              Chebyshev4,
              sme3Dc]
+
+- name: csrmv
+  category: nightly
+  function: csrmv
+  precision: *double_only_precisions_complex_real
+  M: 1
+  N: 1
+  alpha: [1.0]
+  alphai: [-1.2]
+  beta: [0.7]
+  betai: [0.5]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [shipsec1,
+             webbase-1M,
+             bmwcra_1,
+             rma10,
+             mc2depi,
+             ASIC_320k,
+             bibd_22_8,
+             webbase-1M]
