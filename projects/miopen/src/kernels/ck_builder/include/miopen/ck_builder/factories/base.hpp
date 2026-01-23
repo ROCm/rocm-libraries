@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <miopen/ck_builder/shared.hpp>
+
 namespace miopen {
 namespace conv {
 namespace ck_builder {
@@ -16,6 +18,7 @@ template <typename DeviceOp>
 struct DeviceOperationInstanceFactory
 {
 };
+
 } // namespace instance
 } // namespace ck_builder
 } // namespace conv

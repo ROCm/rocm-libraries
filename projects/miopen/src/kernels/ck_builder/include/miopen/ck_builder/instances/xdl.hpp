@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "shared.hpp"
+#include <miopen/ck_builder/shared.hpp>
 
 namespace miopen {
 namespace conv {

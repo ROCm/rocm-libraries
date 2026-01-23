@@ -2,8 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 add_library(ck_builder STATIC 
-    example_conversion.cpp
-    instances/grouped_conv_fwd_2d_f32.cpp
+    factories/grouped_conv_2d_fwd_multiple_abd_f32.cpp
 )
 target_compile_definitions(ck_builder PRIVATE -DCK_EXPERIMENTAL_BUILDER)
 target_include_directories(ck_builder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

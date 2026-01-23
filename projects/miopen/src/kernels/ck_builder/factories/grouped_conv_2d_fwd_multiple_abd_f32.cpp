@@ -1,36 +1,15 @@
-#include <miopen/ck_builder/instances/grouped_conv_fwd_2d_f32.hpp>
+#include <miopen/ck_builder/factories/grouped_conv_2d_fwd_multiple_abd.hpp>
+
 #include <miopen/ck_builder/kernel_instantiation.hpp>
+#include <miopen/ck_builder/instances/xdl.hpp>
+#include <miopen/ck_builder/instances/xdl_v3.hpp>
+
 #include <ck_tile/builder/reflect/instance_traits_device_grouped_conv_bwd_weight_multiple_d_xdl_cshuffle.hpp>
 
 namespace miopen {
 namespace conv {
 namespace ck_builder {
 namespace instance {
-
-using InLayout                             = ck::tensor_layout::convolution::NGCHW;
-using WeiLayout                            = ck::tensor_layout::convolution::GKCYX;
-using OutLayout                            = ck::tensor_layout::convolution::NGKHW;
-using PassThrough                          = ck::tensor_operation::element_wise::PassThrough;
-using EmptyTuple                           = ck::Tuple<>;
-static constexpr ck::index_t NumDimSpatial = 2;
-template <typename DataType>
-using DeviceOpGFwdDefault =
-    ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<NumDimSpatial,
-                                                                  InLayout,
-                                                                  WeiLayout,
-                                                                  ck::Tuple<>,
-                                                                  OutLayout,
-                                                                  DataType,
-                                                                  DataType,
-                                                                  ck::Tuple<>,
-                                                                  DataType,
-                                                                  PassThrough,
-                                                                  PassThrough,
-                                                                  PassThrough,
-                                                                  DataType,
-                                                                  DataType>;
-
-using DeviceOpGFWdDefaultFloat = DeviceOpGFwdDefault<float>;
 
 constexpr auto FP32 = ckb::DataType::FP32;
 
@@ -238,9 +217,6 @@ create_device_grouped_conv_fwd_xdl_f32_instance_data(std::size_t spatialDim,
 
     return result;
 }
-
-using BaseOperator    = ck::tensor_operation::device::BaseOperator;
-using BaseOperatorPtr = std::unique_ptr<BaseOperator>;
 
 template <auto arr>
 void build_k()
@@ -870,12 +846,11 @@ create_device_grouped_conv2d_fwd_xdl_merged_groups_ngchw_gkcyx_ngkhw_f32_instanc
     return instanceData;
 }
 
-void add_grouped_conv_fwd_2d_f32(std::vector<BaseOperatorPtr>& instances)
-{
-    // Adapted from GetInstances() in the composable_kernel project's file:
+std::vector<BaseOperatorPtr> DeviceOperationInstanceFactory<DeviceOpGFwdDefault<float>>::GetInstances()
+    {// Adapted from GetInstances() in the composable_kernel project's file:
     // library/include/ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp
-
-    constexpr auto xdlKernelData = concat(
+        std::vector<BaseOperatorPtr> instances{};
+        constexpr auto xdlKernelData = concat(
         create_device_grouped_conv2d_fwd_xdl_merged_groups_ngchw_gkcyx_ngkhw_f32_instance_data(),
         create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_instance_data(),
         create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_16x16_instance_data());
@@ -886,7 +861,8 @@ void add_grouped_conv_fwd_2d_f32(std::vector<BaseOperatorPtr>& instances)
         create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_intra_instance_data(),
         create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_inter_instance_data());
     build_kernels<xdlV3KernelData>(instances);
-}
+        return instances;
+    }
 } // namespace instance
 } // namespace ck_builder
 } // namespace conv

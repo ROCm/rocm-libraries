@@ -4,7 +4,7 @@
 #pragma once
 
 #include <array>
-#include <miopen/ck_builder/instances/shared.hpp>
+#include <miopen/ck_builder/shared.hpp>
 
 namespace miopen {
 namespace conv {

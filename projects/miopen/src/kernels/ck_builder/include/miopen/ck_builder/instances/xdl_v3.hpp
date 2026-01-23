@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "shared.hpp"
 #include "xdl.hpp"
 
 namespace miopen {

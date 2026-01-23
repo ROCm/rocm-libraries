@@ -6,7 +6,11 @@
 #include <array>
 #include <cstddef>
 #include <miopen/ck_builder/factories/base.hpp>
-#include <miopen/ck_builder/instances/grouped_conv_fwd_2d_f32.hpp>
+
+#include "ck/ck.hpp"
+#include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
+#include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
+#include "ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp"
 
 namespace miopen {
 namespace conv {
@@ -34,16 +38,10 @@ using DeviceOpGFwdDefault =
                                                                   DataType,
                                                                   DataType>;
 
-using DeviceOpGFWdDefaultFloat = DeviceOpGFwdDefault<float>;
 template <>
-struct DeviceOperationInstanceFactory<DeviceOpGFWdDefaultFloat>
+struct DeviceOperationInstanceFactory<DeviceOpGFwdDefault<float>>
 {
-    static std::vector<BaseOperatorPtr> GetInstances()
-    {
-        std::vector<BaseOperatorPtr> instances{};
-        add_grouped_conv_fwd_2d_f32(instances);
-        return instances;
-    }
+    static std::vector<BaseOperatorPtr> GetInstances();
 };
 } // namespace instance
 } // namespace ck_builder
