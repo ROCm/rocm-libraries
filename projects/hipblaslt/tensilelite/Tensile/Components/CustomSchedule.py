@@ -138,6 +138,23 @@ def count_items(input_list: list[int], sv: Optional[int] = None, ev: Optional[in
             count += 1
     return count
 
+def switch_A_B_schedule(optSchedule):
+    # Swap A and B entries in the schedule
+    # Only replace A/B if it's the last or second-last character
+    swappedSchedule = dict()
+    for key, value in optSchedule.items():
+        # Check if A or B is in the last or second-last position
+        if len(key) >= 1 and key[-1] in ('A', 'B'):
+            # Last character is A or B
+            new_key = key[:-1] + ('B' if key[-1] == 'A' else 'A')
+        elif len(key) >= 2 and key[-2] in ('A', 'B'):
+            # Second-last character is A or B
+            new_key = key[:-2] + ('B' if key[-2] == 'A' else 'A') + key[-1]
+        else:
+            # No A or B in last or second-last position, keep unchanged
+            new_key = key
+        swappedSchedule[new_key] = value
+    return swappedSchedule
 
 class ScheduleInfo:
     def __init__(
@@ -3712,7 +3729,7 @@ def _get_schedule_64x128x64_TF32(kernel, useLDSTr, TLDS):
     syncCode = []
     gr_inc_step = 0
 
-    if isTN(kernel) and not useLDSTr and TLDS==1 and kernel["UseDirect32XEmulation"]:
+    if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UsePLRPack"] = True
 
@@ -3786,3 +3803,19 @@ def _get_schedule_64x128x64_TF32(kernel, useLDSTr, TLDS):
 
     else:
         return False, None
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(128, 64, 64, 2, 1, True, 0, 0),
+    dtype_predicate=isTF32,
+    vector_widths=[4, 4, 4],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x64x64_TF32(kernel, useLDSTr, TLDS):
+    valid, opt = _get_schedule_64x128x64_TF32(kernel, useLDSTr, TLDS)
+    if not valid:
+        return False, None
+
+    optSchedule = switch_A_B_schedule(opt.optSchedule)
+    return True, ScheduleInfo(opt.numCodePaths, opt.numMfma, optSchedule, opt.syncCode, opt.nglshift, opt.nllshift)
