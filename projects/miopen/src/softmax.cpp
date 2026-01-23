@@ -17,9 +17,11 @@
 namespace miopen {
 
 namespace softmax {
-miopen::PerformanceDb GetDb(const miopen::ExecutionContext& context, const miopen::softmax::ProblemDescriptionTag&)
+miopen::PerformanceDb GetDb(const miopen::ExecutionContext& context,
+                            const miopen::softmax::ProblemDescriptionTag&)
 {
-    return {DbKinds::PerfDb, context.GetPerfDbPath("softmax"), context.GetUserPerfDbPath("softmax")};
+    return {
+        DbKinds::PerfDb, context.GetPerfDbPath("softmax"), context.GetUserPerfDbPath("softmax")};
 }
 } // namespace softmax
 

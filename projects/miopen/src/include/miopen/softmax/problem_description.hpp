@@ -3,7 +3,10 @@
 
 #pragma once
 
-#include "miopen/sqlite_db.hpp"
+#include <miopen/config.h>
+#if MIOPEN_ENABLE_SQLITE
+#include <miopen/sqlite_db.hpp>
+#endif
 #include <miopen/problem_description_base.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/mlo_internal.hpp>
@@ -133,8 +136,8 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
     // This declaration marks softmax as a primitive with tuning enabled.
     // Any tunable solver would be able pick it and fetch a db instance in ExecutePrimitive.
     // It has to be discoverable via ADL from problem description.
-    friend auto GetDb(const ExecutionContext& context, const ProblemDescriptionTag&)
-        -> PerformanceDb;
+    friend auto GetDb(const ExecutionContext& context,
+                      const ProblemDescriptionTag&) -> PerformanceDb;
 
 private:
     void CheckAndAssignAlphaBeta(const void* alpha_, const void* beta_)

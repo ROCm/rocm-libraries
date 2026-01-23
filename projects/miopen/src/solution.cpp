@@ -519,12 +519,14 @@ void Solution::RunImpl(const Handle& handle,
 
     if(!kernels.empty())
     {
-        const auto ctx              = ExecutionContext{&handle};
+        const auto ctx = ExecutionContext{&handle};
         auto db_getter = MakeConvDbGetter(ctx);
-        const auto softmax_solution = GetSolver() == regularSoftmax.SolverDbId()
-                                          ? solver::FindSolution(regularSoftmax, ctx, problem_description, db_getter, invoke_ctx)
-                                          : attnSoftmax.GetSolution(ctx, problem_description);
-        auto kernel_handles         = std::vector<Kernel>{std::begin(kernels), std::end(kernels)};
+        const auto softmax_solution =
+            GetSolver() == regularSoftmax.SolverDbId()
+                ? solver::FindSolution(
+                      regularSoftmax, ctx, problem_description, db_getter, invoke_ctx)
+                : attnSoftmax.GetSolution(ctx, problem_description);
+        auto kernel_handles = std::vector<Kernel>{std::begin(kernels), std::end(kernels)};
 
         if(softmax_solution.invoker_factory.has_value())
         {
@@ -548,11 +550,12 @@ void Solution::RunImpl(const Handle& handle,
         return;
     }
 
-    auto ctx = ExecutionContext{&handle};
+    auto ctx       = ExecutionContext{&handle};
     auto db_getter = MakeConvDbGetter(ctx);
-    const auto softmax_solution = GetSolver() == regularSoftmax.SolverDbId()
-                                      ? solver::FindSolution(regularSoftmax, ctx, problem_description, db_getter, invoke_ctx)
-                                      : attnSoftmax.GetSolution(ctx, problem_description);
+    const auto softmax_solution =
+        GetSolver() == regularSoftmax.SolverDbId()
+            ? solver::FindSolution(regularSoftmax, ctx, problem_description, db_getter, invoke_ctx)
+            : attnSoftmax.GetSolution(ctx, problem_description);
 
     if(softmax_solution.invoker_factory.has_value())
     {

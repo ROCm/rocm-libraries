@@ -563,8 +563,7 @@ Problem::FindSolutionsImpl(const Handle& handle,
     static solver::softmax::AttnSoftmax attnSoftmaxSolver;
     static solver::softmax::Softmax regularSoftmaxSolver;
 
-    auto check_solver = [&]<typename Solver>(const Solver* solver)
-    {
+    auto check_solver = [&]<typename Solver>(const Solver* solver) {
         if(ret.size() >= max_solutions)
         {
             return;

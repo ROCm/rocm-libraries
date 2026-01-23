@@ -90,7 +90,9 @@ bool Softmax::IsApplicable(
     return true;
 }
 
-PerformanceConfigSoftmax Softmax::GetDefaultPerformanceConfig(const ExecutionContext& context, const miopen::softmax::ProblemDescription& problem) const
+PerformanceConfigSoftmax
+Softmax::GetDefaultPerformanceConfig(const ExecutionContext& context,
+                                     const miopen::softmax::ProblemDescription& problem) const
 {
     PerformanceConfigSoftmax config;
     config.HeuristicInit(problem);
@@ -99,7 +101,9 @@ PerformanceConfigSoftmax Softmax::GetDefaultPerformanceConfig(const ExecutionCon
     return config;
 }
 
-bool Softmax::IsValidPerformanceConfig(const ExecutionContext& context, const miopen::softmax::ProblemDescription& problem, const PerformanceConfigSoftmax& config) const
+bool Softmax::IsValidPerformanceConfig(const ExecutionContext& context,
+                                       const miopen::softmax::ProblemDescription& problem,
+                                       const PerformanceConfigSoftmax& config) const
 {
     return config.IsValid(context, problem);
 }
@@ -122,7 +126,8 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
     auto spatial_dim = mode == MIOPEN_SOFTMAX_MODE_INSTANCE ? 1 : lengths[2] * lengths[3];
     auto vector_size =
         mode == MIOPEN_SOFTMAX_MODE_INSTANCE ? lengths[1] * lengths[2] * lengths[3] : lengths[1];
-    auto num_batch    = vector_size < config.local_size ? nextPow2(config.local_size / vector_size) : 1;
+    auto num_batch =
+        vector_size < config.local_size ? nextPow2(config.local_size / vector_size) : 1;
     auto workgroups   = num_batch == 1               ? grid_size
                         : grid_size % num_batch == 0 ? grid_size / num_batch
                                                      : grid_size / num_batch + 1;

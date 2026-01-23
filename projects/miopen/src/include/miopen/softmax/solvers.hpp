@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include "miopen/execution_context.hpp"
-#include "miopen/invoke_params.hpp"
-#include "miopen/generic_search.hpp"
-#include "miopen/softmax/invoke_params.hpp"
-#include "miopen/tensor.hpp"
+#include <miopen/execution_context.hpp>
+#include <miopen/invoke_params.hpp>
+#include <miopen/generic_search.hpp>
+#include <miopen/softmax/invoke_params.hpp>
+#include <miopen/tensor.hpp>
 #include <miopen/solver.hpp>
 #include <miopen/softmax/problem_description.hpp>
 
@@ -68,23 +68,19 @@ struct Softmax final : SoftmaxTunableSolver<PerformanceConfigSoftmax>
         // Forward y and backward dx are both an input and an output, so we need to restore them
         // after tuning to make sure tuning doesn't affect the output
         auto invoke_context_softmax = invoke_context.CastTo<miopen::softmax::InvokeParams>();
-        std::vector<unsigned char> data_backup;
+        Allocator::ManageDataPtr data_backup;
         if(invoke_context_softmax.forward_y != nullptr)
         {
-            auto y_bytepointer = reinterpret_cast<unsigned char*>(invoke_context_softmax.forward_y);
-            data_backup        = std::vector<unsigned char>(
-                y_bytepointer, y_bytepointer + invoke_context_softmax.yDesc.GetNumBytes());
+            data_backup = context.GetStream().Create(invoke_context_softmax.yDesc.GetNumBytes());
             context.GetStream().Copy(invoke_context_softmax.forward_y,
-                                     data_backup.data(),
+                                     data_backup.get(),
                                      invoke_context_softmax.yDesc.GetNumBytes());
         }
         else if(invoke_context_softmax.dx != nullptr)
         {
-            auto dx_bytepointer = reinterpret_cast<unsigned char*>(invoke_context_softmax.dx);
-            data_backup         = std::vector<unsigned char>(
-                dx_bytepointer, dx_bytepointer + invoke_context_softmax.xdxDesc.GetNumBytes());
+            data_backup = context.GetStream().Create(invoke_context_softmax.xdxDesc.GetNumBytes());
             context.GetStream().Copy(invoke_context_softmax.dx,
-                                     data_backup.data(),
+                                     data_backup.get(),
                                      invoke_context_softmax.yDesc.GetNumBytes());
         }
 
@@ -92,13 +88,13 @@ struct Softmax final : SoftmaxTunableSolver<PerformanceConfigSoftmax>
 
         if(invoke_context_softmax.forward_y != nullptr)
         {
-            context.GetStream().Copy(data_backup.data(),
+            context.GetStream().Copy(data_backup.get(),
                                      invoke_context_softmax.forward_y,
                                      invoke_context_softmax.yDesc.GetNumBytes());
         }
         if(invoke_context_softmax.dx != nullptr)
         {
-            context.GetStream().Copy(data_backup.data(),
+            context.GetStream().Copy(data_backup.get(),
                                      invoke_context_softmax.dx,
                                      invoke_context_softmax.xdxDesc.GetNumBytes());
         }
