@@ -23,7 +23,7 @@ done
 setup_rocm_compilers_hash_file() {
     mkdir -p "$COMPILERS_HASH_DIR"
     HIPCC_MD5="$(md5sum "${ROCM_PATH}/bin/hipcc")"
-    pushd "${ROCM_PATH}/amdgcn/bitcode"
+    pushd "${ROCM_PATH}/lib/llvm/amdgcn/bitcode"
         DEVICELIBS_BITCODES_MD5="$(find . -type f -exec md5sum {} \; | sort | md5sum)"
     popd
     HIPCC_HASH_VALUE="${HIPCC_MD5%% *}"
