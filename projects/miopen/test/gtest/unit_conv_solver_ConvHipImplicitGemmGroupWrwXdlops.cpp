@@ -93,7 +93,7 @@ const auto& GetTestParams()
 
 Gpu GetDeterministicSupportedDevices()
 {
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL && !defined(_WIN32)
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     return Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx110X | Gpu::gfx115X |
            Gpu::gfx120X;
 #else
