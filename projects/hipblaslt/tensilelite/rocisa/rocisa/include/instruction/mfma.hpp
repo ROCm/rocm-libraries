@@ -116,6 +116,18 @@ namespace rocisa
             return std::make_shared<MFMAInstruction>(*this);
         }
 
+        // Workaround for gfx1250: low-precision WMMA must use _scale instruction with scale=0
+        // to avoid Base layer issue where VOP3PX2/VOP3PX3 instructions may not execute atomically
+        bool forceScaledWMMA() const
+        {
+            bool        isWMMA      = !getAsmCaps()["HasMFMA"];
+            auto        isaVersion  = rocIsa::getInstance().getKernel().isaVersion;
+            std::string instTypeStr = typeConvert(instType);
+            // Affected instructions: v_wmma_f32_16x16x128_f8f6f4, v_wmma_f32_32x16x128_f4
+            bool isLowPrecision = (instTypeStr == "f8f6f4") || (instTypeStr == "f4");
+            return isWMMA && (isaVersion == std::array<int, 3>{12, 5, 0}) && isLowPrecision;
+        }
+
         std::string typeConvert(InstType iType) const
         {
             bool is_wmma_v3 = getAsmCaps()["HasWMMA_V3"];
@@ -177,6 +189,11 @@ namespace rocisa
                 std::string instructionName = is_mfma ? "mfma" : "wmma";
                 std::string instructionStep = is_mfma ? "" : "_";
                 std::string mfma_1k         = mfma1k ? "_1k" : "";
+                if(forceScaledWMMA())
+                {
+                    return "v_wmma_scale_" + typeConvert(accType) + "_" + variantStr
+                           + instructionStep + typeConvert(instType);
+                }
                 return "v_" + instructionName + "_" + typeConvert(accType) + "_" + variantStr
                        + instructionStep + typeConvert(instType) + mfma_1k;
             }
@@ -187,6 +204,7 @@ namespace rocisa
             std::string negStr
                 = !neg ? "" : (getAsmCaps()["HasWMMA_V1"] ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
             std::string inputPermuteStr = "";
+            std::string scaleStr        = "";
             if(getAsmCaps()["HasMFMA_f8f6f4"])
             {
                 switch(instType)
@@ -217,9 +235,13 @@ namespace rocisa
                 default:
                     break;
                 }
+                if(forceScaledWMMA())
+                {
+                    scaleStr = ", 0, 0";
+                }
             }
             return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
-                   + acc2->toString() + negStr + inputPermuteStr;
+                   + acc2->toString() + scaleStr + negStr + inputPermuteStr;
         }
 
         std::string toString() const override
