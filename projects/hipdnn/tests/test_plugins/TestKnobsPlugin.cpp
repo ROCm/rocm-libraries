@@ -5,6 +5,7 @@
 #include "TestPluginEngineIdMap.hpp"
 
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_plugin_sdk/KnobFactory.hpp>
 
 // NOLINTNEXTLINE
 thread_local char
@@ -66,114 +67,48 @@ public:
 
             flatbuffers::FlatBufferBuilder builder;
 
-            // Create knobs vector
+            // Create knobs vector using KnobFactory
             std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobOffsets;
 
             // Knob 1: Integer knob with min/max/step constraints
-            {
-                auto knobIdStr = builder.CreateString("test.int_knob");
-                auto description = builder.CreateString("Test integer knob with range 0-100");
-
-                // Default value
-                auto defaultValue = hipdnn_data_sdk::data_objects::CreateIntValue(builder, 50);
-
-                // Constraint: min=0, max=100, step=10
-                auto constraint
-                    = hipdnn_data_sdk::data_objects::CreateIntConstraint(builder, 0, 100, 10);
-
-                auto knob = hipdnn_data_sdk::data_objects::CreateKnob(
-                    builder,
-                    knobIdStr,
-                    description,
-                    hipdnn_data_sdk::data_objects::KnobValue::IntValue,
-                    defaultValue.Union(),
-                    hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint,
-                    constraint.Union(),
-                    false // not deprecated
-                );
-                knobOffsets.push_back(knob);
-            }
+            knobOffsets.push_back(
+                hipdnn_plugin_sdk::KnobFactory::createIntKnob(builder,
+                                                              "test.int_knob",
+                                                              "Test integer knob with range 0-100",
+                                                              50, // default value
+                                                              0, // min
+                                                              100, // max
+                                                              10, // step
+                                                              {})); // no explicit valid values
 
             // Knob 2: Float knob with min/max constraints
-            {
-                auto knobIdStr = builder.CreateString("test.float_knob");
-                auto description = builder.CreateString("Test float knob with range 0.0-1.0");
-
-                // Default value
-                auto defaultValue = hipdnn_data_sdk::data_objects::CreateFloatValue(builder, 0.5);
-
-                // Constraint: min=0.0, max=1.0
-                auto constraint
-                    = hipdnn_data_sdk::data_objects::CreateFloatConstraint(builder, 0.0, 1.0);
-
-                auto knob = hipdnn_data_sdk::data_objects::CreateKnob(
-                    builder,
-                    knobIdStr,
-                    description,
-                    hipdnn_data_sdk::data_objects::KnobValue::FloatValue,
-                    defaultValue.Union(),
-                    hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint,
-                    constraint.Union(),
-                    false // not deprecated
-                );
-                knobOffsets.push_back(knob);
-            }
+            knobOffsets.push_back(hipdnn_plugin_sdk::KnobFactory::createFloatKnob(
+                builder,
+                "test.float_knob",
+                "Test float knob with range 0.0-1.0",
+                0.5f, // default value
+                0.0f, // min
+                1.0f)); // max
 
             // Knob 3: String knob with valid_values constraint
-            {
-                auto knobIdStr = builder.CreateString("test.string_knob");
-                auto description = builder.CreateString("Test string knob with enum values");
-
-                // Default value
-                auto defaultStrValue = builder.CreateString("fast");
-                auto defaultValue
-                    = hipdnn_data_sdk::data_objects::CreateStringValue(builder, defaultStrValue);
-
-                // Constraint: valid values are "fast", "accurate", "balanced"
-                std::vector<flatbuffers::Offset<flatbuffers::String>> validValues;
-                validValues.push_back(builder.CreateString("fast"));
-                validValues.push_back(builder.CreateString("accurate"));
-                validValues.push_back(builder.CreateString("balanced"));
-                auto validValuesVector = builder.CreateVector(validValues);
-
-                auto constraint = hipdnn_data_sdk::data_objects::CreateStringConstraint(
-                    builder, 32, validValuesVector);
-
-                auto knob = hipdnn_data_sdk::data_objects::CreateKnob(
-                    builder,
-                    knobIdStr,
-                    description,
-                    hipdnn_data_sdk::data_objects::KnobValue::StringValue,
-                    defaultValue.Union(),
-                    hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint,
-                    constraint.Union(),
-                    false // not deprecated
-                );
-                knobOffsets.push_back(knob);
-            }
+            knobOffsets.push_back(hipdnn_plugin_sdk::KnobFactory::createStringKnob(
+                builder,
+                "test.string_knob",
+                "Test string knob with enum values",
+                "fast", // default value
+                {"fast", "accurate", "balanced"})); // valid values
 
             // Knob 4: Deprecated integer knob
-            {
-                auto knobIdStr = builder.CreateString("test.deprecated_knob");
-                auto description = builder.CreateString("Deprecated knob for testing");
-
-                auto defaultValue
-                    = hipdnn_data_sdk::data_objects::CreateIntValue(builder, int64_t{0});
-                auto constraint = hipdnn_data_sdk::data_objects::CreateIntConstraint(
-                    builder, int64_t{0}, int64_t{10}, int64_t{1});
-
-                auto knob = hipdnn_data_sdk::data_objects::CreateKnob(
-                    builder,
-                    knobIdStr,
-                    description,
-                    hipdnn_data_sdk::data_objects::KnobValue::IntValue,
-                    defaultValue.Union(),
-                    hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint,
-                    constraint.Union(),
-                    true // deprecated
-                );
-                knobOffsets.push_back(knob);
-            }
+            knobOffsets.push_back(
+                hipdnn_plugin_sdk::KnobFactory::createIntKnob(builder,
+                                                              "test.deprecated_knob",
+                                                              "Deprecated knob for testing",
+                                                              0, // default value
+                                                              0, // min
+                                                              10, // max
+                                                              1, // step
+                                                              {}, // no explicit valid values
+                                                              true)); // deprecated
 
             auto knobsVector = builder.CreateVector(knobOffsets);
             auto newEngineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(

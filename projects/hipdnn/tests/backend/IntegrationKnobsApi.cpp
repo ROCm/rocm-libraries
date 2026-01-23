@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_plugin_sdk/KnobSettingFactory.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
 class IntegrationKnobsApi : public ::testing::Test
@@ -295,7 +296,8 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateStringKnob)
                       hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint);
             auto constraint = knob->constraint_as_StringConstraint();
             ASSERT_NE(constraint, nullptr);
-            EXPECT_EQ(constraint->max_length(), 32);
+            // Note: KnobFactory uses max_length=0 (no length limit) for string knobs
+            EXPECT_EQ(constraint->max_length(), 0);
             ASSERT_NE(constraint->valid_values(), nullptr);
             EXPECT_EQ(constraint->valid_values()->size(), 3UL);
 
@@ -392,52 +394,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoNotFinalizedEngine)
 // EngineConfig Knob Choice Tests (via HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT)
 // =============================================================================
 
-// Helper function to create a serialized KnobSetting with int value
-static flatbuffers::DetachedBuffer createIntKnobSetting(const std::string& knobId, int64_t value)
-{
-    flatbuffers::FlatBufferBuilder builder;
-    auto knobIdOffset = builder.CreateString(knobId);
-    auto intValue = hipdnn_data_sdk::data_objects::CreateIntValue(builder, value);
-    auto knobSetting = hipdnn_data_sdk::data_objects::CreateKnobSetting(
-        builder,
-        knobIdOffset,
-        hipdnn_data_sdk::data_objects::KnobValue::IntValue,
-        intValue.Union());
-    builder.Finish(knobSetting);
-    return builder.Release();
-}
-
-// Helper function to create a serialized KnobSetting with float value
-static flatbuffers::DetachedBuffer createFloatKnobSetting(const std::string& knobId, double value)
-{
-    flatbuffers::FlatBufferBuilder builder;
-    auto knobIdOffset = builder.CreateString(knobId);
-    auto floatValue = hipdnn_data_sdk::data_objects::CreateFloatValue(builder, value);
-    auto knobSetting = hipdnn_data_sdk::data_objects::CreateKnobSetting(
-        builder,
-        knobIdOffset,
-        hipdnn_data_sdk::data_objects::KnobValue::FloatValue,
-        floatValue.Union());
-    builder.Finish(knobSetting);
-    return builder.Release();
-}
-
-// Helper function to create a serialized KnobSetting with string value
-static flatbuffers::DetachedBuffer createStringKnobSetting(const std::string& knobId,
-                                                           const std::string& value)
-{
-    flatbuffers::FlatBufferBuilder builder;
-    auto knobIdOffset = builder.CreateString(knobId);
-    auto strValueOffset = builder.CreateString(value);
-    auto stringValue = hipdnn_data_sdk::data_objects::CreateStringValue(builder, strValueOffset);
-    auto knobSetting = hipdnn_data_sdk::data_objects::CreateKnobSetting(
-        builder,
-        knobIdOffset,
-        hipdnn_data_sdk::data_objects::KnobValue::StringValue,
-        stringValue.Union());
-    builder.Finish(knobSetting);
-    return builder.Release();
-}
+using hipdnn_plugin_sdk::KnobSettingFactory;
 
 TEST_F(IntegrationKnobsApi, SetKnobChoiceIntValue)
 {
@@ -455,7 +412,7 @@ TEST_F(IntegrationKnobsApi, SetKnobChoiceIntValue)
               HIPDNN_STATUS_SUCCESS);
 
     // Set an integer knob value
-    auto knobBuffer = createIntKnobSetting("test.int_knob", 70);
+    auto knobBuffer = KnobSettingFactory::createIntKnobSetting("test.int_knob", 70);
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
@@ -485,7 +442,7 @@ TEST_F(IntegrationKnobsApi, SetKnobChoiceFloatValue)
               HIPDNN_STATUS_SUCCESS);
 
     // Set a float knob value
-    auto knobBuffer = createFloatKnobSetting("test.float_knob", 0.75);
+    auto knobBuffer = KnobSettingFactory::createFloatKnobSetting("test.float_knob", 0.75);
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
@@ -515,7 +472,7 @@ TEST_F(IntegrationKnobsApi, SetKnobChoiceStringValue)
               HIPDNN_STATUS_SUCCESS);
 
     // Set a string knob value
-    auto knobBuffer = createStringKnobSetting("test.string_knob", "accurate");
+    auto knobBuffer = KnobSettingFactory::createStringKnobSetting("test.string_knob", "accurate");
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
@@ -545,9 +502,10 @@ TEST_F(IntegrationKnobsApi, SetKnobChoiceMultipleKnobs)
               HIPDNN_STATUS_SUCCESS);
 
     // Create multiple knob settings
-    auto intKnobBuffer = createIntKnobSetting("test.int_knob", 80);
-    auto floatKnobBuffer = createFloatKnobSetting("test.float_knob", 0.25);
-    auto stringKnobBuffer = createStringKnobSetting("test.string_knob", "balanced");
+    auto intKnobBuffer = KnobSettingFactory::createIntKnobSetting("test.int_knob", 80);
+    auto floatKnobBuffer = KnobSettingFactory::createFloatKnobSetting("test.float_knob", 0.25);
+    auto stringKnobBuffer
+        = KnobSettingFactory::createStringKnobSetting("test.string_knob", "balanced");
 
     std::vector<hipdnnBackendFlatbufferData_t> knobDataArray
         = {{intKnobBuffer.data(), intKnobBuffer.size()},
@@ -612,7 +570,7 @@ TEST_F(IntegrationKnobsApi, SetKnobChoiceInvalidType)
                                         &_engine),
               HIPDNN_STATUS_SUCCESS);
 
-    auto knobBuffer = createIntKnobSetting("test.int_knob", 50);
+    auto knobBuffer = KnobSettingFactory::createIntKnobSetting("test.int_knob", 50);
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     // Wrong attribute type
@@ -628,7 +586,7 @@ TEST_F(IntegrationKnobsApi, SetKnobChoiceOnFinalizedConfig)
 {
     createFinalizedEngineConfig();
 
-    auto knobBuffer = createIntKnobSetting("test.int_knob", 50);
+    auto knobBuffer = KnobSettingFactory::createIntKnobSetting("test.int_knob", 50);
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     // Cannot set knob choice on already finalized engine config
@@ -656,7 +614,7 @@ TEST_F(IntegrationKnobsApi, GetMaxWorkspaceSizeWithKnobs)
               HIPDNN_STATUS_SUCCESS);
 
     // Set a knob before finalizing
-    auto knobBuffer = createIntKnobSetting("test.int_knob", 60);
+    auto knobBuffer = KnobSettingFactory::createIntKnobSetting("test.int_knob", 60);
     hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
 
     ASSERT_EQ(hipdnnBackendSetAttribute(_engineConfig,
