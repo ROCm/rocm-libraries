@@ -105,8 +105,8 @@ struct TestCase
 template <typename T,
           miopenUnitUnderTest_t UUT    = miopenUnitNaiveGPU,
           miopenTestReference_t REF    = miopenTestReferenceNaiveCPU,
-          miopenAfterTestFailure_t ATF = miopenAfterTestFailureAnalyze>
-struct TensorOpsCommonNew : public GTESTBase<UUT, REF, ATF>, public testing::TestWithParam<TestCase>
+          miopenAfterTestFailure_t ATF = miopenAfterTestFailureMoveOn>
+struct TensorOpsCommonNew : public GTestBase<UUT, REF, ATF>, public testing::TestWithParam<TestCase>
 {
 private:
     tensor<T> tensorA;
@@ -182,10 +182,9 @@ protected:
         }
     }
 
-    void runOptimizedGPU() override {}
-    void runNaiveGPU() override
+    miopenStatus_t runOptimizedGPU() override { return miopenStatusNotImplemented; }
+    miopenStatus_t runNaiveGPU() override
     {
-        // std::cout << "runNaiveGPU()\n";
         const TestCase& testCase = GetParam();
 
         auto&& handle = get_handle();
@@ -211,11 +210,11 @@ protected:
                          false); // it does not verify non-standard behaviour
 
         naiveGPUData = handle.Read<T>(c_dev, tensorC.data.size());
+        return miopenStatusSuccess;
     }
-    void runOptimizedCPU() override { std::cout << "runOptimizedCPU()\n"; }
-    void runNaiveCPU() override
+    miopenStatus_t runOptimizedCPU() override { return miopenStatusNotImplemented; }
+    miopenStatus_t runNaiveCPU() override
     {
-        // std::cout << "runNaiveCPU()\n";
         const TestCase& testCase = GetParam();
 
         float alpha1 = testCase.alphabeta[0];
@@ -246,6 +245,7 @@ protected:
                 C = std::max(A * alpha1, B * alpha2) + C * beta;
             });
         }
+        return miopenStatusSuccess;
     }
 
     template <typename DataOp>
