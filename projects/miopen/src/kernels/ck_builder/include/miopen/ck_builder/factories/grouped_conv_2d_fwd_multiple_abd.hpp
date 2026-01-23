@@ -38,6 +38,24 @@ using DeviceOpGFwdDefault =
                                                                   DataType,
                                                                   DataType>;
 
+// F32 instance builder functions
+void add_f32_merged_groups_instances(std::vector<BaseOperatorPtr>& instances);
+void add_f32_standard_instances(std::vector<BaseOperatorPtr>& instances);
+void add_f32_16x16_instances(std::vector<BaseOperatorPtr>& instances);
+void add_f32_comp_instances(std::vector<BaseOperatorPtr>& instances);
+void add_f32_mem_intra_instances(std::vector<BaseOperatorPtr>& instances);
+void add_f32_mem_inter_instances(std::vector<BaseOperatorPtr>& instances);
+
+// F16 instance builder functions
+void add_f16_merged_groups_instances(std::vector<BaseOperatorPtr>& instances);
+void add_f16_standard_instances(std::vector<BaseOperatorPtr>& instances);
+void add_f16_16x16_instances(std::vector<BaseOperatorPtr>& instances);
+void add_f16_comp_instances(std::vector<BaseOperatorPtr>& instances);
+void add_f16_comp_2x_instances(std::vector<BaseOperatorPtr>& instances);
+void add_f16_comp_part2_instances(std::vector<BaseOperatorPtr>& instances);
+void add_f16_mem_intra_instances(std::vector<BaseOperatorPtr>& instances);
+void add_f16_mem_inter_instances(std::vector<BaseOperatorPtr>& instances);
+
 template <>
 struct DeviceOperationInstanceFactory<DeviceOpGFwdDefault<float>>
 {
