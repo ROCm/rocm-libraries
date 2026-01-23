@@ -445,6 +445,26 @@ class hardware_t {
              std::tuple<double, double, double> mem_bw_per_wg_coefficients);
 
   /**
+   * @brief Construct hardware_t using architecture constants and a clock frequency.
+   *
+   * Computes memory performance ratios from the provided architecture constants
+   * and compute clock, then delegates to the full constructor.
+   *
+   * @param arch GPU architecture type
+   * @param N_CU Number of compute units
+   * @param lds_capacity LDS capacity in bytes
+   * @param constants Architecture-specific constants
+   * @param L2_capacity L2 cache capacity in bytes
+   * @param compute_clock_ghz Compute clock frequency in GHz
+   */
+  hardware_t(architecture_t arch,
+             size_t N_CU,
+             size_t lds_capacity,
+             const architecture_constants& constants,
+             size_t L2_capacity,
+             double compute_clock_ghz);
+
+  /**
    * @brief Construct hardware_t from HIP device properties.
    *
    * Automatically determines architecture and extracts hardware parameters
