@@ -96,21 +96,18 @@ namespace TensileLite
                 Task task(hardware, problem, *(solution));
                 if(debug)
                 {
-                    PredicateDebugger::printHeader(
-                        std::cout, "Single: " + solution->name());
+                    PredicateDebugger::printHeader(std::cout, "Single: " + solution->name());
                     solution->hardwarePredicate->debugEval(hardware, std::cout);
                     solution->problemPredicate->debugEval(problem, std::cout);
                     solution->taskPredicate->debugEval(task, std::cout);
                 }
 
-                bool hwMatch   = (*solution->hardwarePredicate)(hardware);
-                bool swMatch   = softwarePredicate(
+                bool hwMatch = (*solution->hardwarePredicate)(hardware);
+                bool swMatch = softwarePredicate(
                     SolutionLibrarySearchType::DEFAULT, task, hardware, (*solution), problem);
 
                 if(debug)
-                {
                     PredicateDebugger::printFooter(std::cout, hwMatch && swMatch);
-                }
 
                 if(hwMatch && swMatch)
                     return solution;
@@ -134,8 +131,7 @@ namespace TensileLite
             {
                 if(debug)
                 {
-                    PredicateDebugger::printHeader(
-                        std::cout, "Single (Grouped): " + solution->name());
+                    PredicateDebugger::printHeader(std::cout, "Single (Grouped): " + solution->name());
                     solution->hardwarePredicate->debugEval(hardware, std::cout);
                     for(size_t idx = 0; idx < problems.size(); idx++)
                     {
@@ -201,8 +197,7 @@ namespace TensileLite
                 Task task(hardware, problem, (*solution));
                 if(debug)
                 {
-                    PredicateDebugger::printHeader(
-                        std::cout, "Single: " + solution->name());
+                    PredicateDebugger::printHeader(std::cout, "Single: " + solution->name());
                     solution->hardwarePredicate->debugEval(hardware, std::cout);
                     if(searchType == SolutionLibrarySearchType::DEFAULT)
                     {
@@ -216,9 +211,7 @@ namespace TensileLite
                     useSolution = true;
 
                 if(debug)
-                {
                     PredicateDebugger::printFooter(std::cout, useSolution);
-                }
             }
             else if(debug)
             {
@@ -243,10 +236,7 @@ namespace TensileLite
             if(solution)
             {
                 if(debug)
-                {
-                    PredicateDebugger::printHeader(
-                        std::cout, "Single (Grouped): " + solution->name());
-                }
+                    PredicateDebugger::printHeader(std::cout, "Single (Grouped): " + solution->name());
 
                 if((*solution->hardwarePredicate)(hardware))
                     useSolution = true;

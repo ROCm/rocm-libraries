@@ -147,7 +147,7 @@ namespace TensileLite
         template <typename... T>
         Value debugEvalCmp(Object const& object, std::ostream& stream, T... args) const
         {
-            Value              rv = (*this)(object);
+            Value rv = (*this)(object);
             std::ostringstream details;
             debugEvalCmpBuildDetails(details, args...);
             PredicateDebugger::printRow(stream, rv, this->type(), details.str());

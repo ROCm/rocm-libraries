@@ -86,26 +86,25 @@ namespace TensileLite
 
                 virtual bool debugEval(Task const& task, std::ostream& stream) const override
                 {
-                    if(task.solution.sizeMapping.streamK == 0)
+                    if (task.solution.sizeMapping.streamK == 0)
                     {
                         dim3 workGroupSize;
                         dim3 numWorkGroups;
                         task.solution.calculateGrid(workGroupSize, numWorkGroups, task.problem);
                         uint64_t workItems = static_cast<uint64_t>(workGroupSize.x)
-                                             * static_cast<uint64_t>(workGroupSize.y)
-                                             * static_cast<uint64_t>(workGroupSize.z)
-                                             * static_cast<uint64_t>(numWorkGroups.x)
-                                             * static_cast<uint64_t>(numWorkGroups.y)
-                                             * static_cast<uint64_t>(numWorkGroups.z);
-                        bool               rv = (workItems <= std::numeric_limits<uint32_t>::max());
+                                           * static_cast<uint64_t>(workGroupSize.y)
+                                           * static_cast<uint64_t>(workGroupSize.z)
+                                           * static_cast<uint64_t>(numWorkGroups.x)
+                                           * static_cast<uint64_t>(numWorkGroups.y)
+                                           * static_cast<uint64_t>(numWorkGroups.z);
+                        bool rv = (workItems <= std::numeric_limits<uint32_t>::max());
                         std::ostringstream details;
                         details << "workItems=" << workItems << " <= max=" << std::numeric_limits<uint32_t>::max();
                         PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                         return rv;
                     }
 
-                    PredicateDebugger::printRow(
-                        stream, true, this->type(), "stream-k handled by grid predictor");
+                    PredicateDebugger::printRow(stream, true, this->type(), "stream-k handled by grid predictor");
                     return true;
                 }
             };

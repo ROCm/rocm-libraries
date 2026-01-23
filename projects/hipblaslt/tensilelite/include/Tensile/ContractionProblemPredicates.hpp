@@ -889,7 +889,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool               rv = (*this)(problem);
+                    bool rv = (*this)(problem);
                     std::ostringstream details;
                     details << "prob_amaxD=" << problem.outputAmaxD() << " == sol_amaxD=" << value;
                     if(value)
@@ -1099,7 +1099,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool               rv = (*this)(problem);
+                    bool rv = (*this)(problem);
                     std::ostringstream details;
                     details << "prob=" << problem.arithmeticIntensity() << " >= sol=" << value;
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
@@ -1136,7 +1136,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool               rv = (*this)(problem);
+                    bool rv = (*this)(problem);
                     std::ostringstream details;
                     details << "prob=" << problem.arithmeticIntensity() << " <= sol=" << value;
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
@@ -1384,7 +1384,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool               rv = (*this)(problem);
+                    bool rv = (*this)(problem);
                     std::ostringstream details;
                     details << "A:(" << problem.a().strides()[1] << "*" << value.depthUorMT0 << "+"
                             << value.shiftPtrElemA << ")*" << problem.a().elementBytes()
@@ -1440,7 +1440,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool               rv = (*this)(problem);
+                    bool rv = (*this)(problem);
                     std::ostringstream details;
                     details << "C:" << problem.c().strides()[1] << "*"
                             << problem.c().elementBytes() << "*" << value << "<2^32";
@@ -1486,7 +1486,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool               rv = (*this)(problem);
+                    bool rv = (*this)(problem);
                     std::ostringstream details;
                     details << "D:" << problem.d().strides()[1] << "*"
                             << problem.d().elementBytes() << "*" << value << "<2^32";
@@ -1536,8 +1536,8 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool               rv = (*this)(problem);
-                    int16_t            gsu = problem.getParams().gsu() != 0 ? problem.getParams().gsu() : value[2];
+                    bool rv = (*this)(problem);
+                    int16_t gsu = problem.getParams().gsu() != 0 ? problem.getParams().gsu() : value[2];
                     std::ostringstream details;
                     if(gsu == -1)
                     {
@@ -1624,8 +1624,8 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool               rv = (*this)(problem);
-                    size_t             gsu = (problem.getParams().gsu() != 0 ? problem.getParams().gsu() : value[1]);
+                    bool rv = (*this)(problem);
+                    size_t gsu = (problem.getParams().gsu() != 0 ? problem.getParams().gsu() : value[1]);
                     std::ostringstream details;
                     if(gsu == static_cast<size_t>(-1))
                     {
@@ -1779,7 +1779,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool               rv = (*this)(problem);
+                    bool rv = (*this)(problem);
                     std::ostringstream details;
                     if(problem.performanceMetric() == PerformanceMetric::CUEfficiency)
                         details << "metric=CUEfficiency";
@@ -1999,7 +1999,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool               rv = (*this)(problem);
+                    bool rv = (*this)(problem);
                     std::ostringstream details;
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
@@ -2124,7 +2124,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool               rv = (*this)(problem);
+                    bool rv = (*this)(problem);
                     std::ostringstream details;
                     details << "supported=[";
                     for(size_t i = 0; i < value.size(); i++)
@@ -2245,7 +2245,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool               rv = (*this)(problem);
+                    bool rv = (*this)(problem);
                     std::ostringstream details;
                     details << "prob=" << problem.useBias() << ", sol_supports=" << value;
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
@@ -2358,7 +2358,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool               rv = (*this)(problem);
+                    bool rv = (*this)(problem);
                     std::ostringstream details;
                     details << "prob=" << problem.useScaleAB() << ", sol_supports=" << value;
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
@@ -2394,7 +2394,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool               rv = (*this)(problem);
+                    bool rv = (*this)(problem);
                     std::ostringstream details;
                     details << "prob=" << problem.useScaleCD() << ", sol_supports=" << value;
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
@@ -2431,7 +2431,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool               rv = (*this)(problem);
+                    bool rv = (*this)(problem);
                     std::ostringstream details;
                     details << "prob=" << problem.useScaleAlphaVec() << ", sol_supports=" << value;
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
@@ -2475,7 +2475,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool               rv = (*this)(problem);
+                    bool rv = (*this)(problem);
                     std::ostringstream details;
                     details << "supported_types=[";
                     for(size_t i = 0; i < value.size(); i++)
@@ -2571,7 +2571,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool               rv = (*this)(problem);
+                    bool rv = (*this)(problem);
                     std::ostringstream details;
                     details << "supported_sources=[";
                     for(size_t i = 0; i < value.size(); i++)

@@ -124,6 +124,7 @@ namespace TensileLite
                                       << " [MatchingTag: " << rv->matchingTag() << "]" << std::endl;
                         }
                         return rv;
+                    }
                 }
             }
 
@@ -318,16 +319,16 @@ namespace TensileLite
         bool operator()(Any const& problem, Hardware const& hardware) const
         {
             bool debug  = Debug::Instance().printDeviceSelection();
-            bool result = (*value)(hardware);
+            bool rv = (*value)(hardware);
 
             if(debug)
             {
                 PredicateDebugger::printHeader(std::cout, "ExactLogic: Hardware");
                 value->debugEval(hardware, std::cout);
-                PredicateDebugger::printFooter(std::cout, result);
+                PredicateDebugger::printFooter(std::cout, rv);
             }
 
-            return result;
+            return rv;
         }
     };
 
@@ -372,16 +373,16 @@ namespace TensileLite
         bool operator()(MyProblem const& problem, Hardware const& hardware) const
         {
             bool debug  = Debug::Instance().printPredicateEvaluation();
-            bool result = (*value)(problem);
+            bool rv = (*value)(problem);
 
             if(debug)
             {
                 PredicateDebugger::printHeader(std::cout, "ExactLogic: Problem");
                 value->debugEval(problem, std::cout);
-                PredicateDebugger::printFooter(std::cout, result);
+                PredicateDebugger::printFooter(std::cout, rv);
             }
 
-            return result;
+            return rv;
         }
     };
 
