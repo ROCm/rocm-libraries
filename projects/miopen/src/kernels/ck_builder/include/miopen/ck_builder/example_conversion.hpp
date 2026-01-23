@@ -5,9 +5,13 @@
 // to use make_xdl_instance_from_old_params constexpr function
 
 #include "builder_conv_xdl.hpp"
+#include <miopen/ck_builder/instances/xdl_v3.hpp>
+#include <miopen/ck_builder/instances/xdl.hpp>
 
 namespace miopen {
+namespace conv {
 namespace ck_builder {
+namespace instance {
 
 // Original template specialization (first BF16 instance from
 // device_grouped_conv_fwd_xdl_bilinear_instance.hpp): NOTE: The actual layouts used depend on the
@@ -141,11 +145,6 @@ constexpr auto example_instance = make_xdl_instance_from_old_params(
     1 // NumGroupsToMerge
 );
 
-constexpr auto NGCHW = ckb::TensorLayout::NGCHW;
-constexpr auto GKCYX = ckb::TensorLayout::GKCYX;
-constexpr auto NGKHW = ckb::TensorLayout::NGKHW;
-constexpr auto FP32  = ckb::DataType::FP32;
-
 // The result is an XdlInstance containing:
 // - example_instance.signature: XdlSignature with spatial_dim, direction, layouts, data_types
 // - example_instance.algorithm: XdlAlgorithm with all tuning parameters
@@ -183,5 +182,7 @@ constexpr auto FP32  = ckb::DataType::FP32;
 // Integer 0 or 1 for bool params  -> false or true
 
 constexpr XdlInstance make_instance() { return example_instance; }
+} // namespace instance
 } // namespace ck_builder
+} // namespace conv
 } // namespace miopen
