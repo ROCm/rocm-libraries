@@ -2907,11 +2907,13 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
         grA[1] += create_range(min_val = max(packB3)+1, num = 4, step = 1,repeat = 2)
 
         syncTable = [                                      
-                    waitLRB0, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for 4/8 LRB0 to complete"),
-                    waitLRB0+4, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for all LRB0 to complete"),
-                    waitLRB0+5, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for all LRB0 to complete"),
-                    waitLRB0+6, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LRB0 to complete"),
-                    waitLRB0+6, SBarrier(comment="Barrier before GRB"), 
+                    waitLRB0, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for 1/6 LRB0 to complete"),
+                    waitLRB0+1, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for 2/6 LRB0 to complete"),
+                    waitLRB0+2, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for 3/6 LRB0 to complete"),
+                    waitLRB0+3, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for 4/6 LRB0 to complete"),
+                    waitLRB0+4, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for 5/6 LRB0 to complete"),
+                    waitLRB0+5, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for 6/6 LRB0 to complete"),
+                    waitLRB0+5, SBarrier(comment="Barrier before GRB"), 
 
                     # incremental wait on LRA0
                     waitLRA0, SWaitCnt(dscnt=min(15,numLrReadA-4), vlcnt=-1, vscnt=-1, comment="Wait for 4 LRA0 to complete"),
@@ -2923,8 +2925,9 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
                     startLRA3-1,SBarrier(comment="Sync before GRA, LRA3 & LRB3"),
 
                     # incremental wait on LRA3 & LRB3
-                    waitLRA3, SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="Wait for half LRA3 to complete"),                    
-                    waitLRA3+7, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA3/LRB3 to complete"),                    
+                    waitLRA3, SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="Wait for 17/32 LRA3 to complete"),         
+                    waitLRA3+4, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for LRA3 to complete"),                    
+                    waitLRA3+7, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB3 to complete"),                    
 
                     ]
 
