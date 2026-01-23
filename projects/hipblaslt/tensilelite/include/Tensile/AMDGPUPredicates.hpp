@@ -74,11 +74,7 @@ namespace TensileLite
                 virtual bool debugEval(AMDGPU const& gpu,
                                        std::ostream& stream) const override
                 {
-                    bool result = (*this)(gpu);
-                    std::ostringstream details;
-                    details << "gpu=" << gpu.archName() << " == sol=" << AMDGPU::toString(value);
-                    PredicateDebugger::printRow(stream, result, this->type(), details.str());
-                    return result;
+                    return debugEvalCmp(gpu, stream, "gpu", gpu.archName(), "==", "sol", AMDGPU::toString(value));
                 }
             };
 
@@ -110,11 +106,7 @@ namespace TensileLite
                 virtual bool debugEval(AMDGPU const& gpu,
                                        std::ostream& stream) const override
                 {
-                    bool result = (*this)(gpu);
-                    std::ostringstream details;
-                    details << "gpu=" << gpu.computeUnitCount << " == sol=" << value;
-                    PredicateDebugger::printRow(stream, result, this->type(), details.str());
-                    return result;
+                    return debugEvalCmp(gpu, stream, "gpu", gpu.computeUnitCount, "==", "sol", value);
                 }
             };
 
@@ -146,12 +138,7 @@ namespace TensileLite
                 virtual bool debugEval(AMDGPU const& gpu,
                                        std::ostream& stream) const override
                 {
-                    bool result = (*this)(gpu);
-                    std::ostringstream details;
-                    details << "gpu=" << gpu.archName()
-                            << " can run sol=" << AMDGPU::toString(value);
-                    PredicateDebugger::printRow(stream, result, this->type(), details.str());
-                    return result;
+                    return debugEvalCmp(gpu, stream, "gpu", gpu.archName(), "can run", "sol", AMDGPU::toString(value));
                 }
             };
         } // namespace GPU

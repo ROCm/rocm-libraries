@@ -1099,11 +1099,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool rv = (*this)(problem);
-                    std::ostringstream details;
-                    details << "prob=" << problem.arithmeticIntensity() << " >= sol=" << value;
-                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
-                    return rv;
+                    return debugEvalCmp(problem, stream, "prob", problem.arithmeticIntensity(), ">=", "sol", value);
                 }
             };
 
@@ -1136,11 +1132,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool rv = (*this)(problem);
-                    std::ostringstream details;
-                    details << "prob=" << problem.arithmeticIntensity() << " <= sol=" << value;
-                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
-                    return rv;
+                    return debugEvalCmp(problem, stream, "prob", problem.arithmeticIntensity(), "<=", "sol", value);
                 }
             };
 

@@ -144,6 +144,25 @@ namespace TensileLite
             }
         }
 
+       /**
+       *
+       * This method provides a convenient way to format and print simple comparison-based
+       * predicate evaluations. It internally calls PredicateDebugger::printRow to ensure
+       * consistent formatting.
+       *
+       * Usage guidelines:
+       * - Use debugEvalCmp() for simple comparisons (e.g., "prob=X == sol=Y", "prob=A >= sol=B")
+       * - For complex formatting (conditionals, loops, multi-part messages), call
+       *   PredicateDebugger::printRow() directly
+       *
+       * Example:
+       *   return debugEvalCmp(problem, stream, "prob", problem.size(), ">=", "sol", value);
+       *   // Outputs: "prob=1024 >= sol=512"
+       *
+       * Multiple comparisons can be chained:
+       *   return debugEvalCmp(problem, stream, "prob", x, "==", "sol", y, "prob2", a, ">=", "sol2", b);
+       *   // Outputs: "prob=X == sol=Y, prob2=A >= sol2=B"
+       */
         template <typename... T>
         Value debugEvalCmp(Object const& object, std::ostream& stream, T... args) const
         {
