@@ -530,6 +530,29 @@ Tests:
   filename: [mplate,
              Chevron3]
 
+# Coverage gap tests: high-fill output rows (develop vs reduced_ci)
+# Uses semi-dense matrices to produce 129-512+ nnz per row in result
+- name: bsrgemm_high_fill
+  category: pre_checkin
+  function: bsrgemm
+  precision: *double_only_precisions
+  M: [64]
+  N: [64]
+  K: [512]
+  block_dim: [4]
+  percentage: [0.5]
+  alpha_alphai: *alpha_range_checkin
+  beta_betai: *beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+  matrix: [rocsparse_matrix_random]
+
 - name: bsrgemm_scale_file
   category: nightly
   function: bsrgemm

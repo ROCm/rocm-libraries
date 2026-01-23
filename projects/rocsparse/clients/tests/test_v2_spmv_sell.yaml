@@ -157,6 +157,20 @@ Tests:
              bibd_22_8,
              rma10]
 
+# Coverage gap tests: transpose with large slice sizes (develop vs reduced_ci)
+- name: v2_spmv_sell_transpose
+  category: pre_checkin
+  function: v2_spmv_sell
+  indextype: *i32
+  precision: *single_double_precisions_complex_real
+  M: [500]
+  N: [500]
+  sell_slice_size: [64, 256]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
 - name: v2_spmv_sell_graph_test
   category: pre_checkin
   function: v2_spmv_sell
