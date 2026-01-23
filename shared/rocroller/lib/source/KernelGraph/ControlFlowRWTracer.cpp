@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -234,7 +234,10 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::trackRegister(int control, int coordinate, ReadWrite rw)
     {
-        AssertFatal(control > 0 && coordinate > 0);
+        AssertFatal(control > 0 && coordinate > 0,
+                    ShowValue(control),
+                    ShowValue(coordinate),
+                    ShowValue(rw));
 
         m_trace.push_back({control, coordinate, rw});
 

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2025-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,13 +24,13 @@
  *
  *******************************************************************************/
 
+#include <rocRoller/Graph/GraphUtilities.hpp>
 #include <rocRoller/KernelGraph/Transforms/ScheduleMultiplyAndLDS.hpp>
 #include <rocRoller/KernelGraph/Transforms/ScheduleMultiplyAndLDS_detail.hpp>
-#include <rocRoller/KernelGraph/Utils.hpp>
-
-#include <rocRoller/Graph/GraphUtilities.hpp>
 #include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/Utilities/Concepts.hpp>
+#include <rocRoller/Utilities/Logging.hpp>
 
 namespace rocRoller::KernelGraph
 {
@@ -182,8 +182,7 @@ namespace rocRoller::KernelGraph
             return rv;
         }
 
-        std::tuple<vec2, std::vector<ChainTypes>>
-            findMultiplyChainsAndCoords(KernelGraph const& graph)
+        vec2 findMultiplyChains(KernelGraph const& graph)
         {
             auto isMultiply = [&](int idx) -> bool {
                 return graph.control.get<ControlGraph::Multiply>(idx).has_value();
@@ -192,6 +191,14 @@ namespace rocRoller::KernelGraph
             auto multiplies = graph.control.getNodes().filter(isMultiply).to<std::vector>();
 
             auto chains = makeChains(graph, std::move(multiplies));
+
+            return chains;
+        }
+
+        std::tuple<vec2, std::vector<ChainTypes>>
+            findMultiplyChainsAndCoords(KernelGraph const& graph)
+        {
+            auto chains = findMultiplyChains(graph);
 
             std::vector<ChainTypes> chainTypes;
 
@@ -522,14 +529,6 @@ namespace rocRoller::KernelGraph
                 if(group.size() == 1)
                     group.clear();
 
-            for(auto const& group : rv)
-            {
-                for(auto const& chain : group)
-                {
-                    logChainTagTable(graph, chain);
-                }
-            }
-
             return rv;
         }
 
@@ -632,6 +631,17 @@ namespace rocRoller::KernelGraph
             Log::debug("LDS chains: \n{}", showChains(ldsChains));
 
             auto chainSets = identifyParallelChains(graph, {multiplyChains, std::move(ldsChains)});
+
+            if(Log::logger().should_log(LogLevel::Debug))
+            {
+                for(auto const& group : chainSets)
+                {
+                    for(auto const& chain : group)
+                    {
+                        logChainTagTable(graph, chain);
+                    }
+                }
+            }
 
             auto ts = [](auto const& x) { return toString(x); };
 

@@ -88,6 +88,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/RemoveImplicitSchedulingTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ScalarExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ScaleUtilsTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ScheduleMultiplyAndLDSDetailTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ScratchOperationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SettingsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SubDwordExpressionTest.cpp"

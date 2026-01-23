@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2025-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -100,6 +100,7 @@ namespace rocRoller::KernelGraph
         void getImmediateBodyParents(KernelGraph const& graph, std::vector<int>& nodes);
 
         vec2 findLoadLDSChains(KernelGraph const& graph);
+        vec2 findMultiplyChains(KernelGraph const& graph);
 
         /**
          * Logs a nice table that will show which nodes in `chain` use which DataFlowTags, and
@@ -143,7 +144,7 @@ namespace rocRoller::KernelGraph
          *      { {chain B}, {chain G} },
          *      { {chain C}, {chain H} }
          * }
-         * 
+         *
          * If instead, Chain A is not parallel to anything, then the return value will be:
          * {
          *      {},
