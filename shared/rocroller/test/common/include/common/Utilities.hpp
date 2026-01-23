@@ -30,10 +30,13 @@
 
 #pragma once
 
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <memory>
+#include <random>
 #include <sstream>
+#include <thread>
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_fp16.h>
@@ -47,6 +50,14 @@
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
+
+inline void jitteredSleep()
+{
+    static std::random_device                      rd;
+    static std::mt19937                            gen(rd());
+    static std::uniform_int_distribution<unsigned> dis(200, 600);
+    std::this_thread::sleep_for(std::chrono::milliseconds(dis(gen)));
+}
 
 template <typename Transform, typename... Args>
 rocRoller::KernelGraph::KernelGraph transform(rocRoller::KernelGraph::KernelGraph& graph,

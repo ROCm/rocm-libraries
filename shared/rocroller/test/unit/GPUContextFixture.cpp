@@ -55,8 +55,12 @@ void BaseGPUContextFixture::SetUp()
     {
         int deviceIdx = m_context->hipDeviceIndex();
 
+        jitteredSleep();
         ASSERT_THAT(hipInit(0), HasHipSuccess(0));
+        jitteredSleep();
+        jitteredSleep();
         ASSERT_THAT(hipSetDevice(deviceIdx), HasHipSuccess(0));
+        jitteredSleep();
     }
 }
 

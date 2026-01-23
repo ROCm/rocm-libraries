@@ -171,7 +171,9 @@ TEST_CASE("AddStreamK BasicStreamKStore", "[streamk][kernel-graph][gpu]")
         uint numTileK = 57;
 
         hipDeviceProp_t deviceProperties;
+        jitteredSleep();
         REQUIRE_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        jitteredSleep();
         uint numWGs = deviceProperties.multiProcessorCount;
 
         auto k = context->kernel();
@@ -359,7 +361,9 @@ TEST_CASE("AddStreamK BasicStreamKLoad", "[streamk][kernel-graph][gpu]")
         uint numTileK = 512;
 
         hipDeviceProp_t deviceProperties;
+        jitteredSleep();
         REQUIRE_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        jitteredSleep();
         uint numWGs = deviceProperties.multiProcessorCount;
 
         auto k = context->kernel();

@@ -138,7 +138,9 @@ namespace GEMMTests
         GEMMProblem gemm;
 
         hipDeviceProp_t deviceProperties;
+        jitteredSleep();
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        jitteredSleep();
         gemm.numWGs = deviceProperties.multiProcessorCount;
 
         gemm.m = gemm.macM * 8;
@@ -180,7 +182,9 @@ namespace GEMMTests
         }
 
         hipDeviceProp_t deviceProperties;
+        jitteredSleep();
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        jitteredSleep();
         gemm.numWGs = deviceProperties.multiProcessorCount;
 
         gemm.m = gemm.macM * 8;

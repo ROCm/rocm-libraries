@@ -590,7 +590,9 @@ namespace GEMMTests
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
 
         hipDeviceProp_t deviceProperties;
+        jitteredSleep();
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        jitteredSleep();
         gemm.numWGs = deviceProperties.multiProcessorCount;
 
         gemm.m = gemm.macM * 8;
