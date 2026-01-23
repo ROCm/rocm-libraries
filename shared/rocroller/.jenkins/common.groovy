@@ -80,7 +80,7 @@ def runTestCommand (platform, project)
                 python3 .jenkins/run-tests-sharded.py build ${numShards} "${testExclude}"
 
                 pushd build
-                ctest --parallel ${numShards} -R "GEMMClientTests.*"
+                ctest --parallel ${numShards} -LE "GTEST|CATCH"
                 popd
             """
 
