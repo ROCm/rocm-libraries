@@ -379,7 +379,6 @@ protected:
 
             auto knob = hipdnn_data_sdk::data_objects::CreateKnob(
                 builder,
-                static_cast<int64_t>(i + 100), // knob_id
                 knobIdStr,
                 description,
                 hipdnn_data_sdk::data_objects::KnobValue::IntValue,
@@ -515,7 +514,7 @@ TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoReturnsSerializedKnobs)
         ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::Knob>());
 
         auto knob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(knobData[i].ptr);
-        ASSERT_EQ(knob->knob_id(), static_cast<int64_t>(i + 100));
+        ASSERT_EQ(knob->knob_id_str()->str(), "test_knob_" + std::to_string(i));
     }
 }
 
