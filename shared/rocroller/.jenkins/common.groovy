@@ -41,7 +41,7 @@ def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, bo
     String yamlBackendFlag = useYamlCpp ? '' : '-DROCROLLER_ENABLE_YAML_CPP=OFF'
     String useCppCheck = staticAnalysis ? '-DROCROLLER_ENABLE_CPPCHECK=ON' : ''
 
-    def numThreads = 8
+    def executorCount = env.NUMBER_OF_EXECUTORS?.toInteger() ?: 8
 
     withSSH(platform) {
         sshBlock ->
@@ -62,8 +62,10 @@ def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, bo
                     -DROCROLLER_ENABLE_FETCH=ON \\
                     -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm"
                 ccache --print-stats
-                echo Using ${numThreads} out of `nproc` threads for testing.
-                make -j ${numThreads} ${target}
+                numExecutors=${executorCount}
+                numThreads=\$((nproc / numExecutors))
+                echo Using \$numThreads out of \$(nproc) threads per executor (\$numExecutors executors) for compiling.
+                make -j \${numThreads} ${target}
                 ccache --print-stats
                 """
 
@@ -75,16 +77,19 @@ def runTestCommand (platform, project)
 {
     String testExclude = platform.jenkinsLabel.contains('compile') ? '-LE GPU' : ''
 
-    def numThreads = 4
+    def executorCount = env.NUMBER_OF_EXECUTORS?.toInteger() ?: 8
 
     def command = """#!/usr/bin/env bash
                 set -ex
                 cd ${project.paths.project_build_prefix}
 
                 pushd build
-                echo Using ${numThreads} out of `nproc` threads for testing.
-                OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=2 ctest -j ${numThreads} --output-on-failure ${testExclude}
+                numExecutors=${executorCount}
+                numThreads=\$((nproc / numExecutors))
+                echo Using \$numThreads out of \$(nproc) threads per executor (\$numExecutors executors) for testing.
+                OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=2 ctest -j \${numThreads} --output-on-failure ${testExclude}
                 export ROCROLLER_BUILD_DIR="\$(pwd)"
+                export ROCROLLER_NUMBER_OF_EXECUTORS_IN_CI=${executorCount}
                 popd
                 scripts/rrperf generate --suite generate_gfx950 --arch gfx950
             """
@@ -218,6 +223,8 @@ def runPerformanceCommand (platform, project)
         sshBlock ->
         def rrperfSuite = platform.jenkinsLabel.contains('gfx12') ? "all_gfx120X" : "all"
 
+        def executorCount = env.NUMBER_OF_EXECUTORS?.toInteger() ?: 8
+
         if (env.CHANGE_ID)
         {
             // either a label or a parameter can block comparison to master branch
@@ -314,6 +321,7 @@ def runPerformanceCommand (platform, project)
                         #Run Performance Test
                         export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH}:${project.paths.project_build_prefix}/build/"
                         export ROCROLLER_BUILD_DIR="\$(pwd)/build"
+                        export ROCROLLER_NUMBER_OF_EXECUTORS_IN_CI=${executorCount}
 
                         ${masterCompareCommand}
 
@@ -428,6 +436,7 @@ def runPerformanceCommand (platform, project)
                         #Run Performance Test
                         export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH}:${project.paths.project_build_prefix}/build/"
                         export ROCROLLER_BUILD_DIR="\$(pwd)/build"
+                        export ROCROLLER_NUMBER_OF_EXECUTORS_IN_CI=${executorCount}
                         ./scripts/rrperf run \\
                             --suite ${rrperfSuite} \\
                             --rundir "./performance_${platform.gpu}"
