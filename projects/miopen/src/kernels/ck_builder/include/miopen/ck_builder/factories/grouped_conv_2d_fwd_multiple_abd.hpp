@@ -43,6 +43,12 @@ struct DeviceOperationInstanceFactory<DeviceOpGFwdDefault<float>>
 {
     static std::vector<BaseOperatorPtr> GetInstances();
 };
+
+template <>
+struct DeviceOperationInstanceFactory<DeviceOpGFwdDefault<ck::half_t>>
+{
+    static std::vector<BaseOperatorPtr> GetInstances();
+};
 } // namespace instance
 } // namespace ck_builder
 } // namespace conv

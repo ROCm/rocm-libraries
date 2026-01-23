@@ -3,6 +3,7 @@
 
 add_library(ck_builder STATIC 
     factories/grouped_conv_2d_fwd_multiple_abd_f32.cpp
+    factories/grouped_conv_2d_fwd_multiple_abd_f16.cpp
 )
 target_compile_definitions(ck_builder PRIVATE -DCK_EXPERIMENTAL_BUILDER)
 target_include_directories(ck_builder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
