@@ -63,7 +63,7 @@ def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, bo
                     -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm"
                 ccache --print-stats
                 numExecutors=${executorCount}
-                numThreads=\$((nproc / numExecutors))
+                numThreads=\$((\$(nproc) / numExecutors))
                 echo Using \$numThreads out of \$(nproc) threads per executor for compiling. Total \$numExecutors executors.
                 make -j \${numThreads} ${target}
                 ccache --print-stats
@@ -85,7 +85,7 @@ def runTestCommand (platform, project)
 
                 pushd build
                 numExecutors=${executorCount}
-                numThreads=\$((nproc / numExecutors))
+                numThreads=\$((\$(nproc) / numExecutors))
                 echo Using \$numThreads out of \$(nproc) threads per executor for testing. Total of \$numExecutors executors.
                 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=2 ctest -j \${numThreads} --output-on-failure ${testExclude}
                 export ROCROLLER_BUILD_DIR="\$(pwd)"
