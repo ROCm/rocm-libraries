@@ -125,5 +125,6 @@ struct EngineRegistrar
 
 // Define all engines using the macro
 HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE, "MIOPEN_ENGINE")
+HIPDNN_REGISTER_ENGINE(HIPBLASLT_ENGINE, "HIPBLASLT_ENGINE")
 
 } // namespace hipdnn_data_sdk::utilities

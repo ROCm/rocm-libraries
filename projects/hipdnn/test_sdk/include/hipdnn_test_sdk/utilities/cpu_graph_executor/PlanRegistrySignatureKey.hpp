@@ -13,6 +13,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionWrwSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/MatmulSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/PointwiseSignatureKey.hpp>
 
 namespace hipdnn_test_sdk::utilities
@@ -36,6 +37,7 @@ using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
                                               ConvolutionFwdSignatureKey,
                                               ConvolutionBwdSignatureKey,
                                               ConvolutionWrwSignatureKey,
+                                              MatmulSignatureKey,
                                               PointwiseSignatureKey>;
 
 struct PlanRegistrySignatureKeyHash
