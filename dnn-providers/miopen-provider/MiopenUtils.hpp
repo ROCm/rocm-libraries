@@ -35,6 +35,53 @@
         }                                                                               \
     } while(0)
 
+/// @brief RAII guard for setting MIOpen tuning policy on a handle.
+///
+/// This class sets the tuning policy on the MIOpen handle upon construction and
+/// restores it to the default policy (miopenTuningPolicyNone) upon destruction.
+/// This ensures that tuning policy changes don't leak to subsequent operations.
+
+class ScopedTuningPolicy
+{
+public:
+    /// @brief Construct and set the tuning policy on the handle.
+    /// @param handle The MIOpen handle to set the policy on.
+    /// @param benchmarkingEnabled If true, sets policy to miopenTuningPolicySearchDbUpdate.
+    ///                           If false, sets policy to miopenTuningPolicyNone.
+    ScopedTuningPolicy(miopenHandle_t handle, bool benchmarkingEnabled)
+        : _handle(handle)
+    {
+        auto policy = benchmarkingEnabled ? miopenTuningPolicySearchDbUpdate
+                                          : miopenTuningPolicyNone;
+        auto status = miopenSetTuningPolicy(_handle, policy);
+        if(status != miopenStatusSuccess)
+        {
+            HIPDNN_LOG_ERROR("Failed to set tuning policy: {}", miopenGetErrorString(status));
+        }
+    }
+
+    /// @brief Destructor restores tuning policy to default (None).
+    ~ScopedTuningPolicy()
+    {
+        auto status = miopenSetTuningPolicy(_handle, miopenTuningPolicyNone);
+        if(status != miopenStatusSuccess)
+        {
+            HIPDNN_LOG_ERROR("Failed to restore tuning policy: {}", miopenGetErrorString(status));
+        }
+    }
+
+    // Non-copyable
+    ScopedTuningPolicy(const ScopedTuningPolicy&) = delete;
+    ScopedTuningPolicy& operator=(const ScopedTuningPolicy&) = delete;
+
+    // Non-movable
+    ScopedTuningPolicy(ScopedTuningPolicy&&) = delete;
+    ScopedTuningPolicy& operator=(ScopedTuningPolicy&&) = delete;
+
+private:
+    miopenHandle_t _handle;
+};
+
 #define HIPDNN_PREPEND_MESSAGE_ON_THROW(statement, message)                               \
     do                                                                                    \
     {                                                                                     \
