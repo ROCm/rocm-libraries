@@ -520,8 +520,8 @@ struct radix_key_codec
         }
 
         template<bool KillNegativeZeros>
-        ROCPRIM_HOST_DEVICE
-        static Key twiddle_in(Key bit_key)
+        ROCPRIM_FORCE_INLINE
+        static constexpr Key twiddle_in(Key bit_key)
         {
             return bit_key;
         }
@@ -563,8 +563,8 @@ struct radix_key_codec
         }
 
         template<bool KillNegativeZeros>
-        ROCPRIM_HOST_DEVICE
-        static Key twiddle_in(Key bit_key)
+        ROCPRIM_FORCE_INLINE
+        static constexpr Key twiddle_in(Key bit_key)
         {
             return bit_key ^ sign_bit;
         }
@@ -624,8 +624,8 @@ struct radix_key_codec
         }
 
         template<bool KillNegativeZeros>
-        ROCPRIM_HOST_DEVICE
-        static Key twiddle_in(Key bit_key)
+        ROCPRIM_FORCE_INLINE
+        static constexpr Key twiddle_in(Key bit_key)
         {
             static_assert(!std::is_same<bit_key_type, void>::value, "Input type not supported");
             static_assert(sizeof(Key) == sizeof(bit_key_type),
@@ -675,8 +675,8 @@ struct radix_key_codec
         }
 
         template<bool KillNegativeZeros>
-        ROCPRIM_HOST_DEVICE
-        static bool twiddle_in(bool bit_key)
+        ROCPRIM_FORCE_INLINE
+        static constexpr bool twiddle_in(bool bit_key)
         {
             return bit_key;
         }
