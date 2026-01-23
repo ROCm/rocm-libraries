@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2025-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -133,9 +133,20 @@ namespace rocRoller::KernelGraph
 
                     if(thisEdge.has_value() && !edgesToKeep.contains(*thisEdge))
                     {
+                        auto upstream = connectionsToKeep.at(nodeB);
+                        auto order
+                            = graph.control.compareNodes(UseCacheIfAvailable, upstream, nodeB);
+                        AssertFatal(order == ControlGraph::NodeOrdering::LeftFirst
+                                        || order == ControlGraph::NodeOrdering::RightInBodyOfLeft,
+                                    ShowValue(order),
+                                    ShowValue(upstream),
+                                    ShowValue(nodeB),
+                                    ShowValue(*thisEdge));
                         graph.control.deleteElement(*thisEdge);
-                        graph.control.chain<ControlGraph::Sequence>(connectionsToKeep.at(nodeB),
-                                                                    nodeB);
+                        if(order == ControlGraph::NodeOrdering::LeftFirst)
+                            graph.control.chain<ControlGraph::Sequence>(upstream, nodeB);
+                        else
+                            graph.control.chain<ControlGraph::Body>(upstream, nodeB);
                     }
                 }
             }
