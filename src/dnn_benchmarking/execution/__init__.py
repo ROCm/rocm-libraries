@@ -3,6 +3,32 @@
 from .ab_runner import ABRunner, ABTestResult
 from .buffer_manager import BufferManager
 from .executor import Executor
-from .timing import Timer
 
-__all__ = ["ABRunner", "ABTestResult", "BufferManager", "Executor", "Timer"]
+# PyTorch classes removed from top-level imports to avoid ROCm version conflicts.
+# Import directly from submodules when needed:
+#   from dnn_benchmarking.execution.pytorch_buffer_manager import PyTorchCudaBufferManager
+#   from dnn_benchmarking.execution.pytorch_executor import PyTorchCudaExecutor
+
+from .timing import (
+    GpuTimer,
+    GpuTimerInterface,
+    Timer,
+    TorchGpuTimer,
+    create_gpu_timer,
+    get_available_backends,
+    is_gpu_timing_available,
+)
+
+__all__ = [
+    "ABRunner",
+    "ABTestResult",
+    "BufferManager",
+    "Executor",
+    "GpuTimer",
+    "GpuTimerInterface",
+    "Timer",
+    "TorchGpuTimer",
+    "create_gpu_timer",
+    "get_available_backends",
+    "is_gpu_timing_available",
+]

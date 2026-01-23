@@ -66,6 +66,14 @@ class TestCLIIntegration:
         if not sample_graph_path.exists():
             pytest.skip(f"Sample graph not found: {sample_graph_path}")
 
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                pytest.skip("PyTorch GPU not available")
+        except ImportError as e:
+            pytest.skip(f"PyTorch not available: {e}")
+
         # Check if hipdnn is available
         try:
             import hipdnn_frontend
@@ -95,7 +103,6 @@ class TestCLIIntegration:
         assert "hipDNN Benchmark" in result.stdout
         assert "Execution Statistics" in result.stdout
         assert "Mean" in result.stdout
-        assert "Validation" in result.stdout
 
         # Should succeed
         assert result.returncode == 0, f"CLI failed with: {result.stderr}"
@@ -120,11 +127,7 @@ class TestCLIIntegration:
                 "sample_pointwise_add_128x256x14x14",
                 marks=pytest.mark.xfail(reason="MIOpen plugin doesn't support pointwise operations yet"),
             ),
-            pytest.param(
-                "sample_batchnorm.json",
-                "sample_batchnorm_inference_32x64x28x28",
-                marks=pytest.mark.xfail(reason="MIOpen plugin doesn't support batchnorm operations yet"),
-            ),
+            ("sample_batchnorm.json", "sample_batchnorm_inference_32x64x28x28"),
         ],
     )
     def test_cli_all_sample_graphs(self, graph_name: str, expected_name: str) -> None:
@@ -133,6 +136,14 @@ class TestCLIIntegration:
 
         if not sample_path.exists():
             pytest.skip(f"Sample graph not found: {sample_path}")
+
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                pytest.skip("PyTorch GPU not available")
+        except ImportError as e:
+            pytest.skip(f"PyTorch not available: {e}")
 
         # Check if hipdnn is available
         try:

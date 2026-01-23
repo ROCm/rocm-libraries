@@ -1,4 +1,4 @@
-# Runtime dependencies for dnn-benchmarking
+# Base dependencies for dnn-benchmarking
 # Python 3.8+
 
 # Core dependencies
@@ -6,4 +6,3 @@ numpy>=1.19.0
 
 # hipDNN Python bindings (must be installed separately)
 # See README for installation instructions
-# hipdnn-frontend

@@ -1,0 +1,12 @@
+# ROCm/AMD GPU dependencies for dnn-benchmarking
+# Use this for hipDNN benchmarking on AMD GPUs
+
+# Base dependencies
+-r requirements.txt
+
+# ROCm nightly PyTorch (required for GPU kernel timing on AMD)
+# Uses the gfx90X-dcgpu index for ROCm wheels
+--index-url https://rocm.nightlies.amd.com/v2/gfx90X-dcgpu/
+torch
+torchaudio
+torchvision

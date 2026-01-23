@@ -1,15 +1,12 @@
 # Development dependencies for dnn-benchmarking
 # Install with: pip install -r requirements-dev.txt
-
-# Include all runtime dependencies
--r requirements.txt
+#
+# For ROCm/AMD: pip install -r requirements-rocm.txt -r requirements-dev.txt
+# For CUDA/NVIDIA: pip install -r requirements-cuda.txt -r requirements-dev.txt
 
 # Testing
 pytest>=7.0.0
 pytest-cov>=4.0.0
-
-# Reference validation
-torch>=2.0.0
 
 # Code formatting and linting (optional)
 # black>=23.0.0

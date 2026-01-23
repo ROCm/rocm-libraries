@@ -2,7 +2,8 @@
 
 import json
 import sys
-from typing import Optional
+from pathlib import Path
+from typing import Literal, Optional
 
 from ..common.exceptions import ExecutionError, GraphLoadError
 from ..config.benchmark_config import ABTestConfig, BenchmarkConfig, ValidationConfig
@@ -11,7 +12,7 @@ from ..execution.buffer_manager import BufferManager
 from ..execution.executor import Executor
 from ..graph.loader import GraphLoader
 from ..reporting.reporter import Reporter
-from ..reporting.statistics import BenchmarkStats
+from ..reporting.statistics import BenchmarkStats, CombinedBenchmarkStats
 from ..validation import ArrayComparator, ReferenceProviderRegistry
 from ..validation.validator import Validator
 from .parser import create_parser
@@ -21,6 +22,8 @@ def run_benchmark(
     config: BenchmarkConfig,
     seed: Optional[int] = None,
     validation_config: Optional[ValidationConfig] = None,
+    output_path: Optional[Path] = None,
+    gpu_backend: Literal["torch", "auto", "none"] = "auto",
 ) -> int:
     """Run the benchmark workflow.
 
@@ -28,6 +31,8 @@ def run_benchmark(
         config: Benchmark configuration.
         seed: Optional random seed for reproducibility.
         validation_config: Optional validation configuration.
+        output_path: Optional path to export benchmark results as JSON.
+        gpu_backend: GPU timer backend to use (torch, auto, none).
 
     Returns:
         Exit code (0 for success, 1 for error, 2 for validation failure).
@@ -62,7 +67,7 @@ def run_benchmark(
 
         # Prepare executor
         graph_json_str = json.dumps(graph_json)
-        executor = Executor(graph_json_str, config)
+        executor = Executor(graph_json_str, config, gpu_backend=gpu_backend)
         executor.prepare(handle)
 
         reporter.print_init_time(executor.init_time_ms)
@@ -79,11 +84,16 @@ def run_benchmark(
             executor.warmup(handle, variant_pack)
 
             # Run benchmark
-            timings = executor.benchmark(handle, variant_pack)
+            result = executor.benchmark(handle, variant_pack, graph_name=graph_name)
 
             # Calculate statistics
-            stats = BenchmarkStats.from_timings(timings)
-            reporter.print_stats(stats)
+            stats = CombinedBenchmarkStats.from_result(result)
+            reporter.print_combined_stats(stats)
+
+            # Export results if requested
+            if output_path:
+                result.save_json(str(output_path))
+                print(f"Results exported to: {output_path}")
 
             # Validation
             if validation_config is not None and validation_config.enabled:
@@ -94,11 +104,6 @@ def run_benchmark(
                     validation_config=validation_config,
                     reporter=reporter,
                 )
-            else:
-                # Stubbed validation
-                validator = Validator()
-                passed, message = validator.validate_stub()
-                reporter.print_validation(passed, message)
 
         reporter.print_footer()
         return 0 if validation_passed else 2
@@ -219,8 +224,104 @@ def _run_reference_validation(
         return False
 
 
+def run_pytorch_benchmark(
+    config: BenchmarkConfig,
+    seed: Optional[int] = None,
+    output_path: Optional[Path] = None,
+    device: str = "cuda:0",
+) -> int:
+    """Run PyTorch CUDA benchmark workflow.
+
+    Args:
+        config: Benchmark configuration.
+        seed: Optional random seed for reproducibility.
+        output_path: Optional path to export benchmark results as JSON.
+        device: CUDA device to use.
+
+    Returns:
+        Exit code (0 for success, 1 for error).
+    """
+    from ..execution.pytorch_buffer_manager import PyTorchCudaBufferManager
+    from ..execution.pytorch_executor import PyTorchCudaExecutor, PyTorchExecutionError
+
+    reporter = Reporter()
+
+    try:
+        # Load graph (skip hipDNN-specific validation)
+        loader = GraphLoader()
+        graph_json = loader.load_json(config.graph_path)
+
+        graph_name = loader.get_graph_name(graph_json)
+        tensor_infos = loader.extract_tensor_info(graph_json)
+
+        # Print header
+        reporter.print_pytorch_header(config, graph_name, device)
+
+        # Check PyTorch CUDA availability
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                reporter.print_error(
+                    "PyTorch GPU not available. "
+                    "Install PyTorch with CUDA or ROCm support."
+                )
+                return 1
+        except ImportError:
+            reporter.print_error("PyTorch not available. Install with: pip install torch")
+            return 1
+
+        # Create executor
+        executor = PyTorchCudaExecutor(graph_json, config, device=device)
+        executor.prepare()
+
+        reporter.print_init_time(executor.init_time_ms)
+
+        # Allocate buffers
+        with PyTorchCudaBufferManager(tensor_infos, device=device) as buffer_manager:
+            buffer_manager.allocate_all()
+            buffer_manager.fill_inputs_random(seed=seed)
+            buffer_manager.zero_outputs()
+
+            tensors = buffer_manager.get_tensors()
+
+            # Run warmup
+            executor.warmup(tensors)
+
+            # Run benchmark
+            result = executor.benchmark(tensors, graph_name=graph_name)
+
+            # Calculate statistics
+            stats = CombinedBenchmarkStats.from_result(result)
+            reporter.print_combined_stats(stats)
+
+            # Export results if requested
+            if output_path:
+                result.save_json(str(output_path))
+                print(f"Results exported to: {output_path}")
+
+        reporter.print_footer()
+        return 0
+
+    except GraphLoadError as e:
+        reporter.print_error(f"Graph load error: {e}")
+        return 1
+
+    except PyTorchExecutionError as e:
+        reporter.print_error(f"PyTorch execution error: {e}")
+        return 1
+
+    except Exception as e:
+        reporter.print_error(f"Unexpected error: {e}")
+        return 1
+
+
 def run_ab_test(
-    config: BenchmarkConfig, ab_config: ABTestConfig, seed: Optional[int] = None
+    config: BenchmarkConfig,
+    ab_config: ABTestConfig,
+    seed: Optional[int] = None,
+    gpu_backend: Literal["torch", "auto", "none"] = "auto",
+    validation_config: Optional[ValidationConfig] = None,
 ) -> int:
     """Run A/B comparison workflow.
 
@@ -228,6 +329,8 @@ def run_ab_test(
         config: Benchmark configuration.
         ab_config: A/B test configuration.
         seed: Optional random seed for reproducibility.
+        gpu_backend: GPU timer backend to use (torch, auto, none).
+        validation_config: Optional validation configuration for reference checking.
 
     Returns:
         Exit code (0 for success, 1 for error, 2 for comparison failure).
@@ -249,13 +352,23 @@ def run_ab_test(
         reporter.print_ab_header(config, ab_config, graph_name)
 
         # Run A/B comparison
-        runner = ABRunner(graph_json, config, ab_config)
+        runner = ABRunner(
+            graph_json,
+            config,
+            ab_config,
+            gpu_backend=gpu_backend,
+            validation_config=validation_config,
+        )
         result = runner.run(seed=seed)
 
-        # Print results
-        reporter.print_ab_stats(
-            result.stats_a,
-            result.stats_b,
+        # Compute combined stats from results
+        stats_a = CombinedBenchmarkStats.from_result(result.result_a)
+        stats_b = CombinedBenchmarkStats.from_result(result.result_b)
+
+        # Print results with both E2E and kernel stats
+        reporter.print_ab_combined_stats(
+            stats_a,
+            stats_b,
             result.init_time_a_ms,
             result.init_time_b_ms,
         )
@@ -268,10 +381,26 @@ def run_ab_test(
             ab_config.atol,
         )
 
+        # Print validation results if available
+        if validation_config is not None and validation_config.enabled:
+            reporter.print_ab_validation(
+                result.validation_a,
+                result.validation_b,
+                validation_config.rtol,
+                validation_config.atol,
+            )
+
         reporter.print_footer()
 
-        # Return 0 for pass, 2 for comparison failure
-        return 0 if result.passed else 2
+        # Check validation results
+        validation_passed = True
+        if result.validation_a is not None and not result.validation_a.passed:
+            validation_passed = False
+        if result.validation_b is not None and not result.validation_b.passed:
+            validation_passed = False
+
+        # Return 0 for pass, 2 for comparison or validation failure
+        return 0 if (result.passed and validation_passed) else 2
 
     except GraphLoadError as e:
         reporter.print_error(f"Graph load error: {e}")
@@ -333,7 +462,34 @@ def main() -> int:
             print(f"A/B configuration error: {e}", file=sys.stderr)
             return 1
 
-        return run_ab_test(config, ab_config, seed=args.seed)
+        # Create validation config if validation is enabled for A/B test
+        ab_validation_config = None
+        if args.validate != "none":
+            try:
+                ab_validation_config = ValidationConfig(
+                    provider=args.validate,
+                    rtol=args.validate_rtol,
+                    atol=args.validate_atol,
+                )
+            except ValueError as e:
+                print(f"Validation configuration error: {e}", file=sys.stderr)
+                return 1
+
+        return run_ab_test(
+            config,
+            ab_config,
+            seed=args.seed,
+            gpu_backend=args.gpu_backend,
+            validation_config=ab_validation_config,
+        )
+
+    # Route based on execution backend
+    if args.backend == "pytorch":
+        return run_pytorch_benchmark(
+            config,
+            seed=args.seed,
+            output_path=args.output,
+        )
 
     # Create validation config if validation is enabled
     validation_config = None
@@ -348,7 +504,13 @@ def main() -> int:
             print(f"Validation configuration error: {e}", file=sys.stderr)
             return 1
 
-    return run_benchmark(config, seed=args.seed, validation_config=validation_config)
+    return run_benchmark(
+        config,
+        seed=args.seed,
+        validation_config=validation_config,
+        output_path=args.output,
+        gpu_backend=args.gpu_backend,
+    )
 
 
 if __name__ == "__main__":

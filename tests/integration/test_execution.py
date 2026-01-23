@@ -21,6 +21,14 @@ class TestExecution:
     def hipdnn(self):
         """Get hipdnn_frontend module or skip if not available."""
         try:
+            import torch
+
+            if not torch.cuda.is_available():
+                pytest.skip("PyTorch GPU not available")
+        except ImportError as e:
+            pytest.skip(f"PyTorch not available: {e}")
+
+        try:
             import hipdnn_frontend
 
             # Test that we can create a handle (requires GPU)
@@ -114,14 +122,20 @@ class TestExecution:
             executor.warmup(handle, variant_pack)
 
             # Benchmark
-            timings = executor.benchmark(handle, variant_pack)
+            result = executor.benchmark(handle, variant_pack)
 
-            # Should have 5 timing values
-            assert len(timings) == 5
+            # Should have 5 E2E timing values
+            assert len(result.e2e_timings) == 5
 
-            # All timings should be positive
-            for t in timings:
+            # All E2E timings should be positive
+            for t in result.e2e_timings:
                 assert t > 0
+
+            # Should also have kernel timings (if HIP backend available)
+            if result.kernel_timings is not None:
+                assert len(result.kernel_timings) == 5
+                for t in result.kernel_timings:
+                    assert t > 0
 
             # Get output data (uid=0 for output tensor)
             output_data = buffer_manager.get_output_data(0)
@@ -165,9 +179,9 @@ class TestExecution:
 
             variant_pack = buffer_manager.create_variant_pack()
             executor.warmup(handle, variant_pack)
-            timings = executor.benchmark(handle, variant_pack)
+            result = executor.benchmark(handle, variant_pack)
 
-            assert len(timings) == 5
+            assert len(result.e2e_timings) == 5
 
             # Get output (C matrix: [256, 1024])
             output_data = buffer_manager.get_output_data(3)
@@ -209,9 +223,9 @@ class TestExecution:
 
             variant_pack = buffer_manager.create_variant_pack()
             executor.warmup(handle, variant_pack)
-            timings = executor.benchmark(handle, variant_pack)
+            result = executor.benchmark(handle, variant_pack)
 
-            assert len(timings) == 5
+            assert len(result.e2e_timings) == 5
 
             # Get output (same shape as input: [64, 128, 56, 56])
             output_data = buffer_manager.get_output_data(2)
@@ -254,9 +268,9 @@ class TestExecution:
 
             variant_pack = buffer_manager.create_variant_pack()
             executor.warmup(handle, variant_pack)
-            timings = executor.benchmark(handle, variant_pack)
+            result = executor.benchmark(handle, variant_pack)
 
-            assert len(timings) == 5
+            assert len(result.e2e_timings) == 5
 
             # Get output (z: [128, 256, 14, 14])
             output_data = buffer_manager.get_output_data(3)
@@ -266,7 +280,6 @@ class TestExecution:
             import numpy as np
             assert not np.allclose(output_data, 0)
 
-    @pytest.mark.xfail(reason="MIOpen plugin doesn't support batchnorm operations yet")
     def test_batchnorm_execution_workflow(self, hipdnn) -> None:
         """Test execution workflow for batchnorm inference graph."""
         sample_path = Path(__file__).parent.parent.parent / "graphs" / "sample_batchnorm.json"
@@ -298,9 +311,9 @@ class TestExecution:
 
             variant_pack = buffer_manager.create_variant_pack()
             executor.warmup(handle, variant_pack)
-            timings = executor.benchmark(handle, variant_pack)
+            result = executor.benchmark(handle, variant_pack)
 
-            assert len(timings) == 5
+            assert len(result.e2e_timings) == 5
 
             # Get output (y: [32, 64, 28, 28])
             output_data = buffer_manager.get_output_data(6)
@@ -368,6 +381,14 @@ class TestPyTorchReferenceValidation:
     @pytest.fixture
     def hipdnn(self):
         """Get hipdnn_frontend module or skip if not available."""
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                pytest.skip("PyTorch GPU not available")
+        except ImportError as e:
+            pytest.skip(f"PyTorch not available: {e}")
+
         try:
             import hipdnn_frontend
 

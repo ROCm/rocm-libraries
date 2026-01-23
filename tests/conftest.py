@@ -6,6 +6,29 @@ from typing import Any, Dict
 
 import pytest
 
+from dnn_benchmarking.execution.timing import GpuTimerInterface
+
+
+class DummyTorchTimer(GpuTimerInterface):
+    """Minimal timer implementation for factory tests.
+
+    This is a test fixture that can be used to mock GPU timing
+    without requiring actual GPU hardware.
+    """
+
+    @property
+    def backend_name(self) -> str:
+        return "torch"
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+    def elapsed_ms(self) -> float:
+        return 0.0
+
 
 @pytest.fixture
 def sample_conv_fwd_json() -> Dict[str, Any]:
@@ -122,6 +145,14 @@ def temp_json_file(tmp_path: Path, sample_conv_fwd_json: Dict[str, Any]) -> Path
 @pytest.fixture
 def skip_if_no_gpu():
     """Skip test if no AMD GPU available."""
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            pytest.skip("PyTorch GPU not available")
+    except ImportError as e:
+        pytest.skip(f"PyTorch not available: {e}")
+
     try:
         import hipdnn_frontend as hipdnn
 

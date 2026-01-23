@@ -1,10 +1,11 @@
 """Graph execution with timing for benchmarks."""
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional
 
 from ..common.exceptions import ExecutionError
 from ..config.benchmark_config import BenchmarkConfig
-from .timing import Timer
+from ..reporting.statistics import BenchmarkMetadata, BenchmarkResult
+from .timing import GpuTimerInterface, Timer, create_gpu_timer
 
 
 class Executor:
@@ -18,15 +19,25 @@ class Executor:
     - Running timed benchmark iterations
     """
 
-    def __init__(self, graph_json_str: str, config: BenchmarkConfig) -> None:
+    def __init__(
+        self,
+        graph_json_str: str,
+        config: BenchmarkConfig,
+        gpu_backend: Optional[Literal["torch", "auto", "none"]] = "auto",
+    ) -> None:
         """Initialize executor with graph JSON and configuration.
 
         Args:
             graph_json_str: The graph as a JSON string.
             config: Benchmark configuration.
+            gpu_backend: GPU timer backend to use:
+                - "torch": Force PyTorch backend (CUDA or ROCm)
+                - "auto": Auto-detect (uses PyTorch if available)
+                - "none": Disable GPU timing, use only E2E timing
         """
         self._graph_json_str = graph_json_str
         self._config = config
+        self._gpu_backend = gpu_backend
         self._graph: Any = None
         self._workspace: Any = None
         self._workspace_ptr: int = 0
@@ -123,15 +134,23 @@ class Executor:
             if result.is_bad():
                 raise ExecutionError(f"Warmup execution failed: {result.get_message()}")
 
-    def benchmark(self, handle: Any, variant_pack: Dict[int, int]) -> List[float]:
+    def benchmark(
+        self,
+        handle: Any,
+        variant_pack: Dict[int, int],
+        graph_name: str = "",
+    ) -> BenchmarkResult:
         """Run benchmark iterations and collect timing.
+
+        Collects both E2E (wall-clock) timing and GPU kernel timing when available.
 
         Args:
             handle: hipdnn.Handle instance.
             variant_pack: Mapping of tensor UIDs to device pointers.
+            graph_name: Optional name/identifier for the graph being benchmarked.
 
         Returns:
-            List of execution times in milliseconds.
+            BenchmarkResult with E2E and optional kernel timings, plus metadata.
 
         Raises:
             ExecutionError: If graph not prepared or execution fails.
@@ -139,19 +158,68 @@ class Executor:
         if self._graph is None:
             raise ExecutionError("Graph not prepared. Call prepare() first.")
 
-        timings = []
+        e2e_timings: List[float] = []
+        kernel_timings: Optional[List[float]] = None
+        gpu_timer: Optional[GpuTimerInterface] = None
+        backend_name: str = ""
+        torch_sync = None
+
+        # Create GPU timer if requested and available
+        if self._gpu_backend != "none":
+            try:
+                gpu_timer = create_gpu_timer(
+                    "torch" if self._gpu_backend == "torch" else "auto"
+                )
+            except RuntimeError as e:
+                raise ExecutionError(str(e)) from e
+            kernel_timings = []
+            backend_name = gpu_timer.backend_name
+        else:
+            # No GPU timer - need explicit sync for E2E timing
+            try:
+                import torch
+
+                if torch.cuda.is_available():
+                    torch_sync = torch.cuda.synchronize
+            except ImportError:
+                torch_sync = None
 
         for _ in range(self._config.benchmark_iters):
+            if gpu_timer:
+                gpu_timer.start()
+
             with Timer() as t:
                 result = self._graph.execute(handle, variant_pack, self._workspace_ptr)
                 if result.is_bad():
                     raise ExecutionError(
                         f"Benchmark execution failed: {result.get_message()}"
                     )
+                if gpu_timer:
+                    gpu_timer.stop()
+                    # elapsed_ms() syncs on the stop event, so E2E includes sync time
+                    kernel_timings.append(gpu_timer.elapsed_ms())
+                elif torch_sync:
+                    # No GPU timer - explicit sync for accurate E2E
+                    torch_sync()
 
-            timings.append(t.elapsed_ms)
+            e2e_timings.append(t.elapsed_ms)
 
-        return timings
+        # Build metadata
+        metadata = BenchmarkMetadata(
+            graph_name=graph_name,
+            graph_path=str(self._config.graph_path),
+            warmup_iters=self._config.warmup_iters,
+            benchmark_iters=self._config.benchmark_iters,
+            engine_id=self._config.engine_id,
+            gpu_backend=backend_name,
+            execution_backend="hipdnn",
+        )
+
+        return BenchmarkResult(
+            e2e_timings=e2e_timings,
+            kernel_timings=kernel_timings,
+            metadata=metadata,
+        )
 
     @property
     def init_time_ms(self) -> float:

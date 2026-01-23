@@ -22,6 +22,10 @@ Examples:
   dnn-benchmark --graph ./graphs/conv1_fwd.json --warmup 20 --iters 200
   dnn-benchmark -g ./graphs/conv1_fwd.json -e 1
 
+PyTorch Backend (GPU via PyTorch):
+  dnn-benchmark -g ./graph.json --backend pytorch
+  dnn-benchmark -g ./graph.json --backend pytorch -o pytorch_results.json
+
 Reference Validation:
   dnn-benchmark -g ./graph.json --validate pytorch
   dnn-benchmark -g ./graph.json --validate pytorch --validate-rtol 1e-3
@@ -75,6 +79,37 @@ A/B Testing:
         default=None,
         metavar="SEED",
         help="Random seed for reproducible input data (default: None)",
+    )
+
+    parser.add_argument(
+        "--backend",
+        "-b",
+        type=str,
+        choices=["hipdnn", "pytorch"],
+        default="hipdnn",
+        metavar="BACKEND",
+        help="Execution backend (default: hipdnn). "
+        "Options: hipdnn (AMD GPU via hipDNN), pytorch (GPU via PyTorch)",
+    )
+
+    # Output arguments
+    output_group = parser.add_argument_group("Output")
+    output_group.add_argument(
+        "--output",
+        "-o",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Export benchmark results to JSON file for offline comparison",
+    )
+    output_group.add_argument(
+        "--gpu-backend",
+        type=str,
+        choices=["torch", "auto", "none"],
+        default="auto",
+        metavar="BACKEND",
+        help="GPU timer backend (default: auto). "
+        "Options: torch (PyTorch CUDA/ROCm), auto, none (E2E only)",
     )
 
     # A/B Testing arguments

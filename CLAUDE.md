@@ -9,8 +9,12 @@ Benchmarking and validation tool for hipDNN graphs. Loads JSON-serialized hipDNN
 ## Build and Development Commands
 
 ```bash
-# Install for development
-pip install -r requirements-dev.txt
+# For ROCm/AMD GPU development (hipDNN benchmarking)
+pip install -r requirements-rocm.txt -r requirements-dev.txt
+pip install -e .
+
+# For CUDA/NVIDIA GPU development (PyTorch CUDA benchmarking)
+pip install -r requirements-cuda.txt -r requirements-dev.txt
 pip install -e .
 
 # hipDNN bindings must be installed separately from your hipDNN build
@@ -23,15 +27,17 @@ cd /path/to/hipdnn/python && pip install -e .
 # All non-GPU tests (no hipDNN required)
 pytest -m "not gpu"
 
-# All tests including GPU tests
-pytest
+# All tests including GPU tests (requires hipDNN and ROCm libraries)
+LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest
 
 # Single test file
-pytest tests/unit/execution/test_timing.py
+LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest tests/unit/execution/test_timing.py
 
 # With coverage
-pytest --cov=dnn_benchmarking tests/
+LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest --cov=dnn_benchmarking tests/
 ```
+
+**Note:** GPU tests require ROCm libraries to be findable. Set `LD_LIBRARY_PATH=/opt/rocm/lib` before running tests that depend on `hipdnn_frontend`.
 
 Test markers: `gpu` (requires GPU), `slow` (slow integration tests).
 
