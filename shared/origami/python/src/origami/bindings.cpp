@@ -15,6 +15,7 @@
 #include "origami/types.hpp"
 
 using hardware_t = origami::hardware_t;
+using namespace nanobind::literals;
 
 NB_MODULE(origami, m) {
   nanobind::enum_<hardware_t::architecture_t>(m, "architecture_t")
@@ -26,6 +27,8 @@ NB_MODULE(origami, m) {
       .value("gfx1151", hardware_t::architecture_t::gfx1151)
       .export_values();
 
+
+      
   nanobind::enum_<origami::data_type_t>(m, "data_type_t")
       .value("Float", origami::data_type_t::Float)
       .value("ComplexFloat", origami::data_type_t::ComplexFloat)
@@ -158,13 +161,14 @@ NB_MODULE(origami, m) {
         &hardware_t::get_hardware_for_device,
         "This gets a hardware object for a device.");
 
+  //Needs named arguments
   m.def("get_hardware_for_arch",
         &hardware_t::get_hardware_for_arch,
-        "arch"_a,
-        "N_CU"_a,
-        "lds_capacity"_a,
-        "L2_capacity"_a,
-        "compute_clock_khz"_a,
+        nanobind::arg("arch"),
+        nanobind::arg("N_CU"),
+        nanobind::arg("lds_capacity"),
+        nanobind::arg("L2_capacity"),
+        nanobind::arg("compute_clock_khz"),
         "Create hardware object for a specific architecture with specified parameters.");
 
   m.def("datatype_to_bits", &origami::datatype_to_bits, "Return the number of bits in a datatype");
@@ -241,4 +245,3 @@ NB_MODULE(origami, m) {
         "Compute number of output tiles");
 
 }
-

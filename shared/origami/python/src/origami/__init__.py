@@ -25,6 +25,7 @@ try:
         hardware_t,
         # Hardware functions
         get_hardware_for_device,
+        get_hardware_for_arch,
         # Data type functions
         int_to_data_type,
         datatype_to_bits,
@@ -82,6 +83,7 @@ __all__ = [
     "hardware_t",
     # Hardware functions
     "get_hardware_for_device",
+    "get_hardware_for_arch",
     # Data type functions
     "int_to_data_type",
     "datatype_to_bits",
