@@ -412,7 +412,7 @@ if(BUILD_CODE_COVERAGE)
   if(GENHTML AND Python3_FOUND AND EXISTS ${COVERAGE_FILTER_SCRIPT})
     message(STATUS "Found genhtml - HTML will be generated from filtered LCOV")
     set(COVERAGE_HTML_COMMAND
-      COMMAND ${GENHTML} ./coverage-report/coverage.info --output-directory ./coverage-report --title rocsparse --legend --demangle-cpp --ignore-errors inconsistent --quiet
+      COMMAND ${GENHTML} ./coverage-report/coverage.info --output-directory ./coverage-report --title rocsparse --legend --demangle-cpp --quiet
     )
   else()
     message(STATUS "genhtml not found - using llvm-cov show (exclusion markers not reflected in HTML)")
