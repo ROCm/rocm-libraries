@@ -57,9 +57,49 @@ endif()
 
 add_unit_test_target(miopen_plugin_tests ${CMAKE_CURRENT_BINARY_DIR})
 
-# Backwards compatibility symlink for TheRock until submodule is bumped
-install(CODE "
-    execute_process(COMMAND \${CMAKE_COMMAND} -E create_symlink
-        miopen_plugin_tests
-        \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/miopen_legacy_plugin_tests)
-")
+# miopen_legacy_plugin_tests - Backwards compatibility target for current TheRock
+add_executable(
+    miopen_legacy_plugin_tests
+    engines/plans/TestMiopenBatchnormApplicabilityChecks.cpp
+    engines/plans/TestMiopenBatchnormBwdPlan.cpp
+    engines/plans/TestMiopenBatchnormFwdInferencePlan.cpp
+    engines/plans/TestMiopenBatchnormFwdInferenceWithVariancePlan.cpp
+    engines/plans/TestMiopenBatchnormFwdTrainingPlan.cpp
+    engines/plans/TestMiopenBatchnormFwdTrainingActivPlan.cpp
+    engines/plans/TestMiopenBatchnormFwdTrainingActivPlanBuilder.cpp
+    engines/plans/TestMiopenBatchnormFwdTrainingPlanBuilder.cpp
+    engines/plans/TestMiopenBatchnormPlanBuilder.cpp
+    engines/plans/TestMiopenConvFwdBiasActivPlan.cpp
+    engines/plans/TestMiopenConvFwdBiasActivPlanBuilder.cpp
+    engines/plans/TestMiopenConvFwdPlan.cpp
+    engines/plans/TestMiopenConvBwdPlan.cpp
+    engines/plans/TestMiopenConvWrwPlan.cpp
+    engines/plans/TestMiopenConvPlanBuilder.cpp
+    engines/TestMiopenEngine.cpp
+    main.cpp
+    TestMiopenActivationDescriptor.cpp
+    TestMiopenConvDescriptor.cpp
+    TestMiopenEngineManager.cpp
+    TestMiopenHandleFactory.cpp
+    TestMiopenHipdnnEnginePluginHandle.cpp
+    TestMiopenHipdnnPluginExecutionContext.cpp
+    TestMiopenEnginePluginApi.cpp
+    TestMiopenPluginApi.cpp
+    TestMiopenTensor.cpp
+    TestMiopenUtils.cpp
+)
+
+target_compile_options(miopen_legacy_plugin_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+
+target_link_libraries(
+    miopen_legacy_plugin_tests PUBLIC GTest::gtest GTest::gmock hip::host
+                                       miopen_plugin_private hipdnn_test_sdk hipdnn_plugin_sdk Threads::Threads
+)
+
+target_include_directories(miopen_legacy_plugin_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+if(BUILD_PLUGIN_AS_DEPENDENCY)
+    clang_tidy_check(miopen_legacy_plugin_tests)
+endif()
+
+add_unit_test_target(miopen_legacy_plugin_tests ${CMAKE_CURRENT_BINARY_DIR})

@@ -254,11 +254,4 @@ function(install_miopen_plugin_ctest_files)
             DESTINATION "${CMAKE_INSTALL_BINDIR}/miopen_legacy_plugin" RENAME CTestTestfile.cmake
     )
 
-    # Backwards compatibility: create symlink at legacy path for TheRock until submodule is bumped
-    install(CODE "
-        execute_process(COMMAND \${CMAKE_COMMAND} -E create_symlink
-            miopen_plugin
-            \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/miopen_legacy_plugin)
-    ")
-
 endfunction() # install_miopen_plugin_ctest_files
