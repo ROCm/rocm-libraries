@@ -45,7 +45,7 @@ jobs:
       - name: Install ROCm
         run: |
           sudo .venv/bin/python3 TheRock/build_tools/install_rocm_from_artifacts.py \
-            --release 7.11.0a20260115 \
+            --release 7.11.0a20260119 \
             --amdgpu-family gfx94X-dcgpu \
             --output-dir /opt/rocm \
             --base-only

@@ -66,8 +66,8 @@ private:
 class BatchnormFwdInferenceWithVariancePlan : public IPlan
 {
 public:
-    BatchnormFwdInferenceWithVariancePlan(
-        BatchnormFwdInferenceWithVarianceParams&& inferenceParams);
+    BatchnormFwdInferenceWithVariancePlan(BatchnormFwdInferenceWithVarianceParams&& inferenceParams,
+                                          bool benchmarkingEnabled = false);
 
     BatchnormFwdInferenceWithVariancePlan(const BatchnormFwdInferenceWithVariancePlan&) = delete;
     BatchnormFwdInferenceWithVariancePlan& operator=(const BatchnormFwdInferenceWithVariancePlan&)
@@ -86,6 +86,7 @@ public:
 
 private:
     BatchnormFwdInferenceWithVarianceParams _inferenceParams;
+    bool _benchmarkingEnabled;
 };
 
 } // namespace miopen_legacy_plugin
