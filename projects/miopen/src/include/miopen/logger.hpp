@@ -138,9 +138,6 @@
 
 namespace miopen {
 
-extern thread_local size_t log_buffer_size, log_buffer_i;
-extern thread_local std::vector<std::string> log_buffer;
-
 void OutputBufferedLogs();
 
 template <class Range>
@@ -367,6 +364,11 @@ constexpr std::string_view LoggingParseFunction(const std::string_view func,
 #else
 #define MIOPEN_GET_FN_NAME miopen::LoggingParseFunction(__func__, __PRETTY_FUNCTION__)
 #endif
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+extern thread_local size_t log_buffer_size, log_buffer_i;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+extern thread_local std::vector<std::string> log_buffer;
 
 #define MIOPEN_LOG_XQ_CUSTOM(level, disableQuieting, category, fn_name, ...)                 \
     do                                                                                       \

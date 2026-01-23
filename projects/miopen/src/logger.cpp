@@ -74,8 +74,11 @@ MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_LOG_BUFFER_SIZE, 128);
 
 namespace miopen {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
 thread_local size_t log_buffer_size = env::value(MIOPEN_LOG_BUFFER_SIZE);
-thread_local size_t log_buffer_i    = 0;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
+thread_local size_t log_buffer_i = 0;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
 thread_local std::vector<std::string> log_buffer(log_buffer_size, "");
 
 void OutputBufferedLogs()

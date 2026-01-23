@@ -375,7 +375,7 @@ void TestLogBufferOn()
     MIOPEN_LOG_I("info");
     MIOPEN_LOG_I2("info2");
     MIOPEN_LOG_T("trace");
-    EXPECT_ANY_THROW(MIOPEN_THROW("throw"));
+    EXPECT_ANY_THROW({ MIOPEN_THROW("throw"); });
 
     EXPECT_TRUE(fs::exists(filename));
     log_file = std::ifstream{filename};
@@ -398,7 +398,6 @@ void TestLogBufferOff()
 {
     auto filename =
         fs::temp_directory_path() / ("miopen_error_" + std::to_string(getpid()) + ".log");
-    std::string line;
 
     ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
                                                  "6"); // miopen::LoggingLevel::Info2
