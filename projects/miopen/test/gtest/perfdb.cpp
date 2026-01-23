@@ -1420,54 +1420,53 @@ public:
     }
 };
 
-// gtest fixture and definitions
+} // namespace tests
+} // namespace miopen
+
 class CPU_PerfDb_NONE : public ::testing::Test
 {
 protected:
-    TempFile temp_file{"miopen.tests.perfdb"};
+    miopen::TempFile temp_file{"miopen.tests.perfdb"};
 
     template <class TDb>
     void DbTests()
     {
-        DbFindTest<TDb>{temp_file}.Run();
-        DbStoreTest<TDb>{temp_file}.Run();
-        DbUpdateTest<TDb>{temp_file}.Run();
-        DbRemoveTest<TDb>{temp_file}.Run();
-        DbReadTest<TDb>{temp_file}.Run();
-        DbWriteTest<TDb>{temp_file}.Run();
-        DbOperationsTest<TDb>{temp_file}.Run();
-        DbParallelTest<TDb>{temp_file}.Run();
+        miopen::tests::DbFindTest<TDb>{temp_file}.Run();
+        miopen::tests::DbStoreTest<TDb>{temp_file}.Run();
+        miopen::tests::DbUpdateTest<TDb>{temp_file}.Run();
+        miopen::tests::DbRemoveTest<TDb>{temp_file}.Run();
+        miopen::tests::DbReadTest<TDb>{temp_file}.Run();
+        miopen::tests::DbWriteTest<TDb>{temp_file}.Run();
+        miopen::tests::DbOperationsTest<TDb>{temp_file}.Run();
+        miopen::tests::DbParallelTest<TDb>{temp_file}.Run();
 
-        DbMultiThreadedReadTest<TDb>{temp_file}.Run();
-        DbMultiProcessReadTest<TDb>{temp_file}.Run();
-        DbMultiThreadedTest<TDb>{temp_file}.Run();
-        DbMultiProcessTest<TDb>{temp_file}.Run();
+        miopen::tests::DbMultiThreadedReadTest<TDb>{temp_file}.Run();
+        miopen::tests::DbMultiProcessReadTest<TDb>{temp_file}.Run();
+        miopen::tests::DbMultiThreadedTest<TDb>{temp_file}.Run();
+        miopen::tests::DbMultiProcessTest<TDb>{temp_file}.Run();
     }
 
     void MultiFileDbTests()
     {
-        if(!DisableUserDbFileIO)
+        if(!miopen::DisableUserDbFileIO)
         {
-            DbMultiFileReadTest<true>{temp_file}.Run();
-            DbMultiFileReadTest<false>{temp_file}.Run();
-            DbMultiFileWriteTest{temp_file}.Run();
+            miopen::tests::DbMultiFileReadTest<true>{temp_file}.Run();
+            miopen::tests::DbMultiFileReadTest<false>{temp_file}.Run();
+            miopen::tests::DbMultiFileWriteTest{temp_file}.Run();
         }
-        DbMultiFileOperationsTest{temp_file}.Run();
-        DbMultiFileMultiThreadedReadTest{temp_file}.Run();
-        DbMultiFileMultiThreadedTest{temp_file}.Run();
+        miopen::tests::DbMultiFileOperationsTest{temp_file}.Run();
+        miopen::tests::DbMultiFileMultiThreadedReadTest{temp_file}.Run();
+        miopen::tests::DbMultiFileMultiThreadedTest{temp_file}.Run();
     }
 };
 
-// RamDb Tests
-TEST_F(CPU_PerfDb_NONE, RamDb_AllTests) { DbTests<RamDb>(); }
+TEST_F(CPU_PerfDb_NONE, RamDb_AllTests) { DbTests<miopen::RamDb>(); }
 
-// PlainTextDb Tests
-TEST_F(CPU_PerfDb_NONE, PlainTextDb_AllTests) { DbTests<PlainTextDb>(); }
+TEST_F(CPU_PerfDb_NONE, PlainTextDb_AllTests) { DbTests<miopen::PlainTextDb>(); }
 
-// MultiFile Database Tests
 TEST_F(CPU_PerfDb_NONE, MultiFileDb_AllTests) { MultiFileDbTests(); }
 
-} // namespace tests
+namespace miopen {
 
 namespace tests {
 namespace perfdb {
