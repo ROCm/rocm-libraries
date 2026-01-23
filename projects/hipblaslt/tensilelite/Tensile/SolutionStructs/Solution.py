@@ -759,15 +759,6 @@ class Solution(collections.abc.Mapping):
         reject(state, "LdsBlockSizePerPadMXSA/LdsBlockSizePerPadMXSB support -1 and 0 for gfx1250")
         return
 
-    if "ClusterDim" in state:
-      state["EnableCluster"] = True
-    else:
-      state["EnableCluster"] = False
-      state["ClusterDim"] = [1, 1]
-
-    if state["Multicast"] == True and state["EnableCluster"] == False:
-      reject(state, printRejectionReason, f"Multicast should set clusterDim.")
-
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
 

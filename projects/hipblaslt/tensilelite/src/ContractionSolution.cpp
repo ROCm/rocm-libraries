@@ -1496,7 +1496,6 @@ namespace TensileLite
             }
         }
 
-        rv.enableCluster = sizeMapping.enableCluster;
         rv.clusterDim = sizeMapping.clusterDim;
 
         rv.numWorkItems.x = rv.workGroupSize.x * rv.numWorkGroups.x;

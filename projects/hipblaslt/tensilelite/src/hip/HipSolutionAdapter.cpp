@@ -453,64 +453,39 @@ namespace TensileLite
             if(startEvent != nullptr)
                 HIP_CHECK_RETURN(hipEventRecord(startEvent, stream));
 
-            if (kernel.enableCluster){
-                HIP_LAUNCH_CONFIG config = {0};
-                // The grid dimension is not affected by cluster launch, and is still enumerated
-                // using number of blocks.
-                // The grid dimension should be a multiple of cluster size.
-                config.gridDimX = kernel.numWorkGroups.x;
-                config.gridDimY = kernel.numWorkGroups.y;
-                config.gridDimZ = kernel.numWorkGroups.z;
-                config.blockDimX = kernel.workGroupSize.x;
-                config.blockDimY = kernel.workGroupSize.y;
-                config.blockDimZ = kernel.workGroupSize.z;
-    
-                hipLaunchAttribute attribute[1];
-                attribute[0].id = hipLaunchAttributeClusterDimension;
-                attribute[0].val.clusterDim.x = kernel.clusterDim.x; // Cluster size in X-dimension
-                attribute[0].val.clusterDim.y = kernel.clusterDim.y;
-                attribute[0].val.clusterDim.z = 1;
-                config.attrs = attribute;
-                config.numAttrs = 1;
-                config.sharedMemBytes = kernel.sharedMemBytes;
-    
-                const HIP_LAUNCH_CONFIG *pConfig = &config;
-                HIP_CHECK_RETURN_WITH_LOG(hipDrvLaunchKernelEx(pConfig,
-                                                               function,
-                                                               nullptr,
-                                                               (void**)&hipLaunchParams),
-                    [&](hipError_t error) {
-                        std::cerr << "hipExtModuleLaunchKernel failed: " << kernel.kernelName << std::endl
-                                  << " with workgroup size: " << kernel.workGroupSize << std::endl
-                                  << " with numWorkGroups : " << kernel.numWorkGroups << std::endl
-                                  << " with numWorkItems : " << kernel.numWorkItems << std::endl
-                                  << " error: " << hipGetErrorString(error) << std::endl;
-                    }
-                );
-            } else {
-                HIP_CHECK_RETURN_WITH_LOG(hipExtModuleLaunchKernel(function,
-                                                          kernel.numWorkItems.x,
-                                                          kernel.numWorkItems.y,
-                                                          kernel.numWorkItems.z,
-                                                          kernel.workGroupSize.x,
-                                                          kernel.workGroupSize.y,
-                                                          kernel.workGroupSize.z,
-                                                          kernel.sharedMemBytes, // sharedMem
-                                                          stream, // stream
-                                                          nullptr,
-                                                          (void**)&hipLaunchParams,
-                                                          nullptr, // event
-                                                          nullptr // event
-                                                          ),
-                    [&](hipError_t error) {
-                        std::cerr << "hipExtModuleLaunchKernel failed: " << kernel.kernelName << std::endl
-                                  << " with workgroup size: " << kernel.workGroupSize << std::endl
-                                  << " with numWorkGroups : " << kernel.numWorkGroups << std::endl
-                                  << " with numWorkItems : " << kernel.numWorkItems << std::endl
-                                  << " error: " << hipGetErrorString(error) << std::endl;
-                    }
-                );
-            }
+            HIP_LAUNCH_CONFIG config = {0};
+            // The grid dimension is not affected by cluster launch, and is still enumerated
+            // using number of blocks.
+            // The grid dimension should be a multiple of cluster size.
+            config.gridDimX = kernel.numWorkGroups.x;
+            config.gridDimY = kernel.numWorkGroups.y;
+            config.gridDimZ = kernel.numWorkGroups.z;
+            config.blockDimX = kernel.workGroupSize.x;
+            config.blockDimY = kernel.workGroupSize.y;
+            config.blockDimZ = kernel.workGroupSize.z;
+
+            hipLaunchAttribute attribute[1];
+            attribute[0].id = hipLaunchAttributeClusterDimension;
+            attribute[0].val.clusterDim.x = kernel.clusterDim.x; // Cluster size in X-dimension
+            attribute[0].val.clusterDim.y = kernel.clusterDim.y;
+            attribute[0].val.clusterDim.z = 1;
+            config.attrs = attribute;
+            config.numAttrs = 1;
+            config.sharedMemBytes = kernel.sharedMemBytes;
+
+            const HIP_LAUNCH_CONFIG *pConfig = &config;
+            HIP_CHECK_RETURN_WITH_LOG(hipDrvLaunchKernelEx(pConfig,
+                                                           function,
+                                                           nullptr,
+                                                           (void**)&hipLaunchParams),
+                [&](hipError_t error) {
+                    std::cerr << "hipExtModuleLaunchKernel failed: " << kernel.kernelName << std::endl
+                              << " with workgroup size: " << kernel.workGroupSize << std::endl
+                              << " with numWorkGroups : " << kernel.numWorkGroups << std::endl
+                              << " with numWorkItems : " << kernel.numWorkItems << std::endl
+                              << " error: " << hipGetErrorString(error) << std::endl;
+                }
+            );
 
             if(stopEvent != nullptr)
                 HIP_CHECK_RETURN(hipEventRecord(stopEvent, stream));
