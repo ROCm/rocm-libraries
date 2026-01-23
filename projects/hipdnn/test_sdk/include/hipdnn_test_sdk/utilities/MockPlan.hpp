@@ -15,11 +15,11 @@ class MockPlan : public hipdnn_plugin_sdk::IPlan
 public:
     MOCK_METHOD(size_t,
                 getWorkspaceSize,
-                (hipdnnEnginePluginHandle_t handle),
+                (const HipdnnEnginePluginHandle& handle),
                 (const, override));
     MOCK_METHOD(void,
                 execute,
-                (hipdnnEnginePluginHandle_t handle,
+                (const HipdnnEnginePluginHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace),

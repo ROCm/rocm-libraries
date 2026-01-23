@@ -6,6 +6,7 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
@@ -544,7 +545,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, GetWorkspaceSizeReturnsZero)
 {
     MockGraph mockGraph;
 
-    size_t workspaceSize = _planBuilder.getWorkspaceSize(_dummyHandle, mockGraph);
+    size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph);
 
     EXPECT_EQ(workspaceSize, 0u);
 }
@@ -554,8 +555,9 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, BuildPlanSetsPlanForValidSingl
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
+    MockEngineConfig mockConfig;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -564,8 +566,9 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, BuildPlanSetsPlanForValidTwoNo
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
+    MockEngineConfig mockConfig;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -600,8 +603,9 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, BuildPlanThrowsForUnsupportedN
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
+    MockEngineConfig mockConfig;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx),
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockConfig, ctx),
                  hipdnn_plugin_sdk::HipdnnPluginException);
     EXPECT_FALSE(ctx.hasValidPlan());
 }

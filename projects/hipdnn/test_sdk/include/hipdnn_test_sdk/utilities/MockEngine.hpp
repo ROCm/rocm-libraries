@@ -16,21 +16,24 @@ public:
     MOCK_METHOD(int64_t, id, (), (const, override));
     MOCK_METHOD(bool,
                 isApplicable,
-                (hipdnnEnginePluginHandle_t handle, const hipdnn_plugin_sdk::IGraph& opGraph),
+                (HipdnnEnginePluginHandle & handle, const hipdnn_plugin_sdk::IGraph& opGraph),
                 (const, override));
     MOCK_METHOD(void,
                 getDetails,
-                (hipdnnEnginePluginHandle_t handle, hipdnnPluginConstData_t& detailsOut),
+                (HipdnnEnginePluginHandle & handle,
+                 const hipdnn_plugin_sdk::IGraph& opGraph,
+                 hipdnnPluginConstData_t& detailsOut),
                 (const, override));
     MOCK_METHOD(size_t,
                 getMaxWorkspaceSize,
-                (hipdnnEnginePluginHandle_t handle, const hipdnn_plugin_sdk::IGraph& opGraph),
+                (const HipdnnEnginePluginHandle& handle, const hipdnn_plugin_sdk::IGraph& opGraph),
                 (const, override));
-    MOCK_METHOD(std::unique_ptr<hipdnn_plugin_sdk::IPlan>,
-                createPlan,
-                (hipdnnEnginePluginHandle_t handle,
+    MOCK_METHOD(void,
+                initializeExecutionContext,
+                (const HipdnnEnginePluginHandle& handle,
                  const hipdnn_plugin_sdk::IGraph& opGraph,
-                 const hipdnn_plugin_sdk::IEngineConfig& engineConfig),
+                 const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
+                 HipdnnEnginePluginExecutionContext& executionContext),
                 (const, override));
 
     ~MockEngine() override = default;

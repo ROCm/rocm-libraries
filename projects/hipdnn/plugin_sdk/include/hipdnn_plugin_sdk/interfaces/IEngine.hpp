@@ -67,13 +67,17 @@ public:
      * @brief Gets the details of this engine.
      *
      * Engine details include information about the engine's capabilities,
-     * behavioral notes, and supported configurations.
+     * behavioral notes, and supported configurations. The operation graph
+     * is provided so that the engine can query applicable plan builders
+     * for custom knobs.
      *
      * @param handle The engine plugin handle.
+     * @param opGraph The operation graph.
      * @param detailsOut Output parameter for the engine details data.
      *                   The caller is responsible for freeing this data.
      */
     virtual void getDetails(HipdnnEnginePluginHandle& handle,
+                            const IGraph& opGraph,
                             hipdnnPluginConstData_t& detailsOut) const = 0;
 
     /**
@@ -90,21 +94,23 @@ public:
                                        const IGraph& opGraph) const = 0;
 
     /**
-     * @brief Creates an executable plan for the given graph and configuration.
+     * @brief Initializes the execution context with a plan for the given graph.
      *
      * This is a pass-through to the appropriate plan builder. It's expected that
-     * only one plan builder will be applicable for a given graph.
+     * only one plan builder will be applicable for a given graph. The built plan
+     * is set on the execution context.
      *
      * @param handle The engine plugin handle.
      * @param opGraph The operation graph.
      * @param engineConfig The engine configuration settings.
-     * @return A unique pointer to the created plan.
+     * @param executionContext The execution context to initialize with a plan.
      * @throws HipdnnPluginException if no applicable plan builder is found or
      *         if plan creation fails.
      */
-    virtual std::unique_ptr<IPlan> createPlan(const HipdnnEnginePluginHandle& handle,
-                                              const IGraph& opGraph,
-                                              const IEngineConfig& engineConfig) const = 0;
+    virtual void initializeExecutionContext(const HipdnnEnginePluginHandle& handle,
+                                            const IGraph& opGraph,
+                                            const IEngineConfig& engineConfig,
+                                            HipdnnEnginePluginExecutionContext& executionContext) const = 0;
 };
 
 } // namespace hipdnn_plugin_sdk

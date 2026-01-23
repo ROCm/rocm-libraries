@@ -17,6 +17,15 @@ using ::testing::_;
 using ::testing::NiceMock;
 using ::testing::Return;
 
+// Define test handle and execution context structs for testing
+struct HipdnnEnginePluginHandle
+{
+};
+
+struct HipdnnEnginePluginExecutionContext
+{
+};
+
 namespace
 {
 
@@ -28,15 +37,6 @@ std::unique_ptr<NiceMock<MockEngine>> createMockEngine(int64_t engineId,
     ON_CALL(*engine, id()).WillByDefault(Return(engineId));
     ON_CALL(*engine, isApplicable(_, _)).WillByDefault(Return(applicable));
     ON_CALL(*engine, getMaxWorkspaceSize(_, _)).WillByDefault(Return(workspaceSize));
-    ON_CALL(*engine, createPlan(_, _, _))
-        .WillByDefault(
-            [workspaceSize](hipdnnEnginePluginHandle_t /*handle*/,
-                            const IGraph& /*opGraph*/,
-                            const IEngineConfig& /*engineConfig*/) -> std::unique_ptr<IPlan> {
-                auto plan = std::make_unique<NiceMock<MockPlan>>();
-                ON_CALL(*plan, getWorkspaceSize(_)).WillByDefault(Return(workspaceSize));
-                return plan;
-            });
     return engine;
 }
 
@@ -77,8 +77,9 @@ TEST(TestEngineManager, GetApplicableEngineIdsFiltersCorrectly)
     manager.addEngine(createMockEngine(2, false));
     manager.addEngine(createMockEngine(3, true));
 
+    HipdnnEnginePluginHandle handle;
     NiceMock<MockGraph> mockGraph;
-    auto applicableIds = manager.getApplicableEngineIds(nullptr, mockGraph);
+    auto applicableIds = manager.getApplicableEngineIds(handle, mockGraph);
 
     EXPECT_EQ(applicableIds.size(), 2u);
     EXPECT_TRUE(std::find(applicableIds.begin(), applicableIds.end(), 1) != applicableIds.end());
@@ -91,8 +92,9 @@ TEST(TestEngineManager, GetWorkspaceSizeReturnsEngineWorkspace)
     EngineManager manager;
     manager.addEngine(createMockEngine(1, true, 2048));
 
+    HipdnnEnginePluginHandle handle;
     NiceMock<MockGraph> mockGraph;
-    auto workspaceSize = manager.getWorkspaceSize(nullptr, 1, mockGraph);
+    auto workspaceSize = manager.getWorkspaceSize(handle, 1, mockGraph);
     EXPECT_EQ(workspaceSize, 2048u);
 }
 
@@ -101,6 +103,7 @@ TEST(TestEngineManager, GetWorkspaceSizeThrowsForUnknownEngine)
     EngineManager manager;
     manager.addEngine(createMockEngine(1, true));
 
+    HipdnnEnginePluginHandle handle;
     NiceMock<MockGraph> mockGraph;
-    EXPECT_THROW(manager.getWorkspaceSize(nullptr, 999, mockGraph), HipdnnPluginException);
+    EXPECT_THROW(manager.getWorkspaceSize(handle, 999, mockGraph), HipdnnPluginException);
 }

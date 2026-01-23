@@ -12,8 +12,7 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
-
-#include "engines/plans/PlanInterface.hpp"
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 struct HipdnnEnginePluginExecutionContext
 {
@@ -25,12 +24,12 @@ public:
         return _plan != nullptr;
     }
 
-    void setPlan(std::unique_ptr<miopen_legacy_plugin::IPlan> plan)
+    void setPlan(std::unique_ptr<hipdnn_plugin_sdk::IPlan> plan)
     {
         _plan = std::move(plan);
     }
 
-    virtual miopen_legacy_plugin::IPlan& plan() const
+    virtual hipdnn_plugin_sdk::IPlan& plan() const
     {
         if(!hasValidPlan())
         {
@@ -52,6 +51,6 @@ public:
     }
 
 private:
-    std::unique_ptr<miopen_legacy_plugin::IPlan> _plan;
+    std::unique_ptr<hipdnn_plugin_sdk::IPlan> _plan;
     bool _benchmarkingEnabled = false;
 };

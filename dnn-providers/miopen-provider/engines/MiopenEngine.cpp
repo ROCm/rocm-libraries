@@ -76,7 +76,8 @@ size_t MiopenEngine::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
-            workspaceSize = std::max(workspaceSize, planBuilder->getWorkspaceSize(handle, opGraph));
+            workspaceSize
+                = std::max(workspaceSize, planBuilder->getMaxWorkspaceSize(handle, opGraph));
         }
     }
     return workspaceSize;
@@ -116,13 +117,13 @@ void MiopenEngine::initializeExecutionContext(
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
-            planBuilder->buildPlan(handle, opGraph, executionContext);
+            planBuilder->buildPlan(handle, opGraph, engineConfig, executionContext);
             break;
         }
     }
 }
 
-void MiopenEngine::addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder)
+void MiopenEngine::addPlanBuilder(std::unique_ptr<hipdnn_plugin_sdk::IPlanBuilder> planBuilder)
 {
     _planBuilders.push_back(std::move(planBuilder));
 }

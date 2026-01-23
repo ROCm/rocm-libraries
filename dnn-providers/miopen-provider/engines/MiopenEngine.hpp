@@ -7,8 +7,8 @@
 #include <set>
 
 #include "EngineInterface.hpp"
-#include "plans/PlanBuilderInterface.hpp"
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
 namespace miopen_legacy_plugin
 {
@@ -33,11 +33,11 @@ public:
         const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
         HipdnnEnginePluginExecutionContext& executionContext) const override;
 
-    void addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder);
+    void addPlanBuilder(std::unique_ptr<hipdnn_plugin_sdk::IPlanBuilder> planBuilder);
 
 private:
     int64_t _id;
-    std::vector<std::unique_ptr<IPlanBuilder>> _planBuilders;
+    std::vector<std::unique_ptr<hipdnn_plugin_sdk::IPlanBuilder>> _planBuilders;
 };
 
 }

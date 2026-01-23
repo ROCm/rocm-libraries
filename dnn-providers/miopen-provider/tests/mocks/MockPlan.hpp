@@ -3,14 +3,16 @@
 
 #pragma once
 
-#include "engines/plans/PlanInterface.hpp"
 #include <gmock/gmock.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+
+#include "HipdnnEnginePluginHandle.hpp"
 
 namespace miopen_legacy_plugin
 {
 
-class MockPlan : public IPlan
+class MockPlan : public hipdnn_plugin_sdk::IPlan
 {
 public:
     MOCK_METHOD(size_t,

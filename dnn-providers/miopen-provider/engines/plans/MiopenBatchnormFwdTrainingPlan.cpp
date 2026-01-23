@@ -5,6 +5,8 @@
 #include "MiopenUtils.hpp"
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 
+#include "HipdnnEnginePluginHandle.hpp"
+
 namespace miopen_legacy_plugin
 {
 

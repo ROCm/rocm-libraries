@@ -13,7 +13,6 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
-#include <hipdnn_plugin_sdk/interfaces/IExecutionContext.hpp>
 
 namespace hipdnn_plugin_sdk
 {
@@ -107,9 +106,8 @@ public:
                           int64_t engineId,
                           hipdnnPluginConstData_t& engineDetailsOut)
     {
-        (void)opGraph; // May be unused depending on engine implementation
         auto& engine = getEngine(engineId);
-        engine.getDetails(handle, engineDetailsOut);
+        engine.getDetails(handle, opGraph, engineDetailsOut);
     }
 
     /**
@@ -142,11 +140,10 @@ public:
     void initializeExecutionContext(const HipdnnEnginePluginHandle& handle,
                                     const IGraph& opGraph,
                                     const IEngineConfig& engineConfig,
-                                    IExecutionContext& executionContext) const
+                                    HipdnnEnginePluginExecutionContext& executionContext) const
     {
         auto& engine = getEngine(engineConfig.engineId());
-        auto plan = engine.createPlan(handle, opGraph, engineConfig);
-        executionContext.setPlan(std::move(plan));
+        engine.initializeExecutionContext(handle, opGraph, engineConfig, executionContext);
     }
 
 protected:

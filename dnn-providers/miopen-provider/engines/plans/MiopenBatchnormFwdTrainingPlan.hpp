@@ -7,7 +7,6 @@
 
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
-#include "PlanBuilderInterface.hpp"
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <optional>
 

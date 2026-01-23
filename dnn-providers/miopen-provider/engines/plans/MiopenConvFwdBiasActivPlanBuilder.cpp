@@ -429,7 +429,7 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHan
     }
 }
 
-size_t MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSize(
+size_t MiopenConvFwdBiasActivPlanBuilder::getMaxWorkspaceSize(
     const HipdnnEnginePluginHandle& handle, const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
@@ -443,6 +443,7 @@ size_t MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSize(
 void MiopenConvFwdBiasActivPlanBuilder::buildPlan(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_plugin_sdk::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
@@ -452,6 +453,18 @@ void MiopenConvFwdBiasActivPlanBuilder::buildPlan(
     auto plan = std::make_unique<ConvFwdBiasActivPlan>(
         handle, std::move(params), true, true, executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
+}
+
+bool MiopenConvFwdBiasActivPlanBuilder::hasCustomKnobs() const
+{
+    return false;
+}
+
+std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenConvFwdBiasActivPlanBuilder::getCustomKnobs(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const hipdnn_plugin_sdk::IGraph& opGraph) const
+{
+    return {};
 }
 
 } // namespace miopen_legacy_plugin

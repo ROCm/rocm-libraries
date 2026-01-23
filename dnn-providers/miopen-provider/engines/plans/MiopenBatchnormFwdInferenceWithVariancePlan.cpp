@@ -6,6 +6,8 @@
 
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 
+#include "HipdnnEnginePluginHandle.hpp"
+
 namespace miopen_legacy_plugin
 {
 

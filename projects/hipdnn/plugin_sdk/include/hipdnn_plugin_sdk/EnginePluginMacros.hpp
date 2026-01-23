@@ -17,7 +17,6 @@
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/PluginHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginLastErrorManager.hpp>
-#include <hipdnn_plugin_sdk/interfaces/IExecutionContext.hpp>
 
 /**
  * @file EnginePluginMacros.hpp
@@ -31,7 +30,7 @@
  *
  * 1. Create a container class derived from EnginePluginContainer
  * 2. Create a handle class derived from PluginHandleBase
- * 3. Optionally create an execution context class derived from ExecutionContextBase
+ * 3. Create an execution context struct (typically named HipdnnEnginePluginExecutionContext)
  * 4. Use the macro to generate the C API functions
  *
  * ```cpp
@@ -51,7 +50,7 @@
  *     "1.0.0",              // Plugin version
  *     MyContainer,          // Container type
  *     MyHandle,             // Handle type
- *     hipdnn_plugin_sdk::ExecutionContextBase  // Execution context type
+ *     HipdnnEnginePluginExecutionContext  // Execution context type
  * )
  * ```
  */
@@ -125,7 +124,7 @@ struct PluginHandleBase
  * @param PLUGIN_VERSION String literal for the plugin version
  * @param CONTAINER_TYPE The container class (must derive from EnginePluginContainer)
  * @param HANDLE_TYPE The handle class (must derive from PluginHandleBase<CONTAINER_TYPE>)
- * @param CONTEXT_TYPE The execution context class (must derive from IExecutionContext)
+ * @param CONTEXT_TYPE The execution context struct (must have getPlan() returning IPlan&)
  */
 #define DECLARE_ENGINE_PLUGIN_DEFAULT_IMPL(                                                        \
     PLUGIN_NAME, PLUGIN_VERSION, CONTAINER_TYPE, HANDLE_TYPE, CONTEXT_TYPE)                        \

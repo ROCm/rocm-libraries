@@ -10,7 +10,6 @@
 #include "MiopenActivationDescriptor.hpp"
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
-#include "PlanBuilderInterface.hpp" //temporary
 
 namespace miopen_legacy_plugin
 {
