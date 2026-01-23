@@ -45,7 +45,7 @@ void ArgumentModel_log_performance(hipblaslt_internal_ostream& name_line,
 void ArgumentModel_log_efficiency(hipblaslt_internal_ostream& name_line,
                                   hipblaslt_internal_ostream& val_line,
                                   const Arguments&            arg,
-                                  double                      hipblaslt_gflops);
+                                  const double                hipblaslt_gflops);
 
 // ArgumentModel template has a variadic list of argument enums
 template <hipblaslt_argument... Args>

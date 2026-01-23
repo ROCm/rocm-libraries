@@ -91,15 +91,11 @@ void ArgumentModel_log_efficiency(hipblaslt_internal_ostream& name_line,
     auto     device_string = efficiency_monitor.getDeviceString();
     uint32_t flops_per_clock_per_cu{};
     if(device_string == "gfx942")
-    {
         flops_per_clock_per_cu
             = hipblaslt_get_flops_per_clock_per_cu_gfx942(arg.a_type, arg.compute_type);
-    }
     else if(device_string == "gfx950")
-    {
         flops_per_clock_per_cu
             = hipblaslt_get_flops_per_clock_per_cu_gfx950(arg.a_type, arg.compute_type);
-    }
 
     if(flops_per_clock_per_cu != 0)
     {
