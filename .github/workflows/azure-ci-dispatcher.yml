@@ -15,7 +15,7 @@
 name: Trigger Azure CI
 
 on:
-  pull_request_target:
+  pull_request:
     types:
       - opened
       - synchronize
@@ -35,7 +35,7 @@ jobs:
     - name: Check if branch is allowed
       id: branch-check
       run: |
-        allowed_branches=("develop" "staging" "main")
+        allowed_branches=("develop" "staging" "main" "users/dsclear/shorten_azuredevops_test_root")
         # Add pattern matching for release branches
         branch="${{ github.event.pull_request.base.ref }}"
         echo "Target branch: $branch"
