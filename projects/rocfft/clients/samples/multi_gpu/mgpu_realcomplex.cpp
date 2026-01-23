@@ -414,31 +414,13 @@ int main(int argc, char* argv[])
     if(fftrc != rocfft_status_success)
         throw std::runtime_error("rocfft_plan_create failed with code " + std::to_string(fftrc));
 
-    // Get execution information and allocate work buffer
-    rocfft_execution_info planinfo      = nullptr;
-    size_t                work_buf_size = 0;
-    fftrc = rocfft_plan_get_work_buffer_size(multigpu_plan, &work_buf_size);
-    if(fftrc != rocfft_status_success)
-        throw std::runtime_error("rocfft_plan_get_work_buffer_size failed.");
-
-    void* work_buf = nullptr;
-    if(work_buf_size)
-    {
-        if(rocfft_execution_info_create(&planinfo) != rocfft_status_success)
-            throw std::runtime_error("failed to create execution info");
-        if(hipMalloc(&work_buf, work_buf_size) != hipSuccess)
-            throw std::runtime_error("hipMalloc failed");
-        if(rocfft_execution_info_set_work_buffer(planinfo, work_buf, work_buf_size)
-           != rocfft_status_success)
-            throw std::runtime_error("rocfft_execution_info_set_work_buffer failed.");
-    }
-
     // Execute plan:
     fftrc = rocfft_execute(multigpu_plan,
                            (void**)gpu_in.data(),
                            place == rocfft_placement_notinplace ? (void**)gpu_out.data()
-                                                                : (void**)gpu_in.data(),
-                           planinfo);
+                                                                : (void**)nullptr,
+                           nullptr // no execution info
+        );
     if(fftrc != rocfft_status_success)
         throw std::runtime_error("failed to execute.");
 
@@ -459,13 +441,6 @@ int main(int argc, char* argv[])
         printbrick(outbrick_lower[idx], outbrick_upper[idx], outbrick_stride[idx], host_out);
     }
 
-    // Destroy plan
-    if(planinfo != nullptr)
-    {
-        if(rocfft_execution_info_destroy(planinfo) != rocfft_status_success)
-            throw std::runtime_error("rocfft_execution_info_destroy failed.");
-        planinfo = nullptr;
-    }
     if(rocfft_plan_description_destroy(description) != rocfft_status_success)
         throw std::runtime_error("rocfft_plan_description_destroy failed.");
     description = nullptr;
@@ -484,8 +459,6 @@ int main(int argc, char* argv[])
     {
         (void)hipFree(gpu_out[idx]);
     }
-    if(work_buf)
-        (void)hipFree(work_buf);
 
     return 0;
 }
