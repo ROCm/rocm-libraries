@@ -536,14 +536,13 @@ public:
     hipGraph_t hipGraph         = nullptr;
     hipGraphExec_t hipGraphExec = nullptr;
     hipGraphFuncPtrType hipGraphFuncPtr;
-    bool hipGraphIsProfilingToRestore;
     hipEvent_t hipGraphStartEvent   = nullptr;
     hipEvent_t hipGraphStopEvent    = nullptr;
     float hipGraphLastExecutionTime = 0.0f;
-    int HipGraphCapture(hipGraphFuncPtrType functPtr);
-    int HipGraphCaptureCapturing(hipGraphFuncPtrType functPtr);
-    int HipGraphExecute();
-    void HipGraphFinalize();
+    int CaptureKernel(hipGraphFuncPtrType functPtr);
+    int CaptureKernelCapturing(hipGraphFuncPtrType functPtr);
+    int ExecuteKernel();
+    void FinalizeKernel();
     float GetHipGraphExecutionTime() { return hipGraphLastExecutionTime; }
 #endif
     virtual ~Driver() { miopenDestroy(handle); }

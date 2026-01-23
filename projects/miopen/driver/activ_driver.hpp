@@ -309,7 +309,7 @@ int ActivationDriver<Tgpu, Tref>::RunForwardGPU()
     int iters       = inflags.GetValueInt("iter");
     Timer t;
 
-    int return_code = HipGraphCapture([&]() -> int {
+    int return_code = CaptureKernel([&]() -> int {
         miopenActivationForward(GetHandle(),
                                 activDesc,
                                 &alpha,
@@ -327,7 +327,7 @@ int ActivationDriver<Tgpu, Tref>::RunForwardGPU()
     {
         START_TIME
 
-        HipGraphExecute();
+        ExecuteKernel();
 
         miopen::deref(GetHandle()).Finish();
         STOP_TIME
@@ -356,7 +356,7 @@ int ActivationDriver<Tgpu, Tref>::RunForwardGPU()
                 avgtime += time;
         }
     }
-    HipGraphFinalize();
+    FinalizeKernel();
 
     if(WALL_CLOCK)
     {
@@ -408,7 +408,7 @@ int ActivationDriver<Tgpu, Tref>::RunBackwardGPU()
     int iters       = inflags.GetValueInt("iter");
     Timer t;
 
-    int return_code = HipGraphCapture([&]() -> int {
+    int return_code = CaptureKernel([&]() -> int {
         miopenActivationBackward(GetHandle(),
                                  activDesc,
                                  &alpha,
@@ -430,7 +430,7 @@ int ActivationDriver<Tgpu, Tref>::RunBackwardGPU()
     {
         START_TIME
 
-        HipGraphExecute();
+        ExecuteKernel();
 
         miopen::deref(GetHandle()).Finish();
         STOP_TIME
@@ -459,7 +459,7 @@ int ActivationDriver<Tgpu, Tref>::RunBackwardGPU()
                 avgtime += time;
         }
     }
-    HipGraphFinalize();
+    FinalizeKernel();
 
     if(WALL_CLOCK)
     {

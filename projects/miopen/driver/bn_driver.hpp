@@ -1147,7 +1147,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunForwardGPU()
     bool use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
 
     // Capture the graph for the first iteration (or if not using HIP graph, just execute)
-    int return_code = HipGraphCapture([&]() -> int {
+    int return_code = CaptureKernel([&]() -> int {
         // if run fwd train
         if(forw == 1)
         { // training only
@@ -1194,7 +1194,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunForwardGPU()
     {
         START_TIME
 
-        HipGraphExecute();
+        ExecuteKernel();
 
         miopen::deref(GetHandle()).Finish();
         STOP_TIME
@@ -1224,7 +1224,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunForwardGPU()
         }
     }
 
-    HipGraphFinalize();
+    FinalizeKernel();
 
     if(WALL_CLOCK)
     {
@@ -1459,7 +1459,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardGPU()
     bool use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
 
     // Capture the graph for the first iteration (or if not using HIP graph, just execute)
-    int return_code = HipGraphCapture([&]() -> int {
+    int return_code = CaptureKernel([&]() -> int {
         if(saveMeanVar)
         {
             if(activ_mode == 0)
@@ -1583,7 +1583,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardGPU()
     {
         START_TIME
 
-        HipGraphExecute();
+        ExecuteKernel();
 
         miopen::deref(GetHandle()).Finish();
         STOP_TIME
@@ -1612,7 +1612,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardGPU()
         }
     }
 
-    HipGraphFinalize();
+    FinalizeKernel();
 
     miopenDestroyActivationDescriptor(activ_desc);
 

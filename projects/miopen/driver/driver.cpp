@@ -73,14 +73,13 @@ GPUMem::Check Driver::GetGpuBufferCheck(const InputFlags& inflags) const
 
 #if MIOPEN_BACKEND_HIP
 
-int Driver::HipGraphCapture(hipGraphFuncPtrType functPtr)
+int Driver::CaptureKernel(hipGraphFuncPtrType functPtr)
 {
     bool use_hip_graph = GetInputFlags().GetValueInt("use_hip_graph") != 0;
     if(use_hip_graph)
     {
-        hipGraphIsProfilingToRestore = miopen::deref(GetHandle()).IsProfilingEnabled();
         miopenEnableProfiling(GetHandle(), false);
-        int rc = HipGraphCaptureCapturing(functPtr);
+        int rc = CaptureKernelCapturing(functPtr);
         return rc;
     }
     else
@@ -90,7 +89,7 @@ int Driver::HipGraphCapture(hipGraphFuncPtrType functPtr)
     }
 }
 
-int Driver::HipGraphCaptureCapturing(hipGraphFuncPtrType functPtr)
+int Driver::CaptureKernelCapturing(hipGraphFuncPtrType functPtr)
 {
 
     hipError_t he = hipStreamBeginCapture(q, hipStreamCaptureModeGlobal);
@@ -126,7 +125,7 @@ int Driver::HipGraphCaptureCapturing(hipGraphFuncPtrType functPtr)
     return miopenStatusSuccess;
 }
 
-int Driver::HipGraphExecute()
+int Driver::ExecuteKernel()
 {
 
     bool use_hip_graph = GetInputFlags().GetValueInt("use_hip_graph") == 1;
@@ -158,7 +157,7 @@ int Driver::HipGraphExecute()
     }
 }
 
-void Driver::HipGraphFinalize()
+void Driver::FinalizeKernel()
 {
 
     bool use_hip_graph = GetInputFlags().GetValueInt("use_hip_graph") == 1;
@@ -178,7 +177,6 @@ void Driver::HipGraphFinalize()
             hipEventDestroy(hipGraphStopEvent);
             hipGraphStopEvent = nullptr;
         }
-        miopenEnableProfiling(GetHandle(), hipGraphIsProfilingToRestore);
     }
 }
 
