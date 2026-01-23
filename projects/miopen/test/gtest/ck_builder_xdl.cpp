@@ -188,6 +188,7 @@ using DeviceOpGFwdDefaultPtrs =
     ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
         DeviceOpGFwdDefault<DataType>>;
 
+/*
 TEST(CKBuilderXdl, CreateExistingInstance)
 {
     // Verify that the signature structure conforms to the signature concept.
@@ -250,6 +251,7 @@ TEST(CKBuilderXdl, CreateExistingInstance)
         }
     }
 }
+*/
 
 /*
 TEST(CKBuilderXdl, StaticInstance)

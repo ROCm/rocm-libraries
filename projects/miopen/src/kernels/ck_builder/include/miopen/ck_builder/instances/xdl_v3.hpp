@@ -6,6 +6,8 @@
 #include <ck_tile/builder/types.hpp>
 #include <ck_tile/builder/conv_builder.hpp>
 
+#include "xdl.hpp"
+
 namespace ckb = ck_tile::builder;
 
 struct XdlV3Algorithm

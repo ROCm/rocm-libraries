@@ -17,7 +17,7 @@ constexpr void instantiate_kernel(std::vector<BaseOperatorPtr>& kernels)
 template <typename T, T... values>
 constexpr void build_kernels_helper(std::vector<BaseOperatorPtr>& kernels)
 {
-    std::array<BaseOperatorPtr, sizeof...(values)> result{};
+    // std::array<BaseOperatorPtr, sizeof...(values)> result{};
     ((instantiate_kernel<values>(kernels)), ...);
 }
 

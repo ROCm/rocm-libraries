@@ -128,7 +128,6 @@ constexpr XdlInstance make_xdl_instance_from_old_params(
                                                 .m_wave_per_xdl = c_thread_cluster_lengths[1],
                                                 .n_block        = c_thread_cluster_lengths[2],
                                                 .n_wave_per_xdl = c_thread_cluster_lengths[3]},
-                                                
                         .epilogue            = {.m_xdl_per_wave_per_shuffle =
                                          c_shuffle_m_xdl_per_wave_per_shuffle,
                                      .n_per_wave_per_shuffle = c_shuffle_n_xdl_per_wave_per_shuffle,
@@ -533,11 +532,11 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_16x16_instance_data(
     // library/include/ck/library/tensor_operation_instance/gpu/grouped_conv_fwd/device_grouped_conv_fwd_xdl_instance.hpp
     // device_grouped_conv_fwd_xdl_f32_16x16_instances
 
-    return std::array<XdlInstance,0>{};
+    return std::array<XdlInstance, 0>{};
 
-    // TODO - Investigate why a_block_transfer_dst_scalar_per_vector_k1 = 8 is invalid according to CK
-    // builder even though we are already creating kernels with it
-    
+    // TODO - Investigate why a_block_transfer_dst_scalar_per_vector_k1 = 8 is invalid according to
+    // CK builder even though we are already creating kernels with it
+
     /*
     // clang-format off
     std::array result = {
@@ -551,7 +550,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_16x16_instance_data(
             {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 2, 8, true,
             1, 1, {1, 32, 1, 4}, 1,
             FP32, FP32),
-        
+
         // Instance 2
         make_xdl_instance_from_old_params(
             spatialDim, inLayout, weiLayout, outLayout,
@@ -562,7 +561,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_16x16_instance_data(
             {4, 64, 1}, {1, 0, 2}, {1, 0, 2}, 2, 1, 8, true,
             1, 1, {1, 32, 1, 4}, 2,
             FP32, FP32),
-        
+
         // Instance 3
         make_xdl_instance_from_old_params(
             spatialDim, inLayout, weiLayout, outLayout,
@@ -577,7 +576,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_16x16_instance_data(
     // clang-format on
 
     return result;
-    */
+    //*/
 }
 
 constexpr auto create_device_grouped_conv_fwd_xdl_f32_comp_instance_data(
@@ -649,7 +648,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_comp_instance_data(
     // clang-format on
 
     return result;
-    */
+    //*/
 }
 
 constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
@@ -721,8 +720,8 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
             FP32, FP32,
             ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V2),
         
-            // TODO - Investigate why c_block_transfer_scalar_per_vector = 8 is invalid according to CK builder even though we are already creating kernels with it
-            /*
+        // TODO - Investigate why c_block_transfer_scalar_per_vector = 8 is invalid according to CK builder even though we are already creating kernels with it
+        /*
         make_xdl_v3_instance_from_old_params(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
@@ -733,7 +732,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_intra_instance_data(
             1, 1, {1, 16, 1, 8}, 8,
             FP32, FP32,
             ckb::PipelineScheduler::INTRAWAVE, ckb::PipelineVersion::V2),
-            */
+        //*/
         
         // Memory friendly instances (v2)
         make_xdl_v3_instance_from_old_params(
@@ -877,9 +876,11 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_inter_instance_data(
             1, 1, {1, 16, 1, 8}, 8,
             FP32, FP32,
             ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2),
-        */
+        //*/
         
         // Memory friendly instances (v2)
+        // TODO - This fails to build due to "desired occupancy was 2, final occupancy is 1"
+        /*
         make_xdl_v3_instance_from_old_params(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
@@ -890,7 +891,10 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_inter_instance_data(
             1, 1, {1, 16, 1, 8}, 4,
             FP32, FP32,
             ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2),
+        */
         
+        // TODO - This fails to build due to "desired occupancy was 2, final occupancy is 1"
+        /*
         make_xdl_v3_instance_from_old_params(
             spatialDim, inLayout, weiLayout, outLayout,
             FP32, FP32, FP32, FP32, FP32,
@@ -901,6 +905,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_mem_inter_instance_data(
             1, 1, {1, 16, 1, 8}, 2,
             FP32, FP32,
             ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2),
+        */
         
         make_xdl_v3_instance_from_old_params(
             spatialDim, inLayout, weiLayout, outLayout,
@@ -993,7 +998,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_merged_groups_f32_instance_dat
     // clang-format on
 
     return result;
-    */
+    //*/
 }
 
 constexpr auto create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_instance_data()
@@ -1146,31 +1151,12 @@ struct DeviceOperationInstanceFactory<DeviceOpGFWdDefaultFloat>
         // library/include/ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp
         std::vector<BaseOperatorPtr> instances{};
 
-        constexpr auto xdlMergedInstanceData =
-            create_device_grouped_conv2d_fwd_xdl_merged_groups_ngchw_gkcyx_ngkhw_f32_instance_data();
-
-        constexpr auto xdlInstanceData =
-            create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_instance_data();
-
-        constexpr auto xdl16x16InstanceData =
-            create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_16x16_instance_data();
-
-        constexpr auto xdlV3CompInstanceData =
-            create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_comp_instance_data();
-
-        constexpr auto xdlV3MemIntraInstanceData =
-            create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_intra_instance_data();
-
-        constexpr auto xdlV3MemInterInstanceData =
-            create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_inter_instance_data();
-
-        constexpr auto xdlAllInstanceData =
-            concat(xdlMergedInstanceData, xdlInstanceData, xdl16x16InstanceData);
-        build_kernels<xdlAllInstanceData>(instances);
-
-        constexpr auto xdlV3AllInstanceData =
-            concat(xdlV3CompInstanceData, xdlV3MemIntraInstanceData, xdlV3MemInterInstanceData);
-        build_kernels<xdlV3AllInstanceData>(instances);
+        build_kernels<create_device_grouped_conv2d_fwd_xdl_merged_groups_ngchw_gkcyx_ngkhw_f32_instance_data()>(instances);
+        build_kernels<create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_instance_data()>(instances);
+        build_kernels<create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_16x16_instance_data()>(instances);
+        build_kernels<create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_comp_instance_data()>(instances);
+        build_kernels<create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_intra_instance_data()>(instances);
+        build_kernels<create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_inter_instance_data()>(instances);
 
         return instances;
     }

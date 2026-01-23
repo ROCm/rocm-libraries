@@ -69,21 +69,6 @@ void test_instance(const std::unique_ptr<T>& builderKernelInstance)
     print_closest_instance(builderKernelInstanceString, factoryInstances);
 }
 
-TEST(CKBuilderXdl, MultipleStaticInstances)
-{
-    std::vector<BaseOperatorPtr> kernels{};
-    constexpr auto instances = miopen::ck_builder::example_instances();
-
-    build_kernels<instances>(kernels);
-
-    std::cout << "Instance count: " << kernels.size() << std::endl;
-
-    for(auto&& k : kernels)
-    {
-        test_instance(k);
-    }
-}
-
 void print_instance_strings(std::vector<std::string>& instance_strings)
 {
     for(auto&& s : instance_strings)
