@@ -70,18 +70,16 @@ def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, bo
 
 def runTestCommand (platform, project)
 {
-    String testExclude = platform.jenkinsLabel.contains('compile') ? '-LE GPU' : ''
+    String testExclude = platform.jenkinsLabel.contains('compile') ? '--gtest_filter=-*GPU*' : ''
 
-    def numThreads = 8
+    def numShards = 4
 
     def command = """#!/usr/bin/env bash
                 set -ex
                 cd ${project.paths.project_build_prefix}
-
                 pushd build
-                echo Using ${numThreads} out of `nproc` threads for testing.
-                OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=2 ctest -j ${numThreads} --output-on-failure ${testExclude}
                 export ROCROLLER_BUILD_DIR="\$(pwd)"
+                python3 ../.jenkins/run-tests-sharded.py \$ROCROLLER_BUILD_DIR ${numShards} "${testExclude}"
                 popd
                 scripts/rrperf generate --suite generate_gfx950 --arch gfx950
             """
@@ -244,7 +242,7 @@ def runPerformanceCommand (platform, project)
                     ./scripts/rrperf compare \\
                         \$(ls -trd ./performance_build_${platform.gpu}/performance_${platform.gpu}/*) \\
                             > performance_comparison_${platform.gpu}.md
-                    
+
                     ./scripts/rrperf compare --format resource_md \\
                         \$(ls -trd ./performance_build_${platform.gpu}/performance_${platform.gpu}/*) \\
                             > resource_comparison_${platform.gpu}.md
@@ -289,7 +287,7 @@ def runPerformanceCommand (platform, project)
                             ./performance_${platform.gpu}_master/performance_${platform.gpu}/* \\
                             ./performance_build_${platform.gpu}/performance_${platform.gpu}/* \\
                             > performance_comparison_${platform.gpu}.md
-                        
+
                         ./scripts/rrperf compare --format resource_md \\
                             ./performance_${platform.gpu}_master/performance_${platform.gpu}/* \\
                             ./performance_build_${platform.gpu}/performance_${platform.gpu}/* \\
@@ -357,19 +355,19 @@ def runPerformanceCommand (platform, project)
             if (!perfCommentExists) {
                 def comment = pullRequest.comment(perfCommentString)
             }
-            
+
             def resCommentTitle = "# Resource Report for ${platform.gpu}"
             def resCommentString = "${resCommentTitle}\n\n"
             def resResults = readFile("${project.paths.project_build_prefix}/resource_comparison_${platform.gpu}.md").trim()
-            
+
             def maxResultsLength = 60000
             def truncatedMessage = "\n```\n\n**Results truncated, see full report in workspace**"
-            
+
             if (resResults.length() > maxResultsLength) {
                 def truncateIndex = resResults.lastIndexOf('\n', maxResultsLength)
                 resResults = resResults.substring(0, truncateIndex) + truncatedMessage
             }
-            
+
             resCommentString += "## Results${estimateString}\n\n"
             resCommentString += "<details open>\n\n${resResults}\n</details>\n"
             resCommentString += "<details><summary>Links</summary>\n\n"
