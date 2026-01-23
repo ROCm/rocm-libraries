@@ -23,6 +23,7 @@ add_executable(
     utilities/TestCpuFpReferenceUtilities.cpp
     utilities/TestCpuFpReferenceValidation.cpp
     utilities/TestCpuReferencePointwise.cpp
+    utilities/TestDynamicTolerance.cpp
     utilities/TestFlatbufferDatatypeMapping.cpp
     utilities/TestFlatbufferTensorAttributesUtils.cpp
     utilities/TestLoadGraphAndTensors.cpp
