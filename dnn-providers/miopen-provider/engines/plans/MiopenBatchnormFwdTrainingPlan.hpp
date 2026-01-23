@@ -80,7 +80,8 @@ private:
 class BatchnormFwdTrainingPlan : public IPlan
 {
 public:
-    BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams);
+    BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams,
+                             bool benchmarkingEnabled = false);
 
     BatchnormFwdTrainingPlan(const BatchnormFwdTrainingPlan&) = delete;
     BatchnormFwdTrainingPlan& operator=(const BatchnormFwdTrainingPlan&) = delete;
@@ -97,6 +98,7 @@ public:
 
 private:
     BatchnormFwdTrainingParams _trainingParams;
+    bool _benchmarkingEnabled;
 };
 
 }
