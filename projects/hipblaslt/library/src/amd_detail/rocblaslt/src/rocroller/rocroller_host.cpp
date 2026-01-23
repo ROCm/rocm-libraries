@@ -501,8 +501,10 @@ rocblaslt_status
         return rocblaslt_status_invalid_value;
     }
 
+    // Check if scale type is not F32 while limiting scope of scale_type
     if(auto scale_type = hipDataType_to_rocRoller_type(prob.scale_type);
-       scale_type != rocRoller::DataType::None && scale_type != rocRoller::DataType::Float)
+        scale_type != rocRoller::DataType::None &&
+        scale_type != rocRoller::DataType::Float)
     {
         std::cerr << "rocRoller only supports F32 as scale type not " << scale_type << std::endl;
         return rocblaslt_status_invalid_value;
