@@ -23,13 +23,10 @@
 
 #include "../shared/rocfft_complex.h"
 #include <hip/hip_runtime_api.h>
-
-#ifdef USE_HIPRAND
-
 #include <vector>
-
 static const unsigned int DATA_GEN_THREADS = 8;
 
+#ifdef USE_HIPRAND
 template <typename Tint, typename Treal>
 void generate_random_interleaved_data(const Tint&            whole_length,
                                       const size_t           idist,
