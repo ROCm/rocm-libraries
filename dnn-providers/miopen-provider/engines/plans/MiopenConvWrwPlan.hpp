@@ -50,7 +50,9 @@ private:
 class ConvWrwPlan : public IPlan
 {
 public:
-    ConvWrwPlan(const HipdnnEnginePluginHandle& handle, ConvWrwParams&& params);
+    ConvWrwPlan(const HipdnnEnginePluginHandle& handle,
+                ConvWrwParams&& params,
+                bool benchmarkingEnabled = false);
     ~ConvWrwPlan() override = default;
 
     ConvWrwPlan(const ConvWrwPlan&) = delete;
@@ -70,6 +72,7 @@ private:
     ConvWrwParams _params;
     hipdnn_data_sdk::utilities::ScopedResource<miopenSolution_t> _solution;
     size_t _workspaceSize = 0;
+    bool _benchmarkingEnabled;
 };
 
 } // namespace miopen_legacy_plugin

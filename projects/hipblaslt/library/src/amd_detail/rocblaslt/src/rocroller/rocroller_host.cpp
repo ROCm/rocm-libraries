@@ -412,6 +412,7 @@ KernelType genKernelType(const RocblasltContractionProblem& prob)
         kernelType.scaleTypeA.blockColSize   = 1;
         kernelType.scaleTypeA.type           = getScaleDataType(prob.scaleAType);
         kernelType.scaleTypeA.preSwizzleTile = preSwizzleSizeForScale(prob.scaleAType);
+        kernelType.scaleTypeA.preTile        = preTileSizeForScaleA(prob.scaleAType);
     }
 
     if(isBlockScaling(prob.scaleBType))
@@ -421,6 +422,7 @@ KernelType genKernelType(const RocblasltContractionProblem& prob)
         kernelType.scaleTypeB.blockColSize   = blockSize(prob.scaleBType);
         kernelType.scaleTypeB.type           = getScaleDataType(prob.scaleBType);
         kernelType.scaleTypeB.preSwizzleTile = preSwizzleSizeForScale(prob.scaleBType);
+        kernelType.scaleTypeB.preTile        = preTileSizeForScaleB(prob.scaleBType);
     }
 
     return kernelType;

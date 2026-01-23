@@ -24,6 +24,8 @@
  *
  *******************************************************************************/
 
+#include <vector>
+
 #include "hip_device.hpp"
 #include "common.hpp"
 
@@ -73,6 +75,10 @@ namespace rocwmma
         {
             mGcnArch = hipGcnArch_t::GFX1102;
         }
+        else if(deviceName.find("gfx1103") != std::string::npos)
+        {
+            mGcnArch = hipGcnArch_t::GFX1103;
+        }
         else if(deviceName.find("gfx1150") != std::string::npos)
         {
             mGcnArch = hipGcnArch_t::GFX1150;
@@ -113,7 +119,7 @@ namespace rocwmma
 
 #if ROCWMMA_BENCHMARK_TESTS
         bool smiErrorFlag = false;
-        CHECK_RSMI_ERROR(rsmi_init(0), smiErrorFlag);
+        CHECK_AMDSMI_ERROR(amdsmi_init(AMDSMI_INIT_AMD_GPUS), smiErrorFlag);
         if(!smiErrorFlag)
         {
             uint64_t hipPCIID = 0;
@@ -121,35 +127,64 @@ namespace rocwmma
             hipPCIID |= ((mProps.pciBusID & 0xFF) << 8);
             hipPCIID |= (mProps.pciDomainID) << 16;
 
-            uint32_t smiCount = 0;
-            CHECK_RSMI_ERROR(rsmi_num_monitor_devices(&smiCount), smiErrorFlag);
-            if(!smiErrorFlag)
+            // Get processor handles for all sockets
+            uint32_t socket_count = 0;
+            CHECK_AMDSMI_ERROR(amdsmi_get_socket_handles(&socket_count, nullptr), smiErrorFlag);
+            if(!smiErrorFlag && socket_count > 0)
             {
-                uint32_t smiDeviceIndex = std::numeric_limits<uint32_t>::max();
-                for(uint32_t smiIndex = 0; smiIndex < smiCount; smiIndex++)
+                std::vector<amdsmi_socket_handle> sockets(socket_count);
+                CHECK_AMDSMI_ERROR(amdsmi_get_socket_handles(&socket_count, sockets.data()), smiErrorFlag);
+                
+                if(!smiErrorFlag)
                 {
-                    uint64_t rsmiPCIID = 0;
-                    CHECK_RSMI_ERROR(rsmi_dev_pci_id_get(smiIndex, &rsmiPCIID), smiErrorFlag);
-                    if(smiErrorFlag)
+                    amdsmi_processor_handle smiDeviceHandle = nullptr;
+                    bool deviceFound = false;
+                    
+                    // Iterate through all sockets to find matching device
+                    for(uint32_t socket_idx = 0; socket_idx < socket_count && !deviceFound; socket_idx++)
                     {
-                        break;
+                        uint32_t processor_count = 0;
+                        CHECK_AMDSMI_ERROR(amdsmi_get_processor_handles(sockets[socket_idx], &processor_count, nullptr), smiErrorFlag);
+                        if(smiErrorFlag || processor_count == 0)
+                            continue;
+                        
+                        std::vector<amdsmi_processor_handle> processors(processor_count);
+                        CHECK_AMDSMI_ERROR(amdsmi_get_processor_handles(sockets[socket_idx], &processor_count, processors.data()), smiErrorFlag);
+                        if(smiErrorFlag)
+                            continue;
+                        
+                        // Check each processor for PCI ID match
+                        for(uint32_t proc_idx = 0; proc_idx < processor_count; proc_idx++)
+                        {
+                            amdsmi_bdf_t bdf;
+                            CHECK_AMDSMI_ERROR(amdsmi_get_gpu_device_bdf(processors[proc_idx], &bdf), smiErrorFlag);
+                            if(smiErrorFlag)
+                                continue;
+                            
+                            // Construct PCI ID from BDF info
+                            uint64_t amdsmiPCIID = 0;
+                            amdsmiPCIID |= bdf.device_number & 0xFF;
+                            amdsmiPCIID |= ((bdf.bus_number & 0xFF) << 8);
+                            amdsmiPCIID |= (bdf.domain_number) << 16;
+                            
+                            if(hipPCIID == amdsmiPCIID)
+                            {
+                                smiDeviceHandle = processors[proc_idx];
+                                deviceFound = true;
+                                break;
+                            }
+                        }
                     }
-                    else if(hipPCIID == rsmiPCIID)
+                    if(!smiErrorFlag && deviceFound)
                     {
-                        smiDeviceIndex = smiIndex;
-                        break;
-                    }
-                }
-
-                if(!smiErrorFlag && (smiDeviceIndex != std::numeric_limits<uint32_t>::max()))
-                {
-                    rsmi_frequencies_t freq;
-                    CHECK_RSMI_ERROR(
-                        rsmi_dev_gpu_clk_freq_get(smiDeviceIndex, RSMI_CLK_TYPE_SYS, &freq),
-                        smiErrorFlag);
-                    if(!smiErrorFlag)
-                    {
-                        mCurFreqMhz = freq.frequency[freq.current] / 1000000;
+                        amdsmi_frequencies_t freq;
+                        CHECK_AMDSMI_ERROR(
+                            amdsmi_get_clk_freq(smiDeviceHandle, AMDSMI_CLK_TYPE_SYS, &freq),
+                            smiErrorFlag);
+                        if(!smiErrorFlag)
+                        {
+                            mCurFreqMhz = freq.frequency[freq.current] / 1000000;
+                        }
                     }
                 }
             }
@@ -206,7 +241,7 @@ namespace rocwmma
     {
 #if ROCWMMA_BENCHMARK_TESTS
         bool smiErrorFlag = false;
-        CHECK_RSMI_ERROR(rsmi_shut_down(), smiErrorFlag);
+        CHECK_AMDSMI_ERROR(amdsmi_shut_down(), smiErrorFlag);
 #endif // ROCWMMA_BENCHMARK_TESTS
     }
 

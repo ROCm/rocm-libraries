@@ -5,8 +5,11 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <memory>
+#include <unordered_map>
 
 #include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_data_sdk/flatbuffer_utilities/KnobSettingWrapper.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 namespace hipdnn_plugin_sdk
 {
@@ -19,6 +22,16 @@ public:
     virtual const hipdnn_data_sdk::data_objects::EngineConfig& getEngineConfig() const = 0;
     virtual bool isValid() const = 0;
     virtual int64_t engineId() const = 0;
+
+    virtual uint32_t knobSettingCount() const = 0;
+    virtual const std::vector<std::unique_ptr<hipdnn_data_sdk::flatbuffer_utilities::IKnobSetting>>&
+        knobSettingWrappers() const
+        = 0;
+    virtual const hipdnn_data_sdk::flatbuffer_utilities::IKnobSetting&
+        getKnobSettingByName(const std::string& knobName) const
+        = 0;
+
+    virtual bool hasKnobSetting(const std::string& knobName) const = 0;
 };
 
 class EngineConfigWrapper : public IEngineConfig
@@ -56,6 +69,48 @@ public:
         return _shallowEngineConfig->engine_id();
     }
 
+    uint32_t knobSettingCount() const override
+    {
+        throwIfNotValid();
+
+        auto knobs = _shallowEngineConfig->knobs();
+        if(knobs == nullptr)
+        {
+            return 0;
+        }
+        return knobs->size();
+    }
+
+    const std::vector<std::unique_ptr<hipdnn_data_sdk::flatbuffer_utilities::IKnobSetting>>&
+        knobSettingWrappers() const override
+    {
+        throwIfNotValid();
+        populateKnobSettingWrappers();
+        return _knobSettingWrappers;
+    }
+
+    const hipdnn_data_sdk::flatbuffer_utilities::IKnobSetting&
+        getKnobSettingByName(const std::string& knobName) const override
+    {
+        throwIfNotValid();
+        populateKnobSettingWrappers();
+
+        auto it = _knobSettingNameToIndex.find(knobName);
+        if(it == _knobSettingNameToIndex.end())
+        {
+            throw std::out_of_range("KnobSetting with name '" + knobName + "' not found");
+        }
+
+        return *_knobSettingWrappers[it->second];
+    }
+
+    bool hasKnobSetting(const std::string& knobName) const override
+    {
+        throwIfNotValid();
+        populateKnobSettingWrappers();
+        return _knobSettingNameToIndex.find(knobName) != _knobSettingNameToIndex.end();
+    }
+
 private:
     void throwIfNotValid() const
     {
@@ -65,9 +120,40 @@ private:
         }
     }
 
+    void populateKnobSettingWrappers() const
+    {
+        if(_knobSettingsPopulated)
+        {
+            return;
+        }
+
+        auto knobs = _shallowEngineConfig->knobs();
+        if(knobs != nullptr)
+        {
+            _knobSettingWrappers.reserve(knobs->size());
+            for(uint32_t i = 0; i < knobs->size(); ++i)
+            {
+                auto knob = knobs->Get(i);
+                auto wrapper
+                    = std::make_unique<hipdnn_data_sdk::flatbuffer_utilities::KnobSettingWrapper>(
+                        knob);
+                auto knobName = wrapper->knobId();
+                _knobSettingNameToIndex[knobName] = i;
+                _knobSettingWrappers.push_back(std::move(wrapper));
+            }
+        }
+        _knobSettingsPopulated = true;
+    }
+
     // Pointer to the flatbuffer representation of the engine config. We do not own this memory
     // as were just reading from the buffer passed during construction.
     const hipdnn_data_sdk::data_objects::EngineConfig* _shallowEngineConfig = nullptr;
+
+    // Lazily populated cache of knob setting wrappers
+    mutable std::vector<std::unique_ptr<hipdnn_data_sdk::flatbuffer_utilities::IKnobSetting>>
+        _knobSettingWrappers;
+    mutable std::unordered_map<std::string, size_t> _knobSettingNameToIndex;
+    mutable bool _knobSettingsPopulated = false;
 };
 
 }
