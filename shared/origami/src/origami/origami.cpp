@@ -373,6 +373,9 @@ staggerU_t select_staggerU(const problem_t& problem,
   // Early Exit: Batch and num_timesteps are not supported yet
   if (batch != 1 || num_timesteps != 1) return staggerU_t{0, 0, 0};
 
+  // Early Exit: if not enough K-slices, then no staggerU is needed
+  if (numMT_K < 4) return staggerU_t{0, 0, 0};
+
   // Early Exit: splitK
   if (split_factor > 1) {
     // Check for memory channel conflicts in split-K case
@@ -404,15 +407,15 @@ staggerU_t select_staggerU(const problem_t& problem,
   if (wgm > 0) {
     // Positive WGM: row-major mapping
     L2Tile_N             = (wgm < numMT_N) ? wgm : numMT_N;
-    size_t L2Tile_M_temp = math::safe_ceil_div(numMT_M, wgm);
+    size_t L2Tile_M_temp = math::safe_ceil_div(numWGsPerL2Tile, L2Tile_N);
     L2Tile_M             = (L2Tile_M_temp < numMT_M) ? L2Tile_M_temp : numMT_M;
-    while (L2Tile_M * L2Tile_N < numWGsPerL2Tile) L2Tile_N++;
+    while (L2Tile_M * L2Tile_N < numWGsPerL2Tile && L2Tile_N < numMT_N) L2Tile_N++;
   } else if (wgm < 0) {
     // Negative WGM: column-major mapping
     L2Tile_M             = (abs_wgm < numMT_M) ? abs_wgm : numMT_M;
-    size_t L2Tile_N_temp = math::safe_ceil_div(numMT_N, abs_wgm);
+    size_t L2Tile_N_temp = math::safe_ceil_div(numWGsPerL2Tile, L2Tile_M);
     L2Tile_N             = (L2Tile_N_temp < numMT_N) ? L2Tile_N_temp : numMT_N;
-    while (L2Tile_M * L2Tile_N < numWGsPerL2Tile) L2Tile_M++;
+    while (L2Tile_M * L2Tile_N < numWGsPerL2Tile && L2Tile_M < numMT_M) L2Tile_M++;
   } else {
     std::cerr << "[ORIGAMI]: Invalid WGM value " << wgm << " in select_staggerU" << std::endl;
     return staggerU_t{0, 0, 0};
@@ -420,22 +423,24 @@ staggerU_t select_staggerU(const problem_t& problem,
 
   // Early Exit: if the whole data doesn't fit in L2, then we have to fetch data from MALL
   // In this case, we better wait for data to be accessible in L2 rather than issuing another
-  // MALL read.
+  // MALL read. Therefore, staggerU only helps when ALL K-slices can remain resident in L2.
+  // There is a 5% buffer to account for other overheads.
   if ((MT_M * L2Tile_M * data_type_to_bytes(problem.a_dtype) +
        MT_N * L2Tile_N * data_type_to_bytes(problem.b_dtype)) *
           K >
-      hardware.L2_capacity)
-    return staggerU_t{0, 0, 0};
+      0.95 * hardware.L2_capacity)
+    return staggerU_t{0, 0, 0};  
 
-  // Find StaggerU for L2
+  // Find StaggerU for L2  
   size_t L2_staggerUMapping = 0;
   size_t L2_staggerU        = 0;
+  // Stagger TWO L2 tiles to spread K-slice access across more offsets
   if (L2Tile_M >= L2Tile_N) {
     L2_staggerUMapping = 0;
-    L2_staggerU        = L2Tile_M;
+    L2_staggerU        = std::min(2 * L2Tile_M, numMT_M);
   } else {
     L2_staggerUMapping = 1;
-    L2_staggerU        = L2Tile_N;
+    L2_staggerU        = std::min(2 * L2Tile_N, numMT_N);
   }
 
   // Find StaggerU for Mall
@@ -454,19 +459,18 @@ staggerU_t select_staggerU(const problem_t& problem,
   // it indicates sparse work distribution -> use Mall stagger for inter-XCD distribution
   // Otherwise, use L2 stagger for intra-XCD contention reduction
   if (numWGsPerL2Tile < numXCD / 2) {
-    // Sparse work distribution: use Mall stagger to distribute work across XCDs
+    // Sparse work distribution: use Mall stagger
     out_staggerUMapping = Mall_staggerUMapping;
     out_staggerU        = Mall_staggerU;
   } else {
     // Dense work distribution: use L2 stagger to reduce intra-XCD contention
-    // Stagger TWO L2 tiles to spread K-slice access across more offsets
     out_staggerUMapping = L2_staggerUMapping;
-    out_staggerU        = 2 * L2_staggerU;
+    out_staggerU        = L2_staggerU;
   }
 
   // Compute smallest power of 2 larger than or equal to out_staggerU
   // 64 is the maximum value for staggerU, however, 32 is a more practical value for most cases.
-  size_t powerOf2 = 1;
+  size_t powerOf2 = 2;
   while (powerOf2 < out_staggerU) powerOf2 <<= 1;
   out_staggerU            = (powerOf2 < 32) ? powerOf2 : 32;
   out_staggerUStrideShift = 1;

@@ -1091,13 +1091,15 @@ namespace TensileLite
             auto cachedStaggerUParams = staggerUParamsCache.find(problem);
 
             if(cachedStaggerUParams == std::make_tuple(SIZE_MAX, SIZE_MAX, SIZE_MAX))
-            {
+            {                
                 auto sizes = problem.problemSizes();
                 if(sizes.size() >= 4)
                 {
                     origami::problem_t origami_problem = {
                         .size  = {sizes[0], sizes[1], sizes[3]},
                         .batch = sizes[2],
+                        .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                        .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
                     };
                     origami::config_t origami_config = {
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
