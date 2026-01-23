@@ -60,36 +60,6 @@ void cpu_softmarginloss_forward(const tensor<T>& input,
 }
 
 template <class T>
-void cpu_softmarginloss_forward_mt(const tensor<T>& input,
-                                   const tensor<T>& target,
-                                   tensor<T>& ref_output,
-                                   miopenLossReductionMode_t reduction_mode)
-{
-    auto input_numel = input.desc.GetElementSize();
-    auto i_tv        = miopen::get_inner_expanded_tv<5>(input.desc);
-    auto t_tv        = miopen::get_inner_expanded_tv<5>(target.desc);
-    auto o_tv        = miopen::get_inner_expanded_tv<5>(ref_output.desc);
-
-    std::atomic<double> sum_loss = 0;
-
-    miopen::par_ford(input_numel)([&](size_t gid) {
-        tensor_layout_t<5> idx(i_tv, gid);
-        // Convert to double for better precision
-        double i = input[i_tv.get_tensor_view_idx(idx)];
-        double t = target[t_tv.get_tensor_view_idx(idx)];
-        if(reduction_mode == MIOPEN_LOSS_REDUCTION_NONE)
-            ref_output[o_tv.get_tensor_view_idx(idx)] = log1p(exp(-i * t));
-        else
-            sum_loss += log1p(exp(-i * t));
-    });
-
-    if(reduction_mode == MIOPEN_LOSS_REDUCTION_MEAN)
-        ref_output[0] = sum_loss / input_numel;
-    else if(reduction_mode == MIOPEN_LOSS_REDUCTION_SUM)
-        ref_output[0] = sum_loss;
-}
-
-template <class T>
 void cpu_softmarginloss_backward(const tensor<T>& input,
                                  const tensor<T>& target,
                                  const tensor<T>& dO,
