@@ -261,11 +261,12 @@ Tests:
   filename: [sme3Dc,
              shipsec1]
 
-# Coverage gap tests: conjugate transpose on B matrix (develop vs reduced_ci)
-- name: gebsrmm_transB_conj
+# Coverage gap tests: transpose on B matrix (develop vs reduced_ci)
+# Note: conjugate_transpose is not implemented for complex types, use transpose only
+- name: gebsrmm_transB
   category: pre_checkin
   function: gebsrmm
-  precision: *single_double_precisions_complex
+  precision: *single_double_precisions_complex_real
   M: [200]
   N: [16]
   K: [200]
@@ -273,7 +274,7 @@ Tests:
   col_block_dimA: [4, 8]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_conjugate_transpose]
+  transB: [rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_random]
