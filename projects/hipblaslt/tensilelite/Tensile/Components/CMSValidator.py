@@ -1057,6 +1057,8 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
         packs = sorted(packs, key=lambda x: x.issue_index)
         for i_pack, pack in enumerate(packs):
             idx_in_group = pack.issue_index % 10
+            # Which group of 10 packs (which tile) does this pack belong to?
+            group_index = pack.issue_index // 10
 
             # The first 4 packs have both a needed_by for MFMAs, and a needed_by for the next packs
             # First 4 CVT0 packs (indices 0-3) feed into 4x4 MFMAs (indices 4-5)
@@ -1075,10 +1077,18 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
                 pack.needed_by = packs[i_pack + 1]
                 continue
             
-            # Calculate pack_offset within the quarter
+            # Calculate tile-based offset: each tile requires 3 MFMAs
+            # For PackA: tiles are indexed sequentially (0, 1, 2, ...)
+            # For PackB: tiles span n_tiles_a_quarter MFMAs in column-major order
+            if is_pack_B:
+                tile_offset = group_index * n_tiles_a_quarter * 3
+            else:
+                tile_offset = group_index * 3
+            
+            # Calculate pack_offset within the tile
             if idx_in_group < 4:
                 # First 4 CVT0 packs: These feed into 4x4 MFMAs
-                # For validation, we set needed_by to the first MFMA in the quarter
+                # For validation, we set needed_by to the first MFMA in the tile
                 pack_offset = 0
             else:
                 # Last 4 CVT1 packs (indices 6-9)
@@ -1088,8 +1098,8 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
                 # B_error is used in mfma 3/3
                 pack_offset = 2 if is_pack_B else 1
             
-            # Combine with quarter offset to get logical MFMA index within iteration
-            logical_index = base_offset + pack_offset
+            # Combine with quarter offset and tile offset to get logical MFMA index within iteration
+            logical_index = base_offset + tile_offset + pack_offset
             
             # Apply mfma_reorder to get execution position within iteration
             if mfma_reorder:

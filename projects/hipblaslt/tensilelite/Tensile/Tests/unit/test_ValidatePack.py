@@ -1159,3 +1159,180 @@ class TestValidatePackTF32MFMA4x4x4(CMSValidationTestBase):
         ]
 
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=12 has too little gap between it and MFMA @ idx=13. Expected at least 2 quad-cycles but only 1 passed.", snopCode=snopCode)
+
+class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
+    """
+    Tests for TF32 4x4 MFMA validation with multiple tiles (multiple groups of 10 packs).
+    This tests that the tile-based offset is correctly calculated for each group.
+    
+    With MIWaveTileA=4, there are 4 A tiles, each requiring 10 pack instructions (40 total PackA0).
+    Each tile's packs should be needed by different MFMAs:
+    - Tile 0 (packs 0-9): needed by MFMAs at base_offset + 0
+    - Tile 1 (packs 10-19): needed by MFMAs at base_offset + 3
+    - Tile 2 (packs 20-29): needed by MFMAs at base_offset + 6
+    - Tile 3 (packs 30-39): needed by MFMAs at base_offset + 9
+    """
+    def setUp(self, kernel_updates: Optional[dict[str, Any]] = None) -> None:
+        kernel_updates = kernel_updates.copy() if kernel_updates else {}
+        kernel_updates["UsePLRPack"] = True
+        kernel_updates["UseF32XEmulation"] = True
+        kernel_updates["UseMFMAF32XEmulation"] = True
+        kernel_updates["UseDirect32XEmulation"] = True
+        kernel_updates["ForceUnrollSubIter"] = True
+        kernel_updates["DepthU"] = 32
+        kernel_updates["MIWaveTileA"] = 4
+        kernel_updates["MIWaveTileB"] = 2
+        super().setUp(kernel_updates)
+
+        # With 4 A tiles, 2 B tiles, 3 MFMAs per tile = 24 vmfmas
+        self.q1s = 0
+        self.q1e = self.num_vmfma // 4 - 1  # 5
+
+        self.q2s = self.q1e + 1  # 6
+        self.q2e = self.num_vmfma // 2 - 1  # 11
+
+        self.q3s = self.q2e + 1  # 12
+        self.q3e = self.num_vmfma // 4 * 3 - 1  # 17
+
+        self.q4s = self.q3e + 1  # 18
+        self.q4e = self.num_vmfma - 1  # 23
+    
+    def validation_function(self, sched, kernel_dict, codePathIdx):
+        return verify_packs_start_and_end_at_correct_indices(sched, kernel_dict, codePathIdx)
+    
+    def _make_valid_pack_group(self, base_idx: int) -> list[int]:
+        """
+        Creates a valid group of 10 packs with proper spacing for 4x4 MFMA TF32.
+        Pack 5 (second 4x4 MFMA) needs 5 quad-cycles before Pack 6 (first CVT1).
+        """
+        return (
+            [base_idx] * 4 +      # CVT0 (packs 0-3)
+            [base_idx] * 2 +      # 4x4 MFMAs (packs 4-5)
+            [base_idx + 2] * 4    # CVT1 (packs 6-9) - needs +2 MFMA indices for 5 quad-cycle gap
+        )
+    
+    def test_passing_multiple_tiles_different_timings(self):
+        """
+        Passing case where 4 groups of 10 packs are scheduled at different times
+        appropriate for their respective tiles.
+        
+        - Tile 0 packs (0-9): needed by MFMAs 6-8 (q2s, q2s+1, q2s+2)
+        - Tile 1 packs (10-19): needed by MFMAs 9-11 (q2s+3, q2s+4, q2s+5)
+        - Tile 2 packs (20-29): needed by MFMAs 6-8 (for B tile 1)
+        - Tile 3 packs (30-39): needed by MFMAs 9-11 (for B tile 1)
+        
+        All packs are scheduled early in Q1 with proper spacing.
+        """
+        assert self.num_vmfma == 24
+
+        # Each tile's packs have proper 5 quad-cycle gap for 4x4 MFMA
+        packA0_schedule = (
+            self._make_valid_pack_group(self.q1s+2) +  # Tile 0: base at 2, CVT1 at 4
+            self._make_valid_pack_group(self.q1s+2) +  # Tile 1
+            self._make_valid_pack_group(self.q1s+2) +  # Tile 2
+            self._make_valid_pack_group(self.q1s+2)    # Tile 3
+        )
+
+        optSchedule = {
+            "SYNC": [[self.q1s+1, self.q2s+1]],
+
+            "LRA0": [[self.q1s] * 4],  # 4 LRs for 4 tiles
+            "PackA0": [packA0_schedule],
+
+            "LRB0": [[self.q2s] * 2],
+            "PackB0": [self._make_valid_pack_group(self.q2s+2) + self._make_valid_pack_group(self.q2s+2)],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s"),
+        ]
+
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+
+    def test_passing_tile1_packs_after_tile0_deadline(self):
+        """
+        Passing case that exercises the tile-based offset calculation.
+        
+        Tile 0 packs (0-9) are needed by MFMAs starting at q2s (index 6).
+        Tile 1 packs (10-19) are needed by MFMAs starting at q2s+3 (index 9).
+        
+        We schedule tile 1's CVT0 packs at index 6, which would be INVALID if they
+        were incorrectly assigned to tile 0's needed_by (index 6) since 6 >= 6, but
+        is VALID because they should be assigned to tile 1's needed_by (index 9).
+        
+        This test specifically validates that the tile offset is correctly applied:
+        - Without the fix, pack 10-13 (tile 1's CVT0) at index 6 would be checked
+          against tile 0's needed_by (MFMA 6), failing with "too late" since 6 >= 6
+        - With the fix, pack 10-13 is correctly checked against tile 1's needed_by
+          (MFMA 9), which passes since 6 < 9
+        
+        CVT1 needed_by for tile 1 is MFMA at index 10 (base=6 + tile_offset=3 + pack_offset=1).
+        We place CVT1 at index 8 (base 6 + 2) which is before MFMA 10.
+        """
+        assert self.num_vmfma == 24
+
+        # Tile 0: schedule at index 2 (valid, well before needed_by at 6)
+        # Tile 1: base at 6 (CVT0/4x4 at 6, CVT1 at 8)
+        #   - CVT0 at 6 would fail if checked against tile 0's needed_by (MFMA 6)
+        #   - CVT0 at 6 passes when correctly checked against tile 1's needed_by (MFMA 9)
+        #   - CVT1 at 8 is before tile 1's CVT1 needed_by (MFMA 10)
+        packA0_schedule = (
+            self._make_valid_pack_group(self.q1s+2) +  # Tile 0: base at 2, CVT1 at 4, before needed_by at 6
+            self._make_valid_pack_group(self.q2s) +    # Tile 1: base at 6, CVT1 at 8, before needed_by at 9/10
+            self._make_valid_pack_group(self.q1s+2) +  # Tile 2
+            self._make_valid_pack_group(self.q1s+2)    # Tile 3
+        )
+
+        optSchedule = {
+            "SYNC": [[self.q1s+1, self.q2s+1]],
+
+            "LRA0": [[self.q1s] * 4],
+            "PackA0": [packA0_schedule],
+
+            "LRB0": [[self.q2s] * 2],
+            "PackB0": [self._make_valid_pack_group(self.q2s+2) + self._make_valid_pack_group(self.q2s+2)],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s"),
+        ]
+
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+
+    def test_failing_tile1_packs_actually_too_late(self):
+        """
+        Failing case where tile 1's packs are scheduled too late for tile 1's actual deadline.
+        
+        Tile 1 packs (10-19) are needed by MFMAs starting at q2s+3 (index 9).
+        We schedule tile 1's CVT0 packs at index 9, which is AT the needed_by index,
+        meaning they're too late (must be strictly before).
+        """
+        assert self.num_vmfma == 24
+
+        # Tile 1: CVT0 at index 9 - exactly at the needed_by, which is too late
+        packA0_schedule = (
+            self._make_valid_pack_group(self.q1s+2) +  # Tile 0: valid
+            [self.q2s+3] * 4 + [self.q2s+3] * 2 + [self.q2s+5] * 4 +  # Tile 1: CVT0 at 9 (too late!)
+            self._make_valid_pack_group(self.q1s+2) +  # Tile 2
+            self._make_valid_pack_group(self.q1s+2)    # Tile 3
+        )
+
+        optSchedule = {
+            "SYNC": [[self.q1s+1, self.q2s+1]],
+
+            "LRA0": [[self.q1s] * 4],
+            "PackA0": [packA0_schedule],
+
+            "LRB0": [[self.q2s] * 2],
+            "PackB0": [self._make_valid_pack_group(self.q2s+2) + self._make_valid_pack_group(self.q2s+2)],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s"),
+        ]
+
+        # Tile 1's CVT0 at index 9 is too late - needed by MFMA at index 9
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=9 issued too late, must be issued before MFMA @ idx=9.")
