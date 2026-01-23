@@ -655,10 +655,10 @@ class SizeMapping:
             # WGM kernel param is interpreted as int so, 32bit output to 32b int
             return ctypes.c_int(output & 0xFFFFFFFF).value
 
-		dtva = bool(d['DirectToVgprA'])
-		dtvb = bool(d['DirectToVgprB'])
-		dtlA = bool(d['DirectToLdsA'])
-		dtlB = bool(d['DirectToLdsB'])
+        dtva = bool(d['DirectToVgprA'])
+        dtvb = bool(d['DirectToVgprB'])
+        dtlA = bool(d['DirectToLdsA'])
+        dtlB = bool(d['DirectToLdsB'])
 
         return cls(waveNum                  = d['NumThreads'] // d['WavefrontSize'],
                    workGroup                = d['WorkGroup'],
