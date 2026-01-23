@@ -39,9 +39,9 @@ target_link_libraries(
     miopen_plugin_integration_tests PUBLIC GTest::gtest hip::host hipdnn_test_sdk hipdnn_plugin_sdk Threads::Threads
 )
 
-# Ensure that the miopen_plugin is built before the miopen_plugin_integration_tests, as the
-# integration tests depend on the MIOpen Provider Plugin
-add_dependencies(miopen_plugin_integration_tests miopen_plugin)
+# Ensure that both plugin targets are built before the miopen_plugin_integration_tests
+# Build both miopen_plugin (canonical) and miopen_legacy_plugin (backwards compatibility)
+add_dependencies(miopen_plugin_integration_tests miopen_plugin miopen_legacy_plugin)
 
 if(BUILD_PLUGIN_AS_DEPENDENCY)
     clang_tidy_check(miopen_plugin_integration_tests)
