@@ -4,6 +4,7 @@ pr:
     include:
       - develop
       - release-staging/rocm-rel-*
+      - users/dsclear/shorten_azure_test*
   paths:
     include:
       - projects/*
@@ -38,26 +39,255 @@ jobs:
     displayName: Checkout Code
   - script: |
           set -e
-          echo "Calling jenkins_api.py for PR #$(PR_NUM)"
-          cd $(repo_name)
-          docker run \
-            -v "$PWD:/src" \
-            -w /src \
-            -e GH_TOKEN="$(svc_acc_org_secret)" \
-            -e svc_acc_org_secret="$(svc_acc_org_secret)" \
-            $(base_image) \
-            bash -c "echo 'Fetching PR title from GitHub API...' && \
-            echo 'repos/$(REPOSITORY_NAME)/pulls/$(PR_NUM)' && \
-            export TITLE=\$(gh api repos/$(REPOSITORY_NAME)/pulls/$(PR_NUM) | jq -r .title) && \
-            python3 jenkins_api.py \
-              -ghr '$(REPOSITORY_NAME)' \
-              -ghsha '$(HEAD_SHA)' \
-              -ghprn '$(PR_NUM)' \
-              -ghpru '$(PR_URL)' \
-              -ghprt \"\$TITLE\" \
-              -ghpat '$(GH_PAT)' \
-              -br   '$(BASE_REF)' \
-              -et   '$(EVENT_TYPE)'" > /dev/null 2>&1
+
+          declare -r GITHUB_API_ROOT="https://api.github.com"  # Should not end in a /
+
+          # Getting the files in a PR via the GitHub REST API will give us at most 3000 files, even if there are more.
+          #     Thus, if we see that many files (well, minus some buffer), we assume that there are more files than we can see,
+          #     we should give up on processing them.
+          declare -r MAX_ALLOWABLE_ALTERED_FILES=2500
+
+          # return_array and return_array_size are used for storing function return values.
+          # The function that sets them should clear them.
+          declare -a return_array  # An array of strings, used for returning function outputs.
+          declare -i return_array_size=0  # The index of the first unfilled element in return_array.
+
+
+          get_files_altered_by_pr () {
+              # @brief Given a PR, returns the list of files altered by that PR in alphabetical order, without duplicates.
+              #        If the PR has more than MAX_ALLOWABLE_ALTERED_FILES altered files, returns a code 3 instead without
+              #        altering return_array and return_array_size.
+              #        Does not check its arguments.
+              #
+              # @param $1 String. The owner and name of the repository, like <owner>/<name>.
+              # @param $2 Integer. The PR number of the target PR.
+              # @param $3 String. The GitHub token which should be used for accessing GitHub.
+              #
+              # @sideeffect Returns (via return_array and return_array_size) the list of paths of files that were changed
+              #             by the target PR (ordered alphabetically, no duplicates).
+              #             If there are too many files (see @brief), then this will not happen and return_array and
+              #             return_array_size will not be altered.
+              #
+              # @returns 0 if there were not too many files, and the changed file paths were placed
+              #            in return_array.
+              #          3 if there were too many files
+              #          1 if any other error occurred.
+
+              local repository_owner_and_name="${1}"
+              local pr_number="${2}"
+              local github_token="${3}"
+
+              echo "get_files_altered_by_pr starting retrieval of altered files from PR #|${pr_number}| from\
+               |${repository_owner_and_name}|."
+
+              # Each request we make will produce a JSON output, containing (among other things) the file paths we are looking
+              #    for.
+              # The file paths are found in lines like this:
+              #         "filename": "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/rocroller/solution_selection.cpp"
+              #     We wish to create a string of all such lines, one line per line, and then we will sort unique on all of them
+              #     to sort and eliminate duplicates (we can sort on the whole line since the '"filename": "' prefix is the same
+              #     for all).
+              local filename_line_regex='"filename": ".+"'
+              local filename_multiline  # The 'total' multiline
+              local filename_multiline_single_page  # The multiline from a single page
+
+
+              # The response may be paginated; we can tell if this is happening and where to request the next block of data by
+              #     looking at the header of the response of our request.
+              #     If the header contains a line like this:
+              #             link: <https://api.github.com/repositories/971570345/pulls/2718/files?page=2>; rel="next", <https://api.github.com/repositories/971570345/pulls/2718/files?page=4>; rel="last"
+              #         or like this:
+              #             link: <https://api.github.com/repositories/971570345/pulls/2718/files?page=1>; rel="prev", <https://api.github.com/repositories/971570345/pulls/2718/files?page=3>; rel="next", <https://api.github.com/repositories/971570345/pulls/2718/files?page=4>; rel="last", <https://api.github.com/repositories/971570345/pulls/2718/files?page=1>; rel="first"
+              #     then the reply is paginated. This header also tells us where we should look for the next page.
+              #     If the header does not contain such a line, then the reply is not paginated.
+              local request_url_base="${GITHUB_API_ROOT}/repos/${repository_owner_and_name}/pulls/${pr_number}/files"
+              local link_header_regex='link:.+'
+              local next_page_link_section_regex='<\S+>; rel="next"'  # Extracting the next link from the links line
+
+              local request_url="${request_url_base}"
+              local curl_response
+              local link_header
+              local next_page_link_section
+              local -i next_page_link_section_string_length  # Length of next_page_link_section
+
+              while true; do
+                  # Collect the files from the next URL.
+                  if ! curl_response="$(curl --fail --silent --retry 2 --location --header "Accept: application/vnd.github+json" --header "Authorization: Bearer ${github_token}" --header "X-Github-Api-Version: 2022-11-28" "${request_url}")"; then
+                      echo "Failed to get good return code from |${request_url}|.\
+           Re-executing curl call to provide error message and returning 1."
+                      curl --retry 2 --location --header "Accept: application/vnd.github+json" --header "Authorization: Bearer ${github_token}" --header "X-Github-Api-Version: 2022-11-28" "${request_url}"
+                      return 1
+                  fi
+
+                  filename_multiline_single_page="$(grep --only-matching --extended-regexp "${filename_line_regex}" <<< "${curl_response}")"
+                  if [[ -z "${filename_multiline_single_page}" ]]; then
+                      echo "Reply from |${request_url}| did not match expected format; could not find any file paths."
+                      return 1
+                  fi
+
+                  # Add the lines to filename_multiline, initializing it with these lines if necessary.
+                  if [[ -z "${filename_multiline}" ]]; then
+                      filename_multiline="${filename_multiline_single_page}"
+                  else
+                      filename_multiline="${filename_multiline}
+          ${filename_multiline_single_page}"
+                  fi
+
+                  # Get the link header.
+                  if ! curl_response="$(curl --fail --silent --retry 2 --location --head --header "Accept: application/vnd.github+json" --header "Authorization: Bearer ${github_token}" --header "X-Github-Api-Version: 2022-11-28" "${request_url}")"; then
+                      echo "Failed to get good return code from |${request_url}|, when collecting headers.\
+           Re-executing curl call (without header-only argument) to provide error message and returning 1."
+                      curl --retry 2 --location --header "Accept: application/vnd.github+json" --header "Authorization: Bearer ${github_token}" --header "X-Github-Api-Version: 2022-11-28" "${request_url}"
+                      return 1
+                  fi
+
+                  if ! link_header="$(grep --only-matching --extended-regexp "${link_header_regex}" <<< "${curl_response}")"; then
+                      # This reply is not paginated. We can break.
+                      break
+                  fi
+
+                  # Extract the section with the next link, if there is one. This will give us a string like
+                  #     <https://api.github.com/repositories/971570345/pulls/2718/files?page=2>; rel="next"
+                  if ! next_page_link_section="$(grep --only-matching --extended-regexp "${next_page_link_section_regex}" <<< "${link_header}")"; then
+                      # We have processed the last page. We can break.
+                      break
+                  fi
+
+                  # Extract just the next page link itself by trimming the unnecessary sections of next_page_link_section.
+                  #     We will go there next loop.
+                  # This will give us a string like:
+                  #     https://api.github.com/repositories/971570345/pulls/2718/files?page=2
+                  next_page_link_section_string_length=${#next_page_link_section}
+                  request_url="${next_page_link_section:1:$((next_page_link_section_string_length - 14))}"
+              done
+
+              # Sort filename_multiline and remove duplicates.
+              local filename_multiline_sorted_unique="$(sort -u - <<< "${filename_multiline}")"
+
+              # Convert filename_multiline_sorted_unique into an array to get an array of file paths.
+              local -a file_paths_list_raw
+              ifs_backup="${IFS}"
+              IFS=$'\n'
+              # Read always returns 1 from non-file input, so we || true
+              read -rd '' -a file_paths_list_raw <<< "${filename_multiline_sorted_unique}" || true
+              IFS="${ifs_backup}"
+
+              # Trim all elements of file_paths_list_raw to leave just one file path per line.
+              # We do this by trimming the leading "filename": " and the tailing ".
+              local -a file_paths_list
+              local -i working_index=0
+              local file_path_raw_length
+              local file_path_trimmed
+              for file_path in "${file_paths_list_raw[@]}"; do
+                  file_path_raw_length=${#file_path}
+                  file_path_trimmed="${file_path:13:$((${file_path_raw_length} - 14))}"
+
+                  file_paths_list[${working_index}]="${file_path_trimmed}"
+                  working_index=$((${working_index} + 1))
+              done
+
+              # If we have too many files, code 3.
+              if [[ ${#file_paths_list} -gt ${MAX_ALLOWABLE_ALTERED_FILES} ]]; then
+                  echo "PR #|${pr_number}| in repository |${repository_owner_and_name}| had more files altered\
+           than |${MAX_ALLOWABLE_ALTERED_FILES}|; returning code 3."
+                  return 3
+              fi
+
+              # The output can now be stored into return_array.
+              return_array_size=0
+              for file_path in "${file_paths_list[@]}"; do
+                  return_array[${return_array_size}]="${file_path}"
+                  return_array_size=$((${return_array_size} + 1))
+              done
+
+              echo "get_files_altered_by_pr has finished retrieving file paths altered by PR #|${pr_number}| from\
+           |${repository_owner_and_name}|, and is returning them with code 0."
+              return 0
+          }
+
+
+          # Collect the list of files that are part of this PR. If they are 'interesting', or we have too many files to process,
+          #     run Jenkins.
+          declare -i get_files_altered_by_pr_return_code=0
+          declare -i jenkins_should_be_run=0  # 0 for False, 1 for True.
+          get_files_altered_by_pr "$(repo_name)" $(PR_NUM) "$(GH_PAT)" || get_files_altered_by_pr_return_code=$?
+
+          if [[ ${get_files_altered_by_pr_return_code} -eq 3 ]]; then
+              echo "Too many files to process in this PR; running Jenkins to be safe."
+              jenkins_should_be_run=1
+          else if [[ ${get_files_altered_by_pr_return_code} -ne 0 ]]; then
+              echo "get_files_altered_by_pr errored out; returning code 1."
+              return 1
+          fi
+
+          if [[ ${jenkins_should_be_run} -eq 0 ]]; then
+              # Check to see if any of the paths are interesting.
+              # We do this by checking against a blacklist of 'uninteresting' regexes (note: a whitelist of interesting ones
+              #     can also be added later).
+              # Uninteresting file paths include:
+              #     Docs paths:
+              #         **/.markdownlint-ci2.yaml
+              #         **/.readthedocs.yaml
+              #         **/.spellcheck.local.yaml
+              #         **/.wordlist.txt
+              #         *.md
+              #         *.rst
+              #         *.rtf
+              #         docs/**
+              #         projects/*/docs/**
+              declare -a uninteresting_file_path_regexes=('^([^/.]+/)*\.markdownlint-ci2\.yaml$'
+                                                          '^([^/.]+/)*\.readthedocs\.yaml$'
+                                                          '^([^/.]+/)*\.spellcheck\.local\.yaml$'
+                                                          '^([^/.]+/)*\.wordlist\.txt$'
+                                                          '^.*\.md$'
+                                                          '^.*\.rst$'
+                                                          '^.*\.rtf$'
+                                                          'docs/.*'
+                                                          '^projects/[^/.]+/docs/.*$'
+                                                         )
+              for altered_file_path in "${return_array[@]}"; do
+                  for uninteresting_path_regex in "${uninteresting_file_path_regexes[@]}"; do
+                      if grep --quiet --extended-regexp "${uninteresting_path_regex}" <<< "${altered_file_path}"; then
+                          continue
+                      fi
+
+                      # This path is interesting.
+                      jenkins_should_be_run=1
+                      break
+                  done
+
+                  if [[ ${jenkins_should_be_run} -eq 1 ]]; then
+                      break
+                  fi
+              done
+          fi
+
+          # If necessary, call Jenkins.
+          if [[ ${jenkins_should_be_run} -eq 1 ]]; then
+              echo "Calling jenkins_api.py for PR #$(PR_NUM)"
+              cd $(repo_name)
+              docker run \
+                -v "$PWD:/src" \
+                -w /src \
+                -e GH_TOKEN="$(svc_acc_org_secret)" \
+                -e svc_acc_org_secret="$(svc_acc_org_secret)" \
+                $(base_image) \
+                bash -c "echo 'Fetching PR title from GitHub API...' && \
+                echo 'repos/$(REPOSITORY_NAME)/pulls/$(PR_NUM)' && \
+                export TITLE=\$(gh api repos/$(REPOSITORY_NAME)/pulls/$(PR_NUM) | jq -r .title) && \
+                python3 jenkins_api.py \
+                  -ghr '$(REPOSITORY_NAME)' \
+                  -ghsha '$(HEAD_SHA)' \
+                  -ghprn '$(PR_NUM)' \
+                  -ghpru '$(PR_URL)' \
+                  -ghprt \"\$TITLE\" \
+                  -ghpat '$(GH_PAT)' \
+                  -br   '$(BASE_REF)' \
+                  -et   '$(EVENT_TYPE)'" > /dev/null 2>&1
+          else
+              echo "Skipping Jenkins call since no files with 'interesting' paths were altered in this PR."
+          fi
+
     displayName: Invoke jenkins_api.py in Docker
     env:
       svc_acc_org_secret: $(svc_acc_org_secret)
