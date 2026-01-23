@@ -362,7 +362,6 @@ TEST(rocfft_UnitTest, gpu_symmetrizer)
 // Test that the host and device Hermitian symmetrizers produce the same results.
 TEST(rocfft_UnitTest, compare_cpu_gpu_symmetrizers)
 {
-#ifdef USE_HIPRAND
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
        > unittest_prob)
     {
@@ -479,7 +478,4 @@ TEST(rocfft_UnitTest, compare_cpu_gpu_symmetrizers)
             }
         }
     }
-#else
-    GTEST_SKIP() << "this test currently requires hipRAND to be used";
-#endif
 }

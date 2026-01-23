@@ -259,14 +259,12 @@ void init_bench_input(const Tparams&                            params,
     }
     else
     {
-#ifdef USE_HIPRAND
         std::vector<void*> ptrs;
         ptrs.reserve(buffers.size());
         for(auto& buf : buffers)
             ptrs.push_back(buf.data());
 
         init_local_input<Tparams, gpubuf>(0, params, bricks, elem_size, ptrs);
-#endif
     }
 }
 
