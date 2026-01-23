@@ -10,11 +10,11 @@
      * ROCm / TheRock (includes AMD Clang compiler)
    - A ROCm-compatible GPU is required to run the samples
 
-   > [!IMPORTANT]
-   > **AMD Clang++ Requirement for Samples**
-   > **AMD Clang++ is required** to compile hipDNN samples and tests. These components utilize `Tensor.hpp` and reference validation implementations that depend on HIP device headers for GPU buffer allocation.
-   >
-   > **Note for API Consumers:** This requirement **does not** apply to standard usage of the `hipDNN` Frontend. Projects consuming the library API without using these specific `data_sdk` utilities for validation & GPU memory allocation do not require AMD Clang++.
+> [!IMPORTANT]
+> **AMD Clang++ Requirement for Samples**
+> **AMD Clang++ is required** to compile hipDNN samples and tests. These components utilize `Tensor.hpp` and reference validation implementations that depend on HIP device headers for GPU buffer allocation.
+>
+> **Note for API Consumers:** This requirement **does not** apply to standard usage of the `hipDNN` Frontend. Projects consuming the library API without using these specific `data_sdk` utilities for validation & GPU memory allocation do not require AMD Clang++.
 
 2. **Build Samples:** From this `samples` directory:
    ```bash
@@ -85,6 +85,27 @@ Executes the forward pass of a batch normalization training graph on a 4D input 
     next_running_variance = (1 - momentum) * prev_running_variance + momentum * batch_variance
     ```
 - The graph outputs the normalized tensor `y`, along with the batch mean/variance (`mean`, `inv_variance`) required for the backward pass, and the updated population statistics (`next_running_mean`, `next_running_variance`) required for inference.
+
+### [**`FusedBnTrainingActiv`**](./batchnorm/FusedBnTrainingActiv.cpp)
+
+Executes a fused batch normalization training and activation graph.
+
+The fused graph consists of two operations:
+
+1. **Batchnorm Training**: Normalizes input `x` using batch statistics, updates running statistics (optional), and outputs saved mean and inverse variance.
+   ```python
+   y_bn = scale * ((x - mean) * inv_variance) + bias
+   ```
+
+2. **Activation (ReLU)**: Applies ReLU activation
+   ```python
+   y = relu(y_bn) = max(y_bn, 0)
+   ```
+
+**Key Features:**
+- Demonstrates fusion of batch normalization training and activation
+- Supports both full training (updating running stats) and batch-stats-only modes
+- Uses `CpuReferenceGraphExecutor` for validation
 
 ### [**`BnBackward`**](./batchnorm/BnBackward.cpp)
 
