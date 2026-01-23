@@ -633,9 +633,7 @@ struct radix_key_codec
             // Might have undefined behavior, kill negative zeros
             if constexpr(KillNegativeZeros)
             {
-                const Key zero{0};
-                const Key plus = bit_key + zero;
-                bit_key        = bit_cast<bit_key_type>(plus);
+                bit_key = bit_key == bit_key_type{-0.0} ? bit_key_type{+0.0} : bit_key;
             }
             // Cast to integral type, so we can flip the two’s complement
             const auto bits = traits::radix_key_codec::bit_cast<bit_key_type>(bit_key);
