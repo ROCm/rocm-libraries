@@ -583,7 +583,7 @@ bool rocfft_brick_t::is_contiguous_in_brick(const std::vector<size_t>& brick_len
     const auto brick_len = length();
 
     // FIXME: deal with brick_stride
-    
+
     // A contiguous brick in a larger Brick is shorter than Brick length only on the highest
     // dimension, ignoring dimensions of length-1, and strides must match the field for all those
     // dimensions.
@@ -1313,15 +1313,15 @@ static std::vector<BufferPtr> GatherUserBuffers(BufferPtrConstruct              
     return ret;
 }
 
-std::vector<size_t> rocfft_plan_t::GatherBricks(rocfft_location_t currentLocation,
+std::vector<size_t> rocfft_plan_t::GatherBricks(rocfft_location_t                  currentLocation,
                                                 const std::vector<rocfft_brick_t>& bricks,
                                                 rocfft_precision                   precision,
                                                 rocfft_array_type                  arrayType,
-                                                const std::vector<size_t>& brick_length,
-                                                const std::vector<size_t>& brick_stride,
-                                                BufferPtr                  output,
-                                                const std::vector<size_t>& antecedents,
-                                                size_t                     elem_size)
+                                                const std::vector<size_t>&         brick_length,
+                                                const std::vector<size_t>&         brick_stride,
+                                                BufferPtr                          output,
+                                                const std::vector<size_t>&         antecedents,
+                                                size_t                             elem_size)
 {
     std::vector<size_t>            outputPlanItems;
     std::vector<TempBufferLease>   gatherPackBufs;
@@ -1331,14 +1331,14 @@ std::vector<size_t> rocfft_plan_t::GatherBricks(rocfft_location_t currentLocatio
 
     const auto local_comm_rank = get_local_comm_rank();
 
-    BufferPtr  gatherDest;
+    BufferPtr gatherDest;
 
     // We can gather to the output buffer if the bricks are contiguous and contiguous in the output
     // brick.  Otherwise, gather to a temp buffer.
     const bool gatherToTemp
         = std::any_of(bricks.begin(), bricks.end(), [&](const rocfft_brick_t& brick) {
               return !brick.is_contiguous()
-                  || !brick.is_contiguous_in_brick(brick_length, brick_stride);
+                     || !brick.is_contiguous_in_brick(brick_length, brick_stride);
           });
     if(gatherToTemp)
     {
@@ -1455,15 +1455,15 @@ std::vector<size_t> rocfft_plan_t::GatherBricks(rocfft_location_t currentLocatio
     return outputPlanItems;
 }
 
-std::vector<size_t> rocfft_plan_t::ScatterBricks(rocfft_location_t          currentLocation,
-                                                 BufferPtr                  input,
-                                                 rocfft_precision           precision,
-                                                 rocfft_array_type          arrayType,
-                                                 const std::vector<size_t>& brick_length,
-                                                 const std::vector<size_t>& brick_stride,
+std::vector<size_t> rocfft_plan_t::ScatterBricks(rocfft_location_t                  currentLocation,
+                                                 BufferPtr                          input,
+                                                 rocfft_precision                   precision,
+                                                 rocfft_array_type                  arrayType,
+                                                 const std::vector<size_t>&         brick_length,
+                                                 const std::vector<size_t>&         brick_stride,
                                                  const std::vector<rocfft_brick_t>& bricks,
-                                                 const std::vector<size_t>& antecedents,
-                                                 size_t                     elem_size)
+                                                 const std::vector<size_t>&         antecedents,
+                                                 size_t                             elem_size)
 {
     std::vector<size_t>            outputPlanItems;
     std::vector<TempBufferLease>   scatterPackBufs;
@@ -1476,7 +1476,7 @@ std::vector<size_t> rocfft_plan_t::ScatterBricks(rocfft_location_t          curr
     BufferPtr  scatterSrc;
     const bool scatterFromTemp
         = std::any_of(bricks.begin(), bricks.end(), [&](const rocfft_brick_t& b) {
-            return !b.is_contiguous_in_brick(brick_length, brick_stride);
+              return !b.is_contiguous_in_brick(brick_length, brick_stride);
           });
     if(scatterFromTemp)
     {
@@ -1716,10 +1716,10 @@ void rocfft_plan_t::GatherScatterSingleDevicePlan(std::unique_ptr<ExecPlan>&& ex
 
         auto fieldLengthWithBatch = lengths;
         fieldLengthWithBatch.push_back(batch);
- 
+
         auto scatterSrcBuf = execPlan->rootPlan->placement == rocfft_placement_notinplace
-            ? fftOutBuf->data()
-            : fftBuf->data();
+                                 ? fftOutBuf->data()
+                                 : fftBuf->data();
 
         ScatterBricks(execPlan->location,
                       BufferPtr::temp(scatterSrcBuf),

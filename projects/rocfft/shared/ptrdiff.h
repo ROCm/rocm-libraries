@@ -72,7 +72,6 @@ static size_t compute_ptrdiff(const std::vector<intT1>& length, const std::vecto
                stride.begin(), stride.end(), static_cast<size_t>(0), std::plus<size_t>());
 }
 
-
 template <typename intT1,
           class = typename std::enable_if<std::is_integral<intT1>::value>::type,
           typename intT2,

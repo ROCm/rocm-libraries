@@ -30,11 +30,10 @@
 #include "rocfft/rocfft.h"
 #include <hip/hip_runtime_api.h>
 
-
-void initbrick(const std::vector<size_t> &lower,
-               const std::vector<size_t> &upper,
-               const std::vector<size_t> &stride,
-               std::vector<double> &hostbrick)
+void initbrick(const std::vector<size_t>& lower,
+               const std::vector<size_t>& upper,
+               const std::vector<size_t>& stride,
+               std::vector<double>&       hostbrick)
 {
     // We assume that the batch size is 1.
     switch(lower.size())
@@ -58,10 +57,8 @@ void initbrick(const std::vector<size_t> &lower,
             {
                 for(auto idx0 = lower[0]; idx0 < upper[0]; ++idx0)
                 {
-                    const auto pos
-                        = (idx0 - lower[0]) * stride[0]
-                        + (idx1 - lower[1]) * stride[1]
-                        + (idx2 - lower[2]) * stride[2];
+                    const auto pos = (idx0 - lower[0]) * stride[0] + (idx1 - lower[1]) * stride[1]
+                                     + (idx2 - lower[2]) * stride[2];
                     hostbrick[pos] = idx0 + idx1 + idx2;
                 }
             }
@@ -72,11 +69,11 @@ void initbrick(const std::vector<size_t> &lower,
     }
 }
 
-template<typename Tval>
-void printbrick(const std::vector<size_t> &lower,
-                const std::vector<size_t> &upper,
-                const std::vector<size_t> &stride,
-                const std::vector<Tval> &hostbrick)
+template <typename Tval>
+void printbrick(const std::vector<size_t>& lower,
+                const std::vector<size_t>& upper,
+                const std::vector<size_t>& stride,
+                const std::vector<Tval>&   hostbrick)
 {
     // We assume that the batch size is 1.
     switch(lower.size())
@@ -101,10 +98,8 @@ void printbrick(const std::vector<size_t> &lower,
             {
                 for(auto idx0 = lower[0]; idx0 < upper[0]; ++idx0)
                 {
-                    const auto pos
-                        = (idx0 - lower[0]) * stride[0]
-                        + (idx1 - lower[1]) * stride[1]
-                        + (idx2 - lower[2]) * stride[2];
+                    const auto pos = (idx0 - lower[0]) * stride[0] + (idx1 - lower[1]) * stride[1]
+                                     + (idx2 - lower[2]) * stride[2];
                     std::cout << hostbrick[pos] << " ";
                 }
                 std::cout << "\n";
@@ -222,9 +217,8 @@ int main(int argc, char* argv[])
             {
                 if(dim != 1)
                 {
-                    inbrick_stride[idx].push_back(compute_ptrdiff(inbrick_lower[idx],
-                                                                  inbrick_upper[idx],
-                                                                  inbrick_stride[idx]));
+                    inbrick_stride[idx].push_back(compute_ptrdiff(
+                        inbrick_lower[idx], inbrick_upper[idx], inbrick_stride[idx]));
                     inbrick_lower[idx].push_back(0);
                     inbrick_upper[idx].push_back(length[dim]);
                 }
@@ -236,9 +230,8 @@ int main(int argc, char* argv[])
                 }
             }
             // We must also include the batch dimension:
-            inbrick_stride[idx].push_back(compute_ptrdiff(inbrick_lower[idx],
-                                                          inbrick_upper[idx],
-                                                          inbrick_stride[idx]));
+            inbrick_stride[idx].push_back(
+                compute_ptrdiff(inbrick_lower[idx], inbrick_upper[idx], inbrick_stride[idx]));
             inbrick_lower[idx].push_back(0);
             inbrick_upper[idx].push_back(1);
 
@@ -301,20 +294,21 @@ int main(int argc, char* argv[])
         // 2D output is split in the same direction as input; 3D output is split in the slowest
         // dimension.
         const size_t splitdim = length.size() == 2 ? 1 : 2;
-        
+
         for(size_t idx = 0; idx < devices.size(); ++idx)
         {
             const size_t outbrick_length_split
-                = outlength[splitdim] / devices.size() + (idx < outlength[splitdim] % devices.size() ? 1 : 0);
-            const size_t outbrick_lower_split = idx * (outlength[splitdim] / devices.size())
-                + std::min(idx, outlength[splitdim] % devices.size());
+                = outlength[splitdim] / devices.size()
+                  + (idx < outlength[splitdim] % devices.size() ? 1 : 0);
+            const size_t outbrick_lower_split
+                = idx * (outlength[splitdim] / devices.size())
+                  + std::min(idx, outlength[splitdim] % devices.size());
             const size_t outbrick_upper_split = outbrick_lower_split + outbrick_length_split;
 
             for(size_t dim = 0; dim < length.size(); ++dim)
             {
-                outbrick_stride[idx].push_back(compute_ptrdiff(outbrick_lower[idx],
-                                                               outbrick_upper[idx],
-                                                               outbrick_stride[idx]));
+                outbrick_stride[idx].push_back(compute_ptrdiff(
+                    outbrick_lower[idx], outbrick_upper[idx], outbrick_stride[idx]));
                 if(dim != splitdim)
                 {
                     outbrick_lower[idx].push_back(0);
@@ -327,12 +321,11 @@ int main(int argc, char* argv[])
                 }
             }
             // We must also include the batch dimension:
-            outbrick_stride[idx].push_back(compute_ptrdiff(outbrick_lower[idx],
-                                                           outbrick_upper[idx],
-                                                           outbrick_stride[idx]));
+            outbrick_stride[idx].push_back(
+                compute_ptrdiff(outbrick_lower[idx], outbrick_upper[idx], outbrick_stride[idx]));
             outbrick_lower[idx].push_back(0);
             outbrick_upper[idx].push_back(1);
-            
+
             rocfft_brick outbrick = nullptr;
 
             fftrc = rocfft_brick_create(&outbrick,
@@ -352,9 +345,8 @@ int main(int argc, char* argv[])
             if(fftrc != rocfft_status_success)
                 throw std::runtime_error("rocfft_brick_destroy failed (outbrick["
                                          + std::to_string(idx) + "].");
-           
-            outbufsizes[idx] = outbrick_stride[idx].back() * sizeof(std::complex<double>);
 
+            outbufsizes[idx] = outbrick_stride[idx].back() * sizeof(std::complex<double>);
             std::cout << "Output brick " << idx;
             std::cout << "\n\tlower indices:";
             for(const auto val : outbrick_lower[idx])
@@ -396,8 +388,8 @@ int main(int argc, char* argv[])
         if(hiprc != hipSuccess)
             throw std::runtime_error("hipMalloc failed");
         std::vector<double> host_in(memsize / sizeof(double));
-        initbrick(inbrick_lower[idx], inbrick_upper[idx],inbrick_stride[idx], host_in);
-        printbrick(inbrick_lower[idx], inbrick_upper[idx],inbrick_stride[idx], host_in);
+        initbrick(inbrick_lower[idx], inbrick_upper[idx], inbrick_stride[idx], host_in);
+        printbrick(inbrick_lower[idx], inbrick_upper[idx], inbrick_stride[idx], host_in);
 
         hiprc = hipMemcpy(gpu_in[idx], host_in.data(), inbufsizes[idx], hipMemcpyHostToDevice);
         if(hiprc != hipSuccess)
