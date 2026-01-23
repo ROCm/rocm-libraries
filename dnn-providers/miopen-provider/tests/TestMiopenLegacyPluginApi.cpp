@@ -32,7 +32,7 @@ TEST_F(TestMiopenLegacyPluginApi, GetNameSuccess)
 {
     const char* name = nullptr;
     EXPECT_EQ(hipdnnPluginGetNameImpl(&name), HIPDNN_PLUGIN_STATUS_SUCCESS);
-    EXPECT_STREQ(name, "miopen_legacy_plugin");
+    EXPECT_STREQ(name, "miopen_provider_plugin");
 }
 
 TEST_F(TestMiopenLegacyPluginApi, GetNameNullptr)

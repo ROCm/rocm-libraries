@@ -400,7 +400,7 @@ TEST_F(TestGraph, BatchnormInferenceNodeVarianceExtCreation)
     bias->set_dim(derivedDims).set_stride(derivedStrides);
 
     auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_name("Epsilon").set_value(1e-5f);
+    epsilon->set_name("Epsilon").set_value(1e-5);
 
     BatchnormInferenceAttributesVarianceExt attributes;
     attributes.set_name("BatchnormNodeVariance");
@@ -707,7 +707,7 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceVarianceExtGraph)
         .set_stride(derivedStrides);
 
     auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_uid(6).set_name("Epsilon").set_value(1e-5f);
+    epsilon->set_uid(6).set_name("Epsilon").set_value(1e-5);
 
     BatchnormInferenceAttributesVarianceExt batchnormAttributes;
     batchnormAttributes.set_name("BatchnormNodeVariance");
@@ -3391,6 +3391,201 @@ TEST_F(TestGraph, BuildOperationGraphPopulatesOnlyMissingUids)
     EXPECT_NE(biasUid, 500);
 }
 
+TEST_F(TestGraph, GetTensorsByUidReturnsMap)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(42)
+        .set_name("X")
+        .set_dim({1, 2, 3, 4})
+        .set_stride({24, 12, 4, 1})
+        .set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_name("PointwiseNode");
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    auto y = graph.pointwise(x, pwAttrs);
+    y->set_uid(99);
+
+    // Get tensor map by UID
+    auto tensorsByUid = graph.getTensorsByUid();
+
+    // Map contains expected tensors
+    EXPECT_EQ(tensorsByUid.size(), 2);
+
+    auto itX = tensorsByUid.find(42);
+    ASSERT_NE(itX, tensorsByUid.end());
+    EXPECT_EQ(itX->second->get_uid(), 42);
+    EXPECT_EQ(itX->second->get_name(), "X");
+    EXPECT_EQ(itX->second, x);
+
+    auto itY = tensorsByUid.find(99);
+    ASSERT_NE(itY, tensorsByUid.end());
+    EXPECT_EQ(itY->second->get_uid(), 99);
+    EXPECT_EQ(itY->second, y);
+
+    // Non-existent UID not found in map
+    auto notFound = tensorsByUid.find(999);
+    EXPECT_EQ(notFound, tensorsByUid.end());
+}
+
+TEST_F(TestGraph, GetTensorsByNameReturnsMap)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("InputTensor")
+        .set_dim({1, 2, 3, 4})
+        .set_stride({24, 12, 4, 1})
+        .set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_name("PointwiseNode");
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    auto y = graph.pointwise(x, pwAttrs);
+
+    // Get tensor map by name
+    auto tensorsByName = graph.getTensorsByName();
+
+    // Map contains expected tensors
+    EXPECT_EQ(tensorsByName.size(), 2);
+
+    auto itX = tensorsByName.find("InputTensor");
+    ASSERT_NE(itX, tensorsByName.end());
+    EXPECT_EQ(itX->second->get_name(), "InputTensor");
+    EXPECT_EQ(itX->second, x);
+
+    // Output tensor has auto-generated name
+    auto itY = tensorsByName.find("PointwiseNode::OUT_0");
+    ASSERT_NE(itY, tensorsByName.end());
+    EXPECT_EQ(itY->second, y);
+
+    // Non-existent name not found in map
+    auto notFound = tensorsByName.find("NonExistentTensor");
+    EXPECT_EQ(notFound, tensorsByName.end());
+}
+
+TEST_F(TestGraph, GetTensorsByUidAndNameIncludePeerStatTensors)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("InputX")
+        .set_dim({1, 64, 32, 32})
+        .set_stride({65536, 1024, 32, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(2)
+        .set_name("ScaleTensor")
+        .set_dim({64})
+        .set_stride({1})
+        .set_data_type(DataType::FLOAT);
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(3)
+        .set_name("BiasTensor")
+        .set_dim({64})
+        .set_stride({1})
+        .set_data_type(DataType::FLOAT);
+
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_uid(4);
+
+    // Create peer stat tensors (these go in the separate peer_stats vector, not outputs)
+    auto peerStat1 = std::make_shared<TensorAttributes>();
+    peerStat1->set_uid(20).set_name("PeerStat1");
+
+    auto peerStat2 = std::make_shared<TensorAttributes>();
+    peerStat2->set_uid(21).set_name("PeerStat2");
+
+    BatchnormAttributes bnAttrs;
+    bnAttrs.set_name("BN");
+    bnAttrs.set_epsilon(epsilon);
+    bnAttrs.set_peer_stats({peerStat1, peerStat2}); // Set peer stats separately
+
+    auto [y, savedMean, savedInvVariance, nextRunningMean, nextRunningVariance]
+        = graph.batchnorm(x, scale, bias, bnAttrs);
+
+    // Assign UIDs to output tensors
+    y->set_uid(10);
+    savedMean->set_uid(11);
+    savedInvVariance->set_uid(12);
+
+    // Test getTensorsByUid()
+    auto tensorsByUid = graph.getTensorsByUid();
+
+    // Should have:
+    // Inputs: x(1), scale(2), bias(3), epsilon(4) = 4
+    // Outputs: y(10), savedMean(11), savedInvVariance(12) = 3
+    // Peer stats: peerStat1(20), peerStat2(21) = 2
+    // Total = 9
+    EXPECT_EQ(tensorsByUid.size(), 9);
+
+    // Verify input tensors are present by UID
+    EXPECT_NE(tensorsByUid.find(1), tensorsByUid.end()); // x
+    EXPECT_NE(tensorsByUid.find(2), tensorsByUid.end()); // scale
+    EXPECT_NE(tensorsByUid.find(3), tensorsByUid.end()); // bias
+    EXPECT_NE(tensorsByUid.find(4), tensorsByUid.end()); // epsilon
+
+    // Verify output tensors are present by UID
+    EXPECT_NE(tensorsByUid.find(10), tensorsByUid.end()); // y
+    EXPECT_NE(tensorsByUid.find(11), tensorsByUid.end()); // savedMean
+    EXPECT_NE(tensorsByUid.find(12), tensorsByUid.end()); // savedInvVariance
+
+    // Verify peer stat tensors are present by UID (tests the specialized gather override)
+    EXPECT_NE(tensorsByUid.find(20), tensorsByUid.end()); // peerStat1
+    EXPECT_NE(tensorsByUid.find(21), tensorsByUid.end()); // peerStat2
+
+    // Verify the pointers match
+    EXPECT_EQ(tensorsByUid[1], x);
+    EXPECT_EQ(tensorsByUid[10], y);
+    EXPECT_EQ(tensorsByUid[20], peerStat1);
+    EXPECT_EQ(tensorsByUid[21], peerStat2);
+
+    // Test getTensorsByName()
+    auto tensorsByName = graph.getTensorsByName();
+
+    // Should have all named tensors:
+    // Inputs with names: InputX, ScaleTensor, BiasTensor (3) - epsilon has no name
+    // Outputs with names: BN::Y, BN::MEAN, BN::INV_VARIANCE (3)
+    // Peer stats with names: PeerStat1, PeerStat2 (2)
+    // Total = 8
+    EXPECT_EQ(tensorsByName.size(), 8);
+
+    // Verify input tensors are present by name
+    EXPECT_NE(tensorsByName.find("InputX"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("ScaleTensor"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("BiasTensor"), tensorsByName.end());
+
+    // Verify output tensors are present by name
+    EXPECT_NE(tensorsByName.find("BN::Y"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("BN::MEAN"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("BN::INV_VARIANCE"), tensorsByName.end());
+
+    // Verify peer stat tensors are present by name (tests the specialized gather override)
+    EXPECT_NE(tensorsByName.find("PeerStat1"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("PeerStat2"), tensorsByName.end());
+
+    // Verify the pointers match
+    EXPECT_EQ(tensorsByName["InputX"], x);
+    EXPECT_EQ(tensorsByName["BN::Y"], y);
+    EXPECT_EQ(tensorsByName["PeerStat1"], peerStat1);
+    EXPECT_EQ(tensorsByName["PeerStat2"], peerStat2);
+}
+
 TEST_F(TestGraph, BuildMethodSucceedsWithValidGraph)
 {
     ::testing::FLAGS_gmock_verbose = "error";
@@ -3592,4 +3787,108 @@ TEST_F(TestGraph, BuildMethodFailsWhenValidationFails)
 
     auto result = graph.build(_handle);
     EXPECT_FALSE(result.is_good());
+}
+
+TEST_F(TestGraph, SetPreferredEngineIdByName)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
+
+    // Set by name
+    graph.set_preferred_engine_id_ext(testEngineName);
+
+    // Verify it was converted to the correct ID
+    auto expectedId = hipdnn_data_sdk::utilities::engineNameToId(testEngineName);
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), expectedId);
+}
+
+TEST_F(TestGraph, SetPreferredEngineIdByEmptyStringClearsPreference)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
+
+    // First set a preference
+    graph.set_preferred_engine_id_ext(testEngineName);
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+
+    // Then clear it with empty string
+    graph.set_preferred_engine_id_ext("");
+
+    // Verify no preferred engine ID is set
+    EXPECT_FALSE(graph.get_preferred_engine_id_ext().has_value());
+}
+
+TEST_F(TestGraph, SetPreferredEngineIdByNameThenById)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
+
+    // Set by name first
+    graph.set_preferred_engine_id_ext(testEngineName);
+
+    // Then override with a different ID
+    int64_t overrideId = 999;
+    graph.set_preferred_engine_id_ext(std::optional<int64_t>(overrideId));
+
+    // Verify the ID overload took precedence
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), overrideId);
+}
+
+TEST_F(TestGraph, SetPreferredEngineIdByIdThenByName)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
+    auto expectedId = hipdnn_data_sdk::utilities::engineNameToId(testEngineName);
+
+    // Set by ID first
+    graph.set_preferred_engine_id_ext(std::optional<int64_t>(999));
+
+    // Then override with name
+    graph.set_preferred_engine_id_ext(testEngineName);
+
+    // Verify the name overload took precedence
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), expectedId);
+}
+
+TEST_F(TestGraph, MethodChaining)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_CHAINING";
+    auto expectedEngineId = hipdnn_data_sdk::utilities::engineNameToId(testEngineName);
+
+    // Test that all setters return reference to self for chaining
+    auto& ref1 = graph.set_name("ChainedGraph");
+    auto& ref2 = ref1.set_compute_data_type(DataType::FLOAT);
+    auto& ref3 = ref2.set_intermediate_data_type(DataType::HALF);
+    auto& ref4 = ref3.set_io_data_type(DataType::BFLOAT16);
+    auto& ref5 = ref4.set_preferred_engine_id_ext(12345);
+
+    // All references should point to the same object
+    EXPECT_EQ(&graph, &ref1);
+    EXPECT_EQ(&graph, &ref2);
+    EXPECT_EQ(&graph, &ref3);
+    EXPECT_EQ(&graph, &ref4);
+    EXPECT_EQ(&graph, &ref5);
+
+    // Verify all values were set correctly
+    EXPECT_EQ(graph.get_name(), "ChainedGraph");
+    EXPECT_EQ(graph.get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(graph.get_intermediate_data_type(), DataType::HALF);
+    EXPECT_EQ(graph.get_io_data_type(), DataType::BFLOAT16);
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), 12345);
+
+    // Test chaining with string overload
+    auto& ref6 = graph.set_preferred_engine_id_ext(testEngineName);
+    EXPECT_EQ(&graph, &ref6);
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), expectedEngineId);
 }

@@ -184,7 +184,14 @@ MIOpenBatchNormActivFwdTrainSpatial(float INHW,
     if(lid == 0)
     {
 #if(MIO_RUNNING_RESULT == 1)
-        running_stash(runningMean, runningVariance, expAvgFactor, mean, variance, grpid);
+        running_stash(runningMean,
+                      runningVariance,
+                      runningMean,
+                      runningVariance,
+                      expAvgFactor,
+                      mean,
+                      variance,
+                      grpid);
 #endif
 
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
@@ -439,7 +446,14 @@ MIOpenBatchNormActivFwdTrainSpatial(
     if(lid == 0)
     {
 #if(MIO_RUNNING_RESULT == 1)
-        running_stash(runningMean, runningVariance, expAvgFactor, mean, variance, grpid);
+        running_stash(runningMean,
+                      runningVariance,
+                      runningMean,
+                      runningVariance,
+                      expAvgFactor,
+                      mean,
+                      variance,
+                      grpid);
 #endif
 
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
@@ -624,7 +638,14 @@ MIOpenBatchNormActivFwdTrainSpatial(
     if(lid == 0)
     {
 #if(MIO_RUNNING_RESULT == 1)
-        running_stash(runningMean, runningVariance, expAvgFactor, mean, variance, grpid);
+        running_stash(runningMean,
+                      runningVariance,
+                      runningMean,
+                      runningVariance,
+                      expAvgFactor,
+                      mean,
+                      variance,
+                      grpid);
 #endif
 
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
