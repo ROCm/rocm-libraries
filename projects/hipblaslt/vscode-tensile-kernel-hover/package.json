@@ -1,0 +1,80 @@
+{
+  "name": "hipblaslt-kernel-hover",
+  "displayName": "hipBLASLt Tensile Kernel Hover",
+  "description": "Hover a Tensile kernel name and view only that kernel's YAML parameters.",
+  "version": "0.0.1",
+  "publisher": "local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:yaml"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "hipblasltKernelHover.openKernel",
+        "title": "Open Tensile kernel parameters"
+      },
+      {
+        "command": "hipblasltKernelHover.editKernel",
+        "title": "Edit Tensile kernel parameters (buffer)"
+      },
+      {
+        "command": "hipblasltKernelHover.applyKernelEdits",
+        "title": "Apply edited kernel buffer back to source YAML"
+      }
+    ],
+    "configuration": {
+      "title": "hipBLASLt Tensile Kernel Hover",
+      "properties": {
+        "hipblasltKernelHover.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable hover to show a single Tensile kernel block."
+        },
+        "hipblasltKernelHover.applyOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "When editing a kernel buffer, pressing Ctrl+S applies changes back to the source YAML automatically."
+        },
+        "hipblasltKernelHover.closeEditorOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "After Ctrl+S applies edits back to source, close the temporary kernel editor and return to the source YAML."
+        },
+        "hipblasltKernelHover.maxHoverChars": {
+          "type": "number",
+          "default": 60000,
+          "description": "If the kernel YAML exceeds this size, the hover shows a link to open it in an editor instead."
+        },
+        "hipblasltKernelHover.triggerKeys": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [
+            "KernelNameMin",
+            "SolutionNameMin",
+            "BaseName"
+          ],
+          "description": "Only trigger hover when hovering over the value of these YAML keys."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node ./node_modules/typescript/bin/tsc -p .",
+    "watch": "node ./node_modules/typescript/bin/tsc -watch -p .",
+    "package": "node ./node_modules/@vscode/vsce/vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.10",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.24.0",
+    "typescript": "^5.4.5"
+  }
+}

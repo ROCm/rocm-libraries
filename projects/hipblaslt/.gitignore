@@ -62,3 +62,15 @@ cmake_install.cmake
 .cache
 
 build_*
+.rocprofv3/*
+tensilelite/.venv/*
+tensilelite/my_cms/*
+tensilelite/my_task/*
+tensilelite/my-ref/*
+tensilelite/mylib/*
+
+# VS Code/Cursor extension artifacts
+**/*.vsix
+.hipblasltKernelHover/*
+vscode-tensile-kernel-hover/node_modules/*
+vscode-tensile-kernel-hover/dist/*
