@@ -196,6 +196,20 @@ Tests:
   part: [rocsparse_hyb_partition_auto]
   filename: [Chevron4]
 
+# Coverage gap tests: transpose with device pointer mode (develop vs reduced_ci)
+- name: hybmv_transpose
+  category: pre_checkin
+  function: hybmv
+  precision: *single_double_precisions_complex_real
+  M: [300]
+  N: [300]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  part: [rocsparse_hyb_partition_auto]
+  algo: [0]
+
 - name: hybmv_graph_test
   category: pre_checkin
   function: hybmv

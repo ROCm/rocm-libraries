@@ -407,6 +407,26 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4]
 
+# Coverage gap tests: high intermediate products per row (develop vs reduced_ci)
+# Semi-dense matrices to trigger group sizes 4-6 (1K-8K intermediates)
+- name: csrgemm_high_intermediates
+  category: pre_checkin
+  function: csrgemm
+  precision: *double_only_precisions
+  M: [128]
+  N: [128]
+  K: [256]
+  percentage: [0.4]
+  alpha_alphai: *alpha_range_checkin
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+  matrix: [rocsparse_matrix_random]
+
 # C = alpha * A * B + beta * D
 - name: csrgemm_scale
   category: quick

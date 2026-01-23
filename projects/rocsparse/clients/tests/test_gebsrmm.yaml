@@ -261,6 +261,23 @@ Tests:
   filename: [sme3Dc,
              shipsec1]
 
+# Coverage gap tests: conjugate transpose on B matrix (develop vs reduced_ci)
+- name: gebsrmm_transB_conj
+  category: pre_checkin
+  function: gebsrmm
+  precision: *single_double_precisions_complex
+  M: [200]
+  N: [16]
+  K: [200]
+  row_block_dimA: [4, 8]
+  col_block_dimA: [4, 8]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_conjugate_transpose]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
 - name: gebsrmm_file
   category: nightly
   function: gebsrmm

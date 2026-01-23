@@ -448,6 +448,20 @@ Tests:
   spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
   filename: [Chevron4]
 
+# Coverage gap tests: transpose with LRB/NNZ-split algorithms (develop vs reduced_ci)
+- name: csrmv_transpose_algs
+  category: pre_checkin
+  function: csrmv
+  precision: *single_double_precisions_complex_real
+  M: [500]
+  N: [500]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  spmv_alg: [rocsparse_spmv_alg_csr_lrb, rocsparse_spmv_alg_csr_rowsplit]
+
 - name: csrmv_graph_test
   category: pre_checkin
   function: csrmv

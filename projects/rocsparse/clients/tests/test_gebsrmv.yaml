@@ -402,6 +402,22 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4]
 
+# Coverage gap tests: high blocks_per_row for wavefront paths (develop vs reduced_ci)
+- name: gebsrmv_high_blocks_per_row
+  category: pre_checkin
+  function: gebsrmv
+  precision: *double_only_precisions
+  M: [64]
+  N: [8192]
+  row_block_dimA: [1, 2]
+  col_block_dimA: [2, 4, 8, 16]
+  alpha_beta: *alpha_beta_range_1
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+
 - name: gebsrmv_graph_test
   category: pre_checkin
   function: gebsrmv
