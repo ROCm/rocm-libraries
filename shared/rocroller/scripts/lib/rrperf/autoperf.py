@@ -65,7 +65,7 @@ def build_rocroller(
     build_dir = project_dir / "build_perf"
     build_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Info: Using {threads} to build rocRoller at {commit}")
+    print(f"Info: Using {threads} threads to build rocRoller at {commit}")
 
     subprocess.run(
         [
