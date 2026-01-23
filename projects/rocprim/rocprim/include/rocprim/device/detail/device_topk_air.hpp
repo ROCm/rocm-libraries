@@ -424,7 +424,7 @@ struct device_topk_air_impl
         constexpr auto histogram_size
             = Iteration == (num_iterations - 1) ? num_buckets_last_iteration : num_buckets;
 
-        digit_t digit = device_air_topk_impl::key_codec::template extract_digit<Decomposer>(
+        digit_t digit = key_codec::template extract_digit<Decomposer>(
             // Extracts digit values. Digits are extracted from the most
             // significant bit to the least significant bit. For signed or floating-point
             // types, the position must be adjusted for negative values.

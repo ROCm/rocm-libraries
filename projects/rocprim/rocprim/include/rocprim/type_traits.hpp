@@ -521,7 +521,7 @@ struct radix_key_codec
 
         template<bool KillNegativeZeros>
         ROCPRIM_HOST_DEVICE
-        static Key twiddle_in(bit_key_type bit_key)
+        static Key twiddle_in(Key bit_key)
         {
             return bit_key;
         }
@@ -564,7 +564,7 @@ struct radix_key_codec
 
         template<bool KillNegativeZeros>
         ROCPRIM_HOST_DEVICE
-        static Key twiddle_in(bit_key_type bit_key)
+        static Key twiddle_in(Key bit_key)
         {
             return bit_key ^ sign_bit;
         }
@@ -676,7 +676,7 @@ struct radix_key_codec
 
         template<bool KillNegativeZeros>
         ROCPRIM_HOST_DEVICE
-        static bool twiddle_in(bit_key_type bit_key)
+        static bool twiddle_in(bool bit_key)
         {
             return bit_key;
         }
