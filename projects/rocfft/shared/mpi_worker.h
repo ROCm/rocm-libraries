@@ -23,6 +23,7 @@
 #include "fft_params.h"
 
 #include "CLI11.hpp"
+#include "fft_enums.h"
 #include "gpubuf.h"
 #include "hostbuf.h"
 #include "ptrdiff.h"

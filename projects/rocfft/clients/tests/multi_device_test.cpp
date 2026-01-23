@@ -19,6 +19,7 @@
 // THE SOFTWARE.
 
 #include "../../shared/accuracy_test.h"
+#include "../../shared/fft_enums.h"
 #include "../../shared/params_gen.h"
 #include "../../shared/rocfft_params.h"
 #include <gtest/gtest.h>

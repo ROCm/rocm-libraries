@@ -49,6 +49,7 @@ namespace std
 #endif
 
 #include "../../shared/CLI11.hpp"
+#include "../../shared/fft_enums.h"
 #include "../../shared/gpubuf.h"
 #include "../../shared/hip_object_wrapper.h"
 #include "../../shared/rocfft_params.h"

@@ -40,6 +40,7 @@
 #include "../../shared/concurrency.h"
 #include "../../shared/device_properties.h"
 #include "../../shared/environment.h"
+#include "../../shared/fft_enums.h"
 #include "../../shared/hostbuf.h"
 #include "../../shared/rocfft_accuracy_test.h"
 #include "../../shared/sys_mem.h"

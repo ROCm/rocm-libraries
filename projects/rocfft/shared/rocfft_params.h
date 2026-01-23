@@ -21,6 +21,7 @@
 #ifndef ROCFFT_PARAMS_H
 #define ROCFFT_PARAMS_H
 
+#include "../shared/fft_enums.h"
 #include "../shared/fft_params.h"
 #include "../shared/gpubuf.h"
 #include "../shared/precision_type.h"
