@@ -409,11 +409,12 @@ int main(int argc, char* argv[])
         throw std::runtime_error("failed to create plan");
 
     // Execute plan:
-    fftrc = rocfft_execute(gpu_plan, (void**)gpu_in.data(),
+    fftrc = rocfft_execute(gpu_plan,
+                           (void**)gpu_in.data(),
                            place == rocfft_placement_notinplace ? (void**)gpu_out.data()
                                                                 : (void**)nullptr,
                            nullptr // no execution info
-        );
+    );
     if(fftrc != rocfft_status_success)
         throw std::runtime_error("failed to execute.");
 
