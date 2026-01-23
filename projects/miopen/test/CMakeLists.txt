@@ -354,6 +354,10 @@ function(add_test_command NAME EXE)
         endif()
     endif()
     set_tests_properties(${NAME} PROPERTIES ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR}")
+    # Append coverage env
+    set_property(TEST ${NAME} APPEND PROPERTY ENVIRONMENT
+        "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/coverage-report/profraw/%p.%m.profraw"
+    )
 endfunction()
 
 separate_arguments(MIOPEN_TEST_FLAGS_ARGS NATIVE_COMMAND ${MIOPEN_TEST_FLAGS})
@@ -417,6 +421,11 @@ function(add_test_executable TEST_NAME)
     if(rocblas_FOUND)
         target_link_libraries( ${TEST_NAME} $<BUILD_INTERFACE:roc::rocblas> )
     endif()
+    # Append coverage env
+    set_property(TEST ${NAME} APPEND PROPERTY ENVIRONMENT
+        "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/coverage-report/profraw/%p.%m.profraw"
+    )
+
 endfunction()
 
 set(MIOPEN_TEST_SANITIZERS)
@@ -460,6 +469,10 @@ function(rate_added_test NAME)
     else()
         set_tests_properties(${NAME} PROPERTIES COST 600)
     endif()
+    # Append coverage env
+    set_property(TEST ${NAME} APPEND PROPERTY ENVIRONMENT
+        "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/coverage-report/profraw/%p.%m.profraw"
+    )
 endfunction()
 
 set(EXCLUDE_TESTS)
@@ -719,6 +732,9 @@ function(add_custom_test NAME)
         AND (${NAME} MATCHES "test_conv_for_implicit_gemm" ))
         set_tests_properties(${NAME} PROPERTIES DISABLED On)
     endif()
+    set_property(TEST ${NAME} APPEND PROPERTY ENVIRONMENT
+        "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/coverage-report/profraw/%p.%m.profraw"
+    )
 endfunction()
 
 set(IMPLICITGEMM_MLIR_ENV_BASE MIOPEN_FIND_MODE=normal)
@@ -880,6 +896,7 @@ if (MIOPEN_ENABLE_COVERAGE)
     HINTS ${ROCM_PATH}/llvm/bin
     PATHS /opt/rocm/llvm/bin
   )
+
   add_custom_target(
     coverage
     DEPENDS coverage_setup check
