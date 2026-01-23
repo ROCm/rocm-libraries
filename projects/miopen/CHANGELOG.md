@@ -2,12 +2,29 @@
 # Change Log for MIOpen
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
-## (Unreleased) MIOpen 3.5.1 for ROCm 7.11.0
+## MIOpen 3.5.1 for ROCm 7.11.0
+### Added
+* [BatchNorm] Added V3 batch normalization API with separate running statistics buffers (prevResultRunningMean/Variance and nextResultRunningMean/Variance)
+* [BatchNorm] New API entry-points `miopenBatchNormalizationForwardInferenceInvVariance` and
+  `miopenBatchNormForwardInferenceActivationInvVariance` to support hipDNN.
+* [Conv] Added initial Composable Kernel (CK) support for RDNA3.X and RDNA4
+
+### Changed
+* Ported additional OCL kernels to HIP
+
 ### Optimized
 * Added `MIOPEN_SEARCH_CUTOFF` option which can reduce tuning times by skipping slow solvers and kernels
+* [Conv] Improved 3D solver selection and kernel tuning heuristics for gfx942 and gfx950
+* [Conv] Removed obsolete explicit gemm solver VRAM limit
 
 ### Resolved issues
 * Fixed calculation of workspace size for fusions when tuning is done
+* Fixed RoPE error tolerance issue for bf16
+* Quieted some harmless workspace warnings that could be emitted in immediate mode
+* Fixed runtime kernel compilation issues for TheRock
+* Fixed Windows Conv2d GPU timeout issue
+* Fixed solver selection bug caused by incorrect handling of unpacked tensors
+* [Conv] Fixed parsing of CK type strings for 3D heuristics
 
 ## MIOpen 3.5.1 for ROCm 7.2.0
 ### Changed

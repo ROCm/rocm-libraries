@@ -33,6 +33,7 @@ set(REGRESSION_TESTS
     test_convnd_fwd
     test_convnd_bwd_data
     test_grouped_convnd_fwd
+    test_grouped_convnd_fwd_bias_bnorm_clamp
     test_grouped_convnd_fwd_scaleadd_ab
     test_grouped_convnd_bwd_weight
     test_softmax_rank3
@@ -271,13 +272,16 @@ add_subdirectory(gemm_b_scale)
 add_subdirectory(gemm_universal_streamk)
 add_subdirectory(gemm_reduce)
 add_subdirectory(gemm_universal_reduce)
+add_subdirectory(batched_contraction)
 add_subdirectory(batched_gemm)
 add_subdirectory(batched_gemm_reduce)
 add_subdirectory(batched_gemm_gemm)
+add_subdirectory(batched_gemm_multiple_d_gemm_multiple_d)
 add_subdirectory(batched_gemm_softmax_gemm)
 add_subdirectory(batched_gemm_softmax_gemm_permute)
 add_subdirectory(batched_gemm_b_scale)
 add_subdirectory(grouped_gemm)
+add_subdirectory(grouped_gemm_tile_loop)
 add_subdirectory(reduce)
 add_subdirectory(convnd_fwd)
 add_subdirectory(convnd_bwd_data)
@@ -319,3 +323,4 @@ add_subdirectory(position_embedding)
 add_subdirectory(scatter_gather)
 add_subdirectory(gpu_reference)
 add_subdirectory(util)
+add_subdirectory(gpu_verification)

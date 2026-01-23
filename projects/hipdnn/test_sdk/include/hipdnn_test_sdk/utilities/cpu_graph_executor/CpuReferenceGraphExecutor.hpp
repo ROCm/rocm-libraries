@@ -7,9 +7,11 @@
 
 #include <hipdnn_data_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormFwdInferenceWithVarianceSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionFwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionWrwPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/MatmulPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/PlanBuilderRegistry.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/PointwisePlan.hpp>
 
@@ -96,6 +98,8 @@ private:
         {
         case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
             return BatchnormFwdInferenceSignatureKey(node, tensorMap);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+            return BatchnormFwdInferenceWithVarianceSignatureKey(node, tensorMap);
         case hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes:
             return PointwiseSignatureKey(node, tensorMap);
         case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
@@ -108,6 +112,8 @@ private:
             return ConvolutionBwdSignatureKey(node, tensorMap, computeType);
         case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
             return ConvolutionWrwSignatureKey(node, tensorMap, computeType);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes:
+            return MatmulSignatureKey(node, tensorMap, computeType);
         default:
             throw std::runtime_error("Unsupported node type for signature key generation");
         }
