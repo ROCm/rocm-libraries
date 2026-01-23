@@ -150,13 +150,14 @@ reduce_n(execution_policy<Derived>& policy, InputIt first, Size num_items, T ini
     {
       return init = __reduce::reduce(policy, first, num_items, init, binary_op);
     }
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static T
     seq(execution_policy<Derived>& policy, InputIt first, Size num_items, T init, BinaryOp binary_op)
     {
       return init = thrust::reduce(cvt_to_seq(derived_cast(policy)), first, first + num_items, init, binary_op);
     }
+#  endif
   };
-
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, first, num_items, init, binary_op);
 #  else

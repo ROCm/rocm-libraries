@@ -51,6 +51,12 @@ namespace rocsparse
                 buffers[0] = current;
                 buffers[1] = alternate;
             }
+            __device__ __host__ inline double_buffer(void* current, void* alternate)
+            {
+                selector   = 0;
+                buffers[0] = (T*)current;
+                buffers[1] = (T*)alternate;
+            }
 
             __device__ __host__ inline T* current() const
             {
@@ -243,5 +249,55 @@ namespace rocsparse
                                                  J*               csr_col_ind,
                                                  J*               csr_col_ind_buffer1,
                                                  void*            buffer);
+    }
+}
+
+namespace rocsparse
+{
+    typedef decltype(&rocsparse::primitives::radix_sort_pairs_buffer_size<int32_t, int32_t>)
+        radix_sort_pairs_buffer_size_t;
+
+    template <typename K>
+    inline radix_sort_pairs_buffer_size_t find_V(rocsparse_indextype V)
+    {
+        switch(V)
+        {
+
+        case rocsparse_indextype_i32:
+        {
+            return rocsparse::primitives::radix_sort_pairs_buffer_size<K, int32_t>;
+        }
+        case rocsparse_indextype_i64:
+        {
+            return rocsparse::primitives::radix_sort_pairs_buffer_size<K, int64_t>;
+        }
+        case rocsparse_indextype_u16:
+        {
+            return nullptr;
+        }
+        }
+        return nullptr;
+    }
+
+    inline radix_sort_pairs_buffer_size_t find_radix_sort_pairs_buffer_size(rocsparse_indextype K,
+                                                                            rocsparse_indextype V)
+    {
+        switch(K)
+        {
+
+        case rocsparse_indextype_i32:
+        {
+            return find_V<int32_t>(V);
+        }
+        case rocsparse_indextype_i64:
+        {
+            return find_V<int64_t>(V);
+        }
+        case rocsparse_indextype_u16:
+        {
+            return nullptr;
+        }
+        }
+        return nullptr;
     }
 }

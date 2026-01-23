@@ -132,6 +132,37 @@ Tests:
   alpha: 2
   beta: 3
 
+- name: matmul_grid_limit_real
+  category: nightly
+  function:
+    matmul: *real_precisions
+  matrix_size: *grid_limit_matrix_size_real
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: 0
+  gpu_arch: '120[0-1]'
+
+- name: matmul_grid_limit_real_1b
+  category: nightly
+  function:
+    matmul: *real_precisions_1b
+  matrix_size: *grid_limit_matrix_size_real
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: 0
+  gpu_arch: '120[0-1]'
+
+- name: matmul_grid_limit_double
+  category: nightly
+  function:
+    matmul: *double_precision
+  matrix_size: *grid_limit_matrix_size_double
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: 0
+  api_method: [0, 2]
+  gpu_arch: '120[0-1]'
+
 - name: matmul_deepbench
   category: nightly
   function:
@@ -1701,7 +1732,7 @@ Tests:
   bias_type: bf16_r
   unit_check: 0
   norm_check: 1
-  gpu_arch: '942'
+  gpu_arch: '9(42|50)'
 
 - name: matmul_dgelu_bf16_NN
   category: pre_checkin
@@ -2125,23 +2156,6 @@ Tests:
   requested_solution_num: -1
   unit_check: 1
 
-# Test case for launch limits
-# Review: should this be enabled on CI?
-# It requires a lot of memory and takes a little while to run.
-# - name: matmul_launch_limits
-#   category: nightly
-#   function:
-#     matmul: *hpa_bf16_precision
-#   matrix_size:
-#     - { M:  262144,   N:  131072,    K:  1024 }
-#   algo_method: [1]
-#   transA: T
-#   transB: N
-#   alpha: 1
-#   beta: 0
-#   requested_solution_num: -1
-#   unit_check: 0
-
 - name: matmul_heuristic_all_solutions_real_1byte_fnuz
   category: nightly
   function:
@@ -2270,29 +2284,7 @@ Tests:
   unit_check: 0
   norm_check: 1
   algo_method: [2]
-  solution_index: -2138568700  # Workgroup tile size = 256x256x128
-  gpu_arch: '950'
-
-# Workgroup tile size = 128x128x64
-- name: matmul_mx_solution_index_wgt_128x128x64
-  category: pre_checkin
-  function:
-    matmul:
-    - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
-    - { a_type: f6_r, b_type: f6_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
-    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
-  M: [128]
-  N: [128]
-  K: [128]
-  transA: T
-  transB: N
-  alpha: 1.0
-  beta: 0.0
-  initialization: hpl
-  unit_check: 0
-  norm_check: 1
-  algo_method: [2]
-  solution_index: -2138831868  # Workgroup tile size = 128x128x128
+  solution_index: -2147220476  # Workgroup tile size = 128x128x128
   gpu_arch: '950'
 
 - name: matmul_mx_multiple_kernels
@@ -2313,6 +2305,31 @@ Tests:
   unit_check: 0
   norm_check: 1
   requested_solution_num: 3
+  gpu_arch: '950'
+
+# MX datatypes with pre-swizzle for swizzle tile {32, 8} (scaleA/B: 1001 = Block_32_UE8M0_32_8_EXT)
+# Tests the preSwizzleScale functionality
+# Uses 16x16x128 MI instruction (subTileK = 128/32 = 4)
+# Requires workgroup tile 128x128x256 for swizzle tile {32, 8} compatibility (WGT.k >= 256)
+- name: matmul_mx_preswizzle_32x8_large
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+    - { a_type: f6_r, b_type: f6_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  M: [4096]
+  N: [4096]
+  K: [16384]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  algo_method: [2]
+  solution_index: -2138831864  # Workgroup tile size = 128x128x256
   gpu_arch: '950'
 
 - name: matmul_relu_clamp_useE
@@ -2354,5 +2371,16 @@ Tests:
   alpha: 1.0
   beta: 0.0
   gpu_arch: '9(0a|42)'
+
+- name: matmul_one_bf16_fp32dst_precision_gfx90a
+  category: quick
+  function:
+    matmul:
+    - { a_type: bf16_r, b_type: bf16_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r}
+  matrix_size: *one_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha: [ 0.0, 1.0 ]
+  beta: [ 0.0, 1.0 ]
+  gpu_arch: '90a'
 
 ...

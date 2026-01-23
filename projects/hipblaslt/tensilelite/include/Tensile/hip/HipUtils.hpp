@@ -69,6 +69,17 @@
         }                                                                                         \
     } while(0)
 
+#define HIP_CHECK_RETURN_WITH_LOG(expr, logLambda) \
+    do                                              \
+    {                                               \
+        hipError_t e = (expr);                      \
+        if(e)                                       \
+        {                                           \
+            logLambda(e);                           \
+            return e;                               \
+        }                                           \
+    } while(0)
+
 #define HIP_CHECK_RETURN(expr) \
     do                         \
     {                          \
@@ -77,12 +88,15 @@
             return e;          \
     } while(0)
 
-#define HIP_CHECK_PRINT(expr)                             \
-    {                                                     \
-        hipError_t e = (expr);                            \
-        if(e)                                             \
-            std::cout << "Error code " << e << std::endl; \
-    }
+#define HIP_CHECK_PRINT(expr, logLambda) \
+    do                                              \
+    {                                               \
+        hipError_t e = (expr);                      \
+        if(e)                                       \
+        {                                           \
+            logLambda(e);                           \
+        }                                           \
+    } while(0)
 
 namespace TensileLite
 {

@@ -404,6 +404,8 @@ namespace rocRoller
         }
         transforms.push_back(std::make_shared<KernelGraph::RemoveDuplicates>());
         transforms.push_back(std::make_shared<KernelGraph::OrderEpilogueBlocks>());
+        // TODO: Investigate why Simplify cannot be called BEFORE RemoveDuplicates and OrderEpilogueBlocks
+        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::CleanLoops>());
         transforms.push_back(
             std::make_shared<KernelGraph::SwizzleScale>(m_commandParameters, m_context));
@@ -420,7 +422,8 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::AddPRNG>(m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::UpdateWavefrontParameters>(m_commandParameters));
-        transforms.push_back(std::make_shared<KernelGraph::AddComputeIndex>());
+        transforms.push_back(
+            std::make_shared<KernelGraph::AssignIndexExpressions>(m_context, m_command));
         transforms.push_back(std::make_shared<KernelGraph::LoadPacked>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::AddConvert>());
 
@@ -432,14 +435,13 @@ namespace rocRoller
             transforms.push_back(std::make_shared<KernelGraph::RemoveSetCoordinate>());
             transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         }
-        transforms.push_back(std::make_shared<KernelGraph::AssignComputeIndex>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::NopExtraScopes>());
         transforms.push_back(std::make_shared<KernelGraph::InlineInits>());
-        transforms.push_back(std::make_shared<KernelGraph::AddDeallocateDataFlow>());
         transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());
         transforms.push_back(std::make_shared<KernelGraph::OrderMultiplyNodes>());
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::AliasDataFlowTags>());
+        transforms.push_back(std::make_shared<KernelGraph::AddDeallocateDataFlow>());
         transforms.push_back(std::make_shared<KernelGraph::CleanArguments>(m_context, m_command));
         transforms.push_back(std::make_shared<KernelGraph::AddDeallocateArguments>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::MergeAdjacentDeallocates>());
@@ -630,13 +632,13 @@ namespace rocRoller
         m_executableKernel->loadKernelFromCodeObjectFile(
             fileName, kernelName, m_context->targetArchitecture().target());
 
-        auto yaml   = readMetaDataFromCodeObject(fileName);
-        auto kernel = AssemblyKernels::fromYAML(yaml).kernels[0];
-
-        // XXX Instead of adding `setKernel`, should the context load from a code object?
+        auto kernels   = AssemblyKernels::fromELF(fileName).kernels;
+        auto kernel    = kernels.at(0);
         auto kernelPtr = std::make_shared<AssemblyKernel>(kernel);
         m_context->setKernel(kernelPtr);
         return kernelPtr;
+
+        // XXX Instead of adding `setKernel`, should the context load from a code object?
     }
 
     ContextPtr CommandKernel::getContext()
@@ -644,9 +646,10 @@ namespace rocRoller
         return m_context;
     }
 
-    size_t CommandKernel::scratchSpaceRequired(RuntimeArguments const& args) const
+    size_t CommandKernel::scratchSpaceRequired(Operations::ScratchPolicy policy,
+                                               RuntimeArguments const&   args) const
     {
-        auto amount = m_context->getScratchAmount();
+        auto amount = m_context->getScratchAmount(policy);
 
         auto times = evaluationTimes(amount);
         AssertFatal(times[Expression::EvaluationTime::Translate]

@@ -56,13 +56,36 @@ namespace hiptensor
     // Kernel run checks. Virtual as different Contraction kernels have different requirements
     // True = run test
     // False = skip test
-    bool ContractionTest::checkDevice(hiptensorDataType_t datatype) const
+    bool ContractionTest::checkDevice(hiptensorDataType_t          dataType,
+                                      hiptensorComputeDescriptor_t computeType) const
     {
-        return (isF32Supported()
-                && (datatype == HIPTENSOR_R_32F || datatype == HIPTENSOR_R_16F
-                    || datatype == HIPTENSOR_R_16BF || datatype == HIPTENSOR_C_32F))
-               || (isF64Supported()
-                   && (datatype == HIPTENSOR_R_64F || datatype == HIPTENSOR_C_64F));
+        switch(computeType)
+        {
+        case HIPTENSOR_COMPUTE_DESC_32F:
+            return (isF32MatrixCoreSupported()
+                    && ((isF16Supported() && isDataType16Bits(dataType))
+                        || (isF32Supported() && isDataType32Bits(dataType))
+                        || (isF64Supported() && isDataType64Bits(dataType)))
+                    && !isDataTypeComplex(dataType));
+        case HIPTENSOR_COMPUTE_DESC_64F:
+            return (isF64MatrixCoreSupported() && (isF64Supported() && isDataType64Bits(dataType))
+                    && !isDataTypeComplex(dataType));
+        case HIPTENSOR_COMPUTE_DESC_16F:
+        case HIPTENSOR_COMPUTE_DESC_16BF:
+            return (isF16MatrixCoreSupported() && (isF32Supported() && isDataType32Bits(dataType))
+                    && !isDataTypeComplex(dataType));
+        case HIPTENSOR_COMPUTE_DESC_C32F:
+            return (isF32MatrixCoreSupported()
+                    && ((isF16Supported() && isDataType16Bits(dataType))
+                        || (isF32Supported() && isDataType32Bits(dataType))
+                        || (isF64Supported() && isDataType64Bits(dataType)))
+                    && isDataTypeComplex(dataType));
+        case HIPTENSOR_COMPUTE_DESC_C64F:
+            return (isF64MatrixCoreSupported() && (isF64Supported() && isDataType64Bits(dataType))
+                    && isDataTypeComplex(dataType));
+        default:
+            return false;
+        }
     }
 
     bool ContractionTest::checkSizes() const
@@ -263,7 +286,7 @@ namespace hiptensor
                     || (computeType == HIPTENSOR_COMPUTE_DESC_C32F)
                     || (computeType == HIPTENSOR_COMPUTE_DESC_C64F));
 
-        mRunFlag &= checkDevice(DDataType);
+        mRunFlag &= checkDevice(DDataType, computeType);
 
         if(!mRunFlag)
         {
@@ -494,14 +517,15 @@ namespace hiptensor
                 d_ms_ns,
                 cd_ms_ns_modes.data(),
                 computeType));
-#if 0 // TODO
+
             hiptensorDataType_t scalarType;
-            CHECK_HIPTENSOR_ERROR(hiptensorOperationDescriptorGetAttribute(handle,
-                        desc,
-                        HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE,
-                        (void*)&scalarType,
-                        sizeof(scalarType)));
-#endif
+            CHECK_HIPTENSOR_ERROR(
+                hiptensorOperationDescriptorGetAttribute(handle,
+                                                         desc,
+                                                         HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE,
+                                                         (void*)&scalarType,
+                                                         sizeof(scalarType)));
+            assert(scalarType == *hiptensor::convertToHipTensorDataType(computeType));
 
             /**************************
             * Set the algorithm to use

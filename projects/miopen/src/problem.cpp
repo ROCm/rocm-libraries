@@ -142,6 +142,24 @@ static Data_t AllocateTensor(const Handle& handle,
     return allocated;
 }
 
+static FindOptions::Workspace AllocateWorkspace(const Handle& handle,
+                                                const FindOptions& options,
+                                                std::vector<Allocator::ManageDataPtr>& owned,
+                                                std::size_t size)
+{
+    const auto preallocated = options.preallocated_workspace.has_value();
+
+    if(preallocated)
+        return options.preallocated_workspace.value();
+
+    size        = std::min(size, options.workspace_limit);
+    auto buffer = handle.Create(size);
+    FindOptions::Workspace allocated{buffer.get(), size};
+
+    owned.emplace_back(std::move(buffer));
+    return allocated;
+}
+
 static void SortFindResults(const FindOptions& options, std::vector<Solution>& results)
 {
     std::sort(results.begin(),
@@ -534,11 +552,18 @@ std::vector<Solution> Problem::FindSolutionsImpl(const Handle& handle,
             const auto conv_solution =
                 result.GetSolver().GetSolver().FindSolution(ctx, conv_problem, db, invoke_ctx);
 
-            std::vector<Program> programs;
-            auto invoker = handle.PrepareInvoker(*conv_solution.invoker_factory,
-                                                 conv_solution.construction_params,
-                                                 options.attach_binaries ? &programs : nullptr);
-            result.SetInvoker(std::move(invoker), programs, conv_solution.construction_params);
+            if(conv_solution.invoker_factory.has_value())
+            {
+                std::vector<Program> programs;
+                auto invoker = handle.PrepareInvoker(*conv_solution.invoker_factory,
+                                                     conv_solution.construction_params,
+                                                     options.attach_binaries ? &programs : nullptr);
+                result.SetInvoker(std::move(invoker), programs, conv_solution.construction_params);
+            }
+            else
+            {
+                MIOPEN_LOG_E("Error: solution without invoker factory.");
+            }
         }
     }
     return results;
@@ -969,12 +994,16 @@ std::vector<Solution> FusedProblem::FindSolutions(const Handle& handle,
         auto owned_buffers = std::vector<Allocator::ManageDataPtr>{};
         auto owned_scalars = std::vector<std::uint64_t>{};
 
-        const auto make_invoke_params = [&]() {
+        const auto make_invoke_params = [&](std::size_t ws_size) {
             auto buffer_allocator = [&](auto id, auto&& desc) {
                 return AllocateTensor(handle, options, owned_buffers, owned_scalars, id, desc);
             };
 
-            return MakeInvokeParams(buffer_allocator, params);
+            auto workspace_allocator = [&]() {
+                return AllocateWorkspace(handle, options, owned_buffers, ws_size);
+            };
+
+            return MakeInvokeParams(buffer_allocator, workspace_allocator, params);
         };
 
         return AsFusionPlan().Find(handle, make_invoke_params, options);
@@ -1053,6 +1082,7 @@ void FusedProblem::AddProblemToPlan(FusionPlanDescriptor& plan, const Problem& p
 
 fusion::FusionInvokeParams FusedProblem::MakeInvokeParams(
     const std::function<Data_t(miopenTensorArgumentId_t, const TensorDescriptor&)>& buffer_getter,
+    const std::function<FindOptions::Workspace(void)>& workspace_getter,
     OperatorArgs& operator_args) const
 {
     auto buffers   = std::unordered_map<miopenTensorArgumentId_t, Data_t>{};
@@ -1180,7 +1210,10 @@ fusion::FusionInvokeParams FusedProblem::MakeInvokeParams(
             problem.operator_descriptor);
     }
 
-    return {operator_args, in_desc, in, out_desc, out, gfx90aaltimpl};
+    FindOptions::Workspace workspace = workspace_getter();
+
+    return {
+        operator_args, in_desc, in, out_desc, out, gfx90aaltimpl, workspace.buffer, workspace.size};
 }
 
 FusionPlanDescriptor FusedProblem::AsFusionPlan() const

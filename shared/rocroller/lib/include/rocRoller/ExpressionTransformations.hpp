@@ -100,6 +100,11 @@ namespace rocRoller
         ExpressionPtr splitBitfieldCombine(ExpressionPtr expr);
 
         /**
+         * Splits uint64_t literal operands in a Concatenate expression into two Raw32 operands.
+         */
+        Concatenate splitConcatenate(Concatenate const& expr);
+
+        /**
          * @brief Simplify expressions
          *
          * @param expr Input expression

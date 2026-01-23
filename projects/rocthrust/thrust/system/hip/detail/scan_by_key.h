@@ -377,7 +377,7 @@ ValOutputIt THRUST_HOST_DEVICE inclusive_scan_by_key(
       return thrust::hip_rocprim::__scan_by_key::inclusive_scan_by_key(
         policy, key_first, key_last, value_first, value_result, binary_pred, scan_op);
     }
-
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static ValOutputIt
     seq(execution_policy<Derived>& policy,
         KeyInputIt key_first,
@@ -390,8 +390,8 @@ ValOutputIt THRUST_HOST_DEVICE inclusive_scan_by_key(
       return thrust::inclusive_scan_by_key(
         cvt_to_seq(derived_cast(policy)), key_first, key_last, value_first, value_result, binary_pred, scan_op);
     }
+#  endif
   };
-
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, key_first, key_last, value_first, value_result, binary_pred, scan_op);
 #  else
@@ -456,7 +456,7 @@ ValOutputIt THRUST_HOST_DEVICE exclusive_scan_by_key(
       return thrust::hip_rocprim::__scan_by_key::exclusive_scan_by_key(
         policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
     }
-
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static ValOutputIt
     seq(execution_policy<Derived>& policy,
         KeyInputIt key_first,
@@ -470,6 +470,7 @@ ValOutputIt THRUST_HOST_DEVICE exclusive_scan_by_key(
       return thrust::exclusive_scan_by_key(
         cvt_to_seq(derived_cast(policy)), key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
     }
+#  endif
   };
 
 #  if __THRUST_HAS_HIPRT__

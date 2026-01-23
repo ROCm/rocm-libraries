@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -176,19 +153,24 @@ struct UniversalTransposeSolver : TransposePseudoSolver
         auto sln = ConvSolution{};
 
         {
-            auto transposeKernel = KernelInfo{};
-
             const auto tensor_space = problem.input.GetElementSize();
             const auto cus          = ctx.GetStream().GetMaxComputeUnits();
-            const auto group_size   = std::min(tensor_space, cus);
-
             const auto build_params = GetDataTypeKBP(problem.input.GetType());
 
-            transposeKernel.kernel_file  = "UniversalTranspose.cl";
+            constexpr std::size_t max_block_size = 256;
+            const auto local_size                = max_block_size;
+            const auto num_blocks =
+                std::max<std::size_t>(1, (tensor_space + local_size - 1) / local_size);
+            const auto capped_blocks = std::min<std::size_t>(num_blocks, cus * 4);
+            const auto global_size   = capped_blocks * local_size;
+
+            auto transposeKernel = KernelInfo{};
+            transposeKernel.g_wk = {global_size, 1, 1};
+            transposeKernel.l_wk = {local_size, 1, 1};
+
+            transposeKernel.kernel_file  = "UniversalTranspose.cpp";
             transposeKernel.kernel_name  = "UniversalTranspose";
-            transposeKernel.g_wk         = {group_size * 16, 1, 1};
-            transposeKernel.l_wk         = {group_size * 16, 1, 1};
-            transposeKernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+            transposeKernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
             sln.construction_params.emplace_back(std::move(transposeKernel));
         }
@@ -465,7 +447,8 @@ struct TransposingSolver : Base
         for(const auto& transpose : Derived::GetTransposes())
         {
             const auto& descriptor = (transposed_problem.*(transpose.cdescriptor))();
-            ws_size += descriptor.GetElementSpace();
+            const auto e_size      = get_data_size(descriptor.GetType());
+            ws_size += descriptor.GetElementSpace() * e_size;
         }
 
         return ws_size;
@@ -473,9 +456,10 @@ struct TransposingSolver : Base
 
     ConvSolution GetSolution(const ExecutionContext& ctx, const Problem& problem) const override
     {
-        auto transposed_problem      = Transpose(problem);
-        ConvSolution sln             = Inner{}.GetSolution(ctx, transposed_problem);
-        auto old_factory             = *sln.invoker_factory;
+        auto transposed_problem = Transpose(problem);
+        ConvSolution sln        = Inner{}.GetSolution(ctx, transposed_problem);
+        // NOLINTNEXTLINE (bugprone-unchecked-optional-access)
+        auto old_factory             = sln.invoker_factory.value();
         const auto old_kernels_end   = sln.construction_params.size();
         const auto transpose_solvers = Derived::GetTransposeSolversMap();
 

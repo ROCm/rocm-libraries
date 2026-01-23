@@ -159,6 +159,9 @@ inline void set_input(std::vector<gpubuf>&       input,
                       const Tint1&               field_contig_stride,
                       const size_t               field_contig_dist)
 {
+    if(igen == fft_input_generator_host || igen == fft_input_random_generator_host)
+        throw std::runtime_error("Host input generation is not available for gpu buffers");
+
     auto isize = count_iters(whole_length) * nbatch;
 
     switch(itype)
@@ -284,6 +287,9 @@ inline void set_input(std::vector<hostbuf>&      input,
                       const Tint1                field_contig_stride,
                       const size_t               field_contig_dist)
 {
+    if(igen == fft_input_generator_device || igen == fft_input_random_generator_device)
+        throw std::runtime_error("Device input generation is not available for host buffers");
+
     switch(itype)
     {
     case fft_array_type_complex_interleaved:
@@ -1468,7 +1474,7 @@ public:
         std::vector<size_t> ibuffer_sizes;
 
         // In-place real-to-complex transforms need to have enough space in the input buffer to
-        // accomadate the output, which is slightly larger.
+        // accommodate the output, which is slightly larger.
         if(placement == fft_placement_inplace && transform_type == fft_transform_type_real_forward)
         {
             return obuffer_sizes();
@@ -2614,7 +2620,7 @@ static bool lexical_cast(const std::string& word, fft_params::fft_mp_lib& mp_lib
 }
 
 // This is used with CLI11 so that the user can type an integer on the
-// command line and we store into an enum varaible
+// command line and we store into an enum variable
 template <typename _Elem, typename _Traits>
 std::basic_istream<_Elem, _Traits>& operator>>(std::basic_istream<_Elem, _Traits>& stream,
                                                fft_array_type&                     atype)

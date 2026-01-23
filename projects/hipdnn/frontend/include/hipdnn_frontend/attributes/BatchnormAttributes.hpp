@@ -4,14 +4,12 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_sdk/data_objects/batchnorm_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 class BatchnormAttributes : public Attributes<BatchnormAttributes>
 {
@@ -261,7 +259,7 @@ public:
             .set_momentum(std::move(momentum));
     }
 
-    flatbuffers::Offset<hipdnn_sdk::data_objects::BatchnormAttributes>
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::BatchnormAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
         auto peerStatsVector = std::vector<int64_t>{};
@@ -281,7 +279,7 @@ public:
         auto nextRunningMean = get_next_running_mean();
         auto nextRunningVariance = get_next_running_variance();
 
-        return hipdnn_sdk::data_objects::CreateBatchnormAttributesDirect(
+        return hipdnn_data_sdk::data_objects::CreateBatchnormAttributesDirect(
             builder,
             get_x()->get_uid(),
             get_scale()->get_uid(),
@@ -303,50 +301,64 @@ public:
                                 : flatbuffers::nullopt);
     }
 
-private:
-    std::shared_ptr<TensorAttributes> getInput(InputNames name) const
+    static BatchnormAttributes fromFlatBuffer(
+        const hipdnn_data_sdk::data_objects::BatchnormAttributes* fb,
+        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
     {
-        auto it = inputs.find(name);
-        if(it != inputs.end())
+        BatchnormAttributes attr;
+
+        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
+        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
+        attr.set_bias(tensorMap.at(fb->bias_tensor_uid()));
+        attr.set_epsilon(tensorMap.at(fb->epsilon_tensor_uid()));
+
+        std::vector<std::shared_ptr<TensorAttributes>> peerStats;
+        if(fb->peer_stats_tensor_uid() != nullptr)
         {
-            return it->second;
+            for(auto uid : *fb->peer_stats_tensor_uid())
+            {
+                peerStats.push_back(tensorMap.at(uid));
+            }
         }
-        return nullptr;
-    }
+        attr.set_peer_stats(peerStats);
 
-    std::shared_ptr<TensorAttributes> getOutput(OutputNames name) const
-    {
-        auto it = outputs.find(name);
-        if(it != outputs.end())
+        if(fb->prev_running_mean_tensor_uid().has_value())
         {
-            return it->second;
+            attr.set_prev_running_mean(tensorMap.at(fb->prev_running_mean_tensor_uid().value()));
         }
-        return nullptr;
-    }
+        if(fb->prev_running_variance_tensor_uid().has_value())
+        {
+            attr.set_prev_running_variance(
+                tensorMap.at(fb->prev_running_variance_tensor_uid().value()));
+        }
+        if(fb->momentum_tensor_uid().has_value())
+        {
+            attr.set_momentum(tensorMap.at(fb->momentum_tensor_uid().value()));
+        }
 
-    BatchnormAttributes& setInput(InputNames name, const std::shared_ptr<TensorAttributes>& value)
-    {
-        inputs[name] = value;
-        return *this;
-    }
-    BatchnormAttributes& setInput(InputNames name, std::shared_ptr<TensorAttributes>&& value)
-    {
-        inputs[name] = std::move(value);
-        return *this;
-    }
+        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
 
-    BatchnormAttributes& setOutput(OutputNames name, const std::shared_ptr<TensorAttributes>& value)
-    {
-        outputs[name] = value;
-        return *this;
-    }
-    BatchnormAttributes& setOutput(OutputNames name, std::shared_ptr<TensorAttributes>&& value)
-    {
-        outputs[name] = std::move(value);
-        return *this;
+        if(fb->mean_tensor_uid().has_value())
+        {
+            attr.set_mean(tensorMap.at(fb->mean_tensor_uid().value()));
+        }
+        if(fb->inv_variance_tensor_uid().has_value())
+        {
+            attr.set_inv_variance(tensorMap.at(fb->inv_variance_tensor_uid().value()));
+        }
+        if(fb->next_running_mean_tensor_uid().has_value())
+        {
+            attr.set_next_running_mean(tensorMap.at(fb->next_running_mean_tensor_uid().value()));
+        }
+        if(fb->next_running_variance_tensor_uid().has_value())
+        {
+            attr.set_next_running_variance(
+                tensorMap.at(fb->next_running_variance_tensor_uid().value()));
+        }
+
+        return attr;
     }
 };
 
 typedef BatchnormAttributes Batchnorm_attributes;
-}
-}
+} // namespace hipdnn_frontend::graph

@@ -51,21 +51,17 @@
 
 #include <../test/cpu_bias.hpp>
 #include <../test/cpu_conv.hpp>
-#include <../test/serialize.hpp>
 #include <../test/tensor_holder.hpp>
 #include <../test/verify.hpp>
 
-#include <boost/optional.hpp>
-#include <boost/optional/optional_io.hpp>
 #include <boost/range/adaptors.hpp>
 
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
-#include <float.h>
 #include <fstream>
 #include <memory>
-#include <numeric>
+#include <optional>
 #include <sstream>
 #include <type_traits>
 #include <vector>
@@ -350,7 +346,7 @@ private:
 
     InputFlags inflags;
 
-    boost::optional<uint64_t> immediate_solution;
+    std::optional<uint64_t> immediate_solution;
 
     GpumemTensor<Tgpu> in;
     GpumemVector<Tgpu> din;
@@ -459,7 +455,8 @@ private:
 
         { // tf32 has same mantissa length as fp16
             auto math_type_ = inflags.GetValueInt("math_type");
-            if(std::is_same_v<Tgpu, float> && (miopen::EnvEnableTF32() || math_type_))
+            if(std::is_same_v<Tgpu, float> &&
+               (miopen::EnvEnableTF32() || (math_type_ == miopenMathDefault)))
                 tolerance = 8.2e-3;
         }
         return tolerance;
@@ -1030,7 +1027,7 @@ int ConvDriver<Tgpu, Tref>::AddCmdLineArgs()
                          "0",
                          "MIOpen tuning policy (Default=0, or no tuning policy set)",
                          "int");
-    // TODO:(LYM) change back to 0
+    // TODO:(LYM) change back to 0 when TF32 is fully supported
     inflags.AddInputFlag("math_type", 'M', "1", "math type of compute (Default=1)", "int");
 
     return 0;

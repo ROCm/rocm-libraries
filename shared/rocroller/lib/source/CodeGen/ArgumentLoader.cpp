@@ -116,10 +116,23 @@ namespace rocRoller
             co_return;
         }
 
-        auto argPtr = argumentPointer();
+        auto        argPtr         = argumentPointer();
+        auto const& launchTimeOnly = m_kernel->launchTimeOnlyArguments();
+
         // TODO: coalesce loads when possible
         for(auto const& arg : args)
         {
+            // Skip loading arguments that are only used at launch time
+            // (for expression evaluation) and not during kernel execution
+            if(launchTimeOnly.contains(arg.name))
+            {
+                Log::debug("Skipping load of launch-time-only arg {}", arg.name);
+                co_yield Instruction::Comment(
+                    concatenate("Skipping load of launch-time-only arg ", arg.name));
+                continue;
+            }
+
+            Log::debug("Loading argument {}", arg.name);
             auto numRegisters = std::max(1u, arg.size / (Register::bitsPerRegister / 8));
             auto r            = Register::Value::Placeholder(m_context.lock(),
                                                   Register::Type::Scalar,

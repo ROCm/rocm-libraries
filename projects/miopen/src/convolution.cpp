@@ -470,9 +470,7 @@ std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,
 
 bool ConvolutionDescriptor::EnableTF32() const
 {
-    /* true only when both EnvEnableTF32() and (MathType==Default) are true. */
-    // temporarily disable TF32 until tf32 feature are fully complete validated with database.
-    // TODO:(LYM) change back to &&
+    // TODO:(LYM) change back to && when TF32 is fully supported
     if((miopen::EnvEnableTF32() ||
         (static_cast<miopenMathType_t>(attribute.Get(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE)) ==
          miopenMathDefault)))

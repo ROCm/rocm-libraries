@@ -4,6 +4,7 @@
 #include "gtest/internal/gtest-port.h"
 #include <fcntl.h>
 #include <fstream>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <iostream>
 #include <regex>
@@ -11,8 +12,8 @@
 #include <thread>
 #include <vector>
 
-#include <hipdnn_sdk/test_utilities/ScopedEnvironmentVariableSetter.hpp>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <logging/Logging.hpp>
 
 class TestBackendLogger : public ::testing::Test
@@ -21,25 +22,25 @@ protected:
     std::string _logFile;
     std::array<int, 2> _stderrPipe;
     int _oldStderr;
-    std::unique_ptr<hipdnn_sdk::test_utilities::ScopedEnvironmentVariableSetter> _logLevelGuard;
-    std::unique_ptr<hipdnn_sdk::test_utilities::ScopedEnvironmentVariableSetter> _logFileGuard;
+    std::unique_ptr<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _logLevelGuard;
+    std::unique_ptr<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _logFileGuard;
 
 public:
     void SetUp() override
     {
         _logLevelGuard
-            = std::make_unique<hipdnn_sdk::test_utilities::ScopedEnvironmentVariableSetter>(
+            = std::make_unique<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter>(
                 "HIPDNN_LOG_LEVEL");
         _logFileGuard
-            = std::make_unique<hipdnn_sdk::test_utilities::ScopedEnvironmentVariableSetter>(
+            = std::make_unique<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter>(
                 "HIPDNN_LOG_FILE");
 
         hipdnn_backend::logging::cleanup();
 
         testing::internal::CaptureStderr();
 
-        hipdnn_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "off");
-        hipdnn_sdk::utilities::unsetEnv("HIPDNN_LOG_FILE");
+        hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "off");
+        hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_LOG_FILE");
     }
 
     void TearDown() override
@@ -94,7 +95,7 @@ TEST_F(TestBackendLogger, MacrosDontLogWhenOff)
 
 TEST_F(TestBackendLogger, MacrosRespectLogLevelInfo)
 {
-    hipdnn_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
 
     HIPDNN_LOG_INFO("Info test message");
     HIPDNN_LOG_WARN("Warn test message");
@@ -108,7 +109,7 @@ TEST_F(TestBackendLogger, MacrosRespectLogLevelInfo)
 
 TEST_F(TestBackendLogger, MacrosRespectLogLevelWarn)
 {
-    hipdnn_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "warn");
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "warn");
 
     HIPDNN_LOG_INFO("Info should not appear");
     HIPDNN_LOG_WARN("Warn should appear");
@@ -122,7 +123,7 @@ TEST_F(TestBackendLogger, MacrosRespectLogLevelWarn)
 
 TEST_F(TestBackendLogger, MacrosRespectLogLevelError)
 {
-    hipdnn_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "error");
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "error");
 
     HIPDNN_LOG_INFO("Info should not appear");
     HIPDNN_LOG_WARN("Warn should not appear");
@@ -136,12 +137,12 @@ TEST_F(TestBackendLogger, MacrosRespectLogLevelError)
 
 TEST_F(TestBackendLogger, LoggingCanBeReinitialized)
 {
-    hipdnn_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "off");
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "off");
     HIPDNN_LOG_INFO("This should not appear");
 
     hipdnn_backend::logging::cleanup();
 
-    hipdnn_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
     HIPDNN_LOG_INFO("This should appear after reinitialization");
 
     verifyStderrContains("This should appear after reinitialization");
@@ -149,7 +150,7 @@ TEST_F(TestBackendLogger, LoggingCanBeReinitialized)
 
 TEST_F(TestBackendLogger, LogPatternFormatIsCorrectOnStderr)
 {
-    hipdnn_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
 
     HIPDNN_LOG_INFO("Pattern format test message");
 
@@ -165,7 +166,7 @@ TEST_F(TestBackendLogger, LogPatternFormatIsCorrectOnStderr)
 
 TEST_F(TestBackendLogger, MultipleMessagesAreLoggedToStderr)
 {
-    hipdnn_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
 
     HIPDNN_LOG_INFO("First backend message");
     HIPDNN_LOG_INFO("Second backend message");
@@ -188,8 +189,8 @@ TEST_F(TestBackendLogger, MultipleMessagesAreLoggedToStderr)
 TEST_F(TestBackendLogger, LogFileCanBeSpecifiedByEnvVar)
 {
     _logFile = "custom_backend_test.log";
-    hipdnn_sdk::utilities::setEnv("HIPDNN_LOG_FILE", _logFile.c_str());
-    hipdnn_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_FILE", _logFile.c_str());
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
 
     HIPDNN_LOG_INFO("Logging to custom file");
 
@@ -210,4 +211,41 @@ TEST_F(TestBackendLogger, LogFileCanBeSpecifiedByEnvVar)
         << logContent;
 
     verifyStderrNotContains("Logging to custom file");
+}
+
+TEST_F(TestBackendLogger, ParamsAreNotExpandedIfLogLevelIsDisabled)
+{
+    bool wasCalledForInfo = false;
+    bool wasCalledForWarn = false;
+    bool wasCalledForError = false;
+    bool wasCalledForFatal = false;
+    std::string infoMessage("info log message");
+    std::string warnMessage("warn log message");
+    std::string errorMessage("error log message");
+    std::string fatalMessage("fatal log message");
+    auto trackingLambda = [](bool& wasCalled, std::string message) {
+        wasCalled = true;
+        return message;
+    };
+
+    // Set level to error so info and warn should be ignored
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "error");
+
+    HIPDNN_LOG_INFO(trackingLambda(wasCalledForInfo, infoMessage));
+    HIPDNN_LOG_WARN(trackingLambda(wasCalledForWarn, warnMessage));
+    HIPDNN_LOG_ERROR(trackingLambda(wasCalledForError, errorMessage));
+    HIPDNN_LOG_FATAL(trackingLambda(wasCalledForFatal, fatalMessage));
+
+    std::string logContent = getStderrContent();
+
+    EXPECT_THAT(logContent, ::testing::Not(::testing::HasSubstr(infoMessage)));
+    EXPECT_THAT(logContent, ::testing::Not(::testing::HasSubstr(infoMessage)));
+    EXPECT_THAT(logContent, ::testing::Not(::testing::HasSubstr(warnMessage)));
+    EXPECT_THAT(logContent, ::testing::Not(::testing::HasSubstr(warnMessage)));
+    EXPECT_THAT(logContent, ::testing::HasSubstr(errorMessage));
+    EXPECT_THAT(logContent, ::testing::HasSubstr(fatalMessage));
+    EXPECT_FALSE(wasCalledForInfo);
+    EXPECT_FALSE(wasCalledForWarn);
+    EXPECT_TRUE(wasCalledForError);
+    EXPECT_TRUE(wasCalledForFatal);
 }

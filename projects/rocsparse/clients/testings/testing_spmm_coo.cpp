@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -22,8 +22,6 @@
 * ************************************************************************ */
 
 #include "testing.hpp"
-
-#include <algorithm>
 
 template <typename I, typename A, typename B, typename C, typename T>
 void testing_spmm_coo_bad_arg(const Arguments& arg)
@@ -146,6 +144,10 @@ void testing_spmm_coo(const Arguments& arg)
                             nnz_A,
                             base);
 
+    // Redefine values
+    rocsparse_init_1d_array<A>(
+        hcoo_val, nnz_A, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
+
     // Some matrix properties
     I A_m = (trans_A == rocsparse_operation_none) ? M : K;
     I A_n = (trans_A == rocsparse_operation_none) ? K : M;
@@ -181,8 +183,8 @@ void testing_spmm_coo(const Arguments& arg)
     host_vector<C> hC_gold(nnz_C, 0);
 
     // Initialize data on CPU
-    rocsparse_init<B>(hB, nnz_B, 1, 1, arg.convert_to_int);
-    rocsparse_init<C>(hC_1, nnz_C, 1, 1, arg.convert_to_int);
+    rocsparse_init_1d_array<B>(hB, nnz_B, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
+    rocsparse_init_1d_array<C>(hC_1, nnz_C, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
 
     hC_2    = hC_1;
     hC_gold = hC_1;
@@ -402,5 +404,9 @@ INSTANTIATE_MIXED(int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_MIXED(int64_t, _Float16, _Float16, float, float);
 INSTANTIATE_MIXED(int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
 INSTANTIATE_MIXED(int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_MIXED(int32_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_MIXED(int64_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_MIXED(int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_MIXED(int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16, float);
 
 void testing_spmm_coo_extra(const Arguments& arg) {}

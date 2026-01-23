@@ -10,9 +10,7 @@
 
 #include "PluginCore.hpp"
 
-namespace hipdnn_backend
-{
-namespace plugin
+namespace hipdnn_backend::plugin
 {
 
 class EnginePlugin : public PluginBase
@@ -112,5 +110,4 @@ private:
     friend class PluginManagerBase<EnginePlugin>;
 };
 
-} // namespace plugin
-} // hipdnn_backend
+} // namespace hipdnn_backend::plugin

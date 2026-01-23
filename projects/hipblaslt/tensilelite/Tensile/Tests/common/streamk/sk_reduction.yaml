@@ -219,8 +219,8 @@ BenchmarkProblems:
           - Exact: [32, 8, 1, 34576]
           - Exact: [32, 8, 1, 34832]
 
-  - # Leading dimensions
-    - # HHS NT
+  - # Large leading dimensions
+    - # S TN
       OperationType: GEMM
       DataType: s
       DestDataType: s
@@ -277,3 +277,54 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [320, 1024, 1, 29280, 138080, 138080, 29280, 29280]
+
+  - # Small leading dimensions
+    - # BBS NT
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # Grid
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - PrefetchLocalRead: [True]
+      ForkParameters:
+        # - 1LDSBuffer: [1]
+        - 1LDSBuffer: [0]
+        - DepthU: [ 64 ]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - GlobalSplitU: [0]
+        # - LocalReadVectorWidth: [8]
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 8,6, 2,2]
+          # - [16, 16, 16, 1, 1, 4,4, 2,2]
+        - MIArchVgpr: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StoreRemapVectorWidth: [0]
+        # - StoreVectorWidth: [4]
+        - StreamK: [3]
+        - TransposeLDS: [0]
+        # - VectorWidthA: [4]
+        # - VectorWidthB: [4]
+        - WorkGroupMapping: [1]
+        - NumLoadsCoalescedA: [2]
+        - DirectToLds: [1]
+
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1164, 185, 1, 884736, 1216, 1216, 1216, 185]

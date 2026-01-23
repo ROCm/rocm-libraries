@@ -252,19 +252,14 @@ namespace rocRollerTest
         control.addElement(Initialize(), {forOp}, {forInit});
         control.addElement(ForLoopIncrement(), {forOp}, {forInc});
 
-        int scope1 = control.addElement(Scope());
-        control.addElement(Body(), {forOp}, {scope1});
         int assign1 = control.addElement(Assign());
-        control.addElement(Body(), {scope1}, {assign1});
+        control.addElement(Body(), {forOp}, {assign1});
 
         int loadC = control.addElement(LoadLinear(DataType::Float));
         control.addElement(Sequence(), {assign1}, {loadC});
 
-        int scope2 = control.addElement(Scope());
-        control.addElement(Body(), {forOp}, {scope2});
-
         int assign2 = control.addElement(Assign());
-        control.addElement(Body(), {scope2}, {assign2});
+        control.addElement(Body(), {forOp}, {assign2});
 
         int loadD = control.addElement(LoadLinear(DataType::Float));
         control.addElement(Sequence(), {assign2}, {loadD});
@@ -303,7 +298,6 @@ namespace rocRollerTest
         // It doesn't walk up ForLoopIncrement edges yet.
         EXPECT_EQ(std::set({scope3, mul, storeE}), control.nodesAfter(forInc).to<std::set>());
 
-        EXPECT_EQ(std::set({forOp, scope2, kernel}), control.nodesContaining(loadD).to<std::set>());
         EXPECT_EQ(std::set({scope3, kernel}), control.nodesContaining(storeE).to<std::set>());
 
         {
@@ -321,11 +315,6 @@ namespace rocRollerTest
 
                 EXPECT_EQ(NodeOrdering::LeftFirst, control.compareNodes(policy, loadC, storeD));
                 EXPECT_EQ(NodeOrdering::LeftFirst, control.compareNodes(policy, loadD, storeD));
-
-                EXPECT_EQ(NodeOrdering::RightInBodyOfLeft,
-                          control.compareNodes(policy, scope1, storeD));
-                EXPECT_EQ(NodeOrdering::RightInBodyOfLeft,
-                          control.compareNodes(policy, scope2, storeD));
             };
             checkOrder(rocRoller::UpdateCache);
             checkOrder(rocRoller::CacheOnly);
@@ -333,28 +322,50 @@ namespace rocRollerTest
             checkOrder(rocRoller::IgnoreCache);
         }
 
+        {
+            auto bodyParents = KernelGraph::bodyParents(forInit, control).to<std::vector>();
+            EXPECT_EQ((std::vector{forOp, kernel}), bodyParents);
+
+            auto stack = KernelGraph::controlStack(forInit, control);
+            EXPECT_EQ((std::deque{kernel, forOp, forInit}), stack);
+        }
+
+        {
+            auto bodyParents = KernelGraph::bodyParents(storeD, control).to<std::vector>();
+            EXPECT_EQ((std::vector{forOp, kernel}), bodyParents);
+
+            auto stack = KernelGraph::controlStack(storeD, control);
+            EXPECT_EQ((std::deque{kernel, forOp, storeD}), stack);
+        }
+
+        {
+            auto bodyParents = KernelGraph::bodyParents(storeE, control).to<std::vector>();
+            EXPECT_EQ((std::vector{scope3, kernel}), bodyParents);
+
+            auto stack = KernelGraph::controlStack(storeE, control);
+            EXPECT_EQ((std::deque{kernel, scope3, storeE}), stack);
+        }
+
         std::string expectedTable = R".(
-               \   1   2   3   6   9  11  12  15  17  19  21  23  25  27  30  32  34  36
-              1| --- RIB RIB RIB RIB RIB RIB RIB RIB RIB RIB RIB RIB RIB RIB RIB RIB RIB |   1
-              2| LIB --- und  LF  LF  LF  LF  LF  LF  LF  LF  LF  LF  LF  LF  LF  LF  LF |   2
-              3| LIB und ---  LF und und und und und und und und und und und und und und |   3
-              6| LIB  RF  RF --- und und und und und und und und und und und und und und |   6
-              9| LIB  RF und und --- RIB RIB RIB RIB RIB RIB RIB RIB RIB RIB  LF  LF  LF |   9
-             11| LIB  RF und und LIB ---  LF  LF  LF  LF  LF  LF  LF  LF  LF  LF  LF  LF |  11
-             12| LIB  RF und und LIB  RF ---  RF  RF  RF  RF  RF  RF  RF  RF  LF  LF  LF |  12
-             15| LIB  RF und und LIB  RF  LF --- RIB RIB und und und RIB RIB  LF  LF  LF |  15
-             17| LIB  RF und und LIB  RF  LF LIB ---  LF und und und  LF  LF  LF  LF  LF |  17
-             19| LIB  RF und und LIB  RF  LF LIB  RF --- und und und  LF  LF  LF  LF  LF |  19
-             21| LIB  RF und und LIB  RF  LF und und und --- RIB RIB RIB RIB  LF  LF  LF |  21
-             23| LIB  RF und und LIB  RF  LF und und und LIB ---  LF  LF  LF  LF  LF  LF |  23
-             25| LIB  RF und und LIB  RF  LF und und und LIB  RF ---  LF  LF  LF  LF  LF |  25
-             27| LIB  RF und und LIB  RF  LF LIB  RF  RF LIB  RF  RF ---  LF  LF  LF  LF |  27
-             30| LIB  RF und und LIB  RF  LF LIB  RF  RF LIB  RF  RF  RF ---  LF  LF  LF |  30
-             32| LIB  RF und und  RF  RF  RF  RF  RF  RF  RF  RF  RF  RF  RF --- RIB RIB |  32
-             34| LIB  RF und und  RF  RF  RF  RF  RF  RF  RF  RF  RF  RF  RF LIB ---  LF |  34
-             36| LIB  RF und und  RF  RF  RF  RF  RF  RF  RF  RF  RF  RF  RF LIB  RF --- |  36
-               |   1   2   3   6   9  11  12  15  17  19  21  23  25  27  30  32  34  36
-        ).";
+               \   1   2   3   6   9  11  12  15  17  19  21  23  26  28  30  32
+              1| --- RIB RIB RIB RIB RIB RIB RIB RIB RIB RIB RIB RIB RIB RIB RIB |   1
+              2| LIB --- und  LF  LF  LF  LF  LF  LF  LF  LF  LF  LF  LF  LF  LF |   2
+              3| LIB und ---  LF und und und und und und und und und und und und |   3
+              6| LIB  RF  RF --- und und und und und und und und und und und und |   6
+              9| LIB  RF und und --- RIB RIB RIB RIB RIB RIB RIB RIB  LF  LF  LF |   9
+             11| LIB  RF und und LIB ---  LF  LF  LF  LF  LF  LF  LF  LF  LF  LF |  11
+             12| LIB  RF und und LIB  RF ---  RF  RF  RF  RF  RF  RF  LF  LF  LF |  12
+             15| LIB  RF und und LIB  RF  LF ---  LF und und  LF  LF  LF  LF  LF |  15
+             17| LIB  RF und und LIB  RF  LF  RF --- und und  LF  LF  LF  LF  LF |  17
+             19| LIB  RF und und LIB  RF  LF und und ---  LF  LF  LF  LF  LF  LF |  19
+             21| LIB  RF und und LIB  RF  LF und und  RF ---  LF  LF  LF  LF  LF |  21
+             23| LIB  RF und und LIB  RF  LF  RF  RF  RF  RF ---  LF  LF  LF  LF |  23
+             26| LIB  RF und und LIB  RF  LF  RF  RF  RF  RF  RF ---  LF  LF  LF |  26
+             28| LIB  RF und und  RF  RF  RF  RF  RF  RF  RF  RF  RF --- RIB RIB |  28
+             30| LIB  RF und und  RF  RF  RF  RF  RF  RF  RF  RF  RF LIB ---  LF |  30
+             32| LIB  RF und und  RF  RF  RF  RF  RF  RF  RF  RF  RF LIB  RF --- |  32
+               |   1   2   3   6   9  11  12  15  17  19  21  23  26  28  30  32
+                    ).";
 
         EXPECT_EQ(NormalizedSource(expectedTable),
                   NormalizedSource(control.nodeOrderTableString()));
@@ -376,29 +387,25 @@ namespace rocRollerTest
             "12"[label="Assign Count nullptr(12)"];
             "13"[label="Initialize(13)",shape=box];
             "14"[label="ForLoopIncrement(14)",shape=box];
-            "15"[label="Scope(15)"];
+            "15"[label="Assign Count nullptr(15)"];
             "16"[label="Body(16)",shape=box];
-            "17"[label="Assign Count nullptr(17)"];
-            "18"[label="Body(18)",shape=box];
-            "19"[label="LoadLinear Value: Float(19)"];
-            "20"[label="Sequence(20)",shape=box];
-            "21"[label="Scope(21)"];
-            "22"[label="Body(22)",shape=box];
+            "17"[label="LoadLinear Value: Float(17)"];
+            "18"[label="Sequence(18)",shape=box];
+            "19"[label="Assign Count nullptr(19)"];
+            "20"[label="Body(20)",shape=box];
+            "21"[label="LoadLinear Value: Float(21)"];
+            "22"[label="Sequence(22)",shape=box];
             "23"[label="Assign Count nullptr(23)"];
-            "24"[label="Body(24)",shape=box];
-            "25"[label="LoadLinear Value: Float(25)"];
-            "26"[label="Sequence(26)",shape=box];
-            "27"[label="Assign Count nullptr(27)"];
-            "28"[label="Sequence(28)",shape=box];
+            "24"[label="Sequence(24)",shape=box];
+            "25"[label="Sequence(25)",shape=box];
+            "26"[label="StoreLinear(26)"];
+            "27"[label="Sequence(27)",shape=box];
+            "28"[label="Scope(28)"];
             "29"[label="Sequence(29)",shape=box];
-            "30"[label="StoreLinear(30)"];
-            "31"[label="Sequence(31)",shape=box];
-            "32"[label="Scope(32)"];
+            "30"[label="Assign Count nullptr(30)"];
+            "31"[label="Body(31)",shape=box];
+            "32"[label="StoreLinear(32)"];
             "33"[label="Sequence(33)",shape=box];
-            "34"[label="Assign Count nullptr(34)"];
-            "35"[label="Body(35)",shape=box];
-            "36"[label="StoreLinear(36)"];
-            "37"[label="Sequence(37)",shape=box];
             "1" -> "4"
             "1" -> "5"
             "2" -> "7"
@@ -411,33 +418,29 @@ namespace rocRollerTest
             "9" -> "13"
             "9" -> "14"
             "9" -> "16"
-            "9" -> "22"
-            "9" -> "33"
+            "9" -> "20"
+            "9" -> "29"
             "10" -> "9"
             "13" -> "11"
             "14" -> "12"
             "15" -> "18"
             "16" -> "15"
-            "17" -> "20"
+            "17" -> "24"
             "18" -> "17"
-            "19" -> "28"
+            "19" -> "22"
             "20" -> "19"
-            "21" -> "24"
+            "21" -> "25"
             "22" -> "21"
-            "23" -> "26"
+            "23" -> "27"
             "24" -> "23"
-            "25" -> "29"
-            "26" -> "25"
-            "27" -> "31"
-            "28" -> "27"
-            "29" -> "27"
+            "25" -> "23"
+            "27" -> "26"
+            "28" -> "31"
+            "29" -> "28"
+            "30" -> "33"
             "31" -> "30"
-            "32" -> "35"
             "33" -> "32"
-            "34" -> "37"
-            "35" -> "34"
-            "37" -> "36"
-            }
+        }
         ).";
 
         EXPECT_EQ(NormalizedSource(expected), NormalizedSource(control.toDOT()));

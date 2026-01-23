@@ -50,6 +50,8 @@ include: blas_ex/nrm2_ex_gtest.yaml
 include: blas_ex/rot_ex_gtest.yaml
 include: blas_ex/scal_ex_gtest.yaml
 include: blas_ex/gemm_ex_gtest.yaml
+include: blas_ex/syrk_ex_gtest.yaml
+include: blas_ex/herk_ex_gtest.yaml
 include: blas_ex/trsm_ex_gtest.yaml
 include: solver/gels_gtest.yaml
 include: solver/geqrf_gtest.yaml

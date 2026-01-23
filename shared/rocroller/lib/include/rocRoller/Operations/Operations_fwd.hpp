@@ -40,6 +40,7 @@ namespace rocRoller
         struct Scalar;
         struct Literal;
         struct BlockScale;
+        struct Scratch;
         struct SubTileTranspose;
         struct T_Load_Linear;
         struct T_Load_Scalar;
@@ -54,6 +55,7 @@ namespace rocRoller
                                        Scalar,
                                        Literal,
                                        BlockScale,
+                                       Scratch,
                                        SubTileTranspose,
                                        T_Load_Linear,
                                        T_Load_Scalar,

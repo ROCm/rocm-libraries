@@ -41,7 +41,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_csrgemm_bad_arg(void)
+void testing_csrgemm_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int                  M         = 1;
@@ -552,17 +552,17 @@ void testing_csrgemm_bad_arg(void)
 #endif
 }
 
-static int csrgemm_nnz(int                  m,
-                       int                  n,
-                       int                  k,
-                       const int*           csr_row_ptr_A,
-                       const int*           csr_col_ind_A,
-                       const int*           csr_row_ptr_B,
-                       const int*           csr_col_ind_B,
-                       int*                 csr_row_ptr_C,
-                       hipsparseIndexBase_t idx_base_A,
-                       hipsparseIndexBase_t idx_base_B,
-                       hipsparseIndexBase_t idx_base_C)
+static int host_csrgemm_nnz(int                  m,
+                            int                  n,
+                            int                  k,
+                            const int*           csr_row_ptr_A,
+                            const int*           csr_col_ind_A,
+                            const int*           csr_row_ptr_B,
+                            const int*           csr_col_ind_B,
+                            int*                 csr_row_ptr_C,
+                            hipsparseIndexBase_t idx_base_A,
+                            hipsparseIndexBase_t idx_base_B,
+                            hipsparseIndexBase_t idx_base_C)
 {
     std::vector<int> nnz(n, -1);
 
@@ -607,21 +607,21 @@ static int csrgemm_nnz(int                  m,
 }
 
 template <typename T>
-static void csrgemm(int                  m,
-                    int                  n,
-                    int                  k,
-                    const int*           csr_row_ptr_A,
-                    const int*           csr_col_ind_A,
-                    const T*             csr_val_A,
-                    const int*           csr_row_ptr_B,
-                    const int*           csr_col_ind_B,
-                    const T*             csr_val_B,
-                    const int*           csr_row_ptr_C,
-                    int*                 csr_col_ind_C,
-                    T*                   csr_val_C,
-                    hipsparseIndexBase_t idx_base_A,
-                    hipsparseIndexBase_t idx_base_B,
-                    hipsparseIndexBase_t idx_base_C)
+static void host_csrgemm(int                  m,
+                         int                  n,
+                         int                  k,
+                         const int*           csr_row_ptr_A,
+                         const int*           csr_col_ind_A,
+                         const T*             csr_val_A,
+                         const int*           csr_row_ptr_B,
+                         const int*           csr_col_ind_B,
+                         const T*             csr_val_B,
+                         const int*           csr_row_ptr_C,
+                         int*                 csr_col_ind_C,
+                         T*                   csr_val_C,
+                         hipsparseIndexBase_t idx_base_A,
+                         hipsparseIndexBase_t idx_base_B,
+                         hipsparseIndexBase_t idx_base_C)
 {
     std::vector<int> nnz(n, -1);
 
@@ -697,7 +697,7 @@ static void csrgemm(int                  m,
 }
 
 template <typename T>
-hipsparseStatus_t testing_csrgemm(Arguments argus)
+void testing_csrgemm(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                  M          = argus.M;
@@ -736,12 +736,8 @@ hipsparseStatus_t testing_csrgemm(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz_A = 0;
-    if(!generate_csr_matrix(
-           filename, M, K, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idx_base_A))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
+        filename, M, K, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idx_base_A));
 
     // B = A^T so that we can compute the square of A
     N                      = M;
@@ -890,36 +886,36 @@ hipsparseStatus_t testing_csrgemm(Arguments argus)
         // Compute csrgemm host solution
         std::vector<int> hcsr_row_ptr_C_gold(M + 1);
 
-        int nnz_C_gold = csrgemm_nnz(M,
-                                     N,
-                                     K,
-                                     hcsr_row_ptr_A.data(),
-                                     hcsr_col_ind_A.data(),
-                                     hcsr_row_ptr_B.data(),
-                                     hcsr_col_ind_B.data(),
-                                     hcsr_row_ptr_C_gold.data(),
-                                     idx_base_A,
-                                     idx_base_B,
-                                     idx_base_C);
+        int nnz_C_gold = host_csrgemm_nnz(M,
+                                          N,
+                                          K,
+                                          hcsr_row_ptr_A.data(),
+                                          hcsr_col_ind_A.data(),
+                                          hcsr_row_ptr_B.data(),
+                                          hcsr_col_ind_B.data(),
+                                          hcsr_row_ptr_C_gold.data(),
+                                          idx_base_A,
+                                          idx_base_B,
+                                          idx_base_C);
 
         std::vector<int> hcsr_col_ind_C_gold(nnz_C_gold);
         std::vector<T>   hcsr_val_C_gold(nnz_C_gold);
 
-        csrgemm(M,
-                N,
-                K,
-                hcsr_row_ptr_A.data(),
-                hcsr_col_ind_A.data(),
-                hcsr_val_A.data(),
-                hcsr_row_ptr_B.data(),
-                hcsr_col_ind_B.data(),
-                hcsr_val_B.data(),
-                hcsr_row_ptr_C_gold.data(),
-                hcsr_col_ind_C_gold.data(),
-                hcsr_val_C_gold.data(),
-                idx_base_A,
-                idx_base_B,
-                idx_base_C);
+        host_csrgemm(M,
+                     N,
+                     K,
+                     hcsr_row_ptr_A.data(),
+                     hcsr_col_ind_A.data(),
+                     hcsr_val_A.data(),
+                     hcsr_row_ptr_B.data(),
+                     hcsr_col_ind_B.data(),
+                     hcsr_val_B.data(),
+                     hcsr_row_ptr_C_gold.data(),
+                     hcsr_col_ind_C_gold.data(),
+                     hcsr_val_C_gold.data(),
+                     idx_base_A,
+                     idx_base_B,
+                     idx_base_C);
 
         // Check nnz of C
         unit_check_general(1, 1, 1, &nnz_C_gold, &hnnz_C_1);
@@ -1023,8 +1019,6 @@ hipsparseStatus_t testing_csrgemm(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSRGEMM_HPP

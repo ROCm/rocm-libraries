@@ -1,9 +1,6 @@
-def repoName = scm.getUserRemoteConfigs()[0].getUrl().tokenize('/').last().replace('.git', '')
-
-def repoDir = "./"
-if (repoName == "rocm-libraries") {
-    repoDir = "projects/miopen"
-}
+def projDir = "projects"
+def miopenDir = "${projDir}/miopen"
+def ckDir = "${projDir}/composablekernel"
 
 def rocmnode(name) {
     return '(rocmtest || miopen) && (' + name + ')'
@@ -41,7 +38,7 @@ utils = null
 
 def withWorkingDir(Closure body) {
     checkout scm
-    dir("${env.WORKSPACE}/${env.REPO_DIR}") {
+    dir("${env.WORKSPACE}/${env.MIOPEN_DIR}") {
         if (utils == null) {
             utils = load "vars/utils.groovy"
         }
@@ -214,13 +211,11 @@ pipeline {
         Smoke_targets   = " check MIOpenDriver"
         NOCOMGR_flags   = " -DMIOPEN_USE_COMGR=Off"
         NOMLIR_flags    = " -DMIOPEN_USE_MLIR=Off"
-        REPO_DIR        = "${repoDir}"
-        REPO_NAME       = "${repoName}"
+        CK_DIR          = "${ckDir}"
+        MIOPEN_DIR      = "${miopenDir}"
+        PROJ_DIR        = "${projDir}"
 
         Build_timeout_minutes = 420
-
-
-        
     }
     stages{
         stage('Build Docker'){
@@ -231,7 +226,7 @@ pipeline {
             steps{
                 script {
                     withWorkingDir {
-                        utils.getDockerImage()
+                        utils.getDockerImageWithStatus()
                     }
                 }
             }
@@ -504,6 +499,24 @@ pipeline {
                         }
                     }
                 }
+                stage('TF32 Hip Install All gfx942') {
+                    when {
+                        beforeAgent true
+                        expression { params.TARGET_GFX942 && params.DATATYPE_TF32 }
+                    }
+                    options {
+                        retry(2)
+                    }
+                    agent{ label rocmnode("gfx942") }
+                    steps{
+                        runBuildAndSingleGtestJob(Full_test + Tf32_flags + gfx942_flags, Build_timeout_minutes)
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
+                }
                 // GFX1101 Tests
                 stage('Fp16 Hip Install All gfx1101') {
                     when {
@@ -529,24 +542,6 @@ pipeline {
                     agent{ label rocmnode("navi32") }
                     steps{
                         runBuildAndSingleGtestJob(Full_test + gfx1101_flags, Build_timeout_minutes)
-                    }
-                }
-                stage('TF32 Hip All gfx942') {
-                    when {
-                        beforeAgent true
-                        expression { params.TARGET_GFX942 && params.DATATYPE_TF32 }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("gfx942") }
-                    steps{
-                        runBuildAndSingleGtestJob(Full_test + Tf32_flags + gfx942_flags, Build_timeout_minutes)
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
                     }
                 }
             }
@@ -971,6 +966,19 @@ pipeline {
                     }
                 }
             }
+        }
+    }
+
+    post {
+        success {
+            githubNotify context: 'Math CI Summary',
+                         status: 'SUCCESS',
+                         description: 'All checks have passed'
+        }
+        failure {
+            githubNotify context: 'Math CI Summary',
+                         status: 'FAILURE',
+                         description: 'Some checks have failed'
         }
     }
 }

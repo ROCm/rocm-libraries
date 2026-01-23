@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 #!/bin/bash -x
 set -e  # Exit on error
 set -u  # Exit on undefined variable
@@ -60,7 +63,7 @@ mkdir -p "$build_location"
 
 # Configure with Ninja using all cores
 cmake -G Ninja -S "$repo_root" -B "$build_location" \
-    -DENABLE_CLANG_TIDY=OFF 
+    -DENABLE_CLANG_TIDY=OFF
 
 # Create CodeQL database with explicit thread settings
 echo "Creating CodeQL database with $CODEQL_THREADS threads..."

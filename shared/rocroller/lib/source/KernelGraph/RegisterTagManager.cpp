@@ -134,7 +134,7 @@ namespace rocRoller
         AssertFatal(src > 0, ShowValue(src));
         AssertFatal(dst > 0, ShowValue(dst));
 
-        AssertFatal(!m_indexes.contains(src));
+        AssertFatal(!m_indexes.contains(src), ShowValue(src));
         m_indexes[src] = {dst, index};
     }
 

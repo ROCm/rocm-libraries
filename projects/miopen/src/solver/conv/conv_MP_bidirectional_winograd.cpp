@@ -39,7 +39,6 @@
 #include <miopen/generic_search.hpp>
 #include <miopen/conv/invokers/impl_gemm.hpp>
 
-#include <boost/any.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 
 #if MIOPEN_BACKEND_HIP
@@ -193,7 +192,7 @@ static bool IsApplicableTransform(const ExecutionContext& ctx, const ProblemDesc
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.Xnack() && *target.Xnack())
+    if(target.isXnackEnabled())
         return false;
 
     const std::string name = ctx.GetStream().GetDeviceName();
@@ -931,9 +930,11 @@ ConvMPBidirectWinograd_xdlops<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>::G
     result.construction_params.push_back(wino_transform.construction_params[2]);
     result.construction_params.push_back(xdlops_conv.construction_params[0]);
 
+    // NOLINTBEGIN (bugprone-unchecked-optional-access)
     result.invoker_factory =
         MakeWinogradInvokerFactory<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>(
             ctx, problem, xdlops_conv.invoker_factory.value(), true);
+    // NOLINTEND (bugprone-unchecked-optional-access)
 
     return result;
 }

@@ -10,7 +10,7 @@ External contributions and feedback are welcome for rocWMMA. Please see the foll
 
 ## Issue Discussion ##
 
-Please use the [GitHub Issues](https://github.com/ROCm/rocWMMA/issues) tab to notify us of issues.
+Please use the [GitHub Issues](https://github.com/ROCm/rocm-libraries/issues) tab to notify us of issues.
 
 * Use your best judgement for issue creation. If your issue is already listed, upvote the existing issue and
   comment or post to provide additional details, such as how you reproduced this issue.
@@ -37,6 +37,8 @@ New issues should use the following templates:
             - Expected Behavior:
             - Actual Behavior:
         3. Any additional information:
+        4. Add the `project: rocWMMA` tag
+        5. Specify 'rocWMMA' in the 'ROCm Component' field, if available.
 * **Enhancement Requests**
     + Any proposed enhancements to rocWMMA should be thoroughly documented with the template below.
         1. Description: ***Please be clear and concise***
@@ -44,6 +46,8 @@ New issues should use the following templates:
             - Feature and/or Functionalities Enabled:
             - Any Alternatives
         3. Any additional information:
+        4. Add the `project: rocWMMA` tag
+        5. Specify 'rocWMMA' in the 'ROCm Component' field, if available.
 
 ## Acceptance Criteria ##
 
@@ -65,7 +69,7 @@ Contributors wishing to submit new features for rocWMMA should follow the guidel
 - WMMA Porting
     * Developers wishing to implement gap closures with nvcuda::wmma may suggest additional features to do so
 
-All new features and fixes should also tie into the rocWMMA [GitHub Issues](https://github.com/ROCm/rocWMMA/issues) tab:
+All new features and fixes should also tie into the rocWMMA [GitHub Issues](https://github.com/ROCm/rocm-libraries/issues) tab:
 
 - **Enhancements**
     + Any implementations of pre-filed enhancement requests should clearly link to the original issue.
@@ -80,7 +84,7 @@ Exceptions to these criteria will be handled on a case-by-case basis, and should
 
 ## Code Structure ##
 
-The organization of the rocWMMA library is explained in detail in the [Programmers Guide](https://github.com/ROCm/rocWMMA/blob/develop/docs/programmers-guide.rst)
+The organization of the rocWMMA library is explained in detail in the [Programmers Guide](https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocwmma/docs/conceptual/programmers-guide.rst).
 
 ## Coding Style ##
 
@@ -191,7 +195,7 @@ rocWMMA has a set of required deliverables for every pull request that are as fo
     kernels.
 
 2. **API Documentation**:
-    - Any new outward facing rocWMMA API functions must be properly documented and included in the [API Reference Guide](https://github.com/ROCm/rocWMMA/blob/develop/docs/api-reference-guide.rst).
+    - Any new outward facing rocWMMA API functions must be properly documented and included in the [API Reference Guide](https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocwmma/docs/api-reference/api-reference-guide.rst).
 
 3. **Type Support**:
     - All features introduced to rocWMMA must maintain support for the following types:

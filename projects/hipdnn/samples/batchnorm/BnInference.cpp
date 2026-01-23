@@ -5,22 +5,20 @@
 #include <string>
 #include <unordered_map>
 
+#include <hipdnn_data_sdk/utilities/Constants.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
-#include <hipdnn_sdk/utilities/Constants.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_sdk;
-
-// Note: Sample temporarily disabled due to https://github.com/ROCm/rocm-libraries/issues/2459
+using namespace hipdnn_data_sdk;
 
 template <typename InputType, typename IntermediateType>
-void SampleRunner::operator()(const TensorLayout& layout)
+bool SampleRunner::operator()(const TensorLayout& layout)
 {
     auto inputType = getDataTypeEnumFromType<InputType>();
     auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
@@ -39,10 +37,10 @@ void SampleRunner::operator()(const TensorLayout& layout)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto x = createTensor({n, c, h, w}, inputType, layout);
-    auto scale = createTensor({1, c, 1, 1}, intermediateType);
-    auto bias = createTensor({1, c, 1, 1}, intermediateType);
-    auto mean = createTensor({1, c, 1, 1}, intermediateType);
-    auto invVariance = createTensor({1, c, 1, 1}, intermediateType);
+    auto scale = createTensor({1, c, 1, 1}, intermediateType, layout);
+    auto bias = createTensor({1, c, 1, 1}, intermediateType, layout);
+    auto mean = createTensor({1, c, 1, 1}, intermediateType, layout);
+    auto invVariance = createTensor({1, c, 1, 1}, intermediateType, layout);
 
     auto bnAttributes = graph::BatchnormInferenceAttributes();
     bnAttributes.set_name("bn_inference_node");
@@ -50,20 +48,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto y = graph->batchnorm_inference(x, mean, invVariance, scale, bias, bnAttributes);
     y->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->validate());
-    std::cout << "Graph validation successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
-    std::cout << "Operation graph build successful.\n";
-
-    HIPDNN_FE_CHECK(graph->create_execution_plans());
-    std::cout << "Execution plans created successfully.\n";
-
-    HIPDNN_FE_CHECK(graph->check_support());
-    std::cout << "Graph support check successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_plans());
-    std::cout << "Plans build successful.\n";
+    HIPDNN_FE_CHECK(graph->build(handle));
+    std::cout << "Graph build successful.\n";
 
     utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
     utilities::Tensor<IntermediateType> scaleTensor(scale->get_dim());
@@ -95,24 +81,28 @@ void SampleRunner::operator()(const TensorLayout& layout)
     yTensor.memory().markDeviceModified();
     auto yHostPtr = yTensor.memory().hostData();
 
+    bool validationPassed = true;
+
     if(config.cpuValidation)
     {
         std::cout << "Running CPU reference validation...\n";
 
         utilities::Tensor<InputType> yRefTensor(y->get_dim(), layout);
 
-        auto tolerance = test_utilities::batchnorm::getToleranceInference<InputType>();
-        double epsilon = utilities::BATCHNORM_DEFAULT_EPSILON;
+        auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceInference<InputType>();
 
-        test_utilities::CpuFpReferenceBatchnorm::fwdInference(
+        hipdnn_test_sdk::utilities::CpuFpReferenceBatchnorm::fwdInference(
             xTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, yRefTensor);
 
-        auto validator = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
+        auto validator
+            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
         bool yValid = validator.allClose(yRefTensor, yTensor);
 
         std::cout << "CPU reference validation:\n";
         std::cout << "  y: " << (yValid ? "successful" : "failed") << "\n";
+
+        validationPassed = yValid;
     }
 
     std::cout << "First 10 y values: ";
@@ -123,6 +113,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     std::cout << "\nBatch normalization inference graph execution complete for " << inputType
               << ".\n\n";
+    return validationPassed;
 }
 
 int main(int argc, char* argv[])
@@ -135,9 +126,18 @@ int main(int argc, char* argv[])
     hipdnnHandle_t handle;
     HIPDNN_CHECK(backend->create(&handle));
 
-    run(SampleRunner{handle, config});
+    bool allPassed = run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(backend->destroy(handle));
-    std::cout << "All batch normalization inference runs completed.\n";
-    return 0;
+
+    if(allPassed)
+    {
+        std::cout << "All batch normalization inference runs completed successfully.\n";
+        return 0;
+    }
+    else
+    {
+        std::cout << "One or more batch normalization inference runs failed validation.\n";
+        return 1;
+    }
 }

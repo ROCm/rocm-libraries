@@ -273,7 +273,7 @@ def mulMIoutAlphaToArch(kernel, startVgprAlphaTmp):
                                                       src0=sgpr("Alpha"), src1=vgpr("ValuC+%u"%srcIdx),
                                                        comment="Multiply MI out reg with alpha")
     elif kernel["ProblemType"]["ComputeDataType"].isSingleComplex():
-        accImOffset = accVgprImagNumOffset(kernel, lrvwB)
+        accImOffset = accVgprImagNumOffset(kernel)
         cimod = Module()
         # cannot use tmp vgpr for write batch, use allocated vgpr instead
         vtmp1 = startVgprAlphaTmp
@@ -283,7 +283,7 @@ def mulMIoutAlphaToArch(kernel, startVgprAlphaTmp):
         # tmp2 = a.imag * b.real
         cimod.add(VMulF32(dst=vgpr(vtmp2), src0=sgpr("Alpha+1"), src1=vgpr("ValuC+%u"%srcIdx), comment=""))
         # c.real = a.real * b.real - a.imag * b.imag = tmp1 - a.imag * b.imag
-        cimod.add(VFmaF32(dst=vgpr(Holder(name="ValuC")), src0=sgpr("Alpha+1"), src1=vgpr("ValuC+%u"%(srcIdx+accImOffset)), src2=vgpr(vtmp1)))
+        cimod.add(VFmaF32(dst=vgpr(Holder(name="ValuC")), src0=sgpr("Alpha+1"), src1=vgpr("ValuC+%u"%(srcIdx+accImOffset)).getMinus(), src2=vgpr(vtmp1)))
         # c.imag = a.real * b.imag + a.imag * b.real = a.real * b.imag + tmp2
         cimod.add(VFmaF32(dst=vgpr(Holder(name="ValuC+1")), src0=sgpr("Alpha+0"), src1=vgpr("ValuC+%u"%(srcIdx+accImOffset)), src2=vgpr(vtmp2)))
         itemList[destIdx] = cimod
@@ -298,7 +298,7 @@ def mulMIoutAlphaToArch(kernel, startVgprAlphaTmp):
       # tmp2 = a.imag * b.real
       cimod.add(VMulF64(dst=vgpr(vtmp2,2), src0=sgpr("Alpha+2",2), src1=vgpr("ValuC+%u"%srcIdx,2)))
       # c.real = a.real * b.real - a.imag * b.imag = tmp1 - a.imag * b.imag
-      cimod.add(VFmaF64(dst=vgpr(Holder(name="ValuC"),2), src0=sgpr("Alpha+2",2), src1=vgpr("ValuC+%u"%(srcIdx+accImOffset),2), src2=vgpr(vtmp1,2)))
+      cimod.add(VFmaF64(dst=vgpr(Holder(name="ValuC"),2), src0=sgpr("Alpha+2",2), src1=vgpr("ValuC+%u"%(srcIdx+accImOffset),2).getMinus(), src2=vgpr(vtmp1,2)))
       # c.imag = a.real * b.imag + a.imag * b.real = a.real * b.imag + tmp2
       cimod.add(VFmaF64(dst=vgpr(Holder(name="ValuC+2"),2), src0=sgpr("Alpha+0",2), src1=vgpr("ValuC+%u"%(srcIdx+accImOffset),2), src2=vgpr(vtmp2,2)))
       itemList[destIdx] = cimod
@@ -333,13 +333,13 @@ def moveMIoutToArch(kernel, startVgprAlphaTmp):
       itemList[destIdx] = VMovB32(dst=vgpr(Holder(name="ValuC")),
                                                      src=vgpr("ValuC+%u"%srcIdx), comment="Rearrange MI out reg")
     elif kernel["ProblemType"]["ComputeDataType"].isSingleComplex():
-        accImOffset = accVgprImagNumOffset(kernel, lrvwB)
+        accImOffset = accVgprImagNumOffset(kernel)
         cimod = Module()
         cimod.add(VMovB32(dst=vgpr(Holder(name="ValuC")), src=vgpr("ValuC+%u"%srcIdx), comment="Rearrange MI out reg"))
-        cimod.addInst(VMovB32(dst=vgpr(Holder(name="ValuC+1")), src=vgpr("ValuC+%u"%(srcIdx+accImOffset)), comment="Rearrange MI out reg"))
+        cimod.add(VMovB32(dst=vgpr(Holder(name="ValuC+1")), src=vgpr("ValuC+%u"%(srcIdx+accImOffset)), comment="Rearrange MI out reg"))
         itemList[destIdx] = cimod
     elif kernel["ProblemType"]["ComputeDataType"].isDoubleComplex():
-      accImOffset = accVgprImagNumOffset(kernel, lrvwB)
+      accImOffset = accVgprImagNumOffset(kernel)
       cimod = Module()
       # tmp1 = a.real * b.real
       cimod.add(VLShiftLeftB64(dst=vgpr(Holder(name="ValuC"), 2), shiftHex=0, src=vgpr("ValuC+%u"%srcIdx,2), comment="Rearrange MI out reg"))

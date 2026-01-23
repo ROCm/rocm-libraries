@@ -26,7 +26,6 @@
 #ifndef GUARD_MIOPEN_DB_RECORD_HPP_
 #define GUARD_MIOPEN_DB_RECORD_HPP_
 
-#include <miopen/config.hpp>
 #include <miopen/logger.hpp>
 
 #include <cassert>

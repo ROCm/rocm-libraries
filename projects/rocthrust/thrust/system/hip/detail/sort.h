@@ -380,10 +380,12 @@ void THRUST_HOST_DEVICE stable_sort(execution_policy<Derived>& policy, ItemsIt f
       __smart_sort::smart_sort<thrust::detail::false_type, thrust::detail::false_type>(
         policy, first, last, null_, compare_op);
     }
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static void seq(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, CompareOp compare_op)
     {
       thrust::stable_sort(cvt_to_seq(derived_cast(policy)), first, last, compare_op);
     }
+#  endif
   };
 #  if __THRUST_HAS_HIPRT__
   workaround::par(policy, first, last, compare_op);
@@ -413,12 +415,13 @@ void THRUST_HOST_DEVICE stable_sort_by_key(
       __smart_sort::smart_sort<thrust::detail::true_type, thrust::detail::false_type>(
         policy, keys_first, keys_last, values, compare_op);
     }
-
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static void
     seq(execution_policy<Derived>& policy, KeysIt keys_first, KeysIt keys_last, ValuesIt values, CompareOp compare_op)
     {
       thrust::stable_sort_by_key(cvt_to_seq(derived_cast(policy)), keys_first, keys_last, values, compare_op);
     }
+#  endif
   };
 
 #  if __THRUST_HAS_HIPRT__

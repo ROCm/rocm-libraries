@@ -36,7 +36,7 @@ hipRTC support
 The HIP runtime compilation (hipRTC) environment enables on-the-fly runtime compilation, loading, and execution of device code on AMD GPUs. The rocWMMA library is compatible with hipRTC, so it can be used for runtime-generated kernels.
 A simple GEMM sample is included to demonstrate compatibility.
 
-For more information, refer to the `HIP API Reference  <https://rocm.docs.amd.com/projects/HIP/en/latest/doxygen/html/index.html>`_
+For more information, refer to the `HIP API Reference  <https://rocm.docs.amd.com/projects/HIP/en/latest/index.html>`_
 
 --------------------------------
 Design concepts
@@ -233,4 +233,4 @@ The ``test`` directory contains the following test code support:
 Contributing
 ^^^^^^^^^^^^
 
-To contribute to the project, see `Contributing to rocWMMA  <https://github.com/ROCm/rocWMMA/blob/develop/CONTRIBUTING.md>`_.
+To contribute to the project, see `Contributing to rocWMMA  <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocwmma/CONTRIBUTING.md>`_.

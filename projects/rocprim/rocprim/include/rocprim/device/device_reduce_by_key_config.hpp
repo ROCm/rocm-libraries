@@ -33,83 +33,33 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// Generic for user-provided config: instantiate user-provided config.
-template<typename ReduceByKeyConfig, typename, typename, typename>
-struct wrapped_reduce_by_key_config
+template<class Key, class Value, class BinaryFunction>
+struct reduce_by_key_config_selector
 {
-    template<target_arch Arch>
-    struct architecture_config
+    using targets    = reduce_by_key_targets;
+    using param_type = reduce_by_key_config_params;
+
+    param_type params;
+
+    template<class Target>
+    constexpr param_type picker_helper()
     {
-        static constexpr reduce_by_key_config_params params = ReduceByKeyConfig{};
-    };
+        // Specialization for default config if types are not custom: instantiate the tuned config.
+        if constexpr(rocprim::is_arithmetic<Key>::value && rocprim::is_arithmetic<Value>::value
+                     && rocprim::detail::is_binary_functional<BinaryFunction>::value)
+        {
+            return reduce_by_key_config_picker<Target, Key, Value>();
+        }
+        else
+        {
+            return reduce_by_key_config_params_base<Key, Value>();
+        }
+    }
+
+    template<class Target>
+    constexpr reduce_by_key_config_selector(Target) : params(picker_helper<Target>())
+    {}
 };
-
-// Generic for default config: instantiate base config.
-template<typename KeyType,
-         typename AccumulatorType,
-         typename BinaryFunction,
-         typename Enable = void>
-struct wrapped_reduce_by_key_impl
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr reduce_by_key_config_params params =
-            typename default_reduce_by_key_config_base<KeyType, AccumulatorType>::type{};
-    };
-};
-
-// Specialization for default config if types are not custom: instantiate the tuned config.
-template<typename KeyType, typename AccumulatorType, typename BinaryFunction>
-struct wrapped_reduce_by_key_impl<
-    KeyType,
-    AccumulatorType,
-    BinaryFunction,
-    std::enable_if_t<is_arithmetic<KeyType>::value && is_arithmetic<AccumulatorType>::value
-                     && is_binary_functional<BinaryFunction>::value>>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr reduce_by_key_config_params params
-            = default_reduce_by_key_config<static_cast<unsigned int>(Arch),
-                                           KeyType,
-                                           AccumulatorType>{};
-    };
-};
-
-// Specialization for default config.
-template<typename KeyType, typename AccumulatorType, typename BinaryFunction>
-struct wrapped_reduce_by_key_config<default_config, KeyType, AccumulatorType, BinaryFunction>
-    : wrapped_reduce_by_key_impl<KeyType, AccumulatorType, BinaryFunction>
-{};
-
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-template<typename ReduceByKeyConfig,
-         typename KeyType,
-         typename AccumulatorType,
-         typename BinaryFunction>
-template<target_arch Arch>
-constexpr reduce_by_key_config_params
-    wrapped_reduce_by_key_config<ReduceByKeyConfig, KeyType, AccumulatorType, BinaryFunction>::
-        architecture_config<Arch>::params;
-
-template<typename KeyType, typename AccumulatorType, typename BinaryFunction, typename Enable>
-template<target_arch Arch>
-constexpr reduce_by_key_config_params
-    wrapped_reduce_by_key_impl<KeyType, AccumulatorType, BinaryFunction, Enable>::
-        architecture_config<Arch>::params;
-
-template<typename KeyType, typename AccumulatorType, typename BinaryFunction>
-template<target_arch Arch>
-constexpr reduce_by_key_config_params wrapped_reduce_by_key_impl<
-    KeyType,
-    AccumulatorType,
-    BinaryFunction,
-    std::enable_if_t<is_arithmetic<KeyType>::value && is_arithmetic<AccumulatorType>::value
-                     && is_binary_functional<BinaryFunction>::value>>::architecture_config<Arch>::
-    params;
-#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 } // end namespace detail
 

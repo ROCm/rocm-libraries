@@ -73,7 +73,7 @@ void testing_coo2csr_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_coo2csr(Arguments argus)
+void testing_coo2csr(Arguments argus)
 {
     int                  m        = argus.M;
     int                  n        = argus.N;
@@ -82,13 +82,6 @@ hipsparseStatus_t testing_coo2csr(Arguments argus)
 
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
     hipsparseHandle_t              handle = unique_ptr_handle->handle;
-
-    if(m == 0 || n == 0)
-    {
-#ifdef __HIP_PLATFORM_NVIDIA__
-        return HIPSPARSE_STATUS_SUCCESS;
-#endif
-    }
 
     srand(12345ULL);
 
@@ -102,7 +95,7 @@ hipsparseStatus_t testing_coo2csr(Arguments argus)
     if(!generate_coo_matrix(filename, m, n, nnz, hcoo_row_ind, hcoo_col_ind, hcoo_val, idx_base))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     std::vector<int> hcsr_row_ptr(m + 1);
@@ -183,8 +176,6 @@ hipsparseStatus_t testing_coo2csr(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_COO2CSR_HPP

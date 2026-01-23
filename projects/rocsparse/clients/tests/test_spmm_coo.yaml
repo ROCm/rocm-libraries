@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,7 @@ Definitions:
   - &alpha_beta_range_nightly
     - { alpha:  -0.5, beta:  0.5,  alphai:  1.0, betai: -0.5 }
     - { alpha:  -1.0, beta: -0.5,  alphai:  0.0, betai:  0.0 }
+    - { alpha:  1.0, beta:  0.0,  alphai:  0.0, betai: 0.0 }
 
   - &alpha_beta_range_stress
     - { alpha:   1.0, beta:  0.0, alphai:  0.0, betai:  0.0 }
@@ -213,6 +214,23 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_coo_atomic]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
+
+- name: spmm_coo
+  category: quick
+  function: spmm_coo
+  indextype: *i32_i64
+  precision: [*float16_float16_float32_float32_abct_precision, *bfloat16_bfloat16_float32_float32_abct_precision]
+  M: [512]
+  N: [16, 32, 64]
+  K: [512]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_coo_atomic, rocsparse_spmm_alg_coo_segmented, rocsparse_spmm_alg_coo_segmented_atomic]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
 
 ##############################
 # Precheckin
@@ -416,6 +434,23 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_coo_segmented]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
+
+- name: spmm_coo
+  category: pre_checkin
+  function: spmm_coo
+  indextype: *i32_i64
+  precision: [*float16_float16_float32_float32_abct_precision, *bfloat16_bfloat16_float32_float32_abct_precision]
+  M: [1024]
+  N: [32, 64, 128]
+  K: [1024]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_coo_atomic, rocsparse_spmm_alg_coo_segmented, rocsparse_spmm_alg_coo_segmented_atomic]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
 
 - name: spmm_coo_graph_test
   category: pre_checkin
@@ -685,4 +720,6 @@ Tests:
   orderB: [rocsparse_order_row, rocsparse_order_column]
   orderC: [rocsparse_order_row, rocsparse_order_column]
   filename: [bmwcra_1]
+  rand_gen_min: -100.0
+  rand_gen_max: 100.0
   convert_to_int: true

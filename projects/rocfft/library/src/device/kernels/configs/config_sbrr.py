@@ -18,7 +18,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from kernels.configs import config_lds
+from kernels.configs.config_arch import lds_config
+from kernels.configs.config_arch import supported_arch
 from types import SimpleNamespace as NS
 
 # Note: Default half_lds is True and default direct_to_from_reg is True as well.
@@ -482,27 +483,27 @@ sbrr_kernels = [
     NS(length=4000, workgroup_size=256, threads_per_transform=200, factors=(10, 10, 10, 4), runtime_compile=True),
     NS(length=4050, workgroup_size=256, threads_per_transform=135, factors=(10, 5, 3, 3, 3, 3), runtime_compile=True),
     NS(length=4096, workgroup_size=256, threads_per_transform=256, factors=(16, 16, 16), runtime_compile=True),
-    NS(length=4704, workgroup_size=256, threads_per_transform=224, factors=(8, 4, 7, 7, 3), double_precision=False, runtime_compile=True),
-    NS(length=5488, workgroup_size=256, threads_per_transform=196, factors=(7, 4, 7, 4, 7), double_precision=False, runtime_compile=True),
-    NS(length=6144, workgroup_size=512, threads_per_transform=512, factors=(16, 4, 8, 3, 4), double_precision=False, runtime_compile=True),
-    NS(length=6561, workgroup_size=256, threads_per_transform=243, factors=(3, 3, 3, 3, 3, 3, 3, 3), double_precision=False, runtime_compile=True),
-    NS(length=8192, workgroup_size=512, threads_per_transform=512, factors=(16, 4, 4, 4, 8), double_precision=False, runtime_compile=True),
+    NS(length=4704, workgroup_size=256, threads_per_transform=224, factors=(8, 4, 7, 7, 3), precision=['sp', 'hp'], runtime_compile=True),
+    NS(length=5488, workgroup_size=256, threads_per_transform=196, factors=(7, 4, 7, 4, 7), precision=['sp', 'hp'], runtime_compile=True),
+    NS(length=6144, workgroup_size=512, threads_per_transform=512, factors=(16, 4, 8, 3, 4), precision=['sp', 'hp'], runtime_compile=True),
+    NS(length=6561, workgroup_size=256, threads_per_transform=243, factors=(3, 3, 3, 3, 3, 3, 3, 3), precision=['sp', 'hp'], runtime_compile=True),
+    NS(length=8192, workgroup_size=512, threads_per_transform=512, factors=(16, 4, 4, 4, 8), precision=['sp', 'hp'], runtime_compile=True),
 
     # configs for 160KiB LDS
-    NS(length=4704, workgroup_size=256, threads_per_transform=224, factors=(8, 4, 7, 7, 3), lds_size_bytes=config_lds.LDS_160k, runtime_compile=True),
-    NS(length=5488, workgroup_size=256, threads_per_transform=196, factors=(7, 4, 7, 4, 7), lds_size_bytes=config_lds.LDS_160k, runtime_compile=True),
-    NS(length=6144, workgroup_size=384, threads_per_transform=256, factors=(4, 8, 8, 8, 3), lds_size_bytes=config_lds.LDS_160k, runtime_compile=True),
-    NS(length=6561, workgroup_size=256, threads_per_transform=243, factors=(3, 3, 3, 3, 3, 3, 3, 3), lds_size_bytes=config_lds.LDS_160k, runtime_compile=True),
-    NS(length=8192, workgroup_size=512, threads_per_transform=512, factors=(16, 4, 16, 8), lds_size_bytes=config_lds.LDS_160k, runtime_compile=True),
-    NS(length=9216, workgroup_size=512, threads_per_transform=512, factors=(4, 8, 4, 4, 3, 6), lds_size_bytes=config_lds.LDS_160k, runtime_compile=True),
-    NS(length=10000, workgroup_size=512, threads_per_transform=500, factors=(4, 5, 5, 10, 10), lds_size_bytes=config_lds.LDS_160k, runtime_compile=True),
-    NS(length=10240, workgroup_size=512, threads_per_transform=512, factors=(8, 4, 4, 4, 5, 4), lds_size_bytes=config_lds.LDS_160k, runtime_compile=True),
-    NS(length=10752, workgroup_size=512, threads_per_transform=512, factors=(4, 16, 8, 7, 3), double_precision=False, lds_size_bytes=config_lds.LDS_160k, runtime_compile=True),
-    NS(length=11200, workgroup_size=512, threads_per_transform=448, factors=(4, 7, 5, 16, 5), double_precision=False, lds_size_bytes=config_lds.LDS_160k, runtime_compile=True),
-    NS(length=12288, workgroup_size=512, threads_per_transform=512, factors=(8, 8, 4, 6, 8), double_precision=False, lds_size_bytes=config_lds.LDS_160k, runtime_compile=True),
-    NS(length=16384, workgroup_size=512, threads_per_transform=512, factors=(8, 16, 4, 8, 4), double_precision=False, lds_size_bytes=config_lds.LDS_160k, runtime_compile=True),
-    NS(length=16807, workgroup_size=384, threads_per_transform=343, factors=(7, 7, 7, 7, 7), double_precision=False, lds_size_bytes=config_lds.LDS_160k, runtime_compile=True),
-    NS(length=18816, workgroup_size=512, threads_per_transform=448, factors=(8, 8, 7, 7, 6), double_precision=False, lds_size_bytes=config_lds.LDS_160k, runtime_compile=True),
-    NS(length=19200, workgroup_size=512, threads_per_transform=480, factors=(8, 10, 8, 5, 6), double_precision=False, lds_size_bytes=config_lds.LDS_160k, runtime_compile=True),
-    NS(length=20480, workgroup_size=512, threads_per_transform=512, factors=(4, 4, 16, 10, 8), double_precision=False, lds_size_bytes=config_lds.LDS_160k, runtime_compile=True),
+    NS(length=4704, workgroup_size=256, threads_per_transform=224, factors=(8, 4, 7, 7, 3), lds_size_bytes=lds_config.SIZE_160KiB.value, runtime_compile=True),
+    NS(length=5488, workgroup_size=256, threads_per_transform=196, factors=(7, 4, 7, 4, 7), lds_size_bytes=lds_config.SIZE_160KiB.value, runtime_compile=True),
+    NS(length=6144, workgroup_size=384, threads_per_transform=256, factors=(4, 8, 8, 8, 3), lds_size_bytes=lds_config.SIZE_160KiB.value, runtime_compile=True),
+    NS(length=6561, workgroup_size=256, threads_per_transform=243, factors=(3, 3, 3, 3, 3, 3, 3, 3), lds_size_bytes=lds_config.SIZE_160KiB.value, runtime_compile=True),
+    NS(length=8192, workgroup_size=512, threads_per_transform=512, factors=(16, 4, 16, 8), lds_size_bytes=lds_config.SIZE_160KiB.value, runtime_compile=True),
+    NS(length=9216, workgroup_size=512, threads_per_transform=512, factors=(4, 8, 4, 4, 3, 6), lds_size_bytes=lds_config.SIZE_160KiB.value, runtime_compile=True),
+    NS(length=10000, workgroup_size=512, threads_per_transform=500, factors=(4, 5, 5, 10, 10), lds_size_bytes=lds_config.SIZE_160KiB.value, runtime_compile=True),
+    NS(length=10240, workgroup_size=512, threads_per_transform=512, factors=(8, 4, 4, 4, 5, 4), lds_size_bytes=lds_config.SIZE_160KiB.value, runtime_compile=True),
+    NS(length=10752, workgroup_size=512, threads_per_transform=512, factors=(4, 16, 8, 7, 3), precision=['sp', 'hp'], lds_size_bytes=lds_config.SIZE_160KiB.value, runtime_compile=True),
+    NS(length=11200, workgroup_size=512, threads_per_transform=448, factors=(4, 7, 5, 16, 5), precision=['sp', 'hp'], lds_size_bytes=lds_config.SIZE_160KiB.value, runtime_compile=True),
+    NS(length=12288, workgroup_size=512, threads_per_transform=512, factors=(8, 8, 4, 6, 8), precision=['sp', 'hp'], lds_size_bytes=lds_config.SIZE_160KiB.value, runtime_compile=True),
+    NS(length=16384, workgroup_size=512, threads_per_transform=512, factors=(8, 16, 4, 8, 4), precision=['sp', 'hp'], lds_size_bytes=lds_config.SIZE_160KiB.value, runtime_compile=True),
+    NS(length=16807, workgroup_size=384, threads_per_transform=343, factors=(7, 7, 7, 7, 7), precision=['sp', 'hp'], lds_size_bytes=lds_config.SIZE_160KiB.value, runtime_compile=True),
+    NS(length=18816, workgroup_size=512, threads_per_transform=448, factors=(8, 8, 7, 7, 6), precision=['sp', 'hp'], lds_size_bytes=lds_config.SIZE_160KiB.value, runtime_compile=True),
+    NS(length=19200, workgroup_size=512, threads_per_transform=480, factors=(8, 10, 8, 5, 6), precision=['sp', 'hp'], lds_size_bytes=lds_config.SIZE_160KiB.value, runtime_compile=True),
+    NS(length=20480, workgroup_size=512, threads_per_transform=512, factors=(4, 4, 16, 10, 8), precision=['sp', 'hp'], lds_size_bytes=lds_config.SIZE_160KiB.value, runtime_compile=True),
 ]

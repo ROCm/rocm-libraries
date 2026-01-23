@@ -948,7 +948,7 @@ def main():
         p.add_argument('--measure',
                        type=str,
                        choices=["mean", "median"],
-                       help="measure of central tendancy: median or mean",
+                       help="measure of central tendency: median or mean",
                        default="median")
     for p in [
             pdf_parser, html_parser, docx_parser, test_parser, autoperf_parser

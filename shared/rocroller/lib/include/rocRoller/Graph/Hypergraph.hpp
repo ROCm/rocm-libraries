@@ -140,8 +140,6 @@ namespace rocRoller
 
             /**
              * @brief Set (overwrite) existing element.
-             *
-             * Asserts that the tag exists already.
              */
             template <typename T>
             void setElement(int tag, T&& element);

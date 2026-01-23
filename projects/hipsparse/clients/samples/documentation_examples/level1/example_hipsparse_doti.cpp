@@ -26,22 +26,22 @@
 #include <iostream>
 #include <vector>
 
-#define HIP_CHECK(stat)                                               \
-    {                                                                 \
-        if(stat != hipSuccess)                                        \
-        {                                                             \
-            fprintf(stderr, "Error: hip error in line %d", __LINE__); \
-            return -1;                                                \
-        }                                                             \
+#define HIP_CHECK(stat)                                                 \
+    {                                                                   \
+        if(stat != hipSuccess)                                          \
+        {                                                               \
+            fprintf(stderr, "Error: hip error in line %d\n", __LINE__); \
+            return -1;                                                  \
+        }                                                               \
     }
 
-#define HIPSPARSE_CHECK(stat)                                               \
-    {                                                                       \
-        if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
-        {                                                                   \
-            fprintf(stderr, "Error: hipsparse error in line %d", __LINE__); \
-            return -1;                                                      \
-        }                                                                   \
+#define HIPSPARSE_CHECK(stat)                                                 \
+    {                                                                         \
+        if(stat != HIPSPARSE_STATUS_SUCCESS)                                  \
+        {                                                                     \
+            fprintf(stderr, "Error: hipsparse error in line %d\n", __LINE__); \
+            return -1;                                                        \
+        }                                                                     \
     }
 
 //! [doc example]

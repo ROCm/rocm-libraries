@@ -1,0 +1,74 @@
+---
+alwaysApply: true
+---
+
+# rocBLAS Project Architecture
+
+> **Note to AI Agents:** If you notice these rules don't match the actual codebase or could be improved, please suggest updates. See `.cursorrules` for details.
+
+rocBLAS is the AMD ROCm Basic Linear Algebra Subprograms (BLAS) library, implemented in HIP and optimized for AMD GPUs.
+
+## Key Documentation
+
+- **[README](./README.md)** - Project overview and requirements
+- **[Linux Install Guide](./docs/install/Linux_Install_Guide.rst)** - Linux build and installation
+- **[Windows Install Guide](./docs/install/Windows_Install_Guide.rst)** - Windows build and installation
+- **[Programmer's Guide](./docs/how-to/Programmers_Guide.rst)** - API usage and programming guide
+- **[Design Notes](./docs/conceptual/rocblas-design-notes.rst)** - Architecture and design decisions
+
+## Component Architecture
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| **Library** (`library/`) | Core implementation | BLAS operations (Level 1, 2, 3, Extensions) |
+| **Clients** (`clients/`) | Testing & benchmarking | Test suite (gtest), benchmarks, samples |
+| **Tensile** (`library/src/blas3/`) | GEMM kernels | Optimized matrix multiplication kernels |
+| **Dependencies** (`deps/`) | External deps | GTest, LAPACK dependencies |
+| **Scripts** (`scripts/`) | Utilities | Performance testing, YAML generation |
+
+## BLAS Operation Levels
+
+### Level 1: Vector-Vector Operations
+- Location: `library/src/blas1/`
+- Examples: `axpy`, `dot`, `scal`, `nrm2`
+- Characteristics: O(n) complexity, vector inputs/outputs
+
+### Level 2: Matrix-Vector Operations
+- Location: `library/src/blas2/`
+- Examples: `gemv`, `ger`, `trmv`, `symv`
+- Characteristics: O(n²) complexity, matrix-vector operations
+
+### Level 3: Matrix-Matrix Operations
+- Location: `library/src/blas3/`
+- Examples: `gemm`, `trmm`, `symm`, `syrk`
+- Characteristics: O(n³) complexity, highly optimized via Tensile
+- **Tensile Integration:** Generates optimized GPU kernels for GEMM operations
+
+### BLAS Extensions
+- Location: `library/src/blas_ex/`
+- Examples: `gemm_ex`, `gemm_strided_batched_ex`
+- Purpose: Extended precision, batched operations, mixed precision
+
+## Tensile Integration
+
+Tensile is a kernel generator that creates highly optimized GEMM (General Matrix Multiply) kernels:
+
+- **Configuration:** YAML files in `library/src/blas3/Tensile/Logic/`
+- **Build-Time Generation:** Kernels generated during build process
+- **Architecture-Specific:** Optimized for specific GPU architectures (gfx90a, gfx942, etc.)
+- **Performance Critical:** GEMM is the most performance-critical BLAS operation
+
+## Data Type Support
+
+rocBLAS supports multiple data types with naming conventions:
+
+- **s** - Single precision float (float)
+- **d** - Double precision float (double)
+- **c** - Complex single precision (rocblas_float_complex)
+- **z** - Complex double precision (rocblas_double_complex)
+- **h** - Half precision (rocblas_half)
+- **bf16** - Brain float 16 (rocblas_bfloat16)
+- **i8** - 8-bit integer (int8_t)
+- **i32** - 32-bit integer (int32_t)
+
+Example: `rocblas_sgemm` = single precision GEMM, `rocblas_daxpy` = double precision AXPY

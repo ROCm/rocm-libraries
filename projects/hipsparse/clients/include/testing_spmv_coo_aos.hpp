@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,7 +39,8 @@
 
 using namespace hipsparse_test;
 
-void testing_spmv_coo_aos_bad_arg(void)
+template <typename I, typename T>
+void testing_spmv_coo_aos_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION > 10010 && CUDART_VERSION < 12000) \
     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1 && CUDART_VERSION < 12000))
@@ -147,7 +148,7 @@ void testing_spmv_coo_aos_bad_arg(void)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_spmv_coo_aos(Arguments argus)
+void testing_spmv_coo_aos(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 10010 && CUDART_VERSION < 12000))
     I                    m        = argus.M;
@@ -156,7 +157,7 @@ hipsparseStatus_t testing_spmv_coo_aos(Arguments argus)
     T                    h_beta   = make_DataType<T>(argus.beta);
     hipsparseOperation_t transA   = argus.transA;
     hipsparseIndexBase_t idx_base = argus.baseA;
-    hipsparseSpMVAlg_t   alg      = static_cast<hipsparseSpMVAlg_t>(argus.spmv_alg);
+    hipsparseSpMVAlg_t   alg      = argus.spmv_alg;
     std::string          filename = argus.filename;
 
     // Index and data type
@@ -176,11 +177,11 @@ hipsparseStatus_t testing_spmv_coo_aos(Arguments argus)
     srand(12345ULL);
 
     I nnz;
-    if(!generate_csr_matrix(filename, m, n, nnz, hrow_ptr, hcol_ind, hval, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hrow_ptr, hcol_ind, hval, idx_base));
+
+    // Redefine sparse matrix values
+    hipsparseInit<T>(hval, hval.size(), 1);
 
     std::vector<I> hind(2 * nnz);
 
@@ -345,8 +346,6 @@ hipsparseStatus_t testing_spmv_coo_aos(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SPMV_COO_AOS_HPP

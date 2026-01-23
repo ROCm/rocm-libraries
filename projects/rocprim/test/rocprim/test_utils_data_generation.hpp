@@ -211,7 +211,7 @@ private:
 public:
     static std::vector<T> vector()
     {
-        if(std::is_integral<T>::value)
+        if(rocprim::is_integral<T>::value)
         {
             return std::vector<T>();
         }
@@ -439,7 +439,7 @@ inline auto generate_random_data_n(OutputIter                                   
                                    Generator&&                                         gen)
     -> std::enable_if_t<
         is_custom_test_array_type<common::it_value_t<OutputIter>>::value
-            && std::is_integral<typename common::it_value_t<OutputIter>::value_type>::value,
+            && rocprim::is_integral<typename common::it_value_t<OutputIter>::value_type>::value,
         OutputIter>
 {
     using T = typename std::iterator_traits<OutputIter>::value_type;
@@ -510,7 +510,24 @@ inline std::vector<T> get_random_data01(size_t size, float p, seed_type seed_val
 template<class T>
 std::vector<size_t> get_sizes(T seed_value)
 {
-    // clang-format off
+// clang-format off
+#if HAS_VALGRIND_H
+    std::vector<size_t> sizes;
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND){
+        sizes = {1024, 2048, 1, 10, 53, 211, 500};
+    }
+    else{
+        sizes = {
+                1024, 2048, 4096, 1792,
+                1, 10, 53, 211, 500, 2345,
+                11001, 34567, 100000,
+                (1 << 16) - 1220,
+                (1 << 20) + 123
+            };
+    }
+
+#else
     std::vector<size_t> sizes = {
         1024, 2048, 4096, 1792,
         1, 10, 53, 211, 500, 2345,
@@ -518,7 +535,11 @@ std::vector<size_t> get_sizes(T seed_value)
         (1 << 16) - 1220,
         (1 << 20) + 123
     };
-    // clang-format on
+
+#endif // HAS_VALGRIND_H
+// clang-format on
+
+
     if(!common::use_hmm())
     {
         // hipMallocManaged() currently doesnt support zero byte allocation

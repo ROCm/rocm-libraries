@@ -234,6 +234,7 @@ merge(execution_policy<Derived>& policy,
     {
       return __merge::merge(policy, keys1_begin, keys1_end, keys2_begin, keys2_end, result_begin, compare_op);
     }
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static ResultIt
     seq(execution_policy<Derived>& policy,
         KeysIt1 keys1_begin,
@@ -246,6 +247,7 @@ merge(execution_policy<Derived>& policy,
       return thrust::merge(
         cvt_to_seq(derived_cast(policy)), keys1_begin, keys1_end, keys2_begin, keys2_end, result_begin, compare_op);
     }
+#  endif
   };
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, keys1_begin, keys1_end, keys2_begin, keys2_end, result_begin, compare_op);
@@ -302,6 +304,7 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE merge_by_key(
         items_out_begin,
         compare_op);
     }
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static pair<KeysOutputIt, ItemsOutputIt> seq(
       execution_policy<Derived>& policy,
       KeysIt1 keys1_begin,
@@ -326,6 +329,7 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE merge_by_key(
         items_out_begin,
         compare_op);
     }
+#  endif
   };
 
 #  if __THRUST_HAS_HIPRT__

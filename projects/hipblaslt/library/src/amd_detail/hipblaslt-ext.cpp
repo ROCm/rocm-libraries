@@ -1413,10 +1413,7 @@ namespace hipblaslt_ext
     int getIndexFromAlgo(hipblasLtMatmulAlgo_t& algo)
     {
         int* algo_ptr = (int*)algo.data;
-        if(*algo_ptr < 0)
-        {
-            return -1;
-        }
+
         return *algo_ptr;
     }
 

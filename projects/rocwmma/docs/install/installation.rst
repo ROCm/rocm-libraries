@@ -111,7 +111,7 @@ The following dependencies are required:
 *  `ROCm <https://github.com/ROCm/ROCm>`_ (Version 6.4 or later)
 *  `CMake <https://cmake.org/>`_ (Version 3.14 or later)
 *  `rocm-cmake <https://github.com/ROCm/rocm-cmake>`_ (Version 0.8.0 or later)
-*  `HIP runtime <https://github.com/ROCm/hip>`_ (Version 6.4.0 or later) (Or the ROCm hip-runtime-amd package)
+*  `HIP runtime <https://github.com/ROCm/rocm-systems/tree/develop/projects/hip>`_ (Version 6.4.0 or later) (Or the ROCm hip-runtime-amd package)
 *  `LLVM OpenMP <https://openmp.llvm.org/>`_ runtime dev package (Version 10.0 or later) (Also available as the ROCm rocm-llvm-dev package)
 *  (Optional, only required to use rocBLAS for validation) `rocBLAS <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_ (Version 4.3.0 for ROCm 6.3 or later) (Or the ROCm rocblas and rocblas-dev packages).
 

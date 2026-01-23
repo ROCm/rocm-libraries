@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,11 +44,11 @@ enum class hipblaslt_initialization
 
 typedef enum class _hipblaslt_activation_type
 {
-    none  = 0,
-    relu  = 1,
-    gelu  = 2,
-    swish = 3,
-    clamp = 4,
+    none    = 0,
+    relu    = 1,
+    gelu    = 2,
+    swish   = 3,
+    clamp   = 4,
     sigmoid = 5,
 } hipblaslt_activation_type;
 
@@ -61,11 +61,73 @@ typedef enum class _hipblaslt_bias_source
 
 typedef enum class _hipblaslt_scaling_format
 {
-    none   = 0,
-    Scalar = 1,
-    Vector = 2,
-    Block  = 3,
+    none                    = 0,
+    Scalar                  = 1,
+    Vector                  = 2,
+    Block_32_UE8M0          = 3,
+    Block_32_UE8M0_32_8_EXT = 1001,
 } hipblaslt_scaling_format;
+
+inline bool isBlockScaling(hipblaslt_scaling_format s)
+{
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_UE8M0:
+    case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+        return true;
+    default:
+        return false;
+    }
+}
+
+inline int blockSize(hipblaslt_scaling_format s)
+{
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_UE8M0:
+    case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+        return 32;
+    default:
+        return 1;
+    }
+}
+
+inline std::vector<size_t> preSwizzleSizeForScale(hipblaslt_scaling_format s)
+{
+    // Returns preSwizzleSize for scale as {swizzleTileMN, 256 / swizzleTileMN, matrixInstruction.k / scaleBlockSize}
+    switch(s)
+    {
+    // preSwizzleSize: {swizzleTileMN, 256 / swizzleTileMN, matrixInstruction.k / scaleBlockSize}
+    case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+        return {32, 8, 4};
+    default:
+        return {};
+    }
+}
+
+inline std::vector<size_t> preTileSizeForScaleA(hipblaslt_scaling_format s)
+{
+    // Returns preTile for scale A: {tileM, tileK}
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+        return {32, 8};
+    default:
+        return {};
+    }
+}
+
+inline std::vector<size_t> preTileSizeForScaleB(hipblaslt_scaling_format s)
+{
+    // Returns preTile for scale B: {tileK, tileN}
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+        return {8, 32};
+    default:
+        return {};
+    }
+}
 
 inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
                                               hipblaslt_activation_type   act)
@@ -88,8 +150,8 @@ inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
         os << "clamp";
         break;
     case hipblaslt_activation_type::sigmoid:
-	os << "sigmoid";
-	break;
+        os << "sigmoid";
+        break;
     }
     return os;
 }
@@ -155,13 +217,13 @@ inline hipblaslt_initialization string2hipblaslt_initialization(const std::strin
 // clang-format on
 inline const hipblaslt_activation_type string_to_hipblaslt_activation_type(const std::string& value)
 {
-    return value == "none"    ? hipblaslt_activation_type::none
-           : value == "gelu"  ? hipblaslt_activation_type::gelu
-           : value == "relu"  ? hipblaslt_activation_type::relu
-           : value == "swish" ? hipblaslt_activation_type::swish
-           : value == "clamp" ? hipblaslt_activation_type::clamp
-	   : value == "sigmoid" ? hipblaslt_activation_type::sigmoid
-                              : static_cast<hipblaslt_activation_type>(-1);
+    return value == "none"      ? hipblaslt_activation_type::none
+           : value == "gelu"    ? hipblaslt_activation_type::gelu
+           : value == "relu"    ? hipblaslt_activation_type::relu
+           : value == "swish"   ? hipblaslt_activation_type::swish
+           : value == "clamp"   ? hipblaslt_activation_type::clamp
+           : value == "sigmoid" ? hipblaslt_activation_type::sigmoid
+                                : static_cast<hipblaslt_activation_type>(-1);
 }
 
 inline const hipblaslt_bias_source string_to_hipblaslt_bias_source(const std::string& value)
@@ -186,7 +248,7 @@ inline const char* hipblaslt_activation_type_to_string(hipblaslt_activation_type
     case hipblaslt_activation_type::clamp:
         return "clamp";
     case hipblaslt_activation_type::sigmoid:
-	return "sigmoid";
+        return "sigmoid";
     case hipblaslt_activation_type::none:
         return "none";
     default:

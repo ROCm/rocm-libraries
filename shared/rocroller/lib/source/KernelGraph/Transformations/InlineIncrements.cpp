@@ -97,24 +97,7 @@ namespace rocRoller
             {
                 for(auto forLoop : graph.control.getNodes<ForLoopOp>())
                 {
-                    // If there are any ComputeIndex nodes contained
-                    // in this ForLoop, don't inline the increments.
-                    auto bodies = graph.control.getOutputNodeIndices<Body>(forLoop).to<std::set>();
-                    bool hasComputeIndex = false;
-                    for(auto body : bodies)
-                    {
-                        for(auto elem : graph.control.depthFirstVisit(body, GD::Downstream))
-                        {
-                            auto maybeComputeIndex = graph.control.get<ComputeIndex>(elem);
-                            if(maybeComputeIndex)
-                            {
-                                hasComputeIndex = true;
-                            }
-                        }
-                    }
-
-                    if(!hasComputeIndex)
-                        stageForLoop(graph, forLoop);
+                    stageForLoop(graph, forLoop);
                 }
             }
 

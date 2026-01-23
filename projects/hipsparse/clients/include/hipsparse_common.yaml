@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -129,6 +129,7 @@ Datatypes:
         HIPSPARSE_SPMV_CSR_ALG1: 2
         HIPSPARSE_SPMV_CSR_ALG2: 3
         HIPSPARSE_SPMV_COO_ALG2: 4
+        HIPSPARSE_SPMV_SELL_ALG1: 5
   - hipsparseSpSVAlg_t:
       bases: [c_int ]
       attr:
@@ -328,6 +329,7 @@ Arguments:
   - unit_check: c_int
   - timing: c_int
   - iters: c_int
+  - graph_test: c_bool
   - filename: c_char*192
   - function: c_char*64
   - category: c_char*32
@@ -434,6 +436,7 @@ Defaults:
   unit_check: 1
   timing: 0
   iters: 10
+  graph_test: false
   filename: '*'
   function: '*'
   category: '*'
