@@ -375,7 +375,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
-    auto areAllNodesF32Compute = [&]() {
+    auto anyNodeIsNotF32Compute = [&]() {
         return !std::all_of(
             opGraph.nodeWrappers().begin(), opGraph.nodeWrappers().end(), [](const auto& node) {
                 return node->computeDataType() == hipdnn_data_sdk::data_objects::DataType::FLOAT;
@@ -386,7 +386,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     {
     case 1:
     {
-        if(areAllNodesF32Compute())
+        if(anyNodeIsNotF32Compute())
         {
             HIPDNN_LOG_ERROR("Batchnorm plan builder only supports nodes with an fp32 "
                              "compute_data_type");
@@ -460,7 +460,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     }
     case 2:
     {
-        if(areAllNodesF32Compute())
+        if(anyNodeIsNotF32Compute())
         {
             HIPDNN_LOG_ERROR("Batchnorm plan builder only supports nodes with an fp32 "
                              "compute_data_type");
@@ -540,7 +540,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     case 3:
     {
         // batchnorm inference -> activation -> batchnorm backward
-        if(areAllNodesF32Compute())
+        if(anyNodeIsNotF32Compute())
         {
             HIPDNN_LOG_ERROR("Batchnorm plan builder only supports nodes with an fp32 "
                              "compute_data_type");

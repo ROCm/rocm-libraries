@@ -162,22 +162,22 @@ using DT = hipdnn_data_sdk::data_objects::DataType;
 // Documents what type combinations are NOT supported by MIOpen
 inline const std::vector<BnTensorTypes> INVALID_ALL = {
     // Invalid IO type (IO must be FLOAT/HALF/BFLOAT16)
-    {DT::UINT8, DT::FLOAT, DT::FLOAT}, // IO=UINT8 (unsupported)
+    {DT::UINT8, DT::FLOAT, DT::FLOAT, DT::FLOAT}, // IO=UINT8 (unsupported)
 
     // Invalid affine types (scale/bias must be FLOAT)
-    {DT::HALF, DT::HALF, DT::FLOAT}, // IO=HALF, Affine=HALF
-    {DT::BFLOAT16, DT::HALF, DT::FLOAT}, // IO=BFLOAT16, Affine=HALF
-    {DT::BFLOAT16, DT::BFLOAT16, DT::FLOAT}, // IO=BFLOAT16, Affine=BFLOAT16
+    {DT::HALF, DT::HALF, DT::FLOAT, DT::FLOAT}, // IO=HALF, Affine=HALF
+    {DT::BFLOAT16, DT::HALF, DT::FLOAT, DT::FLOAT}, // IO=BFLOAT16, Affine=HALF
+    {DT::BFLOAT16, DT::BFLOAT16, DT::FLOAT, DT::FLOAT}, // IO=BFLOAT16, Affine=BFLOAT16
 
     // Invalid stat types (mean/variance must be FLOAT)
-    {DT::HALF, DT::FLOAT, DT::HALF}, // IO=HALF, Stat=HALF
-    {DT::BFLOAT16, DT::FLOAT, DT::HALF}, // IO=BFLOAT16, Stat=HALF
-    {DT::BFLOAT16, DT::FLOAT, DT::BFLOAT16}, // IO=BFLOAT16, Stat=BFLOAT16
+    {DT::HALF, DT::FLOAT, DT::HALF, DT::FLOAT}, // IO=HALF, Stat=HALF
+    {DT::BFLOAT16, DT::FLOAT, DT::HALF, DT::FLOAT}, // IO=BFLOAT16, Stat=HALF
+    {DT::BFLOAT16, DT::FLOAT, DT::BFLOAT16, DT::FLOAT}, // IO=BFLOAT16, Stat=BFLOAT16
 
     // Both affine and stat invalid (must be FLOAT)
-    {DT::HALF, DT::HALF, DT::HALF}, // All HALF
-    {DT::BFLOAT16, DT::BFLOAT16, DT::BFLOAT16}, // All BFLOAT16
-    {DT::BFLOAT16, DT::HALF, DT::HALF}, // Mixed invalid
+    {DT::HALF, DT::HALF, DT::HALF, DT::FLOAT}, // All HALF
+    {DT::BFLOAT16, DT::BFLOAT16, DT::BFLOAT16, DT::FLOAT}, // All BFLOAT16
+    {DT::BFLOAT16, DT::HALF, DT::HALF, DT::FLOAT}, // Mixed invalid
 };
 } // namespace type_configs
 
@@ -652,6 +652,7 @@ struct TensorDataTypesComponentTestCase
     std::vector<int64_t> ioTensorIds;
     std::vector<int64_t> affineTensorIds;
     std::vector<int64_t> statTensorIds;
+    std::vector<int64_t> intermediateTensorIds;
 
     friend std::ostream& operator<<(std::ostream& os, const TensorDataTypesComponentTestCase& tc)
     {
@@ -1654,46 +1655,70 @@ inline std::vector<TensorDataTypesComponentTestCase> getCheckTensorDataTypesSupp
          {{1, "x", DT::FLOAT, ioDims, ioStrides, ""},
           {2, "y", DT::FLOAT, ioDims, ioStrides, ""},
           {3, "scale", DT::FLOAT, derivedDims, derivedStrides, ""},
-          {4, "bias", DT::FLOAT, derivedDims, derivedStrides, ""}},
-         {1, 2},
+          {4, "bias", DT::FLOAT, derivedDims, derivedStrides, ""},
+          {5, "activ_out", DT::FLOAT, ioDims, ioStrides, ""}},
+         {1, 5},
          {3, 4},
-         {}},
+         {},
+         {2}},
         {"AcceptsHalf_IO",
          true,
          {{1, "x", DT::HALF, ioDims, ioStrides, ""},
-          {2, "y", DT::HALF, ioDims, ioStrides, ""},
+          {2, "y", DT::FLOAT, ioDims, ioStrides, ""},
           {3, "scale", DT::FLOAT, derivedDims, derivedStrides, ""},
-          {4, "bias", DT::FLOAT, derivedDims, derivedStrides, ""}},
-         {1, 2},
+          {4, "bias", DT::FLOAT, derivedDims, derivedStrides, ""},
+          {5, "activ_out", DT::HALF, ioDims, ioStrides, ""}},
+         {1, 5},
          {3, 4},
-         {}},
+         {},
+         {2}},
         {"AcceptsBfloat16_IO",
          true,
          {{1, "x", DT::BFLOAT16, ioDims, ioStrides, ""},
-          {2, "y", DT::BFLOAT16, ioDims, ioStrides, ""},
+          {2, "y", DT::FLOAT, ioDims, ioStrides, ""},
           {3, "scale", DT::FLOAT, derivedDims, derivedStrides, ""},
-          {4, "bias", DT::FLOAT, derivedDims, derivedStrides, ""}},
-         {1, 2},
+          {4, "bias", DT::FLOAT, derivedDims, derivedStrides, ""},
+          {5, "activ_out", DT::BFLOAT16, ioDims, ioStrides, ""}},
+         {1, 5},
          {3, 4},
-         {}},
+         {},
+         {2}},
 
-        // Unhappy paths - invalid IO data type
-        {"RejectsInvalidIoDataType",
+        // Unhappy paths - invalid data types
+        {"RejectsInvalidInputDataType",
          false,
-         {{1, "x", DT::UINT8, ioDims, ioStrides, ""},
-          {3, "scale", DT::FLOAT, derivedDims, derivedStrides, ""}},
-         {1},
-         {3},
-         {}},
+         {{1, "x", DT::UINT8, ioDims, ioStrides, ""}, // Invalid
+          {2, "y", DT::FLOAT, ioDims, ioStrides, ""},
+          {3, "scale", DT::FLOAT, derivedDims, derivedStrides, ""},
+          {4, "bias", DT::FLOAT, derivedDims, derivedStrides, ""},
+          {5, "activ_out", DT::HALF, ioDims, ioStrides, ""}},
+         {1, 5},
+         {3, 4},
+         {},
+         {2}},
 
-        // Unhappy paths - invalid affine data type (must be FLOAT)
-        {"RejectsInvalidAffineDataType",
+        {"RejectsInvalidAffineType",
          false,
-         {{1, "x", DT::FLOAT, ioDims, ioStrides, ""},
-          {3, "scale", DT::HALF, derivedDims, derivedStrides, ""}},
-         {1},
-         {3},
-         {}},
+         {{1, "x", DT::HALF, ioDims, ioStrides, ""},
+          {2, "y", DT::FLOAT, ioDims, ioStrides, ""},
+          {3, "scale", DT::HALF, derivedDims, derivedStrides, ""}, // Invalid
+          {4, "bias", DT::HALF, derivedDims, derivedStrides, ""}, // Invalid
+          {5, "activ_out", DT::HALF, ioDims, ioStrides, ""}},
+         {1, 5},
+         {3, 4},
+         {},
+         {2}},
+        {"RejectsInvalidIntermediateDataType",
+         false,
+         {{1, "x", DT::HALF, ioDims, ioStrides, ""},
+          {2, "y", DT::HALF, ioDims, ioStrides, ""}, // Invalid
+          {3, "scale", DT::FLOAT, derivedDims, derivedStrides, ""},
+          {4, "bias", DT::FLOAT, derivedDims, derivedStrides, ""},
+          {5, "activ_out", DT::HALF, ioDims, ioStrides, ""}},
+         {1, 5},
+         {3, 4},
+         {},
+         {2}},
     };
 }
 
@@ -2986,16 +3011,22 @@ TEST_P(TestCheckTensorDataTypesSupported, ValidatesCorrectly)
     if(tc.shouldPass)
     {
         EXPECT_NO_THROW({
-            checkTensorDataTypesSupported(
-                tc.ioTensorIds, tc.affineTensorIds, tc.statTensorIds, tensorMap);
+            checkTensorDataTypesSupported(tc.ioTensorIds,
+                                          tc.affineTensorIds,
+                                          tc.statTensorIds,
+                                          tc.intermediateTensorIds,
+                                          tensorMap);
         });
     }
     else
     {
         EXPECT_THROW(
             {
-                checkTensorDataTypesSupported(
-                    tc.ioTensorIds, tc.affineTensorIds, tc.statTensorIds, tensorMap);
+                checkTensorDataTypesSupported(tc.ioTensorIds,
+                                              tc.affineTensorIds,
+                                              tc.statTensorIds,
+                                              tc.intermediateTensorIds,
+                                              tensorMap);
             },
             hipdnn_plugin_sdk::HipdnnPluginException);
     }
@@ -3596,8 +3627,8 @@ inline std::vector<BatchnormInferenceVarianceExtFusedConfigTestCase>
                 // Add virtual tensor for fusion
                 auto strides
                     = hipdnn_data_sdk::utilities::generateStrides(dims, layout->strideOrder);
-                configs.push_back(
-                    createIoTensor(bnYVirtualUid, "bn_y", typeConfig.io, dims, strides, true));
+                configs.push_back(createIoTensor(
+                    bnYVirtualUid, "bn_y", typeConfig.intermediate, dims, strides, true));
 
                 cases.push_back({"AcceptsInferenceVarExtFused_" + generateName(dims, *layout) + "_"
                                      + toString(typeConfig),
@@ -3615,26 +3646,51 @@ inline std::vector<BatchnormInferenceVarianceExtFusedConfigTestCase>
         }
     }
 
-    // Unhappy paths - unsupported activation mode
-    const auto& sampleDims = shapes::INFERENCE_4D[0];
-    auto configs = createBatchnormInferenceWithVarianceTensors(
-        bn_type_configs::ALL_FLOAT, sampleDims, TensorLayout::NCHW);
-    auto strides
-        = hipdnn_data_sdk::utilities::generateStrides(sampleDims, TensorLayout::NCHW.strideOrder);
-    configs.push_back(createIoTensor(bnYVirtualUid, "bn_y", DT::FLOAT, sampleDims, strides, true));
+    {
+        // Unhappy paths - unsupported activation mode
+        const auto& sampleDims = shapes::INFERENCE_4D[0];
+        auto configs = createBatchnormInferenceWithVarianceTensors(
+            bn_type_configs::ALL_FLOAT, sampleDims, TensorLayout::NCHW);
+        auto strides = hipdnn_data_sdk::utilities::generateStrides(sampleDims,
+                                                                   TensorLayout::NCHW.strideOrder);
+        configs.push_back(
+            createIoTensor(bnYVirtualUid, "bn_y", DT::FLOAT, sampleDims, strides, true));
 
-    cases.push_back({"RejectsInferenceVarExtFused_UnsupportedActivation",
-                     false,
-                     configs,
-                     UIDs::X,
-                     UIDs::Y,
-                     UIDs::SCALE,
-                     UIDs::BIAS,
-                     UIDs::EPSILON,
-                     UIDs::MEAN,
-                     UIDs::VARIANCE,
-                     PM::SIGMOID_FWD});
+        cases.push_back({"RejectsInferenceVarExtFused_UnsupportedActivation",
+                         false,
+                         configs,
+                         UIDs::X,
+                         UIDs::Y,
+                         UIDs::SCALE,
+                         UIDs::BIAS,
+                         UIDs::EPSILON,
+                         UIDs::MEAN,
+                         UIDs::VARIANCE,
+                         PM::SIGMOID_FWD});
+    }
 
+    {
+        // Unhappy paths - unsupported intermediate data type: half
+        const auto& sampleDims = shapes::INFERENCE_4D[0];
+        auto configs = createBatchnormInferenceWithVarianceTensors(
+            bn_type_configs::ALL_FLOAT, sampleDims, TensorLayout::NCHW);
+        auto strides = hipdnn_data_sdk::utilities::generateStrides(sampleDims,
+                                                                   TensorLayout::NCHW.strideOrder);
+        configs.push_back(
+            createIoTensor(bnYVirtualUid, "bn_y", DT::HALF, sampleDims, strides, true));
+
+        cases.push_back({"RejectsInferenceVarExtFused_UnsupportedIntermediateDataType",
+                         false,
+                         configs,
+                         UIDs::X,
+                         UIDs::Y,
+                         UIDs::SCALE,
+                         UIDs::BIAS,
+                         UIDs::EPSILON,
+                         UIDs::MEAN,
+                         UIDs::VARIANCE,
+                         PM::SIGMOID_FWD});
+    }
     return cases;
 }
 
