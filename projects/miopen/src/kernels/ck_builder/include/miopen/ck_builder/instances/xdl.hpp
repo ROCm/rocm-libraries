@@ -3,8 +3,7 @@
 
 #pragma once
 
-#include <ck_tile/builder/types.hpp>
-#include <ck_tile/builder/conv_builder.hpp>
+#include "shared.hpp"
 
 namespace miopen {
 namespace conv {

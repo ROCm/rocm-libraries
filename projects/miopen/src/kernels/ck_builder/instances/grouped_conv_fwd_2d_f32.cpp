@@ -1,14 +1,6 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier: MIT
-
-#pragma once
-
-#include <array>
-#include <cstddef>
-#include <miopen/ck_builder/builder_factory.hpp>
-#include <miopen/ck_builder/instances/xdl_v3.hpp>
-#include <miopen/ck_builder/instances/xdl.hpp>
+#include <miopen/ck_builder/instances/grouped_conv_fwd_2d_f32.hpp>
 #include <miopen/ck_builder/kernel_instantiation.hpp>
+#include <ck_tile/builder/reflect/instance_traits_device_grouped_conv_bwd_weight_multiple_d_xdl_cshuffle.hpp>
 
 namespace miopen {
 namespace conv {
@@ -40,10 +32,7 @@ using DeviceOpGFwdDefault =
 
 using DeviceOpGFWdDefaultFloat = DeviceOpGFwdDefault<float>;
 
-constexpr auto NGCHW = ckb::TensorLayout::NGCHW;
-constexpr auto GKCYX = ckb::TensorLayout::GKCYX;
-constexpr auto NGKHW = ckb::TensorLayout::NGKHW;
-constexpr auto FP32  = ckb::DataType::FP32;
+constexpr auto FP32 = ckb::DataType::FP32;
 
 constexpr auto
 create_device_grouped_conv_fwd_xdl_f32_instance_data(std::size_t spatialDim,
@@ -881,36 +870,23 @@ create_device_grouped_conv2d_fwd_xdl_merged_groups_ngchw_gkcyx_ngkhw_f32_instanc
     return instanceData;
 }
 
-template <>
-struct DeviceOperationInstanceFactory<DeviceOpGFWdDefaultFloat>
+void add_grouped_conv_fwd_2d_f32(std::vector<BaseOperatorPtr>& instances)
 {
-    static std::vector<BaseOperatorPtr> GetInstances()
-    {
-        // Adapted from GetInstances() in the composable_kernel project's file:
-        // library/include/ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp
-        std::vector<BaseOperatorPtr> instances{};
+    // Adapted from GetInstances() in the composable_kernel project's file:
+    // library/include/ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp
 
-        build_kernels<
-            create_device_grouped_conv2d_fwd_xdl_merged_groups_ngchw_gkcyx_ngkhw_f32_instance_data()>(
-            instances);
-        build_kernels<create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_instance_data()>(
-            instances);
-        build_kernels<
-            create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_16x16_instance_data()>(
-            instances);
-        build_kernels<
-            create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_comp_instance_data()>(
-            instances);
-        build_kernels<
-            create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_intra_instance_data()>(
-            instances);
-        build_kernels<
-            create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_inter_instance_data()>(
-            instances);
+    constexpr auto xdlKernelData = concat(
+        create_device_grouped_conv2d_fwd_xdl_merged_groups_ngchw_gkcyx_ngkhw_f32_instance_data(),
+        create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_instance_data(),
+        create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_16x16_instance_data());
+    build_kernels<xdlKernelData>(instances);
 
-        return instances;
-    }
-};
+    constexpr auto xdlV3KernelData = concat(
+        create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_comp_instance_data(),
+        create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_intra_instance_data(),
+        create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_mem_inter_instance_data());
+    build_kernels<xdlV3KernelData>(instances);
+}
 } // namespace instance
 } // namespace ck_builder
 } // namespace conv

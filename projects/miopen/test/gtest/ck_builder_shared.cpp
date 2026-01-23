@@ -3,7 +3,7 @@
 
 #include "ck_builder_shared.hpp"
 
-std::size_t FirstDifference(const std::string& a, const std::string& b)
+std::size_t first_difference(const std::string& a, const std::string& b)
 {
     for(auto i = 0; i < min(a.size(), b.size()); i++)
     {

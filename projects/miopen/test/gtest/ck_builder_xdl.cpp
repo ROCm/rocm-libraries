@@ -7,8 +7,7 @@
 
 #include <iostream>
 
-#include <miopen/ck_builder/example_conversion.hpp>
-#include <miopen/ck_builder/builder_conv_xdl.hpp>
+#include <miopen/ck_builder/factories/grouped_conv_2d_fwd_multiple_abd.hpp>
 
 #include <ck_tile/builder/conv_builder.hpp>
 #include <ck_tile/builder/reflect/conv_description.hpp>
@@ -250,42 +249,5 @@ TEST(CKBuilderXdl, CreateExistingInstance)
             MIOPEN_LOG_T("\t" << instanceString);
         }
     }
-}
-*/
-
-/*
-TEST(CKBuilderXdl, StaticInstance)
-{
-    constexpr XdlInstance instance = miopen::ck_builder::make_instance();
-
-    using Builder = ckb::ConvBuilder<instance.signature, instance.algorithm>;
-
-    static_assert(ckb::factory::FwdXdlAlgorithm<decltype(instance.algorithm)>);
-    do_builder_checks<Builder>();
-
-    auto builderKernelInstance       = Builder::Instance{};
-    auto builderKernelInstanceString = builderKernelInstance.GetInstanceString();
-
-    ASSERT_TRUE(builderKernelInstanceString.find(
-                    "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3") == std::string::npos)
-        << " builder returned wrong kind of instance";
-
-    // These are the instances that MIOpen currently gets from CK's static library
-    auto factoryInstances = DeviceOpGFwdDefaultPtrs<float>::GetInstances();
-
-    ASSERT_GT(factoryInstances.size(), 0) << "Factory returned no instances";
-
-    auto result =
-        std::find_if(factoryInstances.begin(),
-                     factoryInstances.end(),
-                     [&builderKernelInstanceString](const auto& kernelPtr) {
-                         return kernelPtr->GetInstanceString() == builderKernelInstanceString;
-                     });
-
-    print_closest_instance(builderKernelInstanceString, factoryInstances);
-
-    ASSERT_TRUE(result != factoryInstances.end())
-        << "Instance string " << builderKernelInstanceString
-        << " not found in list of instances returned by factory.";
 }
 */

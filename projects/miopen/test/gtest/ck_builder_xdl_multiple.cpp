@@ -5,8 +5,7 @@
 
 #include "ck_builder_shared.hpp"
 
-#include <miopen/ck_builder/example_conversion.hpp>
-#include <miopen/ck_builder/builder_conv_xdl.hpp>
+#include <miopen/ck_builder/factories/grouped_conv_2d_fwd_multiple_abd.hpp>
 
 #include <ck_tile/builder/conv_builder.hpp>
 #include <ck_tile/builder/reflect/conv_description.hpp>

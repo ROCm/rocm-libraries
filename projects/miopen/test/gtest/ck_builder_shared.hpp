@@ -15,20 +15,7 @@ namespace ckb         = ck_tile::builder;
 using BaseOperator    = ck::tensor_operation::device::BaseOperator;
 using BaseOperatorPtr = std::unique_ptr<BaseOperator>;
 
-template <typename Builder>
-constexpr void do_builder_checks()
-{
-    // Verify that Builder is a class type
-    static_assert(std::is_class_v<Builder>, "Builder should be a class type");
-
-    // Verify that Builder::Instance exists and is the actual device kernel class
-    static_assert(std::is_class_v<typename Builder::Instance>,
-                  "Builder::Instance should be a class type");
-
-    static_assert(ck_tile::reflect::HasInstanceTraits<typename Builder::Instance>);
-}
-
-std::size_t FirstDifference(const std::string& a, const std::string& b);
+std::size_t first_difference(const std::string& a, const std::string& b);
 
 void print_closest_instance(std::string builderKernelInstanceString, auto&& factoryInstances)
 {
@@ -38,7 +25,7 @@ void print_closest_instance(std::string builderKernelInstanceString, auto&& fact
     for(auto&& k : factoryInstances)
     {
         auto kernelDescription = k->GetInstanceString();
-        auto firstDifferent    = FirstDifference(builderKernelInstanceString, kernelDescription);
+        auto firstDifferent    = first_difference(builderKernelInstanceString, kernelDescription);
         if(firstDifferent > m)
         {
             m    = firstDifferent;

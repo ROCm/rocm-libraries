@@ -4,6 +4,14 @@
 #pragma once
 
 #include <array>
+#include <miopen/ck_builder/instances/shared.hpp>
+
+namespace miopen {
+namespace conv {
+namespace ck_builder {
+namespace instance {
+
+namespace ckb = ck_tile::builder;
 
 template <auto KernelDescriptor>
 constexpr void instantiate_kernel(std::vector<BaseOperatorPtr>& kernels)
@@ -73,3 +81,7 @@ concat(const std::array<T, N1>& a, const std::array<T, N2>& b, const std::array<
 {
     return concat(concat2(a, b), rest...);
 }
+} // namespace instance
+} // namespace ck_builder
+} // namespace conv
+} // namespace miopen
