@@ -257,10 +257,6 @@ int main(int argc, char* argv[])
             if(fftrc != rocfft_status_success)
                 throw std::runtime_error("rocfft_brick_destroy failed (inbrick["
                                          + std::to_string(idx) + "].");
-
-            // fftrc = rocfft_brick_destroy(inbrick);
-            // if(fftrc != rocfft_status_success)
-            //     throw std::runtime_error("rocfft_brick_destroy failed");
             
             inbufsizes[idx] = inbrick_stride[idx].back() * sizeof(std::complex<double>);
             std::cout << "Input brick " << idx;
@@ -351,10 +347,6 @@ int main(int argc, char* argv[])
             if(fftrc != rocfft_status_success)
                 throw std::runtime_error("rocfft_brick_destroy failed (outbrick["
                                          + std::to_string(idx) + "].");
-
-            // fftrc = rocfft_brick_destroy(outbrick);
-            // if(fftrc != rocfft_status_success)
-            //     throw std::runtime_error("rocfft_brick_destroy failed");
             
             outbufsizes[idx] = outbrick_stride[idx].back() * sizeof(std::complex<double>);
 
@@ -489,6 +481,8 @@ int main(int argc, char* argv[])
     {
         (void)hipFree(gpu_out[idx]);
     }
+    if(work_buf)
+        (void)hipFree(work_buf);
 
     return 0;
 }

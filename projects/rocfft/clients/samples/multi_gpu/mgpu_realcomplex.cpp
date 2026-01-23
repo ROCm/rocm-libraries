@@ -68,7 +68,7 @@ void initbrick(const std::vector<size_t> &lower,
         }
         break;
     default:
-        throw std::runtime_error("Unspported dimension");
+        throw std::runtime_error("Unsupported dimension");
     }
 }
 
@@ -261,10 +261,6 @@ int main(int argc, char* argv[])
                 throw std::runtime_error("rocfft_brick_destroy failed (inbrick["
                                          + std::to_string(idx) + "].");
 
-            // fftrc = rocfft_brick_destroy(inbrick);
-            // if(fftrc != rocfft_status_success)
-            //     throw std::runtime_error("rocfft_brick_destroy failed");
-            
             inbufsizes[idx] = inbrick_stride[idx].back() * sizeof(double);
             std::cout << "Input brick " << idx;
             std::cout << "\n\tlower indices:";
@@ -356,11 +352,7 @@ int main(int argc, char* argv[])
             if(fftrc != rocfft_status_success)
                 throw std::runtime_error("rocfft_brick_destroy failed (outbrick["
                                          + std::to_string(idx) + "].");
-
-            // fftrc = rocfft_brick_destroy(outbrick);
-            // if(fftrc != rocfft_status_success)
-            //     throw std::runtime_error("rocfft_brick_destroy failed");
-            
+           
             outbufsizes[idx] = outbrick_stride[idx].back() * sizeof(std::complex<double>);
 
             std::cout << "Output brick " << idx;
