@@ -340,6 +340,8 @@ void TestLogBufferOn()
     size_t line_i = 0;
     std::string line;
 
+    fs::remove(filename);
+
     ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
                                                  "5"); // miopen::LoggingLevel::Info
     // test log dump after error
@@ -398,6 +400,8 @@ void TestLogBufferOff()
 {
     auto filename =
         fs::temp_directory_path() / ("miopen_error_" + std::to_string(getpid()) + ".log");
+
+    fs::remove(filename);
 
     ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
                                                  "6"); // miopen::LoggingLevel::Info2
