@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
+// Modifications Copyright (c) 2024-2026 Advanced Micro Devices, Inc.
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -50,20 +50,10 @@ __device__ void __atomic_load_cuda(const volatile _Type *__ptr, _Type& __dst, in
     __dst = __hip_atomic_load(__ptr, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
 }
 
-// template<class _Type, typename _CUDA_VSTD::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ void __atomic_load_cuda(const volatile _Type *__ptr, _Type& __dst, int __memorder, __thread_scope_block_tag) {
-//     __dst = __hip_atomic_load(__ptr, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-// }
-
 template<class _Type>
 __device__ void __atomic_store_cuda(volatile _Type *__ptr, _Type& __val, int __memorder, __thread_scope_block_tag) {
     __hip_atomic_store(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
 }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ void __atomic_store_cuda(volatile _Type *__ptr, _Type& __val, int __memorder, __thread_scope_block_tag) {
-//     __hip_atomic_store(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-// }
 
 template<class _Type>
 __device__ bool __atomic_compare_exchange_cuda(volatile _Type *__ptr, _Type *__expected, const _Type __desired, bool, int __success_memorder, int __failure_memorder, __thread_scope_block_tag) {
@@ -95,11 +85,6 @@ __device__ _Type __atomic_fetch_add_cuda(volatile _Type *__ptr, _Type __val, int
     return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
 }
 
-// template<class _Type>
-// __device__ _Type __atomic_fetch_add_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
-//     return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-// }
-
 template<class _Type>
 __device__ _Type __atomic_fetch_max_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
     return __hip_atomic_fetch_max(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
@@ -115,74 +100,10 @@ __device__ _Type __atomic_fetch_sub_cuda(volatile _Type *__ptr, _Type __val, int
     return __hip_atomic_fetch_add(__ptr, -__val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
 }
 
-// template<class _Type>
-// __device__ _Type __atomic_fetch_sub_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
-//     return __hip_atomic_fetch_add(__ptr, -__val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ bool __atomic_compare_exchange_cuda(volatile _Type *__ptr, _Type *__expected, const _Type __desired, bool, int __success_memorder, int __failure_memorder, __thread_scope_block_tag) {
-//     return __hip_atomic_compare_exchange_weak(__ptr, __expected, __desired, __success_memorder, __failure_memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ void __atomic_exchange_cuda(volatile _Type* __ptr, _Type& __old, _Type __new, int __memorder, __thread_scope_block_tag) {
-//     __old = __hip_atomic_exchange(__ptr, __new, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ _Type __atomic_fetch_and_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
-//     return __hip_atomic_fetch_and(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ _Type __atomic_fetch_or_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
-//     return __hip_atomic_fetch_or(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ _Type __atomic_fetch_xor_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
-//     return __hip_atomic_fetch_xor(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-// }
-
-// template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_floating_point<_Type>::value, int>::type = 0>
-// __device__ _Type __atomic_fetch_add_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
-//     return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-// }
-
-// template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_integral<_Type>::value, int>::type = 0>
-// __device__ _Type __atomic_fetch_add_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
-//     return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ _Type __atomic_fetch_max_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
-//     return __hip_atomic_fetch_max(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ _Type __atomic_fetch_min_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
-//     return __hip_atomic_fetch_min(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-// }
-
-// template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_floating_point<_Type>::value, int>::type = 0>
-// __device__ _Type __atomic_fetch_sub_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
-//     return __hip_atomic_fetch_add(__ptr, -__val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-// }
-
-// template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_integral<_Type>::value, int>::type = 0>
-// __device__ _Type __atomic_fetch_sub_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
-//     return __hip_atomic_fetch_add(__ptr, -__val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-// }
-
 template<class _Type>
 __device__ _Type* __atomic_fetch_add_cuda(_Type *volatile *__ptr, ptrdiff_t __val, int __memorder, __thread_scope_block_tag) {
     return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
 }
-// template<class _Type>
-// __device__ _Type* __atomic_fetch_sub_cuda(_Type *volatile *__ptr, ptrdiff_t __val, int __memorder, __thread_scope_block_tag) {
-//     return __hip_atomic_fetch_add(__ptr, -__val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-// }
 
 static inline __device__ void __atomic_thread_fence_cuda(int __memorder, __thread_scope_device_tag) {
     __threadfence();
@@ -193,20 +114,10 @@ __device__ void __atomic_load_cuda(const volatile _Type *__ptr, _Type& __dst, in
     __dst = __hip_atomic_load(__ptr, __memorder, __HIP_MEMORY_SCOPE_AGENT);
 }
 
-// template<class _Type, typename _CUDA_VSTD::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ void __atomic_load_cuda(const volatile _Type *__ptr, _Type& __dst, int __memorder, __thread_scope_device_tag) {
-//     __dst = __hip_atomic_load(__ptr, __memorder, __HIP_MEMORY_SCOPE_AGENT);
-// }
-
 template<class _Type>
 __device__ void __atomic_store_cuda(volatile _Type *__ptr, _Type& __val, int __memorder, __thread_scope_device_tag) {
     __hip_atomic_store(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
 }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ void __atomic_store_cuda(volatile _Type *__ptr, _Type& __val, int __memorder, __thread_scope_device_tag) {
-//     __hip_atomic_store(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
-// }
 
 template<class _Type>
 __device__ bool __atomic_compare_exchange_cuda(volatile _Type *__ptr, _Type *__expected, const _Type __desired, bool, int __success_memorder, int __failure_memorder, __thread_scope_device_tag) {
@@ -238,11 +149,6 @@ __device__ _Type __atomic_fetch_add_cuda(volatile _Type *__ptr, _Type __val, int
     return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
 }
 
-// template<class _Type>
-// __device__ _Type __atomic_fetch_add_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
-//     return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
-// }
-
 template<class _Type>
 __device__ _Type __atomic_fetch_max_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
     return __hip_atomic_fetch_max(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
@@ -257,66 +163,6 @@ template<class _Type>
 __device__ _Type __atomic_fetch_sub_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
     return __hip_atomic_fetch_add(__ptr, -__val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
 }
-
-// template<class _Type>
-// __device__ _Type __atomic_fetch_sub_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
-//     return __hip_atomic_fetch_add(__ptr, -__val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ bool __atomic_compare_exchange_cuda(volatile _Type *__ptr, _Type *__expected, const _Type __desired, bool, int __success_memorder, int __failure_memorder, __thread_scope_device_tag) {
-//     return __hip_atomic_compare_exchange_weak(__ptr, __expected, __desired, __success_memorder, __failure_memorder, __HIP_MEMORY_SCOPE_AGENT);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ void __atomic_exchange_cuda(volatile _Type* __ptr, _Type& __old, _Type __new, int __memorder, __thread_scope_device_tag) {
-//     __old = __hip_atomic_exchange(__ptr, __new, __memorder, __HIP_MEMORY_SCOPE_AGENT);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ _Type __atomic_fetch_and_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
-//     return __hip_atomic_fetch_and(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ _Type __atomic_fetch_or_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
-//     return __hip_atomic_fetch_or(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ _Type __atomic_fetch_xor_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
-//     return __hip_atomic_fetch_xor(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
-// }
-
-// template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_floating_point<_Type>::value, int>::type = 0>
-// __device__ _Type __atomic_fetch_add_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
-//     return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
-// }
-
-// template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_integral<_Type>::value, int>::type = 0>
-// __device__ _Type __atomic_fetch_add_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
-//     return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ _Type __atomic_fetch_max_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
-//     return __hip_atomic_fetch_max(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ _Type __atomic_fetch_min_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
-//     return __hip_atomic_fetch_min(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
-// }
-
-// template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_floating_point<_Type>::value, int>::type = 0>
-// __device__ _Type __atomic_fetch_sub_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
-//     return __hip_atomic_fetch_add(__ptr, -__val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
-// }
-
-// template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_integral<_Type>::value, int>::type = 0>
-// __device__ _Type __atomic_fetch_sub_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
-//     return __hip_atomic_fetch_add(__ptr, -__val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
-// }
 
 template<class _Type>
 __device__ _Type* __atomic_fetch_add_cuda(_Type *volatile *__ptr, ptrdiff_t __val, int __memorder, __thread_scope_device_tag) {
@@ -336,20 +182,10 @@ __device__ void __atomic_load_cuda(const volatile _Type *__ptr, _Type& __dst, in
     __dst = __hip_atomic_load(__ptr, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
-// template<class _Type, typename _CUDA_VSTD::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ void __atomic_load_cuda(const volatile _Type *__ptr, _Type& __dst, int __memorder, __thread_scope_system_tag) {
-//     __dst = __hip_atomic_load(__ptr, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-// }
-
 template<class _Type>
 __device__ void __atomic_store_cuda(volatile _Type *__ptr, _Type& __val, int __memorder, __thread_scope_system_tag) {
     __hip_atomic_store(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
 }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ void __atomic_store_cuda(volatile _Type *__ptr, _Type& __val, int __memorder, __thread_scope_system_tag) {
-//     __hip_atomic_store(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-// }
 
 template<class _Type>
 __device__ bool __atomic_compare_exchange_cuda(volatile _Type *__ptr, _Type *__expected, const _Type __desired, bool __is_weak, int __success_memorder, int __failure_memorder, __thread_scope_system_tag) {
@@ -384,11 +220,6 @@ __device__ _Type __atomic_fetch_add_cuda(volatile _Type *__ptr, _Type __val, int
    return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
-// template<class _Type>
-// __device__ _Type __atomic_fetch_add_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
-//    return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-// }
-
 template<class _Type>
 __device__ _Type __atomic_fetch_max_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
     return __hip_atomic_fetch_max(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
@@ -403,66 +234,6 @@ template<class _Type>
 __device__ _Type __atomic_fetch_sub_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
     return __hip_atomic_fetch_add(__ptr, -__val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
 }
-
-// template<class _Type>
-// __device__ _Type __atomic_fetch_sub_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
-//     return __hip_atomic_fetch_add(__ptr, -__val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ bool __atomic_compare_exchange_cuda(volatile _Type *__ptr, _Type *__expected, const _Type __desired, bool, int __success_memorder, int __failure_memorder, __thread_scope_system_tag) {
-//     return __hip_atomic_compare_exchange_weak(__ptr, __expected, __desired, __success_memorder, __failure_memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ void __atomic_exchange_cuda(volatile _Type* __ptr, _Type& __old, _Type __new, int __memorder, __thread_scope_system_tag) {
-//     __old = __hip_atomic_exchange(__ptr, __new, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ _Type __atomic_fetch_and_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
-//     return __hip_atomic_fetch_and(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ _Type __atomic_fetch_or_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
-//     return __hip_atomic_fetch_or(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ _Type __atomic_fetch_xor_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
-//     return __hip_atomic_fetch_xor(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-// }
-
-// template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_floating_point<_Type>::value, int>::type = 0>
-// __device__ _Type __atomic_fetch_add_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
-//     return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-// }
-
-// template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_integral<_Type>::value, int>::type = 0>
-// __device__ _Type __atomic_fetch_add_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
-//     return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ _Type __atomic_fetch_max_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
-//     return __hip_atomic_fetch_max(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-// }
-
-//template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
-// __device__ _Type __atomic_fetch_min_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
-//     return __hip_atomic_fetch_min(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-// }
-
-// template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_floating_point<_Type>::value, int>::type = 0>
-// __device__ _Type __atomic_fetch_sub_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
-//     return __hip_atomic_fetch_add(__ptr, -__val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-// }
-
-// template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_integral<_Type>::value, int>::type = 0>
-// __device__ _Type __atomic_fetch_sub_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
-//     return __hip_atomic_fetch_add(__ptr, -__val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-// }
 
 template<class _Type>
 __device__ _Type* __atomic_fetch_add_cuda(_Type *volatile *__ptr, ptrdiff_t __val, int __memorder, __thread_scope_system_tag) {
