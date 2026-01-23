@@ -1,6 +1,6 @@
 
 import math
-from typing import Iterable
+from typing import Iterable, Optional
 
 import torch
 
@@ -58,6 +58,8 @@ class OrigamiMatmulSelector:
         b_dtype: torch.dtype,
         out_dtype: torch.dtype,
         device: torch.device,
+        a_stride: Optional[tuple[int, ...]] = None,
+        b_stride: Optional[tuple[int, ...]] = None,
         batch: int = 1,
         mx_block_size=0,
         streamk=False
@@ -75,6 +77,8 @@ class OrigamiMatmulSelector:
             b_dtype: PyTorch dtype for matrix B.
             out_dtype: PyTorch dtype for output matrix.
             device: PyTorch CUDA device (must be ROCm-capable).
+            a_stride: Tuple of PyTorch tensor strides for matrix A (default: None).
+            b_stride: Tuple of PyTorch tensor strides for matrix B (default: None).
             batch: Batch size of the GEMM (default: 1).
             mx_block_size: Block size for MX format dtypes (default: 0 for non-MX types).
             streamk: Whether to use StreamK scheduling (default: False).
@@ -87,6 +91,12 @@ class OrigamiMatmulSelector:
         self._m = m
         self._n = n
         self._k = k
+
+        # Save tensor strides
+        self._a_stride = a_stride
+        self._b_stride = b_stride
+
+        # Save batch size
         self._batch = batch
 
         # Save tensor dtypes as strings
@@ -295,7 +305,7 @@ class OrigamiMatmulSelector:
         return self._grid
 
 
-    def _generate_configs(self, config_gen):
+    def _generate_configs(self, config_gen) -> [origami.config_t]:
         """
         Convert Triton-style configs to Origami config_t objects.
         
@@ -352,12 +362,20 @@ class OrigamiMatmulSelector:
         b_origami_dtype = origami.string_to_datatype(self._b_dtype_str)
         c_origami_dtype = origami.string_to_datatype(self._out_dtype_str)
 
+        # Calculate transpose types based on tensor strides
+        a_transpose = self._check_transpose_type((self._m, self._k),
+                                                 self._a_stride,
+                                                 default=origami.transpose_t.T)
+        b_transpose = self._check_transpose_type((self._k, self._n),
+                                                 self._b_stride,
+                                                 default=origami.transpose_t.N)
+
         # Create and set new problem_t values
         problem = origami.problem_t()
         problem.size            = size
         problem.batch           = self._batch
-        problem.a_transpose     = origami.transpose_t.T
-        problem.b_transpose     = origami.transpose_t.N
+        problem.a_transpose     = a_transpose
+        problem.b_transpose     = b_transpose
         problem.a_dtype         = a_origami_dtype
         problem.b_dtype         = b_origami_dtype
         problem.c_dtype         = c_origami_dtype
@@ -367,6 +385,69 @@ class OrigamiMatmulSelector:
         problem.b_mx_block_size = self._mx_block_size
     
         return problem
+
+
+    def _check_transpose_type(
+        self,
+        shape: tuple[int, int],
+        strides: Optional[tuple[int, ...]] = None,
+        default: Optional[origami.transpose_t] = origami.transpose_t.N
+    ) -> origami.transpose_t:
+        """
+        Determine transpose type from tensor shape and stride pattern.
+
+        Analyzes the memory layout of a matrix by examining its strides to determine
+        whether it is stored in row-major (non-transposed) or column-major (transposed)
+        format. If strides are not provided, returns the default transpose type.
+
+        Args:
+            shape: Tuple of (m, n) dimensions for the matrix.
+            strides: Optional tuple of PyTorch tensor strides. If None, the default
+                    transpose type is returned without analysis.
+            default: Transpose type to use when strides is None or as a starting point
+                    (default: origami.transpose_t.N).
+
+        Returns:
+            origami.transpose_t: The determined transpose type.
+
+        Raises:
+            ValueError: If the matrix has a non-dense memory layout or an unsupported 
+                       stride pattern.
+        """
+        # Start with supplied default transpose type as fallback
+        transpose_t = default
+
+        if strides is not None:
+            m, n = shape
+            # Make sure we check the last 2 values of the stride in case this
+            # is a high-order tensor
+            stride_m, stride_n = strides[-2], strides[-1]
+
+            # Degenerate cases
+            if m == 1 or n == 1:
+                if stride_n == 1:
+                    transpose_t = origami.transpose_t.N
+                elif stride_m == 1:
+                    transpose_t = origami.transpose_t.T
+                else:
+                    raise ValueError(
+                        f"[ROCm:ORIGAMI]: A matrix with strides ({stride_m}, "
+                        f"{stride_n}) appears to be a non-dense vector in memory."
+                    )
+            # Row-major dense case
+            elif stride_n == 1:
+                transpose_t = origami.transpose_t.N
+            # Tranposed-view of row-major dense case
+            elif stride_m == 1:
+                transpose_t = origami.transpose_t.T
+            # Unknown stride pattern
+            else:
+                raise ValueError(
+                    f"[ROCm:ORIGAMI] A matrix with strides ({stride_m}, "
+                    f"{stride_n}) is an unsupported layout." 
+                )
+
+        return transpose_t
 
 
     def _infer_matrix_instruction_dimensions(self):
