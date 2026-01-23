@@ -1,4 +1,4 @@
-# Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Modifications Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -57,7 +57,7 @@ function(libcudacxx_add_public_header_test header)
 
   # Create the default target for that file
   set(headertest_${header_name} verify_${header_name})
-  # NOTE(HIP/AMD): Skipp unsupported headers for AMD devices (no support as of November 2025).
+  # NOTE(HIP/AMD): Skip unsupported headers for AMD devices (no support as of November 2025).
   string(REGEX MATCH "ptx|barrier|latch|semaphore|annotated_ptr|pipeline|memcpy_async" match "${header}")
   if(match)
     return()
