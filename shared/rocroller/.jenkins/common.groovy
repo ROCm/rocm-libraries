@@ -79,8 +79,9 @@ def runTestCommand (platform, project)
                 cd ${project.paths.project_build_prefix}
                 python3 .jenkins/run-tests-sharded.py build ${numShards} "${testExclude}"
 
-                export ROCROLLER_BUILD_DIR="\$(pwd)/build"
-                scripts/rrperf generate --suite generate_gfx950 --arch gfx950
+                pushd build
+                ctest --parallel ${numShards} -R "GEMMClientTests.*"
+                popd
             """
 
     try
