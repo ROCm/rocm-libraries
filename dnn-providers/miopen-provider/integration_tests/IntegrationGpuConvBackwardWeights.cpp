@@ -64,7 +64,7 @@ protected:
         dwTensorAttr->set_dim(testCase.wDims);
         dwTensorAttr->set_stride(generateStrides(testCase.wDims, layout.strideOrder));
 
-        this->registerValidator(dwTensorAttr, tolerance);
+        this->registerValidator(dwTensorAttr, tolerance, 0.0f);
         this->verifyGraph(graphObj, testCase.seed);
     }
 };
