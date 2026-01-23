@@ -72,15 +72,14 @@ def runTestCommand (platform, project)
 {
     String testExclude = platform.jenkinsLabel.contains('compile') ? '--gtest_filter=-*GPU*' : ''
 
-    def numShards = 4
+    def numShards = 16
 
     def command = """#!/usr/bin/env bash
                 set -ex
                 cd ${project.paths.project_build_prefix}
-                pushd build
-                export ROCROLLER_BUILD_DIR="\$(pwd)"
-                python3 ../.jenkins/run-tests-sharded.py \$ROCROLLER_BUILD_DIR ${numShards} "${testExclude}"
-                popd
+                python3 .jenkins/run-tests-sharded.py build ${numShards} "${testExclude}"
+
+                export ROCROLLER_BUILD_DIR="\$(pwd)/build"
                 scripts/rrperf generate --suite generate_gfx950 --arch gfx950
             """
 

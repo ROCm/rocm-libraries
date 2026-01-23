@@ -14,11 +14,13 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 def run_shard(shard_index, test_exe, test_type, num_shards, gpu_filter, build_dir):
     """Run a single shard of tests."""
-    print(f"Starting shard {shard_index} for {test_type}")
+    test_prefix = "G" if test_type == "gtest" else "C"
+    shard_tag = f"[{test_prefix}{shard_index:02d}]"
+    print(f"{shard_tag} Starting shard")
 
     # Set environment variables
     env = os.environ.copy()
-    env["OPENBLAS_NUM_THREADS"] = "1"
+    env["OPENBLAS_NUM_THREADS"] = "2"
     env["OMP_NUM_THREADS"] = "2"
 
     # Build command based on test type
@@ -48,16 +50,36 @@ def run_shard(shard_index, test_exe, test_type, num_shards, gpu_filter, build_di
         ]
 
     try:
-        result = subprocess.run(
-            cmd, env=env, cwd=build_dir, check=True, capture_output=False
+        # Run process and capture output
+        process = subprocess.Popen(
+            cmd,
+            env=env,
+            cwd=build_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
         )
-        print(f"Shard {shard_index} for {test_type} completed successfully")
-        return (shard_index, test_type, 0)
-    except subprocess.CalledProcessError as e:
-        print(
-            f"Shard {shard_index} for {test_type} failed with exit code {e.returncode}"
-        )
-        return (shard_index, test_type, e.returncode)
+
+        # Read and print output line by line with prefix
+        for line in process.stdout:
+            line = line.rstrip()
+            if line:
+                print(f"{shard_tag} {line}", flush=True)
+
+        # Wait for process to complete
+        return_code = process.wait()
+
+        if return_code == 0:
+            print(f"{shard_tag} Completed successfully")
+            return (shard_index, test_type, 0)
+        else:
+            print(f"{shard_tag} Failed with exit code {return_code}")
+            return (shard_index, test_type, return_code)
+
+    except Exception as e:
+        print(f"{shard_tag} Exception: {e}")
+        return (shard_index, test_type, 1)
 
 
 def main():
@@ -115,26 +137,39 @@ def main():
     test_report_dir = build_dir / "test_report"
     test_report_dir.mkdir(exist_ok=True)
 
-    # Prepare tasks
-    tasks = []
+    # Run all shards
+    failed_shards = []
 
-    # Add Google Test shards
+    # Run Google Test shards first
+    print("\n--- Running Google Test shards ---")
+    gtest_tasks = []
     for i in range(args.num_shards):
-        tasks.append(
+        gtest_tasks.append(
             (i, str(gtest_exe), "gtest", args.num_shards, args.gpu_filter, build_dir)
         )
 
-    # Add Catch2 shards
+    with ProcessPoolExecutor(max_workers=args.num_shards) as executor:
+        futures = [executor.submit(run_shard, *task) for task in gtest_tasks]
+
+        for future in as_completed(futures):
+            try:
+                shard_index, test_type, exit_code = future.result()
+                if exit_code != 0:
+                    failed_shards.append((shard_index, test_type, exit_code))
+            except Exception as e:
+                print(f"ERROR: Unexpected exception: {e}")
+                failed_shards.append((-1, "unknown", 1))
+
+    # Run Catch2 shards after Google Test completes
+    print("\n--- Running Catch2 shards ---")
+    catch2_tasks = []
     for i in range(args.num_shards):
-        tasks.append(
+        catch2_tasks.append(
             (i, str(catch2_exe), "catch2", args.num_shards, args.gpu_filter, build_dir)
         )
 
-    # Run all shards in parallel
-    failed_shards = []
-
-    with ProcessPoolExecutor(max_workers=args.num_shards * 2) as executor:
-        futures = [executor.submit(run_shard, *task) for task in tasks]
+    with ProcessPoolExecutor(max_workers=args.num_shards) as executor:
+        futures = [executor.submit(run_shard, *task) for task in catch2_tasks]
 
         for future in as_completed(futures):
             try:
