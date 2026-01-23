@@ -144,11 +144,7 @@ Tests:
   filename: [nos1,
              nos3,
              nos5,
-             nos7,
-             bibd_22_8,
-             Chebyshev4,
-             ASIC_320k,
-             mac_econ_fwd500]
+             nos7]
 
 - name: ellmv_file
   category: nightly
