@@ -72,6 +72,8 @@ def runTestCommand (platform, project)
 {
     String testExclude = platform.jenkinsLabel.contains('compile') ? '--gtest_filter=-*GPU*' : ''
 
+    def numThreads = 8
+
     def command = """#!/usr/bin/env bash
                 set -ex
                 cd ${project.paths.project_build_prefix}
@@ -79,12 +81,8 @@ def runTestCommand (platform, project)
                 # Run sharded tests (auto-detects ncores/2, respecting cgroups)
                 python3 .jenkins/run-tests-sharded.py build "${testExclude}"
 
-                # Auto-detect shard count for remaining ctest tests (nproc respects cgroups)
-                NUM_SHARDS=\$(( \$(nproc) / 2 ))
-                NUM_SHARDS=\$(( NUM_SHARDS > 0 ? NUM_SHARDS : 1 ))
-
                 pushd build
-                ctest --parallel \${NUM_SHARDS} -LE "GTEST|CATCH"
+                OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 ctest --parallel ${numThreads} --output-on-failure -LE "GTEST|CATCH"
                 popd
             """
 
