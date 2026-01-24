@@ -72,7 +72,7 @@ target_compile_options(miopen_plugin_integration_test PRIVATE ${HIPDNN_WARNING_C
 target_compile_definitions(
     miopen_plugin_integration_test
     PRIVATE
-        PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/miopen_plugin"
+        PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/miopen_legacy_plugin"
 )
 
 target_link_libraries(
