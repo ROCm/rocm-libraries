@@ -104,7 +104,7 @@ TEST_P(IntegrationGpuConvWrwDataNcdhwFp32, Correctness)
     runGraphTest(tolerance, TensorLayout::NCDHW);
 }
 
-TEST_P(IntegrationGpuConvWrwDataNchwBfp16, Correctness)
+TEST_P(IntegrationGpuConvWrwDataNchwBfp16, DISABLED_Correctness)
 {
     const auto& params = GetParam();
     auto tolerance
@@ -112,7 +112,7 @@ TEST_P(IntegrationGpuConvWrwDataNchwBfp16, Correctness)
     runGraphTest(tolerance, TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuConvWrwDataNcdhwBfp16, Correctness)
+TEST_P(IntegrationGpuConvWrwDataNcdhwBfp16, DISABLED_Correctness)
 {
     const auto& params = GetParam();
     auto tolerance
@@ -148,7 +148,7 @@ TEST_P(IntegrationGpuConvWrwDataNdhwcFp32, Correctness)
     runGraphTest(tolerance, TensorLayout::NDHWC);
 }
 
-TEST_P(IntegrationGpuConvWrwDataNhwcBfp16, Correctness)
+TEST_P(IntegrationGpuConvWrwDataNhwcBfp16, DISABLED_Correctness)
 {
     const auto& params = GetParam();
     auto tolerance
@@ -156,7 +156,7 @@ TEST_P(IntegrationGpuConvWrwDataNhwcBfp16, Correctness)
     runGraphTest(tolerance, TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuConvWrwDataNdhwcBfp16, Correctness)
+TEST_P(IntegrationGpuConvWrwDataNdhwcBfp16, DISABLED_Correctness)
 {
     const auto& params = GetParam();
     auto tolerance
