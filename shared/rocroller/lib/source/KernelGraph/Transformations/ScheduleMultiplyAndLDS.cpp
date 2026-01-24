@@ -237,7 +237,7 @@ namespace rocRoller::KernelGraph
             return makeChains(graph, std::move(nodes));
         }
 
-        void logChainTagTable(KernelGraph const& graph, vec chain)
+        std::string chainTagTable(KernelGraph const& graph, vec chain)
         {
             ControlFlowRWTracer tracer(graph);
 
@@ -414,7 +414,12 @@ namespace rocRoller::KernelGraph
 
             msg += fmt::format("Lasts: ({})({})\n", lasts.size(), fmt::join(lasts, ", "));
 
-            Log::debug("\n{}", msg);
+            return msg;
+        }
+
+        void logChainTagTable(KernelGraph const& graph, vec chain)
+        {
+            Log::debug("\n{}", chainTagTable(graph, chain));
         }
 
         std::string showChain(vec const& chain)

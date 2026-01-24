@@ -108,6 +108,12 @@ namespace rocRoller::KernelGraph
          */
         void logChainTagTable(KernelGraph const& graph, vec chain);
 
+        /**
+         * Generates a nice table that will show which nodes in `chain` use which DataFlowTags, and
+         * what type they are. Very useful for determining what the schedule should be.
+         */
+        std::string chainTagTable(KernelGraph const& graph, vec chain);
+
         std::string showChain(vec const& chain);
 
         std::string showChains(vec2 const& chains);

@@ -24,6 +24,8 @@
  *
  *******************************************************************************/
 
+#include <common/SourceMatcher.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
@@ -573,6 +575,109 @@ namespace ScheduleMultiplyAndLDSDetailTest
 
             // Should have created new Sequence edges
             CHECK(finalEdgeCount >= initialEdgeCount);
+        }
+    }
+
+    TEST_CASE("chainTagTable generates formatted table", "[kernel-graph][schedule-multiply-lds]")
+    {
+        auto graph = rocRoller::KernelGraph::KernelGraph();
+
+        auto addMultiply = [&](int coordA, int coordB, int coordD) {
+            auto mult = graph.control.addElement(CF::Multiply());
+            graph.mapper.connect(
+                mult, coordA, Connections::typeArgument<CT::MacroTile>(NaryArgument::LHS));
+            graph.mapper.connect(
+                mult, coordB, Connections::typeArgument<CT::MacroTile>(NaryArgument::RHS));
+            graph.mapper.connect(
+                mult, coordD, Connections::typeArgument<CT::MacroTile>(NaryArgument::DEST));
+            return mult;
+        };
+
+        auto addLoadLDSTile = [&](DataType type, int reg, int lds) {
+            auto op = graph.control.addElement(CF::LoadLDSTile{type});
+            graph.mapper.connect<CT::MacroTile>(op, reg);
+            graph.mapper.connect<CT::LDS>(op, lds);
+            return op;
+        };
+
+        {
+            auto kernel = graph.control.addElement(CF::Kernel());
+
+            auto lds1 = graph.coordinates.addElement(CT::LDS());
+
+            // Create multiple multiply nodes to show table structure
+            auto coordA1 = graph.coordinates.addElement(CT::MacroTile({}, LayoutType::MATRIX_A));
+            auto coordB1 = graph.coordinates.addElement(CT::MacroTile({}, LayoutType::MATRIX_B));
+            auto coordD
+                = graph.coordinates.addElement(CT::MacroTile({}, LayoutType::MATRIX_ACCUMULATOR));
+
+            auto coordA2 = graph.coordinates.addElement(CT::MacroTile({}, LayoutType::MATRIX_A));
+            auto coordB2 = graph.coordinates.addElement(CT::MacroTile({}, LayoutType::MATRIX_B));
+
+            auto mult1 = addMultiply(coordA1, coordB1, coordD);
+            auto mult2 = addMultiply(coordA2, coordB1, coordD);
+            auto mult3 = addMultiply(coordA2, coordB2, coordD);
+
+            auto loadA1 = addLoadLDSTile(DataType::FP4x8, coordA1, lds1);
+            auto loadB1 = addLoadLDSTile(DataType::FP4x8, coordB1, lds1);
+            auto loadD1 = addLoadLDSTile(DataType::Half, coordD, lds1);
+            auto loadA2 = addLoadLDSTile(DataType::FP4x8, coordA2, lds1);
+            auto loadB2 = addLoadLDSTile(DataType::FP4x8, coordB2, lds1);
+
+            graph.control.addElement(CF::Body(), {kernel}, {mult1});
+            graph.control.addElement(CF::Body(), {kernel}, {loadA1});
+
+            graph.control.chain<CF::Sequence>(mult1, mult2, mult3);
+
+            graph.control.chain<CF::Sequence>(loadA1, loadA2, loadB1, loadB2, loadD1);
+
+            SECTION("Multiply table")
+            {
+                vec chain{mult1, mult2, mult3};
+
+                auto result = chainTagTable(graph, chain);
+
+                std::string expected = R"(
+            |      |  2   |  3   |  5   |  6
+            ===================================
+            |      |8xFP4 |8xFP4 |8xFP4 |8xFP4
+            ===================================
+            ===================================
+            |      |  A   |  B   |  A   |  B
+            ===================================
+            |  2   |  V   |  V   |      |
+            |  3   |      |  V   |  V   |
+            |  4   |      |      |  V   |  V
+            Lasts: (3)(2, 3, 4)
+            )";
+                INFO(result);
+
+                CHECK(NormalizedSource(result) == NormalizedSource(expected));
+            }
+
+            SECTION("LoadLDSTile table")
+            {
+                vec  chain{loadA1, loadA2, loadB1, loadB2, loadD1};
+                auto result = chainTagTable(graph, chain);
+
+                std::string expected = R"(
+            |      |  2   |  5   |  3   |  6
+            ===================================
+            |      |8xFP4 |8xFP4 |8xFP4 |8xFP4
+            ===================================
+            ===================================
+            |      |  A   |  A   |  B   |  B
+            ===================================
+            |  5   |  ^   |      |      |
+            |  8   |      |  ^   |      |
+            |  6   |      |      |  ^   |
+            |  9   |      |      |      |  ^
+            |  7   |      |      |      |
+            Lasts: (5)(5, 8, 6, 9, 7)
+            )";
+                INFO(result);
+                CHECK(NormalizedSource(result) == NormalizedSource(expected));
+            }
         }
     }
 }
