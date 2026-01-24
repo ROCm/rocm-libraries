@@ -52,6 +52,9 @@ TEST_F(TestMiopenHipdnnEnginePluginHandle, RemoveDetachedBuffer)
 
     // Should not crash when removing non-existent buffer
     _handle->removeEngineDetailsDetachedBuffer(ptr);
+
+    // fake change to trigger CI for testing
+    _handle->removeEngineDetailsDetachedBuffer(ptr);
 }
 
 TEST_F(TestMiopenHipdnnEnginePluginHandle, RemoveNonExistentBuffer)
