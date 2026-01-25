@@ -5,6 +5,9 @@
 # headers inlined, using the copy_external_header.py script to recursively
 # resolve #include directives.
 
+# Find Python3 interpreter once at module scope
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
 function(copy_external_header)
     set(options "")
     set(oneValueArgs TARGET SOURCE_HEADER ROOT_INCLUDE_DIR OUTPUT_PATH COMMENT)
@@ -52,7 +55,7 @@ function(copy_external_header)
     add_custom_command(
 	OUTPUT ${ARG_OUTPUT_PATH}
 	COMMAND ${CMAKE_COMMAND} -E make_directory ${OUTPUT_DIR}
-	COMMAND ${CMAKE_COMMAND} -E env python3
+	COMMAND ${Python3_EXECUTABLE}
 	    ${PROJECT_SOURCE_DIR}/cmake/copy_external_header.py
 	    ${ARG_SOURCE_HEADER}
 	    ${ARG_ROOT_INCLUDE_DIR}
@@ -61,6 +64,7 @@ function(copy_external_header)
 	    ${PROJECT_SOURCE_DIR}/cmake/copy_external_header.py
 	    ${ARG_SOURCE_HEADER}
 	COMMENT "${ARG_COMMENT}"
+	VERBATIM
     )
 
     # Create a custom target to ensure it's generated
