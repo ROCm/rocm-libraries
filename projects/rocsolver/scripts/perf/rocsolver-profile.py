@@ -26,17 +26,15 @@
 # ##########################################################################
 
 """
-Benchmark execution script for rocSOLVER.
+Profiling script for rocSOLVER benchmarks using rocprofv3.
 
-This script executes selected benchmark suites and collates the results to CSV.
-For profiling functionality, use rocsolver-profile.py.
-For graphing functionality, use rocsolver-graph.py.
+This script executes selected benchmark suites with rocprofv3 to collect
+detailed profiling information including kernel traces and statistics.
 """
 
 import argparse
 import collections
-import csv
-import math
+import os
 import shlex
 import sys
 from subprocess import Popen, PIPE
@@ -78,33 +76,49 @@ def call_rocsolver_bench(bench_executable, *args):
             process.returncode)
 
 
-def execute_benchmarks(output_file, suite, precision, case, bench_executable):
+def profile_benchmarks(suite, precision, case, bench_executable, output_dir, graph):
     """
-    EXECUTE_BENCHMARKS collects the arguments for the benchmark client, calls
-    the client, gets the resulting time, and writes everything to output file
+    PROFILE_BENCHMARKS runs the benchmark suite with rocprofv3 to collect profiling data
     """
-    init = False
     benchmark_generator = SUITES[suite]
     sizenormal, sizebatch = get_size_configurations(case)
 
+    # Create output directory if it doesn't exist
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
     for row, n, bench_args in benchmark_generator(suite=suite, precision=precision,
                                                     sizenormal=sizenormal, sizebatch=sizebatch):
-        # Run benchmark
-        out, err, exitcode = call_rocsolver_bench(bench_executable, bench_args)
-        if exitcode != 0:
-            sys.exit("rocsolver-bench call failure: {}".format(err))
+        # Construct benchmark identifier string
+        benchmark_string = "_".join([str(x) for x in list(row.values())])
 
-        time = float(out)
-        row['gpu_time_us'] = time
-        row['log_n'] = math.log10(n)
-        row['log_gpu_time_us'] = math.log10(time)
+        # Determine output path for this benchmark's profiling data
+        if output_dir:
+            profile_output = os.path.join(output_dir, benchmark_string)
+        else:
+            profile_output = benchmark_string
 
-        if not init:
-            results = csv.DictWriter(output_file, fieldnames=row.keys(),
-                                      extrasaction='raise', dialect='excel')
-            results.writeheader()
-            init = True
-        results.writerow(row)
+        # Run with rocprofv3
+        command_args = (f'--kernel-trace --stats=ON -d {profile_output} '
+                        f'-o {benchmark_string} -f csv -- {bench_executable} {bench_args}')
+
+        print(f"Profiling: {benchmark_string}")
+        out_rocprof, err_rocprof, exitcode_rocprof = call_rocsolver_bench("rocprofv3", command_args)
+
+        if exitcode_rocprof != 0:
+            print(f"Warning: rocprofv3 call failed for {benchmark_string}: {err_rocprof}", file=sys.stderr)
+            continue
+
+        rocprof_time = float(out_rocprof)
+        print(f'  Timing (with profiler overhead): {rocprof_time} us')
+
+        # Generate graph if requested
+        if graph:
+            try:
+                from rocsolver_graph import generate_rocprof_graph
+                generate_rocprof_graph(profile_output)
+            except Exception as e:
+                print(f"Warning: Failed to generate graph for {benchmark_string}: {e}", file=sys.stderr)
 
 
 #################################################
@@ -113,32 +127,33 @@ def execute_benchmarks(output_file, suite, precision, case, bench_executable):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        prog='rocsolver-perfoptim-suite',
-        description='Executes a selected suite of benchmarks and collates the results.')
+        prog='rocsolver-profile',
+        description='Profile rocSOLVER benchmarks using rocprofv3.')
     parser.add_argument('-v','--verbose',
             action='store_true',
             help='display more information about operations being performed')
     parser.add_argument('--exe',
             default='../../build/release/clients/staging/rocsolver-bench',
             help='the benchmark executable to run')
-    parser.add_argument('-o',
-            dest='output_path',
+    parser.add_argument('-o', '--output-dir',
+            dest='output_dir',
             default=None,
-            help='the output file name for the benchmark results')
+            help='directory to store profiling results (default: current directory)')
+    parser.add_argument('--graph',
+            action='store_true',
+            help='generate graphs of profiling results using matplotlib')
     parser.add_argument('suite',
             choices=SUITES.keys(),
-            help='the set of benchmarks to run')
+            help='the set of benchmarks to profile')
     parser.add_argument('precision',
             choices=['s', 'd', 'c' , 'z'],
             help='the precision to use for the benchmarks')
     parser.add_argument('case',
             choices=['small', 'medium', 'large'],
             help='the size case to use for the benchmarks')
+
     args = parser.parse_args()
     setup_vprint(args)
 
-    if args.output_path is not None:
-        with open(args.output_path, 'w', buffering=1, encoding='utf-8') as output_file:
-            execute_benchmarks(output_file, args.suite, args.precision, args.case, args.exe)
-    else:
-        execute_benchmarks(sys.stdout, args.suite, args.precision, args.case, args.exe)
+    profile_benchmarks(args.suite, args.precision, args.case, args.exe,
+                       args.output_dir, args.graph)
