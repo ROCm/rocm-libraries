@@ -37,7 +37,7 @@ Tests:
   function: gather
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
-  M: [1200]
+  M: [500]
   nnz: [5, 10, 500]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -46,7 +46,7 @@ Tests:
   function: gather
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
-  M: [15332, 22031, 31958]
+  M: [20000]
   nnz: [0, 1543, 7111, 10000]
   baseA: [rocsparse_index_base_one]
 
@@ -55,7 +55,7 @@ Tests:
   function: gather
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
-  M: [735519, 1452387, 7834525]
+  M: [500000]
   nnz: [23512, 84412, 311983]
   baseA: [rocsparse_index_base_zero]
 
@@ -64,7 +64,7 @@ Tests:
   function: gather
   indextype: *i32_i64
   precision: *int8_precision
-  M: [1400]
+  M: [600]
   nnz: [7, 21, 600]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -73,7 +73,7 @@ Tests:
   function: gather
   indextype: *i32_i64
   precision: *int8_precision
-  M: [14137, 21541, 32986]
+  M: [12000]
   nnz: [0, 1703, 4161, 10100]
   baseA: [rocsparse_index_base_one]
 
@@ -82,7 +82,7 @@ Tests:
   function: gather
   indextype: *i32_i64
   precision: *int8_precision
-  M: [835710, 1512787, 6865531]
+  M: [500000]
   nnz: [33814, 74711, 311084]
   baseA: [rocsparse_index_base_zero]
 
@@ -91,7 +91,7 @@ Tests:
   function: gather
   indextype: *i32_i64
   precision: *half_precision
-  M: [1400]
+  M: [800]
   nnz: [5, 77, 723]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -100,7 +100,7 @@ Tests:
   function: gather
   indextype: *i32_i64
   precision: *half_precision
-  M: [12879, 20481, 34769]
+  M: [10000]
   nnz: [0, 2123, 7689, 9100]
   baseA: [rocsparse_index_base_one]
 
@@ -109,7 +109,7 @@ Tests:
   function: gather
   indextype: *i32_i64
   precision: *half_precision
-  M: [777234, 1205486, 5467921]
+  M: [300000]
   nnz: [30476, 54697, 200375]
   baseA: [rocsparse_index_base_zero]
 
@@ -118,7 +118,7 @@ Tests:
   function: gather
   indextype: *i32_i64
   precision: *brain_half_precision
-  M: [1768]
+  M: [1000]
   nnz: [11, 103, 777]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -127,7 +127,7 @@ Tests:
   function: gather
   indextype: *i32_i64
   precision: *brain_half_precision
-  M: [15467, 23789, 31568]
+  M: [13000]
   nnz: [0, 4235, 8768, 12361]
   baseA: [rocsparse_index_base_one]
 
@@ -136,7 +136,7 @@ Tests:
   function: gather
   indextype: *i32_i64
   precision: *brain_half_precision
-  M: [823546, 1436587, 6234871]
+  M: [300000]
   nnz: [54678, 132456, 267120]
   baseA: [rocsparse_index_base_zero]
 

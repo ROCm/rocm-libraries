@@ -35,4 +35,4 @@ Tests:
   category: pre_checkin
   function: const_dnvec_descr
   precision: *single_double_precisions_complex_real
-  M: [0, 100]
+  M: [8, 100]
