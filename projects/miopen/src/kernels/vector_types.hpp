@@ -27,7 +27,7 @@
 #ifndef VECTOR_TYPES_HPP
 #define VECTOR_TYPES_HPP
 
-#ifndef MIOPEN_DONT_USE_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #endif
