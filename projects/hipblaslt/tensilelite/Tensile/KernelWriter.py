@@ -3662,14 +3662,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # dsWriteBA is to do ds_write B first.
   # grBA is to do buffer_load B first.
   ##############################################################################
-  def _loopBody( self, kernel, tensorParametersA, tensorParametersB, pack, packPre, lc, loopCopies, finalLoop, firstIter=False, dsWriteBA=False, grBA=False, isDTVGRSecondBuf=False, skipClose=False ):
+  def _loopBody( self, kernel, tensorParametersA, tensorParametersB, pack, packPre, lc, loopCopies, finalLoop, firstIter=False, dsWriteBA=False, grBA=False, isDTVGRSecondBuf=False, skipClose=False, initCIter=False):
     module = Module("loopBody")
     expand = kernel["ExpandPointerSwap"]
     # initialize SubTileIdx
     self.states.SubTileIdx = 1 if self.states.numItersPLR and kernel["numSubTiles"] else 0
 
+    label_unrolledLoop_iter1 = Label("unrolledLoop_iter1", "", alignment=16)
+
     # not generate openLoop for firstIter
-    if not firstIter:
+    if not firstIter and not initCIter:
       module.addComment2("Unrolled Loop %u/%u - Begin" % (lc+1, loopCopies))
     if kernel["PrefetchGlobalRead"] and not self.states.numItersPLR and not kernel["_ScheduleIterAlg"] == 2 and not kernel["UseCustomMainLoopSchedule"]:
       if kernel["DirectToLdsA"] or kernel["DirectToLdsB"]:
@@ -3902,10 +3904,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
     ############################################################################
     # unrolled loop: mac iterations
     ############################################################################
-
     # double/quadruple the number of compute loop for each DepthU's worth of data read
     for uIdx in range(0, kernel["LoopIters"]):
       u = uIdx % kernel["LoopIters"]    #   u: index in compute loop (in contrast to the notion of global read loop)
+
+      if initCIter and uIdx==0:
+        module.addComment2("Init C with wmma(mfma) - Begin")
+
+      if (lc==0 and (uIdx==1)) and not initCIter:
+        module.add(label_unrolledLoop_iter1)
+
       if kernel["UseCustomMainLoopSchedule"]:
         LRCodeAAllIters.append(Module())
         LRCodeBAllIters.append(Module())
@@ -3967,7 +3975,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       if kernel["ForceUnrollSubIter"]:
         module.addComment1("subiter %u"%(u))
-      else:
+      elif not initCIter or uIdx==0:
         module.addComment1("iter %u%s"%(u,extraComment))
 
       plrIdx = (u+pflr) % self.states.numVgprBuffer
@@ -4344,7 +4352,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       luIdx = u % self.states.numVgprBuffer # local to use for MACs
       if kernel["EnableMatrixInstruction"]:
-        mfmaIter = self.mfmaIter(kernel, tensorParametersA, tensorParametersB, u, kernel["InnerUnroll"], vregSetIdxMFMA, unrollLoopIdx=lc, unrollIdx = u)
+        mfmaIter = self.mfmaIter(kernel, tensorParametersA, tensorParametersB, u, kernel["InnerUnroll"], vregSetIdxMFMA, unrollLoopIdx=lc, unrollIdx = u, initCIterWmma=initCIter)
         if kernel["UseCustomMainLoopSchedule"]:
           MfmaCodeAllIters.add(mfmaIter)
         else:
@@ -4376,7 +4384,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not kernel["UseCustomMainLoopSchedule"]:
         subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
                       u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[packIdx], packPre[packPreIdx], module, localReadsSecondHalf)
-        module.add(subIterCode) # add scheduled "other", local reads, local writes
+        # In initCIter, all iterations must be traversed to handle packPre state updates, but only the first iteration needs to generate actual instructions.
+        if not initCIter or uIdx == 0:
+          module.add(subIterCode) # add scheduled "other", local reads, local writes
 
       self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
       # reset pack/packPre code
@@ -4398,11 +4408,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if loopCopies == 2:
       finalStr = " (final)" if lc == 1 else ""
       endStr = " %u/%u%s"%(lc+1, loopCopies, finalStr)
-    module.addComment2("Unrolled Loop - End%s"%(endStr))
+    if not initCIter:
+      module.addComment2("Unrolled Loop - End%s"%(endStr))
 
-    oddLabel = (lc == 0 and loopCopies == 2)
+    if initCIter:
+      module.addComment2("Init C with wmma(mfma) - End")
+      if kernel["LoopIters"] > 1:
+        module.add(SBranch(label_unrolledLoop_iter1.getLabelName()))
+    oddLabel = (lc == 0 and loopCopies == 2) 
     if not skipClose and not kernel["UseCustomMainLoopSchedule"]:
-      module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, finalLoop, oddLabel=oddLabel))
+        if not initCIter:
+          module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, finalLoop, oddLabel=oddLabel))
+        elif kernel["LoopIters"] <= 1:
+          module.add(self.decCounter(kernel))
+
     return module
 
   ##############################################################################
@@ -4838,6 +4857,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     packPre = [ Module() for i in range (self.states.numPackBuffer ) ]
     self.preLoopLocalWriteCode = None
 
+    # If it will enter the unrolled loop, skip initC with v_mov
+    # TODO: Expand MFMAInstruction function to support "isComplex"
+    initCIterWmma = kernel["EnableMatrixInstruction"] and not kernel["LdsInitCVgprs"] and not kernel["ForceUnrollSubIter"] \
+                    and not kernel["ProblemType"]["DataType"].isComplex() and not kernel["ProblemType"]["Sparse"]
+
+    waitForPGRLabel = Label("waitForPGR", "")
     if kernel["PrefetchGlobalRead"]:
       if self.states.doShadowInit:
         module.add(self.openShadowInit())
@@ -4846,10 +4871,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.removeSgprVarFromPool("SrdC")
         module.add(self.globalWriteWorkGroupInit(kernel))
         if self.states.doShadowInit == 2:
-          module.add(self.initC(kernel)) # initC while waiting for global reads
+          module.add(self.initC(kernel, initCIterWmma, waitForPGRLabel)) # initC while waiting for global reads
           if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
             module.add(self.initSumUnroll(kernel))
         module.add(self.closeShadowInit(kernel))
+        if initCIterWmma and self.states.doShadowInit == 2:
+          module.add(waitForPGRLabel)
 
       # Wait for PGR code in setupNewTile
       module.add(self.getWaitcntCodeForPGR(kernel, tensorParametersA, tensorParametersB, "wait for global read"))
@@ -5160,8 +5187,21 @@ class KernelWriter(metaclass=abc.ABCMeta):
     module.addComment2("Unrolled Loop(s) - Begin")
     if kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["PrefetchGlobalRead"]:
       module.add(SBarrier(comment="TDM PGR=0: prime barrier before loop"))
-    module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, beginLabelOnly=False))
+    module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, beginLabelOnly=False, beforeInitCIter=initCIterWmma))
 
+    #init C with wmma(mfma) instead of v_mov, then jump to unrolled loop iter1
+    if initCIterWmma:
+      temp_states = deepcopy(self.states)
+      temp_kernel = deepcopy(kernel)
+      temp_A = deepcopy(tensorParametersA)
+      temp_B = deepcopy(tensorParametersB)
+      temp_pack = deepcopy(pack)
+      temp_packPre = deepcopy(packPre)
+      module.add(self._loopBody( temp_kernel, temp_A, temp_B, temp_pack, temp_packPre, 0, loopCopies, 0==(loopCopies-1), \
+                                 isDTVGRSecondBuf=isDTV, initCIter=initCIterWmma))
+      module.add(self.openLoop( temp_kernel, temp_A, temp_B, self.states.unrollIdx, beginLabelOnly=True))
+      self.states = temp_states
+ 
     loopLabelToNoGRloopAfterABLoop = Label("NoGRloopAfterABLoop", "" )
 
     loop = Module("loopBody")
