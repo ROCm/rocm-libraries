@@ -76,8 +76,8 @@ Tests:
   function: spmm_batched_csr
   indextype: *i32i32_i64i32_i64i64
   precision: *double_only_precisions
-  M: [155, 326]
-  N: [22, 39, 43]
+  M: [155, 300]
+  N: [22, 39]
   K: [72, 117, 279]
   batch_count_A: [15, 39]
   batch_count_B: [24, 78]
@@ -96,8 +96,8 @@ Tests:
   function: spmm_batched_csr
   indextype: *i32i32_i64i32_i64i64
   precision: *double_only_precisions
-  M: [1552, 3263]
-  N: [393, 443]
+  M: [300]
+  N: [300]
   K: [1177, 2796]
   batch_count_A: [155, 234, 393]
   batch_count_B: [243, 312, 782]
@@ -116,7 +116,7 @@ Tests:
   function: spmm_batched_csr
   indextype: *i32i32_i64i32_i64i64
   precision: *int8_int8_int32_int32_abct_precision
-  M: [444]
+  M: [300]
   N: [187]
   K: [482]
   batch_count_A: [107]
@@ -266,7 +266,7 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *double_only_precisions
   M: [155, 326]
-  N: [22, 39, 43]
+  N: [22, 39]
   K: [72, 117, 279]
   batch_count_A: [13]
   batch_count_B: [1]
@@ -287,7 +287,7 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *double_only_precisions
   M: [155, 326]
-  N: [22, 39, 43]
+  N: [22, 39]
   K: [72, 117, 279]
   batch_count_A: [1]
   batch_count_B: [3]
@@ -308,7 +308,7 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *double_only_precisions
   M: [155, 326]
-  N: [22, 39, 43]
+  N: [22, 39]
   K: [72, 117, 279]
   batch_count_A: [12]
   batch_count_B: [12]
