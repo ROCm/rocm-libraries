@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -236,6 +236,16 @@ struct formatter<rocsolver_logvalue<rocblas_datatype>> : formatter<string_view>
     auto format(rocsolver_logvalue<rocblas_datatype> wrapper, FormatCtx& ctx) ROCSOLVER_FMT_CONST
     {
         return formatter<string_view>::format(rocsolver::rocblas2string_datatype(wrapper.value), ctx);
+    }
+};
+
+template <>
+struct formatter<rocsolver_logvalue<rocsolver_norm_type>> : formatter<char>
+{
+    template <typename FormatCtx>
+    auto format(rocsolver_logvalue<rocsolver_norm_type> wrapper, FormatCtx& ctx) ROCSOLVER_FMT_CONST
+    {
+        return formatter<char>::format(rocsolver::rocsolver2char_norm_type(wrapper.value), ctx);
     }
 };
 
