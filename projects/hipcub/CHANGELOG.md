@@ -23,17 +23,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 ### Added
 
 * Added `generate_resource_spec.cpp` to the test directory. It is now built as a new target by CMake. It generates the resource spec file required by CTest when running tests in parallel.
-
-### Removed
-
-* Removed  `ConstantInputIterator`, `CountingInputIterator`, `DiscardOutputIterator` and `TransformInputIterator` which were deprecated in hipCUB-4.1.0.
-* Removed `DeviceSpmv`, which was removed from CUB after CCCL's 2.8.0 release. Use `hipSPARSE` or `rocSPARSE` libraries instead.
-* Removed `GridBarrier`.
-* Removed `HIPCUB_MIN`, `HIPCUB_MAX`, `HIPCUB_QUOTIENT_FLOOR`, `HIPCUB_QUOTIENT_CEILING`, `HIPCUB_ROUND_UP_NEAREST` and `HIPCUB_ROUND_DOWN_NEAREST` which were deprecated in hipCUB-4.1.0.
-* Removed `LEGACY_PTX_ARCH`.
-* Removed `hipcub:max` and `hipcub:min`, which were deprecated. Use `hip::std::max` and `hip::std::min` instead.
-* Deprecated `hipcub::Swap`, use `rocprim::swap` instead.
-* Deprecated `HIPCUB_IS_INT128_ENABLED`, use `_CCCL_HAS_INT128()` instead.
+* Added `::hip::std` support.
 
 ### Changed
 
@@ -45,7 +35,16 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 ### Removed
 
+* Removed `hipcub::BaseTraits::CATEGORY`, `hipcub::BaseTraits::nullptr_TYPE` and `hipcub::BaseTraits::PRIMITIVE`.
+* Removed  `ConstantInputIterator`, `CountingInputIterator`, `DiscardOutputIterator` and `TransformInputIterator` which were deprecated in hipCUB-4.1.0.
+* Removed `DeviceSpmv`, which was removed from CUB after CCCL's 2.8.0 release. Use `hipSPARSE` or `rocSPARSE` libraries instead.
 * Removed the `GenerateResourceSpec.cmake` script - it is replaced by the added `generate_resource_spec.cpp` code mentioned above.
+* Removed `GridBarrier`.
+* Removed `HIPCUB_MIN`, `HIPCUB_MAX`, `HIPCUB_QUOTIENT_FLOOR`, `HIPCUB_QUOTIENT_CEILING`, `HIPCUB_ROUND_UP_NEAREST` and `HIPCUB_ROUND_DOWN_NEAREST` which were deprecated in hipCUB-4.1.0.
+* Removed `LEGACY_PTX_ARCH`.
+* Removed `hipcub:max` and `hipcub:min`, which were deprecated. Use `hip::std::max` and `hip::std::min` instead.
+* Deprecated `hipcub::Swap`, use `rocprim::swap` instead.
+* Deprecated `HIPCUB_IS_INT128_ENABLED`, use `_CCCL_HAS_INT128()` instead.
 
 ## hipCUB-4.2.0 for ROCm 7.2
  
