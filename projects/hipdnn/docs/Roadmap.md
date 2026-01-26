@@ -3,7 +3,7 @@
 This document outlines the development roadmap for hipDNN, a comprehensive graph-based deep learning library for AMD GPUs. For current operation support details, refer to the [Operation Support documentation](./OperationSupport.md).
 
 > [!NOTE]
-> 📝 This roadmap is subject to change based on project priorities, community feedback, and technical requirements.The hipDNN team will endevor to keep the roadmap up to date but the further out the quarter, the more speculative our plans. 😅
+> 📝 This roadmap is subject to change based on project priorities, community feedback, and technical requirements. The hipDNN team will endevor to keep the roadmap up to date but the further out the quarter, the more speculative our plans. 😅
 > 
 > ✅ = Done
 > 
@@ -11,7 +11,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 ## P0 ~ Q1 2026 (Current milestone)
 
-**Focus:** Stable foundation, core operations & initial PyTorch Integration
+**Focus:** Stable foundation, core operations & initial PyTorch integration
 
 ### Conv
 - **Convolution MIOpen plugin support** ✅
@@ -20,10 +20,12 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 ### Normalization
 - **Batch normalization MIOpen plugin support** ✅
+  - Including basic fusions ✅
 
 ### GEMM
-- **Initial frontend GEMM API support** ✅ (Need kernel provider)
+- **Initial frontend GEMM API support** ✅
 - Fusilli plugin integration (see note) ✅
+- hipBLASLt plugin initial enablement ⏳
 
 ### Core
 - **Stable, robust library to build upon** ⏳
@@ -37,31 +39,32 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 ## P1 ~ Q2 2026
 
-**Focus:** More operations, basic engine selection heuristic, core improvements
+**Focus:** More operations, basic engine selection heuristic & core improvements
 
 ### GEMM
-- **hipBLASLt plugin support** ⏳
+- **hipBLASLt plugin expanded operation & datatype support**
 
 ### SDPA
 - Initial limited SDPA frontend API support
-- Initial limited SDPA kernel provider TBD
+- Initial limited SDPA kernel provider (TBD)
 
 ### Normalization
 - Adding new **HIP kernel provider plugin** to expand normalization support
-- Expanding operation API & coverage to support Layernorm, RMS, Batchnorm expanded layout & datatype coverage
+- Expanded operation API & coverage to support Layernorm & RMS
+- Expanded layout & datatype coverage for batchnorm
 
 ### Heuristics
 - Heuristic plugin API
 - **Initial heuristic plugin**
 
 ### Core
-- Plugin SDK ⏳
+- Plugin SDK utilities to streamline plugin development for new providers ⏳
 - Benchmarking & performance python tools ⏳
 - Python API wrappers ⏳
 
 ## P2 ~ Q3 2026
 
-**Focus:** SDPA, Better heuristics, expanded performance testing
+**Focus:** SDPA, better heuristics & improved kernel provider selection
 
 ### SDPA
 - Wider SDPA support
@@ -80,6 +83,16 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 **Focus:** Q4 and beyond is far enough out, that there is substantial uncertainty on what will be the most important features at this time. We value community input on what you would like to see!
 
+### Increase operational support coverage
+- Additional high performance static fusion support for priority use cases
+- Additional JIT graph support for operations
+- Improve general operational support for operations:
+  - Additional layout support
+  - Additional data-type support
+
+### More framework integrations
+- Currently discussing timelines for various framework integrations. Roadmap will be updated as they are defined.
+
 ### Normalization
 - **Distributed normalization support**
   
@@ -88,7 +101,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - AOT graph compilation without devices present (Pre-compile graph support)
 - **hipGraph support**
 - Support dynamic linking to backend (enables forwards and backwards compatible client libraries)
-- - Save/Load Execution plans
+  - Save/Load Execution plans
 - Non-standard tensor support (ragged, non-packed, vectorized)
 
 ## Contributing
