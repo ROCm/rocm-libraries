@@ -71,6 +71,14 @@
 #include <type_traits>
 #include <vector>
 
+#define HIPBLASLT_LIB_PATH "/opt/rocm/lib"
+
+#ifdef ENABLE_ROCTX
+#include <roctracer/roctx.h>
+#endif
+
+#define INTERNAL_HIPHOSTMEM_SIZE 32768
+
 #define CHECK_HIP_DRV(cmd)                                                              \
     {                                                                                   \
         hipError_t error = cmd;                                                         \
@@ -81,13 +89,224 @@
         }                                                                               \
     }
 
-#define HIPBLASLT_LIB_PATH "/opt/rocm/lib"
+namespace
+{
 
-#ifdef ENABLE_ROCTX
-#include <roctracer/roctx.h>
-#endif
+    /**
+      * @brief Singleton manager for direct assembly kernels.
+      * Handles rule selection, module loading, and kernel launching.
+      */
+    class DirectAssembly
+    {
+    public:
+        static bool isEnabled()
+        {
+            static bool enabled = []() {
+                const char* env = getenv("HIPBLASLT_ENABLE_DIRECT_ASSEMBLY");
+                if(env && (std::string(env) == "1" || std::string(env) == "TRUE"))
+                {
+                    return true;
+                }
+                return false;
+            }();
+            return enabled;
+        }
 
-#define INTERNAL_HIPHOSTMEM_SIZE 32768
+        static std::string getCoPath(const std::string& filename)
+        {
+            const char* env = std::getenv("HIPBLASLT_CUSTOM_ASM_DIR");
+            if(env)
+            {
+                std::string path = env;
+                // Ensure trailing slash
+                if(!path.empty() && path.back() != '/')
+                {
+                    path += "/";
+                }
+                return path + filename;
+            }
+
+            // Fallback: Use current directory or a specific hardcoded path for safety
+            return "./" + filename;
+        }
+        // The function signature for checking if a kernel applies to a problem.
+        using KernelSelector
+            = std::function<bool(rocblaslt_handle, const RocblasltContractionProblem&)>;
+
+        // The function signature for launching the kernel.
+        using KernelLauncher
+            = std::function<bool(hipFunction_t, const RocblasltContractionProblem&)>;
+
+        struct KernelInfo
+        {
+            std::string    coPath;
+            std::string    funcName;
+            KernelLauncher launcher;
+        };
+
+        struct RegistryEntry
+        {
+            std::string    name;
+            KernelSelector selector;
+            KernelInfo     info;
+        };
+
+        // Main Entry Point
+        static bool dispatch(rocblaslt_handle                   handle,
+                             const KernelInfo&                  info,
+                             const RocblasltContractionProblem& prob)
+        {
+            hipFunction_t func = getFunction(info);
+            if(!func)
+            {
+                std::cerr << "[DirectAssembly] Failed to get GPU function handle." << std::endl;
+                return false;
+            }
+
+            // 3. Execute launcher
+            return info.launcher(func, prob);
+        }
+
+        static const KernelInfo* findKernel(rocblaslt_handle                   handle,
+                                            const RocblasltContractionProblem& prob)
+        {
+            for(const auto& entry : getRegistry())
+            {
+                if(entry.selector(handle, prob))
+                {
+                    return &entry.info;
+                }
+            }
+            return nullptr;
+        }
+
+    private:
+        // Rule 1: Simple GEMM PoC
+        static RegistryEntry entrySimpleGemmPoC()
+        {
+            return {"SimpleGemm_PoC", // Name
+                    [](rocblaslt_handle, const RocblasltContractionProblem& p) -> bool {
+                        // 1. Check Dimensions
+                        bool dimsMatch = (p.m == 128 && p.n == 64 && p.k == 256);
+
+                        // 2. Check Data Types (All F32)
+                        // Assuming standard hipBLASLt enum names:
+                        bool typesMatch = (p.a_type == HIP_R_32F && p.b_type == HIP_R_32F
+                                           && p.c_type == HIP_R_32F && p.d_type == HIP_R_32F);
+
+                        return dimsMatch && typesMatch;
+                    },
+                    // Info & Launcher
+                    {getCoPath("poc_co.co"),
+                     "SimpleGemm", // Symbol
+                     [](hipFunction_t func, const RocblasltContractionProblem& p) -> bool {
+                         std::cout << "[DirectAssembly] Launching SimpleGemm" << std::endl;
+
+                         struct Args
+                         {
+                             void*       D;
+                             const void *A, *B, *C;
+                             float       alpha, beta;
+                             int         m, n, k;
+                         };
+
+                         Args args = {p.D,
+                                      p.A,
+                                      p.B,
+                                      p.C,
+                                      *(float*)p.alpha,
+                                      *(float*)p.beta,
+                                      static_cast<int>(p.m),
+                                      static_cast<int>(p.n),
+                                      static_cast<int>(p.k)};
+
+                         size_t argsSize = sizeof(args);
+
+                         void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
+                                           &args,
+                                           HIP_LAUNCH_PARAM_BUFFER_SIZE,
+                                           &argsSize,
+                                           HIP_LAUNCH_PARAM_END};
+
+                         // Grid: 1 thread per element, 256 threads per block
+                         // For M=128, N=64 -> 8192 threads -> 32 blocks
+                         int threads   = static_cast<int>(p.m * p.n);
+                         int blockSize = 256;
+                         int blocks    = (threads + blockSize - 1) / blockSize;
+
+                         hipError_t err = hipModuleLaunchKernel(func,
+                                                                blocks,
+                                                                1,
+                                                                1, // Grid
+                                                                blockSize, // Block
+                                                                1,
+                                                                1,
+                                                                0, // Shared Mem
+                                                                p.stream, // Stream
+                                                                NULL,
+                                                                config);
+
+                         if(err != hipSuccess)
+                         {
+                             std::cerr
+                                 << "[DirectAssembly] Launch failed: " << hipGetErrorString(err)
+                                 << std::endl;
+                             return false;
+                         }
+                         return true;
+                     }}};
+        }
+
+        static const std::vector<RegistryEntry>& getRegistry()
+        {
+            static std::vector<RegistryEntry> registry = {
+                // Register your rules here:
+                entrySimpleGemmPoC(),
+                // entryLargeProblem(),
+            };
+            return registry;
+        }
+
+        static hipFunction_t getFunction(const KernelInfo& info)
+        {
+            // Static variables for caching (Singleton-like behavior)
+            static std::mutex                                     mutex;
+            static std::unordered_map<std::string, hipFunction_t> funcMap;
+            static std::vector<hipModule_t>                       modules; // Keep alive
+
+            std::lock_guard<std::mutex> lock(mutex);
+
+            std::string key = info.coPath + "::" + info.funcName;
+
+            if(funcMap.count(key))
+            {
+                return funcMap[key];
+            }
+
+            std::cout << "[DirectAssembly] Loading module: " << info.coPath << std::endl;
+
+            hipModule_t module;
+            if(hipModuleLoad(&module, info.coPath.c_str()) != hipSuccess)
+            {
+                std::cerr << "[DirectAssembly] Failed to load module: " << info.coPath << std::endl;
+                return nullptr;
+            }
+
+            hipFunction_t func;
+            if(hipModuleGetFunction(&func, module, info.funcName.c_str()) != hipSuccess)
+            {
+                std::cerr << "[DirectAssembly] Failed to find symbol: " << info.funcName
+                          << std::endl;
+                return nullptr;
+            }
+
+            modules.push_back(module);
+            funcMap[key] = func;
+            return func;
+        }
+    };
+
+} // End anonymous namespace
 
 RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     trans_a,
                                                          hipblasOperation_t     trans_b,
@@ -2536,243 +2755,6 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
 }
 #endif
 
-namespace
-{
-
-    static bool isDirectAssemblyEnabled()
-    {
-        static bool enabled = []() {
-            const char* env = getenv("HIPBLASLT_ENABLE_DIRECT_ASSEMBLY");
-            if(env && (std::string(env) == "1" || std::string(env) == "TRUE"))
-            {
-                return true;
-            }
-            return false;
-        }();
-        return enabled;
-    }
-
-    static std::string getCustomCoPath(const std::string& filename)
-    {
-        const char* env = std::getenv("HIPBLASLT_CUSTOM_ASM_DIR");
-        if(env)
-        {
-            std::string path = env;
-            // Ensure trailing slash
-            if(!path.empty() && path.back() != '/')
-            {
-                path += "/";
-            }
-            return path + filename;
-        }
-
-        // Fallback: Use current directory or a specific hardcoded path for safety
-        return "./" + filename;
-    }
-
-    /**
-      * @brief Singleton manager for direct assembly kernels.
-      * Handles rule selection, module loading, and kernel launching.
-      */
-    class DirectAssembly
-    {
-    public:
-        // The function signature for checking if a kernel applies to a problem.
-        using KernelSelector
-            = std::function<bool(rocblaslt_handle, const RocblasltContractionProblem&)>;
-
-        // The function signature for launching the kernel.
-        using KernelLauncher
-            = std::function<bool(hipFunction_t, const RocblasltContractionProblem&)>;
-
-        struct KernelInfo
-        {
-            std::string    coPath;
-            std::string    funcName;
-            KernelLauncher launcher;
-        };
-
-        struct RegistryEntry
-        {
-            std::string    name;
-            KernelSelector selector;
-            KernelInfo     info;
-        };
-
-        // Main Entry Point
-        static bool dispatch(rocblaslt_handle                   handle,
-                             const rocblaslt_matmul_algo*       algo,
-                             const RocblasltContractionProblem& prob)
-        {
-            // 1. Find matching kernel info
-            const auto* info = findKernel(handle, prob);
-            if(!info)
-            {
-                return false;
-            }
-
-            // 2. Get cached GPU function handle
-            hipFunction_t func = getFunction(*info);
-            if(!func)
-            {
-                std::cerr << "[DirectAssembly] Failed to get GPU function handle." << std::endl;
-                return false;
-            }
-
-            // 3. Execute launcher
-            return info->launcher(func, prob);
-        }
-
-    private:
-        // Rule 1: Simple GEMM PoC
-        static RegistryEntry entrySimpleGemmPoC()
-        {
-            return {"SimpleGemm_PoC", // Name
-                    [](rocblaslt_handle, const RocblasltContractionProblem& p) -> bool {
-                        // 1. Check Dimensions
-                        bool dimsMatch = (p.m == 128 && p.n == 64 && p.k == 256);
-
-                        // 2. Check Data Types (All F32)
-                        // Assuming standard hipBLASLt enum names:
-                        bool typesMatch = (p.a_type == HIP_R_32F && p.b_type == HIP_R_32F
-                                           && p.c_type == HIP_R_32F && p.d_type == HIP_R_32F);
-
-                        return dimsMatch && typesMatch;
-                    },
-                    // Info & Launcher
-                    {getCustomCoPath("poc_co.co"),
-                     "SimpleGemm", // Symbol
-                     [](hipFunction_t func, const RocblasltContractionProblem& p) -> bool {
-                         std::cout << "[DirectAssembly] Launching SimpleGemm..." << std::endl;
-
-                         struct Args
-                         {
-                             void*       D;
-                             const void *A, *B, *C;
-                             float       alpha, beta;
-                             int         m, n, k;
-                         };
-
-                         Args args = {p.D,
-                                      p.A,
-                                      p.B,
-                                      p.C,
-                                      *(float*)p.alpha,
-                                      *(float*)p.beta,
-                                      static_cast<int>(p.m),
-                                      static_cast<int>(p.n),
-                                      static_cast<int>(p.k)};
-
-                         size_t argsSize = sizeof(args);
-
-                         void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
-                                           &args,
-                                           HIP_LAUNCH_PARAM_BUFFER_SIZE,
-                                           &argsSize,
-                                           HIP_LAUNCH_PARAM_END};
-
-                         // Grid: 1 thread per element, 256 threads per block
-                         // For M=128, N=64 -> 8192 threads -> 32 blocks
-                         int threads   = static_cast<int>(p.m * p.n);
-                         int blockSize = 256;
-                         int blocks    = (threads + blockSize - 1) / blockSize;
-
-                         hipError_t err = hipModuleLaunchKernel(func,
-                                                                blocks,
-                                                                1,
-                                                                1, // Grid
-                                                                blockSize, // Block
-                                                                1,
-                                                                1,
-                                                                0, // Shared Mem
-                                                                p.stream, // Stream
-                                                                NULL,
-                                                                config);
-
-                         if(err != hipSuccess)
-                         {
-                             std::cerr
-                                 << "[DirectAssembly] Launch failed: " << hipGetErrorString(err)
-                                 << std::endl;
-                             return false;
-                         }
-                         return true;
-                     }}};
-        }
-
-        static const std::vector<RegistryEntry>& getRegistry()
-        {
-            static std::vector<RegistryEntry> registry = {
-                // Register your rules here:
-                entrySimpleGemmPoC(),
-                // entryLargeProblem(),
-            };
-            return registry;
-        }
-
-        static const KernelInfo* findKernel(rocblaslt_handle                   handle,
-                                            const RocblasltContractionProblem& prob)
-        {
-            for(const auto& entry : getRegistry())
-            {
-                if(entry.selector(handle, prob))
-                {
-                    std::cout << "[DirectAssembly] Match found: " << entry.name << std::endl;
-                    return &entry.info;
-                }
-            }
-            return nullptr;
-        }
-
-        static hipFunction_t getFunction(const KernelInfo& info)
-        {
-            // Static variables for caching (Singleton-like behavior)
-            static std::mutex                                     mutex;
-            static std::unordered_map<std::string, hipFunction_t> funcMap;
-            static std::vector<hipModule_t>                       modules; // Keep alive
-
-            std::lock_guard<std::mutex> lock(mutex);
-
-            std::string key = info.coPath + "::" + info.funcName;
-
-            if(funcMap.count(key))
-            {
-                return funcMap[key];
-            }
-
-            std::cout << "[DirectAssembly] Loading module: " << info.coPath << std::endl;
-
-            hipModule_t module;
-            if(hipModuleLoad(&module, info.coPath.c_str()) != hipSuccess)
-            {
-                std::cerr << "[DirectAssembly] Failed to load module: " << info.coPath << std::endl;
-                return nullptr;
-            }
-
-            hipFunction_t func;
-            if(hipModuleGetFunction(&func, module, info.funcName.c_str()) != hipSuccess)
-            {
-                std::cerr << "[DirectAssembly] Failed to find symbol: " << info.funcName
-                          << std::endl;
-                return nullptr;
-            }
-
-            modules.push_back(module);
-            funcMap[key] = func;
-            return func;
-        }
-    };
-
-    // Returns true if GEMM was run with direct assembly, false otherwise.
-    bool useDirectAssembly(rocblaslt_handle                   handle,
-                           const rocblaslt_matmul_algo*       algo,
-                           const RocblasltContractionProblem& prob)
-    {
-        return DirectAssembly::dispatch(handle, algo, prob);
-    }
-
-} // End anonymous namespace
-
 /******************************************************************************
  * runContractionProblem calls Tensile to run a contraction problem described *
  * by RocblasltContractionProblem *
@@ -2787,13 +2769,17 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
     try
     {
-
-        // Check if the environment variable to enable direct assembly is set.
-        // If it is, try and run the problem using direct assembly kernels.
-        // If you succeed, continue. Otherwise fall through to normal roc-roller + tensilelite paths.
-        if(isDirectAssemblyEnabled() && useDirectAssembly(handle, algo, prob))
+        if(DirectAssembly::isEnabled())
         {
-            return rocblaslt_status_success;
+            const auto* kernel = DirectAssembly::findKernel(handle, prob);
+            if(kernel)
+            {
+                if(DirectAssembly::dispatch(handle, *kernel, prob))
+                {
+                    return rocblaslt_status_success;
+                }
+                throw std::runtime_error("Failed to run Direct Assembly kernel.");
+            }
         }
 
 #ifdef HIPBLASLT_USE_ROCROLLER
@@ -3841,6 +3827,26 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   int*                               returnAlgoCount,
                                   size_t                             maxWorkSpaceBytes)
 {
+
+    // If direct assembly is enabled (environment variable), and there is a direct assembly kernel that can perform prob,
+    // set the returnAlgoCount to 1 and return success.
+    if(!DirectAssembly::isEnabled())
+    {
+        std::cout << "[DirectAssembly] Direct assembly not enabled" << std::endl;
+    }
+    else if(DirectAssembly::findKernel(handle, prob))
+    {
+
+        std::cout << "[DirectAssembly] Match found" << std::endl;
+        *returnAlgoCount = 1;
+        return rocblaslt_status_success;
+    }
+    else
+    {
+        std::cout << "[DirectAssembly] Direct assembly enabled but no matching kernel found"
+                  << std::endl;
+    }
+
 #ifdef HIPBLASLT_USE_ROCROLLER
     if(useRocRoller(handle, prob))
         return getRocRollerBestSolutions(handle,
