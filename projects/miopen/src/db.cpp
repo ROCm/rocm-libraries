@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -66,7 +66,7 @@ PlainTextDb::PlainTextDb(DbKinds db_kind_, const fs::path& filename_, bool is_sy
             if(!fs::create_directories(directory))
                 MIOPEN_LOG_W("Unable to create a directory: " << directory);
             else
-                fs::permissions(directory, FS_ENUM_PERMS_ALL);
+                fs::permissions(directory, fs::perms::all);
         }
     }
 }
@@ -249,7 +249,7 @@ bool PlainTextDb::FlushUnsafe(const DbRecord& record, const RecordPositions* pos
             record.WriteContents(file);
         }
 
-        fs::permissions(filename, FS_ENUM_PERMS_ALL);
+        fs::permissions(filename, fs::perms::all);
     }
     else
     {
@@ -284,7 +284,7 @@ bool PlainTextDb::FlushUnsafe(const DbRecord& record, const RecordPositions* pos
         fs::remove(filename);
         fs::rename(temp_name, filename);
         /// \todo What if rename fails? Thou shalt not loose the original file.
-        fs::permissions(filename, FS_ENUM_PERMS_ALL);
+        fs::permissions(filename, fs::perms::all);
     }
     return true;
 }

@@ -27,21 +27,26 @@
 #ifndef GUARD_MIOPEN_TEST_LSTM_COMMON_HPP
 #define GUARD_MIOPEN_TEST_LSTM_COMMON_HPP
 
-#include "driver.hpp"
-#include "workspace.hpp"
-#include "get_handle.hpp"
-#include "dropout_util.hpp"
-#include "rnn_util.hpp"
-#include "cpu_rnn.hpp"
-
 #include <miopen/rnn.hpp>
-#include <miopen/tensor.hpp>
 
-#include <tuple>
+#include "get_handle.hpp"
+#include "workspace.hpp"
+#include "random.hpp"
+#include "driver.hpp"
+#include "rnn_util.hpp"
+#include "dropout_util.hpp"
+#include "cpu_rnn.hpp"
+#include "verify.hpp"
+
 #include <iostream>
+#include <tuple>
+#include <numeric>
+#include <chrono>
+#include <algorithm>
+#include <cstdlib> //for std::abort()
 
-#define MIO_LSTM_TEST_DEBUG 2
-#define MIO_RNN_TIME_EVERYTHING 1
+#define MIO_LSTM_TEST_DEBUG 0
+#define MIO_RNN_TIME_EVERYTHING 0
 
 #define WORKAROUND_ISSUE_692 1
 
@@ -191,6 +196,7 @@ struct verify_backward_data_lstm
 
     void fail(int badtensor) const
     {
+
         std::cout << "./bin/MIOpenDriver rnn -n ";
         for(int i = 0; i < seqLength; i++)
         {
@@ -203,11 +209,11 @@ struct verify_backward_data_lstm
                 std::cout << batch_seq.at(i);
             }
         }
-        std::cout << " -m lstm "
-                  << " -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen << " -l "
-                  << nLayers << " -F 0 "
-                  << " -r " << dirMode << " -b " << biasMode << " -p " << inputMode << " -q "
-                  << use_seqPadding << std::endl;
+        std::cout << " -m lstm"
+                  << " -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen
+                  << " -l " << nLayers << " -F 0"
+                  << " -r " << dirMode << " -b " << biasMode << " -p " << inputMode
+                  << " -q " << use_seqPadding << std::endl;
 
         std::cout << "inputMode: " << inputMode << " biasMode: " << biasMode
                   << " dirMode: " << dirMode << std::endl;
@@ -322,11 +328,11 @@ struct verify_backward_weights_lstm
                 std::cout << batch_seq.at(i);
             }
         }
-        std::cout << " -m lstm "
-                  << " -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen << " -l "
-                  << nLayers << " -F 0 "
-                  << " -r " << dirMode << " -b " << biasMode << " -p " << inputMode << " -q "
-                  << use_seqPadding << std::endl;
+        std::cout << " -m lstm"
+                  << " -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen
+                  << " -l " << nLayers << " -F 0"
+                  << " -r " << dirMode << " -b " << biasMode << " -p " << inputMode
+                  << " -q " << use_seqPadding << std::endl;
 
         std::cout << "inputMode: " << inputMode << " biasMode: " << biasMode
                   << " dirMode: " << dirMode << std::endl;
@@ -420,6 +426,7 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
 
     std::vector<T> cpu() const
     {
+
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
@@ -497,8 +504,10 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
             std::cout << "CPU outdata[" << i << "]: " << output[i] << std::endl;
         }
 #endif
+
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
+
         std::cout << "Wall clock: CPU forward inference LSTM pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
@@ -512,11 +521,13 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
 
     std::vector<T> gpu() const
     {
+
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
         auto&& handle = get_handle();
+
         size_t out_sz = 0;
 
         std::vector<miopen::TensorDescriptor> inputCPPDescs;
@@ -589,6 +600,7 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
             std::cout << "GPU outdata[" << i << "]: " << outdata[i] << std::endl;
         }
 #endif
+
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
@@ -722,6 +734,7 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
 
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> cpu() const
     {
+
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
@@ -834,6 +847,7 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
 
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
+
         std::cout << "Wall clock: CPU forward train LSTM pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
@@ -862,6 +876,7 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
 
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> gpu() const
     {
+
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
@@ -950,7 +965,7 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
         auto outdata = handle.Read<T>(output_dev, output.size());
         for(int i = 0; i < outdata.size(); i++)
         {
-            std::cout << "GPU outdata[" << i << "]:" << outdata[i] << std::endl;
+            std::cout << "GPU outdata[" << i << "]: " << outdata[i] << std::endl;
         }
 #endif
         rspace.ReadTo(RSVgpu);
@@ -963,6 +978,7 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
 
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
+
         std::cout << "Wall clock: GPU forward_train LSTM pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
@@ -988,11 +1004,11 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
                 std::cout << batch_seq.at(i);
             }
         }
-        std::cout << " -m lstm "
-                  << " -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen << " -l "
-                  << nLayers << " -F 0 "
-                  << " -r " << dirMode << " -b " << biasMode << " -p " << inputMode << " -q "
-                  << use_seqPadding << std::endl;
+        std::cout << " -m lstm"
+                  << " -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen
+                  << " -l " << nLayers << " -F 0"
+                  << " -r " << dirMode << " -b " << biasMode << " -p " << inputMode
+                  << " -q " << use_seqPadding << std::endl;
 
         std::cout << "inputMode: " << inputMode << " biasMode: " << biasMode
                   << " dirMode: " << dirMode << std::endl;
@@ -1019,6 +1035,7 @@ template <class T>
 std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>>
 verify_backward_data_lstm<T>::cpu() const
 {
+
 #if(MIO_RNN_TIME_EVERYTHING == 1)
     auto t_start = std::chrono::high_resolution_clock::now();
 #endif
@@ -1149,6 +1166,7 @@ verify_backward_data_lstm<T>::cpu() const
 
 #if(MIO_RNN_TIME_EVERYTHING == 1)
     auto t_end = std::chrono::high_resolution_clock::now();
+
     std::cout << "Wall clock: CPU backward data LSTM pass time: "
               << std::chrono::duration<double>(t_end - t_start).count() << " seconds." << std::endl;
 #endif
@@ -1186,6 +1204,7 @@ template <class T>
 std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>>
 verify_backward_data_lstm<T>::gpu() const
 {
+
 #if(MIO_RNN_TIME_EVERYTHING == 1)
     auto t_start = std::chrono::high_resolution_clock::now();
 #endif
@@ -1313,6 +1332,7 @@ verify_backward_data_lstm<T>::gpu() const
 template <class T>
 std::vector<T> verify_backward_weights_lstm<T>::cpu() const
 {
+
 #if(MIO_RNN_TIME_EVERYTHING == 1)
     auto t_start = std::chrono::high_resolution_clock::now();
 #endif
@@ -1403,6 +1423,7 @@ std::vector<T> verify_backward_weights_lstm<T>::cpu() const
 template <class T>
 std::vector<T> verify_backward_weights_lstm<T>::gpu() const
 {
+
 #if(MIO_RNN_TIME_EVERYTHING == 1)
     auto t_start = std::chrono::high_resolution_clock::now();
 #endif
@@ -1458,6 +1479,7 @@ std::vector<T> verify_backward_weights_lstm<T>::gpu() const
 
 #if(MIO_RNN_TIME_EVERYTHING == 1)
     auto t_end = std::chrono::high_resolution_clock::now();
+
     std::cout << "Wall clock: GPU backwards_weights LSTM pass time: "
               << std::chrono::duration<double>(t_end - t_start).count() << " seconds." << std::endl;
 #endif
@@ -1503,7 +1525,7 @@ struct lstm_basic_driver : test_driver
     {
         const double Data_scale = 0.001;
 #if(MIOPEN_BACKEND_OPENCL == 1)
-#if(WORKAROUND_ISSUE_692 == 1)
+#if WORKAROUND_ISSUE_692 == 1
         std::cout << "Skip test for Issue #692: " << std::endl;
         exit(EXIT_SUCCESS); // NOLINT (concurrency-mt-unsafe)
 #endif
@@ -1552,8 +1574,8 @@ struct lstm_basic_driver : test_driver
 
         if(useDropout != 0)
         {
-            // Workaround for issue #2335.
-            // OpenCL error creating buffer: 0 Invalid Buffer Size
+// Workaround for issue #2335.
+// OpenCL error creating buffer: 0 Invalid Buffer Size
 #if MIOPEN_BACKEND_OPENCL
             std::cout << "Skip test for Issue #2335: " << std::endl;
             return;
@@ -1824,48 +1846,6 @@ struct lstm_basic_driver : test_driver
             batchSeq, hiddenSize, wei_sz,    batch_n, seqLength, numLayers,        biasMode,
             dirMode,  inputMode,  inVecReal, hx_sz,   nohx,      bool(useDropout), usePadding});
 
-        /// \todo Resolve the issue and remove workaround.
-        /// ROCm3.3, Radeon VII: Many test cases always fail with:
-        /// "Forward Inference LSTM:"
-        /// "Output tensor output failed verification."
-#if 0
-        if(useDropout == 0)
-        {
-            verify(verify_forward_infer_lstm<T>{rnnDesc,
-                                                input,
-                                                hx,
-                                                cx,
-                                                weights,
-                                                batchSeq,
-                                                hiddenSize,
-                                                batch_n,
-                                                seqLength,
-                                                numLayers,
-                                                biasMode,
-                                                dirMode,
-                                                inputMode,
-                                                inVecReal,
-                                                hx_sz,
-                                                nohx,
-                                                nocx,
-                                                nohy,
-                                                nocy});
-        }
-#endif
-        /* normal hx/cx/dhy/dcy input test end */
-
-        // DLOWELL: Subtracting delta weights may produce NAN and infinities. Further investigation
-        // is needed.
-        //        auto dweights = std::get<1>(dweights_pair);
-        //        std::transform(weightData.begin( ), weightData.end( ), dweights.begin( ),
-        //        weightData.begin( ),std::minus<T>( ));
-        //        verify(verify_forward_infer_lstm<T>{rnnDesc, inputData,
-        //                                        curHiddenState, curCellState, weightData,
-        //                                        batchSeq,
-        //                                        hiddenSize, batch_n,
-        //                                        seqLength, numLayers,
-        //                                        biasMode, dirMode,
-        //                                        inputMode, inVecReal});
     }
 };
 

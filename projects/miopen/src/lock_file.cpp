@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -50,7 +50,7 @@ fs::path LockFilePath(const fs::path& filename_)
         if(!fs::exists(directory))
         {
             fs::create_directories(directory);
-            fs::permissions(directory, FS_ENUM_PERMS_ALL);
+            fs::permissions(directory, fs::perms::all);
         }
         const auto hash = md5(filename_.parent_path().string());
         const auto file = directory / (hash + "_" + filename_.filename() + ".lock");
@@ -72,7 +72,7 @@ LockFile::LockFile(const fs::path& path_, PassKey) : path(path_)
         {
             if(!std::ofstream{path})
                 MIOPEN_THROW("Error creating file <" + path + "> for locking.");
-            fs::permissions(path, FS_ENUM_PERMS_ALL);
+            fs::permissions(path, fs::perms::all);
         }
         flock = path.string().c_str();
     }
