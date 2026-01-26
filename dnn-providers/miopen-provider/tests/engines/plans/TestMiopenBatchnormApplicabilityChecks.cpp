@@ -179,6 +179,16 @@ inline const std::vector<BnTensorTypes> INVALID_ALL = {
     {DT::BFLOAT16, DT::BFLOAT16, DT::BFLOAT16, DT::FLOAT}, // All BFLOAT16
     {DT::BFLOAT16, DT::HALF, DT::HALF, DT::FLOAT}, // Mixed invalid
 };
+
+// Invalid configs for fused operations (intermediate tensor data type errors)
+inline const std::vector<BnTensorTypes> INVALID_FUSED_ALL = []() {
+    auto configs = INVALID_ALL;
+    configs.push_back({DT::FLOAT, DT::FLOAT, DT::FLOAT, DT::HALF});
+    configs.push_back({DT::HALF, DT::FLOAT, DT::FLOAT, DT::HALF});
+    configs.push_back({DT::FLOAT, DT::FLOAT, DT::FLOAT, DT::BFLOAT16});
+    return configs;
+}();
+
 } // namespace type_configs
 
 } // namespace canonical_layouts
@@ -472,9 +482,10 @@ inline std::vector<TensorConfig> createBatchnormFusedBackwardTensors(
         createAffineTensor(UIDs::DBIAS, "dbias", types.affine, derivedDims, derivedStrides));
 
     // Virtual tensors (BN_Y, DX_drelu)
-    configs.push_back(createIoTensor(UIDs::BN_Y_VIRTUAL, "BN_Y", types.io, dims, strides, true));
     configs.push_back(
-        createIoTensor(UIDs::DX_DRELU_VIRTUAL, "DX_drelu", types.io, dims, strides, true));
+        createIoTensor(UIDs::BN_Y_VIRTUAL, "BN_Y", types.intermediate, dims, strides, true));
+    configs.push_back(createIoTensor(
+        UIDs::DX_DRELU_VIRTUAL, "DX_drelu", types.intermediate, dims, strides, true));
 
     return configs;
 }
@@ -2406,7 +2417,7 @@ inline std::vector<BatchnormFusedBackwardConfigTestCase>
 
     // Unhappy paths - all invalid type configurations
     auto sampleDims = shapes::INFERENCE_4D[0];
-    for(const auto& invalidConfig : type_configs::INVALID_ALL)
+    for(const auto& invalidConfig : type_configs::INVALID_FUSED_ALL)
     {
         cases.push_back(
             {"RejectsFused_" + toString(invalidConfig),
@@ -3649,6 +3660,32 @@ inline std::vector<BatchnormInferenceVarianceExtFusedConfigTestCase>
         }
     }
 
+    // Unhappy paths - all invalid type configurations
+    for(const auto& invalidTypeConfig : type_configs::INVALID_FUSED_ALL)
+    {
+        auto dims = shapes::INFERENCE_4D[0];
+        auto layout = LAYOUTS_4D[0];
+        auto configs
+            = createBatchnormInferenceWithVarianceTensors(invalidTypeConfig, dims, *layout);
+        // Add virtual tensor for fusion
+        auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout->strideOrder);
+        configs.push_back(createIoTensor(
+            bnYVirtualUid, "bn_y", invalidTypeConfig.intermediate, dims, strides, true));
+
+        cases.push_back({"RejectsInferenceVarExtFused_" + generateName(dims, *layout) + "_"
+                             + toString(invalidTypeConfig),
+                         false,
+                         configs,
+                         UIDs::X,
+                         UIDs::Y,
+                         UIDs::SCALE,
+                         UIDs::BIAS,
+                         UIDs::EPSILON,
+                         UIDs::MEAN,
+                         UIDs::VARIANCE,
+                         PM::RELU_FWD});
+    }
+
     {
         // Unhappy paths - unsupported activation mode
         const auto& sampleDims = shapes::INFERENCE_4D[0];
@@ -3672,28 +3709,6 @@ inline std::vector<BatchnormInferenceVarianceExtFusedConfigTestCase>
                          PM::SIGMOID_FWD});
     }
 
-    {
-        // Unhappy paths - unsupported intermediate data type: half
-        const auto& sampleDims = shapes::INFERENCE_4D[0];
-        auto configs = createBatchnormInferenceWithVarianceTensors(
-            bn_type_configs::ALL_FLOAT, sampleDims, TensorLayout::NCHW);
-        auto strides = hipdnn_data_sdk::utilities::generateStrides(sampleDims,
-                                                                   TensorLayout::NCHW.strideOrder);
-        configs.push_back(
-            createIoTensor(bnYVirtualUid, "bn_y", DT::HALF, sampleDims, strides, true));
-
-        cases.push_back({"RejectsInferenceVarExtFused_UnsupportedIntermediateDataType",
-                         false,
-                         configs,
-                         UIDs::X,
-                         UIDs::Y,
-                         UIDs::SCALE,
-                         UIDs::BIAS,
-                         UIDs::EPSILON,
-                         UIDs::MEAN,
-                         UIDs::VARIANCE,
-                         PM::SIGMOID_FWD});
-    }
     return cases;
 }
 

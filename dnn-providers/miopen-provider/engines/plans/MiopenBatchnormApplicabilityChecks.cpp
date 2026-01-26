@@ -605,9 +605,13 @@ void checkBatchnormInferenceActivationBackwardTensorConfigSupported(
     {
         statTensorIds.push_back(bnBwdAttr.inv_variance_tensor_uid().value());
     }
+    std::vector<int64_t> intermediateTensorIds = {bnInfAttr.y_tensor_uid(),
+                                                  actAttr.in_0_tensor_uid(),
+                                                  actAttr.out_0_tensor_uid(),
+                                                  bnBwdAttr.dy_tensor_uid()};
 
     checkBatchnormTensorConfigSupported(
-        ioTensorIds, affineTensorIds, statTensorIds, {}, tensorMap, true);
+        ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, tensorMap, true);
 }
 
 // --- Activation Mode Validators ---
