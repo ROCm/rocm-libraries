@@ -86,11 +86,6 @@ def main(argv=None) -> None:
         "projects/hipblaslt": {"projects/hipblas-common"},
         "projects/rocblas": {"projects/hipblaslt"},
         "projects/rocsolver": {"projects/rocprim", "projects/rocblas"},
-        "projects/rocsparse": {"projects/rocprim", "projects/rocblas"},
-        "projects/hipblas": {"projects/rocsolver"},
-        "projects/hipsolver": {"projects/rocsolver", "projects/rocsparse"},
-        "projects/hipsparse": {"projects/rocsparse"},
-        "projects/hipsparselt": {"projects/hipsparse"},
         "projects/hiptensor": {},
     }
     # Azure pipeline IDs for each project, to be populated as projects are enabled
@@ -107,11 +102,6 @@ def main(argv=None) -> None:
         "projects/hipblaslt": 301,
         "projects/rocblas": 302,
         "projects/rocsolver": 303,
-        "projects/rocsparse": 314,
-        "projects/hipblas": 317,
-        "projects/hipsolver": 322,
-        "projects/hipsparse": 315,
-        "projects/hipsparselt": 309,
         "shared/origami": 364,
         "projects/rocwmma": 370,
         "projects/hiptensor": 374,
