@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2025-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -47,20 +47,25 @@ namespace rocRoller::KernelGraph::NodeScheduling
             {
                 auto order = graph.control.compareNodes(UpdateCache, *iterA, *iterB);
 
-                if(order == ControlGraph::NodeOrdering::LeftFirst)
+                switch(order)
                 {
+                case ControlGraph::NodeOrdering::LeftFirst:
                     subGraph.addElement(ControlGraph::Sequence{}, {*iterA}, {*iterB});
-                }
-                else if(order == ControlGraph::NodeOrdering::RightFirst)
-                {
+                    break;
+                case ControlGraph::NodeOrdering::RightFirst:
                     subGraph.addElement(ControlGraph::Sequence{}, {*iterB}, {*iterA});
-                }
-                else
-                {
-                    AssertFatal(order == ControlGraph::NodeOrdering::Undefined,
-                                "These nodes should not contain each other",
-                                ShowValue(*iterA),
-                                ShowValue(*iterB));
+                    break;
+                case ControlGraph::NodeOrdering::LeftInBodyOfRight:
+                    subGraph.addElement(ControlGraph::Body{}, {*iterB}, {*iterA});
+                    break;
+                case ControlGraph::NodeOrdering::RightInBodyOfLeft:
+                    subGraph.addElement(ControlGraph::Body{}, {*iterA}, {*iterB});
+                    break;
+                case ControlGraph::NodeOrdering::Undefined:
+                    break;
+                case ControlGraph::NodeOrdering::Count:
+                    Throw<FatalError>("Should not get here!");
+                    break;
                 }
             }
         }
