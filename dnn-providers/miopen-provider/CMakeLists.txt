@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
-    message(STATUS "Building miopen legacy plugin standalone")
+    message(STATUS "Building miopen provider plugin standalone")
     cmake_minimum_required(VERSION 3.25.2)
     add_compile_definitions(__HIP_PLATFORM_AMD__)
 
@@ -39,7 +39,13 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     )
 
     # Enable testing for standalone build
-    option(HIP_DNN_SKIP_TESTS "Skip building tests" OFF)
+    # Migrate HIP_DNN_SKIP_TESTS -> HIPDNN_SKIP_TESTS
+    if(DEFINED HIP_DNN_SKIP_TESTS)
+        set(HIPDNN_SKIP_TESTS ${HIP_DNN_SKIP_TESTS} CACHE BOOL "Skip building tests" FORCE)
+        unset(HIP_DNN_SKIP_TESTS CACHE)
+        message(DEPRECATION "HIP_DNN_SKIP_TESTS has been renamed to HIPDNN_SKIP_TESTS. Please update your build scripts to use -DHIPDNN_SKIP_TESTS instead.")
+    endif()
+    option(HIPDNN_SKIP_TESTS "Skip building tests" OFF)
 
     list(
         PREPEND
@@ -78,7 +84,7 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     include(Tests)
 
 else()
-    message(STATUS "Building miopen legacy plugin as a dependency")
+    message(STATUS "Building miopen provider plugin as a dependency")
 endif()
 
 if(WIN32)
@@ -104,6 +110,7 @@ add_library(
     engines/plans/MiopenBatchnormPlanBuilder.cpp
     engines/plans/MiopenBatchnormBwdPlan.cpp
     engines/plans/MiopenBatchnormFwdInferencePlan.cpp
+    engines/plans/MiopenBatchnormFwdInferenceWithVariancePlan.cpp
     engines/plans/MiopenBatchnormFwdTrainingPlan.cpp
     engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.cpp
     engines/plans/MiopenConvBwdPlan.cpp
@@ -154,7 +161,7 @@ if(BUILD_PLUGIN_AS_DEPENDENCY)
     clang_tidy_check(miopen_legacy_plugin)
 endif()
 
-if(NOT HIP_DNN_SKIP_TESTS)
+if(NOT HIPDNN_SKIP_TESTS)
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
 

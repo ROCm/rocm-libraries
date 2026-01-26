@@ -3,7 +3,7 @@
 
 include(GoogleTest)
 
-if(HIP_DNN_SKIP_TESTS)
+if(HIPDNN_SKIP_TESTS)
     message(STATUS "Skipping Test SDK tests")
     return()
 endif()
@@ -18,6 +18,7 @@ add_executable(
     utilities/TestCpuFpReferenceBatchnorm.cpp
     utilities/TestCpuFpReferenceBatchnormWithVariance.cpp
     utilities/TestCpuFpReferenceConvolution.cpp
+    utilities/TestCpuFpReferenceMatmul.cpp
     utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
     utilities/TestCpuFpReferenceUtilities.cpp
     utilities/TestCpuFpReferenceValidation.cpp
@@ -45,6 +46,8 @@ add_executable(
     utilities/cpu_graph_executor/TestConvolutionFwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestCpuReferenceGraphExecutor.cpp
     utilities/cpu_graph_executor/TestFusedOperationsCpuGraphExecutor.cpp
+    utilities/cpu_graph_executor/TestMatmulPlan.cpp
+    utilities/cpu_graph_executor/TestMatmulSignatureKey.cpp
     utilities/cpu_graph_executor/TestPointwiseOperationsCpuGraphExecutor.cpp
     utilities/cpu_graph_executor/TestGraphTensorBundle.cpp
     utilities/cpu_graph_executor/TestPlanRegistrySignatureKey.cpp

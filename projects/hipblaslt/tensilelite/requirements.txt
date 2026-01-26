@@ -1,9 +1,7 @@
-dataclasses; python_version == '3.6'
 packaging
 pyyaml
 msgpack
-joblib>=1.4.0; python_version >= '3.8'
-joblib>=1.1.1; python_version < '3.8'
+joblib>=1.4.0
 simplejson
 ujson
 orjson

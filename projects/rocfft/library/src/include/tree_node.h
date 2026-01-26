@@ -29,10 +29,10 @@
 #include <set>
 #include <vector>
 
+#include "../../../shared/device_properties.h"
 #include "../../../shared/gpubuf.h"
 #include "../../../shared/hip_object_wrapper.h"
 #include "../../../shared/rocfft_complex.h"
-#include "../../shared/device_properties.h"
 #include "../device/kernels/callback.h"
 #include "../device/kernels/common.h"
 #include "callback_map.h"
@@ -97,6 +97,7 @@ static std::string get_arch_name(const hipDeviceProp_t& prop)
                                                        "gfx1100",
                                                        "gfx1101",
                                                        "gfx1102",
+                                                       "gfx1150",
                                                        "gfx1151",
                                                        "gfx1152",
                                                        "gfx1153",
@@ -162,11 +163,11 @@ struct SchemeTree
 
 using SchemeTreeVec = std::vector<std::unique_ptr<SchemeTree>>;
 
-static SchemeTreeVec EmptySchemeTreeVec = {};
+extern SchemeTreeVec EmptySchemeTreeVec;
 
 using SchemeVec = std::vector<ComputeScheme>;
 
-static SchemeVec EmptySchemeVec = {};
+extern SchemeVec EmptySchemeVec;
 
 class TreeNode;
 class LeafNode;

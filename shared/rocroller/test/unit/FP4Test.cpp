@@ -254,11 +254,11 @@ namespace rocRollerTest
             auto dataType = DataType::FP4;
 
             auto tagTensorA = command->addOperation(
-                rocRoller::Operations::Tensor(2, dataType, {0, 1})); // Load A
+                rocRoller::Operations::Tensor(2, dataType, {}, {0, 1})); // Load A
             auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
             auto tagTensorB = command->addOperation(
-                rocRoller::Operations::Tensor(2, dataType, {0, 1})); // Store B
+                rocRoller::Operations::Tensor(2, dataType, {}, {0, 1})); // Store B
             command->addOperation(rocRoller::Operations::T_Store_Tiled(tagLoadA, tagTensorB));
 
             auto commandArgs = command->createArguments();

@@ -152,9 +152,9 @@ The `ArgumentLoader` class provides a method for allocating all arguments at onc
 
 ### Generating Instructions from a KernelGraph
 
-A list of `Instruction`s can be generated for a particular `KernelGraph` by calling the `KernelGraph::generate` function. The `KernelGraph::generate` function will visit each edge within the graph and attempt to generate a series of `Instruction`s. Ideally, the `Instruction` constructor will never be used here. Instead, there should be calls to classes such as the `Arithmetic` class, which will generate the appropriate instructions for a particular architecture.
+A list of `Instruction`s can be generated for a particular `KernelGraph` by calling the `KernelGraph::generate` function. The `KernelGraph::generate` function will visit each edge within the graph and attempt to generate a series of `Instruction`s. Ideally, the `Instruction` constructor will never be used here. Instead, there should be calls to classes such as `ArithmeticGenerator`, which will generate the appropriate instructions for a particular architecture.
 
-Edges within a graph might include `Expression`s. Instructions might need to be generated for these as well. `Expression::InstructionGenerator::generate` can be used to generate instructions for an expression. It will visit each node within an `Expression` tree and attempt to generate instructions for the node.
+Edges within a graph might include `Expression`s. Instructions might need to be generated for these as well. The `Expression::generate()` function can be used to generate instructions for an expression. It will visit each node within an `Expression` tree and attempt to generate instructions for the node.
 
 ### Context
 
@@ -176,7 +176,7 @@ The `observe` method will modify any state after the `Instruction` has been sche
 
 The `MetaObserver` class holds a collection of `IObserver` types. It will call each `IObserver`'s `peek`, `modify` and `observe` methods. A `Context` contains a `MetaObserver` object that will be called by the `schedule` method.
 
-All of the available `IObserver` types can be found in the `lib/include/rocRoller/Observers` directory.
+All of the available `IObserver` types can be found in the `lib/include/rocRoller/Scheduling/Observers` directory.
 
 ### Wait Count
 
@@ -214,7 +214,7 @@ In general, the `ExecutableKernel` object should not be called directly. Instead
 
 Once a `CommandKernel` object has been created, it can be launched on a GPU with unique arguments by using the `launchKernel` method. The arguments are provided with a `RuntimeArguments` object.
 
-A `RuntimeArguments` object is a block of memory that contains all of the arguments that will be passed to the kernel in the correct order.
+A `RuntimeArguments` object is a `std::span<uint8_t const>` that provides a view into a block of memory containing all of the arguments that will be passed to the kernel in the correct order. The actual memory is typically managed by a `KernelArguments` object, which provides methods for constructing and manipulating the argument buffer.
 
 ## GPUArchitectureInformation
 
@@ -225,7 +225,7 @@ The main ideas behind the `GPUArchitectureGenerator` are the following:
 * minimize the runtime overhead of looking up architecture and instruction information
 * simplify the specification of architecture and instruction information
 
-To keep runtime overhead low we're storing this information in dictionaries(`std::ordered_map<>`).
+To keep runtime overhead low we're storing this information in dictionaries (`std::map<>` and `std::unordered_map<>`).
 However, explicitly specifying these dictionaries in source files is unwieldy and difficult to maintain,
 so we'd like to be able to specify this info in a more programmatic way, but that would negatively impact
 runtime performance.
@@ -260,12 +260,66 @@ GPUArchitectureLibrary::GetArch("GFX90a").GetInstructionInfo("global_store_byte"
 
 ### Components
 
-TODO: Add information
+The Component system provides a flexible plugin architecture for swapping implementations based on runtime conditions. Components are organized into base classes (defining interfaces) and concrete implementations (providing specific functionality).
+
+A `ComponentBase` defines:
+- An `Argument` type used to select the appropriate implementation
+- A `Basename` string identifier
+
+Concrete `Component` implementations provide:
+- A `Match` function to determine if this component is appropriate for given arguments
+- A `Build` factory function to create instances
+- A `Name` identifier
+
+The `ComponentFactory` manages registration and selection of components. When `Component::Get<Base>(args)` is called:
+1. The factory searches registered components for a matching implementation
+2. For non-single-use components, instances are cached and reused
+3. For single-use components, new instances are created each time
+
+Components are thread-safe, using reader-writer locks for concurrent access. This pattern is used throughout rocRoller for architecture-specific code generation (e.g., different assembler implementations).
 
 ### Serialization
 
-TODO: Add information
+rocRoller provides a flexible serialization framework for converting objects to and from YAML format. The serialization system supports both LLVM's YAML library and yaml-cpp.
+
+Key serialization traits:
+- `ScalarTraits<T>`: For basic types and enums, providing `output()` and `input()` methods
+- `MappingTraits<T, IO, Context>`: For structured types with named fields
+- `SequenceTraits<T, IO>`: For sequential collections
+- `EnumTraits<T, IO>`: For enumeration types
+
+The main API functions are:
+- `toYAML(obj)`: Converts an object to a YAML string
+- `fromYAML<T>(yaml)`: Parses a YAML string into an object
+- `writeYAML(stream, obj)`: Writes YAML to an output stream
+
+Many rocRoller types implement serialization traits, including `Command`, `KernelGraph`, `Expression`, and `Operation` types. This enables saving and loading kernel definitions, intermediate representations, and configuration data. Serialization is particularly useful for debugging, caching compiled kernels, and inspecting internal structures.
 
 ### Generator
 
-TODO: Add information
+The `Generator<T>` class template implements lazy sequences using C++20 coroutines. It provides an efficient way to produce sequences of values on-demand without storing the entire collection in memory.
+
+Key features:
+- Implements `std::ranges::input_range` for compatibility with range-based algorithms
+- Supports `co_yield` for single values ranges
+- Provides convenience methods: `map()`, `filter()`, `take()`, `only()`, `empty()`
+- Can create standard collections with `.to<Container>()`
+
+Generators are movable but not copyable. The prefix increment operator (`++iter`) is more efficient than postfix (`iter++`). Generators don't begin executing until the first value is requested.
+
+Example usage pattern:
+```cpp
+Generator<int> numbers() {
+    for(int i = 0; i < 10; i++)
+        co_yield i;
+}
+
+// Use with range-based for
+for(int n : numbers().filter([](int x) { return x % 2 == 0; }))
+    std::cout << n << std::endl;
+
+// Convert to vector
+auto vec = numbers().take(5).to<std::vector>();
+```
+
+Generators are used internally in rocRoller for producing sequences of instructions during code generation, allowing lazy evaluation and efficient memory usage.

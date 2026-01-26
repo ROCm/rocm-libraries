@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-if(HIP_DNN_SKIP_TESTS)
+if(HIPDNN_SKIP_TESTS)
     return()
 endif()
 
@@ -29,12 +29,12 @@ function(_build_test_environment_list_internal OUT_VAR)
 
     if(HIPDNN_ENABLE_COVERAGE)
         # Ensure coverage report directory exists
-        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/coverage_report/profraw")
+        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/coverage-report/profraw")
 
         # For code coverage builds, we want each profraw file to have a unique name.  The %m in the
         # LLVM_PROFILE_FILE environment variable will auto generate a unique id.
         list(APPEND ENVIRONMENT_LIST
-             "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/coverage_report/profraw/%m.profraw"
+             "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/coverage-report/profraw/%m.profraw"
         )
     endif()
 
@@ -166,14 +166,21 @@ endfunction() # finalize_test_targets
 #   WORKING_DIR - Working directory for test execution
 # ~~~
 function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
-    message(STATUS "Appending ${APPEND_FUNCTION_SUFFIX} check target: ${TARGET} in working directory: ${WORKING_DIR}")
+    set(TARGET_EXE ${TARGET})
+
+    # Add executable suffix if needed (e.g., .exe on Windows)
+    if(CMAKE_EXECUTABLE_SUFFIX)
+        set(TARGET_EXE "${TARGET_EXE}${CMAKE_EXECUTABLE_SUFFIX}")
+    endif()
+
+    message(STATUS "Appending ${APPEND_FUNCTION_SUFFIX} check target: ${TARGET} -> ${TARGET_EXE} in working directory: ${WORKING_DIR}")
 
     # Track the dependencies for test name validation
     set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} ${TARGET}
         CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE
     )
     # Track the binary paths for test name validation
-    set(CHECK_EXECUTABLE_PATHS_GLOBAL ${CHECK_EXECUTABLE_PATHS_GLOBAL} "${CMAKE_INSTALL_BINDIR}/${TARGET}"
+    set(CHECK_EXECUTABLE_PATHS_GLOBAL ${CHECK_EXECUTABLE_PATHS_GLOBAL} "${CMAKE_INSTALL_BINDIR}/${TARGET_EXE}"
         CACHE INTERNAL "Accumulated global check executable paths" FORCE
     )
 

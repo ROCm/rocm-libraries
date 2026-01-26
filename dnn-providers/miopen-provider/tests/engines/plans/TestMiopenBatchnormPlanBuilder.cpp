@@ -34,9 +34,9 @@ void createBatchnormFusionTensorAttributes(
     static const std::unordered_set<int64_t> s_derivedDimTensorIds = {2, 3, 4, 5, 8, 9, 12};
 
     std::vector<int64_t> dims = {1, 3, 224, 224};
-    std::vector<int64_t> strides = {1, 3, 224, 224};
+    std::vector<int64_t> strides = {150528, 50176, 224, 1};
     std::vector<int64_t> derivedDims = {1, 3, 1, 1};
-    std::vector<int64_t> derivedStrides = {1, 3, 1, 1};
+    std::vector<int64_t> derivedStrides = {3, 1, 1, 1};
 
     for(int64_t i = 1; i <= numTensors; ++i)
     {
@@ -413,8 +413,8 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForInvalidLayoutI
 
     std::vector<int64_t> strides3D = {42, 14, 1}; // 3D instead of 4D/5D
     std::vector<int64_t> dims3D = {1, 3, 14};
-    std::vector<int64_t> derivedStrides = {3, 1, 1};
-    std::vector<int64_t> derivedDims = {1, 3, 1};
+    std::vector<int64_t> derivedStrides = {3, 1, 1, 1};
+    std::vector<int64_t> derivedDims = {1, 3, 1, 1};
 
     tensorAttributes.push_back(hipdnn_data_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", hipdnn_data_sdk::data_objects::DataType::FLOAT, &strides3D, &dims3D));
@@ -761,6 +761,17 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedInferenceNod
 {
     // Use a real flatbuffer graph with a valid batchnorm node
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    HipdnnEnginePluginExecutionContext ctx;
+
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedInferenceWithVarianceNode)
+{
+    // Use a real flatbuffer graph with a valid batchnorm variance node
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
@@ -1747,6 +1758,229 @@ TEST_F(TestMiopenBatchnormPlanBuilder,
         builder,
         "act",
         hipdnn_data_sdk::data_objects::DataType::UNSET,
+        hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        actAttr.Union()));
+
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// ============================================================================
+// Variance Extension Fusion Tests
+// ============================================================================
+
+TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueForFusedTwoNodeGraphWithVariance)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    createBatchnormFusionTensorAttributes(builder, tensorAttributes, 7, {6});
+
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+
+    // BN inference with variance
+    auto bnInfAttr = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributesVarianceExt(
+        builder, 1, 2, 3, 4, 5, 6);
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "bn_inf_var",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt,
+        bnInfAttr.Union()));
+
+    // Activation
+    auto actAttr = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
+        builder,
+        hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        6,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        7);
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "act",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        actAttr.Union()));
+
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder,
+       IsApplicableReturnsFalseForFusedTwoNodeGraphWithVarianceAndBrokenConnectivity)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    createBatchnormFusionTensorAttributes(builder, tensorAttributes, 7, {6});
+
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+
+    // BN inference with variance
+    auto bnInfAttr = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributesVarianceExt(
+        builder, 1, 2, 3, 4, 5, 6);
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "bn_inf_var",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt,
+        bnInfAttr.Union()));
+
+    // Activation with wrong input
+    auto actAttr = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
+        builder,
+        hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        5, // Wrong input!
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        7);
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "act",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        actAttr.Union()));
+
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder,
+       IsApplicableReturnsFalseForFusedTwoNodeGraphWithVarianceAndNonVirtualIntermediate)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    createBatchnormFusionTensorAttributes(builder, tensorAttributes, 7, {}); // No virtual tensors
+
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+
+    // BN inference with variance
+    auto bnInfAttr = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributesVarianceExt(
+        builder, 1, 2, 3, 4, 5, 6);
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "bn_inf_var",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt,
+        bnInfAttr.Union()));
+
+    // Activation
+    auto actAttr = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
+        builder,
+        hipdnn_data_sdk::data_objects::PointwiseMode::RELU_FWD,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        6,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        7);
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "act",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        actAttr.Union()));
+
+    auto graphOffset = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::DataType::HALF,
+        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        &tensorAttributes,
+        &nodes);
+    builder.Finish(graphOffset);
+
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder,
+       IsApplicableReturnsFalseForFusedTwoNodeGraphWithVarianceAndUnsupportedActivation)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+
+    createBatchnormFusionTensorAttributes(builder, tensorAttributes, 7, {6});
+
+    std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;
+
+    // BN inference with variance
+    auto bnInfAttr = hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributesVarianceExt(
+        builder, 1, 2, 3, 4, 5, 6);
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "bn_inf_var",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
+        hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt,
+        bnInfAttr.Union()));
+
+    // Activation with unsupported MUL
+    auto actAttr = hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
+        builder,
+        hipdnn_data_sdk::data_objects::PointwiseMode::MUL, // Unsupported!
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        6,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        7);
+    nodes.push_back(hipdnn_data_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "act",
+        hipdnn_data_sdk::data_objects::DataType::FLOAT,
         hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes,
         actAttr.Union()));
 
