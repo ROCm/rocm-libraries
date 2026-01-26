@@ -76,3 +76,24 @@ Tests:
              nos5,
              nos6, 
              nos7]
+
+- name: spmm_batched_coo
+  category: pre_checkin
+  function: spmm_batched_coo
+  indextype: *i32
+  precision: *single_only_precisions
+  M: 1
+  N: [22]
+  K: 1
+  alpha: [-1.0]
+  alphai: [1.0]
+  beta: [2.0]
+  betai: [0.5]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  orderB: [HIPSPARSE_ORDER_COL]
+  orderC: [HIPSPARSE_ORDER_COL]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT]
+  filename: [nos6]
+  graph_test: true
