@@ -3,7 +3,11 @@
 This document outlines the development roadmap for hipDNN, a comprehensive graph-based deep learning library for AMD GPUs. For current operation support details, refer to the [Operation Support documentation](./OperationSupport.md).
 
 > [!NOTE]
-> 📝 This roadmap is subject to change based on project priorities, community feedback, and technical requirements.
+> 📝 This roadmap is subject to change based on project priorities, community feedback, and technical requirements.The hipDNN team will endevor to keep the roadmap up to date but the further out the quarter, the more speculative our plans. 😅
+> 
+> ✅ = Done
+> 
+> ⏳ = In progress
 
 ## P0 ~ Q1 2026 (Current milestone)
 
@@ -23,7 +27,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 ### Core
 - **Stable, robust library to build upon** ⏳
-- Kernel engine settings (Engine knob configurations API + implementation)
+- Kernel engine settings (Engine knob configurations API + implementation) ⏳
   - Ex. Flag for enabling benchmarking mode on MIOpen plugin
 
 ### PyTorch
@@ -51,9 +55,9 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - **Initial heuristic plugin**
 
 ### Core
-- Plugin SDK
+- Plugin SDK ⏳
 - Benchmarking & performance python tools ⏳
-- Python API wrappers
+- Python API wrappers ⏳
 
 ## P2 ~ Q3 2026
 
@@ -70,20 +74,22 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - Kernel engine tagging & filtering
   - Behavioral & numeric notes for filtering
   - Client API to enable filtering
-- Save/Load Execution plans
 - **Client auto-tuning API**
-- Expanded performance and validation suites for hipDNN full install (using real user workloads and benchmarks to drive testing)
 
-## P3 ~ Q4 2026
+## P3 ~ Q4 2026 & beyond
 
-**Focus:** Stable foundation, core operations & initial PyTorch Integration
+**Focus:** Q4 and beyond is far enough out, that there is substantial uncertainty on what will be the most important features at this time. We value community input on what you would like to see!
 
+### Normalization
+- **Distributed normalization support**
+  
 ### Core
+- Expanded performance and validation suites for hipDNN full install (using real user workloads and benchmarks to drive testing)
 - AOT graph compilation without devices present (Pre-compile graph support)
 - **hipGraph support**
 - Support dynamic linking to backend (enables forwards and backwards compatible client libraries)
+- - Save/Load Execution plans
 - Non-standard tensor support (ragged, non-packed, vectorized)
-- **Distributed normalization support**
 
 ## Contributing
 
