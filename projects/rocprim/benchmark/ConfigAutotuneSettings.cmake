@@ -65,6 +65,12 @@ ${TUNING_TYPES};rocprim::empty_type ${LIMITED_TUNING_TYPES};\
 ${TUNING_TYPES};rocprim::empty_type ${LIMITED_TUNING_TYPES};\
 128 256 512 1024;4 5 6 7 8" PARENT_SCOPE)
     set(output_pattern_suffix "@KeyType@_@ValueType@_@BlockSize@_@RadixBits@" PARENT_SCOPE)
+  elseif(file STREQUAL "benchmark_device_radix_sort_onesweep_histogram")
+    set(list_across_names "KeyType;ValueType;BlockSize;RadixBits" PARENT_SCOPE)
+    set(list_across "\
+${TUNING_TYPES};rocprim::empty_type ${LIMITED_TUNING_TYPES};\
+128 256 512 1024;4 5 6 7 8" PARENT_SCOPE)
+    set(output_pattern_suffix "@KeyType@_@ValueType@_@BlockSize@_@RadixBits@" PARENT_SCOPE)
   elseif(file STREQUAL "benchmark_device_reduce")
     set(list_across_names "DataType;BlockSize;ItemsPerThread" PARENT_SCOPE)
     set(list_across "\
