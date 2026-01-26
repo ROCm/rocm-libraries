@@ -88,6 +88,7 @@ namespace TensileLite
                 {
                     if (task.solution.sizeMapping.streamK == 0)
                     {
+                        // For non-stream-k kernels, check if the launch grid would overflow the maximum number of work items
                         dim3 workGroupSize;
                         dim3 numWorkGroups;
                         task.solution.calculateGrid(workGroupSize, numWorkGroups, task.problem);
