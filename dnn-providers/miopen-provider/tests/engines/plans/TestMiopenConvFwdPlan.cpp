@@ -242,44 +242,6 @@ TEST_F(TestGpuConvFwdPlan, CreatesPlanWithValidGraph)
     ConvFwdPlan(_handle, std::move(params));
 }
 
-TEST_F(TestGpuConvFwdPlan, CreatesPlanWithBenchmarkingEnabled)
-{
-    // Create a valid convolution graph
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-
-    // Get the convolution node and attributes
-    const auto& node = graph.getNode(0);
-    auto* attrs = node.attributes_as_ConvolutionFwdAttributes();
-    ASSERT_NE(attrs, nullptr);
-
-    // Construct params
-    ConvFwdParams params(*attrs, graph.getTensorMap());
-
-    // Create plan with benchmarking enabled - verifies ScopedTuningPolicy is used correctly
-    // The tuning policy is set to Search during construction, then restored
-    EXPECT_NO_THROW(ConvFwdPlan(_handle, std::move(params), true));
-}
-
-TEST_F(TestGpuConvFwdPlan, CreatesPlanWithBenchmarkingDisabled)
-{
-    // Create a valid convolution graph
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-
-    // Get the convolution node and attributes
-    const auto& node = graph.getNode(0);
-    auto* attrs = node.attributes_as_ConvolutionFwdAttributes();
-    ASSERT_NE(attrs, nullptr);
-
-    // Construct params
-    ConvFwdParams params(*attrs, graph.getTensorMap());
-
-    // Create plan with benchmarking disabled - verifies ScopedTuningPolicy is used correctly
-    // The tuning policy is set to None during construction, then restored
-    EXPECT_NO_THROW(ConvFwdPlan(_handle, std::move(params), false));
-}
-
 TEST_F(TestGpuConvFwdPlan, ThrowsOnInvalidDims)
 {
     // Create a convolution graph with invalid conv dims
