@@ -2381,7 +2381,7 @@ public:
      * the `start_global_dev_idx` (global) device index.
      * NOTE: The global device index `g` in `[0, gpusperrank * mp_ranks(`
      * corresponds to device of local ID `g % gpusperrank` on process of rank
-     * `g / gpusperrank.
+     * `g / gpusperrank`.
      * 
      * @tparam io enum flag specifying whether the input (`io == fft_io::fft_io_in`)
      * or output (`io == fft_io::fft_io_in`) field is being considered.
