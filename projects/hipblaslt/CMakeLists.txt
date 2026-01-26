@@ -434,6 +434,25 @@ if(HIPBLASLT_ENABLE_CLIENT)
         COMPONENT benchmarks
     )
 
+    rocm_install(
+        PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/hipblaslt-perf"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        COMPONENT benchmarks
+    )
+    
+    # Install all Python modules required by hipblaslt-perf
+    rocm_install(
+        FILES 
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/bench.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/bench_sample.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/generator.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/git_info.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/specs.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/suites.py"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        COMPONENT benchmarks
+    )
+
     if(HIPBLASLT_ENABLE_MARKER)
         rocm_package_add_dependencies(DEPENDS "roctracer >= 1.0.0")
     endif()

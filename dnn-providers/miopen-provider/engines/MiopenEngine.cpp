@@ -5,6 +5,11 @@
 #include "plans/MiopenBatchnormPlanBuilder.hpp"
 
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
+#include <hipdnn_plugin_sdk/KnobFactory.hpp>
 
 namespace miopen_legacy_plugin
 {
@@ -38,7 +43,15 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
                               hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto engineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(builder, _id);
+
+    auto knob = hipdnn_plugin_sdk::KnobFactory::createIntKnob(
+        builder, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, "Enable benchmarking", 0, 0, 1, 1, {});
+
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobsVector;
+    knobsVector.push_back(knob);
+    auto knobs = builder.CreateVector(knobsVector);
+
+    auto engineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     detailsOut.ptr = detachedBuffer->data();
@@ -64,8 +77,33 @@ size_t MiopenEngine::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
 void MiopenEngine::initializeExecutionContext(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_plugin_sdk::IGraph& opGraph,
+    const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
+    if(engineConfig.isValid())
+    {
+        if(engineConfig.hasKnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME))
+        {
+            const auto& knobSetting
+                = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
+            if(knobSetting.valueType() == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
+            {
+                auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
+                executionContext.setBenchmarkingEnabled(value != 0);
+            }
+            else
+            {
+                HIPDNN_LOG_WARN(
+                    "Benchmarking knob setting value is not an integer. Type: {}",
+                    hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
+            }
+        }
+    }
+    else
+    {
+        HIPDNN_LOG_WARN("Engine config is invalid");
+    }
+
     for(const auto& planBuilder : _planBuilders)
     {
         if(planBuilder->isApplicable(handle, opGraph))

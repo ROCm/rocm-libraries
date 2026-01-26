@@ -1513,7 +1513,7 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
 
         if constexpr(NumGroupsToMerge > 1)
         {
-            if(!(C == 1))
+            if(!(C == 1) && CDEBlockTransferScalarPerVector_NPerBlock > 1)
             {
                 return false;
             }
@@ -2108,7 +2108,7 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
 
     std::unique_ptr<ck_tile::reflect::Description> describe() const override
     {
-        static_assert(ck_tile::reflect::conv::HasConvTraits<DeviceOp>,
+        static_assert(ck_tile::reflect::HasConvTraits<DeviceOp>,
                       "ConvTraits specialization not found for this device operation. "
                       "If you modified the template parameters of this class, ensure that "
                       "the corresponding ConvTraits specialization in "

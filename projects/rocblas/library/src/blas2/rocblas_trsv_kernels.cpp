@@ -811,10 +811,6 @@ rocblas_status rocblas_internal_trsv_substitution_template(rocblas_handle    han
     if(!n || !batch_count)
         return rocblas_status_success;
 
-    // Temporarily change the thread's default device ID to the handle's device ID
-    // cppcheck-suppress unreadVariable
-    auto saved_device_id = handle->push_device_id();
-
     offset_x = incx < 0 ? offset_x + incx * (1 - n) : offset_x;
 
     int batches = handle->getBatchGridDim((int)batch_count);
