@@ -73,9 +73,13 @@ const auto& GetTestParams()
         {
             supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
         }
-        else if constexpr(type == TestDataType::TF32 || type == TestDataType::BF16)
+        else if constexpr(type == TestDataType::BF16)
         {
             supportedDevices = Gpu::gfx94X | Gpu::gfx950;
+        }
+        else if constexpr(type == TestDataType::TF32)
+        {
+            supportedDevices = Gpu::gfx94X;
         }
         else
         {
