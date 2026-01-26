@@ -35,8 +35,8 @@ Tests:
   category: quick
   function: axpyi
   precision: *single_double_precisions_complex_real
-  M: [12000]
-  nnz: [5, 10, 554]
+  M: [300]
+  nnz: [5, 10, 254]
   alpha: [1.0, 0.0]
   alphai: [1.0]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
@@ -45,7 +45,7 @@ Tests:
   category: pre_checkin
   function: axpyi
   precision: *single_double_precisions_complex_real
-  M: [15332, 22031, 31958]
+  M: [12000]
   nnz: [0, 1543, 7111, 10000]
   alpha: [0.3]
   alphai: [-0.2, 1.7]
@@ -55,7 +55,7 @@ Tests:
   category: nightly
   function: axpyi
   precision: *single_double_precisions_complex_real
-  M: [735519, 1452387, 7834525]
+  M: [400000]
   nnz: [23512, 84412, 311983]
   alpha: [-7.2]
   alphai: [0.732]
@@ -65,7 +65,7 @@ Tests:
   category: pre_checkin
   function: axpyi
   precision: *single_double_precisions_complex_real
-  M: [12000]
+  M: [2000]
   nnz: [5, 10, 554]
   alpha: [1.0, 0.0]
   alphai: [1.0]

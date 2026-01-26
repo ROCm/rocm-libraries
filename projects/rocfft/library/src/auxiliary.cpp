@@ -25,6 +25,7 @@
 #include "../../shared/rocfft_hip.h"
 #include "logging.h"
 #include "repo.h"
+#include "rocfft/rocfft-version.h"
 #include "rocfft/rocfft.h"
 #include "rocfft_exception.h"
 #include "rocfft_ostream.hpp"
@@ -45,6 +46,8 @@ int log_kernelio_fd = -1;
 int log_rtc_fd      = -1;
 int log_tuning_fd   = -1;
 int log_graph_fd    = -1;
+
+extern const char* ROCFFT_VERSION_STRING;
 
 /**
  *  @brief Logging function
@@ -142,7 +145,7 @@ try
     solution_map::get_solution_map().setup(arch_name);
     TuningBenchmarker::GetSingleton().Setup();
 
-    log_trace(__func__);
+    log_trace(__func__, ROCFFT_VERSION_STRING);
     return rocfft_status_success;
 }
 catch(...)

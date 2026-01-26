@@ -218,6 +218,8 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/AddDirect2LDS.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/AddF6LDSPadding.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/AddLDS.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/AddLDSPadding.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/AddLDSPadding_detail.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/AddPRNG.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/AddPrefetch.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/AddPrefetch_detail.hpp"

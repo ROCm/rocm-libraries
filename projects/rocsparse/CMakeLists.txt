@@ -388,31 +388,49 @@ if(BUILD_CODE_COVERAGE)
     PATHS /opt/rocm/llvm/bin
   )
 
-  find_program(LCOV lcov)
-
-  if(LCOV)
-    # With lcov: apply LCOV_EXCL markers
-    add_custom_target(
-      coverage
-      DEPENDS coverage_analysis
-      COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocsparse-coverage_*.profraw -o ./coverage-report/rocsparse.profdata
-      COMMAND ${LLVM_COV} report -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata
-      COMMAND ${LLVM_COV} export -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata -format=lcov > ./coverage-report/raw_coverage.info
-      COMMAND ${LCOV} --rc lcov_excl_line=LCOV_EXCL_LINE --rc lcov_excl_start=LCOV_EXCL_START --rc lcov_excl_stop=LCOV_EXCL_STOP -a ./coverage-report/raw_coverage.info --include '${CMAKE_SOURCE_DIR}/library/*' -o ./coverage-report/coverage.info
-      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  # Python script to filter coverage exclusion markers (LCOV_EXCL_START/LCOV_EXCL_STOP)
+  # Note: lcov and gcovr don't work for LLVM coverage since they can't re-read sources
+  # when processing lcov format files. This script reads source files and filters excluded lines.
+  set(COVERAGE_FILTER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/scripts/filter_lcov_exclusions.py")
+  find_package(Python3 COMPONENTS Interpreter)
+  find_program(GENHTML genhtml)
+  
+  if(Python3_FOUND AND EXISTS ${COVERAGE_FILTER_SCRIPT})
+    message(STATUS "Found Python3 and filter script - coverage exclusion markers will be processed")
+    set(COVERAGE_FILTER_COMMAND
+      COMMAND ${Python3_EXECUTABLE} ${COVERAGE_FILTER_SCRIPT} ./coverage-report/coverage-raw.info ./coverage-report/coverage.info
     )
   else()
-    message(STATUS "lcov not found - LCOV_EXCL markers will not be processed")
-    # Without lcov: export directly (no exclusion processing)
-    add_custom_target(
-      coverage
-      DEPENDS coverage_analysis
-      COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocsparse-coverage_*.profraw -o ./coverage-report/rocsparse.profdata
-      COMMAND ${LLVM_COV} report -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata
-      COMMAND ${LLVM_COV} export -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata -format=lcov > ./coverage-report/coverage.info
-      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    message(WARNING "Python3 or filter script not found. LCOV_EXCL_START/LCOV_EXCL_STOP markers will NOT be processed.")
+    set(COVERAGE_FILTER_COMMAND
+      COMMAND ${CMAKE_COMMAND} -E copy ./coverage-report/coverage-raw.info ./coverage-report/coverage.info
     )
   endif()
+
+  # Generate HTML from filtered LCOV using genhtml (respects exclusion markers)
+  # or fallback to llvm-cov show (doesn't respect exclusion markers)
+  if(GENHTML AND Python3_FOUND AND EXISTS ${COVERAGE_FILTER_SCRIPT})
+    message(STATUS "Found genhtml - HTML will be generated from filtered LCOV")
+    set(COVERAGE_HTML_COMMAND
+      COMMAND ${GENHTML} ./coverage-report/coverage.info --output-directory ./coverage-report --title rocsparse --legend --demangle-cpp --quiet
+    )
+  else()
+    message(STATUS "genhtml not found - using llvm-cov show (exclusion markers not reflected in HTML)")
+    set(COVERAGE_HTML_COMMAND
+      COMMAND ${LLVM_COV} show -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata -format=html -output-dir=coverage-report
+    )
+  endif()
+
+  add_custom_target(
+    coverage
+    DEPENDS coverage_analysis
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocsparse-coverage_*.profraw -o ./coverage-report/rocsparse.profdata
+    COMMAND ${LLVM_COV} report -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata
+    COMMAND ${LLVM_COV} export -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata -format=lcov > ./coverage-report/coverage-raw.info
+    ${COVERAGE_FILTER_COMMAND}
+    ${COVERAGE_HTML_COMMAND}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
 
   #
   # Coverage cleanup
