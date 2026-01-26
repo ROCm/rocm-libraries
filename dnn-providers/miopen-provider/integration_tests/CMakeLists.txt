@@ -43,7 +43,6 @@ target_link_libraries(
 # integration tests depend on the MIOpen Provider Plugin
 add_dependencies(miopen_plugin_integration_test miopen_legacy_plugin)
 
-if(BUILD_PLUGIN_AS_DEPENDENCY)
-    clang_tidy_check(miopen_plugin_integration_test)
-endif()
+clang_tidy_check(miopen_plugin_integration_test)
+
 add_integration_test_target(miopen_plugin_integration_test ${CMAKE_CURRENT_BINARY_DIR})

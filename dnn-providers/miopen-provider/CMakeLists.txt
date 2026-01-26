@@ -46,6 +46,15 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
         message(DEPRECATION "HIP_DNN_SKIP_TESTS has been renamed to HIPDNN_SKIP_TESTS. Please update your build scripts to use -DHIPDNN_SKIP_TESTS instead.")
     endif()
     option(HIPDNN_SKIP_TESTS "Skip building tests" OFF)
+    option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
+    if(WIN32)
+        option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
+        if(ENABLE_CLANG_TIDY)
+            message(WARNING "Clang-Tidy enabled on Windows - this significantly increases build time.")
+        endif()
+    else()
+        option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
+    endif()
 
     list(
         PREPEND
@@ -83,6 +92,8 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     include(Dependencies)
     include(Tests)
 
+    include(cmake/ClangTidy.cmake)
+    include(cmake/ClangCheck.cmake)
 else()
     message(STATUS "Building miopen provider plugin as a dependency")
 endif()
@@ -135,9 +146,7 @@ target_include_directories(miopen_legacy_plugin_private PUBLIC ${CMAKE_CURRENT_S
 target_link_libraries(miopen_legacy_plugin_private PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
 target_compile_options(miopen_legacy_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
-if(BUILD_PLUGIN_AS_DEPENDENCY)
-    clang_tidy_check(miopen_legacy_plugin_private)
-endif()
+clang_tidy_check(miopen_legacy_plugin_private)
 
 add_library(miopen_legacy_plugin SHARED MiopenLegacyPluginPublic.cpp)
 target_compile_definitions(miopen_legacy_plugin PRIVATE COMPONENT_NAME="miopen_legacy_plugin")
@@ -157,9 +166,7 @@ set_target_properties(
                BUILD_WITH_INSTALL_RPATH TRUE
 )
 
-if(BUILD_PLUGIN_AS_DEPENDENCY)
-    clang_tidy_check(miopen_legacy_plugin)
-endif()
+clang_tidy_check(miopen_legacy_plugin)
 
 if(NOT HIPDNN_SKIP_TESTS)
     add_subdirectory(tests)
