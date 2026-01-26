@@ -61,22 +61,6 @@ namespace hiptensor
     {
         switch(computeType)
         {
-        case HIPTENSOR_COMPUTE_DESC_32F:
-            if(isDataType16Bits(dataType))
-            {
-                return isF16F32MatrixCoreSupported() && !isDataTypeComplex(dataType);
-            }
-            else if(isDataType32Bits(dataType))
-            {
-                return isF32F32MatrixCoreSupported() && !isDataTypeComplex(dataType);
-            }
-            return false;
-        case HIPTENSOR_COMPUTE_DESC_64F:
-            if(isDataType64Bits(dataType))
-            {
-                return isF64F64MatrixCoreSupported() && !isDataTypeComplex(dataType);
-            }
-            return false;
         case HIPTENSOR_COMPUTE_DESC_16F:
         case HIPTENSOR_COMPUTE_DESC_16BF:
             if(isDataType16Bits(dataType))
@@ -86,6 +70,26 @@ namespace hiptensor
             else if(isDataType32Bits(dataType))
             {
                 return isF32F16MatrixCoreSupported() && !isDataTypeComplex(dataType);
+            }
+            return false;
+        case HIPTENSOR_COMPUTE_DESC_32F:
+            if(isDataType16Bits(dataType))
+            {
+                return isF16F32MatrixCoreSupported() && !isDataTypeComplex(dataType);
+            }
+            else if(isDataType32Bits(dataType))
+            {
+                return isF32F32MatrixCoreSupported() && !isDataTypeComplex(dataType);
+            }
+            else if(isDataType64Bits(dataType))
+            {
+                return isF64F32MatrixCoreSupported() && !isDataTypeComplex(dataType);
+            }
+            return false;
+        case HIPTENSOR_COMPUTE_DESC_64F:
+            if(isDataType64Bits(dataType))
+            {
+                return isF64F64MatrixCoreSupported() && !isDataTypeComplex(dataType);
             }
             return false;
         case HIPTENSOR_COMPUTE_DESC_C32F:
