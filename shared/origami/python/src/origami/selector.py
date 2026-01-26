@@ -143,11 +143,11 @@ class OrigamiMatmulSelector:
         self._hardware = origami.get_hardware_for_device(device.index)
         self._N_CU = self._hardware.N_CU
         
-        # Create list of Origami config_t objects based on generator.
-        self._configs = self._generate_configs(config_gen)
-
         # Create Origami problem_t based on problem metadata
         self._problem = self._make_problem()
+
+        # Create list of Origami config_t objects based on generator.
+        self._configs = self._generate_configs(config_gen)
 
         # Run Origami solution selection
         self._result = origami.select_config(self._problem,
@@ -322,6 +322,9 @@ class OrigamiMatmulSelector:
         """
         configs_list = []
 
+        # Get recommended matrix instruction dimensions
+        mi = self._hardware.get_recommended_matrix_instruction(self._problem.mi_dtype)
+
         for config in config_gen:
             # config is type triton.runtime.autotuner.Config
 
@@ -329,8 +332,6 @@ class OrigamiMatmulSelector:
             mt = origami.dim3_t(config.kwargs['BLOCK_M'],
                                 config.kwargs['BLOCK_N'],
                                 config.kwargs['BLOCK_K'])
-            # Get matrix instruction dimensions, also in dim3_t object
-            mi = self._infer_matrix_instruction_dimensions()
 
             # Create and set new config_t values
             new_config           = origami.config_t()
@@ -448,80 +449,4 @@ class OrigamiMatmulSelector:
                 )
 
         return transpose_t
-
-
-    def _infer_matrix_instruction_dimensions(self):
-        """
-        Infers the matrix instruction dimensions based on the hardware configuration
-        and the sizes of the input data types.  The input dtype sizes are retrieved
-        from local object variables.
-
-        Returns:
-            origami.dim3_t: An Origami dimension trio containing the matrixinstruction
-                dimensions [M, N, K].
-
-        Raises:
-            ValueError: If the hardware architecture is unsupported or if the data type
-                sizes are not compatible with the detected hardware.
-        """
-        largest_bitsize = max(self._a_dtype_bitsize, self._b_dtype_bitsize)
-
-        mi_dim = None
-        # gfx950
-        if self._hardware.N_CU == 256:
-            # FP32
-            if largest_bitsize == 32:
-                mi_dim = origami.dim3_t(16, 16, 4)
-            # FP16/BF16
-            if largest_bitsize == 16:
-                mi_dim = origami.dim3_t(16, 16, 32)
-            # F4F6F8
-            if largest_bitsize <= 8:
-                mi_dim = origami.dim3_t(16, 16, 128)
-        # gfx942
-        if self._hardware.N_CU == 304:
-            # FP32
-            if largest_bitsize == 32:
-                mi_dim = origami.dim3_t(16, 16, 4)
-            # FP16/BF16
-            if largest_bitsize == 16:
-                mi_dim = origami.dim3_t(16, 16, 16)
-            # F8
-            if largest_bitsize == 8:
-                mi_dim = origami.dim3_t(16, 16, 32)
-            # F4F6 -> Unsupported on MI300X
-            if largest_bitsize < 8:
-                raise ValueError("MI300X doesn't support F4/F6")
-        if self._hardware.N_CU == 228:
-            # FP32
-            if largest_bitsize == 32:
-                mi_dim = origami.dim3_t(16, 16, 4)
-            # FP16/BF16
-            if largest_bitsize == 16:
-                mi_dim = origami.dim3_t(16, 16, 16)
-            # F8
-            if largest_bitsize == 8:
-                mi_dim = origami.dim3_t(16, 16, 32)
-            # F4F6 -> Unsupported on MI300A
-            if largest_bitsize < 8:
-                raise ValueError("MI300A doesn't support F4/F6")
-        # gfx90a
-        if self._hardware.N_CU == 104:
-            # FP32
-            if largest_bitsize == 32:
-                mi_dim = origami.dim3_t(16, 16, 4)
-            # FP16/BF16
-            if largest_bitsize == 16:
-                mi_dim = origami.dim3_t(16, 16, 16)
-            if largest_bitsize == 8:
-                raise ValueError("MI200 doesn't support F8")
-            if largest_bitsize < 8:
-                raise ValueError("MI200 doesn't support F4/F6")
-        # Architecture Detected is not valid
-        if mi_dim == None:
-            raise ValueError(
-                f"No Valid Matrix Instruction integrated for {element_size_A}-bit or {element_size_B}-bit datatypes"
-            )
-
-        return mi_dim
 
