@@ -370,7 +370,14 @@ class MasterSolutionLibrary:
 
             if lazyLibrary:
                 if cuCount: placeholderName += "_CU" + str(cuCount)
-                # if pciChipId: placeholderName += "_ChipID" + str(pciChipId)
+                if pciChipId:
+                    # Convert device names list to a sanitized string for filename
+                    # e.g., ['Device 75a0', 'Device 75b0'] -> 'ID75a0-75b0'
+                    if isinstance(pciChipId, list):
+                        chipIdStr = '-'.join([str(d).replace('Device ', '').strip() for d in pciChipId])
+                    else:
+                        chipIdStr = str(pciChipId).replace('Device ', '').strip()
+                    placeholderName += "_ID" + chipIdStr
                 placeholderName += "_" + str(devicePart)
 
             return newLib, placeholderName
