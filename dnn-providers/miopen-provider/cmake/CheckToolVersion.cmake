@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 # Expected tool versions
-set(EXPECTED_CLANG_FORMAT_VERSION "18")
 set(EXPECTED_CLANG_TIDY_VERSION "20")
 set(EXPECTED_LLVM_VERSION "20")
 
@@ -78,7 +77,7 @@ endfunction()
 # ~~~
 # Parameters:
 #   OUTPUT_VAR - Variable name to store the found tool path
-#   TOOL_NAME - The single name of the single tool to search for (e.g., "clang-format")
+#   TOOL_NAME - The single name of the single tool to search for (e.g., "clang-tidy")
 #   EXPECTED_VERSION - Expected version to search for (typically assumed to be the tool's major version number)
 #   VERSION_REGEX - Regex to extract the relevant portion to match EXPECTED_VERSION frmo the tool's --version output
 #   ERROR_LEVEL - FATAL_ERROR, WARNING, STATUS, or VERBOSE for the not found message
@@ -132,17 +131,6 @@ function(findAndCheckTool OUTPUT_VAR TOOL_NAME EXPECTED_VERSION VERSION_REGEX ER
 
     # Export to parent scope
     set(${OUTPUT_VAR} ${${OUTPUT_VAR}} PARENT_SCOPE)
-endfunction()
-
-# Finds and checks clang-format
-function(findAndCheckClangFormat)
-    findandchecktool(
-        CLANG_FORMAT_BINARY "clang-format" ${EXPECTED_CLANG_FORMAT_VERSION}
-        "clang-format version ([0-9]+)\\." FATAL_ERROR
-    )
-
-    # Export to parent scope
-    set(CLANG_FORMAT_BINARY ${CLANG_FORMAT_BINARY} PARENT_SCOPE)
 endfunction()
 
 # Finds and checks clang-tidy
