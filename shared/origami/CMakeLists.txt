@@ -21,6 +21,8 @@ include(dependencies)
 rocm_setup_version(VERSION ${PROJECT_VERSION})
 
 option(ORIGAMI_BUILD_SHARED_LIBS "Build shared libraries." ${ORIGAMI_STANDALONE})
+option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
+option(ORIGAMI_BUILD_TESTING "Build tests." OFF)
 option(ORIGAMI_ENABLE_INSTALL "Configure origami installation" ON)
 option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
 
@@ -36,7 +38,10 @@ rocm_set_soversion(origami "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 
 add_library(roc::origami ALIAS origami)
 
-set_target_properties(origami PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(origami PROPERTIES 
+    POSITION_INDEPENDENT_CODE ON
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
 target_compile_features(origami PUBLIC cxx_std_17)
 
 add_library(origami-headers INTERFACE)
