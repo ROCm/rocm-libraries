@@ -119,7 +119,7 @@
 #endif
 #endif // MIOPEN_USE_DOUBLE_ACCUM
 
-#if MIOPEN_USE_FP16 == 1
+#if(MIOPEN_USE_FP16 == 1) || (MIOPEN_USE_FPMIX == 1)
 #ifdef __HIP_PLATFORM_AMD__
 #define FLOAT _Float16
 #else // __HIP_PLATFORM_AMD__
@@ -133,7 +133,7 @@
 #else
 #define MAX_VAL HALF_MAX
 #endif
-#endif // MIOPEN_USE_FP16
+#endif // MIOPEN_USE_FP16 || MIOPEN_USE_FPMIX
 
 #if MIOPEN_USE_FP32 == 1
 #ifdef __HIP_PLATFORM_AMD__
@@ -150,7 +150,7 @@
 #endif
 #endif // MIOPEN_USE_FP32
 
-#if MIOPEN_USE_BFP16 == 1
+#if(MIOPEN_USE_BFP16 == 1) || (MIOPEN_USE_BFPMIX == 1)
 #ifdef __HIP_PLATFORM_AMD__
 #define FLOAT ushort
 #else
@@ -159,9 +159,9 @@
 #define SIZEOF_FLOAT 2
 // Max value for the main datatype
 #define MAX_VAL 0x7F7F
-#endif // MIOPEN_USE_BFP16
+#endif // MIOPEN_USE_BFP16 || MIOPEN_USE_BFPMIX
 
-#if MIOPEN_USE_FP16 == 1
+#if(MIOPEN_USE_FP16 == 1) || (MIOPEN_USE_FPMIX == 1)
 #ifdef __HIP_PLATFORM_AMD__
 #define CVT_FLOAT2ACCUM(x) (static_cast<FLOAT_ACCUM>(x))
 #define CVT_ACCUM2FLOAT(x) (static_cast<FLOAT>(x))
@@ -180,7 +180,7 @@
 #define CVT_FP32_2ACCUM(x) (x)
 #define CVT_FLOAT2FP32(x) (CVT_FLOAT2ACCUM(x))
 #define CVT_ACCUM2FP32(x) (x)
-#endif // MIOPEN_USE_FP16
+#endif // MIOPEN_USE_FP16 || MIOPEN_USE_FPMIX
 
 #if MIOPEN_USE_FP32 == 1
 /// \todo Basically, conversions from float to accum and vice versa
@@ -205,7 +205,7 @@
 #define CVT_ACCUM2FP32(x) (x)
 #endif // MIOPEN_USE_FP32
 
-#if MIOPEN_USE_BFP16 == 1
+#if(MIOPEN_USE_BFP16 == 1) || (MIOPEN_USE_BFPMIX == 1)
 #ifdef __HIP_PLATFORM_AMD__
 #define CVT_FLOAT2ACCUM(x) (bfloat16_to_float(x))
 #define CVT_ACCUM2FLOAT(x) (float_to_bfloat16(x))
@@ -262,7 +262,7 @@
 
 #undef CVT_INTEGRAL2ACCUM
 #ifdef __HIP_PLATFORM_AMD__
-#if MIOPEN_USE_BFP16 == 1
+#if(MIOPEN_USE_BFP16 == 1) || (MIOPEN_USE_BFPMIX == 1)
 // No direct conversion from integral types to BF16 is available.
 // WARNING: Precision loss when integral type is wider than 16 bits.
 #define CVT_INTEGRAL2ACCUM(x) (float_to_bfloat16(static_cast<float>(x)))
@@ -270,7 +270,7 @@
 #define CVT_INTEGRAL2ACCUM(x) (static_cast<FLOAT>(x))
 #endif
 #else
-#if MIOPEN_USE_BFP16 == 1
+#if(MIOPEN_USE_BFP16 == 1) || (MIOPEN_USE_BFPMIX == 1)
 // No direct conversion from integral types to BF16 is available.
 // WARNING: Precision loss when integral type is wider than 16 bits.
 #define CVT_INTEGRAL2ACCUM(x) (float_to_bfloat16(static_cast<float>(x)))
