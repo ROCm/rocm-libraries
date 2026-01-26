@@ -842,8 +842,8 @@ rocblas_status rocblas_internal_trsv_substitution_template(rocblas_handle    han
     if(should_use_big_batch_kernel(n, batch_count))
     {
         // TODO: Select block size based on data type requires further tuning
-        constexpr rocblas_int SDCTRSV_BB_NB = 8;
-        constexpr rocblas_int ZTRSV_BB_NB   = 8;
+        constexpr rocblas_int SDCTRSV_BB_NB = 4;
+        constexpr rocblas_int ZTRSV_BB_NB   = 4;
 
 #define TRSV_BATCHED_TEMPLATE_PARAMS                                                       \
     handle, uplo, transA, diag, n, dA, offset_A, lda, stride_A, alpha, dx, offset_x, incx, \

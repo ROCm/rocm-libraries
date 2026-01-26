@@ -34,24 +34,22 @@
  */
 
 // Block solve for lower triangular with z-dimension batching
-template <rocblas_int BLOCK, rocblas_int DIM_Z, bool UNIT, typename T>
-void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_lower_big_batch(const T* __restrict__ A,
-                                                                 int64_t lda,
-                                                                 T&      val)
+template <rocblas_int BLOCK_LDA, rocblas_int DIM_Z, bool UNIT, typename T>
+void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_lower_big_batch(const T* __restrict__ A, T& val)
 {
     // Shared memory per batch in z-dimension
     __shared__ T xs[DIM_Z];
 
-    const rocblas_int tz = threadIdx.z;
+    const int tz = threadIdx.z;
 
     // Iterate forwards through the diagonal block
-    for(rocblas_int i = 0; i < BLOCK; i++)
+    for(int i = 0; i < BLOCK_LDA; i++)
     {
         // Solve current element (only thread with x-index matching current row)
         if(threadIdx.x == i && threadIdx.y == 0)
         {
             if(!UNIT)
-                val *= A[i * lda + i]; // Multiply by diagonal element
+                val *= A[i * BLOCK_LDA + i]; // Multiply by diagonal element
             xs[tz] = val; // Store solved value in shared memory
         }
 
@@ -60,7 +58,7 @@ void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_lower_big_batch(const T* __rest
         // Update future elements with solved one
         if(threadIdx.x > i && threadIdx.y == 0)
         {
-            val += A[i * lda + threadIdx.x] * xs[tz];
+            val += A[i * BLOCK_LDA + threadIdx.x] * xs[tz];
         }
 
         __syncthreads();
@@ -68,24 +66,22 @@ void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_lower_big_batch(const T* __rest
 }
 
 // Block solve for upper triangular with z-dimension batching
-template <rocblas_int BLOCK, rocblas_int DIM_Z, bool UNIT, typename T>
-void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_upper_big_batch(const T* __restrict__ A,
-                                                                 int64_t lda,
-                                                                 T&      val)
+template <rocblas_int BLOCK_LDA, rocblas_int DIM_Z, bool UNIT, typename T>
+void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_upper_big_batch(const T* __restrict__ A, T& val)
 {
     // Shared memory per batch in z-dimension
     __shared__ T xs[DIM_Z];
 
-    const rocblas_int tz = threadIdx.z;
+    const int tz = threadIdx.z;
 
     // Iterate backwards through the diagonal block
-    for(rocblas_int i = BLOCK - 1; i >= 0; i--)
+    for(int i = BLOCK_LDA - 1; i >= 0; i--)
     {
         // Solve current element
         if(threadIdx.x == i && threadIdx.y == 0)
         {
             if(!UNIT)
-                val *= A[i * lda + i];
+                val *= A[i * BLOCK_LDA + i];
             xs[tz] = val;
         }
 
@@ -94,7 +90,7 @@ void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_upper_big_batch(const T* __rest
         // Update future elements with solved one
         if(threadIdx.x < i && threadIdx.y == 0)
         {
-            val += A[i * lda + threadIdx.x] * xs[tz];
+            val += A[i * BLOCK_LDA + threadIdx.x] * xs[tz];
         }
 
         __syncthreads();
@@ -157,6 +153,10 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
     __shared__ T sAdiag_z[DIM_X * DIM_X * DIM_Z];
     __shared__ T sx_z[DIM_X * DIM_Z];
 
+    // Register storage for off-diagonal block
+    // keeping DIM_X == DIM_Y for big_batch so DIM_X / DIM_Y = 1
+    T sAoff[DIM_X / DIM_Y];
+
 #if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
 #else
@@ -174,9 +174,6 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
         T*  sum        = sum_z + xyz_offset;
         T*  sAdiag     = sAdiag_z + xyz_offset;
         T*  sx         = sx_z + sx_offset;
-
-        // Register storage for off-diagonal block
-        T sAoff[DIM_X / DIM_Y];
 
         const int tid = DIM_X * ty + tx;
 
@@ -204,9 +201,9 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
                 __syncthreads();
                 if(TRANS ? (local_row + i < n && local_col < n)
                          : (local_row < n && local_col + i < n))
-                    sAoff[i / DIM_Y] = A[A_idx + i_idx];
+                    sAoff[0] = A[A_idx + i_idx]; // 0 = i / DIM_Y
                 else
-                    sAoff[i / DIM_Y] = 0.0;
+                    sAoff[0] = 0.0; // i / DIM_Y
             }
         }
 
@@ -355,7 +352,7 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
                 if(TRANS ? (local_row + i < n && local_col < n)
                          : (local_row < n && local_col + i < n))
                 {
-                    auto A_val = cached ? sAoff[i / DIM_Y] : A[A_idx + i_idx];
+                    auto A_val = cached ? sAoff[0] : A[A_idx + i_idx]; // i / DIM_Y
                     if(CONJ)
                         A_val = conj(A_val);
                     val += A_val * sx[i + ty];
@@ -401,10 +398,10 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
         else // same as without inversion
         {
             // Solve the diagonal block
-            if(backwards_sub)
-                rocblas_trsv_block_solve_upper_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, DIM_X, val);
+            if constexpr(backwards_sub)
+                rocblas_trsv_block_solve_upper_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, val);
             else
-                rocblas_trsv_block_solve_lower_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, DIM_X, val);
+                rocblas_trsv_block_solve_lower_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, val);
 
             // Store solved value into x
             if(!row_is_remainder || tx < remainder)
@@ -413,10 +410,10 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
         }
 #else
         // Solve the diagonal block
-        if(backwards_sub)
-            rocblas_trsv_block_solve_upper_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, DIM_X, val);
+        if constexpr(backwards_sub)
+            rocblas_trsv_block_solve_upper_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, val);
         else
-            rocblas_trsv_block_solve_lower_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, DIM_X, val);
+            rocblas_trsv_block_solve_lower_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, val);
 
         // Store solved value into x
         if(!row_is_remainder || tx < remainder)
@@ -437,6 +434,14 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
         __threadfence();
 
     } // DEVICE_GRID_YZ_16BIT loop or if
+}
+
+ROCBLAS_KERNEL(1024) rocblas_trsv_init_big_batch(int batch_count, rocblas_int* w_completed_sec)
+{
+    // The last block section which has been completed (for each batch)
+    int batch = blockIdx.x * 1024 + threadIdx.x;
+    if(batch < batch_count)
+        w_completed_sec[batch] = -1;
 }
 
 /**
@@ -467,16 +472,22 @@ rocblas_status rocblas_internal_trsv_substitution_big_batch_template(rocblas_han
         return rocblas_status_success;
 
     // Initialize completion tracking
-    ROCBLAS_LAUNCH_KERNEL(
-        rocblas_trsv_init, dim3(batch_count), dim3(1), 0, handle->get_stream(), w_completed_sec);
+    ROCBLAS_LAUNCH_KERNEL(rocblas_trsv_init_big_batch,
+                          dim3((batch_count - 1) / 1024 + 1),
+                          dim3(1024),
+                          0,
+                          handle->get_stream(),
+                          batch_count,
+                          w_completed_sec);
 
     offset_x = incx < 0 ? offset_x + incx * (1 - n) : offset_x;
 
     int batches = handle->getBatchGridDim((int)batch_count);
 
     // Use z-dimension for batch parallelization
-    constexpr rocblas_int DIM_Y = 8;
-    constexpr rocblas_int DIM_Z = 16; // Process 16 batches per thread block
+    constexpr rocblas_int DIM_Y = 4;
+    static_assert( DIM_X == DIM_Y, "Square sub blocks" );
+    constexpr rocblas_int DIM_Z = 64; // Process 64 batches per thread block
 
     rocblas_int blocks      = (n - 1) / DIM_X + 1;
     rocblas_int batch_grids = (batches - 1) / DIM_Z + 1;
