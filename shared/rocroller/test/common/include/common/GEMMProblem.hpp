@@ -115,5 +115,9 @@ struct GEMMProblem
 
     int scaleBlockSize = -1;
 
+    // LDS padding for MATRIX_A and MATRIX_B; default no padding
+    std::pair<int, int> padA = {0, 0};
+    std::pair<int, int> padB = {0, 0};
+
     auto operator<=>(GEMMProblem const& rhs) const = default;
 };

@@ -1,8 +1,20 @@
+flag_management:
+  default_rules:
+    carryforward: true # compare reports between projects or flags, not just the latest commit
+
+comment:
+  layout: "diff, flags, files"
+  behavior: default
+  require_changes: false  # post comment even if coverage does not change
+  require_base: no # post without previous or base report
+  require_head: yes # must have PR or head report to post
+  show_carryforward_flags: true # use carryforward for PRs
+
 coverage:
   status:
     project:
       default:
-        enabled: false
+        enabled: false # only check flags instead of whole monorepo
       composable_kernel:
         flags: [composable_kernel]
         target: 80%
@@ -29,6 +41,9 @@ coverage:
         target: 80%
       hipRAND:
         flags: [hipRAND]
+        target: 80%
+      hipDNN:
+        flags: [hipDNN]
         target: 80%
       rocRoller:
         flags: [rocRoller]
