@@ -39,6 +39,13 @@ namespace stinkytofu
         // Set wavefront size for gfx942
         registry.setWaveFrontSize(64);
 
+        // Set register limits for gfx942 (GFX9 architecture)
+        GpuArch::RegisterLimits limits;
+        limits.maxVGPR = 256; // Vector GPRs: v0-v255
+        limits.maxSGPR = 102; // Scalar GPRs: s0-s101 (GFX9 has 102 SGPRs)
+        limits.maxAGPR = 256; // Accumulator GPRs: a0-a255
+        registry.setRegisterLimits(limits);
+
         // ============================================
         // Scalar instructions (SOP1 / SOP2 / Scalar ALU)
         // ============================================

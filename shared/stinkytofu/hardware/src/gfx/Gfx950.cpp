@@ -486,6 +486,13 @@ namespace stinkytofu
         // Set wavefront size for gfx950
         registry.setWaveFrontSize(64);
 
+        // Set register limits for gfx950 (GFX9 architecture)
+        GpuArch::RegisterLimits limits;
+        limits.maxVGPR = 256; // Vector GPRs: v0-v255
+        limits.maxSGPR = 102; // Scalar GPRs: s0-s101 (GFX9 has 102 SGPRs)
+        limits.maxAGPR = 256; // Accumulator GPRs: a0-a255
+        registry.setRegisterLimits(limits);
+
         // gfx950 removes xf32 variants of v_mfma.
         for(auto removed : {"v_mfma_f32_16x16x8_xf32", "v_mfma_f32_32x32x4_xf32"})
             registry.erase(removed);

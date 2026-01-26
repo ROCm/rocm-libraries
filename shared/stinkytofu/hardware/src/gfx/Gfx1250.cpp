@@ -601,6 +601,15 @@ namespace stinkytofu
         // Set wavefront size for gfx1250
         registry.setWaveFrontSize(32);
 
+        // Set register limits for gfx1250 (RDNA architecture)
+        GpuArch::RegisterLimits limits;
+        limits.maxVGPR = 256; // Vector GPRs: v0-v255 (visible at a time)
+            // Note: GFX12 has 4 banks of 256 VGPRs (0-1023 total),
+            // switchable via special HW register, but only 256 visible
+        limits.maxSGPR = 106; // Scalar GPRs: s0-s105 (RDNA has 106 SGPRs)
+        limits.maxAGPR = 0; // No AGPRs - GFX12 uses VGPRs for everything
+        registry.setRegisterLimits(limits);
+
         // gfx1250 removes ds_read/ds_write variant instructions.
         std::vector<std::string> removedInsts;
         for(const auto& inst : registry.getInstructions())

@@ -113,6 +113,13 @@ namespace stinkytofu
             static_assert(sizeof(uint16_t) == sizeof(HwInstDesc::latency), "latency type mismatch");
         };
 
+        struct RegisterLimits
+        {
+            unsigned maxVGPR = 256; // Vector GPRs (v0-v255)
+            unsigned maxSGPR = 128; // Scalar GPRs (s0-s127)
+            unsigned maxAGPR = 64; // Accumulator GPRs (a0-a63, acc0-acc63)
+        };
+
     private:
         List instructions;
 
@@ -125,6 +132,8 @@ namespace stinkytofu
         std::string name;
 
         uint32_t waveFrontSize = 64; // Default to 64, can be overridden per architecture
+
+        RegisterLimits registerLimits; // Register limits for this architecture
 
         void updateCycleAndLatency(const InstructionInfo& info);
 
@@ -153,6 +162,16 @@ namespace stinkytofu
         void setWaveFrontSize(uint32_t size)
         {
             waveFrontSize = size;
+        }
+
+        const RegisterLimits& getRegisterLimits() const
+        {
+            return registerLimits;
+        }
+
+        void setRegisterLimits(const RegisterLimits& limits)
+        {
+            registerLimits = limits;
         }
 
         const List& getInstructions() const
