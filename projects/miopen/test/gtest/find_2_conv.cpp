@@ -15,6 +15,8 @@
 
 #include <vector>
 #include <limits>
+#include <optional>
+#include <algorithm>
 
 namespace {
 
@@ -33,17 +35,6 @@ struct Find2ConvTestCase
                   << " attach_binaries:" << tc.attach_binaries;
     }
 };
-
-std::vector<Find2ConvTestCase> GetFind2ConvTestCases()
-{
-    return {
-        // direction, tune, preallocate, workspace_limit, attach_binaries
-        {miopenProblemDirectionForward, 0, false, std::numeric_limits<std::size_t>::max(), false},
-        {miopenProblemDirectionForward, 1, false, 0, true},
-        {miopenProblemDirectionBackward, 0, true, std::numeric_limits<std::size_t>::max(), false},
-        {miopenProblemDirectionBackwardWeights, 1, false, 0, false},
-    };
-}
 
 void RunFind2ConvTest(const Find2ConvTestCase& test_case)
 {
@@ -242,20 +233,76 @@ void RunFind2ConvTest(const Find2ConvTestCase& test_case)
 
 } // namespace
 
-class GPU_Find2Conv_FP32 : public testing::TestWithParam<Find2ConvTestCase>
+class GPU_Find2Conv_FP32 : public testing::TestWithParam<
+                               std::tuple<miopenProblemDirection_t, int, bool, std::size_t, bool>>
 {
+protected:
     void SetUp() override
     {
         prng::reset_seed();
-        if(!IsTestSupportedByDevice(Gpu::All))
+
+        // Parity with CTest: Set log level to 6
+        if(MIOPEN_LOG_LEVEL)
         {
-            GTEST_SKIP();
+            prev_log_level = lib_env::value<int>(MIOPEN_LOG_LEVEL);
         }
-        // Set up environment variables
-        lib_env::update(MIOPEN_LOG_LEVEL, 2);
+        lib_env::update(MIOPEN_LOG_LEVEL, 6);
     }
+
+    void TearDown() override
+    {
+        // Reset internal environment values as per Wiki guidelines
+        if(prev_log_level.has_value())
+        {
+            lib_env::update(MIOPEN_LOG_LEVEL, *prev_log_level);
+        }
+        else
+        {
+            lib_env::clear(MIOPEN_LOG_LEVEL);
+        }
+    }
+
+private:
+    std::optional<int> prev_log_level;
 };
 
-TEST_P(GPU_Find2Conv_FP32, FloatTest_find_2_conv) { RunFind2ConvTest(GetParam()); }
+// TEST_INFO is "Find2ConvTest" for descriptiveness.
+// Specificity is provided by Parameter Name Generator in the test output.
+TEST_P(GPU_Find2Conv_FP32, Find2ConvTest)
+{
+    auto param = GetParam();
+    Find2ConvTestCase tc{std::get<0>(param),
+                         std::get<1>(param),
+                         std::get<2>(param),
+                         std::get<3>(param),
+                         std::get<4>(param)};
+    RunFind2ConvTest(tc);
+}
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Find2Conv_FP32, testing::ValuesIn(GetFind2ConvTestCases()));
+inline std::string
+GetFind2ConvTestCaseName(const testing::TestParamInfo<GPU_Find2Conv_FP32::ParamType>& info)
+{
+    Find2ConvTestCase tc{std::get<0>(info.param),
+                         std::get<1>(info.param),
+                         std::get<2>(info.param),
+                         std::get<3>(info.param),
+                         std::get<4>(info.param)};
+    std::ostringstream os;
+    os << tc;
+    std::string name = os.str();
+    std::replace_if(
+        name.begin(), name.end(), [](char c) { return !std::isalnum(c); }, '_');
+    return name;
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Find2Conv_FP32,
+                         testing::Combine(testing::Values(miopenProblemDirectionForward,
+                                                          miopenProblemDirectionBackward,
+                                                          miopenProblemDirectionBackwardWeights),
+                                          testing::Values(0, 1),
+                                          testing::Values(false, true),
+                                          testing::Values(std::numeric_limits<std::size_t>::max(),
+                                                          static_cast<std::size_t>(0)),
+                                          testing::Values(false, true)),
+                         GetFind2ConvTestCaseName);
