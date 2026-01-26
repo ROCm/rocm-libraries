@@ -470,10 +470,10 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlarfg_64(rocblas_handle handle,
     k           rocblas_int. k >= 1.
                 The number of Householder matrices forming H.
     @param[in]
-    V           pointer to type. Array on the GPU of size ldv*k if column-wise, or ldv*n if row-wise.
+    V           pointer to type. Array on the GPU of size ldv*k if column-wise or ldv*n if row-wise.
                 The matrix of Householder vectors.
     @param[in]
-    ldv         rocblas_int. ldv >= n if column-wise, or ldv >= k if row-wise.
+    ldv         rocblas_int. ldv >= n if column-wise or ldv >= k if row-wise.
                 The leading dimension of V.
     @param[in]
     tau         pointer to type. Array of k scalars on the GPU.
@@ -566,7 +566,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlarft(rocblas_handle handle,
                 If incx < 0, the elements of x are indexed in reverse order.
     @param[in]
     alpha       pointer to type. A scalar on the GPU.
-                The Householder scalar. If alpha = 0, then H = I (A will remain the same; x is never used).
+                The Householder scalar. If alpha = 0, then H = I (A will remain the same, and x is never used).
     @param[inout]
     A           pointer to type. Array on the GPU of size lda*n.
                 On entry, the matrix A. On exit, it is overwritten with
@@ -662,7 +662,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlarf_64(rocblas_handle handle,
 
     \details
     The block reflector H is applied in one of the following forms, depending on
-    the values of side and trans:
+    the values of ``side`` and ``trans``:
 
     \f[
         \begin{array}{cl}
@@ -987,10 +987,10 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlasr(rocblas_handle handle,
                 On entry, the m-by-n matrix to be reduced.
                 On exit, the first k elements on the diagonal and superdiagonal (if m >= n) or
                 subdiagonal (if m < n) contain the bidiagonal form B.
-                If m >= n, the elements below the diagonal of the first k columns are the (possibly non-zero) elements
+                - If m >= n, the elements below the diagonal of the first k columns are the (possibly non-zero) elements
                 of the Householder vectors associated with Q, while the elements above the
                 superdiagonal of the first k rows are the n - i - 1 (possibly non-zero) elements of the Householder vectors related to P.
-                If m < n, the elements below the subdiagonal of the first k columns are the m - i - 1 (possibly non-zero)
+                - If m < n, the elements below the subdiagonal of the first k columns are the m - i - 1 (possibly non-zero)
                 elements of the Householder vectors related to Q, while the elements above the
                 diagonal of the first k rows are the n - i (possibly non-zero) elements of the vectors associated with P.
     @param[in]
@@ -1210,7 +1210,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlatrd(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief LASYF computes a partial factorization of a symmetric matrix \f$A\f$
+    \brief The LASYF functions compute a partial factorization of a symmetric matrix \f$A\f$
     using Bunch-Kaufman diagonal pivoting.
 
     \details
@@ -1244,8 +1244,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlatrd(rocblas_handle handle,
         \end{array} \right]
     \f]
 
-    depending on the value of uplo. The order of the block diagonal matrix \f$D\f$
-    is either \f$nb\f$ or \f$nb-1\f$, and is returned in the argument \f$kb\f$.
+    depending on the value of ``uplo``. The order of the block diagonal matrix \f$D\f$
+    is either \f$nb\f$ or \f$nb-1\f$ and is returned in the argument \f$kb\f$.
 
     @param[in]
     handle      rocblas_handle.
@@ -1274,14 +1274,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlatrd(rocblas_handle handle,
     @param[out]
     ipiv        pointer to rocblas_int. Array on the GPU of dimension n.
                 The vector of pivot indices. Elements of ipiv are 1-based indices.
-                If uplo is upper, then only the last kb elements of ipiv will be
-                set. For n - kb < k <= n, if ipiv[k] > 0 then rows and columns k
+                - If uplo is upper, then only the last kb elements of ipiv will be
+                set. For n - kb < k <= n, if ipiv[k] > 0, then rows and columns k
                 and ipiv[k] were interchanged and D[k,k] is a 1-by-1 diagonal block.
                 If, instead, ipiv[k] = ipiv[k-1] < 0, then rows and columns k-1
                 and -ipiv[k] were interchanged and D[k-1,k-1] to D[k,k] is a 2-by-2
                 diagonal block.
-                If uplo is lower, then only the first kb elements of ipiv will be
-                set. For 1 <= k <= kb, if ipiv[k] > 0 then rows and columns k
+                - If uplo is lower, then only the first kb elements of ipiv will be
+                set. For 1 <= k <= kb, if ipiv[k] > 0, then rows and columns k
                 and ipiv[k] were interchanged and D[k,k] is a 1-by-1 diagonal block.
                 If, instead, ipiv[k] = ipiv[k+1] < 0, then rows and columns k+1
                 and -ipiv[k] were interchanged and D[k,k] to D[k+1,k+1] is a 2-by-2
@@ -1385,19 +1385,19 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlauum(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief ORG2R generates an m-by-n Matrix Q with orthonormal columns.
+    \brief The ORG2R functions generate an ``m``-by-``n`` Matrix Q with orthonormal columns.
 
     \details
-    (This is the unblocked version of the algorithm).
+    (This is the unblocked version of the algorithm.)
 
-    The matrix Q is defined as the first n columns of the product of k Householder
-    reflectors of order m
+    The matrix Q is defined as the first ``n`` columns of the product of ``k`` Householder
+    reflectors of order ``m``
 
     \f[
         Q = H(1)H(2)\cdots H(k).
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its corresponding
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from the corresponding
     Householder vectors \f$v_i\f$ and scalars \f$\text{ipiv}[i]\f$, as returned by \ref rocsolver_sgeqrf "GEQRF".
 
     @param[in]
@@ -1441,19 +1441,19 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorg2r(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief UNG2R generates an m-by-n complex Matrix Q with orthonormal columns.
+    \brief The UNG2R functions generate an ``m``-by-``n`` complex matrix Q with orthonormal columns.
 
     \details
-    (This is the unblocked version of the algorithm).
+    (This is the unblocked version of the algorithm.)
 
-    The matrix Q is defined as the first n columns of the product of k Householder
-    reflectors of order m
+    The matrix Q is defined as the first ``n`` columns of the product of ``k`` Householder
+    reflectors of order ``m``
 
     \f[
         Q = H(1)H(2)\cdots H(k)
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its corresponding
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from the corresponding
     Householder vectors \f$v_i\f$ and scalars \f$\text{ipiv}[i]\f$, as returned by \ref rocsolver_sgeqrf "GEQRF".
 
     @param[in]
@@ -1497,19 +1497,19 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zung2r(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief ORGQR generates an m-by-n Matrix Q with orthonormal columns.
+    \brief The ORGQR functions generate an ``m``-by-``n`` Matrix Q with orthonormal columns.
 
     \details
-    (This is the blocked version of the algorithm).
+    (This is the blocked version of the algorithm.)
 
-    The matrix Q is defined as the first n columns of the product of k Householder
-    reflectors of order m
+    The matrix Q is defined as the first ``n`` columns of the product of ``k`` Householder
+    reflectors of order ``m``
 
     \f[
         Q = H(1)H(2)\cdots H(k)
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its corresponding
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from the corresponding
     Householder vectors \f$v_i\f$ and scalars \f$\text{ipiv}[i]\f$, as returned by \ref rocsolver_sgeqrf "GEQRF".
 
     @param[in]
@@ -1553,19 +1553,19 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorgqr(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief UNGQR generates an m-by-n complex Matrix Q with orthonormal columns.
+    \brief The UNGQR functions generate an ``m``-by-``n`` complex matrix Q with orthonormal columns.
 
     \details
-    (This is the blocked version of the algorithm).
+    (This is the blocked version of the algorithm.)
 
-    The matrix Q is defined as the first n columns of the product of k Householder
-    reflectors of order m
+    The matrix Q is defined as the first ``n`` columns of the product of ``k`` Householder
+    reflectors of order ``m``
 
     \f[
         Q = H(1)H(2)\cdots H(k)
     \f]
 
-    Householder matrices \f$H(i)\f$ are never stored, they are computed from its corresponding
+    Householder matrices \f$H(i)\f$ are never stored. They are computed from the corresponding
     Householder vectors \f$v_i\f$ and scalars \f$\text{ipiv}[i]\f$, as returned by \ref rocsolver_sgeqrf "GEQRF".
 
     @param[in]
@@ -1609,19 +1609,19 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zungqr(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief ORGL2 generates an m-by-n Matrix Q with orthonormal rows.
+    \brief The ORGL2 functions generate an ``m``-by-``n`` Matrix Q with orthonormal rows.
 
     \details
-    (This is the unblocked version of the algorithm).
+    (This is the unblocked version of the algorithm.)
 
-    The matrix Q is defined as the first m rows of the product of k Householder
-    reflectors of order n
+    The matrix Q is defined as the first ``m`` rows of the product of ``k`` Householder
+    reflectors of order ``n``
 
     \f[
         Q = H(k)H(k-1)\cdots H(1)
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its corresponding
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from its corresponding
     Householder vectors \f$v_i\f$ and scalars \f$\text{ipiv}[i]\f$, as returned by \ref rocsolver_sgelqf "GELQF".
 
     @param[in]
@@ -1643,7 +1643,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zungqr(rocblas_handle handle,
     lda         rocblas_int. lda >= m.
                 Specifies the leading dimension of A.
     @param[in]
-    ipiv        pointer to type. Array on the GPU of dimension at least k.
+    ipiv        pointer to type. Array on the GPU, of dimension at least k.
                 The Householder scalars as returned by \ref rocsolver_sgelqf "GELQF".
     ****************************************************************************/
 
@@ -1665,19 +1665,19 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorgl2(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief UNGL2 generates an m-by-n complex Matrix Q with orthonormal rows.
+    \brief The UNGL2 functions generate an ``m``-by-``n`` complex matrix Q with orthonormal rows.
 
     \details
-    (This is the unblocked version of the algorithm).
+    (This is the unblocked version of the algorithm.)
 
-    The matrix Q is defined as the first m rows of the product of k Householder
-    reflectors of order n
+    The matrix Q is defined as the first ``m`` rows of the product of ``k`` Householder
+    reflectors of order ``n``
 
     \f[
         Q = H(k)^HH(k-1)^H\cdots H(1)^H
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its corresponding
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from the corresponding
     Householder vectors \f$v_i\f$ and scalars \f$\text{ipiv}[i]\f$, as returned by \ref rocsolver_sgelqf "GELQF".
 
     @param[in]
@@ -1721,19 +1721,19 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zungl2(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief ORGLQ generates an m-by-n Matrix Q with orthonormal rows.
+    \brief The ORGLQ functions generate an ``m``-by-``n`` Matrix Q with orthonormal rows.
 
     \details
-    (This is the blocked version of the algorithm).
+    (This is the blocked version of the algorithm.)
 
-    The matrix Q is defined as the first m rows of the product of k Householder
-    reflectors of order n
+    The matrix Q is defined as the first ``m`` rows of the product of ``k`` Householder
+    reflectors of order ``n``
 
     \f[
         Q = H(k)H(k-1)\cdots H(1)
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its corresponding
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from the corresponding
     Householder vectors \f$v_i\f$ and scalars \f$\text{ipiv}[i]\f$, as returned by \ref rocsolver_sgelqf "GELQF".
 
     @param[in]
@@ -1777,19 +1777,19 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorglq(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief UNGLQ generates an m-by-n complex Matrix Q with orthonormal rows.
+    \brief The UNGLQ functions generate an ``m``-by-``n`` complex matrix Q with orthonormal rows.
 
     \details
-    (This is the blocked version of the algorithm).
+    (This is the blocked version of the algorithm.)
 
-    The matrix Q is defined as the first m rows of the product of k Householder
-    reflectors of order n
+    The matrix Q is defined as the first ``m`` rows of the product of ``k`` Householder
+    reflectors of order ``n``
 
     \f[
         Q = H(k)^HH(k-1)^H\cdots H(1)^H
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its corresponding
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from the corresponding
     Householder vectors \f$v_i\f$ and scalars \f$\text{ipiv}[i]\f$, as returned by \ref rocsolver_sgelqf "GELQF".
 
     @param[in]
@@ -1833,19 +1833,19 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunglq(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief ORG2L generates an m-by-n Matrix Q with orthonormal columns.
+    \brief The ORG2L functions generate an ``m``-by-``n`` Matrix Q with orthonormal columns.
 
     \details
-    (This is the unblocked version of the algorithm).
+    (This is the unblocked version of the algorithm.)
 
-    The matrix Q is defined as the last n columns of the product of k
-    Householder reflectors of order m
+    The matrix Q is defined as the last ``n`` columns of the product of ``k``
+    Householder reflectors of order ``m``
 
     \f[
         Q = H(k)H(k-1)\cdots H(1)
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from the
     corresponding Householder vectors \f$v_i\f$ and scalars \f$\text{ipiv}[i]\f$, as returned by \ref rocsolver_sgeqlf "GEQLF".
 
     @param[in]
@@ -1889,19 +1889,19 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorg2l(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief UNG2L generates an m-by-n complex Matrix Q with orthonormal columns.
+    \brief The UNG2L functions generate an ``m``-by-``n`` complex matrix Q with orthonormal columns.
 
     \details
-    (This is the unblocked version of the algorithm).
+    (This is the unblocked version of the algorithm.)
 
-    The matrix Q is defined as the last n columns of the product of k
-    Householder reflectors of order m
+    The matrix Q is defined as the last ``n`` columns of the product of ``k``
+    Householder reflectors of order ``m``
 
     \f[
         Q = H(k)H(k-1)\cdots H(1)
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from the
     corresponding Householder vectors \f$v_i\f$ and scalars \f$\text{ipiv}[i]\f$, as returned by \ref rocsolver_sgeqlf "GEQLF".
 
     @param[in]
@@ -1945,19 +1945,19 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zung2l(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief ORGQL generates an m-by-n Matrix Q with orthonormal columns.
+    \brief The ORGQL functions generate an ``m``-by-``n`` Matrix Q with orthonormal columns.
 
     \details
-    (This is the blocked version of the algorithm).
+    (This is the blocked version of the algorithm.)
 
-    The matrix Q is defined as the last n column of the product of k Householder
-    reflectors of order m
+    The matrix Q is defined as the last ``n`` column of the product of ``k`` Householder
+    reflectors of order ``m``
 
     \f[
         Q = H(k)H(k-1)\cdots H(1)
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from the
     corresponding Householder vectors \f$v_i\f$ and scalars \f$\text{ipiv}[i]\f$, as returned by \ref rocsolver_sgeqlf "GEQLF".
 
     @param[in]
@@ -2001,19 +2001,19 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorgql(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief UNGQL generates an m-by-n complex Matrix Q with orthonormal columns.
+    \brief The UNGQL functions generate an ``m``-by-``n`` complex matrix Q with orthonormal columns.
 
     \details
-    (This is the blocked version of the algorithm).
+    (This is the blocked version of the algorithm.)
 
-    The matrix Q is defined as the last n columns of the product of k
-    Householder reflectors of order m
+    The matrix Q is defined as the last ``n`` columns of the product of ``k``
+    Householder reflectors of order ``m``
 
     \f[
         Q = H(k)H(k-1)\cdots H(1)
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from the
     corresponding Householder vectors \f$v_i\f$ and scalars \f$\text{ipiv}[i]\f$, as returned by \ref rocsolver_sgeqlf "GEQLF".
 
     @param[in]
@@ -2057,37 +2057,37 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zungql(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief ORGBR generates an m-by-n Matrix Q with orthonormal rows or columns.
+    \brief The ORGBR functions generate an ``m``-by-``n`` Matrix Q with orthonormal rows or columns.
 
     \details
-    If storev is column-wise, then the matrix Q has orthonormal columns. If m >= k, Q is defined as the first
-    n columns of the product of k Householder reflectors of order m
+    If ``storev`` is column-wise, then the matrix Q has orthonormal columns. If ``m`` >= ``k``, Q is defined as the first
+    ``n`` columns of the product of ``k`` Householder reflectors of order ``m``
 
     \f[
         Q = H(1)H(2)\cdots H(k)
     \f]
 
-    If m < k, Q is defined as the product of Householder reflectors of order m
+    If ``m`` < ``k``, Q is defined as the product of Householder reflectors of order ``m``
 
     \f[
         Q = H(1)H(2)\cdots H(m-1)
     \f]
 
-    On the other hand, if storev is row-wise, then the matrix Q has orthonormal rows. If n > k, Q is defined as the
-    first m rows of the product of k Householder reflectors of order n
+    However, if ``storev`` is row-wise, then the matrix Q has orthonormal rows. If ``n`` > ``k``, Q is defined as the
+    first ``m`` rows of the product of ``k`` Householder reflectors of order ``n``
 
     \f[
         Q = H(k)H(k-1)\cdots H(1)
     \f]
 
-    If n <= k, Q is defined as the product of Householder reflectors of order n
+    If ``n`` <= ``k``, Q is defined as the product of Householder reflectors of order ``n``
 
     \f[
         Q = H(n-1)H(n-2)\cdots H(1)
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its corresponding
-    Householder vectors \f$v_i\f$ and scalars \f$\text{ipiv}[i]\f$, as returned by \ref rocsolver_sgebrd "GEBRD" in its arguments A and tauq or taup.
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from the corresponding
+    Householder vectors \f$v_i\f$ and scalars \f$\text{ipiv}[i]\f$, as returned by \ref rocsolver_sgebrd "GEBRD" in its arguments ``A`` and tauq or taup.
 
     @param[in]
     handle      rocblas_handle.
@@ -2138,38 +2138,38 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorgbr(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief UNGBR generates an m-by-n complex Matrix Q with orthonormal rows or
+    \brief The UNGBR functions generate an ``m``-by-``n`` complex matrix Q with orthonormal rows or
     columns.
 
     \details
-    If storev is column-wise, then the matrix Q has orthonormal columns. If m >= k, Q is defined as the first
-    n columns of the product of k Householder reflectors of order m
+    If ``storev`` is column-wise, then the matrix Q has orthonormal columns. If ``m`` >= ``k``, Q is defined as the first
+    ``n`` columns of the product of ``k`` Householder reflectors of order ``m``
 
     \f[
         Q = H(1)H(2)\cdots H(k)
     \f]
 
-    If m < k, Q is defined as the product of Householder reflectors of order m
+    If ``m`` < ``k``, Q is defined as the product of Householder reflectors of order ``m``
 
     \f[
         Q = H(1)H(2)\cdots H(m-1)
     \f]
 
-    On the other hand, if storev is row-wise, then the matrix Q has orthonormal rows. If n > k, Q is defined as the
-    first m rows of the product of k Householder reflectors of order n
+    However, if ``storev`` is row-wise, then the matrix Q has orthonormal rows. If ``n`` > ``k``, Q is defined as the
+    first ``m`` rows of the product of ``k`` Householder reflectors of order ``n``
 
     \f[
         Q = H(k)H(k-1)\cdots H(1)
     \f]
 
-    If n <= k, Q is defined as the product of Householder reflectors of order n
+    If ``n`` <= ``k``, Q is defined as the product of Householder reflectors of order ``n``
 
     \f[
         Q = H(n-1)H(n-2)\cdots H(1)
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its corresponding
-    Householder vectors \f$v_i\f$ and scalars \f$\text{ipiv}[i]\f$, as returned by \ref rocsolver_sgebrd "GEBRD" in its arguments A and tauq or taup.
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from the corresponding
+    Householder vectors \f$v_i\f$ and scalars \f$\text{ipiv}[i]\f$, as returned by \ref rocsolver_sgebrd "GEBRD" in its arguments ``A`` and tauq or taup.
 
     @param[in]
     handle      rocblas_handle.
@@ -2196,7 +2196,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorgbr(rocblas_handle handle,
     lda         rocblas_int. lda >= m.
                 Specifies the leading dimension of A.
     @param[in]
-    ipiv        pointer to type. Array on the GPU of dimension min(m,k) if column-wise, or min(n,k) if row-wise.
+    ipiv        pointer to type. Array on the GPU of dimension min(m,k) if column-wise or min(n,k) if row-wise.
                 The Householder scalars as returned by \ref rocsolver_sgebrd "GEBRD".
     ****************************************************************************/
 
@@ -2220,25 +2220,25 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zungbr(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief ORGTR generates an n-by-n orthogonal Matrix Q.
+    \brief The ORGTR functions generate an ``n``-by-``n`` orthogonal Matrix Q.
 
     \details
-    Q is defined as the product of n-1 Householder reflectors of order n. If
-    uplo indicates upper, then Q has the form
+    Q is defined as the product of ``n``-1 Householder reflectors of order ``n``. If
+    ``uplo`` indicates ``upper``, then Q has the form
 
     \f[
         Q = H(n-1)H(n-2)\cdots H(1)
     \f]
 
-    On the other hand, if uplo indicates lower, then Q has the form
+    However, if ``uplo`` indicates ``lower``, then Q has the form
 
     \f[
         Q = H(1)H(2)\cdots H(n-1)
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from the
     corresponding Householder vectors \f$v_i\f$ and scalars \f$\text{ipiv}[i]\f$, as returned by
-    \ref rocsolver_ssytrd "SYTRD" in its arguments A and tau.
+    \ref rocsolver_ssytrd "SYTRD" in its arguments ``A`` and tau.
 
     @param[in]
     handle      rocblas_handle.
@@ -2278,25 +2278,25 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorgtr(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief UNGTR generates an n-by-n unitary Matrix Q.
+    \brief The UNGTR functions generate an ``n``-by-``n`` unitary matrix Q.
 
     \details
-    Q is defined as the product of n-1 Householder reflectors of order n. If
-    uplo indicates upper, then Q has the form
+    Q is defined as the product of ``n``-1 Householder reflectors of order ``n``. If
+    ``uplo`` indicates ``upper``, then Q has the form
 
     \f[
         Q = H(n-1)H(n-2)\cdots H(1)
     \f]
 
-    On the other hand, if uplo indicates lower, then Q has the form
+    However, if ``uplo`` indicates ``lower``, then Q has the form
 
     \f[
         Q = H(1)H(2)\cdots H(n-1)
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from their
     corresponding Householder vectors \f$v_i\f$ and scalars \f$\text{ipiv}[i]\f$, as returned by
-    \ref rocsolver_chetrd "HETRD" in its arguments A and tau.
+    \ref rocsolver_chetrd "HETRD" in its arguments ``A`` and tau.
 
     @param[in]
     handle      rocblas_handle.
@@ -2336,14 +2336,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zungtr(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief ORM2R multiplies a matrix Q with orthonormal columns by a general m-by-n
-    matrix C.
+    \brief The ORM2R functions multiply a matrix Q with orthonormal columns by a general ``m``-by-``n``
+    matrix ``C``.
 
     \details
-    (This is the unblocked version of the algorithm).
+    (This is the unblocked version of the algorithm.)
 
     The matrix Q is applied in one of the following forms, depending on
-    the values of side and trans:
+    the values of ``side`` and ``trans``:
 
     \f[
         \begin{array}{cl}
@@ -2354,13 +2354,13 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zungtr(rocblas_handle handle,
         \end{array}
     \f]
 
-    Q is defined as the product of k Householder reflectors
+    Q is defined as the product of ``k`` Householder reflectors
 
     \f[
         Q = H(1)H(2) \cdots H(k)
     \f]
 
-    of order m if applying from the left, or n if applying from the right. Q is never stored, it is
+    of order ``m`` if applying from the left, or ``n`` if applying from the right. Q is never stored. It is
     calculated from the Householder vectors and scalars returned by the QR factorization \ref rocsolver_sgeqrf "GEQRF".
 
     @param[in]
@@ -2378,7 +2378,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zungtr(rocblas_handle handle,
     n           rocblas_int. n >= 0.
                 Number of columns of matrix C.
     @param[in]
-    k           rocblas_int. k >= 0; k <= m if side is left, k <= n if side is right.
+    k           rocblas_int. k >= 0. k <= m if side is left, and k <= n if side is right.
                 The number of Householder reflectors that form Q.
     @param[in]
     A           pointer to type. Array on the GPU of size lda*k.
@@ -2425,14 +2425,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorm2r(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief UNM2R multiplies a complex matrix Q with orthonormal columns by a
-    general m-by-n matrix C.
+    \brief The UNM2R functions multiply a complex matrix Q with orthonormal columns by a
+    general ``m``-by-``n`` matrix ``C``.
 
     \details
-    (This is the unblocked version of the algorithm).
+    (This is the unblocked version of the algorithm.)
 
     The matrix Q is applied in one of the following forms, depending on
-    the values of side and trans:
+    the values of ``side`` and ``trans``:
 
     \f[
         \begin{array}{cl}
@@ -2443,13 +2443,13 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorm2r(rocblas_handle handle,
         \end{array}
     \f]
 
-    Q is defined as the product of k Householder reflectors
+    Q is defined as the product of ``k`` Householder reflectors
 
     \f[
         Q = H(1)H(2)\cdots H(k)
     \f]
 
-    of order m if applying from the left, or n if applying from the right. Q is never stored, it is
+    of order ``m`` if applying from the left, or ``n`` if applying from the right. Q is never stored. It is
     calculated from the Householder vectors and scalars returned by the QR factorization \ref rocsolver_sgeqrf "GEQRF".
 
     @param[in]
@@ -2467,7 +2467,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorm2r(rocblas_handle handle,
     n           rocblas_int. n >= 0.
                 Number of columns of matrix C.
     @param[in]
-    k           rocblas_int. k >= 0; k <= m if side is left, k <= n if side is right.
+    k           rocblas_int. k >= 0. k <= m if side is left, and k <= n if side is right.
                 The number of Householder reflectors that form Q.
     @param[in]
     A           pointer to type. Array on the GPU of size lda*k.
@@ -2515,11 +2515,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunm2r(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief ORMQR multiplies a matrix Q with orthonormal columns by a general m-by-n
-    matrix C.
+    \brief The ORMQR functions multiply a matrix Q with orthonormal columns by a general ``m``-by-``n``
+    matrix ``C``.
 
     \details
-    (This is the blocked version of the algorithm).
+    (This is the blocked version of the algorithm.)
 
     The matrix Q is applied in one of the following forms, depending on
     the values of side and trans:
@@ -2533,13 +2533,13 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunm2r(rocblas_handle handle,
         \end{array}
     \f]
 
-    Q is defined as the product of k Householder reflectors
+    Q is defined as the product of ``k`` Householder reflectors
 
     \f[
         Q = H(1)H(2)\cdots H(k)
     \f]
 
-    of order m if applying from the left, or n if applying from the right. Q is never stored, it is
+    of order ``m`` if applying from the left, or ``n`` if applying from the right. Q is never stored. It is
     calculated from the Householder vectors and scalars returned by the QR factorization \ref rocsolver_sgeqrf "GEQRF".
 
     @param[in]
@@ -2557,7 +2557,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunm2r(rocblas_handle handle,
     n           rocblas_int. n >= 0.
                 Number of columns of matrix C.
     @param[in]
-    k           rocblas_int. k >= 0; k <= m if side is left, k <= n if side is right.
+    k           rocblas_int. k >= 0. k <= m if side is left, and k <= n if side is right.
                 The number of Householder reflectors that form Q.
     @param[in]
     A           pointer to type. Array on the GPU of size lda*k.
@@ -2604,14 +2604,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormqr(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief UNMQR multiplies a complex matrix Q with orthonormal columns by a
-    general m-by-n matrix C.
+    \brief The UNMQR functions multiply a complex matrix Q with orthonormal columns by a
+    general ``m``-by-``n`` matrix ``C``.
 
     \details
-    (This is the blocked version of the algorithm).
+    (This is the blocked version of the algorithm.)
 
     The matrix Q is applied in one of the following forms, depending on
-    the values of side and trans:
+    the values of ``side`` and ``trans``:
 
     \f[
         \begin{array}{cl}
@@ -2622,13 +2622,13 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormqr(rocblas_handle handle,
         \end{array}
     \f]
 
-    Q is defined as the product of k Householder reflectors
+    Q is defined as the product of ``k`` Householder reflectors
 
     \f[
         Q = H(1)H(2)\cdots H(k)
     \f]
 
-    of order m if applying from the left, or n if applying from the right. Q is never stored, it is
+    of order ``m`` if applying from the left or ``n`` if applying from the right. Q is never stored. It is
     calculated from the Householder vectors and scalars returned by the QR factorization \ref rocsolver_sgeqrf "GEQRF".
 
     @param[in]
@@ -2646,7 +2646,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormqr(rocblas_handle handle,
     n           rocblas_int. n >= 0.
                 Number of columns of matrix C.
     @param[in]
-    k           rocblas_int. k >= 0; k <= m if side is left, k <= n if side is right.
+    k           rocblas_int. k >= 0. k <= m if side is left, and k <= n if side is right.
                 The number of Householder reflectors that form Q.
     @param[in]
     A           pointer to type. Array on the GPU of size lda*k.
@@ -2693,14 +2693,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmqr(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief ORML2 multiplies a matrix Q with orthonormal rows by a general m-by-n
-    matrix C.
+    \brief The ORML2 functions multiply a matrix Q with orthonormal rows by a general ``m``-by-``n``
+    matrix ``C``.
 
     \details
-    (This is the unblocked version of the algorithm).
+    (This is the unblocked version of the algorithm.)
 
     The matrix Q is applied in one of the following forms, depending on
-    the values of side and trans:
+    the values of ``side`` and ``trans``:
 
     \f[
         \begin{array}{cl}
@@ -2711,13 +2711,13 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmqr(rocblas_handle handle,
         \end{array}
     \f]
 
-    Q is defined as the product of k Householder reflectors
+    Q is defined as the product of ``k`` Householder reflectors
 
     \f[
         Q = H(k)H(k-1)\cdots H(1)
     \f]
 
-    of order m if applying from the left, or n if applying from the right. Q is never stored, it is
+    of order ``m`` if applying from the left, or ``n`` if applying from the right. Q is never stored. It is
     calculated from the Householder vectors and scalars returned by the LQ factorization \ref rocsolver_sgelqf "GELQF".
 
     @param[in]
@@ -2735,7 +2735,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmqr(rocblas_handle handle,
     n           rocblas_int. n >= 0.
                 Number of columns of matrix C.
     @param[in]
-    k           rocblas_int. k >= 0; k <= m if side is left, k <= n if side is right.
+    k           rocblas_int. k >= 0. k <= m if side is left, and k <= n if side is right.
                 The number of Householder reflectors that form Q.
     @param[in]
     A           pointer to type. Array on the GPU of size lda*m if side is left, or lda*n if side is right.
@@ -2783,14 +2783,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorml2(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief UNML2 multiplies a complex matrix Q with orthonormal rows by a general
-    m-by-n matrix C.
+    \brief The UNML2 functions multiply a complex matrix Q with orthonormal rows by a general
+    ``m``-by-``n`` matrix ``C``.
 
     \details
-    (This is the unblocked version of the algorithm).
+    (This is the unblocked version of the algorithm.)
 
     The matrix Q is applied in one of the following forms, depending on
-    the values of side and trans:
+    the values of ``side`` and ``trans``:
 
     \f[
         \begin{array}{cl}
@@ -2801,13 +2801,13 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorml2(rocblas_handle handle,
         \end{array}
     \f]
 
-    Q is defined as the product of k Householder reflectors
+    Q is defined as the product of ``k`` Householder reflectors
 
     \f[
         Q = H(k)^HH(k-1)^H\cdots H(1)^H
     \f]
 
-    of order m if applying from the left, or n if applying from the right. Q is never stored, it is
+    of order ``m`` if applying from the left, or ``n`` if applying from the right. Q is never stored. It is
     calculated from the Householder vectors and scalars returned by the LQ factorization \ref rocsolver_sgelqf "GELQF".
 
     @param[in]
@@ -2825,10 +2825,10 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorml2(rocblas_handle handle,
     n           rocblas_int. n >= 0.
                 Number of columns of matrix C.
     @param[in]
-    k           rocblas_int. k >= 0; k <= m if side is left, k <= n if side is right.
+    k           rocblas_int. k >= 0. k <= m if side is left, and k <= n if side is right.
                 The number of Householder reflectors that form Q.
     @param[in]
-    A           pointer to type. Array on the GPU of size lda*m if side is left, or lda*n if side is right.
+    A           pointer to type. Array on the GPU of size lda*m if side is left or lda*n if side is right.
                 The Householder vectors as returned by \ref rocsolver_sgelqf "GELQF"
                 in the first k rows of its argument A.
     @param[in]
@@ -2872,14 +2872,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunml2(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief ORMLQ multiplies a matrix Q with orthonormal rows by a general m-by-n
-    matrix C.
+    \brief The ORMLQ functions multiply a matrix Q with orthonormal rows by a general ``m``-by-``n``
+    matrix ``C``.
 
     \details
-    (This is the blocked version of the algorithm).
+    (This is the blocked version of the algorithm.)
 
     The matrix Q is applied in one of the following forms, depending on
-    the values of side and trans:
+    the values of ``side`` and ``trans``:
 
     \f[
         \begin{array}{cl}
@@ -2890,13 +2890,13 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunml2(rocblas_handle handle,
         \end{array}
     \f]
 
-    Q is defined as the product of k Householder reflectors
+    Q is defined as the product of ``k`` Householder reflectors
 
     \f[
         Q = H(k)H(k-1)\cdots H(1)
     \f]
 
-    of order m if applying from the left, or n if applying from the right. Q is never stored, it is
+    of order ``m`` if applying from the left, or ``n`` if applying from the right. Q is never stored. It is
     calculated from the Householder vectors and scalars returned by the LQ factorization \ref rocsolver_sgelqf "GELQF".
 
     @param[in]
@@ -2914,7 +2914,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunml2(rocblas_handle handle,
     n           rocblas_int. n >= 0.
                 Number of columns of matrix C.
     @param[in]
-    k           rocblas_int. k >= 0; k <= m if side is left, k <= n if side is right.
+    k           rocblas_int. k >= 0. k <= m if side is left, and k <= n if side is right.
                 The number of Householder reflectors that form Q.
     @param[in]
     A           pointer to type. Array on the GPU of size lda*m if side is left, or lda*n if side is right.
@@ -2961,14 +2961,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormlq(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief UNMLQ multiplies a complex matrix Q with orthonormal rows by a general
-    m-by-n matrix C.
+    \brief The UNMLQ functions multiply a complex matrix Q with orthonormal rows by a general
+    ``m``-by-``n`` matrix ``C``.
 
     \details
-    (This is the blocked version of the algorithm).
+    (This is the blocked version of the algorithm.)
 
     The matrix Q is applied in one of the following forms, depending on
-    the values of side and trans:
+    the values of ``side`` and ``trans``:
 
     \f[
         \begin{array}{cl}
@@ -2979,13 +2979,13 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormlq(rocblas_handle handle,
         \end{array}
     \f]
 
-    Q is defined as the product of k Householder reflectors
+    Q is defined as the product of ``k`` Householder reflectors
 
     \f[
         Q = H(k)^HH(k-1)^H\cdots H(1)^H
     \f]
 
-    of order m if applying from the left, or n if applying from the right. Q is never stored, it is
+    of order ``m`` if applying from the left, or ``n`` if applying from the right. Q is never stored. It is
     calculated from the Householder vectors and scalars returned by the LQ factorization \ref rocsolver_sgelqf "GELQF".
 
     @param[in]
@@ -3003,10 +3003,10 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormlq(rocblas_handle handle,
     n           rocblas_int. n >= 0.
                 Number of columns of matrix C.
     @param[in]
-    k           rocblas_int. k >= 0; k <= m if side is left, k <= n if side is right.
+    k           rocblas_int. k >= 0. k <= m if side is left, and k <= n if side is right.
                 The number of Householder reflectors that form Q.
     @param[in]
-    A           pointer to type. Array on the GPU of size lda*m if side is left, or lda*n if side is right.
+    A           pointer to type. Array on the GPU of size lda*m if side is left or lda*n if side is right.
                 The Householder vectors as returned by \ref rocsolver_sgelqf "GELQF"
                 in the first k rows of its argument A.
     @param[in]
@@ -3050,14 +3050,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmlq(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief ORM2L multiplies a matrix Q with orthonormal columns by a general m-by-n
-    matrix C.
+    \brief The ORM2L functions multiply a matrix Q with orthonormal columns by a general ``m``-by-``n``
+    matrix ``C``.
 
     \details
-    (This is the unblocked version of the algorithm).
+    (This is the unblocked version of the algorithm.)
 
     The matrix Q is applied in one of the following forms, depending on
-    the values of side and trans:
+    the values of ``side`` and ``trans``:
 
     \f[
         \begin{array}{cl}
@@ -3068,14 +3068,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmlq(rocblas_handle handle,
         \end{array}
     \f]
 
-    Q is defined as the product of k Householder reflectors
+    Q is defined as the product of ``k`` Householder reflectors
 
     \f[
         Q = H(k)H(k-1)\cdots H(1)
     \f]
 
-    of order m if applying from the left, or n if applying from the right. Q is
-    never stored, it is calculated from the Householder vectors and scalars
+    of order ``m`` if applying from the left, or ``n`` if applying from the right. Q is
+    never stored. It is calculated from the Householder vectors and scalars
     returned by the QL factorization \ref rocsolver_sgeqlf "GEQLF".
 
     @param[in]
@@ -3094,14 +3094,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmlq(rocblas_handle handle,
     n           rocblas_int. n >= 0.
                 Number of columns of matrix C.
     @param[in]
-    k           rocblas_int. k >= 0; k <= m if side is left, k <= n if side is right.
+    k           rocblas_int. k >= 0. k <= m if side is left, and k <= n if side is right.
                 The number of Householder reflectors that form Q.
     @param[in]
     A           pointer to type. Array on the GPU of size lda*k.
                 The Householder vectors as returned by \ref rocsolver_sgeqlf "GEQLF" in the last k columns of its
                 argument A.
     @param[in]
-    lda         rocblas_int. lda >= m if side is left, lda >= n if side is right.
+    lda         rocblas_int. lda >= m if side is left, and lda >= n if side is right.
                 Leading dimension of A.
     @param[in]
     ipiv        pointer to type. Array on the GPU of dimension at least k.
@@ -3142,14 +3142,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorm2l(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief UNM2L multiplies a complex matrix Q with orthonormal columns by a
-    general m-by-n matrix C.
+    \brief The UNM2L functions multiply a complex matrix Q with orthonormal columns by a
+    general ``m``-by-``n`` matrix ``C``.
 
     \details
-    (This is the unblocked version of the algorithm).
+    (This is the unblocked version of the algorithm.)
 
     The matrix Q is applied in one of the following forms, depending on
-    the values of side and trans:
+    the values of ``side`` and ``trans``:
 
     \f[
         \begin{array}{cl}
@@ -3160,14 +3160,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorm2l(rocblas_handle handle,
         \end{array}
     \f]
 
-    Q is defined as the product of k Householder reflectors
+    Q is defined as the product of ``k`` Householder reflectors
 
     \f[
         Q = H(k)H(k-1)\cdots H(1)
     \f]
 
-    of order m if applying from the left, or n if applying from the right. Q is
-    never stored, it is calculated from the Householder vectors and scalars
+    of order ``m`` if applying from the left, or ``n`` if applying from the right. Q is
+    never stored. It is calculated from the Householder vectors and scalars
     returned by the QL factorization \ref rocsolver_sgeqlf "GEQLF".
 
     @param[in]
@@ -3186,14 +3186,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorm2l(rocblas_handle handle,
     n           rocblas_int. n >= 0.
                 Number of columns of matrix C.
     @param[in]
-    k           rocblas_int. k >= 0; k <= m if side is left, k <= n if side is right.
+    k           rocblas_int. k >= 0. k <= m if side is left, and k <= n if side is right.
                 The number of Householder reflectors that form Q.
     @param[in]
     A           pointer to type. Array on the GPU of size lda*k.
                 The Householder vectors as returned by \ref rocsolver_sgeqlf "GEQLF" in the last k columns of its
                 argument A.
     @param[in]
-    lda         rocblas_int. lda >= m if side is left, lda >= n if side is right.
+    lda         rocblas_int. lda >= m if side is left, and lda >= n if side is right.
                 Leading dimension of A.
     @param[in]
     ipiv        pointer to type. Array on the GPU of dimension at least k.
@@ -3234,14 +3234,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunm2l(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief ORMQL multiplies a matrix Q with orthonormal columns by a general m-by-n
-    matrix C.
+    \brief The ORMQL functions multiply a matrix Q with orthonormal columns by a general ``m``-by-``n``
+    matrix ``C``.
 
     \details
-    (This is the blocked version of the algorithm).
+    (This is the blocked version of the algorithm.)
 
     The matrix Q is applied in one of the following forms, depending on
-    the values of side and trans:
+    the values of ``side`` and ``trans``:
 
     \f[
         \begin{array}{cl}
@@ -3252,14 +3252,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunm2l(rocblas_handle handle,
         \end{array}
     \f]
 
-    Q is defined as the product of k Householder reflectors
+    Q is defined as the product of ``k`` Householder reflectors
 
     \f[
         Q = H(k)H(k-1)\cdots H(1)
     \f]
 
-    of order m if applying from the left, or n if applying from the right. Q is
-    never stored, it is calculated from the Householder vectors and scalars
+    of order ``m`` if applying from the left, or ``n`` if applying from the right. Q is
+    never stored. It is calculated from the Householder vectors and scalars
     returned by the QL factorization \ref rocsolver_sgeqlf "GEQLF".
 
     @param[in]
@@ -3278,14 +3278,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunm2l(rocblas_handle handle,
     n           rocblas_int. n >= 0.
                 Number of columns of matrix C.
     @param[in]
-    k           rocblas_int. k >= 0; k <= m if side is left, k <= n if side is right.
+    k           rocblas_int. k >= 0. k <= m if side is left, and k <= n if side is right.
                 The number of Householder reflectors that form Q.
     @param[in]
     A           pointer to type. Array on the GPU of size lda*k.
                 The Householder vectors as returned by \ref rocsolver_sgeqlf "GEQLF" in the last k columns of its
                 argument A.
     @param[in]
-    lda         rocblas_int. lda >= m if side is left, lda >= n if side is right.
+    lda         rocblas_int. lda >= m if side is left, and lda >= n if side is right.
                 Leading dimension of A.
     @param[in]
     ipiv        pointer to type. Array on the GPU of dimension at least k.
@@ -3326,14 +3326,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormql(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief UNMQL multiplies a complex matrix Q with orthonormal columns by a
-    general m-by-n matrix C.
+    \brief The UNMQL functions multiply a complex matrix Q with orthonormal columns by a
+    general ``m``-by-``n`` matrix ``C``.
 
     \details
-    (This is the blocked version of the algorithm).
+    (This is the blocked version of the algorithm.)
 
     The matrix Q is applied in one of the following forms, depending on
-    the values of side and trans:
+    the values of ``side`` and ``trans``:
 
     \f[
         \begin{array}{cl}
@@ -3344,14 +3344,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormql(rocblas_handle handle,
         \end{array}
     \f]
 
-    Q is defined as the product of k Householder reflectors
+    Q is defined as the product of ``k`` Householder reflectors
 
     \f[
         Q = H(k)H(k-1)\cdots H(1)
     \f]
 
-    of order m if applying from the left, or n if applying from the right. Q is
-    never stored, it is calculated from the Householder vectors and scalars
+    of order ``m`` if applying from the left, or ``n`` if applying from the right. Q is
+    never stored. It is calculated from the Householder vectors and scalars
     returned by the QL factorization \ref rocsolver_sgeqlf "GEQLF".
 
     @param[in]
@@ -3370,14 +3370,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormql(rocblas_handle handle,
     n           rocblas_int. n >= 0.
                 Number of columns of matrix C.
     @param[in]
-    k           rocblas_int. k >= 0; k <= m if side is left, k <= n if side is right.
+    k           rocblas_int. k >= 0. k <= m if side is left, and k <= n if side is right.
                 The number of Householder reflectors that form Q.
     @param[in]
     A           pointer to type. Array on the GPU of size lda*k.
                 The Householder vectors as returned by \ref rocsolver_sgeqlf "GEQLF" in the last k columns of its
                 argument A.
     @param[in]
-    lda         rocblas_int. lda >= m if side is left, lda >= n if side is right.
+    lda         rocblas_int. lda >= m if side is left, and lda >= n if side is right.
                 Leading dimension of A.
     @param[in]
     ipiv        pointer to type. Array on the GPU of dimension at least k.
@@ -3418,14 +3418,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmql(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief ORMBR multiplies a matrix Q with orthonormal rows or columns by a
-    general m-by-n matrix C.
+    \brief The ORMBR functions multiply a matrix Q with orthonormal rows or columns by a
+    general ``m``-by-``n`` matrix ``C``.
 
     \details
-    If storev is column-wise, then the matrix Q has orthonormal columns.
-    If storev is row-wise, then the matrix Q has orthonormal rows.
+    If ``storev`` is column-wise, then the matrix Q has orthonormal columns.
+    If ``storev`` is row-wise, then the matrix Q has orthonormal rows.
     The matrix Q is applied in one of the following forms, depending on
-    the values of side and trans:
+    the values of ``side`` and ``trans``:
 
     \f[
         \begin{array}{cl}
@@ -3436,34 +3436,34 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmql(rocblas_handle handle,
         \end{array}
     \f]
 
-    The order q of the orthogonal matrix Q is q = m if applying from the left, or q = n if applying from the right.
+    The order q of the orthogonal matrix Q is q = ``m`` if applying from the left or q = ``n`` if applying from the right.
 
-    When storev is column-wise, if q >= k, then Q is defined as the product of k Householder reflectors
-
-    \f[
-        Q = H(1)H(2)\cdots H(k),
-    \f]
-
-    and if q < k, then Q is defined as the product
-
-    \f[
-        Q = H(1)H(2)\cdots H(q-1).
-    \f]
-
-    When storev is row-wise, if q > k, then Q is defined as the product of k Householder reflectors
+    When ``storev`` is column-wise, if q >= ``k``, then Q is defined as the product of ``k`` Householder reflectors
 
     \f[
         Q = H(1)H(2)\cdots H(k),
     \f]
 
-    and if q <= k, Q is defined as the product
+    and if q < ``k``, then Q is defined as the product
 
     \f[
         Q = H(1)H(2)\cdots H(q-1).
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its corresponding
-    Householder vectors and scalars as returned by \ref rocsolver_sgebrd "GEBRD" in its arguments A and tauq or taup.
+    When ``storev`` is row-wise, if q > ``k``, then Q is defined as the product of ``k`` Householder reflectors
+
+    \f[
+        Q = H(1)H(2)\cdots H(k),
+    \f]
+
+    and if q <= ``k``, Q is defined as the product
+
+    \f[
+        Q = H(1)H(2)\cdots H(q-1).
+    \f]
+
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from its corresponding
+    Householder vectors and scalars as returned by \ref rocsolver_sgebrd "GEBRD" in its arguments ``A`` and tauq or taup.
 
     @param[in]
     handle      rocblas_handle.
@@ -3532,14 +3532,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormbr(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief UNMBR multiplies a complex matrix Q with orthonormal rows or columns by
-    a general m-by-n matrix C.
+    \brief The UNMBR functions multiply a complex matrix Q with orthonormal rows or columns by
+    a general ``m``-by-``n`` matrix ``C``.
 
     \details
     If storev is column-wise, then the matrix Q has orthonormal columns.
     If storev is row-wise, then the matrix Q has orthonormal rows.
     The matrix Q is applied in one of the following forms, depending on
-    the values of side and trans:
+    the values of ``side`` and ``trans``:
 
     \f[
         \begin{array}{cl}
@@ -3550,34 +3550,34 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormbr(rocblas_handle handle,
         \end{array}
     \f]
 
-    The order q of the unitary matrix Q is q = m if applying from the left, or q = n if applying from the right.
+    The order q of the unitary matrix Q is q = ``m`` if applying from the left, or q = ``n`` if applying from the right.
 
-    When storev is column-wise, if q >= k, then Q is defined as the product of k Householder reflectors
-
-    \f[
-        Q = H(1)H(2)\cdots H(k),
-    \f]
-
-    and if q < k, then Q is defined as the product
-
-    \f[
-        Q = H(1)H(2)\cdots H(q-1).
-    \f]
-
-    When storev is row-wise, if q > k, then Q is defined as the product of k Householder reflectors
+    When storev is column-wise, if q >= ``k``, then Q is defined as the product of ``k`` Householder reflectors
 
     \f[
         Q = H(1)H(2)\cdots H(k),
     \f]
 
-    and if q <= k, Q is defined as the product
+    and if q < ``k``, then Q is defined as the product
 
     \f[
         Q = H(1)H(2)\cdots H(q-1).
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its corresponding
-    Householder vectors and scalars as returned by \ref rocsolver_sgebrd "GEBRD" in its arguments A and tauq or taup.
+    When storev is row-wise, if q > ``k``, then Q is defined as the product of ``k`` Householder reflectors
+
+    \f[
+        Q = H(1)H(2)\cdots H(k),
+    \f]
+
+    and if q <= ``k``, Q is defined as the product
+
+    \f[
+        Q = H(1)H(2)\cdots H(q-1).
+    \f]
+
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from their corresponding
+    Householder vectors and scalars as returned by \ref rocsolver_sgebrd "GEBRD" in its arguments ``A`` and tauq or taup.
 
     @param[in]
     handle      rocblas_handle.
@@ -3646,11 +3646,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmbr(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief ORMTR multiplies an orthogonal matrix Q by a general m-by-n matrix C.
+    \brief The ORMTR functions multiply an orthogonal matrix Q by a general ``m``-by-``n`` matrix ``C``.
 
     \details
     The matrix Q is applied in one of the following forms, depending on
-    the values of side and trans:
+    the values of ``side`` and ``trans``:
 
     \f[
         \begin{array}{cl}
@@ -3661,25 +3661,25 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmbr(rocblas_handle handle,
         \end{array}
     \f]
 
-    The order q of the orthogonal matrix Q is q = m if applying from the left, or
-    q = n if applying from the right.
+    The order q of the orthogonal matrix Q is q = ``m`` if applying from the left, or
+    q = ``n`` if applying from the right.
 
     Q is defined as a product of q-1 Householder reflectors. If
-    uplo indicates upper, then Q has the form
+    ``uplo`` indicates ``upper``, then Q has the form
 
     \f[
         Q = H(q-1)H(q-2)\cdots H(1).
     \f]
 
-    On the other hand, if uplo indicates lower, then Q has the form
+    However, if ``uplo`` indicates ``lower``, then Q has the form
 
     \f[
         Q = H(1)H(2)\cdots H(q-1)
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from their
     corresponding Householder vectors and scalars as returned by
-    \ref rocsolver_ssytrd "SYTRD" in its arguments A and tau.
+    \ref rocsolver_ssytrd "SYTRD" in its arguments ``A`` and tau.
 
     @param[in]
     handle      rocblas_handle.
@@ -3747,11 +3747,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormtr(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief UNMTR multiplies a unitary matrix Q by a general m-by-n matrix C.
+    \brief The UNMTR functions multiply a unitary matrix Q by a general ``m``-by-``n`` matrix ``C``.
 
     \details
     The matrix Q is applied in one of the following forms, depending on
-    the values of side and trans:
+    the values of ``side`` and ``trans``:
 
     \f[
         \begin{array}{cl}
@@ -3762,25 +3762,25 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormtr(rocblas_handle handle,
         \end{array}
     \f]
 
-    The order q of the unitary matrix Q is q = m if applying from the left, or
-    q = n if applying from the right.
+    The order q of the unitary matrix Q is q = ``m`` if applying from the left, or
+    q = ``n`` if applying from the right.
 
     Q is defined as a product of q-1 Householder reflectors. If
-    uplo indicates upper, then Q has the form
+    ``uplo`` indicates ``upper``, then Q has the form
 
     \f[
         Q = H(q-1)H(q-2)\cdots H(1).
     \f]
 
-    On the other hand, if uplo indicates lower, then Q has the form
+    However, if ``uplo`` indicates ``lower``, then Q has the form
 
     \f[
         Q = H(1)H(2)\cdots H(q-1)
     \f]
 
-    The Householder matrices \f$H(i)\f$ are never stored, they are computed from its
+    The Householder matrices \f$H(i)\f$ are never stored. They are computed from their
     corresponding Householder vectors and scalars as returned by
-    \ref rocsolver_chetrd "HETRD" in its arguments A and tau.
+    \ref rocsolver_chetrd "HETRD" in its arguments ``A`` and tau.
 
     @param[in]
     handle      rocblas_handle.
@@ -3895,7 +3895,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmtr(rocblas_handle handle,
     @param[inout]
     D           pointer to real type. Array on the GPU of dimension n.
                 On entry, the diagonal elements of B. On exit, if info = 0,
-                the singular values of B in decreasing order; if info > 0,
+                the singular values of B in decreasing order, and if info > 0,
                 the diagonal elements of a bidiagonal matrix
                 orthogonally equivalent to B.
     @param[inout]
@@ -3996,11 +3996,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zbdsqr(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief STERF computes the eigenvalues of a symmetric tridiagonal matrix.
+    \brief The STERF functions compute the eigenvalues of a symmetric tridiagonal matrix.
 
     \details
     The eigenvalues of the symmetric tridiagonal matrix are computed by the
-    Pal-Walker-Kahan variant of the QL/QR algorithm, and returned in
+    Pal-Walker-Kahan variant of the QL/QR algorithm and returned in
     increasing order.
 
     The matrix is not represented explicitly, but rather as the array of
@@ -4020,14 +4020,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zbdsqr(rocblas_handle handle,
                 On entry, the diagonal elements of the tridiagonal matrix.
                 On exit, if info = 0, the eigenvalues in increasing order.
                 If info > 0, the diagonal elements of a tridiagonal matrix
-                that is similar to the original matrix (i.e. has the same
+                that is similar to the original matrix (that is, it has the same
                 eigenvalues).
     @param[inout]
     E           pointer to real type. Array on the GPU of dimension n-1.
                 On entry, the off-diagonal elements of the tridiagonal matrix.
                 On exit, if info = 0, this array converges to zero.
                 If info > 0, the off-diagonal elements of a tridiagonal matrix
-                that is similar to the original matrix (i.e. has the same
+                that is similar to the original matrix (that is, it has the same
                 eigenvalues).
     @param[out]
     info        pointer to a rocblas_int on the GPU.
@@ -4050,18 +4050,18 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsterf(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief STEQR computes the eigenvalues and (optionally) eigenvectors of
+    \brief The STEQR functions compute the eigenvalues and (optionally) eigenvectors of
     a symmetric tridiagonal matrix.
 
     \details
     The eigenvalues of the symmetric tridiagonal matrix are computed by the
-    implicit QL/QR algorithm, and returned in increasing order.
+    implicit QL/QR algorithm and returned in increasing order.
 
     The matrix is not represented explicitly, but rather as the array of
-    diagonal elements D and the array of symmetric off-diagonal elements E.
-    When D and E correspond to the tridiagonal form of a full symmetric/Hermitian matrix, as returned by, e.g.,
+    diagonal elements ``D`` and the array of symmetric off-diagonal elements ``E``.
+    When ``D`` and ``E`` correspond to the tridiagonal form of a full symmetric/Hermitian matrix, as returned by, for example,
     \ref rocsolver_ssytrd "SYTRD" or \ref rocsolver_chetrd "HETRD", the eigenvectors of the original matrix can also
-    be computed, depending on the value of evect.
+    be computed, depending on the value of ``evect``.
 
     @param[in]
     handle      rocblas_handle.
@@ -4076,28 +4076,28 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsterf(rocblas_handle handle,
                 On entry, the diagonal elements of the tridiagonal matrix.
                 On exit, if info = 0, the eigenvalues in increasing order.
                 If info > 0, the diagonal elements of a tridiagonal matrix
-                that is similar to the original matrix (i.e. has the same
+                that is similar to the original matrix (that is, it has the same
                 eigenvalues).
     @param[inout]
     E           pointer to real type. Array on the GPU of dimension n-1.
                 On entry, the off-diagonal elements of the tridiagonal matrix.
                 On exit, if info = 0, this array converges to zero.
                 If info > 0, the off-diagonal elements of a tridiagonal matrix
-                that is similar to the original matrix (i.e. has the same
+                that is similar to the original matrix (that is, it has the same
                 eigenvalues).
     @param[inout]
     C           pointer to type. Array on the GPU of dimension ldc*n.
                 On entry, if evect is original, the orthogonal/unitary matrix
-                used for the reduction to tridiagonal form as returned by, e.g.,
+                used for the reduction to tridiagonal form as returned by, for example,
                 \ref rocsolver_sorgtr "ORGTR" or \ref rocsolver_cungtr "UNGTR".
                 On exit, it is overwritten with the eigenvectors of the original
-                symmetric/Hermitian matrix (if evect is original), or the
+                symmetric/Hermitian matrix (if evect is original) or the
                 eigenvectors of the tridiagonal matrix (if evect is tridiagonal).
-                (Not referenced if evect is none).
+                (Not referenced if evect is none.)
     @param[in]
     ldc         rocblas_int. ldc >= n if evect is original or tridiagonal.
                 Specifies the leading dimension of C.
-                (Not referenced if evect is none).
+                (Not referenced if evect is none.)
     @param[out]
     info        pointer to a rocblas_int on the GPU.
                 If info = 0, successful exit.
@@ -4143,18 +4143,18 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsteqr(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief STEDC computes the eigenvalues and (optionally) eigenvectors of
+    \brief The STEDC functions compute the eigenvalues and (optionally) eigenvectors of
     a symmetric tridiagonal matrix.
 
     \details
-    This function uses the divide and conquer method to compute the eigenvectors.
+    This function uses the divide-and-conquer method to compute the eigenvectors.
     The eigenvalues are returned in increasing order.
 
     The matrix is not represented explicitly, but rather as the array of
-    diagonal elements D and the array of symmetric off-diagonal elements E.
-    When D and E correspond to the tridiagonal form of a full symmetric/Hermitian matrix, as returned by, e.g.,
+    diagonal elements ``D`` and the array of symmetric off-diagonal elements ``E``.
+    When ``D`` and ``E`` correspond to the tridiagonal form of a full symmetric/Hermitian matrix, as returned by, for example,
     \ref rocsolver_ssytrd "SYTRD" or \ref rocsolver_chetrd "HETRD", the eigenvectors of the original matrix can also
-    be computed, depending on the value of evect.
+    be computed, depending on the value of ``evect``.
 
     @param[in]
     handle      rocblas_handle.
@@ -4175,15 +4175,15 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsteqr(rocblas_handle handle,
     @param[inout]
     C           pointer to type. Array on the GPU of dimension ldc*n.
                 On entry, if evect is original, the orthogonal/unitary matrix
-                used for the reduction to tridiagonal form as returned by, e.g.,
+                used for the reduction to tridiagonal form as returned by, for example,
                 \ref rocsolver_sorgtr "ORGTR" or \ref rocsolver_cungtr "UNGTR".
                 On exit, if info = 0, it is overwritten with the eigenvectors of the original
-                symmetric/Hermitian matrix (if evect is original), or the
+                symmetric/Hermitian matrix (if evect is original) or the
                 eigenvectors of the tridiagonal matrix (if evect is tridiagonal).
-                (Not referenced if evect is none).
+                (Not referenced if evect is none.)
     @param[in]
     ldc         rocblas_int. ldc >= n if evect is original or tridiagonal.
-                Specifies the leading dimension of C. (Not referenced if evect is none).
+                Specifies the leading dimension of C. (Not referenced if evect is none.)
     @param[out]
     info        pointer to a rocblas_int on the GPU.
                 If info = 0, successful exit.
@@ -4229,14 +4229,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zstedc(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief STEBZ computes a set of eigenvalues of a symmetric tridiagonal matrix T.
+    \brief The STEBZ functions compute a set of eigenvalues of a symmetric tridiagonal matrix T.
 
     \details
-    This function computes all the eigenvalues of T, all the eigenvalues in the half-open interval (vl, vu],
-    or the il-th through iu-th eigenvalues, depending on the value of erange.
+    This function computes all the eigenvalues of T, all the eigenvalues in the half-open interval (``vl``, ``vu``],
+    or the ``il``-th through ``iu``-th eigenvalues, depending on the value of ``erange``.
 
-    The eigenvalues are returned in increasing order either for the entire matrix, or grouped by independent
-    diagonal blocks (if they exist), depending on the value of eorder.
+    The eigenvalues are returned in increasing order either for the entire matrix or grouped by independent
+    diagonal blocks (if they exist), depending on the value of ``eorder``.
 
     @param[in]
     handle      rocblas_handle.
@@ -4246,7 +4246,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zstedc(rocblas_handle handle,
     @param[in]
     eorder      #rocblas_eorder.
                 Specifies whether the computed eigenvalues will be ordered by their position in the
-                entire spectrum, or grouped by independent diagonal (split off) blocks.
+                entire spectrum or grouped by independent diagonal (split off) blocks.
     @param[in]
     n           rocblas_int. n >= 0.
                 The order of the tridiagonal matrix T.
@@ -4259,19 +4259,19 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zstedc(rocblas_handle handle,
                 The upper bound of the search interval (vl, vu]. Ignored if erange indicates to look
                 for all the eigenvalues of T or the eigenvalues within a set of indices.
     @param[in]
-    il          rocblas_int. il = 1 if n = 0; 1 <= il <= iu otherwise.
+    il          rocblas_int. il = 1 if n = 0, and 1 <= il <= iu otherwise.
                 The index of the smallest eigenvalue to be computed. Ignored if erange indicates to look
                 for all the eigenvalues of T or the eigenvalues in a half-open interval.
     @param[in]
-    iu          rocblas_int. iu = 0 if n = 0; 1 <= il <= iu otherwise.
+    iu          rocblas_int. iu = 0 if n = 0, and 1 <= il <= iu otherwise.
                 The index of the largest eigenvalue to be computed. Ignored if erange indicates to look
                 for all the eigenvalues of T or the eigenvalues in a half-open interval.
     @param[in]
     abstol      real type.
                 The absolute tolerance. An eigenvalue is considered to be located if it lies
                 in an interval whose width is <= abstol. If abstol is negative, then machine-epsilon times
-                the 1-norm of the tridiagonal form of A will be used as tolerance. If abstol=0, then the tolerance will be set
-                to twice the underflow threshold; this is the tolerance that could get the most accurate results.
+                the 1-norm of the tridiagonal form of A will be used as the tolerance. If abstol=0, then the tolerance will be set
+                to twice the underflow threshold. This is the tolerance that could get the most accurate results.
     @param[in]
     D           pointer to real type. Array on the GPU of dimension n.
                 The diagonal elements of the tridiagonal matrix.
@@ -4287,7 +4287,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zstedc(rocblas_handle handle,
     @param[out]
     W           pointer to real type. Array on the GPU of dimension n.
                 The first nev elements contain the computed eigenvalues. (The remaining elements
-                can be used as workspace for internal computations).
+                can be used as workspace for internal computations.)
     @param[out]
     iblock      pointer to rocblas_int. Array on the GPU of dimension n.
                 The block indices corresponding to each eigenvalue. When matrix T has
@@ -4302,7 +4302,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zstedc(rocblas_handle handle,
     @param[out]
     info        pointer to a rocblas_int on the GPU.
                 If info = 0, successful exit.
-                If info = 1, the bisection did not converge for some eigenvalues, i.e. the returned
+                If info = 1, the bisection did not converge for some eigenvalues, that is, the returned
                 values are not as accurate as the given tolerance. The non-converged eigenvalues
                 are flagged by negative entries in iblock.
 
@@ -4346,7 +4346,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dstebz(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief STEIN computes the eigenvectors associated with a set of
+    \brief The STEIN functions compute the eigenvectors associated with a set of
     provided eigenvalues of a symmetric tridiagonal matrix.
 
     \details
@@ -4354,8 +4354,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dstebz(rocblas_handle handle,
     inverse iteration.
 
     The matrix is not represented explicitly, but rather as the array of
-    diagonal elements D and the array of symmetric off-diagonal elements E.
-    The eigenvalues must be provided in the array W, as returned by \ref rocsolver_sstebz "STEBZ".
+    diagonal elements ``D`` and the array of symmetric off-diagonal elements ``E``.
+    The eigenvalues must be provided in the array ``W``, as returned by \ref rocsolver_sstebz "STEBZ".
 
     @param[in]
     handle      rocblas_handle.
@@ -4370,7 +4370,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dstebz(rocblas_handle handle,
                 The off-diagonal elements of the tridiagonal matrix.
     @param[in]
     nev         pointer to a rocblas_int on the GPU. 0 <= nev <= n.
-                The number of provided eigenvalues, and the number of eigenvectors
+                The number of provided eigenvalues and the number of eigenvectors
                 to be computed.
     @param[in]
     W           pointer to real type. Array on the GPU of dimension >= nev.
@@ -4403,8 +4403,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dstebz(rocblas_handle handle,
     @param[out]
     info        pointer to a rocblas_int on the GPU.
                 If info = 0, successful exit.
-                If info = i > 0, i eigenvectors did not converge; their indices are stored in
-                IFAIL.
+                If info = i > 0, i eigenvectors did not converge. Their indices are stored in
+                ifail.
 
     ********************************************************************/
 
@@ -4511,11 +4511,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zstein(rocblas_handle handle,
                 The upper bound of the search interval [vl, vu). Ignored if srange indicates to look
                 for all the singular values of B or the singular values within a set of indices.
     @param[in]
-    il          rocblas_int. il = 1 if n = 0; 1 <= il <= iu otherwise.
+    il          rocblas_int. il = 1 if n = 0, and 1 <= il <= iu otherwise.
                 The index of the largest singular value to be computed. Ignored if srange indicates to look
                 for all the singular values of B or the singular values in a half-open interval.
     @param[in]
-    iu          rocblas_int. iu = 0 if n = 0; 1 <= il <= iu otherwise.
+    iu          rocblas_int. iu = 0 if n = 0, and 1 <= il <= iu otherwise.
                 The index of the smallest singular value to be computed. Ignored if srange indicates to look
                 for all the singular values of B or the singular values in a half-open interval.
     @param[out]
@@ -4525,14 +4525,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zstein(rocblas_handle handle,
     @param[out]
     S           pointer to real type. Array on the GPU of dimension nsv.
                 The first nsv elements contain the computed singular values in descending order.
-                Note: If srange is rocblas_srange_value, then the value of nsv is not known in advance.
+                - Note: If srange is rocblas_srange_value, then the value of nsv is not known in advance.
                 In this case, the user should ensure that S is large enough to hold n values.
     @param[out]
     Z           pointer to real type. Array on the GPU of dimension ldz*nsv.
                 If info = 0, the first nsv columns contain the computed singular vectors corresponding to the
                 singular values in S. The first n rows of Z contain the matrix U, and the next n rows contain
                 the matrix V. Not referenced if svect is rocblas_svect_none.
-                Note: If srange is rocblas_srange_value, then the value of nsv is not known in advance.
+                - Note: If srange is rocblas_srange_value, then the value of nsv is not known in advance.
                 In this case, the user should ensure that Z is large enough to hold n columns.
     @param[in]
     ldz         rocblas_int. ldz >= 2*n if svect is rocblas_svect_singular and ldz >= 1 otherwise.
