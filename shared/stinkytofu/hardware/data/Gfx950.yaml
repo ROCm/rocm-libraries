@@ -1,6 +1,7 @@
 # A sample hardware configuration for GFX9.4.2
 # This file is used by StinkyTofu to model the performance of kernels on this architecture
 # The format is YAML
+# Note: Register limits are defined in Gfx950.cpp, not here
 - target: [9,5,0]
 - instructions:
   - default_cycle: 4
