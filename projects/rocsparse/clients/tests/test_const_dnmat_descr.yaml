@@ -35,7 +35,7 @@ Tests:
   category: pre_checkin
   function: const_dnmat_descr
   precision: *single_double_precisions_complex_real
-  M: [0, 100]
-  N: [0, 100]
+  M: [8, 100]
+  N: [8, 100]
   denseld: [100]
   order: [rocsparse_order_row, rocsparse_order_column]

@@ -47,8 +47,9 @@ static const std::string BFloat16 = "convbfp16";
 } // namespace conv
 
 namespace pool {
-static const std::string Float = "pool";
-static const std::string Half  = "poolfp16";
+static const std::string Float    = "pool";
+static const std::string Half     = "poolfp16";
+static const std::string BFloat16 = "poolbfp16";
 } // namespace pool
 
 namespace gemm {
