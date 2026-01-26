@@ -54,9 +54,10 @@
 #include "client/DataParallelGEMMSolution.hpp"
 #include "client/GEMMParameters.hpp"
 #include "client/GEMMParameters_serialization.hpp"
-#include "client/PreSwizzle.hpp"
 #include "client/RotatingBuffer.hpp"
 #include "client/StreamKGEMMSolution.hpp"
+
+#include <mxDataGenerator/PreSwizzle.hpp>
 
 #include <CLI/CLI.hpp>
 
@@ -278,8 +279,9 @@ namespace rocRoller::Client::GEMMClient
                                    problemParams.types.scalePretileA[0]};
                 }
 
-                auto tmpScaleA = preSwizzle(hostScaleA, descScaleA, preSwizzleSize, preTileSize);
-                deviceScaleA   = make_shared_device(tmpScaleA);
+                auto tmpScaleA
+                    = DGen::preSwizzle(hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
+                deviceScaleA = make_shared_device(tmpScaleA);
             }
             else
             {
@@ -320,8 +322,9 @@ namespace rocRoller::Client::GEMMClient
                                    problemParams.types.scalePretileB[1]};
                 };
 
-                auto tmpScaleB = preSwizzle(hostScaleB, descScaleB, preSwizzleSize, preTileSize);
-                deviceScaleB   = make_shared_device(tmpScaleB);
+                auto tmpScaleB
+                    = DGen::preSwizzle(hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
+                deviceScaleB = make_shared_device(tmpScaleB);
             }
             else
             {
@@ -1245,6 +1248,8 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::make_pair("--prefetchScale", &SolutionParameters::prefetchScale),
         std::make_pair("--load_A", &SolutionParameters::loadPathA),
         std::make_pair("--load_B", &SolutionParameters::loadPathB),
+        std::make_pair("--padLDS_A", &SolutionParameters::padLDSA),
+        std::make_pair("--padLDS_B", &SolutionParameters::padLDSB),
         std::make_pair("--storeLDS_D", &SolutionParameters::storeLDSD),
         std::make_pair("--prefetch", &SolutionParameters::prefetch),
         std::make_pair("--prefetchInFlight", &SolutionParameters::prefetchInFlight),
@@ -1296,7 +1301,15 @@ namespace rocRoller::Client::GEMMClient::CLI
         auto update = [&](const std::string& optionName, auto& value) -> bool {
             if(app.get_option(optionName)->count())
             {
-                value = app.get_option(optionName)->as<std::decay_t<decltype(value)>>();
+                if constexpr(std::is_same_v<std::decay_t<decltype(value)>, std::pair<int, int>>)
+                {
+                    auto arg = app.get_option(optionName)->as<std::string>();
+                    rocRoller::Client::GEMMClient::CLI::ParseIntPair(arg, value);
+                }
+                else
+                {
+                    value = app.get_option(optionName)->as<std::decay_t<decltype(value)>>();
+                }
                 return true;
             }
             return false;
@@ -1428,6 +1441,9 @@ namespace rocRoller::Client::GEMMClient::CLI
                 solution.loadPathBScale = SolutionParams::LoadPath::BufferToLDS;
         }
 
+        update(SN(&SP::padLDSA), solution.padLDSA);
+        update(SN(&SP::padLDSB), solution.padLDSB);
+
         // Swizzling
 
         update(SN(&SP::swizzleScale), solution.swizzleScale);
@@ -1506,6 +1522,9 @@ int main(int argc, const char* argv[])
         .loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR,
         .loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR,
         .storeLDSD = true,
+
+        .padLDSA = {0u, 0u},
+        .padLDSB = {0u, 0u},
 
         .prefetch          = false,
         .prefetchInFlight  = 0,
@@ -1735,6 +1754,14 @@ int main(int argc, const char* argv[])
 
     app.add_flag(SN(&SP::matchMemoryAccess),
                  "Match memory access to transpose.  Currently decreases performance.");
+    auto descriptionPadLDSA = fmt::format("Byte padding for A LDS buffer.  Passed as a pair: "
+                                          "contiguous-bytes,padding-bytes, eg {}=1024,8",
+                                          SN(&SP::padLDSA));
+    app.add_option(SN(&SP::padLDSA), descriptionPadLDSA);
+    auto descriptionPadLDSB = fmt::format("Byte padding for B LDS buffer.  Passed as a pair: "
+                                          "contiguous-bytes,padding-bytes, eg {}=1024,8",
+                                          SN(&SP::padLDSB));
+    app.add_option(SN(&SP::padLDSB), descriptionPadLDSB);
     app.add_flag(SN(&SP::prefetch), "Enable prefetching (UnrollK=2 implied).");
     app.add_option(SN(&SP::prefetchInFlight), "Number of prefetches in flight at the same time");
     app.add_option(SN(&SP::prefetchLDSFactor),
@@ -2175,11 +2202,11 @@ int main(int argc, const char* argv[])
 
     if(pretileScale)
     {
-        types.scalePretileA = {static_cast<unsigned long>(solution.macM),
-                               static_cast<unsigned long>(solution.macK / types.scaleBlockSize)};
-
-        types.scalePretileB = {static_cast<unsigned long>(solution.macK / types.scaleBlockSize),
-                               static_cast<unsigned long>(solution.macN)};
+        AssertFatal(types.scaleShuffleTileA.size() >= 2 && types.scaleShuffleTileB.size() >= 2,
+                    "scaleShuffleTileA and scaleShuffleTileB must have at least 2 elements when "
+                    "pretileScale is enabled");
+        types.scalePretileA = {types.scaleShuffleTileA[0], types.scaleShuffleTileA[1]};
+        types.scalePretileB = {types.scaleShuffleTileB[1], types.scaleShuffleTileB[0]};
     }
 
     problem.types  = types;
