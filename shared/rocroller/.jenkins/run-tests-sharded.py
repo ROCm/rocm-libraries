@@ -102,6 +102,11 @@ def start_shard(shard_index, test_exe, test_type, num_shards, gpu_filter, build_
             "test_report/catch2_shard_{}.xml".format(shard_index),
         ]
 
+    # Log the command being executed
+    cmd_str = " ".join(cmd)
+    print(f"{shard_tag} Running command in {build_dir}:", flush=True)
+    print(f"{shard_tag}   {cmd_str}", flush=True)
+
     # Use pseudo-TTY to ensure line-buffered output from subprocess
     master_fd, slave_fd = pty.openpty()
 
