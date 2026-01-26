@@ -227,14 +227,6 @@ else()
   endforeach()
 
   add_gtest(miopen_gtest "${TESTS_CPP}")
-  target_link_options(miopen_gtest
-    PRIVATE
-      -Wl,--error-limit=0
-  )
-  target_compile_options(miopen_gtest
-    PRIVATE
-      -ferror-limit=0
-  )
 
   if(MIOPEN_USE_COMPOSABLEKERNEL)
     if(MIOPEN_BUILD_CK )

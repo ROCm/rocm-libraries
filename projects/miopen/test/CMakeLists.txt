@@ -369,8 +369,6 @@ separate_arguments(MIOPEN_TEST_FLAGS_ARGS NATIVE_COMMAND ${MIOPEN_TEST_FLAGS})
 
 function(add_test_executable TEST_NAME)
     add_executable (${TEST_NAME} EXCLUDE_FROM_ALL ${ARGN})
-    target_link_options(${TEST_NAME} PRIVATE -Wl,--error-limit=0)
-    target_compile_options(${TEST_NAME} PRIVATE -ferror-limit=0)
     if(WIN32)
         target_compile_definitions(${TEST_NAME} PRIVATE NOMINMAX)
     endif()

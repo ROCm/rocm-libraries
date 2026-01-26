@@ -889,8 +889,6 @@ else()
         )
 endif()
 
-target_compile_options(MIOpen PRIVATE -ferror-limit=0)
-
 rocm_set_soversion(MIOpen ${MIOpen_SOVERSION})
 
 clang_tidy_check(MIOpen)

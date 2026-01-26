@@ -85,15 +85,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     set_target_properties(MIOpenDriver PROPERTIES COMPILE_FLAGS -pthread LINK_FLAGS -pthread)
 endif()
 
-target_link_options(MIOpenDriver
-    PRIVATE
-        -Wl,--error-limit=0
-)
-target_compile_options(MIOpenDriver
-    PRIVATE
-        -ferror-limit=0
-)
-
 if( NOT ENABLE_ASAN_PACKAGING )
   install(TARGETS MIOpenDriver
       PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
