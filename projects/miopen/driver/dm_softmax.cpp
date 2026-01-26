@@ -32,6 +32,8 @@ static Driver* makeDriver(const std::string& base_arg)
         return new SoftmaxDriver<float, double>();
     if(base_arg == "softmaxfp16")
         return new SoftmaxDriver<float16, double>();
+    if(base_arg == "softmaxbfp16")
+        return new SoftmaxDriver<bfloat16, double>();
     return nullptr;
 }
 

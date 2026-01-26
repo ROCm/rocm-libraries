@@ -6,10 +6,10 @@
 #include <string>
 #include <unordered_map>
 
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <hipdnn_sdk/utilities/Workspace.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
@@ -17,10 +17,10 @@
 #include "../utils/Helpers.hpp"
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_sdk;
+using namespace hipdnn_data_sdk;
 
 template <typename InputType, typename IntermediateType>
-void SampleRunner::operator()(const TensorLayout& layout)
+bool SampleRunner::operator()(const TensorLayout& layout)
 {
     auto inputType = getDataTypeEnumFromType<InputType>();
     auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
@@ -84,20 +84,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
     dbias->set_data_type(intermediateType);
     dbias->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->validate());
-    std::cout << "Graph validation successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
-    std::cout << "Operation graph build successful.\n";
-
-    HIPDNN_FE_CHECK(graph->create_execution_plans());
-    std::cout << "Execution plans created successfully.\n";
-
-    HIPDNN_FE_CHECK(graph->check_support());
-    std::cout << "Graph support check successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_plans());
-    std::cout << "Plans build successful.\n";
+    HIPDNN_FE_CHECK(graph->build(handle));
+    std::cout << "Graph build successful.\n";
 
     // Create tensors for execution
     utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
@@ -148,6 +136,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto dscaleHostPtr = dscaleTensor.memory().hostData();
     auto dbiasHostPtr = dbiasTensor.memory().hostData();
 
+    bool validationPassed = true;
+
     if(config.cpuValidation)
     {
         std::cout << "Running CPU reference validation using CpuReferenceGraphExecutor...\n";
@@ -193,6 +183,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
         std::cout << "  dx: " << (dxValid ? "successful" : "failed") << "\n";
         std::cout << "  dscale: " << (dscaleValid ? "successful" : "failed") << "\n";
         std::cout << "  dbias: " << (dbiasValid ? "successful" : "failed") << "\n";
+
+        validationPassed = dxValid && dscaleValid && dbiasValid;
     }
 
     std::cout << "First 10 dx values: ";
@@ -213,6 +205,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     std::cout << "\nFused BN Inference + Activation Backward + BN Backward graph execution "
               << "complete for " << inputType << ".\n\n";
+    return validationPassed;
 }
 
 int main(int argc, char* argv[])
@@ -225,9 +218,20 @@ int main(int argc, char* argv[])
     hipdnnHandle_t handle;
     HIPDNN_CHECK(backend->create(&handle));
 
-    run(SampleRunner{handle, config});
+    bool allPassed = run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(backend->destroy(handle));
-    std::cout << "All fused BN Inference + Activation Backward + BN Backward runs completed.\n";
-    return 0;
+
+    if(allPassed)
+    {
+        std::cout << "All fused BN Inference + Activation Backward + BN Backward runs completed "
+                  << "successfully.\n";
+        return 0;
+    }
+    else
+    {
+        std::cout << "One or more fused BN Inference + Activation Backward + BN Backward runs "
+                  << "failed validation.\n";
+        return 1;
+    }
 }

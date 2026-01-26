@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <hipdnn_sdk/utilities/MigratableMemory.hpp>
+#include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
 
-namespace hipdnn_sdk::helpers
+namespace hipdnn_data_sdk::helpers
 {
 
 template <typename T>
@@ -38,4 +38,4 @@ utilities::MigratableMemory<T> createConstantBuffer(size_t size, T value)
     return buffer;
 }
 
-} // namespace hipdnn_sdk::helpers
+} // namespace hipdnn_data_sdk::helpers

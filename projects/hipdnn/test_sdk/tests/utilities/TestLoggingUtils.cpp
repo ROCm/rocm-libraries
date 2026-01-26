@@ -2,17 +2,17 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/logging/ComponentFormatter.hpp>
-#include <hipdnn_sdk/logging/LoggingUtils.hpp>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_data_sdk/logging/ComponentFormatter.hpp>
+#include <hipdnn_data_sdk/logging/LoggingUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <spdlog/details/log_msg.h>
 #include <spdlog/pattern_formatter.h>
 
-using namespace hipdnn_sdk::logging;
+using namespace hipdnn_data_sdk::logging;
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::utilities;
 
 TEST(TestLoggingUtils, IsValidLogLevelWithValidLevels)
 {
@@ -60,7 +60,7 @@ TEST(TestLoggingUtils, IsLoggingEnabledWithInvalidOrUnsetLevels)
 
     EXPECT_FALSE(isLoggingEnabled());
 
-    hipdnn_sdk::utilities::unsetEnv("HIPDNN_LOG_LEVEL");
+    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_LOG_LEVEL");
     EXPECT_FALSE(isLoggingEnabled());
 }
 

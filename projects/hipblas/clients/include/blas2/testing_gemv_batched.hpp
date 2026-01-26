@@ -381,7 +381,7 @@ void testing_gemv_batched(const Arguments& arg)
 
     int abs_incy = incy >= 0 ? incy : -incy;
 
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     T h_alpha = arg.get_alpha<T>();
     T h_beta  = arg.get_beta<T>();
@@ -492,7 +492,7 @@ void testing_gemv_batched(const Arguments& arg)
 
     if(arg.timing)
     {
-        double gpu_time_used;
+        double gpu_time_used{0};
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_DEVICE));
         CHECK_HIP_ERROR(dy.transfer_from(hy));
         hipStream_t stream;

@@ -32,7 +32,7 @@
  * A graph transformation...
  *
  * Lowering passes include:
- * - AddComputeIndex
+ * - AssignIndexExpressions
  * - AddConvert
  * - AddDeallocate
  * - AddLDS

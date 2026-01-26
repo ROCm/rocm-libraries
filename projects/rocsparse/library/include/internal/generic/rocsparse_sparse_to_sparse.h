@@ -49,6 +49,9 @@ extern "C" {
 *  @param[out]
 *  buffer_size_in_bytes  size in bytes of the \p buffer
 *
+*  \note
+*  This routine does not support batched computation.
+*
 *  \retval      rocsparse_status_success the operation completed successfully.
 *  \retval      rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval      rocsparse_status_invalid_value if any required enumeration is invalid.
@@ -75,6 +78,9 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *
 *  \note
 *  The format \ref rocsparse_format_bell is not supported.
+*
+*  \note
+*  This routine does not support batched computation.
 *
 *  @param[in]
 *  handle       handle to the rocsparse library context queue.

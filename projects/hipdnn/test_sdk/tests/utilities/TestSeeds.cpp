@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <unordered_set>
@@ -27,7 +27,7 @@ protected:
 
 TEST_F(TestSeeds, ReturnsDefaultSeedWhenEnvVarNotSet)
 {
-    hipdnn_sdk::utilities::unsetEnv("HIPDNN_GLOBAL_TEST_SEED");
+    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_GLOBAL_TEST_SEED");
 
     auto seed = getGlobalTestSeed();
 
@@ -36,7 +36,7 @@ TEST_F(TestSeeds, ReturnsDefaultSeedWhenEnvVarNotSet)
 
 TEST_F(TestSeeds, ReturnsDefaultSeedWhenEnvVarIsEmpty)
 {
-    hipdnn_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "");
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "");
 
     auto seed = getGlobalTestSeed();
 
@@ -45,7 +45,7 @@ TEST_F(TestSeeds, ReturnsDefaultSeedWhenEnvVarIsEmpty)
 
 TEST_F(TestSeeds, ReturnsSpecificSeedWhenNumericValueProvided)
 {
-    hipdnn_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "42");
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "42");
 
     auto seed = getGlobalTestSeed();
 
@@ -54,7 +54,7 @@ TEST_F(TestSeeds, ReturnsSpecificSeedWhenNumericValueProvided)
 
 TEST_F(TestSeeds, HandlesLargeNumericValues)
 {
-    hipdnn_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "4294967295"); // Max uint32
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "4294967295"); // Max uint32
 
     auto seed = getGlobalTestSeed();
 
@@ -63,7 +63,7 @@ TEST_F(TestSeeds, HandlesLargeNumericValues)
 
 TEST_F(TestSeeds, ReturnsRandomSeedWhenRandomSpecified)
 {
-    hipdnn_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "RANDOM");
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "RANDOM");
 
     std::unordered_set<unsigned int> seeds;
     constexpr int ITERATIONS = 100;
@@ -84,7 +84,7 @@ TEST_F(TestSeeds, RandomIsCaseInsensitive)
 
     for(const auto& variant : randomVariants)
     {
-        hipdnn_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", variant.c_str());
+        hipdnn_data_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", variant.c_str());
 
         std::unordered_set<unsigned int> seeds;
         constexpr int ITERATIONS = 100;
@@ -102,7 +102,7 @@ TEST_F(TestSeeds, RandomIsCaseInsensitive)
 
 TEST_F(TestSeeds, ReturnsDefaultSeedForInvalidNumericValue)
 {
-    hipdnn_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "not_a_number");
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "not_a_number");
 
     auto seed = getGlobalTestSeed();
 
@@ -113,7 +113,7 @@ TEST_F(TestSeeds, ReturnsDefaultSeedForInvalidNumericValue)
 TEST_F(TestSeeds, ReturnsDefaultSeedForOutOfRangeValue)
 {
     // Value larger than unsigned long can hold
-    hipdnn_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "99999999999999999999999999");
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "99999999999999999999999999");
 
     auto seed = getGlobalTestSeed();
 
@@ -123,7 +123,7 @@ TEST_F(TestSeeds, ReturnsDefaultSeedForOutOfRangeValue)
 
 TEST_F(TestSeeds, ConsistentSeedProducesSameValue)
 {
-    hipdnn_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "12345");
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_GLOBAL_TEST_SEED", "12345");
 
     auto seed1 = getGlobalTestSeed();
     auto seed2 = getGlobalTestSeed();

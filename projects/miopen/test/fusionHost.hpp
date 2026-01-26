@@ -140,15 +140,17 @@ void batchNormSpatialHostInference(const tensor<T>& input,
                                    const tensor<U>& bias,
                                    double epsilon,
                                    const tensor<V>& estimatedMean,
-                                   const tensor<V>& estimatedVariance)
+                                   const tensor<V>& estimatedVariance,
+                                   bool useInverseVariance = false)
 {
 
     int n_batches, channels, height, width;
     std::tie(n_batches, channels, height, width) = miopen::tien<4>(input.desc.GetLengths());
     miopen::par_for(channels, 1, [&](int cidx) { // via channel
-        V mean           = estimatedMean(0, cidx, 0, 0);
-        V variance       = estimatedVariance(0, cidx, 0, 0);
-        double invertVar = 1.0 / sqrt(variance + epsilon);
+        V mean     = estimatedMean(0, cidx, 0, 0);
+        V variance = estimatedVariance(0, cidx, 0, 0);
+        double invertVar =
+            useInverseVariance ? static_cast<double>(variance) : 1.0 / sqrt(variance + epsilon);
         // process the batch per channel
         for(int row = 0; row < height; row++)
         { // via rows
@@ -174,7 +176,8 @@ void batchNormPerActivHostInference(const tensor<T>& input,
                                     const tensor<U>& bias,
                                     double epsilon,
                                     const tensor<V>& estimatedMean,
-                                    const tensor<V>& estimatedVariance)
+                                    const tensor<V>& estimatedVariance,
+                                    bool useInverseVariance = false)
 {
     int n_batches, channels, height, width;
     std::tie(n_batches, channels, height, width) = miopen::tien<4>(input.desc.GetLengths());
@@ -186,7 +189,7 @@ void batchNormPerActivHostInference(const tensor<T>& input,
                 // apply down the n_batch dimension
                 double mean       = estimatedMean(0, cidx, row, column);
                 double variance   = estimatedVariance(0, cidx, row, column);
-                double elemInvVar = 1.0 / sqrt(variance + epsilon);
+                double elemInvVar = useInverseVariance ? variance : 1.0 / sqrt(variance + epsilon);
                 for(int bidx = 0; bidx < n_batches; bidx++)
                 { // via mini_batch
                     // per (x-dims) channel load a block of data into LDS

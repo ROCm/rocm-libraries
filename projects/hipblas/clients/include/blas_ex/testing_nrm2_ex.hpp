@@ -136,9 +136,7 @@ void testing_nrm2_ex(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(dx.memcheck());
     CHECK_DEVICE_ALLOCATION(d_hipblas_result.memcheck());
 
-    Tr cpu_result, hipblas_result_host, hipblas_result_device;
-
-    double gpu_time_used, hipblas_error_host, hipblas_error_device;
+    double gpu_time_used{0}, hipblas_error_host{0}, hipblas_error_device{0};
 
     // Initial Data on CPU
     hipblas_init_vector(hx, arg, hipblas_client_alpha_sets_nan, true);
@@ -148,6 +146,8 @@ void testing_nrm2_ex(const Arguments& arg)
 
     if(arg.unit_check || arg.norm_check)
     {
+        Tr cpu_result, hipblas_result_host, hipblas_result_device;
+
         // hipblasNrm2 accept both dev/host pointer for the scalar
         CHECK_HIPBLAS_ERROR(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_DEVICE));
         DAPI_CHECK(hipblasNrm2ExFn,

@@ -29,6 +29,8 @@
 #define NUM_PERF_RUNS 5
 #define NUM_WARMUP_RUNS 3
 
+#include <fstream>
+
 struct PerfHelper
 {
     std::vector<std::tuple<std::string, double, double, double, double, double>> kernelTestStats;

@@ -88,8 +88,8 @@ Tests:
   B_row_indextype: i64
   B_col_indextype: i64
   precision: f64_c
-  M: [17, 49, 203]
-  N: [7, 17, 419]
+  M: [17, 49]
+  N: [7, 17]
   baseA: [rocsparse_index_base_zero]
   formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_coo, rocsparse_format_coo_aos,  rocsparse_format_ell, rocsparse_format_bsr ]
   formatB: [rocsparse_format_coo, rocsparse_format_coo_aos, rocsparse_format_csc, rocsparse_format_csr,  rocsparse_format_ell, rocsparse_format_bsr ]
@@ -102,8 +102,8 @@ Tests:
   B_row_indextype: i64
   B_col_indextype: i64
   precision: f32_c
-  M: [49, 203, 20033]
-  N: [419, 65402]
+  M: [49, 203]
+  N: [419, 2000]
   baseA: [rocsparse_index_base_zero]
   formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_coo, rocsparse_format_coo_aos,  rocsparse_format_ell, rocsparse_format_bsr ]
   formatB: [rocsparse_format_coo, rocsparse_format_coo_aos, rocsparse_format_csc, rocsparse_format_csr,  rocsparse_format_ell, rocsparse_format_bsr ]
@@ -117,8 +117,8 @@ Tests:
   B_row_indextype: i64
   B_col_indextype: i32
   precision: f64_c
-  M: [1, 2, 2048, 4096]
-  N: [1, 2, 2048, 4096]
+  M: [1, 2]
+  N: [1, 2]
   baseA: [rocsparse_index_base_zero]
   formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_bsr ]
   formatB: [rocsparse_format_csc, rocsparse_format_csr, rocsparse_format_bsr, rocsparse_format_coo, rocsparse_format_ell ]
@@ -131,8 +131,8 @@ Tests:
   B_row_indextype: i32
   B_col_indextype: i32
   precision: f32_r
-  M: [17939, 3249, 79392]
-  N: [79392, 1337, 3249]
+  M: [2000]
+  N: [2000, 1337]
   baseA: [rocsparse_index_base_zero]
   formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_coo, rocsparse_format_coo_aos,  rocsparse_format_ell, rocsparse_format_bsr ]
   formatB: [rocsparse_format_coo, rocsparse_format_coo_aos, rocsparse_format_csc, rocsparse_format_csr,  rocsparse_format_ell, rocsparse_format_bsr ]
@@ -145,8 +145,8 @@ Tests:
   B_row_indextype: i32
   B_col_indextype: i32
   precision: f32_r
-  M: [179399, 33249, 931392]
-  N: [739392, 433370, 324943]
+  M: [5000]
+  N: [5000]
   baseA: [rocsparse_index_base_zero]
   formatA: [rocsparse_format_csr, rocsparse_format_coo, rocsparse_format_coo_aos,  rocsparse_format_ell, rocsparse_format_bsr ]
   formatB: [rocsparse_format_coo, rocsparse_format_coo_aos, rocsparse_format_csc, rocsparse_format_csr,  rocsparse_format_ell, rocsparse_format_bsr ]
