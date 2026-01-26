@@ -49,16 +49,14 @@ uint32_t hipblaslt_get_flops_per_clock_per_cu_gfx950(const hipDataType          
                                                      const hipblasComputeType_t computeType)
 {
     if(inputType == HIP_R_64F)
-        return 158;
+        return 128;
     else if(inputType == HIP_R_32F)
         return 256;
-    else if(computeType == HIPBLAS_COMPUTE_32F_FAST_TF32)
-        return 1024;
     else if(inputType == HIP_R_16F || inputType == HIP_R_16BF)
-        return 2560;
+        return 4096;
     else if(inputType == HIP_R_8F_E4M3_FNUZ || inputType == HIP_R_8F_E5M2_FNUZ
             || inputType == HIP_R_8F_E4M3 || inputType == HIP_R_8F_E5M2 || inputType == HIP_R_8I)
-        return 5120;
+        return 8192;
     else
         return 0;
 }
