@@ -51,7 +51,7 @@ namespace FastDivisionTest
         auto expr    = magicMultiple(Ex::literal(x));
 
         //return evaluate(expr);
-	return Ex::literal(evaluate(expr));
+        return Ex::literal(evaluate(expr));
     }
 
     TEST_CASE("FastDivision ExpressionTransformation works for constant expressions.",
@@ -90,7 +90,7 @@ namespace FastDivisionTest
         expr_fast = fastDivision(expr, context.get());
 
         {
-	    auto mulHigh = multiplyHigh(b, getMagicMultiple(7u));
+            auto mulHigh = multiplyHigh(b, getMagicMultiple(7u));
             CHECK_THAT(
                 expr_fast,
                 EquivalentTo((((b - mulHigh) >> Ex::literal(1u)) + mulHigh) >> Ex::literal(2)));
@@ -105,7 +105,7 @@ namespace FastDivisionTest
 
         {
             //auto mulPlusB = multiplyHigh(b, Ex::literal(getMagicMultiple(-5))) + b;
-	    auto mulPlusB = multiplyHigh(b, getMagicMultiple(-5)) + b;
+            auto mulPlusB = multiplyHigh(b, getMagicMultiple(-5)) + b;
             CHECK_THAT(expr_fast,
                        EquivalentTo((((mulPlusB + ((mulPlusB >> Ex::literal(31)) & Ex::literal(4)))
                                       >> Ex::literal(2u))
@@ -191,11 +191,8 @@ namespace FastDivisionTest
 
             auto t = ((a_unsigned - mulHigh >> Ex::literal(1u)) + mulHigh) >> shift;
 
-            auto result
-                = Ex::conditional( (shift & Ex::literal(1u << 31u)) == Ex::literal(0u),
-		t,
-		a_unsigned
-		);
+            auto result = Ex::conditional(
+                (shift & Ex::literal(1u << 31u)) == Ex::literal(0u), t, a_unsigned);
 
             CHECK_THAT(expr_fast, EquivalentTo(result));
         }
