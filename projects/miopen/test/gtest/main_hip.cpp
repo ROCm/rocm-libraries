@@ -18,13 +18,39 @@ namespace miopen {
 namespace tests {
 namespace perfdb {
 
-#if defined(_MSC_VER)
-// MSVC: use selectany for weak linkage
-__declspec(selectany) void SetExePath(const char*) {}
-__declspec(selectany) bool IsChildProcessMode(int, char**) { return false; }
-__declspec(selectany) int RunChildProcess(int, char**) { return 0; }
+#if defined(_WIN32)
+// Windows: use /alternatename linker directive (selectany doesn't work for functions)
+// Use extern "C" to avoid C++ name mangling issues with linker directives
+
+extern "C" {
+static void miopen_perfdb_SetExePath_weak(const char*) {}
+static int miopen_perfdb_IsChildProcessMode_weak(int, char**) { return 0; }
+static int miopen_perfdb_RunChildProcess_weak(int, char**) { return 0; }
+}
+
+#pragma comment(linker, "/alternatename:miopen_perfdb_SetExePath=miopen_perfdb_SetExePath_weak")
+#pragma comment( \
+    linker,      \
+    "/alternatename:miopen_perfdb_IsChildProcessMode=miopen_perfdb_IsChildProcessMode_weak")
+#pragma comment(linker, \
+                "/alternatename:miopen_perfdb_RunChildProcess=miopen_perfdb_RunChildProcess_weak")
+
+extern "C" void miopen_perfdb_SetExePath(const char*);
+extern "C" int miopen_perfdb_IsChildProcessMode(int, char**);
+extern "C" int miopen_perfdb_RunChildProcess(int, char**);
+
+inline void SetExePath(const char* path) { miopen_perfdb_SetExePath(path); }
+inline bool IsChildProcessMode(int argc, char** argv)
+{
+    return miopen_perfdb_IsChildProcessMode(argc, argv) != 0;
+}
+inline int RunChildProcess(int argc, char** argv)
+{
+    return miopen_perfdb_RunChildProcess(argc, argv);
+}
+
 #else
-// GCC/Clang: use weak attribute
+// GCC/Clang on Linux: use weak attribute
 __attribute__((weak)) void SetExePath(const char*) {}
 __attribute__((weak)) bool IsChildProcessMode(int, char**) { return false; }
 __attribute__((weak)) int RunChildProcess(int, char**) { return 0; }
