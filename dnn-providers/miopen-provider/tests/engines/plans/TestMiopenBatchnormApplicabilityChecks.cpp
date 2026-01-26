@@ -3663,7 +3663,7 @@ inline std::vector<BatchnormInferenceVarianceExtFusedConfigTestCase>
     // Unhappy paths - all invalid type configurations
     for(const auto& invalidTypeConfig : type_configs::INVALID_FUSED_ALL)
     {
-        auto dims = shapes::INFERENCE_4D[0];
+        const auto& dims = shapes::INFERENCE_4D[0];
         auto layout = LAYOUTS_4D[0];
         auto configs
             = createBatchnormInferenceWithVarianceTensors(invalidTypeConfig, dims, *layout);
