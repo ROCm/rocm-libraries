@@ -1,10 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_data_sdk/logging/Logger.hpp>
-#include <hipdnn_plugin_sdk/EngineManager.hpp>
-
-#include "EngineManager.hpp"
 #include "MiopenContainer.hpp"
 #include "engines/MiopenEngine.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
@@ -14,6 +10,7 @@
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_plugin_sdk/EngineManager.hpp>
 
 namespace miopen_legacy_plugin
 {
@@ -43,7 +40,7 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
     static const std::vector<EngineDefinition> s_engineDefinitions = {
         // MIOPEN_ENGINE
         {MIOPEN_ENGINE_ID,
-         []() -> std::unique_ptr<IEngine> {
+         []() -> std::unique_ptr<hipdnn_plugin_sdk::IEngine> {
              auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_ID);
              engine->addPlanBuilder(std::make_unique<MiopenBatchnormPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<MiopenBatchnormFwdTrainingPlanBuilder>());

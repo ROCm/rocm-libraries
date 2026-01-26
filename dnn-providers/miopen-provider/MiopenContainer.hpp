@@ -7,13 +7,14 @@
 #include <memory>
 #include <vector>
 
-#include <hipdnn_plugin_sdk/EngineManager.hpp>
+namespace hipdnn_plugin_sdk
+{
+class IEngine;
+class EngineManager;
+}
 
 namespace miopen_legacy_plugin
 {
-
-class EngineManager;
-class IEngine;
 
 /*
  * Container class to manage the intantiation and ownership of all MIOpen plan builders and engines.
@@ -42,7 +43,7 @@ private:
     struct EngineDefinition
     {
         int64_t id; // Set id using EngineNames.hpp.
-        std::function<std::unique_ptr<IEngine>()> createEngine;
+        std::function<std::unique_ptr<hipdnn_plugin_sdk::IEngine>()> createEngine;
     };
 
     static const std::vector<EngineDefinition>& getEngineDefinitions();
