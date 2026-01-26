@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2019 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -140,14 +140,14 @@ void testing_csrilusv(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(&hposition_2, d_position, sizeof(int), hipMemcpyDeviceToHost));
 
     // Compute host reference csrilu0
-    int position_gold = csrilu0(m,
-                                hcsr_row_ptr.data(),
-                                hcsr_col_ind.data(),
-                                hcsr_val.data(),
-                                idx_base,
-                                false,
-                                0.0,
-                                make_DataType<T>(0.0, 0.0));
+    int position_gold = host_csrilu0(m,
+                                     hcsr_row_ptr.data(),
+                                     hcsr_col_ind.data(),
+                                     hcsr_val.data(),
+                                     idx_base,
+                                     false,
+                                     0.0,
+                                     make_DataType<T>(0.0, 0.0));
 
     // Check zero pivot results
     unit_check_general(1, 1, 1, &position_gold, &hposition_1);

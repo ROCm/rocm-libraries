@@ -275,6 +275,70 @@ public:
                                                                            result.second);
     }
 
+    static std::shared_ptr<TensorAttributes>
+        fromFlatBuffer(const hipdnn_data_sdk::data_objects::TensorAttributes* fb)
+    {
+        if(fb == nullptr)
+        {
+            return nullptr;
+        }
+
+        auto tensor = std::make_shared<TensorAttributes>();
+
+        tensor->set_uid(fb->uid());
+
+        if(fb->name() != nullptr)
+        {
+            tensor->set_name(fb->name()->c_str());
+        }
+
+        tensor->set_data_type(fromSdkType(fb->data_type()));
+
+        if(fb->dims() != nullptr)
+        {
+            std::vector<int64_t> dims(fb->dims()->begin(), fb->dims()->end());
+            tensor->set_dim(dims);
+        }
+
+        if(fb->strides() != nullptr)
+        {
+            std::vector<int64_t> strides(fb->strides()->begin(), fb->strides()->end());
+            tensor->set_stride(strides);
+        }
+
+        tensor->set_is_virtual(fb->virtual_());
+
+        auto valueType = fb->value_type();
+        if(valueType != hipdnn_data_sdk::data_objects::TensorValue::NONE)
+        {
+            switch(valueType)
+            {
+            case hipdnn_data_sdk::data_objects::TensorValue::Float32Value:
+                tensor->set_value(fb->value_as_Float32Value()->value());
+                break;
+            case hipdnn_data_sdk::data_objects::TensorValue::Float64Value:
+                tensor->set_value(fb->value_as_Float64Value()->value());
+                break;
+            case hipdnn_data_sdk::data_objects::TensorValue::Float16Value:
+                tensor->set_value(static_cast<half>(fb->value_as_Float16Value()->value()));
+                break;
+            case hipdnn_data_sdk::data_objects::TensorValue::BFloat16Value:
+                tensor->set_value(static_cast<hip_bfloat16>(fb->value_as_BFloat16Value()->value()));
+                break;
+            case hipdnn_data_sdk::data_objects::TensorValue::Float8Value:
+                tensor->set_value(fb->value_as_Float8Value()->value());
+                break;
+            case hipdnn_data_sdk::data_objects::TensorValue::Int32Value:
+                tensor->set_value(fb->value_as_Int32Value()->value());
+                break;
+            default:
+                break;
+            }
+        }
+
+        return tensor;
+    }
+
 private:
     int64_t _uid = 0;
     bool _uidSet = false;

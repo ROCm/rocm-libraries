@@ -25,6 +25,7 @@
 #include "hipfft/hipfftXt.h"
 #include "rocfft/rocfft.h"
 #include <algorithm>
+#include <cstring> // std::memset
 #include <memory>
 #include <sstream>
 #include <string>
@@ -467,7 +468,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     const bool ignore_user_distances = !plan->ionembed.get_nembed(fft_io::fft_io_in)
                                        && !plan->ionembed.get_nembed(fft_io::fft_io_out);
     std::vector<size_t> i_strides, o_strides;
-    size_t              inDist, outDist;
+    size_t              inDist = 0, outDist = 0;
     for(auto dft_type : iotype.transform_types())
     {
         for(auto placement : {rocfft_placement_inplace, rocfft_placement_notinplace})
@@ -1706,7 +1707,7 @@ try
     if(!plan || plan->initialized())
         return HIPFFT_INVALID_PLAN;
     int dev_count = 0;
-    if(hipGetDeviceCount(&dev_count) != HIP_SUCCESS || dev_count <= 0)
+    if(hipGetDeviceCount(&dev_count) != hipSuccess || dev_count <= 0)
         return HIPFFT_INTERNAL_ERROR;
     if(std::any_of(
            gpus, gpus + count, [=](int gpu_id) { return gpu_id < 0 || gpu_id >= dev_count; }))
@@ -1773,7 +1774,7 @@ try
         return HIPFFT_INVALID_VALUE;
 
     auto lib_desc = std::make_unique<hipLibXtDesc>();
-    memset(lib_desc.get(), 0, sizeof(hipLibXtDesc));
+    std::memset(lib_desc.get(), 0, sizeof(hipLibXtDesc));
 
     lib_desc->version       = 0;
     lib_desc->library       = HIPLIB_FORMAT_HIPFFT;
@@ -1781,7 +1782,7 @@ try
     lib_desc->libDescriptor = nullptr;
 
     auto xt_desc = std::make_unique<hipXtDesc>();
-    memset(xt_desc.get(), 0, sizeof(hipXtDesc));
+    std::memset(xt_desc.get(), 0, sizeof(hipXtDesc));
     xt_desc->version = 0;
 
     std::vector<hipfft_brick>* bricks           = nullptr;

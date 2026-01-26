@@ -109,8 +109,7 @@ void testing_scal(const Arguments& arg)
     device_vector<T> dx(N, incx);
     CHECK_DEVICE_ALLOCATION(dx.memcheck());
 
-    double gpu_time_used, cpu_time_used;
-    double hipblas_error = 0.0;
+    double hipblas_error{0};
 
     // Initial Data on CPU
     hipblas_init_vector(hx, arg, hipblas_client_alpha_sets_nan, true);
@@ -153,6 +152,7 @@ void testing_scal(const Arguments& arg)
 
     if(timing)
     {
+        double      gpu_time_used{0};
         hipStream_t stream;
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));
 

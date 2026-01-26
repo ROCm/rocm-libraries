@@ -79,7 +79,7 @@ std::size_t sizeof_kernel_FLOAT(const miopen::pooling::ProblemDescription& probl
 std::size_t sizeof_kernel_FLOAT_ACCUM(const miopen::pooling::ProblemDescription& problem)
 {
     const auto datatype = problem.GetXDesc().GetType();
-    if(datatype == miopenHalf)
+    if(datatype == miopenHalf || datatype == miopenBFloat16)
         return get_data_size(miopenFloat); // mixed precision
     return get_data_size(datatype);
 }
@@ -142,7 +142,8 @@ bool PoolingForward2d::IsApplicable(const ExecutionContext& context,
            problem.GetXDesc().GetNumDims() == 4 &&
            problem.GetXDesc().GetType() == problem.GetYDesc().GetType() &&
            (problem.GetXDesc().GetType() == miopenFloat ||
-            problem.GetXDesc().GetType() == miopenHalf) &&
+            problem.GetXDesc().GetType() == miopenHalf ||
+            problem.GetXDesc().GetType() == miopenBFloat16) &&
            problem.GetXDesc().IsPossibleLayout4D5D("NCHW", strict) &&
            problem.GetYDesc().IsPossibleLayout4D5D("NCHW", strict) &&
            sizeof_private_memory(problem) <=

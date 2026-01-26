@@ -220,11 +220,18 @@ if(HIPBLASLT_ENABLE_MSGPACK)
 endif()
 
 if(NOT ROCM_LIBS_SUPERBUILD)
-    # TODO: This is a temporary solution to prevent the installation of the origami license files.
-    block(SCOPE_FOR VARIABLES)
-        set(ORIGAMI_ENABLE_INSTALL OFF)
-        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
-    endblock()
+    # TODO: Temporarily disabled TheRock origami integration to allow TheRock CI to pass.
+    # Re-enable once origami is available in TheRock.
+    # if(HIPBLASLT_ENABLE_THEROCK)
+    #     find_package(origami REQUIRED)
+    if(FALSE)
+    else()
+        # TODO: This is a temporary solution to prevent the installation of the origami license files.
+        block(SCOPE_FOR VARIABLES)
+            set(ORIGAMI_ENABLE_INSTALL OFF)
+            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
+        endblock()
+    endif()
 endif()
 
 add_subdirectory(tensilelite)
@@ -430,6 +437,25 @@ if(HIPBLASLT_ENABLE_CLIENT)
     )
     rocm_install(
         FILES "${CMAKE_CURRENT_SOURCE_DIR}/clients/bench/sequence.yaml"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        COMPONENT benchmarks
+    )
+
+    rocm_install(
+        PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/hipblaslt-perf"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        COMPONENT benchmarks
+    )
+    
+    # Install all Python modules required by hipblaslt-perf
+    rocm_install(
+        FILES 
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/bench.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/bench_sample.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/generator.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/git_info.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/specs.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/suites.py"
         DESTINATION "${CMAKE_INSTALL_BINDIR}"
         COMPONENT benchmarks
     )

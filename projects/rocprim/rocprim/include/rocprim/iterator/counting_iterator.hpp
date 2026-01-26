@@ -65,7 +65,7 @@ public:
     /// The category of the iterator.
     using iterator_category = std::random_access_iterator_tag;
 
-    static_assert(std::is_integral<value_type>::value, "Incrementable must be integral type");
+    static_assert(rocprim::is_integral<value_type>::value, "Incrementable must be integral type");
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
     using self_type = counting_iterator;
