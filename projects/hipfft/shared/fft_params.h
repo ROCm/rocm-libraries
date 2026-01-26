@@ -2376,6 +2376,12 @@ public:
     /**
      * @brief create one input (resp. output) field with as many bricks
      * as desired along every field dimension for the current object.
+     * The device assignment of the bricks is cycling though the total number
+     * of available devices (i.e., `gpusperrank * num_ranks`) starting from
+     * the `start_global_dev_idx` (global) device index.
+     * NOTE: The global device index `g` in `[0, gpusperrank * mp_ranks(`
+     * corresponds to device of local ID `g % gpusperrank` on process of rank
+     * `g / gpusperrank.
      * 
      * @tparam io enum flag specifying whether the input (`io == fft_io::fft_io_in`)
      * or output (`io == fft_io::fft_io_in`) field is being considered.
@@ -2385,11 +2391,11 @@ public:
      * bricks per dimension: `brick_count_along[i]` if the number of bricks
      * desired along the `i`-th field dimension.
      * @param[in] num_ranks number of processes used in the parallel computer
-     * (default value is one)
+     * (default value is 1)
+     * @param[in] start_global_dev_idx first (global) device ID to be considered
+     * in the cyclic assignment (default value is 0)
      * 
      * NOTES:
-     * - the input/output field is created only if an actual division is requested,
-     * i.e., if product(brick_count_along.begin(), brick_count_along.end()) > 1;
      * - data layouts within bricks are set to be compact, i.e., contiguous for
      * bricks in complex domain, padded in real domain for in-place operations
      * (only if the fastest dimension is not divided itself, i.e., if
@@ -2400,7 +2406,8 @@ public:
     template <fft_io io>
     void distribute_field(int                              gpusperrank,
                           const std::vector<unsigned int>& brick_count_along,
-                          int                              num_ranks = 1)
+                          int                              num_ranks            = 1,
+                          int                              start_global_dev_idx = 0)
     {
         static_assert(io == fft_io::fft_io_in || io == fft_io::fft_io_out);
 
@@ -2424,12 +2431,6 @@ public:
                 "number of available device(s) per process.");
 
         const auto total_bricks = product(brick_count_along.begin(), brick_count_along.end());
-        if(total_bricks == 1)
-        {
-            // nothing to split, no field required
-            iofields.clear();
-            return;
-        }
 
         struct length_division
         {
@@ -2490,8 +2491,10 @@ public:
                 }
             }
 
-            iobrick.device = b_idx % gpusperrank; // determine GPU within rank
-            iobrick.rank   = (b_idx / gpusperrank) % num_ranks; // determine MPI rank
+            iobrick.device
+                = (start_global_dev_idx + b_idx) % gpusperrank; // determine GPU within rank
+            iobrick.rank
+                = ((start_global_dev_idx + b_idx) / gpusperrank) % num_ranks; // determine MPI rank
         }
     }
 
