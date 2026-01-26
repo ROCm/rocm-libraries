@@ -35,5 +35,6 @@ TEST_ROUTINE(hybmv,
              arg.beta,
              arg.betai,
              arg.part,
-             arg.baseA);
+             arg.baseA,
+             arg.graph_test);
 #endif
