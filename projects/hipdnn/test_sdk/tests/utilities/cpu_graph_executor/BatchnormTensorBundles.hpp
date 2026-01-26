@@ -31,7 +31,27 @@ struct BatchnormFwdTensorBundle : public hipdnn_test_sdk::utilities::GraphTensor
         randomizeTensor(attributes.scale_tensor_uid(), 0.0f, 1.0f, seed);
         randomizeTensor(attributes.bias_tensor_uid(), 0.0f, 1.0f, seed);
         randomizeTensor(attributes.mean_tensor_uid(), 0.0f, 1.0f, seed);
-        randomizeTensor(attributes.inv_variance_tensor_uid(), 0.1f, 1.0f, seed);
+        randomizeTensor(attributes.inv_variance_tensor_uid(), 1.0f, 3.0f, seed);
+    }
+};
+
+struct BatchnormFwdWithVarianceTensorBundle : public hipdnn_test_sdk::utilities::GraphTensorBundle
+{
+    BatchnormFwdWithVarianceTensorBundle(
+        const hipdnn_plugin_sdk::INodeWrapper& node,
+        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+            tensorMap,
+        unsigned int seed)
+        : hipdnn_test_sdk::utilities::GraphTensorBundle(tensorMap)
+    {
+        const auto& attributes = node.attributesAs<
+            hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
+
+        randomizeTensor(attributes.x_tensor_uid(), 0.0f, 1.0f, seed);
+        randomizeTensor(attributes.scale_tensor_uid(), 0.0f, 1.0f, seed);
+        randomizeTensor(attributes.bias_tensor_uid(), 0.0f, 1.0f, seed);
+        randomizeTensor(attributes.mean_tensor_uid(), 0.0f, 1.0f, seed);
+        randomizeTensor(attributes.variance_tensor_uid(), 0.1f, 1.0f, seed);
     }
 };
 
