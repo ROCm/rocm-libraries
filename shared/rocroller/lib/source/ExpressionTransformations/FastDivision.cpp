@@ -178,70 +178,16 @@ namespace rocRoller
 
             if(!isSigned)
             {
-                //if(evaluationTimes(magicExpr)[EvaluationTime::Translate])
-                //{
-                //    auto magicValue = getUnsignedInt(evaluate(magicExpr));
-                //    auto shiftValue = getUnsignedInt(evaluate(numShiftsExpr));
-
-                //    if(magicValue == 0)
-                //        result = arithmeticShiftR(numerator, literal(shiftValue, denominatorType));
-                //    else
-                //    {
-                //        auto q = multiplyHigh(numerator, literal(magicValue, denominatorType));
-                //        if((shiftValue & 0x40))
-                //        {
-                //            auto t = (arithmeticShiftR(numerator - q, one)) + q;
-                //            result
-                //                = arithmeticShiftR(t, literal(shiftValue & 0x1F, denominatorType));
-                //        }
-                //        else
-                //        {
-                //            result = arithmeticShiftR(q, literal(shiftValue, denominatorType));
-                //        }
-                //    }
-                //}
-                //else
-                //{
-                //    auto q = multiplyHigh(numerator, magicExpr);
-                //    setComment(q, "q");
-                //    auto qShift = arithmeticShiftR(q, numShiftsExpr);
-                //    setComment(qShift, "qShift");
-
-                //    auto t = (arithmeticShiftR((numerator - q), one)) + q;
-                //    setComment(t, "t");
-                //    auto tShift
-                //        = arithmeticShiftR(t, (numShiftsExpr & literal(0x1F, denominatorType)));
-                //    setComment(tShift, "tShift");
-
-                //    auto maskedShift = numShiftsExpr & literal(0x40, denominatorType);
-                //    setComment(maskedShift, "maskedShift");
-
-                //    auto isShiftZero
-                //        = conditional(maskedShift == literal(0, denominatorType), qShift, tShift);
-                //    setComment(isShiftZero, "isShiftZero");
-
-                //    auto shiftNumerator = arithmeticShiftR(numerator, numShiftsExpr);
-                //    setComment(shiftNumerator, "shiftNumerator");
-
-                //    result = conditional(
-                //        magicExpr == literal(0, denominatorType), shiftNumerator, isShiftZero);
-                //}
-
                 auto q = multiplyHigh(numerator, magicExpr);
                 setComment(q, "Magic q (unsigned)");
 
                 auto t = (arithmeticShiftR(numerator - q, one)) + q;
                 setComment(t, "Magic t (unsigned)");
 
-                //result = conditional(denominator == literal(1, denominatorType),
-                //                     numerator,
-                //                     arithmeticShiftR(t, numShiftsExpr));
-
                 auto isDenominatorOne = (numShiftsExpr & literal(1u << 31u));
                 result                = conditional(
                     isDenominatorOne == literal(0u), arithmeticShiftR(t, numShiftsExpr), numerator);
 
-                //result = arithmeticShiftR(t, numShiftsExpr);
                 setComment(result, "Magic result (unsigned)");
             }
             else

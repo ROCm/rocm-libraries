@@ -91,7 +91,6 @@ namespace rocRoller::Expression::EvaluateDetail
             if(arg == 1)
                 return 0;
 
-            //auto magic = libdivide::libdivide_u32_gen(arg);
             auto magic = libdivide::libdivide_u32_branchfree_gen(arg);
 
             return magic.magic;
@@ -412,12 +411,9 @@ namespace rocRoller::Expression::EvaluateDetail
 
             if(arg == 1)
                 return 1 << 31; // encoding denominator=1
-            //return 0;
 
-            //auto magic = libdivide::libdivide_u32_gen(arg);
             auto magic = libdivide::libdivide_u32_branchfree_gen(arg);
 
-            //return magic.more;
             return magic.more & libdivide::LIBDIVIDE_32_SHIFT_MASK;
         }
     };

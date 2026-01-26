@@ -50,16 +50,8 @@ namespace FastDivisionTest
         namespace Ex = Expression;
         auto expr    = magicMultiple(Ex::literal(x));
 
-        return evaluate(expr);
-    }
-
-    auto getMagicShifts(auto x)
-    {
-        using namespace rocRoller;
-        namespace Ex = Expression;
-        auto expr    = magicShifts(Ex::literal(x));
-
-        return evaluate(expr);
+        //return evaluate(expr);
+	return Ex::literal(evaluate(expr));
     }
 
     TEST_CASE("FastDivision ExpressionTransformation works for constant expressions.",
@@ -98,12 +90,10 @@ namespace FastDivisionTest
         expr_fast = fastDivision(expr, context.get());
 
         {
-            auto magic   = getUnsignedInt(getMagicMultiple(7u));
-            auto shifts  = getUnsignedInt(getMagicShifts(7u));
-            auto mulHigh = multiplyHigh(b, Ex::literal(magic));
-            auto t       = ((b - mulHigh) >> Ex::literal(1u)) + mulHigh;
-
-            CHECK_THAT(expr_fast, EquivalentTo(t >> Ex::literal(shifts & 0x1F)));
+	    auto mulHigh = multiplyHigh(b, getMagicMultiple(7u));
+            CHECK_THAT(
+                expr_fast,
+                EquivalentTo((((b - mulHigh) >> Ex::literal(1u)) + mulHigh) >> Ex::literal(2)));
         }
 
         expr      = b / Ex::literal(1);
@@ -114,7 +104,8 @@ namespace FastDivisionTest
         expr_fast = fastDivision(expr, context.get());
 
         {
-            auto mulPlusB = multiplyHigh(b, Ex::literal(getMagicMultiple(-5))) + b;
+            //auto mulPlusB = multiplyHigh(b, Ex::literal(getMagicMultiple(-5))) + b;
+	    auto mulPlusB = multiplyHigh(b, getMagicMultiple(-5)) + b;
             CHECK_THAT(expr_fast,
                        EquivalentTo((((mulPlusB + ((mulPlusB >> Ex::literal(31)) & Ex::literal(4)))
                                       >> Ex::literal(2u))
@@ -198,14 +189,13 @@ namespace FastDivisionTest
 
             auto mulHigh = multiplyHigh(a_unsigned, mul);
 
-            auto t = (a_unsigned - mulHigh >> Ex::literal(1u)) + mulHigh;
+            auto t = ((a_unsigned - mulHigh >> Ex::literal(1u)) + mulHigh) >> shift;
 
             auto result
-                = Ex::conditional(mul == Ex::literal(0u),
-                                  (a_unsigned >> shift),
-                                  Ex::conditional((shift & Ex::literal(0x40u)) == Ex::literal(0u),
-                                                  (mulHigh >> shift),
-                                                  (t >> (shift & Ex::literal(0x1Fu)))));
+                = Ex::conditional( (shift & Ex::literal(1u << 31u)) == Ex::literal(0u),
+		t,
+		a_unsigned
+		);
 
             CHECK_THAT(expr_fast, EquivalentTo(result));
         }
