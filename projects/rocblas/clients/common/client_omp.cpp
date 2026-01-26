@@ -21,6 +21,8 @@
  * ************************************************************************ */
 
 #include <thread>
+#include <cstdlib>
+#include <string>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -33,8 +35,9 @@
 #include "client_omp.hpp"
 #include "rocblas_ostream.hpp"
 
-// constant to reduce threads to avoid potential deadlocks when using all logical cores
-static constexpr int c_thread_reducer = 2;
+// Constant to reduce threads to avoid performance degradation when using all logical cores
+// Increased from 2 to 4 based on AOCL performance recommendations
+static constexpr int c_thread_reducer = 4;
 
 client_omp_manager::client_omp_manager(size_t std_thread_count)
     : m_original_omp_threads(1)
@@ -81,26 +84,33 @@ client_omp_manager::~client_omp_manager()
 
 void client_omp_manager::limit_by_processor_count()
 {
-    // limit OMP usage as deadlock issues seen in reference library
+    // Limit OMP usage to avoid performance degradation in reference library at high thread counts
+    // See: rocBLAS Programmer's Guide - AOCL threading recommendations
 #ifdef _OPENMP
-    const int processor_count = std::thread::hardware_concurrency();
-    if(processor_count > 0)
+    const int omp_default_threads = omp_get_max_threads();
+    if(omp_default_threads <= 0)
     {
-        const int omp_current_threads = omp_get_max_threads();
-        if(omp_current_threads >= processor_count)
-        {
-            int omp_limit_threads
-                = processor_count > 4 ? processor_count - c_thread_reducer : processor_count;
-            omp_limit_threads = std::max(1, omp_limit_threads);
-
-            if(omp_limit_threads != omp_current_threads)
-            {
-                omp_set_num_threads(omp_limit_threads);
-
-                rocblas_cout << "rocBLAS info: client (OPENMP) reduced omp_set_num_threads to "
-                             << omp_limit_threads << std::endl;
-            }
-        }
+        return;  // Sanity check - should not happen if OpenMP is working
     }
+    
+    // If user explicitly set OMP_NUM_THREADS, respect their choice
+    const char* env_omp_threads = std::getenv("OMP_NUM_THREADS");
+    if(env_omp_threads != nullptr)
+    {
+        return;
+    }
+    
+    // Reduce by c_thread_reducer to avoid AOCL performance degradation at high thread counts
+    int safe_thread_count = omp_default_threads > 4 
+                            ? omp_default_threads - c_thread_reducer 
+                            : omp_default_threads;
+    safe_thread_count = std::max(1, safe_thread_count);
+    
+    omp_set_num_threads(safe_thread_count);
+
+    rocblas_cout << "rocBLAS info: OMP_NUM_THREADS not set, using "
+                 << safe_thread_count << " threads (system default "
+                 << omp_default_threads << " minus " << c_thread_reducer 
+                 << " to optimize AOCL performance)" << std::endl;
 #endif
 }
