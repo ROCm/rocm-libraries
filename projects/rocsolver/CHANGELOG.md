@@ -2,10 +2,14 @@
 
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
-
 ## (Unreleased) rocSOLVER
 
 ### Added
+
+* Computation of different matrix norms
+    * LANGE
+    * LANGE_64
+
 ### Changed
 ### Removed
 ### Optimized
