@@ -95,6 +95,11 @@ if (BUILD_WITH_ROCBLAS AND rocblas_FOUND)
   endif()
 endif()
 
+if(BUILD_CODE_COVERAGE)
+  target_compile_options(rocsparse PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  target_link_libraries(rocsparse PRIVATE -fprofile-instr-generate)
+endif()
+
 if (NOT WIN32)
   if (BUILD_SHARED_LIBS AND BUILD_WITH_ROCTX)
 
