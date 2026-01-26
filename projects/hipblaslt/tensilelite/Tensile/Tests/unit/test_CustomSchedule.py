@@ -616,8 +616,7 @@ class TestCustomScheduleBF16:
 class TestCustomScheduleTF32:
     @staticmethod
     def get_num_mfma(self, kernel,depthU):
-        numMfma = ((kernel["MacroTile0"] // kernel["MIWaveGroup"][0] // kernel["MatrixInstruction"][0]) *
-                   (kernel["MacroTile1"] // kernel["MIWaveGroup"][1] // kernel["MatrixInstruction"][1]) *
+        numMfma = (kernel["MIWaveTileA"] * kernel["MIWaveTileB"] *
                     3 * # tf32 emulated with 3 bf16
                     depthU / 32   # two sub-iterations due to DepthU=64
         )
@@ -892,7 +891,6 @@ class TestCustomScheduleTF32:
             "MatrixInstruction": mi, "MIWaveGroup": mi_wave_group,
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": mi_wave_tile[0], "MIWaveTileB": mi_wave_tile[1],
         })
-        # return kernel
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
         assert isinstance(schedule_info, ScheduleInfo)
