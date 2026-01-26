@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -246,6 +246,10 @@ namespace rocRoller
 
     inline std::vector<AssemblyKernelArgument> AssemblyKernel::resetArguments()
     {
+        m_restoredArgs.clear();
+        m_simplifiedArgs.clear();
+        m_simplifiedRestoredArgs.clear();
+
         m_argumentNames.clear();
         m_argumentSize = 0;
         return std::exchange(m_arguments, {});

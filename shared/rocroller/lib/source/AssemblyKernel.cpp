@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -283,7 +283,7 @@ namespace rocRoller
         auto restored           = restoreCommandArguments(exp);
         auto restoredSimplified = simplify(restored);
 
-        auto match = [exp, simplified, restored, restoredSimplified](auto const& arg) {
+        auto match = [this, exp, simplified, restored, restoredSimplified](auto const& arg) {
             auto equivalentToAny = [exp, simplified, restored, restoredSimplified](
                                        Expression::ExpressionPtr const& anExpression) {
                 return equivalent(anExpression, exp) || equivalent(anExpression, simplified)
@@ -294,17 +294,22 @@ namespace rocRoller
             if(equivalentToAny(arg.expression))
                 return true;
 
-            auto simpleArg = simplify(arg.expression);
-            if(equivalentToAny(simpleArg))
+            //auto simpleArg = simplify(arg.expression);
+            auto& simpleArg = m_simplifiedArgs.at(arg.name);
+            if(simpleArg && equivalentToAny(simpleArg))
                 return true;
 
-            auto restoredArg = restoreCommandArguments(arg.expression);
+            //auto restoredArg = restoreCommandArguments(arg.expression);
+            auto& restoredArg = m_restoredArgs.at(arg.name);
+            if(not restoredArg)
+                return false;
 
             if(equivalentToAny(restoredArg))
                 return true;
 
-            auto restoredSimplifiedArg = simplify(restoredArg);
-            if(equivalentToAny(restoredSimplifiedArg))
+            //auto restoredSimplifiedArg = simplify(restoredArg);
+            auto& restoredSimplifiedArg = m_simplifiedRestoredArgs.at(arg.name);
+            if(restoredSimplifiedArg && equivalentToAny(restoredSimplifiedArg))
                 return true;
 
             return false;
@@ -365,6 +370,24 @@ namespace rocRoller
         m_argumentSize = std::max(m_argumentSize, arg.offset + arg.size);
 
         m_argumentNames[arg.name] = m_arguments.size();
+
+        auto simplifiedArg = simplify(arg.expression);
+        m_simplifiedArgs[arg.name]
+            = equivalent(simplifiedArg, arg.expression) ? nullptr : simplifiedArg;
+        auto restoredArg = restoreCommandArguments(arg.expression);
+        if(equivalent(restoredArg, arg.expression))
+        {
+            m_restoredArgs[arg.name]           = nullptr;
+            m_simplifiedRestoredArgs[arg.name] = nullptr;
+        }
+        else
+        {
+            m_restoredArgs[arg.name]   = restoredArg;
+            auto simplifiedRestoredArg = simplify(restoredArg);
+            m_simplifiedRestoredArgs[arg.name]
+                = equivalent(simplifiedRestoredArg, restoredArg) ? nullptr : simplifiedRestoredArg;
+        }
+
         m_arguments.push_back(std::move(arg));
 
         return Expression::fromKernelArgument(m_arguments.back());
