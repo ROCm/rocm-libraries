@@ -26,6 +26,7 @@
 #include "test.hpp"
 #include "driver.hpp"
 #include "fusionHost.hpp"
+#include "workspace.hpp"
 #include <miopen/stringutils.hpp>
 
 using ptr_FusionPlanDesc = MIOPEN_MANAGE_PTR(miopenFusionPlanDescriptor_t, miopenDestroyFusionPlan);
@@ -203,13 +204,23 @@ struct verify_forward_conv_bias_batchnorm_activ
             miopenSetOpArgsActivForward(
                 ptr_fusionargs.get(), activOp, &alpha, &beta, activ_alpha, activ_beta, activ_gamma);
         }
-        miopenExecuteFusionPlan(&handle,
-                                fusionplan,
-                                inputDesc,
-                                in_dev.get(),
-                                &rout.desc,
-                                out_dev.get(),
-                                ptr_fusionargs.get());
+
+        Workspace wspace{};
+        size_t workspace_size = 0;
+        miopenConvFwdAlgorithm_t algo{}; // not used in GetWorkSpaceSize
+        miopenError = miopenFusionPlanGetWorkSpaceSize(&handle, fusionplan, &workspace_size, algo);
+        EXPECT(miopenError == miopenStatusSuccess);
+        wspace.resize(workspace_size);
+
+        miopenExecuteFusionPlan_v2(&handle,
+                                   fusionplan,
+                                   inputDesc,
+                                   in_dev.get(),
+                                   &rout.desc,
+                                   out_dev.get(),
+                                   ptr_fusionargs.get(),
+                                   wspace.ptr(),
+                                   wspace.size());
         rout.data = handle.Read<T>(out_dev, rout.data.size());
         return rout;
     }
@@ -309,10 +320,9 @@ struct cbna_fusion_driver : test_driver
             {0, 0, 1, 1, 1, 1},
             //        {0, 0, 2, 2, 1, 1},
             //        {1, 1, 1, 1, 1, 1},
-            {1, 1, 2, 2, 1, 1}
-            //        {2, 2, 1, 1, 1, 1},
-            //        {2, 2, 2, 2, 1, 1},
-            //        {3, 3, 2, 2, 1, 1}
+            {1, 1, 2, 2, 1, 1} //        {2, 2, 1, 1, 1, 1},
+                               //        {2, 2, 2, 2, 1, 1},
+                               //        {3, 3, 2, 2, 1, 1}
         };
     };
 
