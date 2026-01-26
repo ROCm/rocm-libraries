@@ -160,9 +160,8 @@ struct ArgMax
                               bool>
              = true>
     HIPCUB_HOST_DEVICE __forceinline__
-    hipcub::KeyValuePair<OffsetT, T>
-        operator()(const hipcub::KeyValuePair<OffsetT, T>& a,
-                   const hipcub::KeyValuePair<OffsetT, T>& b) const
+    hipcub::KeyValuePair<OffsetT, T> operator()(const hipcub::KeyValuePair<OffsetT, T>& a,
+                                                const hipcub::KeyValuePair<OffsetT, T>& b) const
     {
         const hipcub::KeyValuePair<OffsetT, float> native_a(a.key, a.value);
         const hipcub::KeyValuePair<OffsetT, float> native_b(b.key, b.value);
@@ -185,9 +184,8 @@ struct ArgMin
                               bool>
              = true>
     HIPCUB_HOST_DEVICE __forceinline__
-    hipcub::KeyValuePair<OffsetT, T>
-        operator()(const hipcub::KeyValuePair<OffsetT, T>& a,
-                   const hipcub::KeyValuePair<OffsetT, T>& b) const
+    hipcub::KeyValuePair<OffsetT, T> operator()(const hipcub::KeyValuePair<OffsetT, T>& a,
+                                                const hipcub::KeyValuePair<OffsetT, T>& b) const
     {
         const hipcub::KeyValuePair<OffsetT, float> native_a(a.key, a.value);
         const hipcub::KeyValuePair<OffsetT, float> native_b(b.key, b.value);

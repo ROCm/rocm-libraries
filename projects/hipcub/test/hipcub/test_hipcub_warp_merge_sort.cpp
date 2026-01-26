@@ -399,15 +399,15 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeysSegmented)
 
         auto keys = test_utils::is_floating_point<wrapped_type>::value
                         ? test_utils::get_random_data<key_type>(
-                            size,
-                            test_utils::convert_to_device<wrapped_type>(-1000),
-                            test_utils::convert_to_device<wrapped_type>(1000),
-                            seed_value)
+                              size,
+                              test_utils::convert_to_device<wrapped_type>(-1000),
+                              test_utils::convert_to_device<wrapped_type>(1000),
+                              seed_value)
                         : test_utils::get_random_data<key_type>(
-                            size,
-                            _HIPCUB_STD::numeric_limits<wrapped_type>::lowest(),
-                            _HIPCUB_STD::numeric_limits<wrapped_type>::max(),
-                            seed_value);
+                              size,
+                              _HIPCUB_STD::numeric_limits<wrapped_type>::lowest(),
+                              _HIPCUB_STD::numeric_limits<wrapped_type>::max(),
+                              seed_value);
 
         const auto segment_sizes = test_utils::get_random_data<unsigned int>(
             num_warps, 0u, max_segment_size, ~seed_value);
@@ -512,29 +512,29 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeysValuesSegmented)
 
         auto keys = test_utils::is_floating_point<wrapped_type>::value
                         ? test_utils::get_random_data<key_type>(
-                            size,
-                            test_utils::convert_to_device<wrapped_type>(-1000),
-                            test_utils::convert_to_device<wrapped_type>(1000),
-                            seed_value)
+                              size,
+                              test_utils::convert_to_device<wrapped_type>(-1000),
+                              test_utils::convert_to_device<wrapped_type>(1000),
+                              seed_value)
                         : test_utils::get_random_data<key_type>(
-                            size,
-                            _HIPCUB_STD::numeric_limits<wrapped_type>::lowest(),
-                            _HIPCUB_STD::numeric_limits<wrapped_type>::max(),
-                            seed_value);
+                              size,
+                              _HIPCUB_STD::numeric_limits<wrapped_type>::lowest(),
+                              _HIPCUB_STD::numeric_limits<wrapped_type>::max(),
+                              seed_value);
 
         using value_wrapped_type = typename test_utils::inner_type<value_type>::type;
 
         auto values = test_utils::is_floating_point<value_wrapped_type>::value
                           ? test_utils::get_random_data<value_type>(
-                              size,
-                              test_utils::convert_to_device<value_wrapped_type>(-1000),
-                              test_utils::convert_to_device<value_wrapped_type>(1000),
-                              seed_value)
+                                size,
+                                test_utils::convert_to_device<value_wrapped_type>(-1000),
+                                test_utils::convert_to_device<value_wrapped_type>(1000),
+                                seed_value)
                           : test_utils::get_random_data<value_type>(
-                              size,
-                              _HIPCUB_STD::numeric_limits<value_wrapped_type>::lowest(),
-                              _HIPCUB_STD::numeric_limits<value_wrapped_type>::max(),
-                              seed_value ^ (seed_value >> 1ul));
+                                size,
+                                _HIPCUB_STD::numeric_limits<value_wrapped_type>::lowest(),
+                                _HIPCUB_STD::numeric_limits<value_wrapped_type>::max(),
+                                seed_value ^ (seed_value >> 1ul));
 
         const auto segment_sizes = test_utils::get_random_data<unsigned int>(
             num_warps, 0u, max_segment_size, ~seed_value);
@@ -660,15 +660,15 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeys)
 
         auto keys = test_utils::is_floating_point<wrapped_type>::value
                         ? test_utils::get_random_data<key_type>(
-                            size,
-                            test_utils::convert_to_device<wrapped_type>(-1000),
-                            test_utils::convert_to_device<wrapped_type>(1000),
-                            seed_value)
+                              size,
+                              test_utils::convert_to_device<wrapped_type>(-1000),
+                              test_utils::convert_to_device<wrapped_type>(1000),
+                              seed_value)
                         : test_utils::get_random_data<key_type>(
-                            size,
-                            _HIPCUB_STD::numeric_limits<wrapped_type>::lowest(),
-                            _HIPCUB_STD::numeric_limits<wrapped_type>::max(),
-                            seed_value);
+                              size,
+                              _HIPCUB_STD::numeric_limits<wrapped_type>::lowest(),
+                              _HIPCUB_STD::numeric_limits<wrapped_type>::max(),
+                              seed_value);
 
         const auto compare = typename params::compare_function{};
 
@@ -759,29 +759,29 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeysValues)
 
         auto keys = test_utils::is_floating_point<wrapped_type>::value
                         ? test_utils::get_random_data<key_type>(
-                            size,
-                            test_utils::convert_to_device<wrapped_type>(-1000),
-                            test_utils::convert_to_device<wrapped_type>(1000),
-                            seed_value)
+                              size,
+                              test_utils::convert_to_device<wrapped_type>(-1000),
+                              test_utils::convert_to_device<wrapped_type>(1000),
+                              seed_value)
                         : test_utils::get_random_data<key_type>(
-                            size,
-                            _HIPCUB_STD::numeric_limits<wrapped_type>::lowest(),
-                            _HIPCUB_STD::numeric_limits<wrapped_type>::max(),
-                            seed_value);
+                              size,
+                              _HIPCUB_STD::numeric_limits<wrapped_type>::lowest(),
+                              _HIPCUB_STD::numeric_limits<wrapped_type>::max(),
+                              seed_value);
 
         using value_wrapped_type = typename test_utils::inner_type<value_type>::type;
 
         auto values = test_utils::is_floating_point<value_wrapped_type>::value
                           ? test_utils::get_random_data<value_type>(
-                              size,
-                              test_utils::convert_to_device<value_wrapped_type>(-1000),
-                              test_utils::convert_to_device<value_wrapped_type>(1000),
-                              seed_value)
+                                size,
+                                test_utils::convert_to_device<value_wrapped_type>(-1000),
+                                test_utils::convert_to_device<value_wrapped_type>(1000),
+                                seed_value)
                           : test_utils::get_random_data<value_type>(
-                              size,
-                              _HIPCUB_STD::numeric_limits<value_wrapped_type>::lowest(),
-                              _HIPCUB_STD::numeric_limits<value_wrapped_type>::max(),
-                              seed_value ^ (seed_value >> 1ul));
+                                size,
+                                _HIPCUB_STD::numeric_limits<value_wrapped_type>::lowest(),
+                                _HIPCUB_STD::numeric_limits<value_wrapped_type>::max(),
+                                seed_value ^ (seed_value >> 1ul));
 
         const auto compare = typename params::compare_function{};
 

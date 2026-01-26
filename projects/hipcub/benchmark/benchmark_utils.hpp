@@ -424,10 +424,14 @@ using engine_type = std::default_random_engine;
 // generate_random_data_n() generates only part of sequence and replicates it,
 // because benchmarks usually do not need "true" random sequence.
 template<class OutputIter, class U, class V, class Generator>
-inline auto generate_random_data_n(
-    OutputIter it, size_t size, U min, V max, Generator& gen, size_t max_random_size = 1024 * 1024)
-    -> typename std::enable_if_t<std::is_integral<::hipcub::detail::it_value_t<OutputIter>>::value,
-                                 OutputIter>
+inline auto generate_random_data_n(OutputIter it,
+                                   size_t     size,
+                                   U          min,
+                                   V          max,
+                                   Generator& gen,
+                                   size_t     max_random_size = 1024 * 1024) ->
+    typename std::enable_if_t<std::is_integral<::hipcub::detail::it_value_t<OutputIter>>::value,
+                              OutputIter>
 {
     using T = ::hipcub::detail::it_value_t<OutputIter>;
 
