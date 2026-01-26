@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -66,6 +66,12 @@ ${TUNING_TYPES};rocprim::empty_type ${LIMITED_TUNING_TYPES};\
 128 256 512 1024;4 5 6 7 8" PARENT_SCOPE)
     set(output_pattern_suffix "@KeyType@_@ValueType@_@BlockSize@_@RadixBits@" PARENT_SCOPE)
   elseif(file STREQUAL "benchmark_device_radix_sort_onesweep_histogram")
+    set(list_across_names "KeyType;ValueType;BlockSize;RadixBits" PARENT_SCOPE)
+    set(list_across "\
+${TUNING_TYPES};rocprim::empty_type ${LIMITED_TUNING_TYPES};\
+128 256 512 1024;4 5 6 7 8" PARENT_SCOPE)
+    set(output_pattern_suffix "@KeyType@_@ValueType@_@BlockSize@_@RadixBits@" PARENT_SCOPE)
+  elseif(file STREQUAL "benchmark_device_radix_sort_onesweep_iteration")
     set(list_across_names "KeyType;ValueType;BlockSize;RadixBits" PARENT_SCOPE)
     set(list_across "\
 ${TUNING_TYPES};rocprim::empty_type ${LIMITED_TUNING_TYPES};\

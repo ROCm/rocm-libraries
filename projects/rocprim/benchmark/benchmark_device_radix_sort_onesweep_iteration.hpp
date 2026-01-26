@@ -91,13 +91,13 @@ auto config_name()
 template<typename Key    = int,
          typename Value  = rocprim::empty_type,
          typename Config = rocprim::default_config>
-struct device_radix_sort_onesweep_histogram_benchmark : public primbench::benchmark_interface
+struct device_radix_sort_onesweep_iteration_benchmark : public primbench::benchmark_interface
 {
     primbench::json meta() const override
     {
         return primbench::json{}
             .add("lvl", "device")
-            .add("algo", "device_radix_sort_onesweep_histogram")
+            .add("algo", "device_radix_sort_onesweep_iteration")
             .add("key_type", primbench::name<Key>())
             .add("value_type", primbench::name<Value>())
             .add("cfg", config_name<Config>());
@@ -131,18 +131,22 @@ private:
                                         seed);
 
         common::device_ptr<key_type> d_keys_input(keys_input);
-
-        common::device_ptr<void> d_temporary_storage;
-        size_t                   temporary_storage_bytes = 0;
-
-        rocprim::detail::radix_sort_onesweep_histogram_state<size_t> hist{};
+        common::device_ptr<key_type> d_keys_output(items);
 
         rocprim::empty_type* d_values_ptr = nullptr;
 
-        // Size query
+        // Temp storage: histogram + iteration
+        common::device_ptr<void> d_hist_temporary_storage;
+        common::device_ptr<void> d_iter_temporary_storage;
+        size_t                   hist_bytes = 0;
+        size_t                   iter_bytes = 0;
+
+        hist_state_t hist{};
+
+        // Query histogram temp
         HIP_CHECK((rocprim::detail::radix_sort_onesweep_histogram_impl<Config, false>(
-            /*temporary_storage*/ nullptr,
-            temporary_storage_bytes,
+            nullptr,
+            hist_bytes,
             d_keys_input.get(),
             d_values_ptr,
             items,
@@ -150,22 +154,39 @@ private:
             0,
             sizeof(key_type) * 8,
             stream,
-            /*debug_synchronous*/ false,
+            false,
             hist)));
 
-        d_temporary_storage.resize(temporary_storage_bytes);
+        // Query iteration temp
+        bool dummy_is_result_in_output = true;
+        HIP_CHECK((rocprim::detail::radix_sort_onesweep_iteration_impl<Config, false>(
+            nullptr,
+            iter_bytes,
+            d_keys_input.get(),
+            /*keys_tmp*/ nullptr,
+            d_keys_output.get(),
+            d_values_ptr,
+            /*values_tmp*/ nullptr,
+            d_values_ptr,
+            items,
+            dummy_is_result_in_output,
+            hist,
+            rocprim::identity_decomposer{},
+            0,
+            sizeof(key_type) * 8,
+            stream,
+            false,
+            false)));
 
-        state.set_items(items);
-        state.add_reads<key_type>(items);
+        d_hist_temporary_storage.resize(hist_bytes);
+        d_iter_temporary_storage.resize(iter_bytes);
 
-        state.add_writes<offset_type>(hist.places * hist.radix_size_per_place);
-
-        state.run(
+        state.run_before_every_iteration(
             [&]
             {
                 HIP_CHECK((rocprim::detail::radix_sort_onesweep_histogram_impl<Config, false>(
-                    d_temporary_storage.get(),
-                    temporary_storage_bytes,
+                    d_hist_temporary_storage.get(),
+                    hist_bytes,
                     d_keys_input.get(),
                     d_values_ptr,
                     items,
@@ -173,8 +194,37 @@ private:
                     0,
                     sizeof(key_type) * 8,
                     stream,
-                    /*debug_synchronous*/ false,
+                    false,
                     hist)));
+            });
+
+        state.set_items(items);
+        state.add_reads<key_type>(items);
+
+        state.add_reads<offset_type>(hist.places * hist.radix_size_per_place);
+
+        bool is_result_in_output = true;
+        state.run(
+            [&]
+            {
+                HIP_CHECK((rocprim::detail::radix_sort_onesweep_iteration_impl<Config, false>(
+                    d_iter_temporary_storage.get(),
+                    iter_bytes,
+                    d_keys_input.get(),
+                    /*keys_tmp*/ nullptr,
+                    d_keys_output.get(),
+                    d_values_ptr,
+                    /*values_tmp*/ nullptr,
+                    d_values_ptr,
+                    items,
+                    is_result_in_output,
+                    hist,
+                    rocprim::identity_decomposer{},
+                    0,
+                    sizeof(key_type) * 8,
+                    stream,
+                    false,
+                    false)));
             });
     }
 
@@ -190,6 +240,7 @@ private:
         using key_type     = Key;
         using value_type   = Value;
         using hist_state_t = rocprim::detail::radix_sort_onesweep_histogram_state<size_t>;
+        using offset_type  = typename hist_state_t::offset_type;
 
         size_t items = bytes / sizeof(key_type);
 
@@ -201,20 +252,26 @@ private:
 
         std::vector<value_type> values_input(items);
         for(size_t i = 0; i < items; ++i)
+        {
             values_input[i] = value_type(i);
+        }
 
-        common::device_ptr<key_type>   d_keys_input(keys_input);
+        common::device_ptr<key_type> d_keys_input(keys_input);
+        common::device_ptr<key_type> d_keys_output(items);
+
         common::device_ptr<value_type> d_values_input(values_input);
+        common::device_ptr<value_type> d_values_output(items);
 
-        common::device_ptr<void> d_temporary_storage;
-        size_t                   temporary_storage_bytes = 0;
+        common::device_ptr<void> d_hist_temporary_storage;
+        common::device_ptr<void> d_iter_temporary_storage;
+        size_t                   hist_bytes = 0;
+        size_t                   iter_bytes = 0;
 
         hist_state_t hist{};
 
-        // Size query
         HIP_CHECK((rocprim::detail::radix_sort_onesweep_histogram_impl<Config, false>(
-            /*temporary_storage*/ nullptr,
-            temporary_storage_bytes,
+            nullptr,
+            hist_bytes,
             d_keys_input.get(),
             d_values_input.get(),
             items,
@@ -222,23 +279,38 @@ private:
             0,
             sizeof(key_type) * 8,
             stream,
-            /*debug_synchronous*/ false,
+            false,
             hist)));
 
-        d_temporary_storage.resize(temporary_storage_bytes);
+        bool dummy_is_result_in_output = true;
+        HIP_CHECK((rocprim::detail::radix_sort_onesweep_iteration_impl<Config, false>(
+            nullptr,
+            iter_bytes,
+            d_keys_input.get(),
+            /*keys_tmp*/ nullptr,
+            d_keys_output.get(),
+            d_values_input.get(),
+            /*values_tmp*/ nullptr,
+            d_values_output.get(),
+            items,
+            dummy_is_result_in_output,
+            hist,
+            rocprim::identity_decomposer{},
+            0,
+            sizeof(key_type) * 8,
+            stream,
+            false,
+            false)));
 
-        state.set_items(items);
-        state.add_reads<key_type>(items);
-        state.add_reads<value_type>(items);
+        d_hist_temporary_storage.resize(hist_bytes);
+        d_iter_temporary_storage.resize(iter_bytes);
 
-        state.add_writes<hist_state_t::offset_type>(hist.places * hist.radix_size_per_place);
-
-        state.run(
+        state.run_before_every_iteration(
             [&]
             {
                 HIP_CHECK((rocprim::detail::radix_sort_onesweep_histogram_impl<Config, false>(
-                    d_temporary_storage.get(),
-                    temporary_storage_bytes,
+                    d_hist_temporary_storage.get(),
+                    hist_bytes,
                     d_keys_input.get(),
                     d_values_input.get(),
                     items,
@@ -246,8 +318,38 @@ private:
                     0,
                     sizeof(key_type) * 8,
                     stream,
-                    /*debug_synchronous*/ false,
+                    false,
                     hist)));
+            });
+
+        state.set_items(items);
+        state.add_reads<key_type>(items);
+        state.add_reads<value_type>(items);
+
+        state.add_reads<offset_type>(hist.places * hist.radix_size_per_place);
+
+        bool is_result_in_output = true;
+        state.run(
+            [&]
+            {
+                HIP_CHECK((rocprim::detail::radix_sort_onesweep_iteration_impl<Config, false>(
+                    d_iter_temporary_storage.get(),
+                    iter_bytes,
+                    d_keys_input.get(),
+                    /*keys_tmp*/ nullptr,
+                    d_keys_output.get(),
+                    d_values_input.get(),
+                    /*values_tmp*/ nullptr,
+                    d_values_output.get(),
+                    items,
+                    is_result_in_output,
+                    hist,
+                    rocprim::identity_decomposer{},
+                    0,
+                    sizeof(key_type) * 8,
+                    stream,
+                    false,
+                    false)));
             });
     }
 };
@@ -258,15 +360,15 @@ template<unsigned int BlockSize,
          unsigned int RadixBits,
          typename Key,
          typename Value = rocprim::empty_type>
-struct device_radix_sort_onesweep_histogram_benchmark_generator
+struct device_radix_sort_onesweep_iteration_benchmark_generator
 {
     template<unsigned int ItemsPerThread, rocprim::block_radix_rank_algorithm RadixRankAlgorithm>
     static constexpr bool is_buildable()
     {
         // Calculation uses `rocprim::arch::wavefront::min_size()`, which is 32 on host side unless overridden.
-        // However, this does not affect the total size of shared memory for the current configuration space.
-        // Were the implementation to change, causing retuning, this needs to be re-evaluated and possibly taken into account.
-        using sharedmem_storage = typename rocprim::detail::onesweep_histogram_iteration_helper<
+        //   However, this does not affect the total size of shared memory for the current configuration space.
+        //   Were the implementation to change, causing retuning, this needs to be re-evaluated and possibly taken into account.
+        using sharedmem_storage = typename rocprim::detail::onesweep_iteration_helper<
             Key,
             Value,
             size_t,
@@ -289,16 +391,16 @@ struct device_radix_sort_onesweep_histogram_benchmark_generator
                       RadixRankAlgorithm,
                       std::enable_if_t<(is_buildable<ItemsPerThread, RadixRankAlgorithm>())>>
     {
-        using generated_config = rocprim::radix_sort_onesweep_histogram_config<
-            rocprim::kernel_config<BlockSize, ItemsPerThread>,
-            rocprim::kernel_config<BlockSize, ItemsPerThread>,
-            RadixBits,
-            RadixRankAlgorithm>;
+        using generated_config
+            = rocprim::radix_sort_onesweep_config<rocprim::kernel_config<BlockSize, ItemsPerThread>,
+                                                  rocprim::kernel_config<BlockSize, ItemsPerThread>,
+                                                  RadixBits,
+                                                  RadixRankAlgorithm>;
         void operator()(std::vector<std::unique_ptr<primbench::benchmark_interface>>& storage)
         {
             storage.emplace_back(
                 std::make_unique<
-                    device_radix_sort_onesweep_histogram_benchmark<Key,
+                    device_radix_sort_onesweep_iteration_benchmark<Key,
                                                                    Value,
                                                                    generated_config>>());
         }
