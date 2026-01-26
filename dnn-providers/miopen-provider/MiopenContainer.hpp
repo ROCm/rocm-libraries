@@ -6,10 +6,10 @@
 #include <memory>
 #include <set>
 
+#include <hipdnn_plugin_sdk/EngineManager.hpp>
+
 namespace miopen_legacy_plugin
 {
-
-class EngineManager;
 
 /*
  * Container class to manage the intantiation and ownership of all MIOpen plan builders and engines.
@@ -26,10 +26,10 @@ public:
     MiopenContainer();
     ~MiopenContainer();
 
-    EngineManager& getEngineManager();
+    hipdnn_plugin_sdk::EngineManager& getEngineManager();
 
 private:
-    std::unique_ptr<EngineManager> _engineManager;
+    std::unique_ptr<hipdnn_plugin_sdk::EngineManager> _engineManager;
 };
 
 }

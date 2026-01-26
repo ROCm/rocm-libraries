@@ -6,14 +6,14 @@
 #include <memory>
 #include <set>
 
-#include "EngineInterface.hpp"
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
 namespace miopen_legacy_plugin
 {
 
-class MiopenEngine : public IEngine
+class MiopenEngine : public hipdnn_plugin_sdk::IEngine
 {
 public:
     MiopenEngine(int64_t id);
@@ -23,9 +23,10 @@ public:
     bool isApplicable(HipdnnEnginePluginHandle& handle,
                       const hipdnn_plugin_sdk::IGraph& opGraph) const override;
     void getDetails(HipdnnEnginePluginHandle& handle,
+                    const hipdnn_plugin_sdk::IGraph& opGraph,
                     hipdnnPluginConstData_t& detailsOut) const override;
-    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                            const hipdnn_plugin_sdk::IGraph& opGraph) const override;
+    size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
+                               const hipdnn_plugin_sdk::IGraph& opGraph) const override;
 
     void initializeExecutionContext(
         const HipdnnEnginePluginHandle& handle,

@@ -9,6 +9,7 @@
 #include <unordered_map>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_plugin_sdk/EngineManager.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "MiopenContainer.hpp"
@@ -34,7 +35,7 @@ public:
     }
 
     std::shared_ptr<miopen_legacy_plugin::MiopenContainer> miopenContainer;
-    miopen_legacy_plugin::EngineManager& getEngineManager()
+    hipdnn_plugin_sdk::EngineManager& getEngineManager()
     {
         return miopenContainer->getEngineManager();
     }

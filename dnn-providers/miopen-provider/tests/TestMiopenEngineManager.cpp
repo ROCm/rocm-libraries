@@ -6,11 +6,11 @@
 #include <memory>
 #include <set>
 
+#include <hipdnn_plugin_sdk/EngineManager.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
-#include "EngineManager.hpp"
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 #include "mocks/MockEngine.hpp"
@@ -23,7 +23,7 @@ using ::testing::Return;
 
 TEST(TestMiopenEngineManager, ReturnsApplicableEngineIds)
 {
-    std::set<std::unique_ptr<IEngine>> engines;
+    std::set<std::unique_ptr<hipdnn_plugin_sdk::IEngine>> engines;
 
     auto mockEngine1 = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine1, id()).WillRepeatedly(Return(1));
@@ -35,7 +35,7 @@ TEST(TestMiopenEngineManager, ReturnsApplicableEngineIds)
     EXPECT_CALL(*mockEngine2, isApplicable(::testing::_, ::testing::_))
         .WillRepeatedly(Return(false));
 
-    EngineManager manager;
+    hipdnn_plugin_sdk::EngineManager manager;
     manager.addEngine(std::move(mockEngine1));
     manager.addEngine(std::move(mockEngine2));
 
@@ -49,7 +49,7 @@ TEST(TestMiopenEngineManager, ReturnsApplicableEngineIds)
 
 TEST(TestMiopenEngineManager, ReturnsMultipleApplicableEngineIds)
 {
-    std::set<std::unique_ptr<IEngine>> engines;
+    std::set<std::unique_ptr<hipdnn_plugin_sdk::IEngine>> engines;
 
     auto mockEngine1 = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine1, id()).WillRepeatedly(Return(1));
@@ -61,7 +61,7 @@ TEST(TestMiopenEngineManager, ReturnsMultipleApplicableEngineIds)
     EXPECT_CALL(*mockEngine2, isApplicable(::testing::_, ::testing::_))
         .WillRepeatedly(Return(true));
 
-    EngineManager manager;
+    hipdnn_plugin_sdk::EngineManager manager;
     manager.addEngine(std::move(mockEngine1));
     manager.addEngine(std::move(mockEngine2));
 
@@ -76,7 +76,7 @@ TEST(TestMiopenEngineManager, ReturnsMultipleApplicableEngineIds)
 
 TEST(TestMiopenEngineManager, ReturnsNoApplicableEngineIds)
 {
-    std::set<std::unique_ptr<IEngine>> engines;
+    std::set<std::unique_ptr<hipdnn_plugin_sdk::IEngine>> engines;
 
     auto mockEngine1 = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine1, id()).WillRepeatedly(Return(1));
@@ -88,7 +88,7 @@ TEST(TestMiopenEngineManager, ReturnsNoApplicableEngineIds)
     EXPECT_CALL(*mockEngine2, isApplicable(::testing::_, ::testing::_))
         .WillRepeatedly(Return(false));
 
-    EngineManager manager;
+    hipdnn_plugin_sdk::EngineManager manager;
     manager.addEngine(std::move(mockEngine1));
     manager.addEngine(std::move(mockEngine2));
 
@@ -101,16 +101,19 @@ TEST(TestMiopenEngineManager, ReturnsNoApplicableEngineIds)
 
 TEST(TestMiopenEngineManager, ReturnsEngineDetails)
 {
-    EngineManager manager;
+    hipdnn_plugin_sdk::EngineManager manager;
 
     hipdnnPluginConstData_t engineDetails;
     engineDetails.ptr = reinterpret_cast<const void*>(0x12345678);
     engineDetails.size = 200;
     auto mockEngine = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine, id()).WillRepeatedly(Return(1));
-    EXPECT_CALL(*mockEngine, getDetails(::testing::_, ::testing::_))
-        .WillOnce([&engineDetails](HipdnnEnginePluginHandle& handle, hipdnnPluginConstData_t& out) {
+    EXPECT_CALL(*mockEngine, getDetails(::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([&engineDetails](HipdnnEnginePluginHandle& handle,
+                                   const hipdnn_plugin_sdk::IGraph& opGraph,
+                                   hipdnnPluginConstData_t& out) {
             (void)handle;
+            (void)opGraph;
             out.ptr = engineDetails.ptr;
             out.size = engineDetails.size;
         });
@@ -128,7 +131,7 @@ TEST(TestMiopenEngineManager, ReturnsEngineDetails)
 
 TEST(TestMiopenEngineManager, ThrowsOnInvalidEngineId)
 {
-    EngineManager manager;
+    hipdnn_plugin_sdk::EngineManager manager;
 
     MockGraph mockGraph;
     hipdnnPluginConstData_t engineDetails;
@@ -140,13 +143,13 @@ TEST(TestMiopenEngineManager, ThrowsOnInvalidEngineId)
 
 TEST(TestMiopenEngineManager, GetWorkspaceSizeReturnsCorrectValue)
 {
-    EngineManager manager;
+    hipdnn_plugin_sdk::EngineManager manager;
 
     auto mockEngine = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine, id()).WillRepeatedly(Return(42));
     HipdnnEnginePluginHandle dummyHandle = {};
     MockGraph mockGraph;
-    EXPECT_CALL(*mockEngine, getWorkspaceSize(::testing::_, ::testing::_)).WillOnce(Return(4096));
+    EXPECT_CALL(*mockEngine, getMaxWorkspaceSize(::testing::_, ::testing::_)).WillOnce(Return(4096));
 
     manager.addEngine(std::move(mockEngine));
 
@@ -156,7 +159,7 @@ TEST(TestMiopenEngineManager, GetWorkspaceSizeReturnsCorrectValue)
 
 TEST(TestMiopenEngineManager, GetWorkspaceSizeThrowsOnInvalidEngineId)
 {
-    EngineManager manager;
+    hipdnn_plugin_sdk::EngineManager manager;
     HipdnnEnginePluginHandle dummyHandle = {};
     MockGraph mockGraph;
 
@@ -172,7 +175,7 @@ TEST(TestMiopenEngineManager, InitializeExecutionContextCallsEngine)
                 initializeExecutionContext(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(1);
 
-    EngineManager manager;
+    hipdnn_plugin_sdk::EngineManager manager;
     manager.addEngine(std::move(mockEngine));
     HipdnnEnginePluginHandle dummyHandle = {};
     MockGraph mockGraph;
@@ -187,7 +190,7 @@ TEST(TestMiopenEngineManager, InitializeExecutionContextCallsEngine)
 TEST(TestMiopenEngineManager, InitializeExecutionContextThrowsOnInvalidEngineId)
 {
     MockHipdnnEnginePluginExecutionContext execCtx;
-    EngineManager manager;
+    hipdnn_plugin_sdk::EngineManager manager;
     HipdnnEnginePluginHandle dummyHandle = {};
     MockGraph mockGraph;
     MockEngineConfig mockEngineConfig;

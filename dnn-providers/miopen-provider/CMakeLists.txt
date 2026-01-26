@@ -119,7 +119,6 @@ add_library(
     engines/plans/MiopenConvFwdPlan.cpp
     engines/plans/MiopenConvPlanBuilder.cpp
     engines/plans/MiopenConvWrwPlan.cpp
-    EngineManager.cpp
     MiopenActivationDescriptor.cpp
     MiopenHandleFactory.cpp
     MiopenContainer.cpp

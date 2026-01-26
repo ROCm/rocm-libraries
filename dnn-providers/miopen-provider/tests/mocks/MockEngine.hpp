@@ -8,13 +8,12 @@
 #include <gmock/gmock.h>
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
-
-#include "engines/EngineInterface.hpp"
+#include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 
 namespace miopen_legacy_plugin
 {
 
-class MockEngine : public IEngine
+class MockEngine : public hipdnn_plugin_sdk::IEngine
 {
 public:
     MOCK_METHOD(int64_t, id, (), (const, override));
@@ -24,10 +23,12 @@ public:
                 (const, override));
     MOCK_METHOD(void,
                 getDetails,
-                (HipdnnEnginePluginHandle & handle, hipdnnPluginConstData_t& detailsOut),
+                (HipdnnEnginePluginHandle & handle,
+                 const hipdnn_plugin_sdk::IGraph& opGraph,
+                 hipdnnPluginConstData_t& detailsOut),
                 (const, override));
     MOCK_METHOD(size_t,
-                getWorkspaceSize,
+                getMaxWorkspaceSize,
                 (const HipdnnEnginePluginHandle& handle, const hipdnn_plugin_sdk::IGraph& opGraph),
                 (const, override));
 

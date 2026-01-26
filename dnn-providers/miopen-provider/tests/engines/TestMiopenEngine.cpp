@@ -34,7 +34,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
     MockGraph mockGraph;
 
     HipdnnEnginePluginHandle dummyHandle;
-    EXPECT_EQ(engine.getWorkspaceSize(dummyHandle, mockGraph), 0u);
+    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph), 0u);
 }
 
 TEST(TestMiopenEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
@@ -51,7 +51,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
     MockGraph mockGraph;
 
     HipdnnEnginePluginHandle dummyHandle;
-    EXPECT_EQ(engine.getWorkspaceSize(dummyHandle, mockGraph), 1337u);
+    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph), 1337u);
 }
 
 TEST(TestMiopenEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
@@ -75,7 +75,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
     MockGraph mockGraph;
 
     HipdnnEnginePluginHandle dummyHandle;
-    EXPECT_EQ(engine.getWorkspaceSize(dummyHandle, mockGraph), 45000u);
+    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph), 45000u);
 }
 
 TEST(TestMiopenEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
@@ -90,7 +90,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
     MockGraph mockGraph;
 
     HipdnnEnginePluginHandle dummyHandle;
-    EXPECT_EQ(engine.getWorkspaceSize(dummyHandle, mockGraph), 0u);
+    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph), 0u);
 }
 
 TEST(TestMiopenEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
@@ -161,9 +161,10 @@ TEST(TestMiopenEngine, GetDetailsReturnsSerializedEngineDetails)
 {
     MiopenEngine engine(1);
     HipdnnEnginePluginHandle dummyHandle;
+    MockGraph mockGraph;
 
     hipdnnPluginConstData_t result;
-    engine.getDetails(dummyHandle, result);
+    engine.getDetails(dummyHandle, mockGraph, result);
 
     hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(result.ptr, result.size);
     EXPECT_EQ(engineDetails.engineId(), 1);

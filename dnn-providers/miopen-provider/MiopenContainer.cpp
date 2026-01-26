@@ -2,8 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_plugin_sdk/EngineManager.hpp>
 
-#include "EngineManager.hpp"
 #include "MiopenContainer.hpp"
 #include "engines/MiopenEngine.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
@@ -34,7 +34,7 @@ MiopenContainer::MiopenContainer()
     auto convFwdBiasActivPlanBuilder = std::make_unique<MiopenConvFwdBiasActivPlanBuilder>();
     miopenEngine->addPlanBuilder(std::move(convFwdBiasActivPlanBuilder));
 
-    _engineManager = std::make_unique<EngineManager>();
+    _engineManager = std::make_unique<hipdnn_plugin_sdk::EngineManager>();
     _engineManager->addEngine(std::move(miopenEngine));
 }
 
@@ -43,7 +43,7 @@ MiopenContainer::~MiopenContainer()
     HIPDNN_LOG_INFO("Destroying MiopenContainer");
 }
 
-EngineManager& MiopenContainer::getEngineManager()
+hipdnn_plugin_sdk::EngineManager& MiopenContainer::getEngineManager()
 {
     return *_engineManager;
 }
