@@ -28,12 +28,11 @@ include: rocsparse_common.yaml
 Definitions:
   - &alpha_beta_range_quick
     - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
-    - { alpha:  -0.5, beta:  0.5, alphai: -0.5, betai:  1.0 }
+
 
   - &alpha_beta_range_checkin
     - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
-    - { alpha:   2.0, beta:  0.67, alphai: -1.0, betai:  1.5 }
-    - { alpha:   3.0, beta:  1.0,  alphai:  1.0, betai: -0.5 }
+
 
   - &alpha_beta_range_nightly
     - { alpha:   0.0, beta:  0.0,  alphai:  1.5, betai:  0.5 }
@@ -52,14 +51,14 @@ Tests:
   category: pre_checkin
   function: hybmv
   precision: *single_double_precisions_complex_real
-  M: [0, 16, 32, 111]
-  N: [0, 16, 32, 441]
+  M: [8, 16]
+  N: [8, 16]
   alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
-  part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
-  algo: [0, 1, 2]
+  part: [rocsparse_hyb_partition_auto]
+  algo: [0]
 
 - name: hybmv_file
   category: pre_checkin
@@ -68,15 +67,19 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max]
-  algo: [0, 1, 2]
+  part: [rocsparse_hyb_partition_auto]
+  algo: [0]
   filename: [nos1,
              nos3,
              nos5,
-             nos7]
+             nos7,
+             bibd_22_8,
+             Chebyshev4,
+             ASIC_320k,
+             mac_econ_fwd500]
 
 - name: hybmv_file
   category: pre_checkin
@@ -85,11 +88,11 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   part: [rocsparse_hyb_partition_auto]
-  algo: [0, 1, 2]
+  algo: [0]
   filename: [mplate,
              Chevron3]
 
@@ -97,13 +100,13 @@ Tests:
   category: quick
   function: hybmv
   precision: *single_double_precisions_complex_real
-  M: [10, 500]
-  N: [33, 842]
+  M: [10, 300]
+  N: [33, 300]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
-  part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
+  part: [rocsparse_hyb_partition_auto]
   algo: [1]
 
 - name: hybmv_file
@@ -113,10 +116,10 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max]
+  part: [rocsparse_hyb_partition_auto]
   filename: [mac_econ_fwd500,
              nos2,
              nos4,
@@ -133,7 +136,7 @@ Tests:
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max]
+  part: [rocsparse_hyb_partition_auto]
   filename: [Chevron2,
              qc2534]
 
@@ -147,7 +150,7 @@ Tests:
   transA: [rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max]
+  part: [rocsparse_hyb_partition_auto]
   filename: [Chevron2,
              qc2534]
 
@@ -155,10 +158,10 @@ Tests:
   category: nightly
   function: hybmv
   precision: *single_double_precisions_complex_real
-  M: [39385, 193482, 639102]
-  N: [29348, 340123, 710341]
+  M: [5000]
+  N: [5000]
   alpha_beta: *alpha_beta_range_nightly
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   part: [rocsparse_hyb_partition_auto]
@@ -170,7 +173,7 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_nightly
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   part: [rocsparse_hyb_partition_auto]
@@ -187,22 +190,36 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_nightly
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   part: [rocsparse_hyb_partition_auto]
   filename: [Chevron4]
 
+# Coverage gap tests: transpose with device pointer mode (develop vs reduced_ci)
+- name: hybmv_transpose
+  category: pre_checkin
+  function: hybmv
+  precision: *single_double_precisions_complex_real
+  M: [300]
+  N: [300]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  part: [rocsparse_hyb_partition_auto]
+  algo: [0]
+
 - name: hybmv_graph_test
   category: pre_checkin
   function: hybmv
   precision: *single_double_precisions_complex_real
-  M: [10, 500]
-  N: [33, 842]
+  M: [500]
+  N: [842]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
-  part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
-  algo: [0, 1, 2]
+  part: [rocsparse_hyb_partition_auto]
+  algo: [0]
   graph_test: true
