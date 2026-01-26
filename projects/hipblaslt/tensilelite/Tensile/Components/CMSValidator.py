@@ -958,6 +958,68 @@ def set_gr_needed_by_from_lrs(timeline: Timeline, swap_global_read_order: bool) 
             for _, gr in grs:
                 gr.needed_by = LR_target.issued_at
 
+def find_earliest_mfma_execution(
+    is_pack_B: bool,
+    tile_index: int,
+    mfma_in_tile: int,
+    base_offset: int,
+    num_a_tiles: int,
+    num_b_tiles: int,
+    mfma_reorder: list[int],
+    mfmas_per_tile: int = 3,
+) -> int:
+    """
+    Find the earliest MFMA execution index that uses a Pack's output.
+    
+    MFMAs form a 2D grid of (a_tile, b_tile) pairs, stored column-major (A contiguous).
+    Each tile pair may have multiple MFMAs (3 for TF32, 1 for BF16).
+    With MFMA reordering, a Pack's data may be used by multiple MFMAs (one per opposite tile),
+    interleaved in complex ways.
+    This function finds the one that executes first.
+    
+    Args:
+        is_pack_B: True if this is a PackB, False for PackA.
+        tile_index: Which tile this Pack prepares data for (B tile if is_pack_B, else A tile).
+        mfma_in_tile: Which MFMA within the tile group (0 for BF16; 0, 1, or 2 for TF32).
+        base_offset: Base MFMA index offset (e.g., for iteration quarter or half).
+        num_a_tiles: Number of A tiles.
+        num_b_tiles: Number of B tiles.
+        mfma_reorder: MFMA reordering list (logical -> execution index), or empty if no reordering.
+        mfmas_per_tile: Number of MFMAs per tile pair (1 for BF16, 3 for TF32). Defaults to 3.
+    
+    Returns:
+        The earliest execution index among all MFMAs that use this Pack's output.
+    """
+    # Column-major layout: A tiles are contiguous, B tiles are strided
+    a_tile_stride = mfmas_per_tile
+    b_tile_stride = num_a_tiles * mfmas_per_tile
+    
+    def tile_to_logical_mfma(a_tile: int, b_tile: int) -> int:
+        """Convert (a_tile, b_tile) to logical MFMA index."""
+        return base_offset + a_tile * a_tile_stride + b_tile * b_tile_stride + mfma_in_tile
+    
+    # Without MFMA reordering, logical index == execution index.
+    # The first MFMA in the tile is always the earliest consumer.
+    if not mfma_reorder:
+        if is_pack_B:
+            return tile_to_logical_mfma(a_tile=0, b_tile=tile_index)
+        else:
+            return tile_to_logical_mfma(a_tile=tile_index, b_tile=0)
+    
+    # With reordering, search all MFMAs that use this Pack's output to find the earliest
+    if is_pack_B:
+        # PackB prepares B tile data, used by MFMAs: (A0, Bi), (A1, Bi), ... for all A tiles
+        return min(
+            mfma_reorder[tile_to_logical_mfma(a_tile, tile_index)]
+            for a_tile in range(num_a_tiles)
+        )
+    else:
+        # PackA prepares A tile data, used by MFMAs: (Ai, B0), (Ai, B1), ... for all B tiles
+        return min(
+            mfma_reorder[tile_to_logical_mfma(tile_index, b_tile)]
+            for b_tile in range(num_b_tiles)
+        )
+
 def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reorder: list[int], mfmas_by_index: dict[int, MFMA], num_vmfma: int, kernel: 'Solution') -> None:
     """
     Set the needed_by field for Pack instructions.
@@ -1022,7 +1084,7 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
     base_offset = needed_by_offset % num_vmfma
     
     if not is_tf32_emulation:
-        # BF16 case
+        # BF16 case: 1 MFMA per tile pair
         # Calculate packs_per_tile dynamically based on actual pack count
         n_tiles = n_tiles_b if is_pack_B else n_tiles_a
         packs_per_tile = len(packs) // n_tiles
@@ -1030,17 +1092,17 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
         for pack in packs:
             # Determine which tile this pack belongs to
             tile_index = pack.issue_index // packs_per_tile
-            # Calculate the base needed_by index (in column-major order, relative to offset)
-            pack_offset = (tile_index * n_tiles_a if is_pack_B else tile_index)
             
-            # Combine with half-iteration offset to get logical MFMA index within iteration
-            logical_index = base_offset + pack_offset
-            
-            # Apply mfma_reorder to get execution position within iteration
-            if mfma_reorder:
-                execution_index = mfma_reorder[logical_index]
-            else:
-                execution_index = logical_index
+            execution_index = find_earliest_mfma_execution(
+                is_pack_B=is_pack_B,
+                tile_index=tile_index,
+                mfma_in_tile=0,  # BF16 has only 1 MFMA per tile
+                base_offset=base_offset,
+                num_a_tiles=n_tiles_a,
+                num_b_tiles=n_tiles_b,
+                mfma_reorder=mfma_reorder,
+                mfmas_per_tile=1,  # BF16: 1 MFMA per tile pair
+            )
             
             # Add iteration offset to get final position
             needed_by = iteration_offset + execution_index
@@ -1053,6 +1115,7 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
         # Middle 2 packs are 4x4 MFMAs.
         # Last 4 packs (CVT1) feed into the actual MFMAs starting at base_offset
         n_tiles_a_quarter = n_tiles_a // 4
+        n_tiles_b_quarter = n_tiles_b // 4
 
         packs = sorted(packs, key=lambda x: x.issue_index)
         for i_pack, pack in enumerate(packs):
@@ -1077,39 +1140,28 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
                 pack.needed_by = packs[i_pack + 1]
                 continue
             
-            # Calculate tile-based offset: each tile requires 3 MFMAs
-            # For PackA: tiles are indexed sequentially (0, 1, 2, ...)
-            # For PackB: tiles span n_tiles_a_quarter MFMAs in column-major order
-            if is_pack_B:
-                tile_offset = group_index * n_tiles_a_quarter * 3
-            else:
-                tile_offset = group_index * 3
-            
-            # Calculate pack_offset within the tile
+            # Calculate pack_offset within the tile (which MFMA within the 3-MFMA group uses this pack)
             if idx_in_group < 4:
-                # First 4 CVT0 packs: These feed into 4x4 MFMAs
-                # For validation, we set needed_by to the first MFMA in the tile
+                # First 4 CVT0 packs: feed into the 1st MFMA of each tile (bf16*bf16)
                 pack_offset = 0
             else:
-                # Last 4 CVT1 packs (indices 6-9)
-                # These produce error terms used by actual MFMAs
-                # Following the same pattern as regular TF32 (groups of 24):
-                # A_error is used in mfma 2/3
-                # B_error is used in mfma 3/3
+                # Last 4 CVT1 packs (indices 6-9): produce error terms used by 2nd/3rd MFMAs
+                # A_error is used in mfma 2/3 (offset 1)
+                # B_error is used in mfma 3/3 (offset 2)
                 pack_offset = 2 if is_pack_B else 1
             
-            # Combine with quarter offset and tile offset to get logical MFMA index within iteration
-            logical_index = base_offset + tile_offset + pack_offset
-            
-            # Apply mfma_reorder to get execution position within iteration
-            if mfma_reorder:
-                execution_index = mfma_reorder[logical_index]
-            else:
-                execution_index = logical_index
+            earliest_execution = find_earliest_mfma_execution(
+                is_pack_B=is_pack_B,
+                tile_index=group_index,
+                mfma_in_tile=pack_offset,
+                base_offset=base_offset,
+                num_a_tiles=n_tiles_a_quarter,
+                num_b_tiles=n_tiles_b_quarter,
+                mfma_reorder=mfma_reorder,
+            )
             
             # Add iteration offset to get final position
-            needed_by = iteration_offset + execution_index
-            mfma_needed_by = mfmas_by_index[needed_by]
+            mfma_needed_by = mfmas_by_index[iteration_offset + earliest_execution]
             # Packs 0-3 have multiple needed_by. But since both have the same min quad-cycle wait,
             # We can pick the one that occurs sooner as it's the active constraint.
             if pack.needed_by.issued_at > mfma_needed_by.issued_at:
@@ -1117,44 +1169,37 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
     else:
         # Regular TF32: Packs come in groups of 24
         n_tiles_a_quarter = n_tiles_a // 4
+        n_tiles_b_quarter = n_tiles_b // 4
         for pack in packs:
             idx_in_group = pack.issue_index % 24
+            # Which group of 24 packs (which tile) does this pack belong to?
+            group_index = pack.issue_index // 24
+
             # Middle 16 packs (4-19) don't need needed_by set
             # They are depended on by the last 4 packs and are handled implicitly.
             if 4 <= idx_in_group < 20:
                 continue
 
-            # Calculate base index relative to quarter start
-            pack_offset = 0
-            # 1. Find fp32 mfma (column-major indexing within each quarter)
-            fp32_delta = (idx_in_group % 20) // 4
-            if is_pack_B:
-                fp32_delta *= n_tiles_a_quarter
-            pack_offset += 3 * fp32_delta  # 3 bf16 mfmas per fp32 mfma
-
-            # 2. Adjust into bf16 approximation
-            bf16_delta = 0
-            if idx_in_group < 4:  # bf16 approximations terms
-                # A_bf16 & B_bf16 are used in mfma 1/3
-                pass
-            elif idx_in_group >= 20:  # error terms
-                # A_error is used in mfma 2/3
-                # B_error is used in mfma 3/3
-                bf16_delta = 2 if is_pack_B else 1
-            pack_offset += bf16_delta
-            
-            # Combine with quarter offset to get logical MFMA index within iteration
-            logical_index = base_offset + pack_offset
-            
-            # Apply mfma_reorder to get execution position within iteration
-            if mfma_reorder:
-                execution_index = mfma_reorder[logical_index]
+            # Determine which MFMA within the 3-MFMA tile group uses this pack
+            if idx_in_group < 4:
+                # CVT0 packs (bf16 approximations) are used by MFMA 0 (bf16*bf16)
+                mfma_in_tile = 0
             else:
-                execution_index = logical_index
-            
+                # CVT1 packs (error terms): A_error -> 2nd MFMA, B_error -> 3rd MFMA
+                mfma_in_tile = 2 if is_pack_B else 1
+
+            earliest_execution = find_earliest_mfma_execution(
+                is_pack_B=is_pack_B,
+                tile_index=group_index,
+                mfma_in_tile=mfma_in_tile,
+                base_offset=base_offset,
+                num_a_tiles=n_tiles_a_quarter,
+                num_b_tiles=n_tiles_b_quarter,
+                mfma_reorder=mfma_reorder,
+            )
+
             # Add iteration offset to get final position
-            needed_by = iteration_offset + execution_index
-            pack.needed_by = mfmas_by_index[needed_by]
+            pack.needed_by = mfmas_by_index[iteration_offset + earliest_execution]
        
 
 def _handle_min_pack_quad_cycles(packs: list[Pack], is_4x4mfma: bool) -> None:

@@ -26,7 +26,8 @@
 from typing import Any, Optional
 from rocisa.instruction import SWaitCnt, SNop
 
-from Tensile.Components.CMSValidator import verify_packs_start_and_end_at_correct_indices
+from Tensile.Components.CMSValidator import verify_packs_start_and_end_at_correct_indices, isValid
+from Tensile.Components.CustomSchedule import ScheduleInfo
 from cms_validation_base import CMSValidationTestBase
 
 class TestValidatePackBF16(CMSValidationTestBase):
@@ -536,14 +537,14 @@ class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
     """
     Only tests with UsePLRPack since performance is better.
     Use MFMA reorder to swap Q2 and Q3.
-
-    | 0 |  6 |     | 0 |  3 |
-    | 1 |  7 |     | 1 |  4 |
-    | 2 |  8 |     | 2 |  5 |
-    ----------     ----------
-    | 3 |  9 |  -> | 6 |  9 |
-    | 4 | 10 |     | 7 | 10 |
-    | 5 | 11 |     | 8 | 11 |
+    
+    With MIWaveTileA=4, MIWaveTileB=4, TF32 (3 MFMAs per tile), we have 48 MFMAs:
+    - Q1 (indices 0-11): first quarter
+    - Q2 (indices 12-23): second quarter
+    - Q3 (indices 24-35): third quarter
+    - Q4 (indices 36-47): fourth quarter
+    
+    MFMA reorder swaps Q2 and Q3 (indices 12-23 execute at 24-35 positions and vice versa).
     """
     def setUp(self, kernel_updates: Optional[dict[str, Any]] = None) -> None:
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
@@ -552,6 +553,8 @@ class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
         kernel_updates["UseDirect32XEmulation"] = True
         kernel_updates["ForceUnrollSubIter"] = True
         kernel_updates["DepthU"] = 32
+        kernel_updates["MIWaveTileA"] = 4  # Need >= 4 for n_tiles_quarter >= 1
+        kernel_updates["MIWaveTileB"] = 4  # Need >= 4 for n_tiles_quarter >= 1
         super().setUp(kernel_updates)
 
         self.q1s = 0
@@ -566,7 +569,8 @@ class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
         self.q4s = self.q3e + 1
         self.q4e = self.num_vmfma - 1
 
-        self.mfma_reorder = [0, 1, 2, 6, 7, 8, 3, 4, 5, 9, 10, 11]
+        # MFMA reorder: swap Q2 (indices 12-23) and Q3 (indices 24-35)
+        self.mfma_reorder = list(range(12)) + list(range(24, 36)) + list(range(12, 24)) + list(range(36, 48))
     
     def validation_function(self, sched, kernel_dict, codePathIdx):
         return verify_packs_start_and_end_at_correct_indices(sched, kernel_dict, codePathIdx)
@@ -575,22 +579,22 @@ class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
         """
         Simple passing case.
         """
-        assert self.num_vmfma == 12
+        assert self.num_vmfma == 48
 
         optSchedule = {
             "SYNC": [[self.q1s+1, self.q2s+1, self.q3s+1, self.q4s+1]],
 
-            "LRA0": [[self.q2s] * 2],
-            "PackA0": [[self.q2e] * 24],
+            "LRA0": [[self.q2s] * 4],
+            "PackA0": [[self.q2e] * 48],
 
-            "LRB0": [[self.q1s] * 2],
-            "PackB0": [[self.q1e] * 24],
+            "LRB0": [[self.q1s] * 4],
+            "PackB0": [[self.q1e] * 48],
             
-            "LRB3": [[self.q3s] * 2],
-            "PackB3": [[self.q3e] * 24],
+            "LRB3": [[self.q3s] * 4],
+            "PackB3": [[self.q3e] * 48],
 
-            "LRA3": [[self.q4s] * 2],
-            "PackA3": [[self.q4e] * 24],
+            "LRA3": [[self.q4s] * 4],
+            "PackA3": [[self.q4e] * 48],
         }
 
         syncCode = [
@@ -606,19 +610,19 @@ class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
         """
         Failing case where PackB0 are issued too early (before LRB0s are complete).
         """
-        assert self.num_vmfma == 12
+        assert self.num_vmfma == 48
 
         optSchedule = {
             "SYNC": [[self.q1e]],
-            "LRA0": [[self.q1s] * 2],
-            "LRB0": [[self.q1s] * 2],
-            "PackB0": [[self.q1s+1] * 24],
+            "LRA0": [[self.q1s] * 4],
+            "LRB0": [[self.q1s] * 4],
+            "PackB0": [[self.q1s+1] * 48],
         }
 
         syncCode = [
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackB0 @ idx=1 issued too early, must be issued after idx=2 (because of LRB0 issued @ idx=0).", mfmaReorder=self.mfma_reorder)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackB0 @ idx=1 issued too early, must be issued after idx=11 (because of LRB0 issued @ idx=0).", mfmaReorder=self.mfma_reorder)
 
 class TestValidatePackTF32CrossPackInterleaving(CMSValidationTestBase):
     """
@@ -1336,3 +1340,61 @@ class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
 
         # Tile 1's CVT0 at index 9 is too late - needed by MFMA at index 9
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=9 issued too late, must be issued before MFMA @ idx=9.")
+
+    def test_broken_pack_schedule_with_mfma_reorder(self):
+        """
+        Test that the validator detects pack scheduling bugs (read-before-write hazards)
+        with complex MFMA reordering.
+        
+        Broken PackA0 schedule (packs at idx 27-30, MFMA needs them at idx 26) should fail.
+        This is a real-world 128x256x32 TF32 NT configuration with MFMA reordering.
+        """
+        # Minimal kernel config for 128x256x32 TF32 NT validation
+        kernel = {
+            "UseF32XEmulation": True, "UseDirect32XEmulation": True, "UseMFMAF32XEmulation": True,
+            "ForceUnrollSubIter": True, "DirectToLds": True, "SwapGlobalReadOrder": False,
+            "UsePLRPack": True, "MIWaveTileA": 4, "MIWaveTileB": 8, "Use64bShadowLimit": 1,
+        }
+
+        # Hardcoded schedule from _get_schedule_128x256x32_TF32 NT case
+        # with broken PackA0: packs at indices 27-30, but MFMA at index 26 needs their results
+        schedule_info = ScheduleInfo(
+            numCodePaths=2,
+            numMfma=96,
+            optSchedule={
+                "SYNC": [[1, 78]],
+                "LRA0": [[0]*16],
+                "LRB0": [[0]*32],
+                "LRA3": [[77]*16],
+                "LRB3": [[48]*32],
+                # BROKEN PackA0: indices 27-30 instead of 24-26, causing read-before-write
+                "PackA0": [[
+                    20, 20, 21, 21, 
+                    23, 23, 
+                    28, 28, 28, 28,
+
+                    27, 27, 27, 27,
+                    28, 28, 
+                    30, 30, 30, 30]],
+
+                "PackB0": [[42, 42, 42, 43, 48, 48, 49, 49, 49, 50, 43, 43, 44, 44, 48, 48, 50, 50, 50, 51, 45, 45, 46, 46, 48, 48, 51, 51, 52, 52, 46, 47, 47, 47, 48, 48, 52, 53, 53, 53]],
+                "PackB3": [[67, 67, 68, 68, 75, 75, 76, 76, 77, 77, 69, 69, 70, 70, 75, 75, 78, 78, 86, 86, 71, 71, 72, 72, 75, 75, 87, 87, 88, 88, 73, 73, 74, 74, 75, 75, 89, 89, 90, 90]],
+                "PackA3": [[89, 89, 90, 90, 92, 92, 93, 93, 93, 94, 90, 91, 91, 91, 92, 92, 94, 94, 95, 95]],
+            },
+            syncCode=[
+                SWaitCnt(dscnt=0),
+                SWaitCnt(dscnt=0)
+            ],
+            nglshift=12,
+            nllshift=12,
+            mfmaReorder=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+                         20, 21, 22, 23, 24, 40, 25, 32, 44, 33, 26, 41, 27, 34, 45, 35, 28, 42,
+                         29, 36, 46, 37, 30, 43, 31, 38, 47, 39, 48, 56, 64, 49, 57, 65, 50, 58,
+                         66, 51, 59, 67, 52, 60, 68, 53, 61, 69, 54, 62, 70, 55, 63, 71, 72, 73,
+                         74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91,
+                         92, 93, 94, 95],
+        )
+
+        valid, message = isValid(schedule_info, {"kernel": kernel})
+        assert not valid
+        assert message == "Code path 0: PackA0 @ idx=27 issued too late, must be issued before MFMA @ idx=26."
