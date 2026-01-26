@@ -35,5 +35,6 @@ TEST_ROUTINE(gemvi,
              arg.beta,
              arg.betai,
              arg.transA,
-             arg.baseA);
+             arg.baseA,
+             arg.graph_test);
 #endif
