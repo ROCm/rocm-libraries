@@ -207,6 +207,48 @@ Run checks on staged files:
 pre-commit
 ```
 
+Run checks on all files in the repo:
+```bash
+pre-commit run --all-files
+```
+
+### Opting a Project into Pre-commit Checks
+
+By default, most projects are excluded from pre-commit checks in [`.pre-commit-config.yaml`](.pre-commit-config.yaml). To opt-in a project, follow this incremental approach to avoid pre-commit failures:
+
+1.  **Apply Fixes**:
+    Remove your project's exclusion pattern from [`.pre-commit-config.yaml`](.pre-commit-config.yaml) on your local machine (**do not commit this change yet**) and run pre-commit:
+    ```bash
+    pre-commit run --files $(git ls-files projects/<your-project>)
+    ```
+    Some fixes will be applied automatically, while others may require manual intervention. Submit pull requests to apply these fixes to your project's code. We recommend coordinating within your team and grouping fixes by directory or subcomponent to avoid the volatility that could ensue following a bulk PR.
+
+2.  **Finalize Opt-in**:
+    Once all issues in the project are resolved:
+    1.  Permanently remove the project's exclusion pattern from [`.pre-commit-config.yaml`](.pre-commit-config.yaml).
+    2.  Run a final check to ensure everything is clean:
+        ```bash
+        pre-commit run --files $(git ls-files projects/<your-project>)
+        ```
+    3.  Submit a PR with the config change and any remaining fixes.
+
+3.  **(Optional) Install Dependencies in CI**:
+    Only applicable if you're adding custom pre-commit hooks whose dependencies aren't self-contained in the hook:
+    1.  Edit [`.github/workflows/pre-commit.yml`](.github/workflows/pre-commit.yml).
+    2.  Add your project name to the `PROJECTS_WITH_OPTIONAL_DEPS` environment variable in the "Detect project changes" step (add it on a new line):
+        ```yaml
+        PROJECTS_WITH_OPTIONAL_DEPS: >-
+          hipdnn
+          your-project
+        ```
+    3.  Add a new step to install dependencies, conditional on your project changing:
+        ```yaml
+        - name: Install <your-project> dependencies
+          if: steps.changes.outputs.<your-project>_changed == 'true'
+          run: |
+            # Install dependencies here
+        ```
+
 ---
 
 ## Pull Request Guidelines

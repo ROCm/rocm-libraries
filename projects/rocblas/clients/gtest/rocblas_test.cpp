@@ -270,6 +270,13 @@ bool match_test_category(const Arguments& arg, const char* category)
         }
     }
 
+    // TODO: periodically review if this can be removed after support is added
+    if(arg.graph_test)
+    {
+        // We know that underlying arg object is non-const, so we can use const_cast
+        *(const_cast<bool*>(&arg.pointer_mode_device)) = false;
+    }
+
     // we are now bypassing the category key
     // Return whether arg.category matches the requested category
     // return !strcmp(arg.category, category);

@@ -41,6 +41,12 @@ hipdnnBackendDescriptorType_t HipdnnBackendDescriptor::getType() const
     return _impl->getType();
 }
 
+std::string HipdnnBackendDescriptor::toString() const
+{
+    THROW_IF_TRUE(!_impl, HIPDNN_STATUS_INTERNAL_ERROR, "Null _impl in toString.");
+    return _impl->toString();
+}
+
 bool HipdnnBackendDescriptor::isValid()
 {
     return _impl && getType() != hipdnnBackendDescriptorType_t::HIPDNN_INVALID_TYPE;

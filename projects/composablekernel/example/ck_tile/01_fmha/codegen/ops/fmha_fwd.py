@@ -40,7 +40,16 @@ DTYPE_BITS = {
     "bf8": 8,
 }
 
-K0_MAX_SUBMAX_MAP = {32: 32, 48: 48, 64: 64, 96: 128, 128: 128, 192: 192, 256: 256}
+K0_MAX_SUBMAX_MAP = {
+    32: 32,
+    48: 48,
+    64: 64,
+    80: 96,
+    96: 128,
+    128: 128,
+    192: 192,
+    256: 256,
+}
 
 FMHA_FWD_KERNEL_HEADER = """// SPDX-License-Identifier: MIT
 // Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.\n
@@ -202,11 +211,10 @@ float fmha_fwd(fmha_fwd_traits traits, fmha_fwd_args args, const ck_tile::stream
     const bool can_dispatch_v3 =
         (device_name.compare(0, 6, "gfx950") == 0) and
         (traits.data_type.compare("fp16") == 0 or traits.data_type.compare("bf16") == 0) and
-        traits.is_v_rowmajor and (not traits.has_logits_soft_cap) and
-        (traits.bias_type == bias_enum::no_bias) and (not traits.has_lse) and
-        (not traits.has_dropout) and (traits.qscale_type == quant_scale_enum::no_scale) and
-        (not is_swa) and (args.nhead_q % args.nhead_k == 0) and (args.hdim_q == 128) and
-        (args.hdim_v == 128);
+        traits.is_v_rowmajor and (traits.bias_type == bias_enum::no_bias) and
+        (not traits.has_lse) and (not traits.has_dropout) and
+        (traits.qscale_type == quant_scale_enum::no_scale) and (not is_swa) and
+        (args.nhead_q % args.nhead_k == 0) and (args.hdim_q == 128) and (args.hdim_v == 128);
     if ({F_is_v3_enabled} and can_dispatch_v3) {{
         return fmha_fwd_v3(traits, args, config);
     }} else {{
@@ -307,7 +315,7 @@ class FmhaFwdApiTrait:
             assert False
 
     def seqtune(self, max_bm0: int) -> str:
-        if self.bm0 == max_bm0:
+        if self.bm0 == max_bm0 or self.bm0 == 64:
             return "true/*fall back to largest tile*/"
         else:
             return f"a.seqlen_q <= {self.bm0}"
@@ -839,6 +847,11 @@ class CompatibilityRuleFactoryGfx9(CompatibilityRuleFactory):
                         (problem_ctx.hdim, problem_ctx.hdim_v) != (128, 128)
                         and kernel_ctx.tile.F_bm0 != 128
                     )
+                    or (
+                        (problem_ctx.hdim, problem_ctx.hdim_v) == (128, 128)
+                        and kernel_ctx.pipeline.tag != "qr_async"
+                        and kernel_ctx.tile.F_bk0 == 64
+                    )
                 ):
                     # non qr_async_trload only support km0=128 tile size when hdim is not 128
                     # non qr_async only support kn0=128 tile size when hdim is 128
@@ -930,9 +943,11 @@ class KernelComponentFactoryGfx9(CompatibilityRuleFactoryGfx9):
                 ( 64,  64) : [FmhaFwdTileSize( 16,  32,  64,  64,  32,  64,  1, 1, 1,  1, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
                               FmhaFwdTileSize( 32,  32,  64,  64,  32,  64,  1, 1, 1,  1, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
                               FmhaFwdTileSize(128,  64,  32,  64,  32,  64,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1)],
+                ( 80, 96)  : [FmhaFwdTileSize(128, 128,  16,  96,  32,  80,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1)],
                 ( 96, 128) : [FmhaFwdTileSize(128, 128,  32, 128,  32,  96,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1)],
                 (128, 128) : [FmhaFwdTileSize( 16,  32,  64, 128,  32, 128,  1, 1, 1,  1, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
                               FmhaFwdTileSize( 32,  32, 128, 128,  32, 128,  1, 1, 1,  1, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
+                              FmhaFwdTileSize( 64, 128,  32, 128,  32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 16,  -1, CppConstraint('get_num_blocks(64) <= num_cus')),
                               FmhaFwdTileSize(128,  64,  32, 128,  16, 128,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
                               FmhaFwdTileSize(128, 128,  32, 128,  32, 128,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1)],
               # (160, 160) : [FmhaFwdTileSize(128, 128 , 32, 160,  32, 160,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,   1)],
@@ -1008,14 +1023,18 @@ class KernelComponentFactoryGfx9(CompatibilityRuleFactoryGfx9):
         elif dtype in cls._DT_FP8BF16 or dtype in cls._DT_FP8FP32:
             # no need lse/dropout kernels
             for logits, qscale, mask, bias, sink in itertools.product(
-                ["f"],
-                ["no", "pertensor"],
+                ["t", "f"],
+                ["no", "pertensor", "blockscale"],
                 get_mask_map(mask_impl).keys(),
                 ["no"],
                 ["f", "t"],
             ):
-                pipelines.append(FmhaFwdPipeline("qr_async", "row", "t", "f", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", sink))  # fmt: skip
-                pipelines.append(FmhaFwdPipeline("qr_async", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                if hdim == 64:
+                    pipelines.append(FmhaFwdPipeline("qr", "row", "t", "f", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                else:
+                    pipelines.append(FmhaFwdPipeline("qr_async", "row", "t", "f", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_async", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", sink))  # fmt: skip
         elif dtype in ["fp8", "fp8fp16", "bf8"]:
             # TODO
             pass
@@ -1068,9 +1087,9 @@ class KernelComponentFactoryGfx950(
             # qr_async_trload_v3 only supports hdim=hdim_v=128 for now
             if (hdim, hdim_v) == (128, 128):
                 # qr_async_trload_v3 only supports (generic) causal mask
-                for mask in ["no", "causal"]:
+                for logits, mask in itertools.product(["t", "f"], ["no", "causal"]):
                     pipelines.append(FmhaFwdPipeline("qr_async_trload_v3", "row", "t", "t", "f", "f",
-                        F_logits="f", F_bias="no", F_lse="f", F_dropout="f", F_qscale=qscale, F_mask=mask, F_skip="f", F_trload="t", F_sink="f"))  # fmt: skip
+                        F_logits=logits, F_bias="no", F_lse="f", F_dropout="f", F_qscale=qscale, F_mask=mask, F_skip="f", F_trload="t", F_sink="f"))  # fmt: skip
 
         return pipelines
 
@@ -1133,7 +1152,10 @@ class KernelComponentFactoryGfx12(CompatibilityRuleFactory):
         elif dtype in cls._DT_FP8_FP8BF16 or dtype in cls._DT_FP8FP32:
             # no need lse/dropout kernels
             for logits, qscale, mask, bias in itertools.product(
-                ["f"], ["no", "pertensor"], get_mask_map(mask_impl).keys(), ["no"]
+                ["f"],
+                ["no", "pertensor", "blockscale"],
+                get_mask_map(mask_impl).keys(),
+                ["no"],
             ):
                 pipelines.append(FmhaFwdPipeline("qr", "row", "f", "f", "f", "f", logits, bias, "f", "f", qscale, mask, "f", "f", "f"))  # fmt: skip
                 pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", "f"))  # fmt: skip

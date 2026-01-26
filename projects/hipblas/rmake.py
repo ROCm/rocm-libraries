@@ -316,6 +316,8 @@ def config_cmd():
             cmake_options.append( f"-DLINK_BLIS=ON")
         if args.clients_no_fortran:
             cmake_options.append(f"-DBUILD_FORTRAN_CLIENTS=OFF")
+        if os.name == "nt":
+            cmake_options.append( f"-DCREATE_TEST_APP_LOCAL_DEPLOY=ON")
 
 
     if args.build_solver:

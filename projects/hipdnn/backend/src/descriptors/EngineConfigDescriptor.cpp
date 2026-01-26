@@ -6,17 +6,19 @@
 #include "EngineDescriptor.hpp"
 #include "GraphDescriptor.hpp"
 #include "HipdnnBackendDescriptorType.h"
+#include "HipdnnBackendFlatbufferData.h"
 #include "HipdnnException.hpp"
 #include "handle/Handle.hpp"
 
-#include <hipdnn_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_data_sdk/flatbuffer_utilities/KnobSettingWrapper.hpp>
 
 namespace hipdnn_backend
 {
 
 EngineConfigDescriptor::EngineConfigDescriptor()
 {
-    _engineConfigData = std::make_unique<hipdnn_sdk::data_objects::EngineConfigT>();
+    _engineConfigData = std::make_unique<hipdnn_data_sdk::data_objects::EngineConfigT>();
 }
 
 void EngineConfigDescriptor::finalize()
@@ -148,6 +150,9 @@ void EngineConfigDescriptor::setAttribute(hipdnnBackendAttributeName_t attribute
     case HIPDNN_ATTR_ENGINECFG_ENGINE:
         setEngine(attributeType, elementCount, arrayOfElements);
         break;
+    case HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT:
+        setKnobChoice(attributeType, elementCount, arrayOfElements);
+        break;
     case HIPDNN_ATTR_ENGINECFG_INTERMEDIATE_INFO:
     case HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES:
     case HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE:
@@ -215,11 +220,68 @@ hipdnnPluginConstData_t EngineConfigDescriptor::getSerializedEngineConfig() cons
 
         flatbuffers::FlatBufferBuilder builder;
         builder.Finish(
-            hipdnn_sdk::data_objects::EngineConfig::Pack(builder, _engineConfigData.get()));
+            hipdnn_data_sdk::data_objects::EngineConfig::Pack(builder, _engineConfigData.get()));
         _engineConfigSerializedBuffer = builder.Release();
     }
 
     return {_engineConfigSerializedBuffer.data(), _engineConfigSerializedBuffer.size()};
+}
+
+void EngineConfigDescriptor::setKnobChoice(hipdnnBackendAttributeType_t attributeType,
+                                           int64_t elementCount,
+                                           const void* arrayOfElements)
+{
+    THROW_IF_NE(attributeType,
+                HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                HIPDNN_STATUS_BAD_PARAM,
+                "EngineConfigDescriptor failed to set knob choice: Invalid attribute type.");
+
+    THROW_IF_LT(elementCount,
+                1,
+                HIPDNN_STATUS_BAD_PARAM,
+                "EngineConfigDescriptor failed to set knob choice: Element count must be > 0.");
+
+    THROW_IF_NULL(arrayOfElements,
+                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                  "EngineConfigDescriptor failed to set knob choice: Null pointer.");
+
+    auto* inputArray = static_cast<const hipdnnBackendFlatbufferData_t*>(arrayOfElements);
+
+    for(int64_t i = 0; i < elementCount; ++i)
+    {
+        const auto& flatbufferData = inputArray[i];
+
+        THROW_IF_NULL(flatbufferData.ptr,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      "EngineConfigDescriptor failed to set knob choice: "
+                      "Flatbuffer data pointer is null.");
+
+        THROW_IF_EQ(flatbufferData.size,
+                    0UL,
+                    HIPDNN_STATUS_BAD_PARAM,
+                    "EngineConfigDescriptor failed to set knob choice: "
+                    "Flatbuffer data size must be > 0.");
+
+        hipdnn_data_sdk::flatbuffer_utilities::KnobSettingWrapper wrapper(flatbufferData.ptr,
+                                                                          flatbufferData.size);
+
+        THROW_IF_FALSE(wrapper.isValid(),
+                       HIPDNN_STATUS_BAD_PARAM,
+                       "EngineConfigDescriptor failed to set knob choice: "
+                       "Invalid knob setting flatbuffer.");
+
+        // Convert to KnobSettingT and add to the engine config data
+        auto knobSettingT = wrapper.toKnobSettingT();
+        _engineConfigData->knobs.push_back(std::move(knobSettingT));
+    }
+}
+
+std::string EngineConfigDescriptor::toString() const
+{
+    std::string str = "EngineConfigDescriptor: {engineId=";
+    str += _engine ? std::to_string(_engine->getEngineId()) : "null";
+    str += ", maxWorkspaceSize=" + std::to_string(_maxWorkspaceSize) + "}";
+    return str;
 }
 
 } // namespace hipdnn_backend

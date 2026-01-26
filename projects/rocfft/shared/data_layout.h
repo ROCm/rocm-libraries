@@ -24,6 +24,7 @@
 #include "fft_enums.h"
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <limits>
 #include <numeric>
 #include <optional>
@@ -133,8 +134,8 @@ static std::vector<T> default_distances(fft_transform_type                      
     validate_enums_or_throw("default_distances", dft_type, placement, io);
     if(batches.empty())
         return std::vector<T>(); // empty as well
-    auto temp_lengths = lengths;
-    temp_lengths.insert(temp_lengths.begin(), batches.begin(), batches.end());
+    auto temp_lengths = batches;
+    std::copy(lengths.begin(), lengths.end(), std::back_inserter(temp_lengths));
     std::vector<T> ret;
     if(!len_dim_order)
     {
@@ -573,7 +574,7 @@ private:
 // @ elementary strides are ignored when implicit default inembed/onembed are used
 //   --> "true" template specialization value for second template arg of ionembed_t
 template <typename T>
-using hipfft_ionembed_t = ionembed_t<T, false>;
+using hipfft_ionembed_t = ionembed_t<T, true>;
 
 // in FFTW3/hipFFTW
 // @ T := int

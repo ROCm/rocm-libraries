@@ -40,6 +40,7 @@ __all__ = [
     "BatchnormForwardInferenceAttributes",
     "BatchnormBackwardAttributes",
     "PoolingForwardAttributes",
+    "MatmulAttributes",
     "DataType",
     "TensorLayout",
     "ConvolutionMode",

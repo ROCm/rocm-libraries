@@ -34,9 +34,10 @@
 #define AVERAGE_OPS 0
 #endif
 
-// Let's use extended-precision accumulator only in FP16 pooling and only for averaging.
+// Let's use extended-precision accumulator for FP16 averaging and always for BF16.
+// BF16 uses ushort which doesn't work correctly with signed comparisons in max pooling.
 // For all other ops and datatypes, use native accumulator, i.e. treate FLOAT_ACCUM as FLOAT.
-#if !(AVERAGE_OPS && MIOPEN_USE_FP16)
+#if !((AVERAGE_OPS && MIOPEN_USE_FP16) || MIOPEN_USE_BFP16)
 #define MIOPEN_USE_NATIVE_DATATYPE_ACCUM 1
 #endif
 
@@ -46,7 +47,7 @@
 #error "MLO_POOLING_IS2D_KERNEL must be defined"
 #endif
 
-using arg_size_t = unsigned long;
+using arg_size_t = uint64_t;
 
 extern "C" __global__ void mloPoolingForwardNaive(const FLOAT* bot_ptr,
                                                   FLOAT* top_ptr,
@@ -137,15 +138,16 @@ extern "C" __global__ void mloPoolingForwardNaive(const FLOAT* bot_ptr,
                                                  + static_cast<size_t>(d * bot_d_stride) //
                                                  + static_cast<size_t>(h * bot_h_stride) //
                                                  + static_cast<size_t>(w * bot_w_stride);
+                        FLOAT_ACCUM bot_val = CVT_FLOAT2ACCUM(bot_ptr[bot_index]);
                         if constexpr(AVERAGE_OPS)
                         {
-                            res += bot_ptr[bot_index];
+                            res += bot_val;
                         }
                         else // MAX
                         {
-                            if(bot_ptr[bot_index] > res)
+                            if(bot_val > res)
                             {
-                                res = bot_ptr[bot_index];
+                                res = bot_val;
                                 if(save_index)
                                 {
                                     found  = true;
@@ -207,7 +209,7 @@ extern "C" __global__ void mloPoolingForwardNaive(const FLOAT* bot_ptr,
                                      + static_cast<size_t>(j * top_h_stride) //
                                      + static_cast<size_t>(i * top_w_stride);
 
-            top_ptr[top_index] = static_cast<FLOAT>(res);
+            top_ptr[top_index] = CVT_ACCUM2FLOAT(res);
         }
     };
 

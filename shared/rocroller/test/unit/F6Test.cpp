@@ -335,12 +335,12 @@ namespace rocRollerTest
 
             auto command = std::make_shared<Command>();
 
-            auto tagTensorA
-                = command->addOperation(rocRoller::Operations::Tensor(2, F6Type, {0, 1})); // Load A
+            auto tagTensorA = command->addOperation(
+                rocRoller::Operations::Tensor(2, F6Type, {}, {0, 1})); // Load A
             auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
             auto tagTensorB = command->addOperation(
-                rocRoller::Operations::Tensor(2, F6Type, {0, 1})); // Store B
+                rocRoller::Operations::Tensor(2, F6Type, {}, {0, 1})); // Store B
             command->addOperation(rocRoller::Operations::T_Store_Tiled(tagLoadA, tagTensorB));
 
             auto commandArgs = command->createArguments();
@@ -460,13 +460,6 @@ namespace rocRollerTest
 
     TEST_P(F6Test, GPU_F6TiledLoadStore)
     {
-        auto const& arch = m_context->targetArchitecture().target();
-        if(!arch.isCDNAGPU())
-        {
-            GTEST_SKIP() << "Test not yet supported on "
-                         << m_context->targetArchitecture().target().toString() << std::endl;
-        }
-
         int workitemsPerWorkgroup = 64;
         int elementsPerWorkitem   = 16;
 

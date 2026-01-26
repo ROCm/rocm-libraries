@@ -34,13 +34,13 @@ typedef std::tuple<base, std::string> csrilusv_bin_tuple;
 
 base csrilusv_idxbase_range[] = {HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE};
 
-std::string csrilusv_bin[] = {"scircuit.csr",
+std::string csrilusv_bin[] = {"scircuit.bin",
 #if defined(__HIP_PLATFORM_AMD__)
                               //                              "bmwcra_1.csr",
-                              "nos1.csr",
+                              "nos1.bin",
 #endif
-                              "nos6.csr",
-                              "amazon0312.csr"};
+                              "nos6.bin",
+                              "amazon0312.bin"};
 
 class parameterized_csrilusv_bin : public testing::TestWithParam<csrilusv_bin_tuple>
 {

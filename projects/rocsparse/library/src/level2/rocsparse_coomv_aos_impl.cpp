@@ -94,6 +94,7 @@ namespace rocsparse
               typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void coomvn_aos_atomic_loops(int64_t nnz,
+                                 I       m,
                                  ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                  const I* __restrict__ coo_ind,
                                  const A* __restrict__ coo_val,
@@ -106,7 +107,7 @@ namespace rocsparse
         if(alpha != 0)
         {
             rocsparse::coomvn_aos_atomic_loops_device<BLOCKSIZE, LOOPS>(
-                nnz, alpha, coo_ind, coo_val, x, y, idx_base);
+                nnz, m, alpha, coo_ind, coo_val, x, y, idx_base);
         }
     }
 
@@ -114,6 +115,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void coomvt_aos_kernel(rocsparse_operation trans,
                            int64_t             nnz,
+                           I                   n,
                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                            const I* __restrict__ coo_ind,
                            const A* __restrict__ coo_val,
@@ -125,7 +127,7 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         if(alpha != 0)
         {
-            rocsparse::coomvt_aos_device(trans, nnz, alpha, coo_ind, coo_val, x, y, idx_base);
+            rocsparse::coomvt_aos_device(trans, nnz, n, alpha, coo_ind, coo_val, x, y, idx_base);
         }
     }
 
@@ -164,6 +166,7 @@ namespace rocsparse
                 0,
                 stream,
                 nnz,
+                m,
                 ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                 coo_ind,
                 coo_val,
@@ -184,6 +187,7 @@ namespace rocsparse
                 handle->stream,
                 trans,
                 nnz,
+                n,
                 ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                 coo_ind,
                 coo_val,
@@ -291,6 +295,7 @@ namespace rocsparse
                 handle->stream,
                 trans,
                 nnz,
+                n,
                 ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                 coo_ind,
                 coo_val,
@@ -525,8 +530,12 @@ INSTANTIATE_MIXED(float, int32_t, int8_t, int8_t, float);
 INSTANTIATE_MIXED(float, int64_t, int8_t, int8_t, float);
 INSTANTIATE_MIXED(float, int32_t, _Float16, _Float16, float);
 INSTANTIATE_MIXED(float, int64_t, _Float16, _Float16, float);
+INSTANTIATE_MIXED(float, int32_t, _Float16, _Float16, _Float16);
+INSTANTIATE_MIXED(float, int64_t, _Float16, _Float16, _Float16);
 INSTANTIATE_MIXED(float, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE_MIXED(float, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_MIXED(float, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
+INSTANTIATE_MIXED(float, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
 INSTANTIATE_MIXED(
     rocsparse_float_complex, int32_t, float, rocsparse_float_complex, rocsparse_float_complex);
 INSTANTIATE_MIXED(

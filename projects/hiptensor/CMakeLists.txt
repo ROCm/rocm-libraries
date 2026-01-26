@@ -132,7 +132,7 @@ endif()
 
 # Variable GPU_TARGET must be a cached variable and must be specified before calling find_package(hip)
 # This is because hip-config.cmake sets --offload-arch via GPU_TARGET cached variable __after__ setting
-# default cached variable GPU_TARGET to "gfx900;gfx906;gfx908;gfx1100;gfx1101;gfx1102", where not all archs are compatible with MFMA instructions
+# default cached variable GPU_TARGET to "gfx900;gfx906;gfx908", where not all archs are compatible with MFMA instructions
 #
 # By rule, once cached variable is set, it cannot be overridden unless we use the FORCE option
 if(GPU_TARGETS)

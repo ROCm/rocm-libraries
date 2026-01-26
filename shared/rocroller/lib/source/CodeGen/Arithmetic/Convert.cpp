@@ -520,6 +520,9 @@ namespace rocRoller
         case DataType::Int64:
             co_yield m_context->copier()->copy(dest, arg, "convert");
             break;
+        case DataType::UInt64:
+            co_yield m_context->copier()->copy(dest, arg, "convert");
+            break;
 
         default:
             Throw<FatalError>("Unsupported datatype for convert to UInt64: ", ShowValue(dataType));

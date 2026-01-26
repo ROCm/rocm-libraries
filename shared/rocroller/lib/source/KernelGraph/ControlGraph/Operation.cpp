@@ -221,7 +221,6 @@ namespace rocRoller::KernelGraph::ControlGraph
 
     RR_CLASS_NAME_IMPL(AssertOp);
     RR_CLASS_NAME_IMPL(Assign);
-    RR_CLASS_NAME_IMPL(ComputeIndex);
     RR_CLASS_NAME_IMPL(ConditionalOp);
     RR_CLASS_NAME_IMPL(Deallocate);
     RR_CLASS_NAME_IMPL(DoWhileOp);
