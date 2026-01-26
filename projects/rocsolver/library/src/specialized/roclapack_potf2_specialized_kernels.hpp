@@ -39,6 +39,17 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+/**
+ * ------------------------------------------------------
+ * Perform Cholesky factorization for small n by n matrix.
+ * The function executes in a single thread block per matrix.
+ * ------------------------------------------------------
+ *
+ * NB           Number of panels to perform blocked decomposition.
+ *              ceildiv(n, PANEL_SIZE)
+ * PANEL_SIZE   Size of panel to perform non-blocked decompostion.
+ *              PANEL_SIZE == BlockDim.x == BlockDim.y
+**/
 template <int NB, int PANEL_SIZE, typename T, typename I, typename INFO, typename U>
 ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
                                          const I n,
@@ -48,8 +59,6 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
                                          const rocblas_stride strideA,
                                          INFO* const info)
 {
-    bool const is_lower = (!is_upper);
-
     auto const tid = hipThreadIdx_y * hipBlockDim_x + hipThreadIdx_x;
     auto const inc = hipBlockDim_y * hipBlockDim_x;
     auto const tidx = hipThreadIdx_x;
