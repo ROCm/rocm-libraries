@@ -326,7 +326,7 @@ public:
                 oss << "Value \"" << val << "\" is not in the list of valid values: ";
                 std::vector<std::string> sortedValues(_validValues.begin(), _validValues.end());
                 std::sort(sortedValues.begin(), sortedValues.end());
-                hipdnn_data_sdk::utilities::vecToStream(oss, sortedValues);
+                hipdnn_data_sdk::utilities::stringVecToStream(oss, sortedValues);
                 return {ErrorCode::INVALID_VALUE, oss.str()};
             }
             return {ErrorCode::OK, ""};
@@ -353,7 +353,7 @@ public:
             std::sort(sortedValues.begin(), sortedValues.end());
             oss << ", validValues=";
 
-            hipdnn_data_sdk::utilities::vecToStream(oss, sortedValues);
+            hipdnn_data_sdk::utilities::stringVecToStream(oss, sortedValues);
         }
         oss << "}";
         return oss.str();

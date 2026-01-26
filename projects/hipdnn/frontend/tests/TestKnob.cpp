@@ -320,6 +320,7 @@ TEST(TestKnobStringConstraint, ConstraintWithValidValues)
     ASSERT_NE(constraint, nullptr);
 
     std::string str = constraint->toString();
+
     EXPECT_NE(str.find("validValues"), std::string::npos);
     // Check that values are quoted
     EXPECT_NE(str.find("\"option1\""), std::string::npos);
