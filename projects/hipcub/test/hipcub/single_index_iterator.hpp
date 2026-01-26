@@ -52,8 +52,7 @@ public:
 
         // Implicit conversion for read access
         HIPCUB_HOST_DEVICE
-        inline
-            operator T() const
+        inline operator T() const
         {
             return *value_;
         }

@@ -79,7 +79,8 @@ struct half_t
     }
 
     /// Constructor from size_t
-    __host__ __device__ __forceinline__ half_t(size_t a)
+    __host__ __device__ __forceinline__
+    half_t(size_t a)
     {
         *this = half_t(float(a));
     }
@@ -89,7 +90,8 @@ struct half_t
              typename
              = typename std::enable_if<std::is_same_v<T, unsigned long long int>
                                        && (!std::is_same_v<size_t, unsigned long long int>)>::type>
-    __host__ __device__ __forceinline__ half_t(T a)
+    __host__ __device__ __forceinline__
+    half_t(T a)
     {
         *this = half_t(float(a));
     }
