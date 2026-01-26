@@ -4,6 +4,7 @@
 find_package(Python3 COMPONENTS Interpreter)
 
 # Function to apply category labels to discovered GTest tests
+# Optional 4th parameter: install_test_file - path to write install-time test definitions
 function(apply_test_category_labels target_name yaml_file working_dir)
     # Execute the Python script to generate CMake code
     if(NOT Python3_FOUND)
@@ -11,12 +12,25 @@ function(apply_test_category_labels target_name yaml_file working_dir)
         return()
     endif()
 
+    # Check if optional install_test_file parameter was provided
+    set(install_test_file "${ARGV3}")
+    if(install_test_file)
+        set(python_args ${yaml_file} ${target_name} ${working_dir} ${install_test_file})
+    else()
+        set(python_args ${yaml_file} ${target_name} ${working_dir})
+    endif()
+
     execute_process(
-        COMMAND ${Python3_EXECUTABLE} ${ROCM_LIBRARIES_ROOT}/shared/ctest/parse_test_categories.py ${yaml_file} ${target_name} ${working_dir}
+        COMMAND ${Python3_EXECUTABLE} ${ROCM_LIBRARIES_ROOT}/shared/ctest/parse_test_categories.py ${python_args}
         OUTPUT_VARIABLE CMAKE_CATEGORY_CODE
         ERROR_VARIABLE PARSE_ERROR
         RESULT_VARIABLE PARSE_RESULT
     )
+
+    # Enable the following to show debug/error output if present in writing the install-time test file
+    #if(PARSE_ERROR)
+    #    message(STATUS "Test category parser output: ${PARSE_ERROR}")
+    #endif()
 
     if(NOT PARSE_RESULT EQUAL 0)
         message(WARNING "Failed to parse test categories YAML: ${PARSE_ERROR}")
