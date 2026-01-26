@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -103,6 +103,20 @@ void inline protected_assert_eq(T val, T expected)
     {
         const bool result = (val == expected);
         ASSERT_TRUE(result);
+    }
+}
+
+template<class T, class U, bool UseGTestAssert = is_printable<T> && is_printable<U>>
+void inline protected_assert_eq(std::pair<T, U> val, std::pair<T, U> expected, size_t index)
+{
+    if constexpr(UseGTestAssert)
+    {
+        ASSERT_EQ(val, expected) << "where index = " << index;
+    }
+    else
+    {
+        const bool result = (val == expected);
+        ASSERT_TRUE(result) << "where index = " << index;
     }
 }
 

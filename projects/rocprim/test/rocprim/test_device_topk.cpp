@@ -718,11 +718,11 @@ void topk_large_sizes_test(bool debug_synchronous)
         const auto output = d_output.load()[0];
         if constexpr(descending)
         {
-            ASSERT_EQ(output, size_in_type{size - 1});
+            test_utils::assert_eq(output, size_in_type{size - 1});
         }
         else
         {
-            ASSERT_EQ(output, size_in_type{0});
+            test_utils::assert_eq(output, size_in_type{0});
         }
 
         if(use_graphs)
