@@ -97,14 +97,14 @@ void client_omp_manager::limit_by_processor_count()
     const char* env_omp_threads = std::getenv("OMP_NUM_THREADS");
     if(env_omp_threads != nullptr)
     {
+        rocblas_cout << "rocBLAS info: Found OMP_NUM_THREADS environment variable set to " 
+                     << env_omp_threads << std::endl;
         return;
     }
     
-    // Reduce by c_thread_reducer to avoid AOCL performance degradation at high thread counts
-    int safe_thread_count = omp_default_threads > 4 
-                            ? omp_default_threads - c_thread_reducer 
-                            : omp_default_threads;
-    safe_thread_count = std::max(1, safe_thread_count);
+    // Preserve c_thread_reducer cores free to avoid AOCL performance degradation at high thread counts
+    // On small systems (≤4 cores), use single-threaded mode to avoid contention entirely
+    int safe_thread_count = std::max(1, omp_default_threads - c_thread_reducer);
     
     omp_set_num_threads(safe_thread_count);
 
