@@ -37,33 +37,50 @@
 
 /// @brief RAII guard for setting MIOpen tuning policy on a handle.
 ///
-/// This class sets the tuning policy on the MIOpen handle upon construction and
-/// restores it to the default policy (miopenTuningPolicyNone) upon destruction.
+/// This class saves the current tuning policy, sets a new one based on the
+/// benchmarking flag, and restores the original policy upon destruction.
 /// This ensures that tuning policy changes don't leak to subsequent operations.
+///
+/// When benchmarking is enabled, uses miopenTuningPolicySearch (3) rather than
+/// miopenTuningPolicySearchDbUpdate (4). The difference:
+/// - Search (3): Uses cached results if available, searches only on cache miss
+/// - SearchDbUpdate (4): Always re-searches, ignoring cached results
+///
+/// Search (3) matches PyTorch's benchmark=true behavior: first run searches and
+/// caches, subsequent runs with same config use the cached optimal kernel.
+/// This is more efficient for production use.
 
 class ScopedTuningPolicy
 {
 public:
     /// @brief Construct and set the tuning policy on the handle.
     /// @param handle The MIOpen handle to set the policy on.
-    /// @param benchmarkingEnabled If true, sets policy to miopenTuningPolicySearchDbUpdate.
+    /// @param benchmarkingEnabled If true, sets policy to miopenTuningPolicySearch.
     ///                           If false, sets policy to miopenTuningPolicyNone.
     ScopedTuningPolicy(miopenHandle_t handle, bool benchmarkingEnabled)
         : _handle(handle)
     {
-        auto policy = benchmarkingEnabled ? miopenTuningPolicySearchDbUpdate
-                                          : miopenTuningPolicyNone;
-        auto status = miopenSetTuningPolicy(_handle, policy);
+        // Save original policy
+        auto status = miopenGetTuningPolicy(_handle, &_originalPolicy);
+        if(status != miopenStatusSuccess)
+        {
+            HIPDNN_LOG_ERROR("Failed to get tuning policy: {}", miopenGetErrorString(status));
+            _originalPolicy = miopenTuningPolicyNone; // Fallback
+        }
+
+        // Set new policy: Search (3) for benchmarking, None (1) otherwise
+        auto policy = benchmarkingEnabled ? miopenTuningPolicySearch : miopenTuningPolicyNone;
+        status = miopenSetTuningPolicy(_handle, policy);
         if(status != miopenStatusSuccess)
         {
             HIPDNN_LOG_ERROR("Failed to set tuning policy: {}", miopenGetErrorString(status));
         }
     }
 
-    /// @brief Destructor restores tuning policy to default (None).
+    /// @brief Destructor restores tuning policy to original value.
     ~ScopedTuningPolicy()
     {
-        auto status = miopenSetTuningPolicy(_handle, miopenTuningPolicyNone);
+        auto status = miopenSetTuningPolicy(_handle, _originalPolicy);
         if(status != miopenStatusSuccess)
         {
             HIPDNN_LOG_ERROR("Failed to restore tuning policy: {}", miopenGetErrorString(status));
@@ -80,6 +97,7 @@ public:
 
 private:
     miopenHandle_t _handle;
+    miopenTuningPolicy_t _originalPolicy{miopenTuningPolicyNone};
 };
 
 #define HIPDNN_PREPEND_MESSAGE_ON_THROW(statement, message)                               \
