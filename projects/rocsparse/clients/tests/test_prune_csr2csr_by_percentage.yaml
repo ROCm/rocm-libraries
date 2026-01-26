@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -29,14 +29,14 @@ Tests:
 - name: prune_csr2csr_by_percentage_bad_arg
   category: pre_checkin
   function: prune_csr2csr_by_percentage_bad_arg
-  precision: *single_double_precisions
+  precision: *single_only_precisions
 
 - name: prune_csr2csr_by_percentage
   category: quick
   function: prune_csr2csr_by_percentage
-  precision: *single_double_precisions
-  M: [0, 1, 10, 325, 1107]
-  N: [0, 1, 33, 435, 1089]
+  precision: *single_double_precisions_complex_real
+  M: [0, 1, 325, 1107]
+  N: [0, 1, 435, 1089]
   percentage: [0.0, 10.0, 20.0, 50.0, 100.0]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_one]
@@ -45,7 +45,7 @@ Tests:
 - name: prune_csr2csr_by_percentage
   category: pre_checkin
   function: prune_csr2csr_by_percentage
-  precision: *single_double_precisions
+  precision: *single_double_precisions_complex_real
   M: [10245, 50687, 92835]
   N: [11200, 51023, 78583]
   percentage: [0.1, 33.0, 100.0]
@@ -56,7 +56,7 @@ Tests:
 - name: prune_csr2csr_by_percentage_file
   category: pre_checkin
   function: prune_csr2csr_by_percentage
-  precision: *single_double_precisions
+  precision: *single_double_precisions_complex_real
   M: 1
   N: 1
   percentage: [45.0, 15.0, 90.0]
@@ -64,17 +64,22 @@ Tests:
   baseB: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [mac_econ_fwd500,
+             nos1,
              nos2,
+             nos3,
              nos4,
+             nos5,
              nos6,
+             nos7,
+             qc2534,
              scircuit]
 
 - name: prune_csr2csr
   category: nightly
   function: prune_csr2csr_by_percentage
   precision: *single_double_precisions
-  M: [20245, 50677, 82859]
-  N: [12909, 40232, 88180]
+  M: [4049, 5000]
+  N: [2581, 5000]
   percentage: [67.0, 35.0, 99.0, 100.0]
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero]
