@@ -11,15 +11,22 @@ def main():
     )
     parser.add_argument("yaml_file", help="Path to the test_categories.yaml file")
     parser.add_argument(
-        "target_name", help="Name of the test target (e.g., hipblas-test)"
+        "target_name", help="Name of the test target (e.g., miopen_gtest)"
     )
     parser.add_argument("working_dir", help="Working directory for running tests")
+    parser.add_argument(
+        "install_test_file",
+        nargs="?",
+        default=None,
+        help="Optional: Path to write install-time test definitions with relative paths",
+    )
 
     args = parser.parse_args()
 
     yaml_file = args.yaml_file
     target_name = args.target_name
     working_dir = args.working_dir
+    install_test_file = args.install_test_file
 
     try:
         with open(yaml_file, "r") as f:
@@ -27,6 +34,26 @@ def main():
     except Exception as e:
         print(f"Error loading YAML: {e}", file=sys.stderr)
         sys.exit(1)
+
+    # Open install test file if provided
+    install_file_handle = None
+    if install_test_file:
+        try:
+            install_file_handle = open(
+                install_test_file, "a", buffering=1
+            )  # Line buffered
+            print(
+                f"# DEBUG: Opened install test file: {install_test_file}",
+                file=sys.stderr,
+            )
+        except Exception as e:
+            print(
+                f"Warning: Could not open install test file {install_test_file}: {e}",
+                file=sys.stderr,
+            )
+            install_file_handle = None
+    else:
+        print(f"# DEBUG: No install test file provided", file=sys.stderr)
 
     categories = config.get("test_categories", {})
     timeouts = config.get("execution_settings", {}).get("category_timeouts", {})
@@ -92,6 +119,25 @@ def main():
         print(f"  TIMEOUT {timeout}")
         print(")")
         print()
+
+        # Write install-time test with relative path if install file is provided
+        if install_file_handle:
+            try:
+                print(
+                    f"# DEBUG: Writing category test {category_name}", file=sys.stderr
+                )
+                install_file_handle.write(
+                    f'add_test({target_name}-{category_name}-suite "../{target_name}" --gtest_filter={pattern_string})\n'
+                )
+                install_file_handle.write(
+                    f"set_tests_properties({target_name}-{category_name}-suite PROPERTIES LABELS {label_string} TIMEOUT {timeout})\n\n"
+                )
+                install_file_handle.flush()
+            except Exception as e:
+                print(
+                    f"Warning: Failed to write category {category_name} to install test file: {e}",
+                    file=sys.stderr,
+                )
 
     # ========================================================================
     # GPU Exclusion Tests with Hierarchical Pattern Matching
@@ -240,6 +286,35 @@ def main():
             print(f"  TIMEOUT {timeout}")
             print(")")
             print()
+
+            # Write install-time test with relative path if install file is provided
+            if install_file_handle:
+                try:
+                    print(
+                        f"# DEBUG: Writing GPU exclude test {category_name}-{gpu_arch}",
+                        file=sys.stderr,
+                    )
+                    install_file_handle.write(
+                        f'add_test({target_name}-{category_name}-{gpu_arch}-exclude "../{target_name}" --gtest_filter={pattern_string})\n'
+                    )
+                    install_file_handle.write(
+                        f"set_tests_properties({target_name}-{category_name}-{gpu_arch}-exclude PROPERTIES LABELS {label_string} TIMEOUT {timeout})\n\n"
+                    )
+                    install_file_handle.flush()
+                except Exception as e:
+                    print(
+                        f"Warning: Failed to write GPU exclude {category_name}-{gpu_arch} to install test file: {e}",
+                        file=sys.stderr,
+                    )
+
+    # Close install test file if it was opened
+    if install_file_handle:
+        try:
+            install_file_handle.flush()  # Ensure all data is written
+            install_file_handle.close()
+            print(f"# DEBUG: Closed install test file successfully", file=sys.stderr)
+        except Exception as e:
+            print(f"# DEBUG: Error closing install test file: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":
