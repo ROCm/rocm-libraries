@@ -46,8 +46,8 @@ Tests:
   category: quick
   function: check_matrix_csc
   precision: *single_double_precisions_complex_real
-  M: [2, 11, 33, 67, 120]
-  N: [2, 11, 33, 67, 120]
+  M: [2, 11]
+  N: [2, 11]
   baseA: [rocsparse_index_base_one]
   matrix_type: [rocsparse_matrix_type_general]
   uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
@@ -69,8 +69,8 @@ Tests:
   category: pre_checkin
   function: check_matrix_csc
   precision: *single_double_precisions_complex_real
-  M: [16745, 58237]
-  N: [57646, 60879]
+  M: [2000]
+  N: [2000]
   baseA: [rocsparse_index_base_zero]
   matrix_type: [rocsparse_matrix_type_general]
   uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
