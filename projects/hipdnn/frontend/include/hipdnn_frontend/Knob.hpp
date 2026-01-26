@@ -28,52 +28,32 @@ namespace hipdnn_frontend
 #define KNOB_TYPES int64_t, double, std::string
 
 // Type alias for knob IDs
-typedef int64_t KnobType_t; // NOLINT(readability-identifier-naming)
+typedef std::string KnobType_t; // NOLINT(readability-identifier-naming)
 
 // Forward declarations
 class KnobSetting;
 class Knob;
-
-// Helper to hash the string ID to the int ID
-inline int64_t makeKnobId(const std::string& strID)
-{
-    return static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash(strID));
-}
 
 // KnobSetting class - represents a knob value setting
 class KnobSetting
 {
 public:
     // Constructors
-    KnobSetting(int64_t knobId, std::variant<KNOB_TYPES> value)
-        : _knobId(knobId)
+    KnobSetting(std::string knobId, std::variant<KNOB_TYPES> value)
+        : _knobId(std::move(knobId))
         , _value(std::move(value))
     {
     }
 
-    KnobSetting(const std::string& knobIdStr, std::variant<KNOB_TYPES> value)
-        : _knobId(makeKnobId(knobIdStr))
-        , _value(std::move(value))
-    {
-    }
-
-    // Template constructors for convenience
     template <typename T>
-    KnobSetting(int64_t knobId, const T& value)
-        : _knobId(knobId)
-        , _value(value)
-    {
-    }
-
-    template <typename T>
-    KnobSetting(const std::string& knobIdStr, const T& value)
-        : _knobId(makeKnobId(knobIdStr))
+    KnobSetting(std::string knobId, const T& value)
+        : _knobId(std::move(knobId))
         , _value(value)
     {
     }
 
     // Accessors
-    int64_t getKnobId() const
+    const std::string& getKnobId() const
     {
         return _knobId;
     }
@@ -124,15 +104,15 @@ public:
             },
             _value);
 
-        return hipdnn_data_sdk::data_objects::CreateKnobSetting(
-            builder, _knobId, valueType, valueOffset);
+        return hipdnn_data_sdk::data_objects::CreateKnobSettingDirect(
+            builder, _knobId.c_str(), valueType, valueOffset);
     }
 
     // String representation
     std::string toString() const
     {
         std::ostringstream oss;
-        oss << "KnobSetting{knobId=" << _knobId << ", value=";
+        oss << "KnobSetting{knobIdStr=" << _knobId << ", value=";
 
         std::visit(
             [&oss](auto&& value) {
@@ -152,7 +132,7 @@ public:
     }
 
 private:
-    int64_t _knobId;
+    std::string _knobId;
     std::variant<KNOB_TYPES> _value;
 };
 
@@ -346,7 +326,7 @@ public:
                 oss << "Value \"" << val << "\" is not in the list of valid values: ";
                 std::vector<std::string> sortedValues(_validValues.begin(), _validValues.end());
                 std::sort(sortedValues.begin(), sortedValues.end());
-                hipdnn_data_sdk::utilities::stringVecToStream(oss, sortedValues);
+                hipdnn_data_sdk::utilities::vecToStream(oss, sortedValues);
                 return {ErrorCode::INVALID_VALUE, oss.str()};
             }
             return {ErrorCode::OK, ""};
@@ -373,7 +353,7 @@ public:
             std::sort(sortedValues.begin(), sortedValues.end());
             oss << ", validValues=";
 
-            hipdnn_data_sdk::utilities::stringVecToStream(oss, sortedValues);
+            hipdnn_data_sdk::utilities::vecToStream(oss, sortedValues);
         }
         oss << "}";
         return oss.str();
@@ -490,11 +470,6 @@ public:
     }
 
     // Accessors
-    int64_t getKnobId() const
-    {
-        return _knobId;
-    }
-
     const std::string& getKnobIdStr() const
     {
         return _knobIdStr;
@@ -538,18 +513,12 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    // Helper to hash the string ID to the int ID
-    static int64_t makeKnobId(const std::string& strID)
-    {
-        return hipdnn_frontend::makeKnobId(strID);
-    }
-
     // String representation for logging
     std::string toString() const
     {
         std::ostringstream oss;
-        oss << "Knob{knobId=" << _knobId << ", knobIdStr=\"" << _knobIdStr << "\", description=\""
-            << _description << "\", defaultValue=";
+        oss << "Knob{knobIdStr=\"" << _knobIdStr << "\", description=\"" << _description
+            << "\", defaultValue=";
 
         variantToStream(oss, _defaultValue);
 
@@ -571,7 +540,6 @@ private:
          std::variant<KNOB_TYPES> defaultValue,
          bool deprecated)
         : _knobIdStr(std::move(knobIdStr))
-        , _knobId(makeKnobId(_knobIdStr))
         , _description(std::move(description))
         , _defaultValue(std::move(defaultValue))
         , _deprecated(deprecated)
@@ -595,7 +563,6 @@ private:
     }
 
     std::string _knobIdStr;
-    int64_t _knobId;
     std::string _description;
     std::variant<KNOB_TYPES> _defaultValue;
     bool _deprecated;

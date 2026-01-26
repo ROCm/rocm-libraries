@@ -940,7 +940,7 @@ public:
 
     // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
     Error get_knob_lookup_for_engine(int64_t engineId,
-                                     std::unordered_map<int64_t, Knob>& knobs) const
+                                     std::unordered_map<KnobType_t, Knob>& knobs) const
     {
         std::vector<Knob> knobVector;
         Error status = get_knobs_for_engine(engineId, knobVector);
@@ -948,7 +948,7 @@ public:
 
         for(auto& knob : knobVector)
         {
-            knobs.try_emplace(knob.getKnobId(), std::move(knob));
+            knobs.try_emplace(knob.getKnobIdStr(), std::move(knob));
         }
 
         return {ErrorCode::OK, ""};
@@ -1031,7 +1031,7 @@ public:
                     "execution plan."};
         }
 
-        std::unordered_map<int64_t, Knob> existingKnobs;
+        std::unordered_map<KnobType_t, Knob> existingKnobs;
         Error status = get_knob_lookup_for_engine(engineId, existingKnobs);
         HIPDNN_CHECK_ERROR(status);
 

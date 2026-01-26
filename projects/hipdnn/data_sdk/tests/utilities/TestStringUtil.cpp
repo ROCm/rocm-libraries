@@ -192,16 +192,16 @@ TEST_F(TestStringUtil, StringVecToStream)
 {
     std::vector<std::string> strVec = {"hello", "world", "test"};
     std::ostringstream oss;
-    hipdnn_data_sdk::utilities::stringVecToStream(oss, strVec);
+    hipdnn_data_sdk::utilities::vecToStream(oss, strVec);
     EXPECT_EQ(oss.str(), "[\"hello\", \"world\", \"test\"]");
 
     std::vector<std::string> singleVec = {"single"};
     std::ostringstream oss2;
-    hipdnn_data_sdk::utilities::stringVecToStream(oss2, singleVec);
+    hipdnn_data_sdk::utilities::vecToStream(oss2, singleVec);
     EXPECT_EQ(oss2.str(), "[\"single\"]");
 
     std::vector<std::string> emptyVec;
     std::ostringstream oss3;
-    hipdnn_data_sdk::utilities::stringVecToStream(oss3, emptyVec);
+    hipdnn_data_sdk::utilities::vecToStream(oss3, emptyVec);
     EXPECT_EQ(oss3.str(), "[]");
 }

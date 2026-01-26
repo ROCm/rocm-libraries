@@ -4058,7 +4058,6 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithKnobSettings)
     flatbuffers::FlatBufferBuilder builder;
     auto knobOffset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
         builder,
-        Knob::makeKnobId("global.deterministic"),
         "global.deterministic",
         "Enable deterministic execution",
         hipdnn_data_sdk::data_objects::KnobValue::IntValue,
@@ -4199,7 +4198,6 @@ TEST_F(TestGraph, CreateExecutionPlanWithInt64Knobs)
     flatbuffers::FlatBufferBuilder builder;
     auto knobOffset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
         builder,
-        Knob::makeKnobId("global.deterministic"),
         "global.deterministic",
         "Enable deterministic execution",
         hipdnn_data_sdk::data_objects::KnobValue::IntValue,
@@ -4280,7 +4278,7 @@ TEST_F(TestGraph, CreateExecutionPlanWithInt64Knobs)
 
     // Use the compatibility method with int64 map
     std::unordered_map<KnobType_t, int64_t> settings;
-    settings[Knob::makeKnobId("global.deterministic")] = 1;
+    settings["global.deterministic"] = 1;
 
     auto result = graph.create_execution_plan(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
@@ -4340,7 +4338,6 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithMultipleKnobs)
     flatbuffers::FlatBufferBuilder builder1;
     auto knob1Offset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
         builder1,
-        Knob::makeKnobId("global.deterministic"),
         "global.deterministic",
         "Enable deterministic execution",
         hipdnn_data_sdk::data_objects::KnobValue::IntValue,
@@ -4356,7 +4353,6 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithMultipleKnobs)
     flatbuffers::FlatBufferBuilder builder2;
     auto knob2Offset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
         builder2,
-        Knob::makeKnobId("performance.threads"),
         "performance.threads",
         "Number of threads",
         hipdnn_data_sdk::data_objects::KnobValue::IntValue,
@@ -4609,7 +4605,6 @@ TEST_F(TestGraph, CreateExecutionPlanExtIgnoresUnsupportedKnobs)
     flatbuffers::FlatBufferBuilder builder;
     auto knobOffset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
         builder,
-        Knob::makeKnobId("global.deterministic"),
         "global.deterministic",
         "Enable deterministic execution",
         hipdnn_data_sdk::data_objects::KnobValue::IntValue,
@@ -4849,7 +4844,6 @@ TEST_F(TestGraph, GetKnobsForEngineReturnsKnobsWhenAvailable)
     flatbuffers::FlatBufferBuilder builder1;
     auto knob1Offset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
         builder1,
-        Knob::makeKnobId("test_knob_1"),
         "test_knob_1",
         "First test knob",
         hipdnn_data_sdk::data_objects::KnobValue::IntValue,
@@ -4863,7 +4857,6 @@ TEST_F(TestGraph, GetKnobsForEngineReturnsKnobsWhenAvailable)
     flatbuffers::FlatBufferBuilder builder2;
     auto knob2Offset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
         builder2,
-        Knob::makeKnobId("test_knob_2"),
         "test_knob_2",
         "Second test knob",
         hipdnn_data_sdk::data_objects::KnobValue::FloatValue,
@@ -4988,7 +4981,6 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesDeprecatedKnobs)
     flatbuffers::FlatBufferBuilder builder;
     auto knobOffset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
         builder,
-        Knob::makeKnobId("deprecated_knob"),
         "deprecated_knob",
         "This knob is deprecated",
         hipdnn_data_sdk::data_objects::KnobValue::IntValue,
@@ -5103,7 +5095,6 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesStringKnobs)
 
     auto knobOffset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
         builder,
-        Knob::makeKnobId("string_knob"),
         "string_knob",
         "String knob with choices",
         hipdnn_data_sdk::data_objects::KnobValue::StringValue,
@@ -5313,12 +5304,14 @@ TEST_F(TestGraph, GetKnobLookupForEngineReturnsMapByKnobId)
 
     EXPECT_CALL(*_mockBackend, backendFinalize(engineDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
+    std::string alphaId = "knob_alpha";
+    std::string betaId = "knob_beta";
+
     // Create flatbuffer knobs
     flatbuffers::FlatBufferBuilder builder1;
     auto knob1Offset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
         builder1,
-        Knob::makeKnobId("knob_alpha"),
-        "knob_alpha",
+        alphaId.c_str(),
         "Alpha parameter",
         hipdnn_data_sdk::data_objects::KnobValue::IntValue,
         hipdnn_data_sdk::data_objects::CreateIntValue(builder1, 1).Union(),
@@ -5331,8 +5324,7 @@ TEST_F(TestGraph, GetKnobLookupForEngineReturnsMapByKnobId)
     flatbuffers::FlatBufferBuilder builder2;
     auto knob2Offset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
         builder2,
-        Knob::makeKnobId("knob_beta"),
-        "knob_beta",
+        betaId.c_str(),
         "Beta parameter",
         hipdnn_data_sdk::data_objects::KnobValue::FloatValue,
         hipdnn_data_sdk::data_objects::CreateFloatValue(builder2, 0.1).Union(),
@@ -5383,21 +5375,19 @@ TEST_F(TestGraph, GetKnobLookupForEngineReturnsMapByKnobId)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    std::unordered_map<int64_t, Knob> knobLookup;
+    std::unordered_map<KnobType_t, Knob> knobLookup;
     auto result = graph.get_knob_lookup_for_engine(42, knobLookup);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(knobLookup.size(), 2);
 
     // Verify knobs are accessible by their IDs
-    int64_t alphaId = Knob::makeKnobId("knob_alpha");
-    int64_t betaId = Knob::makeKnobId("knob_beta");
 
     EXPECT_NE(knobLookup.find(alphaId), knobLookup.end());
     EXPECT_NE(knobLookup.find(betaId), knobLookup.end());
 
-    EXPECT_EQ(knobLookup.at(alphaId).getKnobIdStr(), "knob_alpha");
-    EXPECT_EQ(knobLookup.at(betaId).getKnobIdStr(), "knob_beta");
+    EXPECT_EQ(knobLookup.at(alphaId).getKnobIdStr(), alphaId);
+    EXPECT_EQ(knobLookup.at(betaId).getKnobIdStr(), betaId);
 }
 
 TEST_F(TestGraph, GetKnobLookupForEngineReturnsEmptyMapWhenNoKnobs)
@@ -5462,7 +5452,7 @@ TEST_F(TestGraph, GetKnobLookupForEngineReturnsEmptyMapWhenNoKnobs)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    std::unordered_map<int64_t, Knob> knobLookup;
+    std::unordered_map<KnobType_t, Knob> knobLookup;
     auto result = graph.get_knob_lookup_for_engine(42, knobLookup);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
