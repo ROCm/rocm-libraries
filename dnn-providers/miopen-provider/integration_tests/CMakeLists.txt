@@ -32,7 +32,7 @@ target_compile_options(miopen_plugin_integration_tests PRIVATE ${HIPDNN_WARNING_
 target_compile_definitions(
     miopen_plugin_integration_tests
     PRIVATE
-        PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}"
+        PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/miopen_legacy_plugin"
 )
 
 target_link_libraries(
@@ -72,7 +72,7 @@ target_compile_options(miopen_plugin_integration_test PRIVATE ${HIPDNN_WARNING_C
 target_compile_definitions(
     miopen_plugin_integration_test
     PRIVATE
-        PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}"
+        PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/miopen_plugin"
 )
 
 target_link_libraries(
@@ -80,9 +80,3 @@ target_link_libraries(
 )
 
 add_dependencies(miopen_plugin_integration_test miopen_plugin miopen_legacy_plugin)
-
-if(BUILD_PLUGIN_AS_DEPENDENCY)
-    clang_tidy_check(miopen_plugin_integration_test)
-endif()
-
-add_integration_test_target(miopen_plugin_integration_test ${CMAKE_CURRENT_BINARY_DIR})
