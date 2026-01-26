@@ -69,6 +69,14 @@ inline __device__ __host__ hip_bfloat16 negate(hip_bfloat16 x)
 }
 
 template <>
+inline __device__ __host__ hipblaslt_f4x2 negate(hipblaslt_f4x2 x)
+{
+    x.__x ^= 0x8; // left fp4 element
+    x.__x ^= 0x80; // right fp4 element
+    return x;
+}
+
+template <>
 inline __device__ __host__ hipblaslt_f8_fnuz negate(hipblaslt_f8_fnuz x)
 {
     x.__x ^= 0x80;

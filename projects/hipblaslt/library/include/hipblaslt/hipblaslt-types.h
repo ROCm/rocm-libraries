@@ -38,6 +38,7 @@
 #endif
 
 #include "hipblaslt_float8.h"
+#include "hipblaslt_float4.h"
 #include <float.h>
 
 // Generic API

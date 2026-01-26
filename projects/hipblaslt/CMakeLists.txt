@@ -563,6 +563,7 @@ if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
             sample_hipblaslt_gemm_bias_swizzle_a_ext
             sample_hipblaslt_weight_swizzle_padding
             sample_hipblaslt_gemm_swish_bias
+            sample_hipblaslt_gemm_with_FP4
         RUNTIME
         COMPONENT samples
         DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt-samples"
