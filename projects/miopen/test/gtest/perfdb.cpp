@@ -1471,10 +1471,39 @@ namespace miopen {
 namespace tests {
 namespace perfdb {
 
-void SetExePath(const char* path) { exe_path() = fs::absolute(path); }
+#if defined(_WIN32)
+// Strong implementations for Windows (override the weak defaults in main_hip.cpp via
+// /alternatename)
+extern "C" void miopen_perfdb_SetExePath(const char* path) { exe_path() = fs::absolute(path); }
+
+extern "C" int miopen_perfdb_IsChildProcessMode(int argc, char** argv)
+{
+    for(int i = 1; i < argc; ++i)
+    {
+        std::string arg = argv[i];
+        if(arg.find("--" + std::string(ArgsHelper::id_arg)) != std::string::npos)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+#endif
+
+void SetExePath(const char* path)
+{
+#if defined(_WIN32)
+    miopen_perfdb_SetExePath(path);
+#else
+    exe_path() = fs::absolute(path);
+#endif
+}
 
 bool IsChildProcessMode(int argc, char** argv)
 {
+#if defined(_WIN32)
+    return miopen_perfdb_IsChildProcessMode(argc, argv) != 0;
+#else
     for(int i = 1; i < argc; ++i)
     {
         std::string arg = argv[i];
@@ -1484,6 +1513,7 @@ bool IsChildProcessMode(int argc, char** argv)
         }
     }
     return false;
+#endif
 }
 
 namespace {
@@ -1516,7 +1546,8 @@ bool HasFlag(int argc, char** argv, const std::string& name)
 
 } // anonymous namespace
 
-int RunChildProcess(int argc, char** argv)
+#if defined(_WIN32)
+extern "C" int miopen_perfdb_RunChildProcess(int argc, char** argv)
 {
     std::string logs_root         = GetArg(argc, argv, ArgsHelper::logs_path_arg);
     bool test_write               = HasFlag(argc, argv, ArgsHelper::write_arg);
@@ -1552,6 +1583,49 @@ int RunChildProcess(int argc, char** argv)
     }
 
     return 0;
+}
+#endif
+
+int RunChildProcess(int argc, char** argv)
+{
+#if defined(_WIN32)
+    return miopen_perfdb_RunChildProcess(argc, argv);
+#else
+    std::string logs_root         = GetArg(argc, argv, ArgsHelper::logs_path_arg);
+    bool test_write               = HasFlag(argc, argv, ArgsHelper::write_arg);
+    std::string mt_child_id_s     = GetArg(argc, argv, ArgsHelper::id_arg);
+    std::string mt_child_db_path  = GetArg(argc, argv, ArgsHelper::path_arg);
+    std::string mt_child_db_class = GetArg(argc, argv, ArgsHelper::db_class_arg);
+
+    if(!logs_root.empty())
+        thread_logs_root() = logs_root;
+
+    if(HasFlag(argc, argv, "all"))
+    {
+        full_set() = true;
+
+        DBMultiThreadedTestWork::threads_count    = 32;
+        DBMultiThreadedTestWork::common_part_size = 128;
+        DBMultiThreadedTestWork::unique_part_size = 128;
+    }
+
+    int mt_child_id = std::stoi(mt_child_id_s);
+
+    if(mt_child_id >= 0)
+    {
+        if(mt_child_db_class == ArgsHelper::db_class::db)
+        {
+            DbMultiProcessTest<miopen::PlainTextDb>::WorkItem(
+                mt_child_id, mt_child_db_path, test_write);
+        }
+        else if(mt_child_db_class == ArgsHelper::db_class::ramdb)
+        {
+            DbMultiProcessTest<miopen::RamDb>::WorkItem(mt_child_id, mt_child_db_path, test_write);
+        }
+    }
+
+    return 0;
+#endif
 }
 
 } // namespace perfdb
