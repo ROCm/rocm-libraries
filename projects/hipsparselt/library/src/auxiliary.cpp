@@ -29,8 +29,9 @@ const hipDataType string_to_hip_datatype(const std::string& value)
     return
         value == "f32_r" || value == "s" ? HIP_R_32F  :
         value == "f16_r" || value == "h" ? HIP_R_16F  :
-        value == "bf16_r"                ? HIP_R_16BF  :
+        value == "bf16_r"                ? HIP_R_16BF :
         value == "i8_r"                  ? HIP_R_8I   :
+        value == "i32_r"                 ? HIP_R_32I  :
 #if defined(HIP_FP8_TYPE_OCP) || defined(__HIP_PLATFORM_NVIDIA__)
         value == "f8_r"                  ? HIP_R_8F_E4M3    :
         value == "bf8_r"                 ? HIP_R_8F_E5M2    :
