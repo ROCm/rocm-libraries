@@ -486,7 +486,7 @@ rocblas_status rocblas_internal_trsv_substitution_big_batch_template(rocblas_han
 
     // Use z-dimension for batch parallelization
     constexpr rocblas_int DIM_Y = 4;
-    static_assert( DIM_X == DIM_Y, "Square sub blocks" );
+    static_assert(DIM_X == DIM_Y, "Square sub blocks");
     constexpr rocblas_int DIM_Z = 64; // Process 64 batches per thread block
 
     rocblas_int blocks      = (n - 1) / DIM_X + 1;

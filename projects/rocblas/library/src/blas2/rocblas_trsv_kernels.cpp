@@ -797,8 +797,8 @@ rocblas_trsv_device(rocblas_int    n,
  * @brief Heuristic to determine if big batch kernel should be used
  * 
  * The big batch kernel is beneficial when:
- * - batch_count is much larger than N (ratio >= 8)
- * - N is not big (< 1024)
+ * - batch_count is much larger than N
+ * - N is not big
  * 
  * @param n Matrix dimension
  * @param batch_count Number of batched operations
@@ -806,8 +806,6 @@ rocblas_trsv_device(rocblas_int    n,
  */
 inline bool should_use_big_batch_kernel(rocblas_int n, rocblas_int batch_count)
 {
-    return batch_count >= 1; // TODO remove after new kernel testing
-
     // Threshold: use big batch kernel when batch_count >= 8*n
     constexpr rocblas_int BIG_BATCH_TO_N_RATIO = 8;
 
