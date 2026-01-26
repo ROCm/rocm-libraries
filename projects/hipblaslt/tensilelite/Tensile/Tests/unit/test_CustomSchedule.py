@@ -864,15 +864,16 @@ class TestCustomScheduleTF32:
         assert schedule_info.numMfma == numMfma
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
+
     @pytest.mark.parametrize(
-        # fmt: off
         "transA, transB, lds_tr_inst,  tr_lds, mt0, mt1", [
-        (  True,  False,       False,       1, 128, 160),
-        ( False,  False,        True,       1, 160, 128),
+        (  True,  False,       False,       1,  128, 160),
+        (  True,  False,       False,       1, 160,  128),
         # fmt: on
         ])
-    def test_schedule_128x160x64(self, transA, transB, lds_tr_inst, tr_lds, mt0, mt1):
-        """Tests the 128x160x64 and 160x128x64 TF32 schedule."""
+    def test_schedule_128x160x64_160x128x64(self, transA, transB, lds_tr_inst, tr_lds, mt0, mt1):
+        """Tests the 128x160x64 and 160x128x64 TF32 TN schedule."""
+
         kernel = create_base_kernel()
         kernel["ProblemType"].update({
             "TransposeA": transA, "TransposeB": transB
@@ -885,44 +886,13 @@ class TestCustomScheduleTF32:
 
         kernel.update({
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
-            "MacroTile0": mt0, "MacroTile1": mt1, "DepthU": du,
+            "MacroTile0": mt0, "MacroTile1": mt1, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
             "MatrixInstruction": mi, "MIWaveGroup": mi_wave_group,
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": mi_wave_tile[0], "MIWaveTileB": mi_wave_tile[1],
         })
-        return kernel
-    
-    @pytest.mark.parametrize(
-        # fmt: off
-        "transA, transB, lds_tr_inst,  tr_lds", [
-        (  True,  False,       False,       1),
-        # fmt: on
-        ])
-    def test_schedule_128x160x64(self, transA, transB, lds_tr_inst, tr_lds):
-        """Tests the 128x160x64 TF32 TN schedule."""
-        kernel = TestCustomScheduleTF32.get_128x160x64_kernel(transA, transB, lds_tr_inst, tr_lds)
-        has_schedule, schedule_info = hasCustomSchedule(kernel)
-        assert has_schedule
-        assert isinstance(schedule_info, ScheduleInfo)
-        assert schedule_info.numCodePaths == 2
-        numMfma = TestCustomScheduleTF32.get_num_mfma(self, kernel, depthU=64)
-        assert schedule_info.numMfma == numMfma
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
-        assert valid, message
-
-    @pytest.mark.parametrize(
-        # fmt: off
-        "transA, transB, lds_tr_inst,  tr_lds", [
-        (  True,  False,       False,       1),
-        # fmt: on
-        ])
-    def test_schedule_160x128x64(self, transA, transB, lds_tr_inst, tr_lds):
-        """Tests the 160x128x64 TF32 TN schedule."""
-        kernel = TestCustomScheduleTF32.get_128x160x64_kernel(transA, transB, lds_tr_inst, tr_lds)
-        kernel["MacroTile0"], kernel["MacroTile1"] = kernel["MacroTile1"], kernel["MacroTile0"]
-        kernel["MIWaveTileA"], kernel["MIWaveTileB"] = kernel["MIWaveTileB"], kernel["MIWaveTileA"]     
-
+        # return kernel
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
         assert isinstance(schedule_info, ScheduleInfo)
