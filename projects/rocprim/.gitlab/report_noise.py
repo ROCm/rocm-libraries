@@ -181,7 +181,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--json-dir",
-        help="The directory of benchmark JSON files, which to report the noise of",
+        help="The directory of benchmark JSON files that will be analyzed for noise",
         required=True,
     )
     parser.add_argument(
