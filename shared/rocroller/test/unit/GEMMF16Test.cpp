@@ -32,47 +32,6 @@ namespace GEMMTests
 {
     using namespace rocRoller;
 
-    // ========================================================================
-    // GEMMF16TestSuite
-    // ========================================================================
-
-    // Params are: A & B type, K tile size, (transA, transB), loadPathA, and loadPathB
-    class GEMMF16TestSuite
-        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
-                                                   int,
-                                                   std::pair<std::string, std::string>,
-                                                   SolutionParams::LoadPath,
-                                                   SolutionParams::LoadPath>>
-    {
-    };
-
-    INSTANTIATE_TEST_SUITE_P(
-        GEMMF16Test,
-        GEMMF16TestSuite,
-        ::testing::Combine(
-            currentGPUISA(),
-            ::testing::Combine(::testing::Values(rocRoller::DataType::Half,
-                                                 rocRoller::DataType::BFloat16),
-                               ::testing::Values(16, 32),
-                               ::testing::Values(std::pair<std::string, std::string>("N", "N"),
-                                                 std::pair<std::string, std::string>("N", "T"),
-                                                 std::pair<std::string, std::string>("T", "N"),
-                                                 std::pair<std::string, std::string>("T", "T")),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
-
-    // ========================================================================
-    // GEMMF16NTTestSuite
-    // ========================================================================
-
-    // Params are: loadPathA and loadPathB
-    class GEMMF16NTTestSuite : public BaseGEMMContextFixture<
-                                   std::tuple<SolutionParams::LoadPath, SolutionParams::LoadPath>>
-    {
-    };
-
     GEMMProblem SetupGEMMF16(uint waveM, uint waveN, uint waveK)
     {
         GEMMProblem gemm;
@@ -138,6 +97,102 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "ds_read"), numDSReads + numTrLoads);
         EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128 "), numDSReads);
     }
+
+    // ========================================================================
+    // GEMMF16TestSuite
+    // ========================================================================
+
+    // Params are: A & B type, K tile size, (transA, transB), loadPathA, and loadPathB
+    class GEMMF16TestSuite
+        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
+                                                   int,
+                                                   std::pair<std::string, std::string>,
+                                                   SolutionParams::LoadPath,
+                                                   SolutionParams::LoadPath>>
+    {
+    };
+
+    TEST_P(GEMMF16TestSuite, GPU_GEMM_DataType_BF16_FP32_32x32x4)
+    {
+        GEMMProblem gemm;
+        gemm.waveM = 32;
+        gemm.waveN = 32;
+        gemm.waveK = 4;
+
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x4);
+        basicGEMM<BFloat16, BFloat16, float>(gemm);
+    }
+
+    TEST_P(GEMMF16TestSuite, GPU_GEMM_DataType_BF16_BF16_32x32x4)
+    {
+        GEMMProblem gemm;
+        gemm.waveM = 32;
+        gemm.waveN = 32;
+        gemm.waveK = 4;
+
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x4);
+        basicGEMM<BFloat16, BFloat16, BFloat16>(gemm);
+    }
+
+    TEST_P(GEMMF16TestSuite, GPU_GEMM_DataType_BF16_FP32_16x16x8)
+    {
+        GEMMProblem gemm;
+        gemm.waveM = 16;
+        gemm.waveN = 16;
+        gemm.waveK = 8;
+
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x8);
+        basicGEMM<BFloat16, BFloat16, float>(gemm);
+    }
+
+    TEST_P(GEMMF16TestSuite, GPU_GEMM_DataType_BF16_FP32_16x16x16)
+    {
+        GEMMProblem gemm;
+        gemm.waveM = 16;
+        gemm.waveN = 16;
+        gemm.waveK = 16;
+
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x16_1k);
+        basicGEMM<BFloat16, BFloat16, float>(gemm);
+    }
+
+    TEST_P(GEMMF16TestSuite, GPU_GEMM_DataType_BF16_BF16_16x16x16)
+    {
+        GEMMProblem gemm;
+        gemm.waveM = 16;
+        gemm.waveN = 16;
+        gemm.waveK = 16;
+
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x16_1k);
+        basicGEMM<BFloat16, BFloat16, float>(gemm);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMF16Test,
+        GEMMF16TestSuite,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(::testing::Values(rocRoller::DataType::Half,
+                                                 rocRoller::DataType::BFloat16),
+                               ::testing::Values(16, 32),
+                               ::testing::Values(std::pair<std::string, std::string>("N", "N"),
+                                                 std::pair<std::string, std::string>("N", "T"),
+                                                 std::pair<std::string, std::string>("T", "N"),
+                                                 std::pair<std::string, std::string>("T", "T")),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
+
+    // ========================================================================
+    // GEMMF16NTTestSuite
+    // ========================================================================
+
+    // Params are: loadPathA and loadPathB
+    class GEMMF16NTTestSuite : public BaseGEMMContextFixture<
+                                   std::tuple<SolutionParams::LoadPath, SolutionParams::LoadPath>>
+    {
+    };
 
     TEST_P(GEMMF16TestSuite, GPU_GEMM_DataType_FP16_Parameterized)
     {
@@ -247,16 +302,6 @@ namespace GEMMTests
                      numTrLoads);
     }
 
-    INSTANTIATE_TEST_SUITE_P(
-        GEMMF16Test,
-        GEMMF16NTTestSuite,
-        ::testing::Combine(
-            currentGPUISA(),
-            ::testing::Combine(::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
-
     TEST_P(GEMMF16NTTestSuite, GPU_GEMM_DataType_FP16_32x32x8)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
@@ -290,59 +335,14 @@ namespace GEMMTests
         basicGEMM<BFloat16, BFloat16, float>(gemm);
     }
 
-    TEST_P(GEMMF16TestSuite, GPU_GEMM_DataType_BF16_FP32_32x32x4)
-    {
-        GEMMProblem gemm;
-        gemm.waveM = 32;
-        gemm.waveN = 32;
-        gemm.waveK = 4;
-
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x4);
-        basicGEMM<BFloat16, BFloat16, float>(gemm);
-    }
-
-    TEST_P(GEMMF16TestSuite, GPU_GEMM_DataType_BF16_BF16_32x32x4)
-    {
-        GEMMProblem gemm;
-        gemm.waveM = 32;
-        gemm.waveN = 32;
-        gemm.waveK = 4;
-
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x4);
-        basicGEMM<BFloat16, BFloat16, BFloat16>(gemm);
-    }
-
-    TEST_P(GEMMF16TestSuite, GPU_GEMM_DataType_BF16_FP32_16x16x8)
-    {
-        GEMMProblem gemm;
-        gemm.waveM = 16;
-        gemm.waveN = 16;
-        gemm.waveK = 8;
-
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x8);
-        basicGEMM<BFloat16, BFloat16, float>(gemm);
-    }
-
-    TEST_P(GEMMF16TestSuite, GPU_GEMM_DataType_BF16_FP32_16x16x16)
-    {
-        GEMMProblem gemm;
-        gemm.waveM = 16;
-        gemm.waveN = 16;
-        gemm.waveK = 16;
-
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x16_1k);
-        basicGEMM<BFloat16, BFloat16, float>(gemm);
-    }
-
-    TEST_P(GEMMF16TestSuite, GPU_GEMM_DataType_BF16_BF16_16x16x16)
-    {
-        GEMMProblem gemm;
-        gemm.waveM = 16;
-        gemm.waveN = 16;
-        gemm.waveK = 16;
-
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x16_1k);
-        basicGEMM<BFloat16, BFloat16, float>(gemm);
-    }
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMF16Test,
+        GEMMF16NTTestSuite,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 
 } // namespace GEMMTests

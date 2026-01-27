@@ -116,20 +116,6 @@ namespace GEMMTests
         }
     }
 
-    // ========================================================================
-    // GEMMF8F6F4TestSuite
-    // ========================================================================
-
-    // Params are: A & B type, K tile size, (transA, transB), load A path, load B path
-    class GEMMF8F6F4TestSuite
-        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
-                                                   int,
-                                                   std::pair<std::string, std::string>,
-                                                   SolutionParams::LoadPath,
-                                                   SolutionParams::LoadPath>>
-    {
-    };
-
     void CheckMFMAF8F6F4(rocRoller::ContextPtr m_context,
                          std::string           f8f6f4_inst,
                          std::string           modifier)
@@ -148,6 +134,20 @@ namespace GEMMTests
             EXPECT_EQ(f8f6f4_count, modifier_count);
         }
     }
+
+    // ========================================================================
+    // GEMMF8F6F4TestSuite
+    // ========================================================================
+
+    // Params are: A & B type, K tile size, (transA, transB), load A path, load B path
+    class GEMMF8F6F4TestSuite
+        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
+                                                   int,
+                                                   std::pair<std::string, std::string>,
+                                                   SolutionParams::LoadPath,
+                                                   SolutionParams::LoadPath>>
+    {
+    };
 
     TEST_P(GEMMF8F6F4TestSuite, GPU_GEMM_DataType_F8F6F4_Basic)
     {
@@ -693,42 +693,6 @@ namespace GEMMTests
     {
     };
 
-    using ScaledMixedGEMMF8F6F4TestParamGenerator
-        = ::testing::internal::ParamGenerator<ScaledMixedGEMMF8F6F4TestSuite::ParamType>;
-    static auto FilterValidScalePathAndScaleModeParams(
-        ScaledMixedGEMMF8F6F4TestParamGenerator&& inputParamGenerator)
-    {
-        using LP = SolutionParams::LoadPath;
-        using SM = rocRoller::Operations::ScaleMode;
-
-        std::vector<ScaledMixedGEMMF8F6F4TestSuite::ParamType> filtered;
-        for(auto const& inputParam : inputParamGenerator)
-        {
-            auto const& params = std::get<1>(inputParam);
-
-            auto const& scaleAMode     = std::get<5>(params);
-            auto const& scaleBMode     = std::get<6>(params);
-            auto const& loadScalePathA = std::get<7>(params);
-            auto const& loadScalePathB = std::get<8>(params);
-
-            if((loadScalePathA != LP::BufferToVGPR or loadScalePathA != LP::GlobalToVGPR)
-               && (scaleAMode == SM::None || scaleAMode == SM::SingleScale))
-            {
-                continue;
-            }
-
-            if((loadScalePathB != LP::BufferToVGPR or loadScalePathB != LP::GlobalToVGPR)
-               && (scaleBMode == SM::None || scaleBMode == SM::SingleScale))
-            {
-                continue;
-            }
-
-            filtered.push_back(inputParam);
-        }
-
-        return ::testing::ValuesIn(filtered);
-    }
-
     TEST_P(ScaledMixedGEMMF8F6F4TestSuite, GPU_GEMM_Scaled_F8F6F4_Mixed)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
@@ -777,6 +741,42 @@ namespace GEMMTests
         }
 
         basicGEMMMixed(typeA, typeB, problem);
+    }
+
+    using ScaledMixedGEMMF8F6F4TestParamGenerator
+        = ::testing::internal::ParamGenerator<ScaledMixedGEMMF8F6F4TestSuite::ParamType>;
+    static auto FilterValidScalePathAndScaleModeParams(
+        ScaledMixedGEMMF8F6F4TestParamGenerator&& inputParamGenerator)
+    {
+        using LP = SolutionParams::LoadPath;
+        using SM = rocRoller::Operations::ScaleMode;
+
+        std::vector<ScaledMixedGEMMF8F6F4TestSuite::ParamType> filtered;
+        for(auto const& inputParam : inputParamGenerator)
+        {
+            auto const& params = std::get<1>(inputParam);
+
+            auto const& scaleAMode     = std::get<5>(params);
+            auto const& scaleBMode     = std::get<6>(params);
+            auto const& loadScalePathA = std::get<7>(params);
+            auto const& loadScalePathB = std::get<8>(params);
+
+            if((loadScalePathA != LP::BufferToVGPR or loadScalePathA != LP::GlobalToVGPR)
+               && (scaleAMode == SM::None || scaleAMode == SM::SingleScale))
+            {
+                continue;
+            }
+
+            if((loadScalePathB != LP::BufferToVGPR or loadScalePathB != LP::GlobalToVGPR)
+               && (scaleBMode == SM::None || scaleBMode == SM::SingleScale))
+            {
+                continue;
+            }
+
+            filtered.push_back(inputParam);
+        }
+
+        return ::testing::ValuesIn(filtered);
     }
 
     INSTANTIATE_TEST_SUITE_P(

@@ -55,30 +55,6 @@ namespace GEMMTests
                   numBufferLoadsForAB + numBufferLoadsForC);
     }
 
-    template <typename DirectLDSTestType>
-    static auto FilterOutNonDirectLDSParamValues(
-        ::testing::internal::ParamGenerator<DirectLDSTestType>&& inputParamGenerator)
-    {
-        using LP = SolutionParams::LoadPath;
-        using SM = rocRoller::Operations::ScaleMode;
-
-        std::vector<DirectLDSTestType> filtered;
-        for(auto const& inputParam : inputParamGenerator)
-        {
-            auto const& params = std::get<1>(inputParam);
-
-            auto const& loadPathA = std::get<3>(params);
-            auto const& loadPathB = std::get<4>(params);
-
-            if(SolutionParams::IsBufferToLDS(loadPathA) || SolutionParams::IsBufferToLDS(loadPathB))
-            {
-                filtered.push_back(inputParam);
-            }
-        }
-
-        return ::testing::ValuesIn(filtered);
-    }
-
     // ========================================================================
     // GEMMDirectLDSF8F6F4TestSuite
     // ========================================================================
@@ -473,6 +449,30 @@ namespace GEMMTests
             auto generatedCode = m_context->instructions()->toString();
             EXPECT_EQ(generatedCode.find("ds_write"), std::string::npos);
         }
+    }
+
+    template <typename DirectLDSTestType>
+    static auto FilterOutNonDirectLDSParamValues(
+        ::testing::internal::ParamGenerator<DirectLDSTestType>&& inputParamGenerator)
+    {
+        using LP = SolutionParams::LoadPath;
+        using SM = rocRoller::Operations::ScaleMode;
+
+        std::vector<DirectLDSTestType> filtered;
+        for(auto const& inputParam : inputParamGenerator)
+        {
+            auto const& params = std::get<1>(inputParam);
+
+            auto const& loadPathA = std::get<3>(params);
+            auto const& loadPathB = std::get<4>(params);
+
+            if(SolutionParams::IsBufferToLDS(loadPathA) || SolutionParams::IsBufferToLDS(loadPathB))
+            {
+                filtered.push_back(inputParam);
+            }
+        }
+
+        return ::testing::ValuesIn(filtered);
     }
 
     INSTANTIATE_TEST_SUITE_P(

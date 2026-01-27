@@ -184,6 +184,22 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMStreamKTest,
+        GEMMStreamKWGMTestSuite,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(::testing::Values(0, 1), /* workgroupMapping dim */
+                               ::testing::Values(1, 2, 6), /* workgroupMapping value */
+                               ::testing::Values(true, false), /* remapWorkgroupXCC */
+                               ::testing::Values(StreamKMode::Standard,
+                                                 StreamKMode::TwoTile,
+                                                 StreamKMode::TwoTileDPFirst),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
+
     // ========================================================================
     // GEMMStreamKTestSuite
     // ========================================================================
