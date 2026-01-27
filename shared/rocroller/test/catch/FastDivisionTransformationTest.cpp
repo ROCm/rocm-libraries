@@ -50,7 +50,6 @@ namespace FastDivisionTest
         namespace Ex = Expression;
         auto expr    = magicMultiple(Ex::literal(x));
 
-        //return evaluate(expr);
         return Ex::literal(evaluate(expr));
     }
 
@@ -104,7 +103,6 @@ namespace FastDivisionTest
         expr_fast = fastDivision(expr, context.get());
 
         {
-            //auto mulPlusB = multiplyHigh(b, Ex::literal(getMagicMultiple(-5))) + b;
             auto mulPlusB = multiplyHigh(b, getMagicMultiple(-5)) + b;
             CHECK_THAT(expr_fast,
                        EquivalentTo((((mulPlusB + ((mulPlusB >> Ex::literal(31)) & Ex::literal(4)))
@@ -165,7 +163,7 @@ namespace FastDivisionTest
         auto expr_fast = fastDivision(expr, context.get());
 
         {
-            auto [mul, shift, sign] = getMagicMultipleShiftAndSign(b_signed, context.get());
+            auto [mul, shift, sign, _] = getMagicDivisionParams(b_signed, context.get());
 
             auto mulPlusA = a + multiplyHigh(a, mul);
 
@@ -185,14 +183,13 @@ namespace FastDivisionTest
         expr_fast = fastDivision(expr, context.get());
 
         {
-            auto [mul, shift, sign] = getMagicMultipleShiftAndSign(b_unsigned, context.get());
+            auto [mul, shift, sign, shiftMSB] = getMagicDivisionParams(b_unsigned, context.get());
 
             auto mulHigh = multiplyHigh(a_unsigned, mul);
 
             auto t = ((a_unsigned - mulHigh >> Ex::literal(1u)) + mulHigh) >> shift;
 
-            auto result = Ex::conditional(
-                (shift & Ex::literal(1u << 31u)) == Ex::literal(0u), t, a_unsigned);
+            auto result = Ex::conditional(shiftMSB == Ex::literal(0u), t, a_unsigned);
 
             CHECK_THAT(expr_fast, EquivalentTo(result));
         }
