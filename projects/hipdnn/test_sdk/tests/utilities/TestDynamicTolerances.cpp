@@ -111,27 +111,64 @@ std::vector<ConvWrwToleranceTestCase> getConvWrwToleranceTestCases<TypePair<half
 template <typename Out, typename Comp>
 class TestCalculateConvWrwTolerance : public ::testing::TestWithParam<ConvWrwToleranceTestCase>
 {
+protected:
+    void verifyTolerance()
+    {
+        const auto& params = GetParam();
+        auto tol = calculateConvWrwTolerance<Out, Comp>(
+            params.inputMin, params.inputMax, params.dyMin, params.dyMax, params.dyDims);
+        EXPECT_NEAR(static_cast<float>(tol), params.expectedTolerance, 1e-5)
+            << "Failed for dims size: " << params.dyDims.size();
+    }
 };
 
-#define REGISTER_CONV_TEST(OutType, CompType, Name)                                  \
-    using TestConv##Name = TestCalculateConvWrwTolerance<OutType, CompType>;         \
-    TEST_P(TestConv##Name, VerifyTolerance)                                          \
-    {                                                                                \
-        auto tol = calculateConvWrwTolerance<OutType, CompType>(GetParam().inputMin, \
-                                                                GetParam().inputMax, \
-                                                                GetParam().dyMin,    \
-                                                                GetParam().dyMax,    \
-                                                                GetParam().dyDims);  \
-        EXPECT_NEAR(static_cast<float>(tol), GetParam().expectedTolerance, 1e-5)     \
-            << "Failed for dims size: " << GetParam().dyDims.size();                 \
-    }                                                                                \
-    INSTANTIATE_TEST_SUITE_P(                                                        \
-        Name,                                                                        \
-        TestConv##Name,                                                              \
-        ::testing::ValuesIn(getConvWrwToleranceTestCases<TypePair<OutType, CompType>>()));
+using TestCalculateConvWrwToleranceFp32 = TestCalculateConvWrwTolerance<float, float>;
+TEST_P(TestCalculateConvWrwToleranceFp32, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalculateConvWrwToleranceFp32,
+    ::testing::ValuesIn(getConvWrwToleranceTestCases<TypePair<float, float>>()));
 
-REGISTER_CONV_TEST(float, float, FloatFloat)
-REGISTER_CONV_TEST(hip_bfloat16, float, HipBfloat16Float)
-REGISTER_CONV_TEST(hip_bfloat16, hip_bfloat16, HipBfloat16HipBfloat16)
-REGISTER_CONV_TEST(half, float, HalfFloat)
-REGISTER_CONV_TEST(half, half, HalfHalf)
+using TestCalculateConvWrwToleranceComputeFloatBfp16
+    = TestCalculateConvWrwTolerance<hip_bfloat16, float>;
+TEST_P(TestCalculateConvWrwToleranceComputeFloatBfp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalculateConvWrwToleranceComputeFloatBfp16,
+    ::testing::ValuesIn(getConvWrwToleranceTestCases<TypePair<hip_bfloat16, float>>()));
+
+using TestCalculateConvWrwToleranceBfp16
+    = TestCalculateConvWrwTolerance<hip_bfloat16, hip_bfloat16>;
+TEST_P(TestCalculateConvWrwToleranceBfp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalculateConvWrwToleranceBfp16,
+    ::testing::ValuesIn(getConvWrwToleranceTestCases<TypePair<hip_bfloat16, hip_bfloat16>>()));
+
+using TestCalculateConvWrwToleranceComputeFloatFp16 = TestCalculateConvWrwTolerance<half, float>;
+TEST_P(TestCalculateConvWrwToleranceComputeFloatFp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalculateConvWrwToleranceComputeFloatFp16,
+    ::testing::ValuesIn(getConvWrwToleranceTestCases<TypePair<half, float>>()));
+
+using TestCalculateConvWrwToleranceFp16 = TestCalculateConvWrwTolerance<half, half>;
+TEST_P(TestCalculateConvWrwToleranceFp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         TestCalculateConvWrwToleranceFp16,
+                         ::testing::ValuesIn(getConvWrwToleranceTestCases<TypePair<half, half>>()));
