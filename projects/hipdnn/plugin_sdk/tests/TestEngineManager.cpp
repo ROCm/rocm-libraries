@@ -1,12 +1,12 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngine.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/MockPlan.hpp>
@@ -29,9 +29,8 @@ struct HipdnnEnginePluginExecutionContext
 namespace
 {
 
-std::unique_ptr<NiceMock<MockEngine>> createMockEngine(int64_t engineId,
-                                                        bool applicable,
-                                                        size_t workspaceSize = 1024)
+std::unique_ptr<NiceMock<MockEngine>>
+    createMockEngine(int64_t engineId, bool applicable, size_t workspaceSize = 1024)
 {
     auto engine = std::make_unique<NiceMock<MockEngine>>();
     ON_CALL(*engine, id()).WillByDefault(Return(engineId));

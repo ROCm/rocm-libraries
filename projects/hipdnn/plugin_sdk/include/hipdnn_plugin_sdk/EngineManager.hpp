@@ -80,7 +80,7 @@ public:
      * @return Vector of applicable engine IDs.
      */
     std::vector<int64_t> getApplicableEngineIds(HipdnnEnginePluginHandle& handle,
-                                                 const IGraph& opGraph)
+                                                const IGraph& opGraph)
     {
         std::vector<int64_t> applicable;
         for(const auto& [id, engine] : _engines)
@@ -160,7 +160,8 @@ protected:
         if(it == _engines.end())
         {
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-                                        "Engine with ID " + std::to_string(engineId) + " not found.");
+                                        "Engine with ID " + std::to_string(engineId)
+                                            + " not found.");
         }
         return *it->second;
     }

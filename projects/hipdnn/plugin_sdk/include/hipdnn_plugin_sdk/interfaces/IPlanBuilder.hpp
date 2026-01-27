@@ -43,8 +43,8 @@ public:
      * @param opGraph The operation graph to check.
      * @return true if this plan builder can handle the graph, false otherwise.
      */
-    virtual bool isApplicable(const HipdnnEnginePluginHandle& handle,
-                              const IGraph& opGraph) const = 0;
+    virtual bool isApplicable(const HipdnnEnginePluginHandle& handle, const IGraph& opGraph) const
+        = 0;
 
     /**
      * @brief Returns the maximum workspace size required for the given graph.
@@ -54,7 +54,8 @@ public:
      * @return The maximum workspace size in bytes.
      */
     virtual size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                       const IGraph& opGraph) const = 0;
+                                       const IGraph& opGraph) const
+        = 0;
 
     /**
      * @brief Builds an executable plan for the given graph.
@@ -69,11 +70,11 @@ public:
      * @param executionContext The execution context to store the plan on.
      * @throws HipdnnPluginException if the plan cannot be built.
      */
-    virtual void buildPlan(
-        const HipdnnEnginePluginHandle& handle,
-        const IGraph& opGraph,
-        [[maybe_unused]] const IEngineConfig& engineConfig,
-        HipdnnEnginePluginExecutionContext& executionContext) const = 0;
+    virtual void buildPlan(const HipdnnEnginePluginHandle& handle,
+                           const IGraph& opGraph,
+                           [[maybe_unused]] const IEngineConfig& engineConfig,
+                           HipdnnEnginePluginExecutionContext& executionContext) const
+        = 0;
 
     /**
      * @brief Checks if this plan builder has custom knobs.
@@ -95,9 +96,8 @@ public:
      * @param opGraph The operation graph.
      * @return A vector of KnobT objects representing the custom knobs.
      */
-    virtual std::vector<hipdnn_data_sdk::data_objects::KnobT> getCustomKnobs(
-        const HipdnnEnginePluginHandle& handle,
-        const IGraph& opGraph) const = 0;
+    virtual std::vector<hipdnn_data_sdk::data_objects::KnobT>
+        getCustomKnobs(const HipdnnEnginePluginHandle& handle, const IGraph& opGraph) const = 0;
 };
 
 } // namespace hipdnn_plugin_sdk

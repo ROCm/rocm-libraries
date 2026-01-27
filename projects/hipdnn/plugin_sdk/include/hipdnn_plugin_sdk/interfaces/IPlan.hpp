@@ -48,7 +48,8 @@ public:
     virtual void execute(const HipdnnEnginePluginHandle& handle,
                          const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                          uint32_t numDeviceBuffers,
-                         void* workspace = nullptr) const = 0;
+                         void* workspace = nullptr) const
+        = 0;
 };
 
 } // namespace hipdnn_plugin_sdk

@@ -29,7 +29,8 @@ public:
         instanceCount--;
     }
 
-    static uint32_t copyEngineIds(int64_t* /*engineIds*/, uint32_t /*maxEngines*/, uint32_t& numEngines)
+    static uint32_t
+        copyEngineIds(int64_t* /*engineIds*/, uint32_t /*maxEngines*/, uint32_t& numEngines)
     {
         numEngines = 0;
         return 0;

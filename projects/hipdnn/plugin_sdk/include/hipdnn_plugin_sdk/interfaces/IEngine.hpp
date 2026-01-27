@@ -78,7 +78,8 @@ public:
      */
     virtual void getDetails(HipdnnEnginePluginHandle& handle,
                             const IGraph& opGraph,
-                            hipdnnPluginConstData_t& detailsOut) const = 0;
+                            hipdnnPluginConstData_t& detailsOut) const
+        = 0;
 
     /**
      * @brief Returns the maximum workspace size required for the given graph.
@@ -91,7 +92,8 @@ public:
      * @return The maximum workspace size in bytes.
      */
     virtual size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                       const IGraph& opGraph) const = 0;
+                                       const IGraph& opGraph) const
+        = 0;
 
     /**
      * @brief Initializes the execution context with a plan for the given graph.
@@ -107,10 +109,12 @@ public:
      * @throws HipdnnPluginException if no applicable plan builder is found or
      *         if plan creation fails.
      */
-    virtual void initializeExecutionContext(const HipdnnEnginePluginHandle& handle,
-                                            const IGraph& opGraph,
-                                            const IEngineConfig& engineConfig,
-                                            HipdnnEnginePluginExecutionContext& executionContext) const = 0;
+    virtual void
+        initializeExecutionContext(const HipdnnEnginePluginHandle& handle,
+                                   const IGraph& opGraph,
+                                   const IEngineConfig& engineConfig,
+                                   HipdnnEnginePluginExecutionContext& executionContext) const
+        = 0;
 };
 
 } // namespace hipdnn_plugin_sdk
