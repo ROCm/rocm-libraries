@@ -23,7 +23,6 @@
 
 #pragma once
 #include "InstDefDSL.hpp"
-#include <gfx/LatencyHelper.hpp>
 
 namespace stinkytofu
 {
@@ -352,7 +351,7 @@ namespace stinkytofu
 
         MFMA* mfmaInst = defT<MFMA>(
             mfmaName, registry, file, line, s.M, s.N, s.K, s.B, s.outTy, s.inTy, sparse);
-        mfmaInst->hwInstDesc.latency = computeCdna3MfmaLatency(*mfmaInst);
+        // Costs set by applyInstructionCosts() from architecture-specific cost tables
 
         return mfmaInst;
     }
@@ -372,9 +371,7 @@ namespace stinkytofu
         WMMA* wmmaInst = defT<WMMA>(
             wmmaName, registry, file, line, s.M, s.N, s.K, s.B, s.outTy, s.inTy, sparse);
 
-        // TODO
-        wmmaInst->hwInstDesc.latency
-            = computeCdna5WmmaLatency(*wmmaInst); // Placeholder latency value
+        // Costs set by applyInstructionCosts() from architecture-specific cost tables
 
         return wmmaInst;
     }

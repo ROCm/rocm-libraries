@@ -45,16 +45,12 @@ namespace stinkytofu
     void GpuArchManager::addArch(const std::string&            arch,
                                  std::function<void(GpuArch&)> defineInsts,
                                  std::function<void(GpuArch&)> setLogicalToArchMap,
-                                 std::function<void(GpuArch&)> setRocisaConversionMap,
-                                 const std::string&            hardwareDir)
+                                 std::function<void(GpuArch&)> setRocisaConversionMap)
     {
         instructionsByArch.push_back(std::make_unique<GpuArch>(arch));
         defineInsts(*instructionsByArch.back());
         setLogicalToArchMap(*instructionsByArch.back());
         setRocisaConversionMap(*instructionsByArch.back());
-        // YAML loading removed - costs now in C++
-        // instructionsByArch.back()->loadHardwareDataFromYaml(hardwareDir + "/data/" + arch
-        //                                                     + ".yaml");
 
         // Check for errors immediately after initialization
         if(instructionsByArch.back()->hasError())
@@ -113,14 +109,13 @@ namespace stinkytofu
                 inst->hwInstDesc.unifiedOpcode = opcodeMap[inst->name];
     }
 
-    bool GpuArchManager::initAllArchs(GpuArchManager& manager, const std::string& hardwareDir)
+    bool GpuArchManager::initAllArchs(GpuArchManager& manager)
     {
 #define STINKYTOFU_ARCH(archName)                    \
     manager.addArch(#archName,                       \
                     define##archName##Insts,         \
                     set##archName##LogicalToArchMap, \
-                    set##archName##ConversionMap,    \
-                    hardwareDir);
+                    set##archName##ConversionMap);
 #include "Config/Archs.def"
 
         manager.enumAllOpcodes();

@@ -4,7 +4,6 @@
 set(GFX_SOURCES
     GpuArchManager.cpp
     InstDefDSL.cpp
-    LatencyHelper.cpp
 )
 
 # Add all STINKYTOFU_ARCHS cpp files to GFX_SOURCES

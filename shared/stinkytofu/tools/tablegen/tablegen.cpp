@@ -62,7 +62,7 @@ int main(int argc, char** argv)
 
     GpuArchManager manager;
 
-    success &= GpuArchManager::initAllArchs(manager, hardwareDir);
+    success &= GpuArchManager::initAllArchs(manager);
 
     if(!success)
     {

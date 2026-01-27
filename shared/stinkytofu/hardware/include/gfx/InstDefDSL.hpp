@@ -100,19 +100,6 @@ namespace stinkytofu
     {
         using List = std::vector<std::unique_ptr<GfxInstDef>>;
 
-        struct InstructionInfo
-        {
-            uint16_t default_cycle = 0;
-
-            std::vector<std::pair<std::string, uint16_t>> cycle;
-            std::vector<std::pair<std::string, uint16_t>> latency;
-
-            static_assert(sizeof(uint16_t) == sizeof(HwInstDesc::issue),
-                          "default_cycle type mismatch");
-            static_assert(sizeof(uint16_t) == sizeof(HwInstDesc::issue), "cycle type mismatch");
-            static_assert(sizeof(uint16_t) == sizeof(HwInstDesc::latency), "latency type mismatch");
-        };
-
         struct RegisterLimits
         {
             unsigned maxVGPR = 256; // Vector GPRs (v0-v255)
@@ -141,8 +128,6 @@ namespace stinkytofu
         // Per-architecture defaults (must be explicitly set, 0 = not set/error)
         uint16_t defaultCycle_   = 0;
         uint16_t defaultLatency_ = 0;
-
-        void updateCycleAndLatency(const InstructionInfo& info);
 
         GfxInstDef* getInst(const std::string& name);
 
@@ -198,12 +183,6 @@ namespace stinkytofu
 
         bool add(std::unique_ptr<GfxInstDef> inst);
         bool erase(const std::string& name);
-
-        // load hardware data from yaml file.
-        //
-        // hardware data includes default cycle, cycle for each instruction,
-        // latency for each instruction, .. etc.
-        bool loadHardwareDataFromYaml(const std::string& yamlPath);
 
         // Cost map system: Set default costs for this architecture
         // Must be called before applyInstructionCosts()
