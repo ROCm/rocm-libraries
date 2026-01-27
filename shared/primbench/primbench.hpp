@@ -99,6 +99,41 @@ extern const size_t MiB;
 template<typename... Args>
 void log(Args&&... args);
 
+/**
+ * \brief Settings that the user can change by passing arguments via their CLI.
+ */
+struct settings
+{
+    size_t      bytes    = 128 * primbench::MiB; /**< Input array size in bytes */
+    bool        hot      = false; /**< Hot means not clearing GPU cache between batches */
+    uint32_t    seed     = 42; /**< The seed to use for input array generation */
+    std::string json_out = "results.json"; /**< Output JSON file path */
+    std::string csv_out  = ""; /**< Output CSV file path */
+    std::string filter   = ""; /**< Regex filter of specialization names to benchmark */
+    bool        dry      = false; /**< Flag to perform a dry run */
+    double      min_gpu_ms_per_batch = 10.0; /**< Minimum GPU batch duration */
+    double      min_secs             = 1.0; /**< Minimum benchmark duration */
+    double      noise_timeout_secs   = 10.0; /**< Max duration before noisy benchmark times out */
+    size_t      batch_window_size    = 10; /**< Noise window size for early stopping */
+    double      noise_tolerance_percent = 1.0; /**< Noise tolerance for early stopping */
+    uint16_t    min_gpu_temp            = 50; /**< Minimum GPU temperature */
+    uint16_t    max_gpu_temp            = 60; /**< Maximum GPU temperature */
+    double      max_warming_secs        = 60.0; /**< Max GPU warmup time */
+    double      max_cooling_secs        = 60.0; /**< Max GPU cooldown time */
+    bool        output_hip_device_properties_context
+        = false; /**< Flag to output HIP device properties context */
+    bool     output_amdsmi_context = false; /**< Flag to output AMD SMI context */
+    bool     output_batches        = false; /**< Flag to output batch details */
+    uint32_t spaces_per_indent     = 4; /**< JSON indentation spaces */
+    double   stream_blocking_timeout_secs
+        = 10.0; /**< Max duration before stream blocking times out */
+
+    using custom_arg_value = std::variant<std::string, bool, double, int, unsigned int, size_t>;
+    std::map<std::string, custom_arg_value>
+        custom_args; /**< Custom user-registered arguments with types */
+
+}; // struct settings
+
 namespace detail
 {
 
@@ -900,41 +935,6 @@ struct FlagTag
 } // namespace flags
 
 /**
- * \brief Settings that the user can change by passing arguments via their CLI.
- */
-struct cli_settings
-{
-    size_t                        bytes; /**< Input array size in bytes */
-    bool                          hot; /**< Hot means not clearing GPU cache between batches */
-    uint32_t                      seed; /**< The seed to use for input array generation */
-    std::string                   json_out; /**< Output JSON file path */
-    std::string                   csv_out; /**< Output CSV file path */
-    std::string                   filter; /**< Regex filter of specialization names to benchmark */
-    bool                          dry; /**< Flag to perform a dry run */
-    std::chrono::duration<double> min_gpu_ms_per_batch; /**< Minimum GPU batch duration */
-    std::chrono::duration<double> min_secs; /**< Minimum benchmark duration */
-    std::chrono::duration<double>
-             noise_timeout_secs; /**< Max duration before noisy benchmark times out */
-    size_t   batch_window_size; /**< Noise window size for early stopping */
-    double   noise_tolerance_percent; /**< Noise tolerance for early stopping */
-    uint16_t min_gpu_temp; /**< Minimum GPU temperature */
-    uint16_t max_gpu_temp; /**< Maximum GPU temperature */
-    std::chrono::duration<double> max_warming_secs; /**< Max GPU warmup time */
-    std::chrono::duration<double> max_cooling_secs; /**< Max GPU cooldown time */
-    bool output_hip_device_properties_context; /**< Flag to output HIP device properties context */
-    bool output_amdsmi_context; /**< Flag to output AMD SMI context */
-    bool output_batches; /**< Flag to output batch details */
-    uint32_t spaces_per_indent; /**< JSON indentation spaces */
-    std::chrono::duration<double>
-        stream_blocking_timeout_secs; /**< Max duration before stream blocking times out */
-
-    using custom_arg_value = std::variant<std::string, bool, double, int, unsigned int, size_t>;
-    std::map<std::string, custom_arg_value>
-        custom_args; /**< Custom user-registered arguments with types */
-
-}; // struct cli_settings
-
-/**
  * \brief Logger for saving benchmark results in JSON format.
  *
  * Handles initialization of output, storing batch data, and writing
@@ -970,35 +970,35 @@ public:
     /**
      * \brief Initializes the logger, and opens the output JSON and CSV files.
      */
-    void init(std::string_view    algorithm,
-              size_t              specialization_count,
-              const cli_settings& cli_settings,
-              flags::FlagTag      flags,
-              const amdsmi&       amdsmi)
+    void init(std::string_view algorithm,
+              size_t           specialization_count,
+              const settings&  settings,
+              flags::FlagTag   flags,
+              const amdsmi&    amdsmi)
     {
-        m_output_batches    = cli_settings.output_batches;
-        m_spaces_per_indent = cli_settings.spaces_per_indent;
-        m_outputting_csv    = !cli_settings.csv_out.empty();
+        m_output_batches    = settings.output_batches;
+        m_spaces_per_indent = settings.spaces_per_indent;
+        m_outputting_csv    = !settings.csv_out.empty();
 
-        m_json_out.open(std::string(cli_settings.json_out), std::ios::out | std::ios::trunc);
+        m_json_out.open(std::string(settings.json_out), std::ios::out | std::ios::trunc);
         if(!m_json_out)
         {
-            std::cerr << "Error: Failed to open " << cli_settings.json_out << " for writing\n";
+            std::cerr << "Error: Failed to open " << settings.json_out << " for writing\n";
             std::exit(EXIT_FAILURE);
         }
 
         if(m_outputting_csv)
         {
-            m_csv_out.open(std::string(cli_settings.csv_out), std::ios::out | std::ios::trunc);
+            m_csv_out.open(std::string(settings.csv_out), std::ios::out | std::ios::trunc);
             if(!m_csv_out)
             {
-                std::cerr << "Error: Failed to open " << cli_settings.csv_out << " for writing\n";
+                std::cerr << "Error: Failed to open " << settings.csv_out << " for writing\n";
                 std::exit(EXIT_FAILURE);
             }
         }
 
         m_json_out << indent(
-            serialize_json_prologue(algorithm, specialization_count, cli_settings, flags, amdsmi),
+            serialize_json_prologue(algorithm, specialization_count, settings, flags, amdsmi),
             0);
         m_json_out << "[";
         if(m_spaces_per_indent > 0)
@@ -1137,17 +1137,17 @@ private:
      * \brief Serializes the start of the JSON file,
      * adding the `context` object, and starting the `specializations` array.
      */
-    std::string serialize_json_prologue(std::string_view    algorithm,
-                                        size_t              specialization_count,
-                                        const cli_settings& cli_settings,
-                                        flags::FlagTag      flags,
-                                        const amdsmi&       amdsmi)
+    std::string serialize_json_prologue(std::string_view algorithm,
+                                        size_t           specialization_count,
+                                        const settings&  settings,
+                                        flags::FlagTag   flags,
+                                        const amdsmi&    amdsmi)
     {
         std::ostringstream ss;
         ss << "{";
 
         ss << "\"context\":"
-           << serialize_context(algorithm, specialization_count, cli_settings, flags, amdsmi);
+           << serialize_context(algorithm, specialization_count, settings, flags, amdsmi);
 
         ss << ",";
         if(m_spaces_per_indent > 0)
@@ -1161,29 +1161,29 @@ private:
     /**
      * \brief Serializes the benchmark context into JSON.
      */
-    std::string serialize_context(std::string_view    algorithm,
-                                  size_t              specialization_count,
-                                  const cli_settings& cli_settings,
-                                  flags::FlagTag      flags,
-                                  const amdsmi&       amdsmi) const
+    std::string serialize_context(std::string_view algorithm,
+                                  size_t           specialization_count,
+                                  const settings&  settings,
+                                  flags::FlagTag   flags,
+                                  const amdsmi&    amdsmi) const
     {
         std::ostringstream ss;
         ss << "{";
 
         ss << "\"results_version\":\"1.0.0\"";
         ss << ",\"general\":" << serialize_general(algorithm, specialization_count, amdsmi);
-        ss << ",\"cli_settings\":" << serialize_cli_settings(cli_settings);
+        ss << ",\"settings\":" << serialize_settings(settings);
 
-        std::string custom_cli = serialize_custom_cli_settings(cli_settings);
+        std::string custom_cli = serialize_custom_settings(settings);
         if(!custom_cli.empty())
         {
-            ss << ",\"custom_cli_settings\":" << custom_cli;
+            ss << ",\"custom_settings\":" << custom_cli;
         }
 
         ss << ",\"flags\":" << serialize_flags(flags);
-        if(cli_settings.output_hip_device_properties_context)
+        if(settings.output_hip_device_properties_context)
             ss << ",\"hip_device_properties\":" << serialize_hip_device_properties();
-        if(cli_settings.output_amdsmi_context)
+        if(settings.output_amdsmi_context)
             ss << ",\"amdsmi\":" << amdsmi.serialize_context();
 
         ss << "}";
@@ -1306,12 +1306,12 @@ private:
     /**
      * \brief Serializes CLI settings into JSON.
      */
-    std::string serialize_cli_settings(const cli_settings& cli_settings) const
+    std::string serialize_settings(const settings& settings) const
     {
         std::ostringstream ss;
         ss << "{";
 
-        const auto& s = cli_settings;
+        const auto& s = settings;
 
         ss << "\"bytes\":" << s.bytes;
         ss << ",\"hot\":" << std::boolalpha << s.hot;
@@ -1320,21 +1320,21 @@ private:
         ss << ",\"csv_out\":\"" << s.csv_out << "\"";
         ss << ",\"filter\":\"" << s.filter << "\"";
         ss << ",\"dry\":" << s.dry;
-        ss << ",\"min_gpu_ms_per_batch\":" << s.min_gpu_ms_per_batch.count();
-        ss << ",\"min_secs\":" << s.min_secs.count();
-        ss << ",\"noise_timeout_secs\":" << s.noise_timeout_secs.count();
+        ss << ",\"min_gpu_ms_per_batch\":" << s.min_gpu_ms_per_batch;
+        ss << ",\"min_secs\":" << s.min_secs;
+        ss << ",\"noise_timeout_secs\":" << s.noise_timeout_secs;
         ss << ",\"batch_window_size\":" << s.batch_window_size;
         ss << ",\"noise_tolerance_percent\":" << s.noise_tolerance_percent;
         ss << ",\"min_gpu_temp\":" << s.min_gpu_temp;
         ss << ",\"max_gpu_temp\":" << s.max_gpu_temp;
-        ss << ",\"max_warming_secs\":" << s.max_warming_secs.count();
-        ss << ",\"max_cooling_secs\":" << s.max_cooling_secs.count();
+        ss << ",\"max_warming_secs\":" << s.max_warming_secs;
+        ss << ",\"max_cooling_secs\":" << s.max_cooling_secs;
         ss << ",\"output_hip_device_properties_context\":"
            << s.output_hip_device_properties_context;
         ss << ",\"output_amdsmi_context\":" << s.output_amdsmi_context;
         ss << ",\"output_batches\":" << s.output_batches;
         ss << ",\"spaces_per_indent\":" << s.spaces_per_indent;
-        ss << ",\"stream_blocking_timeout_secs\":" << s.stream_blocking_timeout_secs.count();
+        ss << ",\"stream_blocking_timeout_secs\":" << s.stream_blocking_timeout_secs;
 
         ss << "}";
         return ss.str();
@@ -1343,9 +1343,9 @@ private:
     /**
      * \brief Serializes custom CLI settings into JSON.
      */
-    std::string serialize_custom_cli_settings(const cli_settings& cli_settings) const
+    std::string serialize_custom_settings(const settings& settings) const
     {
-        if(cli_settings.custom_args.empty())
+        if(settings.custom_args.empty())
         {
             return "";
         }
@@ -1355,7 +1355,7 @@ private:
         ss << std::boolalpha;
 
         bool first = true;
-        for(const auto& [key, value] : cli_settings.custom_args)
+        for(const auto& [key, value] : settings.custom_args)
         {
             if(!first)
                 ss << ",";
@@ -2445,27 +2445,27 @@ public:
     /**
      * \brief Constructs a benchmark state.
      */
-    state(std::string_view    algo,
-          json                meta,
-          size_t              family_index,
-          hipStream_t         stream,
-          logger&             logger,
-          amdsmi&             amdsmi,
-          stream_blocker&     stream_blocker,
-          const cli_settings& cli_settings,
-          flags::FlagTag      flags,
-          size_t              spec_col_width,
-          size_t              family_col_width)
+    state(std::string_view algo,
+          json             meta,
+          size_t           family_index,
+          hipStream_t      stream,
+          logger&          logger,
+          amdsmi&          amdsmi,
+          stream_blocker&  stream_blocker,
+          const settings&  settings,
+          flags::FlagTag   flags,
+          size_t           spec_col_width,
+          size_t           family_col_width)
         : stream(stream)
-        , bytes(cli_settings.bytes)
-        , seed(cli_settings.seed)
+        , bytes(settings.bytes)
+        , seed(settings.seed)
         , m_algo(algo)
         , m_meta(std::move(meta))
         , m_family_index(family_index)
         , m_logger(logger)
         , m_amdsmi(amdsmi)
         , m_stream_blocker(stream_blocker)
-        , m_cli_settings(cli_settings)
+        , m_settings(settings)
         , m_flags(flags)
         , m_spec_col_width(spec_col_width)
         , m_family_col_width(family_col_width)
@@ -2576,7 +2576,7 @@ public:
             exit(EXIT_FAILURE);
         }
 
-        const auto& s = m_cli_settings;
+        const auto& s = m_settings;
 
         std::string name           = m_meta.serialize_name();
         size_t      bytes_per_item = m_read_write_bytes / m_items;
@@ -2674,11 +2674,12 @@ public:
             auto elapsed_host = now - start;
 
             // Stop early if the noise stabilized.
-            bool stop_early = elapsed_host >= s.min_secs && iterations >= s.batch_window_size
+            bool stop_early = elapsed_host >= std::chrono::duration<double>(s.min_secs)
+                              && iterations >= s.batch_window_size
                               && noise_percent < s.noise_tolerance_percent;
 
             // Stop early if the benchmark has been noisy for too long.
-            bool noise_timeout = elapsed_host > s.noise_timeout_secs
+            bool noise_timeout = elapsed_host > std::chrono::duration<double>(s.noise_timeout_secs)
                                  && iterations >= s.batch_window_size
                                  && noise_percent >= s.noise_tolerance_percent;
 
@@ -2704,7 +2705,7 @@ public:
                                      m_spec_col_width,
                                      m_family_col_width,
                                      elapsed_host_secs,
-                                     s.noise_timeout_secs.count(),
+                                     s.noise_timeout_secs,
                                      s.noise_tolerance_percent,
                                      gpu_temp);
 
@@ -2761,7 +2762,7 @@ private:
 
         auto start = std::chrono::steady_clock::now();
 
-        const auto& s = m_cli_settings;
+        const auto& s = m_settings;
 
         while(true)
         {
@@ -2778,9 +2779,10 @@ private:
 
             PRIMBENCH_HIP_CHECK(hipStreamSynchronize(stream));
 
-            if(std::chrono::steady_clock::now() - start >= s.max_warming_secs)
+            auto duration = std::chrono::steady_clock::now() - start;
+            if(duration >= std::chrono::duration<double>(s.max_warming_secs))
             {
-                std::cerr << "\nError: Failed to warm up after " << s.max_warming_secs.count()
+                std::cerr << "\nError: Failed to warm up after " << s.max_warming_secs
                           << " seconds\n";
                 exit(EXIT_FAILURE);
             }
@@ -2819,7 +2821,7 @@ private:
     {
         auto start = std::chrono::steady_clock::now();
 
-        const auto& s = m_cli_settings;
+        const auto& s = m_settings;
 
         while(true)
         {
@@ -2829,9 +2831,10 @@ private:
 
             progress::print_cooling(gpu_temp, s.max_gpu_temp);
 
-            if(std::chrono::steady_clock::now() - start >= s.max_cooling_secs)
+            auto duration = std::chrono::steady_clock::now() - start;
+            if(duration >= std::chrono::duration<double>(s.max_cooling_secs))
             {
-                std::cerr << "\nError: Failed to cool down after " << s.max_cooling_secs.count()
+                std::cerr << "\nError: Failed to cool down after " << s.max_cooling_secs
                           << " seconds\n";
                 exit(EXIT_FAILURE);
             }
@@ -2879,7 +2882,7 @@ private:
             for(const auto& event : events)
                 PRIMBENCH_HIP_CHECK(hipEventDestroy(event));
 
-            if(batch_ms > m_cli_settings.min_gpu_ms_per_batch)
+            if(batch_ms > std::chrono::duration<double>(m_settings.min_gpu_ms_per_batch))
                 break;
 
             // Doubling is the simplest form of exponential growth.
@@ -2897,7 +2900,7 @@ private:
             if(m_run_before_every_iteration_lambda)
                 m_run_before_every_iteration_lambda();
 
-            if(!m_cli_settings.hot)
+            if(!m_settings.hot)
                 clear_gpu_cache(stream);
 
             // We block the stream to ensure the start event is recorded immediately before the
@@ -3030,7 +3033,7 @@ private:
     amdsmi&         m_amdsmi;
     stream_blocker& m_stream_blocker;
 
-    const cli_settings& m_cli_settings;
+    const settings& m_settings;
 
     flags::FlagTag m_flags;
 
@@ -3184,11 +3187,11 @@ public:
     }
 
     /// \brief Returns all registered arguments with their parsed values.
-    std::map<std::string, cli_settings::custom_arg_value> get_all_custom_arguments() const
+    std::map<std::string, settings::custom_arg_value> get_all_custom_options() const
     {
-        std::map<std::string, cli_settings::custom_arg_value> custom_args;
+        std::map<std::string, settings::custom_arg_value> custom_args;
 
-        // Skip built-in arguments that are already in cli_settings
+        // Skip built-in arguments that are already in settings
         static const std::unordered_set<std::string> builtin_args
             = {"help",
                "bytes",
@@ -3213,7 +3216,7 @@ public:
                "spaces-per-indent",
                "stream-blocking-timeout-secs"};
 
-        auto parse_value = [](const std::string& value) -> cli_settings::custom_arg_value
+        auto parse_value = [](const std::string& value) -> settings::custom_arg_value
         {
             if(value.empty())
             {
@@ -3508,23 +3511,24 @@ public:
      * \brief Constructs the executor and initializes parsing and logging.
      * \param argc Argument count from main().
      * \param argv Argument values from main().
-     * \param default_bytes Default size for input arrays in bytes.
+     * \param settings Optional benchmark-specific settings.
      * \param flags Optional flags controlling executor behavior.
+     * \param stream Optional HIP stream to run the benchmarks on.
      */
     executor(int                    argc,
              char*                  argv[],
-             size_t                 default_bytes,
-             detail::flags::FlagTag flags  = flags::none,
-             hipStream_t            stream = hipStreamDefault)
-        : m_stream(stream), m_flags(flags), m_cli(argc, argv)
+             primbench::settings    settings = {},
+             detail::flags::FlagTag flags    = flags::none,
+             hipStream_t            stream   = hipStreamDefault)
+        : m_settings(settings), m_flags(flags), m_stream(stream), m_cli(argc, argv)
     {
         get_logger().save_program_start_time();
 
-        m_cli_settings = parse(m_cli, default_bytes);
+        parse();
 
-        m_stream_blocker = std::make_unique<detail::stream_blocker>(
-            m_stream,
-            m_cli_settings.stream_blocking_timeout_secs.count());
+        m_stream_blocker
+            = std::make_unique<detail::stream_blocker>(m_stream,
+                                                       m_settings.stream_blocking_timeout_secs);
     }
 
     /**
@@ -3582,10 +3586,10 @@ public:
         m_cli.finalize();
 
         // Capture custom arguments after all have been registered.
-        m_cli_settings.custom_args = m_cli.get_all_custom_arguments();
+        m_settings.custom_args = m_cli.get_all_custom_options();
 
         // Only keep filtered specializations, based on their name.
-        std::regex pattern(m_cli_settings.filter);
+        std::regex pattern(m_settings.filter);
         static_specializations.erase(std::remove_if(static_specializations.begin(),
                                                     static_specializations.end(),
                                                     [&pattern](const auto& spec) {
@@ -3606,9 +3610,9 @@ public:
         if(specialization_count == 0)
         {
             std::cerr << "Error: At least one benchmark must be queued\n";
-            if(!m_cli_settings.filter.empty())
+            if(!m_settings.filter.empty())
             {
-                std::cerr << "Hint: The currently used --filter '" << m_cli_settings.filter
+                std::cerr << "Hint: The currently used --filter '" << m_settings.filter
                           << "' is likely incorrect\n";
             }
             exit(EXIT_FAILURE);
@@ -3640,7 +3644,7 @@ public:
             exit(EXIT_FAILURE);
         }
 
-        get_logger().init(algorithm, specialization_count, m_cli_settings, m_flags, get_amdsmi());
+        get_logger().init(algorithm, specialization_count, m_settings, m_flags, get_amdsmi());
 
         // Determine max specialization width, and validate that every name is unique.
         m_spec_col_width = 0;
@@ -3664,7 +3668,7 @@ public:
         m_family_col_width
             = std::string("Index/").size() + std::to_string(specialization_count).size();
 
-        if(m_cli_settings.dry)
+        if(m_settings.dry)
         {
             detail::progress::print_dry_header(algorithm,
                                                m_spec_col_width,
@@ -3677,7 +3681,7 @@ public:
                                            m_spec_col_width,
                                            m_family_col_width,
                                            specialization_count,
-                                           m_cli_settings.noise_timeout_secs.count());
+                                           m_settings.noise_timeout_secs);
         }
 
         // Run all benchmarks.
@@ -3706,12 +3710,13 @@ private:
     /**
      * \brief Parse optional arguments.
      */
-    detail::cli_settings parse(detail::cli& cli, size_t default_bytes)
+    void parse()
     {
-        detail::cli_settings s{};
+        auto& cli = m_cli;
+        auto& s   = m_settings;
 
         s.bytes = cli.get<size_t>("bytes",
-                                  default_bytes,
+                                  s.bytes,
                                   "Sets the size (in bytes) of the randomly generated input array, "
                                   "overriding the value provided to `primbench::executor`.");
         if(s.bytes == 0)
@@ -3721,51 +3726,51 @@ private:
         }
 
         s.hot
-            = cli.get<bool>("hot", false, "Skip clearing the GPU cache between batch iterations.");
+            = cli.get<bool>("hot", s.hot, "Skip clearing the GPU cache between batch iterations.");
 
-        s.seed = cli.get<uint32_t>("seed", 42, "Seed used for input generation.");
+        s.seed = cli.get<uint32_t>("seed", s.seed, "Seed used for input generation.");
 
         s.json_out = cli.get<std::string>("json-out",
-                                          "results.json",
+                                          s.json_out,
                                           "JSON path to write benchmark results to.");
 
-        s.csv_out = cli.get<std::string>("csv-out", "", "CSV path to write benchmark results to.");
+        s.csv_out
+            = cli.get<std::string>("csv-out", s.csv_out, "CSV path to write benchmark results to.");
 
         s.filter = cli.get<std::string>("filter",
-                                        "",
+                                        s.filter,
                                         "Regex filter of specialization names to benchmark.");
 
         s.dry = cli.get<bool>("dry",
-                              false,
+                              s.dry,
                               "Perform a dry run. The benchmark setup is still run, and JSON and "
                               "CSV files are still output, but `state.run()` immediately returns.");
 
-        s.min_gpu_ms_per_batch = std::chrono::duration<double>(
-            cli.get<double>("min-gpu-ms-per-batch",
-                            10.0,
-                            "Minimum duration of a batch in milliseconds (GPU time)."));
-        if(s.min_gpu_ms_per_batch.count() <= 0.0)
+        s.min_gpu_ms_per_batch
+            = cli.get<double>("min-gpu-ms-per-batch",
+                              s.min_gpu_ms_per_batch,
+                              "Minimum duration of a batch in milliseconds (GPU time).");
+        if(s.min_gpu_ms_per_batch <= 0.0)
         {
             std::cerr << "Error: --min-gpu-ms-per-batch must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
-        s.min_secs = std::chrono::duration<double>(
-            cli.get<double>("min-secs",
-                            1.0,
-                            "Minimum total benchmark duration in seconds (wall time)."));
-        if(s.min_secs.count() <= 0.0)
+        s.min_secs = cli.get<double>("min-secs",
+                                     s.min_secs,
+                                     "Minimum total benchmark duration in seconds (wall time).");
+        if(s.min_secs <= 0.0)
         {
             std::cerr << "Error: --min-secs must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
-        s.noise_timeout_secs = std::chrono::duration<double>(
-            cli.get<double>("noise-timeout-secs",
-                            10.0,
-                            "Maximum total benchmark duration in seconds before timing out a "
-                            "noisy run (wall time)."));
-        if(s.noise_timeout_secs.count() <= 0.0)
+        s.noise_timeout_secs
+            = cli.get<double>("noise-timeout-secs",
+                              s.noise_timeout_secs,
+                              "Maximum total benchmark duration in seconds before timing out a "
+                              "noisy run (wall time).");
+        if(s.noise_timeout_secs <= 0.0)
         {
             std::cerr << "Error: --noise-timeout-secs must be greater than 0\n";
             exit(EXIT_FAILURE);
@@ -3778,7 +3783,7 @@ private:
 
         s.batch_window_size
             = cli.get<size_t>("batch-window-size",
-                              10,
+                              s.batch_window_size,
                               "Number of batch times used in the noise (coefficient of variation) "
                               "window to decide early benchmark stopping.");
         if(s.batch_window_size == 0)
@@ -3789,7 +3794,7 @@ private:
 
         s.noise_tolerance_percent
             = cli.get<double>("noise-tolerance-percent",
-                              1.0,
+                              s.noise_tolerance_percent,
                               "Noise tolerance of batch times in percent, used to determine "
                               "whether a benchmark can be stopped early.");
         if(s.noise_tolerance_percent <= 0.0)
@@ -3800,11 +3805,11 @@ private:
 
         s.min_gpu_temp = cli.get<uint16_t>(
             "min-gpu-temp",
-            50,
+            s.min_gpu_temp,
             "Minimum GPU temperature in °C. Too low slows benchmarks; too high increases noise.");
         s.max_gpu_temp = cli.get<uint16_t>(
             "max-gpu-temp",
-            60,
+            s.max_gpu_temp,
             "Maximum GPU temperature in °C. Too low slows benchmarks; too high increases noise.");
         if(s.min_gpu_temp > s.max_gpu_temp)
         {
@@ -3812,21 +3817,21 @@ private:
             exit(EXIT_FAILURE);
         }
 
-        s.max_warming_secs = std::chrono::duration<double>(
-            cli.get<double>("max-warming-secs",
-                            60.0,
-                            "Maximum seconds allowed for GPU warming before an error is thrown."));
-        if(s.max_warming_secs.count() <= 0.0)
+        s.max_warming_secs
+            = cli.get<double>("max-warming-secs",
+                              s.max_warming_secs,
+                              "Maximum seconds allowed for GPU warming before an error is thrown.");
+        if(s.max_warming_secs <= 0.0)
         {
             std::cerr << "Error: --max-warming-secs must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
-        s.max_cooling_secs = std::chrono::duration<double>(
-            cli.get<double>("max-cooling-secs",
-                            60.0,
-                            "Maximum seconds allowed for GPU cooling before an error is thrown."));
-        if(s.max_cooling_secs.count() <= 0.0)
+        s.max_cooling_secs
+            = cli.get<double>("max-cooling-secs",
+                              s.max_cooling_secs,
+                              "Maximum seconds allowed for GPU cooling before an error is thrown.");
+        if(s.max_cooling_secs <= 0.0)
         {
             std::cerr << "Error: --max-cooling-secs must be greater than 0\n";
             exit(EXIT_FAILURE);
@@ -3834,23 +3839,23 @@ private:
 
         s.output_hip_device_properties_context
             = cli.get<bool>("output-hip-device-properties-context",
-                            false,
+                            s.output_hip_device_properties_context,
                             "Output a `hip_device_properties` object in the context object, "
                             "containing details about the GPU.");
 
         s.output_amdsmi_context = cli.get<bool>(
             "output-amdsmi-context",
-            false,
+            s.output_amdsmi_context,
             "Output an `amdsmi` object in the context object, containing details about the GPU.");
 
         s.output_batches = cli.get<bool>(
             "output-batches",
-            false,
+            s.output_batches,
             "Output a `batches` array for each specialization, containing per-batch details.");
 
         s.spaces_per_indent = cli.get<uint32_t>(
             "spaces-per-indent",
-            4,
+            s.spaces_per_indent,
             "Number of spaces per indentation level in JSON output. Set to 0 for no indentation.");
         if(s.spaces_per_indent > 8)
         {
@@ -3858,18 +3863,16 @@ private:
             exit(EXIT_FAILURE);
         }
 
-        s.stream_blocking_timeout_secs = std::chrono::duration<double>(cli.get<double>(
+        s.stream_blocking_timeout_secs = cli.get<double>(
             "stream-blocking-timeout-secs",
-            10.0,
+            s.stream_blocking_timeout_secs,
             "Maximum stream blocking duration in seconds before timing out. Stream is blocked "
-            "while queueing kernel calls. Use `primbench::flags::sync` if kernel is synchronous."));
-        if(s.stream_blocking_timeout_secs.count() <= 0.0)
+            "while queueing kernel calls. Use `primbench::flags::sync` if kernel is synchronous.");
+        if(s.stream_blocking_timeout_secs <= 0.0)
         {
             std::cerr << "Error: --stream-blocking-timeout-secs must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
-
-        return s;
     }
 
     /**
@@ -3888,7 +3891,7 @@ private:
                      get_logger(),
                      get_amdsmi(),
                      *m_stream_blocker,
-                     m_cli_settings,
+                     m_settings,
                      m_flags,
                      m_spec_col_width,
                      m_family_col_width);
@@ -3916,13 +3919,13 @@ private:
      */
     inline static std::vector<std::unique_ptr<benchmark_interface>> static_specializations;
 
-    hipStream_t m_stream; /**< HIP stream used for execution */
+    settings m_settings; /**< CLI user settings */
 
     detail::flags::FlagTag m_flags; /**< Executor flags */
 
-    detail::cli m_cli; /**< Command-line argument parser */
+    hipStream_t m_stream; /**< HIP stream used for execution */
 
-    detail::cli_settings m_cli_settings; /**< CLI user settings */
+    detail::cli m_cli; /**< Command-line argument parser */
 
     std::unique_ptr<detail::stream_blocker>
         m_stream_blocker; /**< Stream blocker to serialize output */
