@@ -216,6 +216,8 @@ namespace rocRoller
 
         /**
           * @brief Find the closest common ancestor loop (ForLoopOp or DoWhileOp) for two operations.
+          * If a common ancestor loop exists, then it is the immediate parent of the operation that
+          * executes first (opA) and also contains the second operation (opB).
           *
           * @param graph The kernel graph
           * @param opA First operation tag
@@ -225,7 +227,6 @@ namespace rocRoller
         inline std::optional<int> FindCommonAncestorLoop(KernelGraph const& graph, int opA, int opB)
         {
             // Get all nodes containing opA (ancestors)
-            // const auto ancestorsA = graph.control.nodesContaining(opA).to<std::set>();
             const auto tagOfimmediateParentLoopOfA = FindImmediateParentLoop(graph, opA);
 
             if(not tagOfimmediateParentLoopOfA.has_value())
