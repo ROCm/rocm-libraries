@@ -1713,7 +1713,7 @@ def schedule_get(name: str, code_path: int, schedule_info: 'ScheduleInfo') -> li
 
 
 def _transform_index_with_force_unroll_sub_iter(
-    needed_by: int,
+    linear_index: int,
     is_lr0: bool,
     is_lra: bool,
     n_tiles_a: int,
@@ -1724,23 +1724,53 @@ def _transform_index_with_force_unroll_sub_iter(
 ) -> int:
     """
     Convert column-major linear index into needed_by mfma index when ForceUnrollSubIter is enabled.
+    
+    LR data is consumed by multiple MFMAs (one for each tile in the opposite dimension).
+    With MFMA reordering, we find the earliest consumer.
     """
-    # For LR0s, add offset for second half of tiles
-    if is_lr0:
-        if is_lra:
-            needed_by += n_tiles_a // 2
-        else:  # LRB0
-            needed_by += n_tiles_a * (n_tiles_b // 2)
+    mfmas_per_tile = 3 if use_f32x_emulation else 1
     
-    # Apply ForceUnrollSubIter reordering on TILE indices first,
-    # then convert to MFMA indices for F32X emulation
-    needed_by = index_for_force_unroll_sub_iter(needed_by, n_tiles_a, n_tiles_b)
+    # Determine the tile coordinate for this LR
+    # For LRA: linear_index is the A tile index
+    # For LRB: linear_index is n_tiles_a * B tile index, so extract B tile
+    if is_lra:
+        a_tile = linear_index
+        if is_lr0:
+            a_tile += n_tiles_a // 2  # Second half of A tiles
+    else:
+        b_tile = linear_index // n_tiles_a
+        if is_lr0:
+            b_tile += n_tiles_b // 2  # Second half of B tiles
     
-    if use_f32x_emulation:  # Each tile requires 3 MFMAs
-        needed_by *= 3
+    def compute_consumer_mfma_index(a: int, b: int) -> int:
+        """Compute MFMA index for tile (a, b) after ForceUnrollSubIter permutation."""
+        # Column-major tile index
+        col_major_idx = a + b * n_tiles_a
+        # Apply ForceUnrollSubIter permutation
+        permuted = index_for_force_unroll_sub_iter(col_major_idx, n_tiles_a, n_tiles_b)
+        # Convert to MFMA index (multiply by 3 for TF32)
+        return permuted * mfmas_per_tile
     
     if mfma_reorder:
-        needed_by = mfma_reorder[needed_by]
+        # Find earliest consumer across all tiles in the opposite dimension
+        if is_lra:
+            # LRA's A tile is consumed by MFMAs at (a_tile, b) for all b tiles
+            needed_by = min(
+                mfma_reorder[compute_consumer_mfma_index(a_tile, b)]
+                for b in range(n_tiles_b)
+            )
+        else:
+            # LRB's B tile is consumed by MFMAs at (a, b_tile) for all a tiles
+            needed_by = min(
+                mfma_reorder[compute_consumer_mfma_index(a, b_tile)]
+                for a in range(n_tiles_a)
+            )
+    else:
+        # Without reorder, the first consumer (in permuted order) is always earliest
+        if is_lra:
+            needed_by = compute_consumer_mfma_index(a_tile, 0)
+        else:
+            needed_by = compute_consumer_mfma_index(0, b_tile)
     
     if not is_lr0:  # LR1/LR3 reads data for next iteration.
         needed_by += num_vmfma
@@ -1749,23 +1779,46 @@ def _transform_index_with_force_unroll_sub_iter(
 
 
 def _transform_index_standard(
-    needed_by: int,
+    linear_index: int,
     is_lr0: bool,
+    is_lra: bool,
+    n_tiles_a: int,
+    n_tiles_b: int,
     use_f32x_emulation: bool,
     mfma_reorder: list[int],
     num_vmfma: int
 ) -> int:
     """
     Convert column-major linear index into needed_by mfma index when ForceUnrollSubIter is disabled.
+    
+    LR data is consumed by multiple MFMAs (one for each tile in the opposite dimension).
+    With MFMA reordering, we find the earliest consumer.
     """
-    if use_f32x_emulation:  # Each tile requires 3 MFMAs
-        needed_by *= 3
+    mfmas_per_tile = 3 if use_f32x_emulation else 1
+    
+    # Convert linear index to MFMA base index
+    needed_by = linear_index * mfmas_per_tile
     
     if is_lr0:  # LR0 reads data for 2nd half of this iteration (when present)
         needed_by += num_vmfma // 2
     
     if mfma_reorder:
-        needed_by = mfma_reorder[needed_by]
+        # With reordering, we need to find the earliest consumer across all tiles in the opposite dimension.
+        # LR data is used by multiple MFMAs - one for each tile in the opposite dimension.
+        if is_lra:
+            # LRA's A tile is consumed by MFMAs at (a, b) for all b tiles
+            # In column-major layout: index = base + b * n_tiles_a * mfmas_per_tile
+            needed_by = min(
+                mfma_reorder[needed_by + b * n_tiles_a * mfmas_per_tile]
+                for b in range(n_tiles_b)
+            )
+        else:
+            # LRB's B tile is consumed by MFMAs at (a, b) for all a tiles
+            # In column-major layout: index = base + a * mfmas_per_tile
+            needed_by = min(
+                mfma_reorder[needed_by + a * mfmas_per_tile]
+                for a in range(n_tiles_a)
+            )
     
     if not is_lr0:  # LR1/LR3 reads data for first half of next iteration
         needed_by += num_vmfma
@@ -1833,15 +1886,14 @@ def lr_needed_by_mfma(
     
     # Apply transformations based on scheduling mode
     is_lr0 = local_read_name == "LRA0" or local_read_name == "LRB0"
+    
+    transform_function = _transform_index_standard
     if force_unroll_sub_iter:
-        needed_by = _transform_index_with_force_unroll_sub_iter(
-            linear_index, is_lr0, is_lra, n_tiles_a, n_tiles_b,
-            use_f32x_emulation, mfma_reorder, num_vmfma
-        )
-    else:
-        needed_by = _transform_index_standard(
-            linear_index, is_lr0, use_f32x_emulation, mfma_reorder, num_vmfma
-        )
+        transform_function = _transform_index_with_force_unroll_sub_iter        
+    needed_by = transform_function(
+        linear_index, is_lr0, is_lra, n_tiles_a, n_tiles_b,
+        use_f32x_emulation, mfma_reorder, num_vmfma
+    )
     
     return needed_by
 
