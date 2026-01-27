@@ -2932,7 +2932,7 @@ class Solution(collections.abc.Mapping):
       # restrict feature combinations
       if state["DtlPlusLdsBuf"]:
         # disable CMS for DtlPlusLdsBuf (not supported yet)
-        state["UseCustomMainLoopSchedule"] = False
+        state["UseCustomMainLoopSchedule"] = 0
         # force 1LDSBuffer = 0
         state["1LDSBuffer"] = 0
 
