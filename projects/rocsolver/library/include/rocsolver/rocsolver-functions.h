@@ -231,15 +231,15 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlacgv_64(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief LANGE computes the norm of a general m-by-n matrix A.
+    \brief The LANGE functions compute the norm of a general ``m``-by-``n`` matrix ``A``.
 
     \details
-    The norm computed is specified by norm_type as follows:
+    The norm computed is specified by ``norm_type`` as follows:
 
-    - rocsolver_norm_type_one: the 1-norm (maximum column sum),
-    - rocsolver_norm_type_frobenius: the Frobenius norm (square root of sum of squares),
-    - rocsolver_norm_type_infinity: the infinity-norm (maximum row sum), or
-    - rocsolver_norm_type_max: the maximum absolute value of any element.
+    - ``rocsolver_norm_type_one``: the 1-norm (maximum column sum),
+    - ``rocsolver_norm_type_frobenius``: the Frobenius norm (square root of sum of squares),
+    - ``rocsolver_norm_type_infinity``: the infinity-norm (maximum row sum), or
+    - ``rocsolver_norm_type_max``: the maximum absolute value of any element.
 
     @param[in]
     handle      rocblas_handle.
@@ -329,11 +329,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlange_64(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief LASWP performs a series of row interchanges on the matrix A.
+    \brief The LASWP functions perform a series of row interchanges on the matrix ``A``.
 
     \details
-    Row interchanges are done one by one. If \f$\text{ipiv}[k_1 + (j - k_1) \cdot \text{abs}(\text{incx})] = r\f$, then the j-th row of A
-    will be interchanged with the r-th row of A, for \f$j = k_1,k_1+1,\dots,k_2\f$. Indices \f$k_1\f$ and \f$k_2\f$ are 1-based indices.
+    Row interchanges are done one by one. If \f$\text{ipiv}[k_1 + (j - k_1) \cdot \text{abs}(\text{incx})] = r\f$, then the j-th row of ``A``
+    will be interchanged with the r-th row of ``A``, for \f$j = k_1,k_1+1,\dots,k_2\f$. Indices \f$k_1\f$ and \f$k_2\f$ are 1-based indices.
 
     @param[in]
     handle      rocblas_handle.
