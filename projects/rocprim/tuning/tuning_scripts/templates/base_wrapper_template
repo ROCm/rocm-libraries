@@ -1,52 +1,50 @@
-#include "../../rocprim/include/rocprim/device/{{algo_type}}_{{ algo_name }}.hpp"
-#include "../../rocprim/include/rocprim/device/detail/device_config_helper.hpp"
-#include "../utils/tuning_utils.hpp"
-#include <hip/hip_runtime.h>
-#include <chrono>
-#include <stdio.h>
-
-{% block type_definitions %}
-using key_type = {{ key_type }};
-{% if value_type %}
-using value_type = {{ value_type }};
-{% endif %}
-{% endblock %}
-
-{% block tuning_config %}
-using tuning_config = rocprim::{{ algo_name }}_config<{{ config_params }}>;
+{% block includes %}
+// Include utils for {{algo_name}}_config<...>.
+#include "rocprim/device/detail/device_config_helper.hpp" 
+// Include 'rocprim::empty_type'.
+#include "rocprim/types.hpp" 
+// Include main benchmarking logic {{algo_type}}_{{algo_name}}_benchmark.
+#include "benchmark_{{algo_type}}_{{algo_name}}.hpp"
+// Include primbench executor.
+#include "primbench.hpp"
+// Include fixed-width integers for interop with python.
+#include <cstdint>
 {% endblock %}
 
 {% block extern_c_wrapper %}
-extern "C" float {{algo_type}}_{{ algo_name }}_wrapper(
-    {% block arguments required %}{% endblock %}
+extern "C" float {{algo_type}}_{{algo_name}}_wrapper(
+    {% block arguments %}
+    uint64_t bytes_size
+    {% endblock %}
 )
 {
-    hipStream_t stream = 0;
+    // Flush is required for fancy primbench printing due to use
+    // of terminal control characters.
+    std::cout << std::flush;
 
-    {% block setup %}{% endblock %}
+    {% block config %}
+    using config = rocprim::{{algo_name}}_config<{{config_params}}>;
+    {% endblock %}
 
-    {# Temporary storage section #}
-    void* d_temporary_storage = nullptr;
-    size_t temporary_storage_bytes = 0;
-    {% block storage_query %}{% endblock %}
-    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+    {% block type_definitions %}
+    using key_type = {{key_type}};
+    {% if value_type %}
+    using value_type = {{value_type}};
+    {% else %}
+    using value_type = rocprim::empty_type;
+    {% endif %}
+    {% endblock %}
 
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
+    {% block benchmark_type %}
+    using benchmark_type = {{algo_type}}_{{algo_name}}_benchmark<key_type, value_type, config>;
+    {% endblock %}
 
-    HIP_CHECK(hipEventRecord(start, stream));
-    {% block algorithm_call required %}{% endblock %}
-    HIP_CHECK(hipEventRecord(stop, stream));
-    HIP_CHECK(hipEventSynchronize(stop));
-
-    float milliseconds;
-    HIP_CHECK(hipEventElapsedTime(&milliseconds, start, stop));
-
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
-    HIP_CHECK(hipFree(d_temporary_storage));
-
-    return milliseconds;
+    {% block benchmark_exec %}
+    char* args[] = { "ignore-first-arg", /* You can pass arguments to primbench CLI here! */ };
+    auto exec = primbench::executor(1, args, bytes_size, primbench::flags::none, 0);
+    exec.queue<benchmark_type>();
+    exec.run();
+    return exec.get_last_bytes_per_second();
+    {% endblock %}
 }
 {% endblock %}

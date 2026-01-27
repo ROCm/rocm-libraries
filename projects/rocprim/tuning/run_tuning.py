@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,8 @@ from contextlib import contextmanager
 import re
 import traceback
 from utils import Parser
+
+from tuning_scripts.base_tuner import TunerArgs
 
 
 @contextmanager
@@ -80,7 +82,6 @@ def filter_algorithms(available_algos: List[str], pattern: str) -> List[str]:
 def run_tuning(
     algorithms: List[str],
     size: int = None,
-    iterations: int = None,
     output_dir: str = None,
     include_default_config: bool = None,
     max_fevals: int = None,
@@ -112,10 +113,10 @@ def run_tuning(
             print(f"Working directory: {Path.cwd()}")
             try:
                 if hasattr(tuning_module, "Tuner"):
-                    tuner = tuning_module.Tuner(
+                    args: TunerArgs = tuning_module.Tuner._get_default_args()
+                    args.update_with_kwargs(
                         algo_full_name=algo,
-                        bytes_size=size,
-                        iterations=iterations,
+                        size=size,
                         output_dir=output_dir,
                         include_default_config=include_default_config,
                         max_fevals=max_fevals,
@@ -124,6 +125,7 @@ def run_tuning(
                         arch_name=arch_name,
                         seed=seed,
                     )
+                    tuner = tuning_module.Tuner(args)
                     tuner.tune_all()
                 else:
                     print(f"Warning: No tuner class found in {algo} module")
@@ -167,7 +169,6 @@ def main():
         return
 
     args.size = int(args.size) if args.size else None
-    args.iterations = int(args.iterations) if args.iterations else None
 
     matched_algos = filter_algorithms(available_algos, args.algo_regex)
 
@@ -188,7 +189,6 @@ def main():
     run_tuning(
         matched_algos,
         args.size,
-        args.iterations,
         args.output_dir,
         args.include_default_config,
         args.max_fevals,

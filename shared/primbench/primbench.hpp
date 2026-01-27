@@ -2983,6 +2983,8 @@ private:
     bool   m_has_run          = false;
     size_t m_items            = 0;
     size_t m_read_write_bytes = 0;
+
+    double m_last_bytes_per_second = 0.0;
 }; // class state
 
 /// Simple command-line argument parser.
@@ -3617,6 +3619,14 @@ public:
         return m_cli.get<T>(name, default_val, description);
     }
 
+    /**
+     * \brief Returns the bytes per second of the last ran benchmark.
+     */
+    double get_last_bytes_per_second()
+    {
+        return m_last_bytes_per_second;
+    }
+
 private:
     /// Parse optional arguments.
     void parse()
@@ -3914,6 +3924,7 @@ private:
             {
                 auto state = new_state(algo, meta, specialization_index);
                 b->run(state);
+                m_last_bytes_per_second = state.get_last_bytes_per_second();
             }
 
             specialization_index++;
@@ -3999,6 +4010,8 @@ private:
     bool     m_own_stream; ///< Whether primbench should create its own stream.
 
     detail::cli m_cli; ///< Command-line argument parser.
+
+    double m_last_bytes_per_second = 0.0; /**< Last bytes per second */
 
     std::unique_ptr<detail::stream_blocker>
         m_stream_blocker; ///< Stream blocker to serialize output.

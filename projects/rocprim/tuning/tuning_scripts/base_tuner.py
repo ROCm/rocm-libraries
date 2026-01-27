@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -28,8 +28,12 @@ import json
 from pathlib import Path
 import numpy as np
 from jinja2 import Environment, FileSystemLoader
-from utils import hip_check, TYPE_CONFIGS, ConfigParser
+from utils import TYPE_CONFIGS, ConfigParser
 from hip import hip
+import warnings
+from dataclasses import dataclass
+from utils import TYPE_CONFIGS, Parser
+import pathlib
 
 """
 The following base class is used when implementing the tuning for new algorithms
@@ -80,62 +84,80 @@ Kernel Tuner documentation: https://kerneltuner.github.io/kernel_tuner/stable/co
 ROCm HIP Python Wrapper: https://rocm.docs.amd.com/projects/hip-python/en/latest/index.html
 """
 
+@dataclass
+class TunerArgs:
+    algo_full_name: Optional[str] = None
+    """The full algorithm name, with type and name.
+    """
+
+    size: int = 1024 * 1024 * 32 * 4
+    """Size in bytes for the problem/data to tune with.
+    """
+
+    max_fevals: int = 100
+    """Maximum number of function evaluations for the tuning strategy
+    """
+
+    strategy = "dual_annealing"
+    """Tuning strategy to use (e.g. "dual_annealing", "brute_force").
+    """
+
+    output_dir: str = "../output"
+    """Directory path to store tuning results and metadata.
+    """
+
+    include_default_config: bool = True
+    """Whether to also test default configurations.
+    """
+
+    save_metadata: bool = False
+    """Whether to save additional tuning metadata.
+    """
+
+    simulation_mode: bool = False
+    seed: int = -1
+    arch_name: Optional[str] = None
+
+    def update_with_kwargs(self, **kwargs):
+        for k, v in kwargs.items():
+            if k in self.__dict__.keys() and v:
+                self.__dict__[k] = v
 
 class BaseTuner(ABC):
     def __init__(
         self,
-        algo_full_name: str,
-        bytes_size: int,
-        iterations: int,
-        output_dir: str,
-        include_default_config: bool,
-        max_fevals: int,
-        save_metadata: bool,
-        strategy: str,
-        simulation_mode: bool,
-        arch_name: str,
-        seed: int,
+        args: TunerArgs
     ):
         """Initialize the tuner with configuration parameters.
-
-        Args:
-            algo_full_name: The full algorithm name, with type and name
-            bytes_size: Size in bytes for the problem/data to tune with
-            iterations: Number of iterations Kernel Tuner will run for each config
-            output_dir: Directory path to store tuning results and metadata
-            include_default_config: Whether to also test default configurations
-            max_fevals: Maximum number of function evaluations for the tuning strategy
-            save_metadata: Whether to save additional tuning metadata
-            strategy: Tuning strategy to use (e.g. "dual_annealing", "brute_force")
         """
-        self.algo_full_name = algo_full_name
+        self.algo_full_name = args.algo_full_name
         algo_types = ["warp", "block", "device"]
-        algo_full_name_parts = algo_full_name.split("_")
+        algo_full_name_parts = args.algo_full_name.split("_")
         if algo_full_name_parts[0] in algo_types:
             self.algo_type = algo_full_name_parts[0]
             self.algo_name = "_".join(algo_full_name_parts[1:])
         else:
             raise ValueError(
-                f"Invalid algo_type in {algo_full_name}. Must start with one of {algo_types}"
+                f"Invalid algo_type in {args.algo_full_name}. Must start with one of {algo_types}"
             )
         self.device_id = 0
-        self.bytes_size = bytes_size
-        self.iterations = iterations
-        self.output_dir = Path(output_dir)
+        self.bytes_size = args.size
+        self.output_dir = Path(args.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.simulation_mode = simulation_mode
+        self.simulation_mode = args.simulation_mode
         if not self.simulation_mode:
+            # TODO: remove or replace this to get rid of hip-python
             self.device_properties = hip.hipDeviceProp_t()
             hip.hipGetDeviceProperties(self.device_properties, self.device_id)
             self.arch_name = self.device_properties.gcnArchName.decode().split(":")[0]
         else:
-            assert arch_name, "Simulation mode requires --arch-name to be specified"
-            self.arch_name = arch_name
-        self.include_default_config = include_default_config
-        self.max_fevals = max_fevals
-        self.save_metadata = save_metadata
-        self.strategy = strategy
-        self.seed = None if seed == -1 else seed
+            assert args.arch_name, "Simulation mode requires --arch-name to be specified"
+            self.arch_name = args.arch_name
+        self.include_default_config = args.include_default_config
+        self.max_fevals = args.max_fevals
+        self.save_metadata = args.save_metadata
+        self.strategy = args.strategy
+        self.seed = None if args.seed == -1 else args.seed
 
         if self.include_default_config:
             self.config_parser = ConfigParser(
@@ -148,6 +170,22 @@ class BaseTuner(ABC):
         else:
             self.config_parser = None
             self.default_configs = None
+
+    @abstractmethod
+    def _get_default_args() -> TunerArgs:
+        """Returns the default arguments. Used to generate default values for the CLI."""
+        pass
+
+    @classmethod
+    def cli(cls):
+        defaults: TunerArgs = cls._get_default_args()
+        args = Parser.get_parser(
+            default_bytes=defaults.size,
+            default_max_feval=defaults.max_feval,
+            default_output_dir=defaults.output_dir,
+            default_strategy=defaults.strategy,
+        )
+        cls(args).tune_all()
 
     @abstractmethod
     def _get_tune_params(self) -> OrderedDict:
@@ -174,18 +212,9 @@ class BaseTuner(ABC):
         """
         pass
 
-    @abstractmethod
-    def _allocate_device_memory(self):
-        """
-        DeviceArray wrapper must be used to properly manage GPU memory allocation/deallocation
-        and configure array properties. See HIP Python wrapper documentation for examples.
-        """
-        pass
-
-    @abstractmethod
     def _get_grid_div_x(self):
         """Return the grid_div_x parameter for kernel_tuner.tune_kernel()"""
-        pass
+        return ["block_size_x"]
 
     @abstractmethod
     def tune_all(self) -> None:
@@ -193,14 +222,9 @@ class BaseTuner(ABC):
         pass
 
     def _get_problem_size(self, key_type: str, value_type: Optional[str] = None):
-        return self.bytes_size // TYPE_CONFIGS[key_type].size
-
-    def _free_device_memory(self, allocated_mem: Dict) -> None:
-        """Free all device memory allocated with DeviceArray wrapper"""
-        if not self.simulation_mode:
-            for ptr in self.allocated_mem.values():
-                if ptr is not None:
-                    hip_check(hip.hipFree(ptr))
+        return self.bytes_size // (
+            TYPE_CONFIGS[key_type].size + (TYPE_CONFIGS[value_type].size if value_type else 0)
+        )
 
     def _get_metrics(self, key_type: str, value_type: Optional[str] = None) -> Dict:
         """Default metrics for performance measurement."""
@@ -221,6 +245,9 @@ class BaseTuner(ABC):
         default_tune_params = self.config_parser.get_default_config(
             self.arch_name, key_type, value_type
         )
+        if default_tune_params is None:
+            warnings.warn("No tuning parameters extracted from default config. Skipping!")
+            return
 
         default_args = tune_kernel_args.copy()
         default_args.update(
@@ -236,7 +263,7 @@ class BaseTuner(ABC):
     ) -> None:
         """Performs auto-tuning for a specific key type and optional value type combination."""
         print(f"\nTuning for {key_type} {value_type if value_type else ''}")
-        print(f"Using size: {self.bytes_size} bytes, iterations: {self.iterations}")
+        print(f"Using size: {self.bytes_size} bytes")
         strategy_print_message = (
             f"Using strategy: {self.strategy if self.strategy else 'brute_force'}"
         )
@@ -259,8 +286,6 @@ class BaseTuner(ABC):
             print(f"Failed tuning for {key_type} {value_type if value_type else ''}")
             print(f"Error: {str(e)}")
             raise
-        finally:
-            self._free_device_memory(self.allocated_mem)
 
     def generate_wrapper(
         self,
@@ -270,11 +295,19 @@ class BaseTuner(ABC):
         output_file: bool = False,
     ) -> str:
         """Generate wrapper code using Jinja2 template inheritance."""
+        template_dir = pathlib.Path("templates")
         env = Environment(
-            loader=FileSystemLoader("templates"), trim_blocks=True, lstrip_blocks=True
+            loader=FileSystemLoader(template_dir), trim_blocks=True, lstrip_blocks=True
         )
 
-        template = env.get_template(f"{self.algo_full_name}_wrapper_template")
+        # We first check if a specialized template exists, e.g.
+        # 'device_merge_wrapper_template' if it doesn't exist, we 
+        # fallback to 'base_wrapper_template'.
+        template_name = f"{self.algo_full_name}_wrapper_template"
+        if not template_dir.joinpath(template_name).exists():
+            template_name = "base_wrapper_template"
+
+        template = env.get_template(template_name)
         context = {
             "algo_type": self.algo_type,
             "algo_name": self.algo_name,
@@ -302,8 +335,6 @@ class BaseTuner(ABC):
     ) -> Dict:
         """Returns base arguments for kernel_tuner.tune_kernel()."""
         np.random.seed(self.seed)
-        args, allocated_mem = self._allocate_device_memory(key_type, value_type)
-        self.allocated_mem = allocated_mem
 
         wrapper_string = self.generate_wrapper(
             tune_params=self._get_tune_params(),
@@ -315,21 +346,21 @@ class BaseTuner(ABC):
             "kernel_name": f"{self.algo_full_name}_wrapper",
             "kernel_source": wrapper_string,
             "problem_size": self._get_problem_size(key_type, value_type),
-            "arguments": args,
+            "arguments": [np.uint64(self.bytes_size)],
             "tune_params": self._get_tune_params(),
             "strategy": self.strategy,
             "grid_div_x": self._get_grid_div_x(),
-            "metrics": self._get_metrics(key_type, value_type),
-            "iterations": self.iterations,
             "cache": str(self._get_cache_file_path(key_type, value_type)),
             "lang": "C",
             "compiler": "hipcc",
             "compiler_options": self._get_compiler_options(),
             "restrictions": self._get_restrictions(key_type, value_type),
-            "verbose": False,
+            "verbose": True,
+            "iterations": 1,
             "log": False,
             "device": self.device_id,
             "simulation_mode": self.simulation_mode,
+            "objective_higher_is_better": True,
         }
 
         if self.strategy != "brute_force":
@@ -391,12 +422,17 @@ class BaseTuner(ABC):
 
     def _get_compiler_options(self) -> List[str]:
         """Returns a list with all compiler options to pass to Kernel Tuner"""
+        monorepo_dir = pathlib.Path('../../../..').resolve()
+        rocprim_dir = monorepo_dir.joinpath('projects/rocprim')
         return [
             "-fPIC",
             "-std=c++17",
-            "-I/opt/rocm/include",
-            "-I../../rocprim/include",
-            "-I../../build/rocprim/include/rocprim",
+            f"-I{rocprim_dir.joinpath('rocprim/include')}",
+            f"-I{rocprim_dir.joinpath('build/rocprim/include/rocprim')}",
+            f"-I{rocprim_dir.joinpath('build/release/rocprim/include/rocprim')}",
+            f"-I{rocprim_dir.joinpath('benchmark')}",
+            f"-I{monorepo_dir.joinpath('shared/primbench')}",
             "-Wno-#pragma-messages",
             f"--offload-arch={self.arch_name}",
+            "-lamd_smi",
         ]

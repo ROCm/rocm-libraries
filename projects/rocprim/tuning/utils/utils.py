@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,28 +20,15 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from hip import hip
 import argparse
 import numpy as np
 from dataclasses import dataclass
 from typing import Optional
 
-
-def hip_check(call_result):
-    err = call_result[0]
-    result = call_result[1:]
-    if len(result) == 1:
-        result = result[0]
-    if isinstance(err, hip.hipError_t) and err != hip.hipError_t.hipSuccess:
-        raise RuntimeError(str(err))
-    return result
-
-
 class Parser:
     @staticmethod
     def get_parser(
         default_bytes: Optional[int] = None,
-        default_iterations: int = 32,
         default_max_feval: int = 100,
         default_output_dir: str = "../output",
         default_strategy: str = "dual_annealing",
@@ -53,12 +40,6 @@ class Parser:
             type=int,
             default=default_bytes,
             help=f"Size in bytes (default: {default_bytes})",
-        )
-        parser.add_argument(
-            "--iterations",
-            type=int,
-            default=default_iterations,
-            help=f"Number of iterations (default: {default_iterations})",
         )
         parser.add_argument(
             "--max-fevals",
