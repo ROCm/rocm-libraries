@@ -42,9 +42,9 @@ z -> complex double precision
 
 size cases to run
 valid options are: (default is large)
-small  -> see definitions in rocsolver-perfoptim-suite.py for included size values
-medium -> see definitions in rocsolver-perfoptim-suite.py for included size values
-large  -> see definitions in rocsolver-perfoptim-suite.py for included size values
+small  -> see definitions in rocsolver_suites.py for included size values
+medium -> see definitions in rocsolver_suites.py for included size values
+large  -> see definitions in rocsolver_suites.py for included size values
 (note: select only one as small is a sub-set of medium which is a sub-set of large)
 ```
 
