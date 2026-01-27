@@ -29,6 +29,8 @@ import glob
 import itertools
 import os
 import shutil
+import pickle
+import zlib
 from pathlib import Path
 from timeit import default_timer as timer
 from typing import List, NamedTuple, Optional, Union
@@ -77,10 +79,9 @@ from Tensile.Utilities.Decorators.Timing import timing
 
 from .ParseArguments import parseArguments
 
-
 class KernelCodeGenResult(NamedTuple):
     err: int
-    src: str
+    src: Union[str, bytes]
     header: Optional[str]
     name: str
     targetObjFilename: str
@@ -96,7 +97,13 @@ class KernelMinResult(NamedTuple):
     pgr: int
     mathclk: int
 
-def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel) -> KernelCodeGenResult:
+def memCompress(obj):
+    return zlib.compress(pickle.dumps(obj))
+
+def memDecompress(byt):
+    return pickle.loads(zlib.decompress(byt))
+
+def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel, compress = False) -> KernelCodeGenResult:
     """
     Generate source for a single kernel.
     Returns (error, source, header, kernelName).
@@ -105,6 +112,8 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
     kernelWriter.setRocIsa(data, outOptions)
     asmFilename = getKernelFileBase(splitGSU, kernel)
     err, src = kernelWriter.getSourceFileString(kernel)
+    if compress:
+        src = memCompress(src)
     header = kernelWriter.getHeaderFileString(kernel)
     objFilename = kernel._state.get("codeObjectFile", None)
     pgr = int(kernel["PrefetchGlobalRead"])
@@ -252,11 +261,13 @@ def writeAssembly(asmPath: Union[Path, str], result: KernelCodeGenResult):
     isa = result.isa
     wfsize = result.wavefrontSize
     with open(path, "w", encoding="utf-8") as f:
-        f.write(result.src)
+        src = result.src
+        if isinstance(src, bytes):
+            src = memDecompress(src)
+        f.write(src)
 
     minResult = KernelMinResult(result.err, result.cuoccupancy, result.pgr, result.mathclk)
     return path, isa, wfsize, minResult
-
 
 def writeHelpers(
     outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H
@@ -348,7 +359,8 @@ def writeSolutionsAndKernels(
         itertools.repeat(splitGSU),
         asmKernels
     )
-    asmResults = ParallelMap2(processKernelSource, asmIter, "Generating assembly kernels", return_as="list")
+    memcompress = numAsmKernels > 10000
+    asmResults = ParallelMap2(functools.partial(processKernelSource, compress=memcompress), asmIter, "Generating assembly kernels", return_as="list")
     removeInvalidSolutionsAndKernels(
         asmResults, asmKernels, solutions, errorTolerant, getVerbosity(), splitGSU
     )
@@ -458,12 +470,14 @@ def writeSolutionsAndKernelsTCL(
     outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
     outOptions.outputNoComment = not disableAsmComments
 
+    memcompress = len(uniqueAsmKernels) > 10000
     unaryProcessKernelSource = functools.partial(
         processKernelSource,
         kernelWriterAssembly,
         rocisa.rocIsa.getInstance().getData(),
         outOptions,
         splitGSU,
+        compress = memcompress,
     )
 
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
