@@ -82,6 +82,19 @@ public:
         return hipdnn_data_sdk::data_objects::CreateMatmulAttributes(
             builder, get_a()->get_uid(), get_b()->get_uid(), get_c()->get_uid());
     }
+
+    static MatmulAttributes fromFlatBuffer(
+        const hipdnn_data_sdk::data_objects::MatmulAttributes* fb,
+        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    {
+        MatmulAttributes attr;
+
+        attr.set_a(tensorMap.at(fb->a_tensor_uid()));
+        attr.set_b(tensorMap.at(fb->b_tensor_uid()));
+        attr.set_c(tensorMap.at(fb->c_tensor_uid()));
+
+        return attr;
+    }
 };
 
 typedef MatmulAttributes Matmul_attributes;

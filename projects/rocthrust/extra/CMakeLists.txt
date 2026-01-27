@@ -2,7 +2,7 @@
 # Copyright 2019-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
-cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 
 # This project includes tests that should be run after
 # rocThrust is installed from package or using `make install`

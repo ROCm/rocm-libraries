@@ -29,6 +29,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/TestKernels.cpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/AddDeallocateTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AddLDSPaddingTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddPrefetchTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddStreamKTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AliasDataFlowTagsTest.cpp"
@@ -59,6 +60,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/FuseLoopsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GlobalLoadStoreTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HazardObserverTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/HoistLoopInvariantTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HypergraphTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HypergraphSerializationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/IdentifyParallelDimensionsTest.cpp"
@@ -89,6 +91,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/SettingsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SubDwordExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/StreamKFixupTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SwizzleScaleTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptorTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TernaryExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestContext.cpp"

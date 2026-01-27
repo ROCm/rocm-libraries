@@ -11,6 +11,9 @@ Documentation for hipSPARSE is available at
 * Added the `debian`, `almalinux`, `rockylinux`, and `oraclelinux` OS names to install script.
 * Added brain half float mixed precision to `hipsparseSpMV` where A, X, and Y use bfloat16 and the compute type uses float.
 * Added half float mixed precision to `hipsparseSpMV` where A, X, and Y use float16 and the compute type uses float.
+* Added brain half float mixed precision to `hipsparseSpMM` where A, B, and C use bfloat16 and the compute type use float.
+* Added half float mixed precision to `hipsparseSpMM` where A, B, and C use float16 and the compute type use float.
+
 
 ### Resolved issues
 * In `hipsparseSpSM_solve()`, the external buffer is passed as a parameter, which does not match the NVIDIA CUDA cuSPARSE API. The `hipsparseSpSM_solve_ex()` routine has been added to properly match the

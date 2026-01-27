@@ -12,7 +12,8 @@
   - [Key Files Reference](#key-files-reference)
 - [Plugin Architecture](#plugin-architecture)
 - [Plugin Loading](#plugin-loading)
-- [Example: MIOpen Legacy Plugin](#example-miopen-legacy-plugin)
+- [Example: MIOpen Provider Plugin](#example-miopen-provider-plugin)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -76,6 +77,64 @@ The plugin API defines how kernel engine plugins interact with hipDNN:
 - **Capability Reporting**: Plugins analyze graphs and report whether they can execute them
 - **Execution Interface**: Plugins provide execution methods for supported operations
 
+## Engine IDs
+
+hipDNN uses a deterministic hash-based system for managing engine IDs. This system converts human-readable engine names to unique `int64_t` identifiers.
+
+### How It Works
+
+1. **Engine Names**: Define human-readable string names for your engines (e.g., "MIOPEN_PLUGIN", "MY_CUSTOM_ENGINE")
+2. **Hash Function**: The `hipdnn_plugin_sdk::engine_names::engineNameToId()` function converts names to IDs using a FNV-1a hash algorithm
+3. **Registration**: Engine names are registered in the Plugin SDK header for discoverability
+
+### Using Engine IDs
+
+```cpp
+#include <hipdnn_plugin_sdk/EngineNames.hpp>
+
+// Option 1: Use a registered engine ID
+const int64_t engineId = hipdnn_plugin_sdk::engine_names::MIOPEN_PLUGIN_ID;
+
+// Option 2: Generate ID from custom name
+const int64_t customEngineId = hipdnn_data_sdk::engineNameToId("MY_CUSTOM_ENGINE");
+
+// In your engine implementation
+class MyEngine {
+    int64_t _id;
+public:
+    MyEngine(const char* engineName)
+        : _id(hipdnn_data_sdk::engineNameToId(engineName)) {
+        // Engine is now initialized with a unique ID
+    }
+};
+```
+
+### Registering New Engine Names
+
+To add your engine name to the official registry:
+
+1. **Choose a Unique Name**:
+   - Use UPPER_CASE with underscores
+   - Make the name match the value.
+
+2. **Add to Registry**: Submit a PR to add your engine name to [`plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp):
+   ```cpp
+   HIPDNN_REGISTER_ENGINE(MY_NEW_ENGINE, "MY_NEW_ENGINE")
+   ```
+
+3. **Test Locally First**: You can use unregistered names during development - they'll generate a warning but work correctly
+
+### Benefits
+
+- **Deterministic**: Same name always produces same ID
+- **No Collisions**: Hash algorithm minimizes collision risk
+- **Human-Readable**: Debug logs can show meaningful engine names
+- **Forward Compatible**: New engines can be used without registry updates
+
+> [!TIP]
+> 💡 The engine ID system ensures globally unique identifiers across all plugins. You can query registered engines using `hipdnn_plugin_sdk::engine_names::getAllEngineNames()` and check for name collisions using the provided test utilities.
+
+
 ## Creating a Kernel Engine Plugin
 
 This section focuses on developing kernel engine plugins; currently the only supported plugin type.
@@ -89,7 +148,7 @@ Before creating a plugin, ensure you have **built and installed hipDNN**. Plugin
 1. **Create Plugin Structure**
    - Create a new project/repository for your plugin
    - Implement the plugin interface defined in [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
-   - See [MIOpen Legacy Plugin](../plugins/miopen_legacy_plugin/) as a reference implementation (currently included but will become a separate project)
+   - See [MIOpen Provider Plugin](../../../dnn-providers/miopen-provider/) as a reference implementation.
 
 2. **Implement Plugin API Functions**
 
@@ -97,6 +156,7 @@ Before creating a plugin, ensure you have **built and installed hipDNN**. Plugin
    - **Engine Manager**: Manages available engines and their capabilities
    - **Engine**: Implements graph execution for specific operations (each engine must have a globally unique `int64_t` ID)
    - **Execution Plans**: Define how operations are executed
+   - **Engine Name & ID**: Name your engine and place it in the [EngineNames](../plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp) registry
 
 3. **Build and Deploy Plugin**
    - Configure CMake to build the plugin as a shared library
@@ -117,9 +177,6 @@ For **Engine Implementations**:
 - Handle operation-specific kernel launches
 - Manage memory transfers and synchronization
 
-> [!TIP]
-> 💡 An engine ID is an integer unique to all loaded plugins. These IDs are used by the backend to identify and select specific engines for execution. You may want to reference other loaded plugins to accrue a set of unused engine IDs.
-
 **Execution plans** for kernel engines:
 - Map hipDNN operations to backend-specific kernel implementations
 - Define memory layouts and data transformations
@@ -139,9 +196,9 @@ In general, the **best practices** consist of:
 ### Key Files Reference
 
 - **Plugin API Interface**: [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
-- **Example Plugin Implementation**: [`plugins/miopen_legacy_plugin/MiopenLegacyPlugin.cpp`](../plugins/miopen_legacy_plugin/MiopenLegacyPlugin.cpp)
-- **Example Engine Manager**: [`plugins/miopen_legacy_plugin/EngineManager.hpp`](../plugins/miopen_legacy_plugin/EngineManager.hpp)
-- **Example Engine Implementation**: [`plugins/miopen_legacy_plugin/engines/MiopenEngine.cpp`](../plugins/miopen_legacy_plugin/engines/MiopenEngine.cpp)
+- **Example Plugin Implementation**: [`dnn-providers/miopen-provider/MiopenLegacyPlugin.cpp`](../../../dnn-providers/miopen-provider/MiopenLegacyPlugin.cpp)
+- **Example Engine Manager**: [`dnn-providers/miopen-provider/EngineManager.hpp`](../../../dnn-providers/miopen-provider/EngineManager.hpp)
+- **Example Engine Implementation**: [`dnn-providers/miopen-provider/engines/MiopenEngine.cpp`](../../../dnn-providers/miopen-provider/engines/MiopenEngine.cpp)
 
 ## Plugin Architecture
 
@@ -394,13 +451,13 @@ Integration tests validate end-to-end functionality of your plugin:
     - **Smoke** - These tests are designed to test features using the smallest possible shape and run quickly (combined smoke test run time must be under 5 mins)
     - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
 
-For a comprehensive example of an integration test, see: [`plugins/miopen_legacy_plugin/integration_tests/IntegrationGpuBatchnormForwardInference.cpp`](../plugins/miopen_legacy_plugin/integration_tests/IntegrationGpuBatchnormForwardInference.cpp)
+For a comprehensive example of an integration test, see: [`dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp`](../../../dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp)
 
 Moreover, see our [general testing requirements](./testing/TestingStrategy.md#general-testing-requirements).
 
-## Example: [MIOpen Legacy Plugin](../plugins/miopen_legacy_plugin/)
+## Example: [MIOpen Provider Plugin](../../../dnn-providers/miopen-provider/)
 
-The MIOpen Legacy Plugin is a complete example of a kernel engine plugin. It demonstrates how a plugin integrates with hipDNN and delegates execution to a backend. Furthermore, it incorporates the recommended structure and best practices for kernel engine plugins.
+The MIOpen Provider Plugin is a complete example of a kernel engine plugin. It demonstrates how a plugin integrates with hipDNN and delegates execution to a backend. Furthermore, it incorporates the recommended structure and best practices for kernel engine plugins.
 
 At a high level, it:
 - Initializes and manages the GPU context using MIOpen handles
@@ -409,6 +466,81 @@ At a high level, it:
 - Coordinates streams and handles synchronization
 
 ### Structure
-- **Main Plugin**: [`MiopenLegacyPlugin.cpp`](../plugins/miopen_legacy_plugin/MiopenLegacyPlugin.cpp) - Entry point and plugin registration
-- **Engine Manager**: [`EngineManager.hpp`](../plugins/miopen_legacy_plugin/EngineManager.hpp) - Manages MIOpen engines
-- **MIOpen Engine**: [`MiopenEngine.cpp`](../plugins/miopen_legacy_plugin/engines/MiopenEngine.cpp) - Implements graph execution using MIOpen kernels
+- **Main Plugin**: [`MiopenLegacyPlugin.cpp`](../../../dnn-providers/miopen-provider/MiopenLegacyPlugin.cpp) - Entry point and plugin registration
+- **Engine Manager**: [`EngineManager.hpp`](../../../dnn-providers/miopen-provider/EngineManager.hpp) - Manages MIOpen engines
+- **MIOpen Engine**: [`MiopenEngine.cpp`](../../../dnn-providers/miopen-provider/engines/MiopenEngine.cpp) - Implements graph execution using MIOpen kernels
+
+## Troubleshooting
+
+### Plugin Loading Failures
+
+When a plugin fails to load or initialize, hipDNN logs an error and continues loading other plugins. Common issues include:
+
+#### Plugin Handle Creation Fails
+
+If you see errors like "Failed to create handle for plugin 'PluginName'", this typically indicates:
+- Missing dependencies that the plugin requires at runtime
+- GPU initialization failures (e.g., no compatible device found)
+- Plugin internal initialization errors
+
+**Solution**: Check that all plugin dependencies are satisfied and a compatible GPU device is available.
+
+#### Null Handle Returned
+
+If you see "Plugin 'PluginName' returned null handle", the plugin's `hipdnnEnginePluginCreate` function returned a null pointer without throwing an exception.
+
+**Solution**: Review the plugin's handle creation logic to ensure it either returns a valid handle or throws an exception with a meaningful error message.
+
+### Symbol Collisions Between Plugins
+
+#### Symptoms
+
+When multiple plugins are loaded and one or more plugins don't properly hide their symbols, you may encounter:
+
+- Handle collision errors: "Plugin 'PluginName' returned a handle that collides with another plugin"
+- Unexpected behavior where one plugin's functions are called instead of another's
+- Crashes or undefined behavior during plugin operations
+
+This occurs because dynamically loaded shared libraries can inadvertently share symbols, causing one plugin's function to override another's.
+
+#### Example Error Log
+
+```
+[ERROR] Plugin 'my_plugin' returned a handle that collides with another plugin.
+        This may indicate a symbol collision between plugins.
+        Ensure all plugins are built with -fvisibility=hidden.
+```
+
+#### Solution
+
+All plugins **must** be built with symbol visibility hidden to prevent symbol collisions:
+
+1. **CMake Configuration**: Add the following to your plugin's CMakeLists.txt:
+   ```cmake
+   set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+   set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+   ```
+
+2. **Compiler Flags**: Alternatively, add `-fvisibility=hidden` to your compiler flags:
+   ```cmake
+   target_compile_options(your_plugin PRIVATE -fvisibility=hidden)
+   ```
+
+3. **Explicit Symbol Export**: Only export the required plugin API symbols. The plugin SDK macros handle this automatically when visibility is hidden by default.
+
+#### Verification
+
+To verify your plugin has proper symbol visibility:
+
+```bash
+# List exported symbols (should only show plugin API functions)
+nm -gD your_plugin.so | grep " T "
+
+# Expected output should only contain:
+# hipdnnEnginePluginCreate
+# hipdnnEnginePluginDestroy
+# hipdnnEnginePluginGetAllEngineIds
+# ... (other plugin API functions)
+```
+
+If you see many internal symbols exported, your visibility settings are incorrect.

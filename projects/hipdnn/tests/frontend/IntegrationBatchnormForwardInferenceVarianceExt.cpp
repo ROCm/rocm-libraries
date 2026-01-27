@@ -199,11 +199,24 @@ protected:
         }
         tensors.bias = std::make_shared<TensorAttributes>(std::move(biasAttr));
 
+        // Epsilon (pass-by-value)
+        auto epsilon = std::make_shared<TensorAttributes>();
+        epsilon->set_name("epsilon").set_value(1e-5f);
+        if(useManualUids)
+        {
+            epsilon->set_uid(uid++);
+        }
+
         BatchnormInferenceAttributesVarianceExt bnAttrs;
         bnAttrs.set_name("batchnorm_inference_variance_ext");
 
-        tensors.y = graph->batchnorm_inference_variance_ext(
-            tensors.x, tensors.mean, tensors.variance, tensors.scale, tensors.bias, bnAttrs);
+        tensors.y = graph->batchnorm_inference_variance_ext(tensors.x,
+                                                            tensors.mean,
+                                                            tensors.variance,
+                                                            tensors.scale,
+                                                            tensors.bias,
+                                                            epsilon,
+                                                            bnAttrs);
 
         if(useManualUids)
         {

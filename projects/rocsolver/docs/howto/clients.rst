@@ -75,7 +75,7 @@ flag lets you select the data precision for the function. It can be one of ``s``
 ``d`` (double precision), ``c`` (single precision complex), or ``z`` (double precision complex).
 
 The non-pointer arguments for a function can be passed to ``rocsolver-bench`` by using the argument name as
-a flag. See the :ref:`Reference <reference>` sections for more information on the function arguments and
+a flag. See the :doc:`Reference <../reference/intro>` sections for more information on the function arguments and
 names. For example, the function ``rocsolver_dgeqrf_strided_batched`` has the following method signature:
 
 .. code-block:: cpp

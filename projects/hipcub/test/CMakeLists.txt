@@ -30,7 +30,7 @@ file(WRITE "${INSTALL_TEST_FILE}"
 ]=]
 )
 
-function(add_relative_test test_name test_target)
+function(add_relative_test test_name test_target resource_group)
     get_target_property(EXE_PATH ${test_target} RUNTIME_OUTPUT_DIRECTORY)
     if(EXE_PATH STREQUAL "EXE_PATH-NOTFOUND")
         set(EXE_PATH ".")
@@ -60,7 +60,15 @@ function(add_relative_test test_name test_target)
     endif()
     rocm_install(TARGETS ${test_target} COMPONENT tests)
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${test_name} \"../${EXE_NAME}\")\n")
+    # Set the resource group for the test. This must correspond to a gfxID present in resources.json.
+    file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties([=[${test_name}]=] PROPERTIES RESOURCE_GROUPS \"1,${resource_group}:1\")\n")
 endfunction()
+
+# We'll use this small program to detect available GPUs and build the resource JSON file.
+set(GEN_RES_SPEC_PATH ${CMAKE_SOURCE_DIR}/test/generate_resource_spec.cpp)
+add_executable(generate_resource_spec ${GEN_RES_SPEC_PATH})
+set_target_properties(generate_resource_spec PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+target_link_libraries(generate_resource_spec PRIVATE hip::host)
 
 # hipCUB tests
 add_subdirectory(hipcub)
@@ -102,9 +110,18 @@ if(BUILD_CODE_COVERAGE)
   )
 endif()
 
+
 rocm_install(
     FILES "${INSTALL_TEST_FILE}"
     DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
     COMPONENT tests
     RENAME "CTestTestfile.cmake"
+)
+
+# Install the executable as PROGRAMS (rather than TARGETS)
+# since we want to put it in the correct DESTINATION.
+rocm_install(
+    PROGRAMS $<TARGET_FILE:generate_resource_spec>
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
+    COMPONENT tests
 )
