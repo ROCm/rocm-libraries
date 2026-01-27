@@ -92,18 +92,24 @@ Add to `shared/stinkytofu/tools/tablegen/LogicalInstructionDefs.inc`:
 
 ### Step 6: Add Hardware Timing Info
 
-Add to `Gfx1250.yaml`:
+Add to the cost table in `hardware/src/gfx/Gfx1250.cpp`:
 
-```yaml
-- instructions:
-  - default_cycle: 1
-  - cycle:
-    - s_wait_tensorcnt: 1        # Issue cycles
-  - latency:
-    - s_wait_tensorcnt: 1        # Latency cycles
+```cpp
+constexpr InstructionCost GFX1250_COSTS[] = {
+    // ... existing costs ...
+
+    // Add new instruction costs
+    {"s_wait_tensorcnt", 1, 1},  // cycle, latency
+
+    // ... rest of costs ...
+};
 ```
 
-**Important**: Use the assembly mnemonic (`s_wait_tensorcnt`), not the class name.
+**Important**:
+- Use the assembly mnemonic (`s_wait_tensorcnt`), not the class name
+- If the instruction uses default costs, you don't need to add it to the table
+- For Gfx1250 (RDNA4), default is cycle=1, latency=1
+- For Gfx942/Gfx950 (CDNA), default is cycle=4, latency=4
 
 ### Step 7: Run Tablegen
 
