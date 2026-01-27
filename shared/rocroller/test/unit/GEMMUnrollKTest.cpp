@@ -35,21 +35,15 @@ namespace GEMMTests
 {
     using namespace rocRoller;
 
-    class UnrollKTestSuite : public BaseGEMMContextFixture<>
+    // ========================================================================
+    // GEMMUnrollKTestSuite
+    // ========================================================================
+
+    class GEMMUnrollKTestSuite : public BaseGEMMContextFixture<>
     {
     };
 
-    // Params are: prefetchInFlight, prefetchLDSFactor, prefetchMixMemOps
-    class UnrollKPrefetchTestSuite : public BaseGEMMContextFixture<std::tuple<int, int, bool>>
-    {
-    };
-
-    // Params are: K dimension size
-    class GEMMUnrollKTailLoopTestSuite : public BaseGEMMContextFixture<std::tuple<int>>
-    {
-    };
-
-    TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_Basic)
+    TEST_P(GEMMUnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_Basic)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -69,7 +63,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_LDS)
+    TEST_P(GEMMUnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_LDS)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -83,7 +77,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_MoreLDS)
+    TEST_P(GEMMUnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_MoreLDS)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -97,7 +91,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_MoreLDS_A)
+    TEST_P(GEMMUnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_MoreLDS_A)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -111,7 +105,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_MoreLDS_B)
+    TEST_P(GEMMUnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_MoreLDS_B)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -125,7 +119,45 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(UnrollKPrefetchTestSuite, GPU_GEMM_Optimization_UnrollK_LDS_Prefetch)
+    TEST_P(GEMMUnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_FP16_Prefetch3)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+        GEMMProblem gemm;
+        gemm.m                 = 4096;
+        gemm.n                 = 4096;
+        gemm.k                 = 2048 * 3;
+        gemm.loadPathA         = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB         = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.storeLDSD         = false;
+        gemm.fuseLoops         = false;
+        gemm.unrollK           = 3;
+        gemm.macM              = 128;
+        gemm.macN              = 16;
+        gemm.macK              = 64;
+        gemm.waveM             = 16;
+        gemm.waveN             = 16;
+        gemm.waveK             = 16;
+        gemm.workgroupSizeX    = 256;
+        gemm.workgroupSizeY    = 1;
+        gemm.prefetch          = true;
+        gemm.prefetchInFlight  = 3;
+        gemm.prefetchLDSFactor = 2;
+        gemm.prefetchMixMemOps = true;
+        basicGEMM<Half>(gemm);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(GEMMUnrollKTest, GEMMUnrollKTestSuite, currentGPUISA());
+
+    // ========================================================================
+    // GEMMUnrollKPrefetchTestSuite
+    // ========================================================================
+
+    // Params are: prefetchInFlight, prefetchLDSFactor, prefetchMixMemOps
+    class GEMMUnrollKPrefetchTestSuite : public BaseGEMMContextFixture<std::tuple<int, int, bool>>
+    {
+    };
+
+    TEST_P(GEMMUnrollKPrefetchTestSuite, GPU_GEMM_Optimization_UnrollK_LDS_Prefetch)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
@@ -152,7 +184,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(UnrollKPrefetchTestSuite, GPU_GEMM_Optimization_UnrollK_FP16_LDS_Prefetch)
+    TEST_P(GEMMUnrollKPrefetchTestSuite, GPU_GEMM_Optimization_UnrollK_FP16_LDS_Prefetch)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
@@ -184,7 +216,7 @@ namespace GEMMTests
         basicGEMM<Half>(gemm);
     }
 
-    TEST_P(UnrollKPrefetchTestSuite, GPU_GEMM_Optimization_UnrollK_LDS_MultiPrefetch)
+    TEST_P(GEMMUnrollKPrefetchTestSuite, GPU_GEMM_Optimization_UnrollK_LDS_MultiPrefetch)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
@@ -210,32 +242,23 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_FP16_Prefetch3)
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMUnrollKTest,
+        GEMMUnrollKPrefetchTestSuite,
+        ::testing::Combine(currentGPUISA(),
+                           ::testing::Combine(::testing::Values(1, 2, 3), // prefetchInFlight
+                                              ::testing::Values(0, 1, 2), // prefetchLDSFactor
+                                              ::testing::Values(false,
+                                                                true)))); // prefetchMixMemOps
+
+    // ========================================================================
+    // GEMMUnrollKTailLoopTestSuite
+    // ========================================================================
+
+    // Params are: K dimension size
+    class GEMMUnrollKTailLoopTestSuite : public BaseGEMMContextFixture<std::tuple<int>>
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
-        GEMMProblem gemm;
-        gemm.m                 = 4096;
-        gemm.n                 = 4096;
-        gemm.k                 = 2048 * 3;
-        gemm.loadPathA         = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.loadPathB         = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD         = false;
-        gemm.fuseLoops         = false;
-        gemm.unrollK           = 3;
-        gemm.macM              = 128;
-        gemm.macN              = 16;
-        gemm.macK              = 64;
-        gemm.waveM             = 16;
-        gemm.waveN             = 16;
-        gemm.waveK             = 16;
-        gemm.workgroupSizeX    = 256;
-        gemm.workgroupSizeY    = 1;
-        gemm.prefetch          = true;
-        gemm.prefetchInFlight  = 3;
-        gemm.prefetchLDSFactor = 2;
-        gemm.prefetchMixMemOps = true;
-        basicGEMM<Half>(gemm);
-    }
+    };
 
     TEST_P(GEMMUnrollKTailLoopTestSuite, GPU_GEMM_Optimization_UnrollK_TailLoop)
     {
@@ -259,17 +282,6 @@ namespace GEMMTests
 
         basicGEMM<float>(gemm);
     }
-
-    INSTANTIATE_TEST_SUITE_P(GEMMUnrollKTest, UnrollKTestSuite, currentGPUISA());
-
-    INSTANTIATE_TEST_SUITE_P(
-        GEMMUnrollKTest,
-        UnrollKPrefetchTestSuite,
-        ::testing::Combine(currentGPUISA(),
-                           ::testing::Combine(::testing::Values(1, 2, 3), // prefetchInFlight
-                                              ::testing::Values(0, 1, 2), // prefetchLDSFactor
-                                              ::testing::Values(false,
-                                                                true)))); // prefetchMixMemOps
 
     INSTANTIATE_TEST_SUITE_P(
         GEMMUnrollKTest,

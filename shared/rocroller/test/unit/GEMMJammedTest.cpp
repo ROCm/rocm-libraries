@@ -36,6 +36,10 @@ namespace GEMMTests
     using namespace rocRoller;
     namespace SolutionParams = rocRoller::Parameters::Solution;
 
+    // ========================================================================
+    // GEMMJammedTestSuite
+    // ========================================================================
+
     class GEMMJammedTestSuite : public BaseGEMMContextFixture<>
     {
     };

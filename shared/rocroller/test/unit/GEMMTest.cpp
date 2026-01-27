@@ -73,12 +73,11 @@ namespace GEMMTests
         return rv;
     }
 
-    class GEMMTestSuite : public BaseGEMMContextFixture<>
-    {
-    };
+    // ========================================================================
+    // GEMMTestSuite
+    // ========================================================================
 
-    // Params are: random seed value
-    class GEMMSchedulerRandomTestSuite : public BaseGEMMContextFixture<std::tuple<int>>
+    class GEMMTestSuite : public BaseGEMMContextFixture<>
     {
     };
 
@@ -116,30 +115,6 @@ namespace GEMMTests
         EXPECT_NE(NormalizedSource(coop_nop), NormalizedSource(rr));
 
         EXPECT_NE(NormalizedSource(priority_nop), NormalizedSource(rr));
-    }
-
-    // Test to verify different random seeds produce different instruction sequences
-    TEST_P(GEMMSchedulerRandomTestSuite, GPU_GEMM_Optimization_Schedulers_Random)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
-
-        auto [seed] = std::get<1>(GetParam());
-
-        GEMMProblem gemm;
-        gemm.macK = 8;
-
-        // TODO: Re-enable LDS once LDS deallocations are fixed
-        gemm.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
-        gemm.loadPathB = SolutionParams::LoadPath::BufferToVGPR;
-
-        auto settings = Settings::getInstance();
-        settings->set(Settings::Scheduler, Scheduling::SchedulerProcedure::Random);
-        settings->set(Settings::RandomSeed, seed);
-
-        basicGEMM<float>(gemm);
-
-        // Verify the kernel generates successfully with this random seed
-        EXPECT_GT(m_context->instructions()->toString().size(), 0);
     }
 
     TEST_P(GEMMTestSuite, GPU_GEMM_DataType_FP32_Basic)
@@ -685,9 +660,43 @@ namespace GEMMTests
 
     INSTANTIATE_TEST_SUITE_P(GEMMTest, GEMMTestSuite, currentGPUISA());
 
+    // ========================================================================
+    // GEMMSchedulerRandomTestSuite
+    // ========================================================================
+
+    // Params are: random seed value
+    class GEMMSchedulerRandomTestSuite : public BaseGEMMContextFixture<std::tuple<int>>
+    {
+    };
+
+    // Test to verify different random seeds produce different instruction sequences
+    TEST_P(GEMMSchedulerRandomTestSuite, GPU_GEMM_Optimization_Schedulers_Random)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+
+        auto [seed] = std::get<1>(GetParam());
+
+        GEMMProblem gemm;
+        gemm.macK = 8;
+
+        // TODO: Re-enable LDS once LDS deallocations are fixed
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToVGPR;
+
+        auto settings = Settings::getInstance();
+        settings->set(Settings::Scheduler, Scheduling::SchedulerProcedure::Random);
+        settings->set(Settings::RandomSeed, seed);
+
+        basicGEMM<float>(gemm);
+
+        // Verify the kernel generates successfully with this random seed
+        EXPECT_GT(m_context->instructions()->toString().size(), 0);
+    }
+
     INSTANTIATE_TEST_SUITE_P(
         GEMMTest,
         GEMMSchedulerRandomTestSuite,
         ::testing::Combine(currentGPUISA(),
                            ::testing::Combine(::testing::Values(2, 4, 8, 314, 1729))));
+
 }

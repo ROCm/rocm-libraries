@@ -37,6 +37,10 @@ namespace GEMMTests
     using namespace rocRoller;
     namespace SolutionParams = rocRoller::Parameters::Solution;
 
+    // ========================================================================
+    // GEMMBasicTestSuite
+    // ========================================================================
+
     /**
      * GEMMBasicTestGPU: Consolidated basic tests for smoke tests.
      * 

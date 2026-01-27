@@ -32,6 +32,10 @@ namespace GEMMTests
 {
     using namespace rocRoller;
 
+    // ========================================================================
+    // GEMMF16TestSuite
+    // ========================================================================
+
     // Params are: A & B type, K tile size, (transA, transB), loadPathA, and loadPathB
     class GEMMF16TestSuite
         : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
@@ -41,6 +45,27 @@ namespace GEMMTests
                                                    SolutionParams::LoadPath>>
     {
     };
+
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMF16Test,
+        GEMMF16TestSuite,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(::testing::Values(rocRoller::DataType::Half,
+                                                 rocRoller::DataType::BFloat16),
+                               ::testing::Values(16, 32),
+                               ::testing::Values(std::pair<std::string, std::string>("N", "N"),
+                                                 std::pair<std::string, std::string>("N", "T"),
+                                                 std::pair<std::string, std::string>("T", "N"),
+                                                 std::pair<std::string, std::string>("T", "T")),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
+
+    // ========================================================================
+    // GEMMF16NTTestSuite
+    // ========================================================================
 
     // Params are: loadPathA and loadPathB
     class GEMMF16NTTestSuite : public BaseGEMMContextFixture<
@@ -222,6 +247,16 @@ namespace GEMMTests
                      numTrLoads);
     }
 
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMF16Test,
+        GEMMF16NTTestSuite,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
+
     TEST_P(GEMMF16NTTestSuite, GPU_GEMM_DataType_FP16_32x32x8)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
@@ -310,30 +345,4 @@ namespace GEMMTests
         basicGEMM<BFloat16, BFloat16, float>(gemm);
     }
 
-    INSTANTIATE_TEST_SUITE_P(
-        GEMMF16Test,
-        GEMMF16TestSuite,
-        ::testing::Combine(
-            currentGPUISA(),
-            ::testing::Combine(::testing::Values(rocRoller::DataType::Half,
-                                                 rocRoller::DataType::BFloat16),
-                               ::testing::Values(16, 32),
-                               ::testing::Values(std::pair<std::string, std::string>("N", "N"),
-                                                 std::pair<std::string, std::string>("N", "T"),
-                                                 std::pair<std::string, std::string>("T", "N"),
-                                                 std::pair<std::string, std::string>("T", "T")),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
-
-    INSTANTIATE_TEST_SUITE_P(
-        GEMMF16Test,
-        GEMMF16NTTestSuite,
-        ::testing::Combine(
-            currentGPUISA(),
-            ::testing::Combine(::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 } // namespace GEMMTests

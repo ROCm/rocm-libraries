@@ -56,7 +56,11 @@
 
 namespace GEMMDriverTest
 {
-    struct GEMMFusionSuite : public CurrentGPUContextFixture
+    // ========================================================================
+    // GEMMFusionTestSuite
+    // ========================================================================
+
+    struct GEMMFusionTestSuite : public CurrentGPUContextFixture
     {
         template <typename T>
         void basicGEMMRelu(ContextPtr&        m_context,
@@ -446,7 +450,7 @@ namespace GEMMDriverTest
         }
     };
 
-    TEST_F(GEMMFusionSuite, GPU_GEMM_Fusion_Relu)
+    TEST_F(GEMMFusionTestSuite, GPU_GEMM_Fusion_Relu)
     {
         GEMMProblem gemm;
         basicGEMMRelu<float>(m_context, gemm);
