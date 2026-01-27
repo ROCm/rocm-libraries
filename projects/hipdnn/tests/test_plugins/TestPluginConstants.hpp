@@ -92,4 +92,10 @@ inline const std::string& testIncompleteApiPluginPath()
         = getPluginPath(TEST_INCOMPLETE_API_PLUGIN_NAME);
     return s_testIncompleteApiPluginPath;
 }
+
+inline const std::string& testKnobsPluginPath()
+{
+    static const std::string s_testKnobsPluginPath = getPluginPath(TEST_KNOBS_PLUGIN_NAME);
+    return s_testKnobsPluginPath;
+}
 } // namespace hipdnn_tests::plugin_constants
