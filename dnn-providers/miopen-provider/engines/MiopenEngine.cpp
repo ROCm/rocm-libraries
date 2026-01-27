@@ -53,8 +53,8 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
         builder,
         hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME,
         "Workspace size limit in bytes",
-        -1,
-        -1,
+        std::numeric_limits<int64_t>::max(),
+        0,
         std::numeric_limits<int64_t>::max(),
         1,
         {});
@@ -119,17 +119,13 @@ void MiopenEngine::initializeExecutionContext(
             if(knobSetting.valueType() == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
             {
                 auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
-                if(value == -1)
-                {
-                    executionContext.setWorkspaceSizeLimit(std::nullopt);
-                }
-                else if(value >= 0)
+                if(value >= 0)
                 {
                     executionContext.setWorkspaceSizeLimit(static_cast<size_t>(value));
                 }
                 else
                 {
-                    HIPDNN_LOG_WARN("Invalid workspace size limit value: {}. Must be -1 or >= 0", value);
+                    HIPDNN_LOG_WARN("Invalid workspace size limit value: {}. Must be >= 0", value);
                 }
             }
             else

@@ -374,37 +374,6 @@ TEST(TestMiopenEngine, InitializeExecutionContextSetsWorkspaceSizeLimit)
     EXPECT_EQ(ctx.workspaceSizeLimit().value(), WORKSPACE_SIZE_LIMIT);
 }
 
-TEST(TestMiopenEngine, InitializeExecutionContextSetsWorkspaceSizeLimitUnlimited)
-{
-    MiopenEngine engine(1);
-    MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
-    MockHipdnnEnginePluginExecutionContext ctx;
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto knobIdOffset = builder.CreateString("global.workspace_size_limit");
-    auto knobValue = hipdnn_data_sdk::data_objects::CreateIntValue(builder, -1);
-    hipdnn_data_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
-    knobSettingBuilder.add_knob_id(knobIdOffset);
-    knobSettingBuilder.add_value_type(hipdnn_data_sdk::data_objects::KnobValue::IntValue);
-    knobSettingBuilder.add_value(knobValue.Union());
-    auto knobSetting = knobSettingBuilder.Finish();
-
-    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>> knobsVector;
-    knobsVector.push_back(knobSetting);
-    auto knobs = builder.CreateVector(knobsVector);
-
-    auto engineConfig = hipdnn_data_sdk::data_objects::CreateEngineConfig(builder, 1, knobs);
-    builder.Finish(engineConfig);
-
-    auto buffer = builder.Release();
-    hipdnn_plugin_sdk::EngineConfigWrapper configWrapper(buffer.data(), buffer.size());
-
-    engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
-
-    EXPECT_FALSE(ctx.workspaceSizeLimit().has_value());
-}
-
 TEST(TestMiopenEngine, InitializeExecutionContextSetsWorkspaceSizeLimitToZero)
 {
     MiopenEngine engine(1);

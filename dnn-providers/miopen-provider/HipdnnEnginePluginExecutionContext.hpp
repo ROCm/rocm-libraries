@@ -52,7 +52,7 @@ public:
         return _benchmarkingEnabled;
     }
 
-    void setWorkspaceSizeLimit(std::optional<size_t> limit)
+    void setWorkspaceSizeLimit(size_t limit)
     {
         _workspaceSizeLimit = limit;
     }
