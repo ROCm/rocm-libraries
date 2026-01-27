@@ -80,7 +80,7 @@ typedef enum rocblas_workmode_
 {
     rocblas_outofplace = 201, /**< Out-of-place computations are allowed. This
                                    requires extra device memory for the workspace. */
-    rocblas_inplace = 202, /**< This forces in-place computations for the case where not enough memory is available.  */
+    rocblas_inplace = 202, /**< If not enough memory is available, this forces in-place computations.  */
 } rocblas_workmode;
 
 /*! \brief Used to specify how the eigenvectors are to be computed
