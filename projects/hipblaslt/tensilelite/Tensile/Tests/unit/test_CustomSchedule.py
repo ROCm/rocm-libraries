@@ -888,8 +888,8 @@ class TestCustomScheduleTF32:
             "MacroTile0": mt0, "MacroTile1": mt1, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
-            "MatrixInstruction": mi, "MIWaveGroup": mi_wave_group,
-            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": mi_wave_tile[0], "MIWaveTileB": mi_wave_tile[1],
+            "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": mt0/32, "MIWaveTileB": mt1/32,
         })
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule

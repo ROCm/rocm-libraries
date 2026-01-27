@@ -662,20 +662,6 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-<<<<<<< HEAD
-          - [16, 16, 32, 1, 1, 5, 4, 2, 2] # 325, 362
-        - DepthU: [ 64 ]
-        - LocalReadVectorWidth: [4]
-        - DirectToLds: [1]
-        - PrefetchGlobalRead: [2]
-        - PrefetchLocalRead: [1]
-        - UseCustomMainLoopSchedule: [1]
-        - StreamK: [3]
-        - StaggerU: [0]
-        - ClusterLocalRead: [1]
-        - TransposeLDS: [1]
-        - LDSTrInst: [1]
-=======
           - [16, 16, 32, 1,  1, 5, 4,  2,2 ]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
@@ -700,18 +686,11 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
->>>>>>> 99714eacc1 (Fixed custom mainloop scheduling tf32 yaml)
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Range: [[160], [128], [1], [64, 64, 256]]
-<<<<<<< HEAD
-          - Range: [[160], [128], [1], [1, 1, 256]]
-          - Range: [[160], [128], [1], [32, 64, 256]]
-        - BiasTypeArgs: ['s']
-=======
           - Range: [[160], [128], [1], [1,1,64]]
           - Range: [[160], [128], [1], [32, 64, 256]]
         - BiasTypeArgs: ['s']
 
->>>>>>> 99714eacc1 (Fixed custom mainloop scheduling tf32 yaml)
