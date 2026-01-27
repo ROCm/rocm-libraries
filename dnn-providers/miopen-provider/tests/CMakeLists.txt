@@ -57,43 +57,18 @@ endif()
 
 add_unit_test_target(miopen_plugin_tests ${CMAKE_CURRENT_BINARY_DIR})
 
-# miopen_legacy_plugin_tests - Backwards compatibility target for current TheRock
-add_executable(
-    miopen_legacy_plugin_tests
-    engines/plans/TestMiopenBatchnormApplicabilityChecks.cpp
-    engines/plans/TestMiopenBatchnormBwdPlan.cpp
-    engines/plans/TestMiopenBatchnormFwdInferencePlan.cpp
-    engines/plans/TestMiopenBatchnormFwdInferenceWithVariancePlan.cpp
-    engines/plans/TestMiopenBatchnormFwdTrainingPlan.cpp
-    engines/plans/TestMiopenBatchnormFwdTrainingActivPlan.cpp
-    engines/plans/TestMiopenBatchnormFwdTrainingActivPlanBuilder.cpp
-    engines/plans/TestMiopenBatchnormFwdTrainingPlanBuilder.cpp
-    engines/plans/TestMiopenBatchnormPlanBuilder.cpp
-    engines/plans/TestMiopenConvFwdBiasActivPlan.cpp
-    engines/plans/TestMiopenConvFwdBiasActivPlanBuilder.cpp
-    engines/plans/TestMiopenConvFwdPlan.cpp
-    engines/plans/TestMiopenConvBwdPlan.cpp
-    engines/plans/TestMiopenConvWrwPlan.cpp
-    engines/plans/TestMiopenConvPlanBuilder.cpp
-    engines/TestMiopenEngine.cpp
-    main.cpp
-    TestMiopenActivationDescriptor.cpp
-    TestMiopenConvDescriptor.cpp
-    TestMiopenEngineManager.cpp
-    TestMiopenHandleFactory.cpp
-    TestMiopenHipdnnEnginePluginHandle.cpp
-    TestMiopenHipdnnPluginExecutionContext.cpp
-    TestMiopenEnginePluginApi.cpp
-    TestMiopenPluginApi.cpp
-    TestMiopenTensor.cpp
-    TestMiopenUtils.cpp
+# Backwards compatibility: copy the binary to the old name (miopen_legacy_plugin_tests)
+# This is needed because TheRock's current submodule references the old target name.
+# TODO: Remove this after TheRock bumps rocm-libraries submodule and updates references.
+add_custom_command(
+    TARGET miopen_plugin_tests POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy
+        $<TARGET_FILE:miopen_plugin_tests>
+        ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/miopen_legacy_plugin_tests${CMAKE_EXECUTABLE_SUFFIX}
+    COMMENT "Creating backwards compat copy: miopen_legacy_plugin_tests"
 )
 
-target_compile_options(miopen_legacy_plugin_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-
-target_link_libraries(
-    miopen_legacy_plugin_tests PUBLIC GTest::gtest GTest::gmock hip::host
-                                       miopen_plugin_private hipdnn_test_sdk hipdnn_plugin_sdk Threads::Threads
+install(PROGRAMS
+    ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/miopen_legacy_plugin_tests${CMAKE_EXECUTABLE_SUFFIX}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-
-target_include_directories(miopen_legacy_plugin_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

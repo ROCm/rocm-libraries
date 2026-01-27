@@ -32,51 +32,34 @@ target_compile_options(miopen_plugin_integration_tests PRIVATE ${HIPDNN_WARNING_
 target_compile_definitions(
     miopen_plugin_integration_tests
     PRIVATE
-        PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/miopen_legacy_plugin"
+        PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/miopen_plugin"
 )
 
 target_link_libraries(
     miopen_plugin_integration_tests PUBLIC GTest::gtest hip::host hipdnn_test_sdk hipdnn_plugin_sdk Threads::Threads
 )
 
-# Ensure that both plugin targets are built before the miopen_plugin_integration_tests
-# Build both miopen_plugin (canonical) and miopen_legacy_plugin (backwards compatibility)
-add_dependencies(miopen_plugin_integration_tests miopen_plugin miopen_legacy_plugin)
+# Ensure that the miopen_plugin is built before the integration tests
+add_dependencies(miopen_plugin_integration_tests miopen_plugin)
 
 if(BUILD_PLUGIN_AS_DEPENDENCY)
     clang_tidy_check(miopen_plugin_integration_tests)
 endif()
+
 add_integration_test_target(miopen_plugin_integration_tests ${CMAKE_CURRENT_BINARY_DIR})
 
-# miopen_plugin_integration_test - Backwards compatibility target for current TheRock
-# Note: singular "test" not "tests" for backwards compatibility
-add_executable(
-    miopen_plugin_integration_test
-    main.cpp
-    IntegrationGpuBatchnormBackward.cpp
-    IntegrationGpuBatchnormBackwardActivation.cpp
-    IntegrationGpuBatchnormForwardInference.cpp
-    IntegrationGpuBatchnormForwardInferenceWithVariance.cpp
-    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
-    IntegrationGpuBatchnormFwdPlusActive.cpp
-    IntegrationGpuBatchnormForwardTraining.cpp
-    IntegrationGpuBatchnormFwdTrainingActiv.cpp
-    IntegrationGpuConvForward.cpp
-    IntegrationGpuConvFwdBiasActiv.cpp
-    IntegrationGpuConvBackwardData.cpp
-    IntegrationGpuConvBackwardWeights.cpp
+# Backwards compatibility: copy the binary to the old name (singular "test" not "tests")
+# This is needed because TheRock's current submodule references the old target name.
+# TODO: Remove this after TheRock bumps rocm-libraries submodule and updates references.
+add_custom_command(
+    TARGET miopen_plugin_integration_tests POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy
+        $<TARGET_FILE:miopen_plugin_integration_tests>
+        ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/miopen_plugin_integration_test${CMAKE_EXECUTABLE_SUFFIX}
+    COMMENT "Creating backwards compat copy: miopen_plugin_integration_test"
 )
 
-target_compile_options(miopen_plugin_integration_test PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-
-target_compile_definitions(
-    miopen_plugin_integration_test
-    PRIVATE
-        PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/miopen_plugin"
+install(PROGRAMS
+    ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/miopen_plugin_integration_test${CMAKE_EXECUTABLE_SUFFIX}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-
-target_link_libraries(
-    miopen_plugin_integration_test PUBLIC GTest::gtest hip::host hipdnn_test_sdk hipdnn_plugin_sdk Threads::Threads
-)
-
-add_dependencies(miopen_plugin_integration_test miopen_plugin miopen_legacy_plugin)
