@@ -16,6 +16,10 @@ Documentation for rocSPARSE is available at
 
 ### Resolved issues
 * Fix issue in `rocsparse_[s|d|c|z]gebsrmv` routine where incorrect results could sometimes be returned.
+* Fix issue in `rocsparse_[s|d|c|z]bsrxmv` routine where we could sometimes read past the end of the mask pointer array.
+
+### Resolved issues
+* Fixed an issue where out-of-bounds memory reads can occur in the single precision bsrxmv kernels when `block_dim` equals `5` or `8`.
 
 ## rocSPARSE 4.2.0 for ROCm 7.2.0
 
