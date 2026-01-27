@@ -33,7 +33,7 @@ namespace rocRoller::KernelGraph
     namespace ScheduleMultiplyAndLDSDetail
     {
         /**
-         * Glossary: Within this file, a 'chain' refers to
+         * Glossary: Within this namespace, a 'chain' refers to
          *
          *  - a series of nodes of the same type that are all directly connected to each other
          *    with Sequence edges, or
@@ -42,9 +42,9 @@ namespace rocRoller::KernelGraph
          *    some criteria.
          */
 
-        using vec  = std::vector<int>;
-        using vec2 = std::vector<vec>;
-        using vec3 = std::vector<vec2>;
+        using Chain  = std::vector<int>;
+        using Chains = std::vector<Chain>;
+        using Groups = std::vector<Chains>;
 
         /**
          * Identifies groups within `nodes` that are directly connected in a linear chain.
@@ -55,7 +55,7 @@ namespace rocRoller::KernelGraph
          *
          * This would return 2 vectors, {1, 2, 3, 4} and {5, 6, 7, 8}.
          */
-        vec2 makeChains(KernelGraph const& graph, std::vector<int> nodes);
+        Chains makeChains(KernelGraph const& graph, std::vector<int> nodes);
 
         /**
          * Given a SetCoordinate node, find the actual memory node associated with it.
@@ -85,7 +85,7 @@ namespace rocRoller::KernelGraph
          * last nodes that read a DataFlowTag. Returns a parallel vector containing the data
          * types read by each node.
          */
-        ChainTypes filterLastCoordinateReads(KernelGraph const& graph, vec& chain);
+        ChainTypes filterLastCoordinateReads(KernelGraph const& graph, Chain& chain);
 
         /**
          * Given a graph,
@@ -94,31 +94,31 @@ namespace rocRoller::KernelGraph
          * - Filters those chains to only the ones that are the last reads of some tag.
          * - Returns those chains as well as info about the data types of those tags.
          */
-        std::tuple<vec2, std::vector<ChainTypes>>
+        std::tuple<Chains, std::vector<ChainTypes>>
             findMultiplyChainsAndCoords(KernelGraph const& graph);
 
         void getImmediateBodyParents(KernelGraph const& graph, std::vector<int>& nodes);
 
-        vec2 findLoadLDSChains(KernelGraph const& graph);
-        vec2 findMultiplyChains(KernelGraph const& graph);
+        Chains findLoadLDSChains(KernelGraph const& graph);
+        Chains findMultiplyChains(KernelGraph const& graph);
 
         /**
          * Logs a nice table that will show which nodes in `chain` use which DataFlowTags, and
          * what type they are. Very useful for determining what the schedule should be.
          */
-        void logChainTagTable(KernelGraph const& graph, vec chain);
+        void logChainTagTable(KernelGraph const& graph, Chain chain);
 
         /**
          * Generates a nice table that will show which nodes in `chain` use which DataFlowTags, and
          * what type they are. Very useful for determining what the schedule should be.
          */
-        std::string chainTagTable(KernelGraph const& graph, vec chain);
+        std::string chainTagTable(KernelGraph const& graph, Chain chain);
 
-        std::string showChain(vec const& chain);
+        std::string showChain(Chain const& chain);
 
-        std::string showChains(vec2 const& chains);
+        std::string showChains(Chains const& chains);
 
-        std::string showGroups(vec3 const& groups);
+        std::string showGroups(Groups const& groups);
 
         /**
          * Given groups of chains (grouped by node type), identifies which chains of different
@@ -158,12 +158,12 @@ namespace rocRoller::KernelGraph
          *      { {chain C}, {chain H} }
          * }
          */
-        vec3 identifyParallelChains(KernelGraph const& graph, vec3 groups);
+        Groups identifyParallelChains(KernelGraph const& graph, Groups groups);
 
         struct ParallelChainSet
         {
-            vec multiplyChain;
-            vec ldsChain;
+            Chain multiplyChain;
+            Chain ldsChain;
 
             ChainTypes            multiplyTagTypes;
             std::vector<DataType> ldsChainTypes;

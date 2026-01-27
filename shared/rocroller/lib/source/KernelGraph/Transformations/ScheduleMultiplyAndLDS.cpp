@@ -36,7 +36,7 @@ namespace rocRoller::KernelGraph
 {
     namespace ScheduleMultiplyAndLDSDetail
     {
-        vec2 makeChains(KernelGraph const& graph, std::vector<int> nodes)
+        Chains makeChains(KernelGraph const& graph, std::vector<int> nodes)
         {
             std::ranges::sort(nodes, TopologicalCompare(graph));
             Log::debug("makeChains({})", ShowValue(nodes));
@@ -50,7 +50,7 @@ namespace rocRoller::KernelGraph
                             ShowValue(nodes[i + 1]));
             }
 
-            vec2 rv;
+            Chains rv;
 
             if(nodes.empty())
                 return rv;
@@ -115,7 +115,7 @@ namespace rocRoller::KernelGraph
             return fmt::format("{{{}}}", fmt::join(formatted, ", "));
         }
 
-        ChainTypes filterLastCoordinateReads(KernelGraph const& graph, vec& chain)
+        ChainTypes filterLastCoordinateReads(KernelGraph const& graph, Chain& chain)
         {
             ControlFlowRWTracer tracer(graph);
 
@@ -178,7 +178,7 @@ namespace rocRoller::KernelGraph
             return rv;
         }
 
-        vec2 findMultiplyChains(KernelGraph const& graph)
+        Chains findMultiplyChains(KernelGraph const& graph)
         {
             auto isMultiply = [&](int idx) -> bool {
                 return graph.control.get<ControlGraph::Multiply>(idx).has_value();
@@ -191,7 +191,7 @@ namespace rocRoller::KernelGraph
             return chains;
         }
 
-        std::tuple<vec2, std::vector<ChainTypes>>
+        std::tuple<Chains, std::vector<ChainTypes>>
             findMultiplyChainsAndCoords(KernelGraph const& graph)
         {
             auto chains = findMultiplyChains(graph);
@@ -221,7 +221,7 @@ namespace rocRoller::KernelGraph
             }
         }
 
-        vec2 findLoadLDSChains(KernelGraph const& graph)
+        Chains findLoadLDSChains(KernelGraph const& graph)
         {
             auto isLoadLDSTile = [&](int idx) -> bool {
                 return graph.control.get<ControlGraph::LoadLDSTile>(idx).has_value();
@@ -233,7 +233,7 @@ namespace rocRoller::KernelGraph
             return makeChains(graph, std::move(nodes));
         }
 
-        std::string chainTagTable(KernelGraph const& graph, vec chain)
+        std::string chainTagTable(KernelGraph const& graph, Chain chain)
         {
             ControlFlowRWTracer tracer(graph);
 
@@ -413,18 +413,18 @@ namespace rocRoller::KernelGraph
             return msg;
         }
 
-        void logChainTagTable(KernelGraph const& graph, vec chain)
+        void logChainTagTable(KernelGraph const& graph, Chain chain)
         {
             Log::debug("\n{}", chainTagTable(graph, chain));
         }
 
-        std::string showChain(vec const& chain)
+        std::string showChain(Chain const& chain)
         {
             auto ts = [](int x) -> std::string { return fmt::format("{}", x); };
             return fmt::format("({})", fmt::join(chain | std::views::transform(ts), ", "));
         }
 
-        std::string showChains(vec2 const& chains)
+        std::string showChains(Chains const& chains)
         {
             std::ostringstream msg;
 
@@ -438,7 +438,7 @@ namespace rocRoller::KernelGraph
             return msg.str();
         }
 
-        std::string showGroups(vec3 const& groups)
+        std::string showGroups(Groups const& groups)
         {
             std::string rv;
 
@@ -452,7 +452,7 @@ namespace rocRoller::KernelGraph
             return rv;
         }
 
-        bool canJoin(KernelGraph const& graph, vec2 const& group, vec const& chain)
+        bool canJoin(KernelGraph const& graph, Chains const& group, Chain const& chain)
         {
             auto groupParent = bodyParents(group.at(0).at(0), graph).take(1).only();
             auto chainParent = bodyParents(chain.at(0), graph).take(1).only();
@@ -492,9 +492,9 @@ namespace rocRoller::KernelGraph
             return true;
         }
 
-        vec3 identifyParallelChains(KernelGraph const& graph, vec3 groups)
+        Groups identifyParallelChains(KernelGraph const& graph, Groups groups)
         {
-            vec3 rv;
+            Groups rv;
             if(groups.empty())
                 return rv;
 

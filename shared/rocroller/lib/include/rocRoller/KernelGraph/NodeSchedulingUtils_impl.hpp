@@ -55,19 +55,17 @@ namespace rocRoller::KernelGraph::NodeScheduling
         return getGroupedNodes(graph, pred);
     }
 
-    std::vector<int>
-        getDesiredOrder(KernelGraph const& graph, std::vector<int> nodes, auto const& comp)
-    {
-        std::ranges::sort(nodes, comp);
-        return nodes;
-    }
-
     void orderNodes(KernelGraph const& graph, std::vector<int>& nodes, auto const& comp)
     {
+        std::vector<int> desiredOrder;
+
         if(Log::getLogger()->should_log(LogLevel::Debug))
         {
             std::set tmp(nodes.begin(), nodes.end());
             Log::debug("Pre-existing order:\n{}", graph.control.nodeOrderTableString(tmp));
+
+            desiredOrder = nodes;
+            std::ranges::sort(desiredOrder, comp);
         }
         // Simply including existing order in `BestNodeOrder` and calling `sort` can
         // lead to a situation where existing nodes appear out of program order.
@@ -77,8 +75,6 @@ namespace rocRoller::KernelGraph::NodeScheduling
         // order relationships between them.
         // 2. Walk that subgraph in topological order, using `BestNodeOrder` to decide
         // which node to pick next when there are multiple topologically valid options.
-
-        auto desiredOrder = getDesiredOrder(graph, nodes, comp);
 
         auto subGraph = createSubGraph(graph, nodes);
 
@@ -109,8 +105,11 @@ namespace rocRoller::KernelGraph::NodeScheduling
 
         nodes.clear();
 
-        std::ranges::sort(candidates, comp);
-        Log::debug("Starting with ({})", fmt::join(candidates, ","));
+        if(Log::getLogger()->should_log(LogLevel::Debug))
+        {
+            std::ranges::sort(candidates, comp);
+            Log::debug("Starting with ({})", fmt::join(candidates, ","));
+        }
 
         while(!remainingNodes.empty() || !candidates.empty())
         {
@@ -138,7 +137,7 @@ namespace rocRoller::KernelGraph::NodeScheduling
                     }
                 }
 
-                if(!newNodes.empty())
+                if(!newNodes.empty() && Log::getLogger()->should_log(LogLevel::Debug))
                 {
                     Log::debug("Adding ({})", fmt::join(newNodes, ", "));
                     std::ranges::sort(candidates, comp);

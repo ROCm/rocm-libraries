@@ -98,22 +98,22 @@ namespace ScheduleMultiplyAndLDSDetailTest
     {
         SECTION("Empty chain")
         {
-            vec  chain;
-            auto result = showChain(chain);
+            Chain chain;
+            auto  result = showChain(chain);
             CHECK(result == "()");
         }
 
         SECTION("Single node")
         {
-            vec  chain  = {42};
-            auto result = showChain(chain);
+            Chain chain  = {42};
+            auto  result = showChain(chain);
             CHECK(result == "(42)");
         }
 
         SECTION("Multiple nodes")
         {
-            vec  chain  = {1, 2, 3};
-            auto result = showChain(chain);
+            Chain chain  = {1, 2, 3};
+            auto  result = showChain(chain);
             CHECK(result == "(1, 2, 3)");
         }
     }
@@ -122,15 +122,15 @@ namespace ScheduleMultiplyAndLDSDetailTest
     {
         SECTION("Empty chains")
         {
-            vec2 chains;
-            auto result = showChains(chains);
+            Chains chains;
+            auto   result = showChains(chains);
             CHECK(result == "");
         }
 
         SECTION("Single chain")
         {
-            vec2 chains = {{1, 2, 3}};
-            auto result = showChains(chains);
+            Chains chains = {{1, 2, 3}};
+            auto   result = showChains(chains);
             CHECK_THAT(result, ContainsSubstring("1"));
             CHECK_THAT(result, ContainsSubstring("2"));
             CHECK_THAT(result, ContainsSubstring("3"));
@@ -138,8 +138,8 @@ namespace ScheduleMultiplyAndLDSDetailTest
 
         SECTION("Multiple chains")
         {
-            vec2 chains = {{1, 2}, {3, 4, 5}};
-            auto result = showChains(chains);
+            Chains chains = {{1, 2}, {3, 4, 5}};
+            auto   result = showChains(chains);
             CHECK_THAT(result, ContainsSubstring("1"));
             CHECK_THAT(result, ContainsSubstring("2"));
             CHECK_THAT(result, ContainsSubstring("3"));
@@ -152,15 +152,15 @@ namespace ScheduleMultiplyAndLDSDetailTest
     {
         SECTION("Empty groups")
         {
-            vec3 groups;
-            auto result = showGroups(groups);
+            Groups groups;
+            auto   result = showGroups(groups);
             CHECK_THAT(result, ContainsSubstring("0 groups"));
         }
 
         SECTION("Single group")
         {
-            vec3 groups = {{{1, 2, 3}}};
-            auto result = showGroups(groups);
+            Groups groups = {{{1, 2, 3}}};
+            auto   result = showGroups(groups);
             CHECK_THAT(result, ContainsSubstring("1 groups"));
             CHECK_THAT(result, ContainsSubstring("1"));
             CHECK_THAT(result, ContainsSubstring("2"));
@@ -169,8 +169,8 @@ namespace ScheduleMultiplyAndLDSDetailTest
 
         SECTION("Multiple groups")
         {
-            vec3 groups = {{{1, 2}}, {{3, 4, 5}}};
-            auto result = showGroups(groups);
+            Groups groups = {{{1, 2}}, {{3, 4, 5}}};
+            auto   result = showGroups(groups);
             CHECK_THAT(result, ContainsSubstring("2 groups"));
         }
     }
@@ -211,7 +211,7 @@ namespace ScheduleMultiplyAndLDSDetailTest
             std::vector<int> nodes  = {node1, node2, node3, node4};
             auto             chains = makeChains(graph, nodes);
 
-            CHECK(chains == vec2{{node1, node2, node3, node4}});
+            CHECK(chains == Chains{{node1, node2, node3, node4}});
         }
 
         SECTION("Two disconnected chains")
@@ -242,7 +242,7 @@ namespace ScheduleMultiplyAndLDSDetailTest
             std::vector<int> nodes  = {node1, node2, node3, node5, node6, node7};
             auto             chains = makeChains(graph, nodes);
 
-            CHECK(chains == vec2{{node1, node2, node3}, {node5, node6, node7}});
+            CHECK(chains == Chains{{node1, node2, node3}, {node5, node6, node7}});
         }
     }
 
@@ -326,7 +326,7 @@ namespace ScheduleMultiplyAndLDSDetailTest
             std::vector<int> nodes = {node1, node2};
             getImmediateBodyParents(graph, nodes);
 
-            CHECK(nodes == vec{node1, node2});
+            CHECK(nodes == Chain{node1, node2});
         }
 
         SECTION("Single body parent updates node")
@@ -338,7 +338,7 @@ namespace ScheduleMultiplyAndLDSDetailTest
             std::vector<int> nodes = {ldsNode};
             getImmediateBodyParents(graph, nodes);
 
-            CHECK(nodes == vec{setCoord});
+            CHECK(nodes == Chain{setCoord});
         }
 
         SECTION("Chain of body parents updates to root")
@@ -353,7 +353,7 @@ namespace ScheduleMultiplyAndLDSDetailTest
             std::vector<int> nodes = {ldsNode};
             getImmediateBodyParents(graph, nodes);
 
-            CHECK(nodes == vec{setCoord1});
+            CHECK(nodes == Chain{setCoord1});
         }
     }
 
@@ -373,7 +373,7 @@ namespace ScheduleMultiplyAndLDSDetailTest
             auto ldsNode = graph.control.addElement(CF::LoadLDSTile());
             auto chains  = findLoadLDSChains(graph);
 
-            CHECK(chains == vec2{{ldsNode}});
+            CHECK(chains == Chains{{ldsNode}});
         }
 
         SECTION("Connected LoadLDSTile chain")
@@ -387,7 +387,7 @@ namespace ScheduleMultiplyAndLDSDetailTest
 
             auto chains = findLoadLDSChains(graph);
 
-            CHECK(chains == vec2{{lds1, lds2, lds3}});
+            CHECK(chains == Chains{{lds1, lds2, lds3}});
         }
 
         SECTION("LoadLDSTile with SetCoordinate parents")
@@ -404,7 +404,7 @@ namespace ScheduleMultiplyAndLDSDetailTest
             auto chains = findLoadLDSChains(graph);
 
             // Should find chain of SetCoordinate parents
-            CHECK(chains == vec2{{setCoord1, setCoord2}});
+            CHECK(chains == Chains{{setCoord1, setCoord2}});
         }
     }
 
@@ -455,7 +455,7 @@ namespace ScheduleMultiplyAndLDSDetailTest
 
             auto [chains, chainTypes] = findMultiplyChainsAndCoords(graph);
 
-            CHECK(chains == vec2{{mult3, mult4}});
+            CHECK(chains == Chains{{mult3, mult4}});
         }
     }
 
@@ -466,8 +466,8 @@ namespace ScheduleMultiplyAndLDSDetailTest
 
         SECTION("Empty input returns empty")
         {
-            vec3 groups;
-            auto result = identifyParallelChains(graph, groups);
+            Groups groups;
+            auto   result = identifyParallelChains(graph, groups);
             CHECK(result.empty());
         }
 
@@ -511,13 +511,13 @@ namespace ScheduleMultiplyAndLDSDetailTest
             graph.control.chain<CF::Sequence>(multChain1.back(), nop, multChain2.front());
 
             auto ldsChains = findLoadLDSChains(graph);
-            CHECK(ldsChains == vec2({ldsChain1, ldsChain2, ldsChain3}));
+            CHECK(ldsChains == Chains({ldsChain1, ldsChain2, ldsChain3}));
             auto multiplyChains = findMultiplyChains(graph);
-            CHECK(multiplyChains == vec2({multChain1, multChain2}));
-            // vec3 groups = find
+            CHECK(multiplyChains == Chains({multChain1, multChain2}));
+
             auto result = identifyParallelChains(graph, {multiplyChains, ldsChains});
 
-            CHECK(result == vec3({{{multChain1, ldsChain2}}, {{multChain2, ldsChain3}}}));
+            CHECK(result == Groups({{{multChain1, ldsChain2}}, {{multChain2, ldsChain3}}}));
         }
     }
 
@@ -633,7 +633,7 @@ namespace ScheduleMultiplyAndLDSDetailTest
 
             SECTION("Multiply table")
             {
-                vec chain{mult1, mult2, mult3};
+                Chain chain{mult1, mult2, mult3};
 
                 auto result = chainTagTable(graph, chain);
 
@@ -657,8 +657,8 @@ namespace ScheduleMultiplyAndLDSDetailTest
 
             SECTION("LoadLDSTile table")
             {
-                vec  chain{loadA1, loadA2, loadB1, loadB2, loadD1};
-                auto result = chainTagTable(graph, chain);
+                Chain chain{loadA1, loadA2, loadB1, loadB2, loadD1};
+                auto  result = chainTagTable(graph, chain);
 
                 std::string expected = R"(
             |      |  2   |  5   |  3   |  6

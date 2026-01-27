@@ -53,9 +53,12 @@ namespace rocRoller::KernelGraph
         /**
          * Creates a sub-graph of the given nodes.
          *
-         * The sub-graph is created by adding the given nodes to a new control graph,
-         * and then adding sequence edges between the nodes based on the order of the
-         * nodes in the original control graph.
+         * The sub-graph is created by adding the given nodes to a new control graph, and then
+         * adding edges between the nodes based on the order of the nodes in the original
+         * control graph.
+         * 
+         * rv.compare(cacheMode, a, b) should always return the same result as the original
+         * control graph as long as a and b are both in `nodes`.
          */
         ControlGraph::ControlGraph createSubGraph(KernelGraph const&      graph,
                                                   std::vector<int> const& nodes);
