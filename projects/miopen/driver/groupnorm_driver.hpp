@@ -332,107 +332,18 @@ int GroupNormDriver<Tgpu, Tref>::RunForwardGPU()
 template <typename Tgpu, typename Tref>
 int GroupNormDriver<Tgpu, Tref>::RunForwardCPU()
 {
-    if(use_multithread)
-    {
-        auto start = std::chrono::steady_clock::now();
-        mloGroupNormForwardRunHost_mt<Tgpu, Tref>(inputDesc,
-                                                  in.data(),
-                                                  weight.data(),
-                                                  bias.data(),
-                                                  outhost.data(),
-                                                  meanhost.data(),
-                                                  rstdhost.data(),
-                                                  num_groups,
-                                                  eps,
-                                                  mode);
-        auto end = std::chrono::steady_clock::now();
+    mloGroupNormForwardRunHost<Tgpu, Tref>(inputDesc,
+                                           in.data(),
+                                           weight.data(),
+                                           bias.data(),
+                                           outhost.data(),
+                                           meanhost.data(),
+                                           rstdhost.data(),
+                                           num_groups,
+                                           eps,
+                                           mode,
+                                           use_multithread);
 
-        std::chrono::duration<float, std::milli> diff = end - start;
-
-        start = std::chrono::steady_clock::now();
-        mloGroupNormForwardRunHost_mt2<Tgpu, Tref>(inputDesc,
-                                                   in.data(),
-                                                   weight.data(),
-                                                   bias.data(),
-                                                   outhost.data(),
-                                                   meanhost.data(),
-                                                   rstdhost.data(),
-                                                   num_groups,
-                                                   eps,
-                                                   mode);
-        end = std::chrono::steady_clock::now();
-
-        std::chrono::duration<float, std::milli> diff1 = end - start;
-
-        auto lens = GetInputTensorLengthsFromCmdLine();
-
-        size_t sz     = 1;
-        std::string s = "";
-        for(int i = 0; i < lens.size(); i++)
-        {
-            sz *= lens[i];
-            s += std::to_string(lens[i]);
-            if(i < lens.size() - 1)
-            {
-                s += "x";
-            }
-        }
-
-        std::ofstream f("groupnorm_fwd_mt.tsv", std::ios::app);
-        f << s << "\t" << sz << "\t" << diff.count() << "\t" << diff1.count() << std::endl;
-        f.close();
-    }
-    else
-    {
-        auto start = std::chrono::steady_clock::now();
-        mloGroupNormForwardRunHost<Tgpu, Tref>(inputDesc,
-                                               in.data(),
-                                               weight.data(),
-                                               bias.data(),
-                                               outhost.data(),
-                                               meanhost.data(),
-                                               rstdhost.data(),
-                                               num_groups,
-                                               eps,
-                                               mode);
-        auto end = std::chrono::steady_clock::now();
-
-        std::chrono::duration<float, std::milli> diff = end - start;
-
-        start = std::chrono::steady_clock::now();
-
-        mloGroupNormForwardRunHost2<Tgpu, Tref>(inputDesc,
-                                                in.data(),
-                                                weight.data(),
-                                                bias.data(),
-                                                outhost.data(),
-                                                meanhost.data(),
-                                                rstdhost.data(),
-                                                num_groups,
-                                                eps,
-                                                mode);
-        end = std::chrono::steady_clock::now();
-
-        std::chrono::duration<float, std::milli> diff1 = end - start;
-
-        auto lens = GetInputTensorLengthsFromCmdLine();
-
-        size_t sz     = 1;
-        std::string s = "";
-        for(int i = 0; i < lens.size(); i++)
-        {
-            sz *= lens[i];
-            s += std::to_string(lens[i]);
-            if(i < lens.size() - 1)
-            {
-                s += "x";
-            }
-        }
-
-        std::ofstream f("groupnorm_fwd_st.tsv", std::ios::app);
-        f << s << "\t" << sz << "\t" << diff.count() << "\t" << diff1.count() << std::endl;
-        f.close();
-    }
     return miopenStatusSuccess;
 }
 
@@ -479,26 +390,26 @@ int GroupNormDriver<Tgpu, Tref>::VerifyForward()
     if(!std::isfinite(meanerror) || meanerror > tolerance)
     {
         std::cout << "Forward GroupNorm mean FAILED against " << solver_type
-                  << " CPU reference: " << error << " > " << tolerance << std::endl;
+                  << " CPU reference: " << meanerror << " > " << tolerance << std::endl;
         return EC_VerifyFwd;
     }
     else
     {
         std::cout << "Forward GroupNorm mean Verifies OK against " << solver_type
-                  << " CPU reference (" << error << " < " << tolerance << ')' << std::endl;
+                  << " CPU reference (" << meanerror << " < " << tolerance << ')' << std::endl;
     }
 
     auto rstderror = miopen::rms_range(rstdhost, rstd);
     if(!std::isfinite(rstderror) || rstderror > tolerance)
     {
         std::cout << "Forward GroupNorm rstd FAILED against " << solver_type
-                  << " CPU reference: " << error << " > " << tolerance << std::endl;
+                  << " CPU reference: " << rstderror << " > " << tolerance << std::endl;
         return EC_VerifyFwd;
     }
     else
     {
         std::cout << "Forward GroupNorm rstd Verifies OK against " << solver_type
-                  << " CPU reference (" << error << " < " << tolerance << ')' << std::endl;
+                  << " CPU reference (" << rstderror << " < " << tolerance << ')' << std::endl;
     }
 
     return miopenStatusSuccess;
