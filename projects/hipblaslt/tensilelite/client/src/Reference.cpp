@@ -26,7 +26,7 @@
 
 #include "Reference.hpp"
 #include "DataInitialization.hpp"
-#include "Tensile/Debug.hpp"
+#include "Tensile/TensorDescriptor_fwd.hpp"
 #include "Tensile/Utils.hpp"
 #include "TypedId.hpp"
 
@@ -37,6 +37,88 @@
 
 namespace TensileLite
 {
+
+    namespace
+    {
+
+        // Helper to load data from various source types into a float buffer.
+        template <typename SrcType>
+        std::vector<float> loadToFloat(void const* src, size_t N)
+        {
+            std::vector<float> buffer(N);
+            const SrcType*     sPtr = static_cast<const SrcType*>(src);
+            for(size_t i = 0; i < N; ++i)
+            {
+                buffer[i] = static_cast<float>(sPtr[i]);
+            }
+            return buffer;
+        }
+
+        // Helper to store data from a float buffer into various destination types.
+        template <typename DstType>
+        void storeFromFloat(void* dst, const std::vector<float>& buffer, size_t N)
+        {
+            DstType* dPtr = static_cast<DstType*>(dst);
+            for(size_t i = 0; i < N; ++i)
+            {
+                dPtr[i] = static_cast<DstType>(buffer[i]);
+            }
+        }
+
+        // Helper class that wraps a shadow copy of input buffers in float format.
+        // It quietly manages the indirection between directly using the input pointer
+        // (for float) and a shadow copy (for half / bfloat16).
+        class ShadowBuffer
+        {
+            std::vector<float> m_storage;
+            const float*       m_ptr = nullptr;
+
+        public:
+            ShadowBuffer() = default;
+            ShadowBuffer(void const* ptr, rocisa::DataType type, size_t N)
+            {
+                if(ptr == nullptr)
+                {
+                    assert(N == 0 && "Null pointer with non-zero size");
+                }
+                else if(type == rocisa::DataType::Float)
+                {
+                    m_ptr = static_cast<const float*>(ptr);
+                }
+                else if(type == rocisa::DataType::Half)
+                {
+                    m_storage = loadToFloat<TensileLite::Half>(ptr, N);
+                    m_ptr     = m_storage.data();
+                }
+                else if(type == rocisa::DataType::BFloat16)
+                {
+                    m_storage = loadToFloat<TensileLite::BFloat16>(ptr, N);
+                    m_ptr     = m_storage.data();
+                }
+                else
+                {
+                    throw std::runtime_error("Unsupported type for ShadowBuffer");
+                }
+            }
+
+            const float* data() const
+            {
+                return m_ptr;
+            }
+
+            explicit operator bool() const
+            {
+                return m_ptr != nullptr;
+            }
+
+            // Array access convenience
+            float operator[](size_t idx) const
+            {
+                return m_ptr[idx];
+            }
+        };
+    }
+
     namespace Client
     {
         template <typename T>
@@ -80,8 +162,10 @@ namespace TensileLite
             */
             constexpr bool needAccumCast
                 = !(std::is_same<TypeL, Accumulator>() && std::is_same<TypeR, Accumulator>())
-                  && !std::is_same<TypeL, Int8>() //case I8/I32/I32, I8 be implicitly cast to int.
-                  && !std::is_same<TypeL, Int8x4>(); //case I8x4/I32/I32, I8x4 overloading the op*.
+                  && !std::is_same<TypeL,
+                                   Int8>() //case I8/I32/I32, I8 implicitly cast to int.
+                  && !std::is_same<TypeL,
+                                   Int8x4>(); //case I8x4/I32/I32, I8x4 overloading the op*.
 
             using LMultT = std::conditional_t<needAccumCast, Accumulator, TypeL>;
             using RMultT = std::conditional_t<needAccumCast, Accumulator, TypeR>;
@@ -89,7 +173,6 @@ namespace TensileLite
             constexpr bool needMathOpAccumCast = !std::is_same<Accumulator, MathOpAccum>();
             using LMathOpMultT = std::conditional_t<needMathOpAccumCast, MathOpAccum, LMultT>;
             using RMathOpMultT = std::conditional_t<needMathOpAccumCast, MathOpAccum, RMultT>;
-
             return static_cast<Accumulator>(static_cast<LMultT>(static_cast<LMathOpMultT>(l))
                                             * static_cast<RMultT>(static_cast<RMathOpMultT>(r)));
         }
@@ -109,8 +192,10 @@ namespace TensileLite
             */
             constexpr bool needAccumCast
                 = !(std::is_same<TypeL, Accumulator>() && std::is_same<TypeR, Accumulator>())
-                  && !std::is_same<TypeL, Int8>() //case I8/I32/I32, I8 be implicitly cast to int.
-                  && !std::is_same<TypeL, Int8x4>(); //case I8x4/I32/I32, I8x4 overloading the op*.
+                  && !std::is_same<TypeL,
+                                   Int8>() //case I8/I32/I32, I8 be implicitly cast to int.
+                  && !std::is_same<TypeL,
+                                   Int8x4>(); //case I8x4/I32/I32, I8x4 overloading the op*.
 
             using LMultT = std::conditional_t<needAccumCast, Accumulator, TypeL>;
             using RMultT = std::conditional_t<needAccumCast, Accumulator, TypeR>;
@@ -135,8 +220,10 @@ namespace TensileLite
             */
             constexpr bool needAccumCast
                 = !std::is_same<Type, Accumulator>()
-                  && !std::is_same<Type, Int8>() //case I8/I32/I32, I8 be implicitly cast to int.
-                  && !std::is_same<Type, Int8x4>(); //case I8x4/I32/I32, I8x4 overloading the op*.
+                  && !std::is_same<Type,
+                                   Int8>() //case I8/I32/I32, I8 be implicitly cast to int.
+                  && !std::is_same<Type,
+                                   Int8x4>(); //case I8x4/I32/I32, I8x4 overloading the op*.
 
             using MultT = std::conditional_t<needAccumCast, Accumulator, Type>;
             return static_cast<MultT>(val);
@@ -314,7 +401,8 @@ namespace TensileLite
                                        || std::is_same<int32_t, Accumulator>::value
                                        || std::is_same<int64_t, Accumulator>::value
                                        || std::is_same<int8_t, Accumulator>::value,
-                                   bool> = true>
+                                   bool>
+                  = true>
         void SetValue(rocisa::DataType dataType, Accumulator& src, void* dstPtr, size_t pos)
         {
             switch(dataType)
@@ -404,7 +492,8 @@ namespace TensileLite
                                        && !std::is_same<BFloat8, Accumulator>::value
                                        && !std::is_same<Float8_fnuz, Accumulator>::value
                                        && !std::is_same<BFloat8_fnuz, Accumulator>::value,
-                                   bool> = true>
+                                   bool>
+                  = true>
         void SetValue(rocisa::DataType dataType, Accumulator& src, void* dstPtr, size_t pos)
         {
             switch(dataType)
@@ -463,12 +552,13 @@ namespace TensileLite
                     return static_cast<T>(
                         std::min(static_cast<castT>(val), static_cast<castT>(args[1])));
                 return static_cast<T>(
-                        std::min(static_cast<castT>(0.0), static_cast<castT>(args[1])));
+                    std::min(static_cast<castT>(0.0), static_cast<castT>(args[1])));
             }
             else if(new_type == ActivationType::Clamp)
             {
-	      return static_cast<T>(
-                  std::max(static_cast<castT>(args[0]), std::min(static_cast<castT>(val), static_cast<castT>(args[1]))));
+                return static_cast<T>(
+                    std::max(static_cast<castT>(args[0]),
+                             std::min(static_cast<castT>(val), static_cast<castT>(args[1]))));
             }
             else if(new_type == ActivationType::Exp)
             {
@@ -609,7 +699,8 @@ namespace TensileLite
                     || std::is_same<Float8, Input>::value || std::is_same<BFloat8, Input>::value
                     || std::is_same<Float8_fnuz, Input>::value
                     || std::is_same<BFloat8_fnuz, Input>::value,
-                bool> = true>
+                bool>
+            = true>
         std::string ReductionCPU(TensorDescriptor const&  biasTensor,
                                  TensorDescriptor const&  tensor,
                                  void const*              src,
@@ -676,7 +767,8 @@ namespace TensileLite
                     && !std::is_same<Float8, Input>::value && !std::is_same<BFloat8, Input>::value
                     && !std::is_same<Float8_fnuz, Input>::value
                     && !std::is_same<BFloat8_fnuz, Input>::value,
-                bool> = true>
+                bool>
+            = true>
         std::string ReductionCPU(TensorDescriptor const&  biasTensor,
                                  TensorDescriptor const&  tensor,
                                  void const*              src,
@@ -685,6 +777,376 @@ namespace TensileLite
                                  size_t                   reducIdx)
         {
             throw std::runtime_error("Unsupported input type.");
+        }
+
+        // Solve combinations of f16, bf16, f32 gemm problems using efficient CPU code.
+        // This versions only solves for a subset of geometries. The set of geometries
+        // supported should be extended as new bottlenecks in validation are discovered.
+        bool solveCPUFastInF32(ContractionProblemGemm const& problem,
+                               ContractionInputs const&      inputs)
+        {
+
+            // For more precise numerical correctness with XFloat32, skip this fast path.
+            // If we knew at this point that the data was initialized as whole number floats,
+            // we could continue down this fast path, because there would be no rounding
+            // errors incurred by f32 accumulation. But we do not.
+            if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
+            {
+                return false;
+            }
+
+            // Guard rails to check that the fast path is appropriate to use.
+            // Some of these can be relaxed  as support on this path is generalized.
+            auto isSupportedType = [](rocisa::DataType t) {
+                return t == rocisa::DataType::Float || t == rocisa::DataType::Half
+                       || t == rocisa::DataType::BFloat16;
+            };
+
+            if(!isSupportedType(problem.a().dataType()) || !isSupportedType(problem.b().dataType())
+               || !isSupportedType(problem.c().dataType())
+               || !isSupportedType(problem.d().dataType()))
+            {
+                return false;
+            }
+
+            if(problem.batchIndices().empty())
+            {
+                return false;
+            }
+
+            if(problem.useGradient())
+            {
+                return false;
+            }
+
+            if(problem.outputAmaxD())
+            {
+                return false;
+            }
+
+            if(problem.useE())
+            {
+                return false;
+            }
+
+            if(problem.useScaleCD())
+            {
+                return false;
+            }
+
+            if(problem.useScaleAB() == "Scalar")
+            {
+                return false;
+            }
+
+            if(problem.useScaleAB() == "Vector")
+            {
+                return false;
+            }
+
+            if(problem.boundIndices().size() != 1 || problem.freeIndicesA().size() != 1
+               || problem.freeIndicesB().size() != 1)
+            {
+                return false;
+            }
+
+            bool               doActivation = false;
+            std::vector<float> actArgs;
+            if(problem.activationType() != ActivationType::None)
+            {
+                doActivation = true;
+                for(int i = 0; i < inputs.activationArgs.size(); i++)
+                {
+                    actArgs.push_back(constVariantCast<float>(inputs.activationArgs[i]));
+                }
+            }
+
+            size_t indexMA = problem.freeIndicesA()[0].i;
+            size_t indexKA = problem.boundIndices()[0].a;
+            size_t indexNB = problem.freeIndicesB()[0].i;
+            size_t indexKB = problem.boundIndices()[0].b;
+            size_t indexMD = problem.freeIndices()[0].d;
+
+            size_t strideMA = problem.a().strides()[indexMA];
+            size_t strideKA = problem.a().strides()[indexKA];
+            size_t strideNB = problem.b().strides()[indexNB];
+            size_t strideKB = problem.b().strides()[indexKB];
+
+            // Layout validation
+            bool isPackedA = (strideMA == 1 || strideKA == 1);
+            bool isPackedB = (strideNB == 1 || strideKB == 1);
+            bool isPackedD = (problem.d().strides()[indexMD] == 1);
+            if(!isPackedA || !isPackedB || !isPackedD)
+            {
+                return false;
+            }
+
+            size_t indexND  = problem.freeIndices()[1].d;
+            size_t strideND = problem.d().strides()[indexND];
+            size_t strideNC = problem.c().strides()[indexND];
+
+            size_t strideBatchA = problem.a().strides()[problem.batchIndices()[0].a];
+            size_t strideBatchB = problem.b().strides()[problem.batchIndices()[0].b];
+            size_t strideBatchC = problem.c().strides()[problem.batchIndices()[0].d];
+            size_t strideBatchD = problem.d().strides()[problem.batchIndices()[0].d];
+
+            // 4. Shadow copies in f32.
+            ShadowBuffer shadowA(
+                inputs.a, problem.a().dataType(), problem.a().totalAllocatedElements());
+            ShadowBuffer shadowB(
+                inputs.b, problem.b().dataType(), problem.b().totalAllocatedElements());
+            ShadowBuffer shadowC(
+                inputs.c, problem.c().dataType(), problem.c().totalAllocatedElements());
+
+            std::vector<float> shadowD;
+            float*             ptrD = nullptr;
+            if(problem.d().dataType() == rocisa::DataType::Float)
+            {
+                ptrD = static_cast<float*>(inputs.d);
+            }
+            else
+            {
+                shadowD.resize(problem.d().totalAllocatedElements());
+                ptrD = shadowD.data();
+            }
+
+            bool useScaleAlphaVec = problem.useScaleAlphaVec();
+            int  factorDim        = problem.getParams().factorDim(); // 0 = Row(M), 1 = Col(N)
+
+            ShadowBuffer shadowAlphaVec;
+            if(problem.useScaleAlphaVec())
+            {
+                size_t vecLen  = (factorDim == 0) ? problem.freeSizeA(0) : problem.freeSizeB(0);
+                shadowAlphaVec = ShadowBuffer(inputs.scaleAlphaVec, problem.alphaType(), vecLen);
+            }
+
+            size_t sizeBatch = problem.batchSize(0);
+            size_t sizeK     = problem.boundSize(0);
+            size_t sizeM     = problem.freeSizeA(0);
+            size_t sizeN     = problem.freeSizeB(0);
+
+            constexpr size_t BLOCK_M = 32;
+            constexpr size_t BLOCK_N = 32;
+            constexpr size_t BLOCK_K = 8;
+
+            auto nTiles = (sizeN / BLOCK_N + (sizeN % BLOCK_N != 0));
+            auto mTiles = (sizeM / BLOCK_M + (sizeM % BLOCK_M != 0));
+            auto kTiles = (sizeK / BLOCK_K + (sizeK % BLOCK_K != 0));
+
+// Perform the contraction.
+// Parallelize over the 3 non-reduction dimensions: batch, M, and N.
+// Each thread computes a BLOCK_M x BLOCK_N tile.
+#pragma omp parallel for collapse(3)
+            for(size_t b = 0; b < sizeBatch; ++b)
+            {
+                const float* curBatchA = shadowA.data() + (b * strideBatchA);
+                const float* curBatchB = shadowB.data() + (b * strideBatchB);
+                const float* curBatchC = shadowC.data() + (b * strideBatchC);
+                float*       curBatchD = ptrD + (b * strideBatchD);
+                for(size_t m = 0; m < mTiles; ++m)
+                {
+                    auto m0 = m * BLOCK_M;
+                    for(size_t n = 0; n < nTiles; ++n)
+                    {
+                        auto n0 = n * BLOCK_N;
+
+                        std::array<float, BLOCK_M * BLOCK_K> aReg = {0};
+                        std::array<float, BLOCK_K * BLOCK_N> bReg = {0};
+                        std::array<float, BLOCK_M * BLOCK_N> cReg = {0};
+                        for(size_t k = 0; k < kTiles; ++k)
+                        {
+                            auto k0 = k * BLOCK_K;
+
+                            // Populate A 'registers':
+                            for(size_t km = 0; km < BLOCK_K; ++km)
+                            {
+                                for(size_t mm = 0; mm < BLOCK_M; ++mm)
+                                {
+                                    size_t global_k = k0 + km;
+                                    size_t global_m = m0 + mm;
+                                    if(global_k < sizeK && global_m < sizeM)
+                                    {
+                                        auto offset = global_m * strideMA + global_k * strideKA;
+                                        aReg[km * BLOCK_M + mm] = curBatchA[offset];
+                                    }
+                                    else
+                                    {
+                                        aReg[km * BLOCK_M + mm] = 0.0f;
+                                    }
+                                }
+                            }
+
+                            // Populate B 'registers':
+                            for(size_t kn = 0; kn < BLOCK_K; ++kn)
+                            {
+                                for(size_t nn = 0; nn < BLOCK_N; ++nn)
+                                {
+                                    size_t global_k = k0 + kn;
+                                    size_t global_n = n0 + nn;
+                                    if(global_k < sizeK && global_n < sizeN)
+                                    {
+                                        bReg[kn * BLOCK_N + nn]
+                                            = curBatchB[global_n * strideNB + global_k * strideKB];
+                                    }
+                                    else
+                                    {
+                                        bReg[kn * BLOCK_N + nn] = 0.0f;
+                                    }
+                                }
+                            }
+
+                            // Perform matrix multiplication accumulation with k as inner-most (fastest)
+                            // dimension for both A and B. A, B, and C of sizes defined by BLOCK_M, BLOCK_N, BLOCK_K.
+                            // Store result in row-major order.
+                            auto innerReduction = [BLOCK_M, BLOCK_N, BLOCK_K](
+                                                      const float* A, const float* B, float* C) {
+                                for(size_t k_i = 0; k_i < BLOCK_K; ++k_i)
+                                {
+                                    for(size_t m_i = 0; m_i < BLOCK_M; ++m_i)
+                                    {
+                                        for(size_t n_i = 0; n_i < BLOCK_N; ++n_i)
+                                        {
+                                            auto  b_index = k_i * BLOCK_N + n_i;
+                                            auto  a_index = k_i * BLOCK_M + m_i;
+                                            auto  c_index = m_i * BLOCK_N + n_i;
+                                            float valB    = B[b_index];
+                                            float valA    = A[a_index];
+                                            C[c_index] += valA * valB;
+                                        }
+                                    }
+                                }
+                            };
+                            innerReduction(aReg.data(), bReg.data(), cReg.data());
+                        }
+
+                        // Copy from cReg back.
+                        for(size_t nn = 0; nn < BLOCK_N; ++nn)
+                        {
+                            for(size_t mm = 0; mm < BLOCK_M; ++mm)
+                            {
+                                size_t global_n = n0 + nn;
+                                size_t global_m = m0 + mm;
+                                if(global_n < sizeN && global_m < sizeM)
+                                {
+                                    size_t idxD     = global_n * strideND + global_m;
+                                    curBatchD[idxD] = cReg[mm * BLOCK_N + nn];
+                                }
+                            }
+                        }
+
+                        // Perform all the post-reduction stuff.
+                        const float originalAlpha = std::get<float>(inputs.alpha);
+                        const float beta          = std::get<float>(inputs.beta);
+                        for(size_t nn = 0; nn < BLOCK_N; ++nn)
+                        {
+                            for(size_t mm = 0; mm < BLOCK_M; ++mm)
+                            {
+                                size_t global_n = n0 + nn;
+                                size_t global_m = m0 + mm;
+                                if(global_n < sizeN && global_m < sizeM)
+                                {
+                                    size_t idxD      = global_m + (global_n * strideND);
+                                    size_t idxC      = global_m + (global_n * strideNC);
+                                    auto   startingC = curBatchC[idxC];
+                                    auto   current   = curBatchD[idxD];
+                                    float  alpha     = originalAlpha;
+                                    if(useScaleAlphaVec)
+                                    {
+                                        if(factorDim == 1)
+                                        {
+                                            alpha *= shadowAlphaVec[global_n];
+                                        }
+                                        else
+                                        {
+                                            alpha *= shadowAlphaVec[global_m];
+                                        }
+                                    }
+                                    if(beta != 0.0f)
+                                    {
+                                        current = (alpha * current) + (beta * startingC);
+                                    }
+                                    else
+                                    {
+                                        current = (alpha * current);
+                                    }
+
+                                    if(problem.useBias() && inputs.bias)
+                                    {
+
+                                        assert(!problem.useGradient()
+                                               && "Bias gradient not supported on this path.");
+
+                                        size_t dNum
+                                            = global_m + (global_n * sizeM) + (b * sizeM * sizeN);
+                                        auto const&          d = problem.d();
+                                        std::vector<int64_t> dCoord(d.dimensions());
+                                        CoordNumbered(dNum,
+                                                      dCoord.begin(),
+                                                      dCoord.end(),
+                                                      d.sizes().begin(),
+                                                      d.sizes().end());
+
+                                        auto const&          bias = problem.bias();
+                                        std::vector<int64_t> biasCoord(bias.dimensions());
+                                        for(size_t i = 0; i < problem.batchIndices().size(); i++)
+                                        {
+                                            auto const& idx   = problem.batchIndices()[i];
+                                            size_t      coord = dCoord[idx.d];
+                                            if(biasCoord.size() > 2)
+                                            {
+                                                biasCoord[2] = coord;
+                                            }
+                                        }
+                                        auto biasIndex = problem.bias().index(biasCoord);
+
+                                        int pos = 0;
+                                        if(problem.getParams().factorDim())
+                                            pos = int(int(dNum / problem.d().sizes()[0])
+                                                      % problem.d().sizes()[1])
+                                                  + biasIndex;
+                                        else
+                                            pos = int(dNum % problem.d().sizes()[0]) + biasIndex;
+
+                                        bool aConjugate   = false;
+                                        using Accumulator = float;
+                                        Accumulator biasVal
+                                            = GetValue<Accumulator>(problem.bias().dataType(),
+                                                                    inputs.bias,
+                                                                    pos,
+                                                                    aConjugate);
+
+                                        current += biasVal;
+                                    }
+
+                                    if(doActivation)
+                                    {
+                                        current = Activation(problem.activationType(),
+                                                             current,
+                                                             problem.getParams().activationEnum(),
+                                                             actArgs);
+                                    }
+
+                                    curBatchD[idxD] = current;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 6. Write Back
+            if(problem.d().dataType() == rocisa::DataType::Half)
+            {
+                storeFromFloat<TensileLite::Half>(
+                    inputs.d, shadowD, problem.d().totalAllocatedElements());
+            }
+            else if(problem.d().dataType() == rocisa::DataType::BFloat16)
+            {
+                storeFromFloat<TensileLite::BFloat16>(
+                    inputs.d, shadowD, problem.d().totalAllocatedElements());
+            }
+
+            return true;
         }
 
         template <typename Inputs, typename Accumulator, typename MathOpAccum>
@@ -1043,8 +1505,10 @@ namespace TensileLite
                               + biasIndex;
                     else
                         pos = int(dNum % problem.d().sizes()[0]) + biasIndex;
+
                     Accumulator bias = GetValue<Accumulator>(
                         problem.bias().dataType(), inputs.bias, pos, aConjugate);
+
                     resultD += bias;
                 }
                 // E
@@ -1752,33 +2216,67 @@ namespace TensileLite
             throw std::runtime_error("Data type not implemented.");
         }
 
+        void SolveGemmCPU(ContractionProblemGemm const& problem,
+                          ContractionInputs const&      inputs,
+                          size_t                        elementsToValidate,
+                          bool                          tryFastPath)
+        {
+
+            // The fast solver computes all elements. If the number of elements to validate
+            // is in [0, sparsityThreshold * totalElements), skip this solver, falling through to another
+            // solver that handles the partial validation sparsity efficiently.
+            double sparsityThreshold        = 0.2;
+            bool   isDenseEnoughForFastPath = true;
+            if(elementsToValidate >= 0
+               && elementsToValidate < sparsityThreshold * problem.d().totalLogicalElements())
+            {
+                isDenseEnoughForFastPath = false;
+            }
+
+            if(tryFastPath && isDenseEnoughForFastPath && solveCPUFastInF32(problem, inputs))
+            {
+                return;
+            }
+
+            auto contractionInputsTypeId = getInputContractionInputsTypeId(problem);
+            SolveCPUTemplates(contractionInputsTypeId, problem, inputs, elementsToValidate);
+        }
+
         void SolveCPU(ContractionProblem const* problem,
                       ProblemInputs const*      inputs,
                       size_t                    elementsToValidate)
         {
+
             if(auto groupedProblem = dynamic_cast<ContractionProblemGroupedGemm const*>(problem))
             {
-                if(auto refInput = dynamic_cast<ContractionGroupedInputs const*>(inputs))
+                auto refInput = dynamic_cast<ContractionGroupedInputs const*>(inputs);
+                if(!refInput)
                 {
-                    auto contractionInputsTypeId
-                        = getInputContractionInputsTypeId(groupedProblem->gemms[0]);
-                    SolveCPUTemplates(
-                        contractionInputsTypeId, *groupedProblem, *refInput, elementsToValidate);
-                }
-                else
                     throw std::runtime_error("Unable to cast input to ContractionGroupedInputs.");
+                }
+                if(groupedProblem->gemms.size() != refInput->grouped.size())
+                {
+                    throw std::runtime_error("Mismatched number of grouped problems and inputs.");
+                }
+                for(uint64_t i = 0; i < groupedProblem->gemms.size(); ++i)
+                {
+                    ContractionProblemGemm problem = groupedProblem->gemms[i];
+                    ContractionInputs      input   = refInput->grouped[i];
+                    SolveGemmCPU(problem, input, elementsToValidate);
+                }
+                return;
             }
+
             else if(auto gemmProblem = dynamic_cast<ContractionProblemGemm const*>(problem))
             {
-                if(auto refInput = dynamic_cast<ContractionInputs const*>(inputs))
+                auto refInput = dynamic_cast<ContractionInputs const*>(inputs);
+                if(!refInput)
                 {
-                    auto contractionInputsTypeId = getInputContractionInputsTypeId(*gemmProblem);
-                    SolveCPUTemplates(
-                        contractionInputsTypeId, *gemmProblem, *refInput, elementsToValidate);
-                }
-                else
                     throw std::runtime_error("Unable to cast input to ContractionInputs.");
+                }
+                SolveGemmCPU(*gemmProblem, *refInput, elementsToValidate);
             }
+
             else
             {
                 throw std::runtime_error("[Reference] Failed to cast to any ContractionProblem");

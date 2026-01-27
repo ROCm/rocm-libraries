@@ -7,6 +7,7 @@
 #include <type_traits>
 #include <cstdint>
 #include <half/half.hpp>
+#include <miopen/bfloat16.hpp>
 #include <boost/container/small_vector.hpp>
 
 struct OpKernelArg
@@ -17,7 +18,8 @@ struct OpKernelArg
     template <typename T>
     OpKernelArg(T arg) : buffer(sizeof(T))
     {
-        static_assert(std::is_trivial<T>{} || std::is_same<T, half_float::half>{},
+        static_assert(std::is_trivial<T>{} || std::is_same<T, half_float::half>{} ||
+                          std::is_same<T, bfloat16>{},
                       "Only for trivial types");
         *(reinterpret_cast<T*>(buffer.data())) = arg;
     }
