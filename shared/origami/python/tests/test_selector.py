@@ -5,6 +5,7 @@
 
 import pytest
 import torch
+import math
 import origami
 from origami.selector import OrigamiMatmulSelector
 from .conftest import create_config_list
@@ -225,26 +226,35 @@ def test_selector_even_k_property(rocm_device):
 
 @pytest.mark.integration
 def test_selector_streamk_disabled(rocm_device):
-    """Test selector with StreamK disabled (default)."""
+    """Test selector with StreamK disabled (data-parallel grid)."""
     config_gen = create_mock_config_gen()
-    
-    selector = OrigamiMatmulSelector(
-        config_gen=config_gen,
-        m=2048,
-        n=2048,
-        k=2048,
-        a_dtype=torch.float16,
-        b_dtype=torch.float16,
-        out_dtype=torch.float16,
-        device=rocm_device,
-        streamk=False
-    )
-    
-    # With StreamK disabled, grid is selected using data_parallel mode
-    # This may be less than N_CU depending on the problem size and config
-    assert selector.grid_size > 0
-    assert selector.grid_size <= selector.number_of_cus
 
+
+    m = n = k = 2048
+    selector = OrigamiMatmulSelector(
+    config_gen=config_gen,
+    m=m,
+    n=n,
+    k=k,
+    a_dtype=torch.float16,
+    b_dtype=torch.float16,
+    out_dtype=torch.float16,
+    device=rocm_device,
+    streamk=False
+    )
+
+
+    assert selector.grid_size > 0
+
+
+    # Data-parallel grid: tiles in M and N based on selected macrotiles
+    mt_m = selector.macrotile_m
+    mt_n = selector.macrotile_n
+    assert mt_m > 0 and mt_n > 0
+
+
+    expected_grid = math.ceil(m / mt_m) * math.ceil(n / mt_n)
+    assert selector.grid_size == expected_grid
 
 @pytest.mark.integration
 def test_selector_streamk_enabled(rocm_device):
