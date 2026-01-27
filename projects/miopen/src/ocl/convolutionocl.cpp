@@ -923,8 +923,7 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
     // On regular path (find-db hit) this was checked during Find().
     Problem::ValidateGroupCount(xDesc, weightsDesc, *this);
 
-    const auto& conv    = problem.GetConv();
-    bool immediate_mode = conv.findMode.IsFast(ctx);
+    const auto& conv = problem.GetConv();
 
     auto interim = std::vector<miopenConvSolution_t>{};
     interim.reserve(maxSolutionCount); // For speed. In most cases we have less entries than asked.
@@ -1019,7 +1018,7 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
     /// solutions after sorting by estimated performance. See the detailed explanation
     /// in GetSolutions() for the full rationale.
     std::sort(begin(interim), end(interim), SolutionTimeComparator{});
-    
+
     auto out = std::vector<miopenConvSolution_t>{};
     out.reserve(maxSolutionCount);
     auto n_copied = 0;
@@ -1028,7 +1027,8 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
         const auto solver_id = solver::Id{s.solution_id};
         if(!solver_id.GetSolver().IsApplicable(ctx, problem))
             continue;
-        if(!conv::IsEnoughWorkspace("GetSolutionsFallback", solver_id, s.workspace_size, invokeParams))
+        if(!conv::IsEnoughWorkspace(
+               "GetSolutionsFallback", solver_id, s.workspace_size, invokeParams, false))
             continue;
         out.push_back(s);
         if(++n_copied >= maxSolutionCount)
