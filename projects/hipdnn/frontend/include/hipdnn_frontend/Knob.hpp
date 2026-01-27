@@ -470,9 +470,9 @@ public:
     }
 
     // Accessors
-    const std::string& getKnobIdStr() const
+    const std::string& getKnobId() const
     {
-        return _knobIdStr;
+        return _knobId;
     }
 
     const std::string& getDescription() const
@@ -517,7 +517,7 @@ public:
     std::string toString() const
     {
         std::ostringstream oss;
-        oss << "Knob{knobIdStr=\"" << _knobIdStr << "\", description=\"" << _description
+        oss << "Knob{knobIdStr=\"" << _knobId << "\", description=\"" << _description
             << "\", defaultValue=";
 
         variantToStream(oss, _defaultValue);
@@ -539,7 +539,7 @@ private:
          std::string description,
          std::variant<KNOB_TYPES> defaultValue,
          bool deprecated)
-        : _knobIdStr(std::move(knobIdStr))
+        : _knobId(std::move(knobIdStr))
         , _description(std::move(description))
         , _defaultValue(std::move(defaultValue))
         , _deprecated(deprecated)
@@ -562,7 +562,7 @@ private:
             variant);
     }
 
-    std::string _knobIdStr;
+    std::string _knobId;
     std::string _description;
     std::variant<KNOB_TYPES> _defaultValue;
     bool _deprecated;

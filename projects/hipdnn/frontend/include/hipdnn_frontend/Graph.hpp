@@ -948,7 +948,7 @@ public:
 
         for(auto& knob : knobVector)
         {
-            knobs.try_emplace(knob.getKnobIdStr(), std::move(knob));
+            knobs.try_emplace(knob.getKnobId(), std::move(knob));
         }
 
         return {ErrorCode::OK, ""};
@@ -1055,7 +1055,7 @@ public:
 
             if(knob.isDeprecated())
             {
-                HIPDNN_FE_LOG_WARN("Knob {} has been marked as deprecated.", knob.getKnobIdStr());
+                HIPDNN_FE_LOG_WARN("Knob {} has been marked as deprecated.", knob.getKnobId());
             }
 
             status = knob.validate(setting);
