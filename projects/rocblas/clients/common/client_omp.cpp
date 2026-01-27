@@ -100,9 +100,9 @@ void client_omp_manager::limit_by_processor_count()
                      << env_omp_threads << std::endl;
         return;
     }
-    
-    // Preserve c_thread_reducer cores free to avoid AOCL performance degradation at high thread counts
-    // On small systems, use single-threaded mode to avoid contention entirely
+
+    // Preserve c_thread_reducer cores free to avoid AOCL performance degradation at high
+    // thread counts. On small systems, use single-threaded mode to avoid contention entirely
     int safe_thread_count = std::max(1, omp_default_threads - c_thread_reducer);
     
     omp_set_num_threads(safe_thread_count);
