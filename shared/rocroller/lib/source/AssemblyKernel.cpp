@@ -373,9 +373,10 @@ namespace rocRoller
 
         auto simplifiedArg = simplify(arg.expression);
         m_simplifiedArgs[arg.name]
-            = equivalent(simplifiedArg, arg.expression) ? nullptr : simplifiedArg;
+            = identical(simplifiedArg, arg.expression) ? nullptr : simplifiedArg;
+
         auto restoredArg = restoreCommandArguments(arg.expression);
-        if(equivalent(restoredArg, arg.expression))
+        if(identical(restoredArg, arg.expression))
         {
             m_restoredArgs[arg.name]           = nullptr;
             m_simplifiedRestoredArgs[arg.name] = nullptr;
@@ -385,7 +386,7 @@ namespace rocRoller
             m_restoredArgs[arg.name]   = restoredArg;
             auto simplifiedRestoredArg = simplify(restoredArg);
             m_simplifiedRestoredArgs[arg.name]
-                = equivalent(simplifiedRestoredArg, restoredArg) ? nullptr : simplifiedRestoredArg;
+                = identical(simplifiedRestoredArg, restoredArg) ? nullptr : simplifiedRestoredArg;
         }
 
         m_arguments.push_back(std::move(arg));
