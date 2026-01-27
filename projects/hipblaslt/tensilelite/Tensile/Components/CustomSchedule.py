@@ -1313,8 +1313,23 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
     elif isTN(kernel) and (not useLDSTr) and TLDS==1:
         # Derived by swapping A/B roles from the existing 160x256x64 TN schedule,
         # to match the 256x160 wave-tile aspect ratio (MIWaveTileA=8, MIWaveTileB=5).
+        # index and code pair (syncTable style)
+        # NOTE: keep the original SYNC index sequence to preserve validation semantics
+        # (this schedule relies on extra insertion points like 39/42/43).
+        syncTable = [
+            -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all prior LRA1/LRB1 before starting main loop"),
+             4, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all prior LRA1/LRB1 for the remaining main loop"),
+            13, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete to start GRA"),
+            13, SBarrier(comment=""),
+            38, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete to start GRB"),
+            39, SBarrier(comment=""),
+            42, SWaitCnt(dscnt=-1, vlcnt=0, vscnt=-1, comment="Wait for all GRA to complete before LRA1"),
+            43, SBarrier(comment=""),
+            70, SWaitCnt(dscnt=-1, vlcnt=0, vscnt=-1, comment="Wait for all GRB to complete before LRB1"),
+            70, SBarrier(comment=""),
+        ]
         optSchedule = {
-            'SYNC'   : [[-1, 4, 13,13, 38,39, 42,43, 70,70]],
+            'SYNC'   : [syncTable[::2]],
             'GRIncA' : [[29,30,31,32,33,34,35,36,37]],
             'GRIncB' : [[0,1,2,3,4,5,6,7,8]],
 
@@ -1342,18 +1357,7 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
             'LWSB'   : [[76]],
             'LCC'    : [[79, 79]],
         }
-        syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all prior LRA1/LRB1 before starting main loop"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all prior LRA1/LRB1 for the remaining main loop"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete to start GRA"),
-            SBarrier(comment=""),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete to start GRB"),
-            SBarrier(comment=""),
-            SWaitCnt(dscnt=-1, vlcnt=0, vscnt=-1, comment="Wait for all GRA to complete before LRA1"),
-            SBarrier(comment=""),
-            SWaitCnt(dscnt=-1, vlcnt=0, vscnt=-1, comment="Wait for all GRB to complete before LRB1"),
-            SBarrier(comment=""),
-        ]
+        syncCode = syncTable[1::2]
         nglshift = nllshift = 13
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     elif isNT(kernel) and useLDSTr and TLDS==0:
