@@ -7,7 +7,9 @@
 #include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsBfp8.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsFp8.hpp>
 #include <iostream>
 #include <numeric>
 #include <random>
@@ -288,33 +290,57 @@ public:
     template <typename... Args>
     T getHostValue(Args... indices) const
     {
-        int64_t index = getIndex(indices...);
-        const auto* data = memory().hostData();
-        return data[index];
+        return (*this)(indices...);
     }
 
     template <typename IndexType>
     T getHostValue(const std::vector<IndexType>& indices) const
     {
-        int64_t index = getIndex(indices);
-        const auto* data = memory().hostData();
-        return data[index];
+        return (*this)(indices);
     }
 
     template <typename... Args>
     void setHostValue(T value, Args... indices)
     {
-        int64_t index = getIndex(indices...);
-        auto* data = memory().hostData();
-        data[index] = value;
+        (*this)(indices...) = value;
     }
 
     template <typename IndexType>
     void setHostValue(T value, const std::vector<IndexType>& indices)
     {
+        (*this)(indices) = value;
+    }
+
+    template <typename... Args>
+    T& operator()(Args... indices)
+    {
+        int64_t index = getIndex(indices...);
+        auto* data = memory().hostData();
+        return data[index];
+    }
+
+    template <typename... Args>
+    const T& operator()(Args... indices) const
+    {
+        int64_t index = getIndex(indices...);
+        const auto* data = memory().hostData();
+        return data[index];
+    }
+
+    template <typename IndexType>
+    T& operator()(const std::vector<IndexType>& indices)
+    {
         int64_t index = getIndex(indices);
         auto* data = memory().hostData();
-        data[index] = value;
+        return data[index];
+    }
+
+    template <typename IndexType>
+    const T& operator()(const std::vector<IndexType>& indices) const
+    {
+        int64_t index = getIndex(indices);
+        const auto* data = memory().hostData();
+        return data[index];
     }
 
     virtual void fillWithValue(T value) = 0;
@@ -563,6 +589,10 @@ inline std::unique_ptr<utilities::ITensor> createTensor(data_objects::DataType d
         return std::make_unique<Tensor<int32_t>>(dims, strides);
     case data_objects::DataType::INT8:
         return std::make_unique<Tensor<int8_t>>(dims, strides);
+    case data_objects::DataType::FP8_E4M3:
+        return std::make_unique<Tensor<hip_fp8_e4m3>>(dims, strides);
+    case data_objects::DataType::FP8_E5M2:
+        return std::make_unique<Tensor<hip_fp8_e5m2>>(dims, strides);
     default:
         throw std::runtime_error("Unsupported data type for tensor");
     }

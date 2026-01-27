@@ -402,7 +402,11 @@ set(ROCSPARSE_CLIENTS_COMMON
   ../common/rocsparseio.cpp
   )
 
-add_executable(rocsparse-test rocsparse_test_main.cpp ${ROCSPARSE_TEST_SOURCES} ${ROCSPARSE_CLIENTS_COMMON} ${ROCSPARSE_CLIENTS_TESTINGS})
+if (BUILD_CLIENTS_ONLY)
+  add_executable(rocsparse-test rocsparse_test_main.cpp ${ROCSPARSE_TEST_SOURCES} ${ROCSPARSE_CLIENTS_COMMON} ${ROCSPARSE_CLIENTS_TESTINGS})
+else()
+  add_executable(rocsparse-test rocsparse_test_main.cpp test_atomic_add.cpp ${ROCSPARSE_TEST_SOURCES} ${ROCSPARSE_CLIENTS_COMMON} ${ROCSPARSE_CLIENTS_TESTINGS})
+endif()
 
 # Set GOOGLE_TEST definition
 target_compile_definitions(rocsparse-test PRIVATE GOOGLE_TEST)
@@ -414,6 +418,9 @@ target_compile_options(rocsparse-test PRIVATE -ffp-contract=on -mfma -Wno-deprec
 target_include_directories(rocsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
 if (BUILD_CLIENTS_ONLY)
   target_include_directories(rocsparse-test PRIVATE ${rocsparse_INCLUDE_DIRS}/rocsparse)
+else()
+  # Library internal headers for testing atomic_add
+  target_include_directories(rocsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>)
 endif()
 
 # Add OpenMP if available

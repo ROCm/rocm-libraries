@@ -62,16 +62,59 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 
     unsigned int tidy = blockIdx.y * MIO_BN_GRP1 + threadIdx.y;
 
-    unsigned int c_i      = tidy;
-    unsigned int hw_i     = tidx;
-    unsigned int c_offset = c_i * MIO_BN_HW;
+    unsigned int c_i, hw_i, c_offset, hw_offset;
+    if constexpr(MIO_LAYOUT_NHWC)
+    {
+        c_i       = tidx;
+        hw_i      = tidy;
+        c_offset  = c_i * MIOPEN_READ_UNIT;
+        hw_offset = hw_i * MIO_BN_C;
+    }
+    else
+    {
+        c_i       = tidy;
+        hw_i      = tidx;
+        c_offset  = c_i * MIO_BN_HW;
+        hw_offset = hw_i * MIOPEN_READ_UNIT;
+    }
 
     // load the mean, variance, scale, and bias
-    const FLOAT_ACCUM pmean       = estimatedMean[c_i];
-    const FLOAT_ACCUM pvar        = estimatedVariance[c_i];
-    const FLOAT_ACCUM pscale      = scale[c_i];
-    const FLOAT_ACCUM pbias       = bias[c_i];
-    const FLOAT_ACCUM invVariance = rsqrt(pvar + static_cast<FLOAT_ACCUM>(epsilon));
+    FLOAT_ACCUM pmean[MIOPEN_READ_UNIT];
+    FLOAT_ACCUM pvar[MIOPEN_READ_UNIT];
+    FLOAT_ACCUM pscale[MIOPEN_READ_UNIT];
+    FLOAT_ACCUM pbias[MIOPEN_READ_UNIT];
+    FLOAT_ACCUM invVariance[MIOPEN_READ_UNIT];
+    if constexpr(MIO_LAYOUT_NHWC)
+    {
+        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pmean)) =
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedMean + c_offset));
+        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pvar)) =
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedVariance + c_offset));
+        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pscale)) =
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(scale + c_offset));
+        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pbias)) =
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(bias + c_offset));
+    }
+    else // NCHW layout
+    {
+        const auto mean_val  = estimatedMean[c_i];
+        const auto var_val   = estimatedVariance[c_i];
+        const auto scale_val = scale[c_i];
+        const auto bias_val  = bias[c_i];
+#pragma unroll
+        for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
+        {
+            pmean[i]  = mean_val;
+            pvar[i]   = var_val;
+            pscale[i] = scale_val;
+            pbias[i]  = bias_val;
+        }
+    }
+#pragma unroll
+    for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
+    {
+        invVariance[i] = rsqrt(pvar[i] + static_cast<FLOAT_ACCUM>(epsilon));
+    }
 
     FLOAT data[MIOPEN_READ_UNIT];
     FLOAT_ACCUM bnRes[MIOPEN_READ_UNIT];
@@ -80,7 +123,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 #pragma unroll 2
     for(unsigned int n_i = 0; n_i < MIO_BN_N; ++n_i)
     {
-        const unsigned int index = n_i * MIO_BN_CHW + c_offset + hw_i * MIOPEN_READ_UNIT;
+        const unsigned int index = n_i * MIO_BN_CHW + c_offset + hw_offset;
 
         // load the input data
         *(reinterpret_cast<FLOAT_VEC_TYPE*>(data)) =
@@ -90,7 +133,8 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 #pragma unroll
         for(unsigned int i = 0; i < MIOPEN_READ_UNIT; ++i)
         {
-            bnRes[i] = pscale * (CVT_FLOAT2ACCUM(data[i]) - pmean) * invVariance + pbias;
+            bnRes[i] =
+                pscale[i] * (CVT_FLOAT2ACCUM(data[i]) - pmean[i]) * invVariance[i] + pbias[i];
         }
         ActivationFunction(
             actRes, bnRes, CVT_FLOAT2ACCUM(gamma), CVT_FLOAT2ACCUM(beta), CVT_FLOAT2ACCUM(alpha));

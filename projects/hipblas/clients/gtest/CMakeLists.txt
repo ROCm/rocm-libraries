@@ -82,6 +82,7 @@ set(hipblas_test_source
   blas_ex/trsm_ex_gtest.cpp
   blas_ex/gemm_ex_gtest.cpp
   blas_ex/syrk_ex_gtest.cpp
+  blas_ex/herk_ex_gtest.cpp
 )
 
 if( BUILD_WITH_SOLVER )
@@ -229,7 +230,7 @@ set( HIPBLAS_L3_YAML_DATA blas3/dgmm_gtest.yaml blas3/geam_gtest.yaml blas3/gemm
 
 set( HIPBLAS_EX_YAML_DATA blas_ex/axpy_ex_gtest.yaml blas_ex/dot_ex_gtest.yaml blas_ex/nrm2_ex_gtest.yaml
                           blas_ex/rot_ex_gtest.yaml blas_ex/scal_ex_gtest.yaml blas_ex/gemm_ex_gtest.yaml 
-                          blas_ex/syrk_ex_gtest.yaml blas_ex/trsm_ex_gtest.yaml )
+                          blas_ex/syrk_ex_gtest.yaml blas_ex/herk_ex_gtest.yaml blas_ex/trsm_ex_gtest.yaml )
 
 if( BUILD_WITH_SOLVER )
   set( HIPBLAS_SOLVER_YAML_DATA solver/gels_gtest.yaml solver/geqrf_gtest.yaml solver/getrf_gtest.yaml solver/getri_gtest.yaml solver/getrs_gtest.yaml )

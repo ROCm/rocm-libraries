@@ -1122,7 +1122,10 @@ void cast_to_buffer(
         U*       dst    = A_u + offset;
         for(size_t j = 0; j < rowsA; j++)
         {
-            *dst++ = static_cast<U>(*src++);
+            if constexpr(std::is_same_v<T, rocblas_bfloat16> && std::is_same_v<U, float>)
+                *dst++ = float(*src++);
+            else
+                *dst++ = static_cast<U>(*src++);
         }
     }
 }
@@ -1137,7 +1140,12 @@ void cast_from_buffer(int64_t m, int64_t n, int64_t ldc, const host_vector<T>& C
     {
         size_t offset = i * ldc;
         for(size_t j = 0; j < m; j++)
-            C_u[j + offset] = static_cast<U>(C_t[j + offset]);
+        {
+            if constexpr(std::is_same_v<U, rocblas_bfloat16> && std::is_same_v<T, float>)
+                C_u[j + offset] = rocblas_bfloat16(C_t[j + offset]);
+            else
+                C_u[j + offset] = static_cast<U>(C_t[j + offset]);
+        }
     }
 }
 
@@ -2304,7 +2312,7 @@ void ref_syrk_ex(rocblas_fill      uplo,
 
 INSTANTIATE_SYRK_EX_TEMPLATE(rocblas_half, rocblas_half, float)
 INSTANTIATE_SYRK_EX_TEMPLATE(rocblas_half, float, float)
-// for reference bfloat16 we just keep output always higher precision
+INSTANTIATE_SYRK_EX_TEMPLATE(rocblas_bfloat16, rocblas_bfloat16, float)
 INSTANTIATE_SYRK_EX_TEMPLATE(rocblas_bfloat16, float, float)
 INSTANTIATE_SYRK_EX_TEMPLATE(float, float, double)
 INSTANTIATE_SYRK_EX_TEMPLATE(float, double, double)

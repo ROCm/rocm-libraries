@@ -3,7 +3,7 @@
 
 include(GoogleTest)
 
-if(HIP_DNN_SKIP_TESTS)
+if(HIPDNN_SKIP_TESTS)
     message(STATUS "Skipping Plugin SDK tests")
     return()
 endif()
@@ -18,6 +18,7 @@ add_executable(hipdnn_plugin_sdk_tests
     TestPluginException.cpp
     TestPluginHelpers.cpp
     TestPluginLastErrorManager.cpp
+    TestKnobFactory.cpp
 )
 
 target_compile_options(hipdnn_plugin_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

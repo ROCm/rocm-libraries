@@ -399,10 +399,14 @@ TEST_F(TestGraph, BatchnormInferenceNodeVarianceExtCreation)
     scale->set_dim(derivedDims).set_stride(derivedStrides);
     bias->set_dim(derivedDims).set_stride(derivedStrides);
 
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_name("Epsilon").set_value(1e-5);
+
     BatchnormInferenceAttributesVarianceExt attributes;
     attributes.set_name("BatchnormNodeVariance");
 
-    auto y = graph.batchnorm_inference_variance_ext(x, mean, variance, scale, bias, attributes);
+    auto y = graph.batchnorm_inference_variance_ext(
+        x, mean, variance, scale, bias, epsilon, attributes);
 
     EXPECT_EQ(y->get_name(), "BatchnormNodeVariance::Y");
     EXPECT_TRUE(y->get_is_virtual());
@@ -702,11 +706,14 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceVarianceExtGraph)
         .set_dim(derivedDims)
         .set_stride(derivedStrides);
 
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(6).set_name("Epsilon").set_value(1e-5);
+
     BatchnormInferenceAttributesVarianceExt batchnormAttributes;
     batchnormAttributes.set_name("BatchnormNodeVariance");
 
     auto y = graph.batchnorm_inference_variance_ext(
-        x, mean, variance, scale, bias, batchnormAttributes);
+        x, mean, variance, scale, bias, epsilon, batchnormAttributes);
 
     auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
@@ -722,7 +729,7 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceVarianceExtGraph)
     EXPECT_EQ(deserializedGraph->intermediate_data_type,
               hipdnn_data_sdk::data_objects::DataType::HALF);
     EXPECT_EQ(deserializedGraph->io_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
-    EXPECT_EQ(deserializedGraph->tensors.size(), 6);
+    EXPECT_EQ(deserializedGraph->tensors.size(), 7);
     EXPECT_EQ(deserializedGraph->nodes.size(), 1);
 
     std::unordered_map<int64_t, hipdnn_data_sdk::data_objects::TensorAttributesT> tensorLookup;
@@ -736,6 +743,7 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceVarianceExtGraph)
     validateTensor(*variance, tensorLookup[variance->get_uid()]);
     validateTensor(*scale, tensorLookup[scale->get_uid()]);
     validateTensor(*bias, tensorLookup[bias->get_uid()]);
+    validateTensor(*epsilon, tensorLookup[epsilon->get_uid()]);
     validateTensor(*y, tensorLookup[y->get_uid()]);
 
     EXPECT_EQ(deserializedGraph->nodes[0]->name, "BatchnormNodeVariance");
@@ -749,6 +757,7 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceVarianceExtGraph)
     EXPECT_EQ(deserializedBatchnormAttributes->variance_tensor_uid, variance->get_uid());
     EXPECT_EQ(deserializedBatchnormAttributes->scale_tensor_uid, scale->get_uid());
     EXPECT_EQ(deserializedBatchnormAttributes->bias_tensor_uid, bias->get_uid());
+    EXPECT_EQ(deserializedBatchnormAttributes->epsilon_tensor_uid, epsilon->get_uid());
     EXPECT_EQ(deserializedBatchnormAttributes->y_tensor_uid, y->get_uid());
 }
 
@@ -1352,6 +1361,89 @@ TEST_F(TestGraph, BuildAndSerializeConvolutionFwdGraph)
     EXPECT_EQ(deserializedConvolutionAttributes->post_padding, std::vector<int64_t>({1, 1}));
     EXPECT_EQ(deserializedConvolutionAttributes->stride, std::vector<int64_t>({1, 1}));
     EXPECT_EQ(deserializedConvolutionAttributes->dilation, std::vector<int64_t>({1, 1}));
+}
+
+TEST_F(TestGraph, MatmulNodeCreation)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto a = std::make_shared<TensorAttributes>();
+    a->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
+
+    auto b = std::make_shared<TensorAttributes>();
+    b->set_dim({8, 5}).set_stride({5, 1}).set_data_type(DataType::FLOAT);
+
+    MatmulAttributes attributes;
+    attributes.set_name("MatmulNode");
+
+    auto c = graph.matmul(a, b, attributes);
+
+    EXPECT_EQ(c->get_name(), "MatmulNode::C");
+    EXPECT_TRUE(c->get_is_virtual());
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, BuildAndSerializeMatmulGraph)
+{
+    Graph graph;
+
+    graph.set_name("SerializedMatmulGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto a = std::make_shared<TensorAttributes>();
+    a->set_uid(1).set_name("A").set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
+
+    auto b = std::make_shared<TensorAttributes>();
+    b->set_uid(2).set_name("B").set_dim({8, 5}).set_stride({5, 1}).set_data_type(DataType::FLOAT);
+
+    MatmulAttributes attributes;
+    attributes.set_name("MatmulNode");
+
+    auto c = graph.matmul(a, b, attributes);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+
+    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> deserializedGraph;
+    expectGraphSerializedToBackendDescriptor(deserializedGraph);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
+
+    EXPECT_EQ(deserializedGraph->name, "SerializedMatmulGraph");
+    EXPECT_EQ(deserializedGraph->compute_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->intermediate_data_type,
+              hipdnn_data_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(deserializedGraph->io_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->tensors.size(), 3);
+    EXPECT_EQ(deserializedGraph->nodes.size(), 1);
+
+    std::unordered_map<int64_t, hipdnn_data_sdk::data_objects::TensorAttributesT> tensorLookup;
+    for(auto& tensor : deserializedGraph->tensors)
+    {
+        tensorLookup[tensor->uid] = *tensor;
+    }
+
+    validateTensor(*a, tensorLookup[a->get_uid()]);
+    validateTensor(*b, tensorLookup[b->get_uid()]);
+    validateTensor(*c, tensorLookup[c->get_uid()]);
+
+    EXPECT_EQ(deserializedGraph->nodes[0]->name, "MatmulNode");
+    EXPECT_EQ(deserializedGraph->nodes[0]->attributes.type,
+              hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes);
+    auto deserializedMatmulAttributes
+        = deserializedGraph->nodes[0]->attributes.AsMatmulAttributes();
+    ASSERT_NE(deserializedMatmulAttributes, nullptr);
+    EXPECT_EQ(deserializedMatmulAttributes->a_tensor_uid, a->get_uid());
+    EXPECT_EQ(deserializedMatmulAttributes->b_tensor_uid, b->get_uid());
+    EXPECT_EQ(deserializedMatmulAttributes->c_tensor_uid, c->get_uid());
 }
 
 TEST_F(TestGraph, BuildAndSerializeConvolutionDgradGraph)
@@ -3297,4 +3389,506 @@ TEST_F(TestGraph, BuildOperationGraphPopulatesOnlyMissingUids)
     EXPECT_NE(biasUid, 300);
     EXPECT_NE(biasUid, 400);
     EXPECT_NE(biasUid, 500);
+}
+
+TEST_F(TestGraph, GetTensorsByUidReturnsMap)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(42)
+        .set_name("X")
+        .set_dim({1, 2, 3, 4})
+        .set_stride({24, 12, 4, 1})
+        .set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_name("PointwiseNode");
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    auto y = graph.pointwise(x, pwAttrs);
+    y->set_uid(99);
+
+    // Get tensor map by UID
+    auto tensorsByUid = graph.getTensorsByUid();
+
+    // Map contains expected tensors
+    EXPECT_EQ(tensorsByUid.size(), 2);
+
+    auto itX = tensorsByUid.find(42);
+    ASSERT_NE(itX, tensorsByUid.end());
+    EXPECT_EQ(itX->second->get_uid(), 42);
+    EXPECT_EQ(itX->second->get_name(), "X");
+    EXPECT_EQ(itX->second, x);
+
+    auto itY = tensorsByUid.find(99);
+    ASSERT_NE(itY, tensorsByUid.end());
+    EXPECT_EQ(itY->second->get_uid(), 99);
+    EXPECT_EQ(itY->second, y);
+
+    // Non-existent UID not found in map
+    auto notFound = tensorsByUid.find(999);
+    EXPECT_EQ(notFound, tensorsByUid.end());
+}
+
+TEST_F(TestGraph, GetTensorsByNameReturnsMap)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("InputTensor")
+        .set_dim({1, 2, 3, 4})
+        .set_stride({24, 12, 4, 1})
+        .set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_name("PointwiseNode");
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    auto y = graph.pointwise(x, pwAttrs);
+
+    // Get tensor map by name
+    auto tensorsByName = graph.getTensorsByName();
+
+    // Map contains expected tensors
+    EXPECT_EQ(tensorsByName.size(), 2);
+
+    auto itX = tensorsByName.find("InputTensor");
+    ASSERT_NE(itX, tensorsByName.end());
+    EXPECT_EQ(itX->second->get_name(), "InputTensor");
+    EXPECT_EQ(itX->second, x);
+
+    // Output tensor has auto-generated name
+    auto itY = tensorsByName.find("PointwiseNode::OUT_0");
+    ASSERT_NE(itY, tensorsByName.end());
+    EXPECT_EQ(itY->second, y);
+
+    // Non-existent name not found in map
+    auto notFound = tensorsByName.find("NonExistentTensor");
+    EXPECT_EQ(notFound, tensorsByName.end());
+}
+
+TEST_F(TestGraph, GetTensorsByUidAndNameIncludePeerStatTensors)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("InputX")
+        .set_dim({1, 64, 32, 32})
+        .set_stride({65536, 1024, 32, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(2)
+        .set_name("ScaleTensor")
+        .set_dim({64})
+        .set_stride({1})
+        .set_data_type(DataType::FLOAT);
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(3)
+        .set_name("BiasTensor")
+        .set_dim({64})
+        .set_stride({1})
+        .set_data_type(DataType::FLOAT);
+
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_uid(4);
+
+    // Create peer stat tensors (these go in the separate peer_stats vector, not outputs)
+    auto peerStat1 = std::make_shared<TensorAttributes>();
+    peerStat1->set_uid(20).set_name("PeerStat1");
+
+    auto peerStat2 = std::make_shared<TensorAttributes>();
+    peerStat2->set_uid(21).set_name("PeerStat2");
+
+    BatchnormAttributes bnAttrs;
+    bnAttrs.set_name("BN");
+    bnAttrs.set_epsilon(epsilon);
+    bnAttrs.set_peer_stats({peerStat1, peerStat2}); // Set peer stats separately
+
+    auto [y, savedMean, savedInvVariance, nextRunningMean, nextRunningVariance]
+        = graph.batchnorm(x, scale, bias, bnAttrs);
+
+    // Assign UIDs to output tensors
+    y->set_uid(10);
+    savedMean->set_uid(11);
+    savedInvVariance->set_uid(12);
+
+    // Test getTensorsByUid()
+    auto tensorsByUid = graph.getTensorsByUid();
+
+    // Should have:
+    // Inputs: x(1), scale(2), bias(3), epsilon(4) = 4
+    // Outputs: y(10), savedMean(11), savedInvVariance(12) = 3
+    // Peer stats: peerStat1(20), peerStat2(21) = 2
+    // Total = 9
+    EXPECT_EQ(tensorsByUid.size(), 9);
+
+    // Verify input tensors are present by UID
+    EXPECT_NE(tensorsByUid.find(1), tensorsByUid.end()); // x
+    EXPECT_NE(tensorsByUid.find(2), tensorsByUid.end()); // scale
+    EXPECT_NE(tensorsByUid.find(3), tensorsByUid.end()); // bias
+    EXPECT_NE(tensorsByUid.find(4), tensorsByUid.end()); // epsilon
+
+    // Verify output tensors are present by UID
+    EXPECT_NE(tensorsByUid.find(10), tensorsByUid.end()); // y
+    EXPECT_NE(tensorsByUid.find(11), tensorsByUid.end()); // savedMean
+    EXPECT_NE(tensorsByUid.find(12), tensorsByUid.end()); // savedInvVariance
+
+    // Verify peer stat tensors are present by UID (tests the specialized gather override)
+    EXPECT_NE(tensorsByUid.find(20), tensorsByUid.end()); // peerStat1
+    EXPECT_NE(tensorsByUid.find(21), tensorsByUid.end()); // peerStat2
+
+    // Verify the pointers match
+    EXPECT_EQ(tensorsByUid[1], x);
+    EXPECT_EQ(tensorsByUid[10], y);
+    EXPECT_EQ(tensorsByUid[20], peerStat1);
+    EXPECT_EQ(tensorsByUid[21], peerStat2);
+
+    // Test getTensorsByName()
+    auto tensorsByName = graph.getTensorsByName();
+
+    // Should have all named tensors:
+    // Inputs with names: InputX, ScaleTensor, BiasTensor (3) - epsilon has no name
+    // Outputs with names: BN::Y, BN::MEAN, BN::INV_VARIANCE (3)
+    // Peer stats with names: PeerStat1, PeerStat2 (2)
+    // Total = 8
+    EXPECT_EQ(tensorsByName.size(), 8);
+
+    // Verify input tensors are present by name
+    EXPECT_NE(tensorsByName.find("InputX"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("ScaleTensor"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("BiasTensor"), tensorsByName.end());
+
+    // Verify output tensors are present by name
+    EXPECT_NE(tensorsByName.find("BN::Y"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("BN::MEAN"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("BN::INV_VARIANCE"), tensorsByName.end());
+
+    // Verify peer stat tensors are present by name (tests the specialized gather override)
+    EXPECT_NE(tensorsByName.find("PeerStat1"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("PeerStat2"), tensorsByName.end());
+
+    // Verify the pointers match
+    EXPECT_EQ(tensorsByName["InputX"], x);
+    EXPECT_EQ(tensorsByName["BN::Y"], y);
+    EXPECT_EQ(tensorsByName["PeerStat1"], peerStat1);
+    EXPECT_EQ(tensorsByName["PeerStat2"], peerStat2);
+}
+
+TEST_F(TestGraph, BuildMethodSucceedsWithValidGraph)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+
+    graph.set_name("BuildMethodTestGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    std::vector<int64_t> dims = {1, 2, 3, 4};
+    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1).set_name("X").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    mean->set_uid(2)
+        .set_name("Mean")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
+
+    auto invVariance = std::make_shared<TensorAttributes>();
+    invVariance->set_uid(3)
+        .set_name("InvVariance")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(4)
+        .set_name("Scale")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(5)
+        .set_name("Bias")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(derivedDims)
+        .set_stride(derivedStrides);
+
+    BatchnormInferenceAttributes batchnormAttributes;
+    batchnormAttributes.set_name("BatchnormNode");
+
+    graph.batchnorm_inference(x, mean, invVariance, scale, bias, batchnormAttributes);
+
+    // Mock build_operation_graph
+    auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillOnce([&graphDesc](hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+            *descriptor = graphDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(graphDesc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(graphDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Mock create_execution_plans
+    auto heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
+        .WillOnce(
+            [&heurDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = heurDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            heurDesc, HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(heurDesc, HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_HEUR_MODE, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(heurDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(heurDesc,
+                                    HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    0,
+                                    _,
+                                    nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    auto engineConfigDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2345);
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x3345);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
+        .WillOnce([&engineConfigDesc](hipdnnBackendDescriptorType_t,
+                                      hipdnnBackendDescriptor_t* descriptor) {
+            *descriptor = engineConfigDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineConfigDesc))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineConfigDesc,
+                                    HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    nullptr,
+                                    _))
+        .WillOnce([&engineDesc](hipdnnBackendDescriptor_t,
+                                hipdnnBackendAttributeName_t,
+                                hipdnnBackendAttributeType_t,
+                                int64_t,
+                                int64_t*,
+                                void* arrayOfElements) {
+            *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = engineDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t*,
+                     void* arrayOfElements) {
+            *static_cast<int64_t*>(arrayOfElements) = 10;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(heurDesc,
+                                    HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    _,
+                                    NotNull()))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* retrievedCount,
+                     void*) {
+            *retrievedCount = 1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
+        .WillOnce([&executionPlanDesc](hipdnnBackendDescriptorType_t,
+                                       hipdnnBackendDescriptor_t* descriptor) {
+            *descriptor = executionPlanDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Mock build_plans
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(executionPlanDesc,
+                                    HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(executionPlanDesc))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto result = graph.build(_handle);
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+}
+
+TEST_F(TestGraph, BuildMethodFailsWhenValidationFails)
+{
+    Graph graph;
+
+    // Create an invalid graph (compute type not set)
+    graph.set_name("TestGraph")
+        .set_compute_data_type(DataType::NOT_SET)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto in0 = std::make_shared<TensorAttributes>();
+    in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes attributes;
+    attributes.set_name("PointwiseNode");
+    attributes.set_mode(PointwiseMode::RELU_FWD);
+    graph.pointwise(in0, attributes);
+
+    auto result = graph.build(_handle);
+    EXPECT_FALSE(result.is_good());
+}
+
+TEST_F(TestGraph, SetPreferredEngineIdByName)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
+
+    // Set by name
+    graph.set_preferred_engine_id_ext(testEngineName);
+
+    // Verify it was converted to the correct ID
+    auto expectedId = hipdnn_data_sdk::utilities::engineNameToId(testEngineName);
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), expectedId);
+}
+
+TEST_F(TestGraph, SetPreferredEngineIdByEmptyStringClearsPreference)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
+
+    // First set a preference
+    graph.set_preferred_engine_id_ext(testEngineName);
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+
+    // Then clear it with empty string
+    graph.set_preferred_engine_id_ext("");
+
+    // Verify no preferred engine ID is set
+    EXPECT_FALSE(graph.get_preferred_engine_id_ext().has_value());
+}
+
+TEST_F(TestGraph, SetPreferredEngineIdByNameThenById)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
+
+    // Set by name first
+    graph.set_preferred_engine_id_ext(testEngineName);
+
+    // Then override with a different ID
+    int64_t overrideId = 999;
+    graph.set_preferred_engine_id_ext(std::optional<int64_t>(overrideId));
+
+    // Verify the ID overload took precedence
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), overrideId);
+}
+
+TEST_F(TestGraph, SetPreferredEngineIdByIdThenByName)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
+    auto expectedId = hipdnn_data_sdk::utilities::engineNameToId(testEngineName);
+
+    // Set by ID first
+    graph.set_preferred_engine_id_ext(std::optional<int64_t>(999));
+
+    // Then override with name
+    graph.set_preferred_engine_id_ext(testEngineName);
+
+    // Verify the name overload took precedence
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), expectedId);
+}
+
+TEST_F(TestGraph, MethodChaining)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_CHAINING";
+    auto expectedEngineId = hipdnn_data_sdk::utilities::engineNameToId(testEngineName);
+
+    // Test that all setters return reference to self for chaining
+    auto& ref1 = graph.set_name("ChainedGraph");
+    auto& ref2 = ref1.set_compute_data_type(DataType::FLOAT);
+    auto& ref3 = ref2.set_intermediate_data_type(DataType::HALF);
+    auto& ref4 = ref3.set_io_data_type(DataType::BFLOAT16);
+    auto& ref5 = ref4.set_preferred_engine_id_ext(12345);
+
+    // All references should point to the same object
+    EXPECT_EQ(&graph, &ref1);
+    EXPECT_EQ(&graph, &ref2);
+    EXPECT_EQ(&graph, &ref3);
+    EXPECT_EQ(&graph, &ref4);
+    EXPECT_EQ(&graph, &ref5);
+
+    // Verify all values were set correctly
+    EXPECT_EQ(graph.get_name(), "ChainedGraph");
+    EXPECT_EQ(graph.get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(graph.get_intermediate_data_type(), DataType::HALF);
+    EXPECT_EQ(graph.get_io_data_type(), DataType::BFLOAT16);
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), 12345);
+
+    // Test chaining with string overload
+    auto& ref6 = graph.set_preferred_engine_id_ext(testEngineName);
+    EXPECT_EQ(&graph, &ref6);
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), expectedEngineId);
 }

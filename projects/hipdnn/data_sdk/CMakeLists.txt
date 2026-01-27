@@ -12,6 +12,7 @@ hipdnn_add_dependency(spdlog VERSION ${HIPDNN_SPDLOG_VERSION})
 hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 
 find_package(fmt ${HIPDNN_FMTLIB_VERSION} QUIET)
+find_package(hip REQUIRED)
 
 # For dependencies we are going to check if they weren't imported, and then install it along with
 # the SDK headers to allow it to work for local builds that want to install. If the dependecy is
@@ -100,6 +101,9 @@ hipdnn_add_dependency_includes(hipdnn_data_sdk flatbuffers::flatbuffers)
 hipdnn_add_dependency_includes(hipdnn_data_sdk spdlog::spdlog_header_only)
 hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
 
+target_link_libraries(hipdnn_data_sdk INTERFACE hip::host)
+target_compile_definitions(hipdnn_data_sdk INTERFACE __HIP_PLATFORM_AMD__)
+
 if (fmt_FOUND)
     message(STATUS "Found fmt: using system fmt")
     hipdnn_add_dependency_includes(hipdnn_data_sdk fmt::fmt COMPILE_DEFINITIONS SPDLOG_FMT_EXTERNAL)
@@ -114,7 +118,7 @@ target_include_directories(
 )
 
 # Automatically generate the flatbuffer headers from the schema files during build
-if(HIP_DNN_GENERATE_SDK_HEADERS)
+if(HIPDNN_GENERATE_SDK_HEADERS)
     set(SCHEMA_FILES
         schemas/batchnorm_attributes.fbs
         schemas/batchnorm_backward_attributes.fbs
@@ -128,6 +132,7 @@ if(HIP_DNN_GENERATE_SDK_HEADERS)
         schemas/engine_config.fbs
         schemas/engine_details.fbs
         schemas/graph.fbs
+        schemas/knob_value.fbs
         schemas/matmul_attributes.fbs
         schemas/pointwise_attributes.fbs
         schemas/tensor_attributes.fbs
@@ -159,8 +164,8 @@ if(HIP_DNN_GENERATE_SDK_HEADERS)
     add_dependencies(hipdnn_data_sdk generate_hipdnn_data_sdk_headers)
 endif()
 
-# This is required to use hip/hip_fp16.h and hip/hip_bfloat16.h in any code that includes the sdk By
-# doing this, we don't need to link to hip::device
+# __HIPCC__ is required to use hip/hip_fp16.h and hip/hip_bfloat16.h
+# This allows non-hipcc compilers to use these HIP type headers
 target_compile_definitions(hipdnn_data_sdk INTERFACE __HIPCC__)
 
 export(TARGETS hipdnn_data_sdk ${_hipdnn_data_sdk_local_export_targets}
@@ -218,45 +223,6 @@ endif()
 
 install(FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_data_sdkConfig.cmake"
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk COMPONENT Development
-)
-
-# =============================================================================
-# Backwards compatibility: Create hipdnn_sdk target and cmake config files
-# This allows the build system to still detect the old hipdnn_sdk target name
-# =============================================================================
-
-# Create hipdnn_sdk as a real INTERFACE library that links to hipdnn_data_sdk
-add_library(hipdnn_sdk INTERFACE)
-target_link_libraries(hipdnn_sdk INTERFACE hipdnn_data_sdk)
-
-# Set up old-style variables for backwards compatibility
-set(HIP_DNN_SDK_INSTALL_INCLUDE_DIR "${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}")
-set(HIP_DNN_SDK_INCLUDE_DIR "${HIP_DNN_DATA_SDK_INCLUDE_DIR}")
-
-# Export hipdnn_sdk target
-export(TARGETS hipdnn_sdk
-       FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk/hipdnn_sdkTargets.cmake"
-)
-
-# Install hipdnn_sdk target
-install(TARGETS hipdnn_sdk EXPORT hipdnn_sdk_targets COMPONENT Development)
-
-install(EXPORT hipdnn_sdk_targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk
-        FILE hipdnn_sdkTargets.cmake COMPONENT Development
-)
-
-# Generate old-style config file
-configure_package_config_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_sdkConfig.cmake.in"
-    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk/hipdnn_sdkConfig.cmake"
-    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk
-    PATH_VARS HIPDNN_PLUGIN_ENGINE_SUBDIR HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR
-              HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR
-)
-
-# Install old-style config files
-install(FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk/hipdnn_sdkConfig.cmake"
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_sdk COMPONENT Development
 )
 
 add_subdirectory(tests)

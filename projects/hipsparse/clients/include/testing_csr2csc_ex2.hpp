@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_graph.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -51,8 +52,7 @@ void testing_csr2csc_ex2_bad_arg(const Arguments& argus)
     int    safe_size   = 100;
     size_t buffer_size = 0;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto csr_row_ptr_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
@@ -286,8 +286,7 @@ void testing_csr2csc_ex2(Arguments argus)
 
     hipDataType dataType = getDataType<T>();
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     srand(12345ULL);
 
@@ -298,11 +297,8 @@ void testing_csr2csc_ex2(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz = 0;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base));
 
     // Allocate memory on the device
     auto dcsr_row_ptr_managed
@@ -334,21 +330,21 @@ void testing_csr2csc_ex2(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(dcsr_val, hcsr_val.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
 
     size_t bufferSize;
-    CHECK_HIPSPARSE_ERROR(hipsparseCsr2cscEx2_bufferSize(handle,
-                                                         m,
-                                                         n,
-                                                         nnz,
-                                                         dcsr_val,
-                                                         dcsr_row_ptr,
-                                                         dcsr_col_ind,
-                                                         dcsc_val,
-                                                         dcsc_col_ptr,
-                                                         dcsc_row_ind,
-                                                         dataType,
-                                                         action,
-                                                         idx_base,
-                                                         alg,
-                                                         &bufferSize));
+    CHECK_HIPSPARSE_ERROR(testing::hipsparseCsr2cscEx2_bufferSize(handle,
+                                                                  m,
+                                                                  n,
+                                                                  nnz,
+                                                                  dcsr_val,
+                                                                  dcsr_row_ptr,
+                                                                  dcsr_col_ind,
+                                                                  dcsc_val,
+                                                                  dcsc_col_ptr,
+                                                                  dcsc_row_ind,
+                                                                  dataType,
+                                                                  action,
+                                                                  idx_base,
+                                                                  alg,
+                                                                  &bufferSize));
 
     // Allocate buffer on the device
     auto dbuffer_managed
@@ -358,21 +354,21 @@ void testing_csr2csc_ex2(Arguments argus)
 
     if(argus.unit_check)
     {
-        CHECK_HIPSPARSE_ERROR(hipsparseCsr2cscEx2(handle,
-                                                  m,
-                                                  n,
-                                                  nnz,
-                                                  dcsr_val,
-                                                  dcsr_row_ptr,
-                                                  dcsr_col_ind,
-                                                  dcsc_val,
-                                                  dcsc_col_ptr,
-                                                  dcsc_row_ind,
-                                                  dataType,
-                                                  action,
-                                                  idx_base,
-                                                  alg,
-                                                  dbuffer));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseCsr2cscEx2(handle,
+                                                           m,
+                                                           n,
+                                                           nnz,
+                                                           dcsr_val,
+                                                           dcsr_row_ptr,
+                                                           dcsr_col_ind,
+                                                           dcsc_val,
+                                                           dcsc_col_ptr,
+                                                           dcsc_row_ind,
+                                                           dataType,
+                                                           action,
+                                                           idx_base,
+                                                           alg,
+                                                           dbuffer));
 
         // Copy output from device to host
         std::vector<int> hcsc_row_ind(nnz);
@@ -421,21 +417,21 @@ void testing_csr2csc_ex2(Arguments argus)
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseCsr2cscEx2(handle,
-                                                      m,
-                                                      n,
-                                                      nnz,
-                                                      dcsr_val,
-                                                      dcsr_row_ptr,
-                                                      dcsr_col_ind,
-                                                      dcsc_val,
-                                                      dcsc_col_ptr,
-                                                      dcsc_row_ind,
-                                                      dataType,
-                                                      action,
-                                                      idx_base,
-                                                      alg,
-                                                      dbuffer));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseCsr2cscEx2(handle,
+                                                               m,
+                                                               n,
+                                                               nnz,
+                                                               dcsr_val,
+                                                               dcsr_row_ptr,
+                                                               dcsr_col_ind,
+                                                               dcsc_val,
+                                                               dcsc_col_ptr,
+                                                               dcsc_row_ind,
+                                                               dataType,
+                                                               action,
+                                                               idx_base,
+                                                               alg,
+                                                               dbuffer));
         }
 
         double gpu_time_used = get_time_us();
@@ -443,21 +439,21 @@ void testing_csr2csc_ex2(Arguments argus)
         // Performance run
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseCsr2cscEx2(handle,
-                                                      m,
-                                                      n,
-                                                      nnz,
-                                                      dcsr_val,
-                                                      dcsr_row_ptr,
-                                                      dcsr_col_ind,
-                                                      dcsc_val,
-                                                      dcsc_col_ptr,
-                                                      dcsc_row_ind,
-                                                      dataType,
-                                                      action,
-                                                      idx_base,
-                                                      alg,
-                                                      dbuffer));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseCsr2cscEx2(handle,
+                                                               m,
+                                                               n,
+                                                               nnz,
+                                                               dcsr_val,
+                                                               dcsr_row_ptr,
+                                                               dcsr_col_ind,
+                                                               dcsc_val,
+                                                               dcsc_col_ptr,
+                                                               dcsc_row_ind,
+                                                               dataType,
+                                                               action,
+                                                               idx_base,
+                                                               alg,
+                                                               dbuffer));
         }
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;

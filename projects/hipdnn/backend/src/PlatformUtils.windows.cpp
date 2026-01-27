@@ -86,22 +86,22 @@ std::string getSystemInfo()
     versionInfo.dwOSVersionInfoSize = sizeof(versionInfo);
 
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-    if(ntdll)
+    if(ntdll != nullptr)
     {
-        auto RtlGetVersion
+        auto rtlGetVersion
             = reinterpret_cast<RtlGetVersionPtr>(GetProcAddress(ntdll, "RtlGetVersion"));
-        if(RtlGetVersion)
+        if(rtlGetVersion != nullptr)
         {
-            RtlGetVersion(&versionInfo);
+            rtlGetVersion(&versionInfo);
         }
     }
 
     // Get computer name
-    char computerName[MAX_COMPUTERNAME_LENGTH + 1];
-    DWORD size = sizeof(computerName);
-    if(!GetComputerNameA(computerName, &size))
+    std::array<char, MAX_COMPUTERNAME_LENGTH + 1> computerName;
+    auto size = static_cast<DWORD>(computerName.size());
+    if(GetComputerNameA(computerName.data(), &size) == FALSE)
     {
-        strcpy_s(computerName, "Unknown");
+        strcpy_s(computerName.data(), computerName.size(), "Unknown");
     }
 
     // Get system architecture
@@ -126,7 +126,7 @@ std::string getSystemInfo()
 
     return fmt::format("System Information: {{System Name: Windows, Node Name: {}, Release: {}.{}, "
                        "Version: {}, Machine: {}}}",
-                       computerName,
+                       computerName.data(),
                        versionInfo.dwMajorVersion,
                        versionInfo.dwMinorVersion,
                        versionInfo.dwBuildNumber,

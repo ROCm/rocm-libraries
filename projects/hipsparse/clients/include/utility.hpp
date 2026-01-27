@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -161,8 +161,8 @@ inline std::string get_filename(const std::string& matrix_filename)
 // BSR indexing macros
 #define BSR_IND(j, bi, bj, dir) \
     ((dir == HIPSPARSE_DIRECTION_ROW) ? BSR_IND_R(j, bi, bj) : BSR_IND_C(j, bi, bj))
-#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
-#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
+#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) * bsr_dim + (bj))
+#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj) * bsr_dim)
 
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
 inline const char* hipsparseStatusToString(hipsparseStatus_t status)
@@ -227,6 +227,24 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
     return "<undefined HIPSPARSE_STATUS value>";
 }
 #endif
+
+// CHECK_GENERATE_MATRIX_ERROR
+#ifdef GOOGLE_TEST
+#define CHECK_GENERATE_MATRIX_ERROR2(ERROR) ASSERT_EQ(ERROR, true)
+#else
+#define CHECK_GENERATE_MATRIX_ERROR2(ERROR)                                                        \
+    do                                                                                             \
+    {                                                                                              \
+        auto error = ERROR;                                                                        \
+        if(error != true)                                                                          \
+        {                                                                                          \
+            fprintf(                                                                               \
+                stderr, "Error encountered generating matrix data (%s:%d)\n", __FILE__, __LINE__); \
+            exit(EXIT_FAILURE);                                                                    \
+        }                                                                                          \
+    } while(0)
+#endif
+#define CHECK_GENERATE_MATRIX_ERROR(ERROR) CHECK_GENERATE_MATRIX_ERROR2(ERROR)
 
 // CHECK_HIP_ERROR
 #ifdef GOOGLE_TEST
@@ -1245,6 +1263,11 @@ bool generate_csr_matrix(const std::string    filename,
             {
                 return true;
             }
+            else
+            {
+                fprintf(stderr, "Cannot open [read] %s\ncol", full_filename_path.c_str());
+                return false;
+            }
         }
         else if(extension == "mtx")
         {
@@ -1278,6 +1301,11 @@ bool generate_csr_matrix(const std::string    filename,
 
                     return true;
                 }
+            }
+            else
+            {
+                fprintf(stderr, "Cannot open [read] %s\ncol", full_filename_path.c_str());
+                return false;
             }
         }
     }
@@ -3757,14 +3785,14 @@ void host_coomm_batched(I                    M,
 }
 
 template <typename T>
-int csrilu0(int                  m,
-            const int*           ptr,
-            const int*           col,
-            T*                   val,
-            hipsparseIndexBase_t idx_base,
-            bool                 boost,
-            double               boost_tol,
-            T                    boost_val)
+int host_csrilu0(int                  m,
+                 const int*           ptr,
+                 const int*           col,
+                 T*                   val,
+                 hipsparseIndexBase_t idx_base,
+                 bool                 boost,
+                 double               boost_tol,
+                 T                    boost_val)
 {
     // pointer of upper part of each row
     std::vector<int> diag_offset(m);
@@ -3842,9 +3870,31 @@ int csrilu0(int                  m,
             // Structural zero digonal
             return ai + idx_base;
         }
+        else
+        {
+            // set diagonal pointer to diagonal element
+            diag_offset[ai] = j;
 
-        // set diagonal pointer to diagonal element
-        diag_offset[ai] = j;
+            if(boost)
+            {
+                if(testing_abs(val[j]) <= boost_tol)
+                {
+                    val[j] = boost_val;
+                }
+            }
+            else
+            {
+                const bool is_diag = (j >= 0) && (col[j] == (ai + idx_base));
+
+                const bool is_zero_diag = is_diag && (val[j] == make_DataType<T>(0));
+
+                // check for zero diagonal
+                if(is_zero_diag)
+                {
+                    return ai + idx_base;
+                }
+            }
+        }
 
         // clear nnz entries
         for(j = row_start; j < row_end; ++j)
@@ -7293,15 +7343,13 @@ void host_sddmm_coo(I                    C_m,
         const I r = coo_row_ind[i] - idx_base;
         const I c = coo_col_ind[i] - idx_base;
 
-        const T* Aptr
-            = (orderA == HIPSPARSE_ORDER_COL)
-                  ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[r] : &A[lda * r])
-                  : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[lda * r] : &A[r]);
+        const T* Aptr = (orderA == HIPSPARSE_ORDER_COL)
+                            ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[r] : &A[lda * r])
+                            : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[lda * r] : &A[r]);
 
-        const T* Bptr
-            = (orderB == HIPSPARSE_ORDER_COL)
-                  ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[ldb * c] : &B[c])
-                  : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[c] : &B[ldb * c]);
+        const T* Bptr = (orderB == HIPSPARSE_ORDER_COL)
+                            ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[ldb * c] : &B[c])
+                            : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[c] : &B[ldb * c]);
 
         T sum = static_cast<T>(0);
         for(I j = 0; j < k; ++j)
@@ -7345,15 +7393,13 @@ void host_sddmm_coo_aos(I                    C_m,
         const I r = coo_ind[2 * i] - idx_base;
         const I c = coo_ind[2 * i + 1] - idx_base;
 
-        const T* Aptr
-            = (orderA == HIPSPARSE_ORDER_COL)
-                  ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[r] : &A[lda * r])
-                  : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[lda * r] : &A[r]);
+        const T* Aptr = (orderA == HIPSPARSE_ORDER_COL)
+                            ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[r] : &A[lda * r])
+                            : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[lda * r] : &A[r]);
 
-        const T* Bptr
-            = (orderB == HIPSPARSE_ORDER_COL)
-                  ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[ldb * c] : &B[c])
-                  : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[c] : &B[ldb * c]);
+        const T* Bptr = (orderB == HIPSPARSE_ORDER_COL)
+                            ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[ldb * c] : &B[c])
+                            : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[c] : &B[ldb * c]);
 
         T sum = static_cast<T>(0);
         for(I j = 0; j < k; ++j)
@@ -7390,12 +7436,7 @@ void host_axpby(I                    size,
 /* ============================================================================================ */
 /*! \brief  Host axpyi (y = y + alpha * x for sparse vectors) */
 template <typename I, typename T>
-void host_axpyi(I                    nnz,
-                T                    alpha,
-                const T*             x_val,
-                const I*             x_ind,
-                T*                   y,
-                hipsparseIndexBase_t idx_base)
+void host_axpyi(I nnz, T alpha, const T* x_val, const I* x_ind, T* y, hipsparseIndexBase_t idx_base)
 {
     for(I i = 0; i < nnz; ++i)
     {
@@ -7406,12 +7447,8 @@ void host_axpyi(I                    nnz,
 /* ============================================================================================ */
 /*! \brief  Host doti (dot product of sparse and dense vectors) */
 template <typename I, typename T>
-void host_doti(I                    nnz,
-               const T*             x_val,
-               const I*             x_ind,
-               const T*             y,
-               T*                   result,
-               hipsparseIndexBase_t idx_base)
+void host_doti(
+    I nnz, const T* x_val, const I* x_ind, const T* y, T* result, hipsparseIndexBase_t idx_base)
 {
     *result = make_DataType<T>(0.0);
     for(I i = 0; i < nnz; ++i)
@@ -7423,12 +7460,8 @@ void host_doti(I                    nnz,
 /* ============================================================================================ */
 /*! \brief  Host dotci (conjugate dot product of sparse and dense vectors) */
 template <typename I, typename T>
-void host_dotci(I                    nnz,
-                const T*             x_val,
-                const I*             x_ind,
-                const T*             y,
-                T*                   result,
-                hipsparseIndexBase_t idx_base)
+void host_dotci(
+    I nnz, const T* x_val, const I* x_ind, const T* y, T* result, hipsparseIndexBase_t idx_base)
 {
     *result = make_DataType<T>(0.0);
     for(I i = 0; i < nnz; ++i)
@@ -7440,11 +7473,7 @@ void host_dotci(I                    nnz,
 /* ============================================================================================ */
 /*! \brief  Host gthr (gather: x_val[i] = y[x_ind[i]]) */
 template <typename I, typename T>
-void host_gthr(I                    nnz,
-               const T*             y,
-               T*                   x_val,
-               const I*             x_ind,
-               hipsparseIndexBase_t idx_base)
+void host_gthr(I nnz, const T* y, T* x_val, const I* x_ind, hipsparseIndexBase_t idx_base)
 {
     for(I i = 0; i < nnz; ++i)
     {
@@ -7455,11 +7484,7 @@ void host_gthr(I                    nnz,
 /* ============================================================================================ */
 /*! \brief  Host gthrz (gather and zero: x_val[i] = y[x_ind[i]], y[x_ind[i]] = 0) */
 template <typename I, typename T>
-void host_gthrz(I                    nnz,
-                T*                   y,
-                T*                   x_val,
-                const I*             x_ind,
-                hipsparseIndexBase_t idx_base)
+void host_gthrz(I nnz, T* y, T* x_val, const I* x_ind, hipsparseIndexBase_t idx_base)
 {
     for(I i = 0; i < nnz; ++i)
     {
@@ -7471,11 +7496,7 @@ void host_gthrz(I                    nnz,
 /* ============================================================================================ */
 /*! \brief  Host sctr (scatter: y[x_ind[i]] = x_val[i]) */
 template <typename I, typename T>
-void host_sctr(I                    nnz,
-               const T*             x_val,
-               const I*             x_ind,
-               T*                   y,
-               hipsparseIndexBase_t idx_base)
+void host_sctr(I nnz, const T* x_val, const I* x_ind, T* y, hipsparseIndexBase_t idx_base)
 {
     for(I i = 0; i < nnz; ++i)
     {
@@ -7486,57 +7507,41 @@ void host_sctr(I                    nnz,
 /* ============================================================================================ */
 /*! \brief  Host roti (Givens rotation for sparse vectors) */
 template <typename I, typename T>
-void host_roti(I                    nnz,
-               T*                   x_val,
-               const I*             x_ind,
-               T*                   y,
-               T                    c,
-               T                    s,
-               hipsparseIndexBase_t idx_base)
+void host_roti(I nnz, T* x_val, const I* x_ind, T* y, T c, T s, hipsparseIndexBase_t idx_base)
 {
     for(I i = 0; i < nnz; ++i)
     {
         I idx = x_ind[i] - idx_base;
 
-        T x = x_val[i];
+        T x    = x_val[i];
         T yval = y[idx];
 
-        x_val[i] = c * x + s * yval;
-        y[idx]   = c * yval - s * x;
+        x_val[i] = testing_fma(c, x, testing_mult(s, yval));
+        y[idx]   = testing_fma(c, yval, testing_mult(-s, x));
     }
 }
 
 /* ============================================================================================ */
 /*! \brief  Host rot (Givens rotation for sparse vectors - generic API) */
 template <typename I, typename T>
-void host_rot(I                    nnz,
-              T*                   x_val,
-              const I*             x_ind,
-              T*                   y,
-              T                    c,
-              T                    s,
-              hipsparseIndexBase_t idx_base)
+void host_rot(I nnz, T* x_val, const I* x_ind, T* y, T c, T s, hipsparseIndexBase_t idx_base)
 {
     for(I i = 0; i < nnz; ++i)
     {
         I idx = x_ind[i] - idx_base;
 
-        T x = x_val[i];
+        T x    = x_val[i];
         T yval = y[idx];
 
-        x_val[i] = testing_mult(c, x) + testing_mult(s, yval);
-        y[idx]   = testing_mult(c, yval) - testing_mult(s, x);
+        x_val[i] = testing_fma(c, x, testing_mult(s, yval));
+        y[idx]   = testing_fma(c, yval, testing_mult(-s, x));
     }
 }
 
 /* ============================================================================================ */
 /*! \brief  Host coo2csr (convert COO row indices to CSR row pointers) */
 template <typename I>
-void host_coo2csr(I                    m,
-                  I                    nnz,
-                  const I*             coo_row_ind,
-                  I*                   csr_row_ptr,
-                  hipsparseIndexBase_t idx_base)
+void host_coo2csr(I m, I nnz, const I* coo_row_ind, I* csr_row_ptr, hipsparseIndexBase_t idx_base)
 {
     // Initialize row pointers to zero
     for(I i = 0; i <= m; ++i)
@@ -7561,11 +7566,7 @@ void host_coo2csr(I                    m,
 /* ============================================================================================ */
 /*! \brief  Host csr2coo (convert CSR row pointers to COO row indices) */
 template <typename I>
-void host_csr2coo(I                    m,
-                  I                    nnz,
-                  const I*             csr_row_ptr,
-                  I*                   coo_row_ind,
-                  hipsparseIndexBase_t idx_base)
+void host_csr2coo(I m, I nnz, const I* csr_row_ptr, I* coo_row_ind, hipsparseIndexBase_t idx_base)
 {
     for(I i = 0; i < m; ++i)
     {
@@ -7663,9 +7664,9 @@ void host_csr2hyb(I                    m,
         {
             if(p < ell_width)
             {
-                I idx              = ELL_IND(i, p++, m, ell_width);
-                ell_col_ind[idx]   = csr_col_ind[j];
-                ell_val[idx]       = csr_val[j];
+                I idx            = ELL_IND(i, p++, m, ell_width);
+                ell_col_ind[idx] = csr_col_ind[j];
+                ell_val[idx]     = csr_val[j];
             }
             else
             {

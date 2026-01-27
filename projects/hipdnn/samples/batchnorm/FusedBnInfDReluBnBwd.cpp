@@ -56,7 +56,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto bnY
         = graph->batchnorm_inference(x, savedMean, savedInvVariance, scale, bias, bnInfAttributes);
     bnY->set_name("bn_y");
-    bnY->set_data_type(inputType);
+    bnY->set_data_type(intermediateType);
 
     // Step 2: Activation Backward (ReLU backward)
     auto activBwdAttributes = graph::PointwiseAttributes();
@@ -65,7 +65,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     auto dxDrelu = graph->pointwise(bnY, dy, activBwdAttributes);
     dxDrelu->set_name("dx_drelu");
-    dxDrelu->set_data_type(inputType);
+    dxDrelu->set_data_type(intermediateType);
 
     // Step 3: Batchnorm Backward
     auto bnBwdAttributes = graph::BatchnormBackwardAttributes();
@@ -84,20 +84,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     dbias->set_data_type(intermediateType);
     dbias->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->validate());
-    std::cout << "Graph validation successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
-    std::cout << "Operation graph build successful.\n";
-
-    HIPDNN_FE_CHECK(graph->create_execution_plans());
-    std::cout << "Execution plans created successfully.\n";
-
-    HIPDNN_FE_CHECK(graph->check_support());
-    std::cout << "Graph support check successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_plans());
-    std::cout << "Plans build successful.\n";
+    HIPDNN_FE_CHECK(graph->build(handle));
+    std::cout << "Graph build successful.\n";
 
     // Create tensors for execution
     utilities::Tensor<InputType> xTensor(x->get_dim(), layout);

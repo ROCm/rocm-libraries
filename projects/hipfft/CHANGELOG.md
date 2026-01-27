@@ -5,6 +5,37 @@ Documentation for hipFFT is available at
 
 ## (Unreleased) hipFFT 1.0.23
 
+### Added
+
+* hipFFTW plan creation functions for advanced and general plans:
+
+  * fftw_plan_many_dft
+  * fftwf_plan_many_dft
+  * fftw_plan_many_dft_r2c
+  * fftwf_plan_many_dft_r2c
+  * fftw_plan_many_dft_c2r
+  * fftwf_plan_many_dft_c2r
+  * fftw_plan_guru_dft
+  * fftwf_plan_guru_dft
+  * fftw_plan_guru_dft_r2c
+  * fftwf_plan_guru_dft_r2c
+  * fftw_plan_guru_dft_c2r
+  * fftwf_plan_guru_dft_c2r
+  * fftw_plan_guru64_dft
+  * fftwf_plan_guru64_dft
+  * fftw_plan_guru64_dft_r2c
+  * fftwf_plan_guru64_dft_r2c
+  * fftw_plan_guru64_dft_c2r
+  * fftwf_plan_guru64_dft_c2r
+
+### Changed
+
+* Moved library to C++20 standard.
+* Removed Boost as a dependency for clients and samples.
+
+### Added
+* Support for gfx1150 architecture.
+
 ### Resolved issues
 
 * Fixed potential launch failure of data generation kernels in test and benchmark programs.

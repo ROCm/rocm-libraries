@@ -52,12 +52,19 @@ namespace GEMMTests
     {
     };
 
-    // Params are:  wakeK, loadLDSScaleA, loadLDSScaleB, unrollK, loadPathAB
+    // Params are: waveK, loadLDSScaleA, loadLDSScaleB, unrollK, loadPathAB, padA, padB
     class SwizzleScaledF4TNTestGPU : public BaseGEMMContextFixture<int,
                                                                    SolutionParams::LoadPath,
                                                                    SolutionParams::LoadPath,
                                                                    int,
-                                                                   SolutionParams::LoadPath>
+                                                                   SolutionParams::LoadPath,
+                                                                   int,
+                                                                   int>
+    {
+    };
+
+    // Params: StreamKMode
+    class SwizzleScaledStreamKTestGPU : public BaseGEMMContextFixture<StreamKMode>
     {
     };
 
@@ -449,7 +456,8 @@ namespace GEMMTests
 
     TEST_P(SwizzleScaledF4TNTestGPU, GPU_SwizzleScaledGEMM)
     {
-        auto const& [arch, waveK, loadScaleA, loadScaleB, unrollK, loadPathAB] = GetParam();
+        auto const& [arch, waveK, loadScaleA, loadScaleB, unrollK, loadPathAB, padA, padB]
+            = GetParam();
 
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -465,9 +473,9 @@ namespace GEMMTests
 
         auto gemm = GEMMProblemF8F6F4(waveM, waveN, waveK);
 
-        gemm.macM = 256;
-        gemm.macN = 256;
-        gemm.macK = 128;
+        gemm.macM = 128;
+        gemm.macN = 128;
+        gemm.macK = 256;
         gemm.m    = 2 * gemm.macM;
         gemm.n    = 3 * gemm.macN;
         gemm.k    = 4 * gemm.macK;
@@ -492,6 +500,10 @@ namespace GEMMTests
         gemm.loadScalePathA = loadScaleA;
         gemm.loadScalePathB = loadScaleB;
         gemm.unrollK        = unrollK;
+        if(padA != 0)
+            gemm.padA = {padA, 128};
+        if(padB != 0)
+            gemm.padB = {padB, 128};
 
         basicGEMM<FP4, FP4, float>(gemm);
 
@@ -503,9 +515,101 @@ namespace GEMMTests
             EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
         }
         EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
+
+        if(loadPathAB == SolutionParams::LoadPath::BufferToLDS
+           || loadPathAB == SolutionParams::LoadPath::BufferToLDSViaVGPR)
+        {
+            auto offsets = nonZeroDSReadOffsets("ds_read_b128", generatedCode);
+            if(padA == 0 && padB == 0)
+            {
+                EXPECT_EQ(offsets.contains(4 * 1024), true);
+                EXPECT_EQ(offsets.contains(4 * 1024 + 2 * 128), false);
+            }
+            if(padA == 2048 && padB == 2048)
+            {
+                EXPECT_EQ(offsets.contains(4 * 1024), false);
+                EXPECT_EQ(offsets.contains(4 * 1024 + 2 * 128), true);
+            }
+        }
+
+        if(loadPathAB == SolutionParams::LoadPath::BufferToLDS)
+        {
+            auto strides = direct2LDSWriteStrides(generatedCode);
+            if(padA == 0 && padB == 0)
+            {
+                EXPECT_EQ(strides.contains(4 * 1024), true);
+                EXPECT_EQ(strides.contains(4 * 1024 + 2 * 128), false);
+            }
+            if(padA == 2048 && padB == 2048)
+            {
+                EXPECT_EQ(strides.contains(4 * 1024), false);
+                EXPECT_EQ(strides.contains(4 * 1024 + 2 * 128), true);
+            }
+        }
+    }
+
+    TEST_P(SwizzleScaledStreamKTestGPU, GPU_PrefetchGEMMMXF4TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
+
+        auto streamKMode = std::get<1>(GetParam());
+
+        auto gemm = GEMMProblemF8F6F4{32, 32, 64};
+
+        gemm.macM = 256;
+        gemm.macN = 256;
+        gemm.macK = 128;
+
+        gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
+
+        gemm.loadPathA      = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB      = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadScalePathA = SolutionParams::LoadPath::BufferToVGPR;
+        gemm.loadScalePathB = SolutionParams::LoadPath::BufferToVGPR;
+
+        gemm.unrollK           = 2;
+        gemm.prefetch          = true;
+        gemm.prefetchInFlight  = 2;
+        gemm.prefetchLDSFactor = 2;
+
+        gemm.scaleAMode = Operations::ScaleMode::Separate;
+        gemm.scaleBMode = Operations::ScaleMode::Separate;
+
+        gemm.scaleTypeA = DataType::E8M0;
+        gemm.scaleTypeB = DataType::E8M0;
+
+        gemm.swizzleScale  = true;
+        gemm.swizzleM      = 64;
+        gemm.swizzleN      = 64;
+        gemm.swizzleK      = 8;
+        gemm.prefetchScale = true;
+
+        gemm.scaleBlockSize
+            = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
+
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        gemm.numWGs = deviceProperties.multiProcessorCount;
+
+        gemm.m = gemm.macM * 8;
+        gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
+        gemm.k = gemm.macK * 8;
+
+        gemm.streamK = streamKMode;
+
+        basicGEMM<FP4, FP4, float>(gemm);
     }
 
     INSTANTIATE_TEST_SUITE_P(GEMMTest, SwizzleScaledTestGPU, currentGPUISA());
+
+    INSTANTIATE_TEST_SUITE_P(GEMMTest,
+                             SwizzleScaledStreamKTestGPU,
+                             ::testing::Combine(currentGPUISA(),
+                                                ::testing::Values(StreamKMode::Standard,
+                                                                  StreamKMode::TwoTile,
+                                                                  StreamKMode::TwoTileDPFirst)));
 
     INSTANTIATE_TEST_SUITE_P(GEMMMXFP4TNSwizzleScaledUnrollTest,
                              GEMMMXFP4TNSwizzleScaledUnrollTestGPU,
@@ -526,6 +630,9 @@ namespace GEMMTests
                                              SolutionParams::LoadPath::BufferToLDS),
                            ::testing::Values(0, 2, 4),
                            ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                             SolutionParams::LoadPath::BufferToVGPR)));
+                                             SolutionParams::LoadPath::BufferToVGPR,
+                                             SolutionParams::LoadPath::BufferToLDS),
+                           ::testing::Values(0, 2048),
+                           ::testing::Values(0, 2048)));
 
 } // namespace GEMMTests

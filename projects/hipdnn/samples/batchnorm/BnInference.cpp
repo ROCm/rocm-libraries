@@ -17,8 +17,6 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk;
 
-// Note: Sample temporarily disabled due to https://github.com/ROCm/rocm-libraries/issues/2459
-
 template <typename InputType, typename IntermediateType>
 bool SampleRunner::operator()(const TensorLayout& layout)
 {
@@ -39,10 +37,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto x = createTensor({n, c, h, w}, inputType, layout);
-    auto scale = createTensor({1, c, 1, 1}, intermediateType);
-    auto bias = createTensor({1, c, 1, 1}, intermediateType);
-    auto mean = createTensor({1, c, 1, 1}, intermediateType);
-    auto invVariance = createTensor({1, c, 1, 1}, intermediateType);
+    auto scale = createTensor({1, c, 1, 1}, intermediateType, layout);
+    auto bias = createTensor({1, c, 1, 1}, intermediateType, layout);
+    auto mean = createTensor({1, c, 1, 1}, intermediateType, layout);
+    auto invVariance = createTensor({1, c, 1, 1}, intermediateType, layout);
 
     auto bnAttributes = graph::BatchnormInferenceAttributes();
     bnAttributes.set_name("bn_inference_node");
@@ -50,20 +48,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto y = graph->batchnorm_inference(x, mean, invVariance, scale, bias, bnAttributes);
     y->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->validate());
-    std::cout << "Graph validation successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
-    std::cout << "Operation graph build successful.\n";
-
-    HIPDNN_FE_CHECK(graph->create_execution_plans());
-    std::cout << "Execution plans created successfully.\n";
-
-    HIPDNN_FE_CHECK(graph->check_support());
-    std::cout << "Graph support check successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_plans());
-    std::cout << "Plans build successful.\n";
+    HIPDNN_FE_CHECK(graph->build(handle));
+    std::cout << "Graph build successful.\n";
 
     utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
     utilities::Tensor<IntermediateType> scaleTensor(scale->get_dim());
@@ -104,7 +90,6 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<InputType> yRefTensor(y->get_dim(), layout);
 
         auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceInference<InputType>();
-        double epsilon = utilities::BATCHNORM_DEFAULT_EPSILON;
 
         hipdnn_test_sdk::utilities::CpuFpReferenceBatchnorm::fwdInference(
             xTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, yRefTensor);
