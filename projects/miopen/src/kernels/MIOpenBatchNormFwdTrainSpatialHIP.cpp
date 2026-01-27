@@ -400,7 +400,12 @@ extern "C" __global__ void __launch_bounds__(
                              static_cast<fp_accum_c_type>(expAvgFactor));
 
         miopen::batchnorm::running_stash<fp_accum_c_type, fp_prec_c_type, StashUpdater>(
-            resultRunningMean, resultRunningVariance, updater, grpid);
+            prevResultRunningMean,
+            prevResultRunningVariance,
+            nextResultRunningMean,
+            nextResultRunningVariance,
+            updater,
+            grpid);
 #endif
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
         miopen::batchnorm::saved_stash<fp_accum_c_type, fp_prec_c_type>(

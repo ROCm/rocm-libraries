@@ -331,8 +331,10 @@ __forceinline__ __device__ void saved_stash(FpPrecType_C* __restrict resultSaveM
 }
 
 template <typename FpAccumType_C, typename FpPrecType_C, typename Updater>
-__forceinline__ __device__ void running_stash(FpPrecType_C* __restrict resultRunningMean,
-                                              FpPrecType_C* __restrict resultRunningVariance,
+__forceinline__ __device__ void running_stash(const FpPrecType_C* __restrict prevRunningMean,
+                                              const FpPrecType_C* __restrict prevRunningVariance,
+                                              FpPrecType_C* __restrict nextRunningMean,
+                                              FpPrecType_C* __restrict nextRunningVariance,
                                               Updater const& update,
                                               uint channel)
 {
@@ -341,12 +343,12 @@ __forceinline__ __device__ void running_stash(FpPrecType_C* __restrict resultRun
     static_assert(miopen::batchnorm::config::variant != 4,
                   "running_stash is only compiled when MIO_BN_VARIANT != 4.");
 
-    auto pvt_runMean     = static_cast<FpAccumType_C>(resultRunningMean[channel]);
-    auto pvt_runVariance = static_cast<FpAccumType_C>(resultRunningVariance[channel]);
+    auto pvt_runMean     = static_cast<FpAccumType_C>(prevRunningMean[channel]);
+    auto pvt_runVariance = static_cast<FpAccumType_C>(prevRunningVariance[channel]);
 
     update(pvt_runMean, pvt_runVariance);
 
-    saved_stash(resultRunningMean, resultRunningVariance, pvt_runMean, pvt_runVariance, channel);
+    saved_stash(nextRunningMean, nextRunningVariance, pvt_runMean, pvt_runVariance, channel);
 }
 
 } // namespace batchnorm

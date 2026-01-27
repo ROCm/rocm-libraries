@@ -6,7 +6,6 @@
 #include "bfloat16_dev.hpp"
 #include "float_types.h"
 #include "vector_types.hpp"
-#include <type_traits>
 
 namespace miopen {
 namespace detail {

@@ -75,7 +75,7 @@ extern "C" __global__ void __launch_bounds__(mio_bn_config::launch_dim.grp0)
                          static_cast<fp_prec_c_type>(expAvgFactor));
 
     miopen::batchnorm::running_stash<fp_prec_c_type, fp_prec_c_type, StashUpdater>(
-        runningMean, runningVariance, updater, xgid);
+        runningMean, runningVariance, runningMean, runningVariance, updater, xgid);
 #endif
 
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
