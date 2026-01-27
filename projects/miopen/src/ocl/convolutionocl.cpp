@@ -966,9 +966,6 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
                 if(!sol.IsApplicable(ctx, problem))
                     continue;
                 const auto ws = sol.GetWorkspaceSize(ctx, problem);
-                if(!conv::IsEnoughWorkspace(
-                       "GetSolutionsFallback AI", solver_id, ws, invokeParams, !immediate_mode))
-                    continue;
                 interim.emplace_back(
                     miopenConvSolution_t{ai_time(idx), ws, solver_id.Value(), algo});
                 ++idx;
@@ -1004,9 +1001,6 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
             if(s.IsEmpty() || !s.IsDynamic() || !s.IsApplicable(ctx, problem))
                 continue;
             const auto ws = s.GetWorkspaceSize(ctx, problem);
-            if(!conv::IsEnoughWorkspace(
-                   "GetSolutionsFallback WTI", solver_id, ws, invokeParams, !immediate_mode))
-                continue;
 
             const auto wti = s.GetWti(ctx, problem);
             MIOPEN_LOG_I2(solver_id.ToString() << " Estimated WTI = " << wti);
@@ -1019,10 +1013,29 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
     for(const auto& s : interim)
         MIOPEN_LOG_I2(s);
 
+    /// Similar to GetSolutions() above: when InvokeParams is provided (immediate mode),
+    /// the workspace size is often limited to what the "best" solver needs. To avoid
+    /// false warnings, we check IsEnoughWorkspace only for the top maxSolutionCount
+    /// solutions after sorting by estimated performance. See the detailed explanation
+    /// in GetSolutions() for the full rationale.
     std::sort(begin(interim), end(interim), SolutionTimeComparator{});
-    interim.resize(std::min(maxSolutionCount, interim.size()));
+    
+    auto out = std::vector<miopenConvSolution_t>{};
+    out.reserve(maxSolutionCount);
+    auto n_copied = 0;
+    for(const auto& s : interim)
+    {
+        const auto solver_id = solver::Id{s.solution_id};
+        if(!solver_id.GetSolver().IsApplicable(ctx, problem))
+            continue;
+        if(!conv::IsEnoughWorkspace("GetSolutionsFallback", solver_id, s.workspace_size, invokeParams))
+            continue;
+        out.push_back(s);
+        if(++n_copied >= maxSolutionCount)
+            break;
+    }
 
-    return interim;
+    return out;
 }
 
 /// \todo Extend miopenConvSolution_t with an attribute indicating
