@@ -903,6 +903,30 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
                                                            false,
                                                            IsBPreShuffled>())>;
 
+    struct Traits
+    {
+        using DsDataType_       = DsDataType;
+        using EDataType_        = EDataType;
+        using AccDataType_      = AccDataType;
+        using CShuffleDataType_ = CShuffleDataType;
+        using CDEShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock_ =
+            CDEShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock;
+        using CDEShuffleBlockTransferScalarPerVectors_ = CDEShuffleBlockTransferScalarPerVectors;
+        using CDEElementwiseOperation_                 = CDEElementwiseOperation;
+        using ThisThreadBlock_                         = ThisThreadBlock;
+        using BlockwiseGemmPipe_                       = BlockwiseGemmPipe;
+
+        static constexpr auto MPerBlock_                 = MPerBlock;
+        static constexpr auto NPerBlock_                 = NPerBlock;
+        static constexpr auto MPerWmma_                  = MPerWmma;
+        static constexpr auto NPerWmma_                  = NPerWmma;
+        static constexpr auto MRepeat_                   = MRepeat;
+        static constexpr auto NRepeat_                   = NRepeat;
+        static constexpr auto CShuffleMRepeatPerShuffle_ = CShuffleMRepeatPerShuffle;
+        static constexpr auto CShuffleNRepeatPerShuffle_ = CShuffleNRepeatPerShuffle;
+        static constexpr auto GemmSpec_                  = GemmSpec;
+        static constexpr auto BlockSize_                 = BlockSize;
+    };
     // Used to create obj in global function and pass it to Run method
     using EpilogueCShuffle =
         EpilogueCShuffle<DsDataType,
