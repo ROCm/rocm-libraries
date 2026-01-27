@@ -1,6 +1,6 @@
 # MIT License
 #
-# Modifications Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
+# Modifications Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -174,6 +174,7 @@ if (${CMAKE_CUDA_COMPILER_ID} STREQUAL "HIPCC")
     " ${LIBCUDACXX_FORCE_INCLUDE}" 
     " -I${CMAKE_SOURCE_DIR}/include"
     " -I${libhipcxx_SOURCE_DIR}/include"
+    " -I${libhipcxx_SOURCE_DIR}/include/libhipcxx"
 #    " CACHE INTERNAL "Flags for libcxx testing."
   )
 endif()

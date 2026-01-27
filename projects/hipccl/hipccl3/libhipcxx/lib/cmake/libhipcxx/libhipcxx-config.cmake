@@ -1,4 +1,4 @@
-# Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
+# Modifications Copyright (c) 2024-2026 Advanced Micro Devices, Inc.
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -55,7 +55,10 @@ set(_libhipcxx_INCLUDE_DIR "${_libhipcxx_VERSION_INCLUDE_DIR}"
   CACHE INTERNAL "Location of libhipcxx headers."
 )
 unset(_libhipcxx_VERSION_INCLUDE_DIR CACHE) # Clear tmp variable from cache
-target_include_directories(_libhipcxx_libhipcxx INTERFACE "${_libhipcxx_INCLUDE_DIR}")
+target_include_directories(_libhipcxx_libhipcxx INTERFACE
+  "${_libhipcxx_INCLUDE_DIR}"
+  "${_libhipcxx_INCLUDE_DIR}/libhipcxx/"
+  )
 
 #
 # Standardize version info
