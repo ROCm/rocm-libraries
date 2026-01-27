@@ -74,7 +74,7 @@ template <typename TInput,
 class BatchNormDriver : public Driver
 {
 public:
-    BatchNormDriver() : Driver() { data_type = (sizeof(TInput) == 4) ? miopenFloat : miopenHalf; }
+    BatchNormDriver() : Driver() { miopenCreateActivationDescriptor(&activ_desc); }
 
     int AddCmdLineArgs() override;
     int ParseCmdLineArgs(int argc, char* argv[]) override;
@@ -113,18 +113,17 @@ public:
     // defined in MIOpen lib.
     void ValidateLayoutInputParameters(std::string layout_type);
 
-    ~BatchNormDriver() override {}
+    ~BatchNormDriver() override { miopenDestroyActivationDescriptor(activ_desc); }
 
 private:
     miopenBatchNormMode_t bn_mode;
     miopenActivationMode_t activ_mode = miopenActivationRELU;
+    miopenActivationDescriptor_t activ_desc;
 
-    bool saveMeanVar;
-    bool bsaveMeanVar;
-    bool keepRunningMeanVar;
-    bool estimatedMeanVar;
-    bool useInverseVar;
-    bool usePingPongBuffers;
+    bool saveMeanVar        = false;
+    bool keepRunningMeanVar = false;
+    bool useInverseVar      = false;
+    bool usePingPongBuffers = false;
 
     int forw;
     int back;
@@ -589,9 +588,9 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::SetBNParametersFromCm
     {
         if(forw != 1 || !keepRunningMeanVar)
         {
-            printf("Ping-pong buffers are only supported in forward training when running mean "
-                   "and variance are kept\n");
-            exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+            MIOPEN_THROW(miopenStatusBadParm,
+                         "Ping-pong buffers are only supported in forward training when running "
+                         "mean and variance are kept");
         }
         usePingPongBuffers = true;
     }
@@ -703,7 +702,10 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::AllocateBuffersAndCop
     }
 
     if(status != STATUS_SUCCESS)
-        printf("Fatal: Error copying data to GPU\nExiting...\n\n");
+    {
+        printf("Fatal: Error allocating GPU buffers\nExiting...\n\n");
+        return miopenStatusAllocFailed;
+    }
 
     return miopenStatusSuccess;
 }
@@ -805,8 +807,6 @@ template <typename TInput, typename Tref, typename TAcc, typename TScaleBias, ty
 void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::runGPUFwdInferenceActivation(
     Tref epsilon, float alpha, float beta)
 {
-    miopenActivationDescriptor_t activ_desc;
-    miopenCreateActivationDescriptor(&activ_desc);
     miopenSetActivationDescriptor(activ_desc,
                                   activ_mode,
                                   inflags.GetValueDouble("activ_alpha"),
@@ -900,7 +900,6 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::runGPUFwdInferenceAc
                                                                  activ_desc);
         }
     }
-    miopenDestroyActivationDescriptor(activ_desc);
     return;
 }
 
@@ -1113,8 +1112,6 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::runGPUFwdTrainActiva
                                                                                      float alpha,
                                                                                      float beta)
 {
-    miopenActivationDescriptor_t activ_desc;
-    miopenCreateActivationDescriptor(&activ_desc);
     miopenSetActivationDescriptor(activ_desc,
                                   activ_mode,
                                   inflags.GetValueDouble("activ_alpha"),
@@ -1240,7 +1237,6 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::runGPUFwdTrainActiva
                                              nullptr,
                                              activ_desc);
 #endif
-    miopenDestroyActivationDescriptor(activ_desc);
 }
 
 template <typename TInput, typename Tref, typename TAcc, typename TScaleBias, typename TOut>
@@ -1539,8 +1535,6 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardGPU()
     float lowtime   = 100000000.0;
     float avgtime   = 0.;
 
-    miopenActivationDescriptor_t activ_desc;
-    miopenCreateActivationDescriptor(&activ_desc);
     miopenSetActivationDescriptor(activ_desc,
                                   activ_mode,
                                   inflags.GetValueDouble("activ_alpha"),
@@ -1694,7 +1688,6 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardGPU()
                    lowtime);
         }
     }
-    miopenDestroyActivationDescriptor(activ_desc);
 
     if(WALL_CLOCK)
     {
