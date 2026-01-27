@@ -4,7 +4,9 @@ pr:
     include:
       - develop
       - release-staging/rocm-rel-*
-      - users/dsclear/shorten_azuredevops_test*
+      - users/dsclear/shorten_azuredevops_test_root
+      - users/dsclear/shorten_azuredevops_test_bin
+      - users/dsclear/shorten_azuredevops_test_text
   paths:
     include:
       - projects/*

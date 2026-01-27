@@ -35,7 +35,7 @@ jobs:
     - name: Check if branch is allowed
       id: branch-check
       run: |
-        allowed_branches=("develop" "staging" "main" "users/dsclear/shorten_azuredevops_test_root")
+        allowed_branches=("develop" "staging" "main" "users/dsclear/shorten_azuredevops_test_root" "users/dsclear/shorten_azuredevops_test_bin" "users/dsclear/shorten_azuredevops_test_text")
         # Add pattern matching for release branches
         branch="${{ github.event.pull_request.base.ref }}"
         echo "Target branch: $branch"
