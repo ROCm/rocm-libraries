@@ -37,7 +37,7 @@ namespace GEMMTests
     using namespace rocRoller;
     namespace SolutionParams = rocRoller::Parameters::Solution;
 
-    static void checkNumDwordx4(std::string generatedCode,
+    static void CheckNumDwordx4(std::string generatedCode,
                                 const int   numBitsPerElementAB,
                                 const int   macM,
                                 const int   macN,
@@ -144,7 +144,7 @@ namespace GEMMTests
         {
             EXPECT_EQ(generatedCode.find("ds_write"), std::string::npos);
         }
-        checkNumDwordx4(generatedCode,
+        CheckNumDwordx4(generatedCode,
                         numBitsPerElementAB,
                         problem.macM,
                         problem.macN,
@@ -217,7 +217,7 @@ namespace GEMMTests
         {
             EXPECT_EQ(generatedCode.find("ds_write"), std::string::npos);
         }
-        checkNumDwordx4(generatedCode,
+        CheckNumDwordx4(generatedCode,
                         numBitsPerElementAB,
                         problem.macM,
                         problem.macN,
@@ -420,7 +420,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
 
         auto instructions    = m_context->instructions()->toString();
-        auto ldsWriteStrides = direct2LDSWriteStrides(instructions);
+        auto ldsWriteStrides = Direct2LDSWriteStrides(instructions);
 
         std::set<int> expectedLDSWriteStrides;
         if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWiderDirectToLds))

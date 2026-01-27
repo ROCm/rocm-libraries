@@ -41,7 +41,7 @@ namespace GEMMTests
     using namespace rocRoller;
     namespace SolutionParams = rocRoller::Parameters::Solution;
 
-    std::set<int> nonZeroDSReadOffsets(std::string const& instruction, std::string const& s)
+    std::set<int> NonZeroDSReadOffsets(std::string const& instruction, std::string const& s)
     {
         std::regex ds_read_offset(instruction + ".*offset:(\\d+)");
 
@@ -57,7 +57,7 @@ namespace GEMMTests
         return rv;
     }
 
-    std::set<int> direct2LDSWriteStrides(std::string const& s)
+    std::set<int> Direct2LDSWriteStrides(std::string const& s)
     {
         std::regex m0_stride_pattern("s_add_u32 m0, m0, (\\d+)");
 
@@ -141,7 +141,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
 
         auto instructions = m_context->instructions()->toString();
-        auto ldsOffsets   = nonZeroDSReadOffsets("ds_read_b32", instructions);
+        auto ldsOffsets   = NonZeroDSReadOffsets("ds_read_b32", instructions);
 
         // With no padding in A, the LDS buffer for B would start at
         //
@@ -363,7 +363,7 @@ namespace GEMMTests
         basicGEMM<FP8, FP8, float>(gemm);
     }
 
-    void check_GEMMF8_TN(rocRoller::ContextPtr m_context)
+    void CheckGEMMF8TN(rocRoller::ContextPtr m_context)
     {
         if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
         {
@@ -387,7 +387,7 @@ namespace GEMMTests
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto gemm = GEMMProblemF8TN{};
         basicGEMM<FP8, FP8, float>(gemm);
-        check_GEMMF8_TN(m_context);
+        CheckGEMMF8TN(m_context);
     }
 
     TEST_P(GEMMTestSuite, GPU_GEMM_DataType_BF8_16x16x32_TN)
@@ -395,7 +395,7 @@ namespace GEMMTests
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto gemm = GEMMProblemF8TN{};
         basicGEMM<BF8, BF8, float>(gemm);
-        check_GEMMF8_TN(m_context);
+        CheckGEMMF8TN(m_context);
     }
 
     TEST_P(GEMMTestSuite, GPU_GEMM_DataType_FP8_LargerLDS_32x32x64_TN)
@@ -412,7 +412,7 @@ namespace GEMMTests
         basicGEMM<FP8, FP8, float>(gemm);
     }
 
-    static void checkNumDwordx4(std::string generatedCode,
+    static void CheckNumDwordx4(std::string generatedCode,
                                 const int   numBitsPerElementAB,
                                 const int   macM,
                                 const int   macN,
@@ -451,7 +451,7 @@ namespace GEMMTests
         auto const  numBitsPerElementAB = 8;
         std::string generatedCode       = m_context->instructions()->toString();
         EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
-        checkNumDwordx4(generatedCode,
+        CheckNumDwordx4(generatedCode,
                         numBitsPerElementAB,
                         gemm.macM,
                         gemm.macN,
@@ -480,7 +480,7 @@ namespace GEMMTests
         auto const  numBitsPerElementAB = 8;
         std::string generatedCode       = m_context->instructions()->toString();
         EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
-        checkNumDwordx4(generatedCode,
+        CheckNumDwordx4(generatedCode,
                         numBitsPerElementAB,
                         gemm.macM,
                         gemm.macN,
@@ -509,7 +509,7 @@ namespace GEMMTests
         auto const  numBitsPerElementAB = 4;
         std::string generatedCode       = m_context->instructions()->toString();
         EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
-        checkNumDwordx4(generatedCode,
+        CheckNumDwordx4(generatedCode,
                         numBitsPerElementAB,
                         gemm.macM,
                         gemm.macN,
@@ -592,12 +592,12 @@ namespace GEMMTests
         gemm.splitStoreTileIntoWaveBlocks = true;
         basicGEMM<Half>(gemm);
         auto instructions0 = output();
-        EXPECT_EQ(nonZeroDSReadOffsets("ds_read_b128", instructions0), std::set<int>{1024});
+        EXPECT_EQ(NonZeroDSReadOffsets("ds_read_b128", instructions0), std::set<int>{1024});
 
         gemm.splitStoreTileIntoWaveBlocks = false;
         basicGEMM<Half>(gemm);
         auto instructions1 = output();
-        EXPECT_EQ(nonZeroDSReadOffsets("ds_read_b128", instructions1), std::set<int>{64});
+        EXPECT_EQ(NonZeroDSReadOffsets("ds_read_b128", instructions1), std::set<int>{64});
     }
 
     TEST_P(GEMMTestSuite, GPU_GEMM_DataType_FP16_AllLDS_Debug)

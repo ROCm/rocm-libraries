@@ -73,7 +73,7 @@ namespace GEMMTests
     {
     };
 
-    GEMMProblem setupGEMMF16(uint waveM, uint waveN, uint waveK)
+    GEMMProblem SetupGEMMF16(uint waveM, uint waveN, uint waveK)
     {
         GEMMProblem gemm;
 
@@ -106,7 +106,7 @@ namespace GEMMTests
         return gemm;
     }
 
-    void checkGEMMF16(rocRoller::ContextPtr m_context,
+    void CheckGEMMF16(rocRoller::ContextPtr m_context,
                       std::string           mfma,
                       uint                  numMFMAs,
                       uint                  numBufferAndGlobalLoads,
@@ -148,7 +148,7 @@ namespace GEMMTests
         uint const waveN = (MFMAK == 32) ? 16 : 32;
         uint const waveK = MFMAK;
 
-        auto problem = setupGEMMF16(waveM, waveN, waveK);
+        auto problem = SetupGEMMF16(waveM, waveN, waveK);
 
         problem.loadPathA = loadPathA;
         problem.loadPathB = loadPathB;
@@ -238,7 +238,7 @@ namespace GEMMTests
 
         auto const mfma{fmt::format("v_mfma_f32_{}x{}x{}_{}", waveM, waveN, waveK, typeStr)};
 
-        checkGEMMF16(m_context,
+        CheckGEMMF16(m_context,
                      mfma,
                      numMFMAs,
                      numBufferLoadsForC + numBufferLoadsForAB,

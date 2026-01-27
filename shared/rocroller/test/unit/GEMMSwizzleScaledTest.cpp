@@ -547,7 +547,7 @@ namespace GEMMTests
         if(loadPathAB == SolutionParams::LoadPath::BufferToLDS
            || loadPathAB == SolutionParams::LoadPath::BufferToLDSViaVGPR)
         {
-            auto offsets = nonZeroDSReadOffsets("ds_read_b128", generatedCode);
+            auto offsets = NonZeroDSReadOffsets("ds_read_b128", generatedCode);
             if(padA == 0 && padB == 0)
             {
                 EXPECT_EQ(offsets.contains(4 * 1024), true);
@@ -562,7 +562,7 @@ namespace GEMMTests
 
         if(loadPathAB == SolutionParams::LoadPath::BufferToLDS)
         {
-            auto strides = direct2LDSWriteStrides(generatedCode);
+            auto strides = Direct2LDSWriteStrides(generatedCode);
             if(padA == 0 && padB == 0)
             {
                 EXPECT_EQ(strides.contains(4 * 1024), true);

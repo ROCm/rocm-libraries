@@ -39,7 +39,7 @@ namespace GEMMTests
     using namespace rocRoller;
     namespace SolutionParams = rocRoller::Parameters::Solution;
 
-    void checkGEMMF8F6F4(rocRoller::ContextPtr m_context,
+    void CheckGEMMF8F6F4(rocRoller::ContextPtr m_context,
                          std::string           mfma,
                          std::string           modifiers,
                          uint                  numMFMAs,
@@ -130,9 +130,9 @@ namespace GEMMTests
     {
     };
 
-    void check_mfma_f8f6f4(rocRoller::ContextPtr m_context,
-                           std::string           f8f6f4_inst,
-                           std::string           modifier)
+    void CheckMFMAF8F6F4(rocRoller::ContextPtr m_context,
+                         std::string           f8f6f4_inst,
+                         std::string           modifier)
     {
         if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
         {
@@ -244,7 +244,7 @@ namespace GEMMTests
 
         auto const mfma{fmt::format("v_mfma_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
 
-        checkGEMMF8F6F4(m_context,
+        CheckGEMMF8F6F4(m_context,
                         mfma,
                         modifiers,
                         numMFMAs,
@@ -367,7 +367,7 @@ namespace GEMMTests
 
         auto const mfma{fmt::format("v_mfma_scale_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
 
-        checkGEMMF8F6F4(m_context,
+        CheckGEMMF8F6F4(m_context,
                         mfma,
                         modifiers,
                         numMFMAs,
@@ -450,7 +450,7 @@ namespace GEMMTests
         }
 
         auto const mfma{fmt::format("v_mfma_scale_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
-        check_mfma_f8f6f4(m_context, mfma, modifiers);
+        CheckMFMAF8F6F4(m_context, mfma, modifiers);
 
         uint const totalWorkitems = gemm.workgroupSizeX * gemm.workgroupSizeY;
         // Example A:256x128 => scaleA:256x4 => 1024 values/256 workitems => 4 values per workitem
@@ -652,7 +652,7 @@ namespace GEMMTests
         else
             Throw<FatalError>("Unhandled data type for mixed GEMM.", ShowValue(typeB));
 
-        check_mfma_f8f6f4(m_context, mfma, modifierA + " " + modifierB);
+        CheckMFMAF8F6F4(m_context, mfma, modifierA + " " + modifierB);
     }
 
     INSTANTIATE_TEST_SUITE_P(
