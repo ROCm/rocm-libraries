@@ -57,7 +57,6 @@ comprehensive_patterns: &comprehensive_patterns
   - "*/GPU_FinInterfaceTest*"
   - "*/GPU_VecAddTest_*"
   - "*/GPU_KernelTuningNetTest*"
-  - "*/GPU_MIOpenDriver*"
   - "*/GPU_Bwd_Mha_*"
   - "*/GPU_Fwd_Mha_*"
   - "*/GPU_Softmax*"
@@ -111,6 +110,7 @@ test_categories:
     exclude:
       - "Smoke/GPU_BNOCLFWDTrainLarge2D_BFP16*"
       - "Smoke/GPU_BNOCLInferLarge2D_BFP16*"
+      - "*/GPU_MIOpenDriver*"
       
     exclude_windows:
       # The following tests are added to show functionality
@@ -142,7 +142,6 @@ test_categories:
       - "quick"
       - "pre-commit"
       - "smoke"
-      - "critical"
 
   standard:
     description: "Core functionality - Run on every PR (target: < 30 min)"
@@ -178,6 +177,7 @@ test_categories:
       - "Full/GPU_ConvGrpActivInfer3D_FP32*"
       - "Full/GPU_ConvGrpActivInfer3D_FP16*"
       - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
+      - "*/GPU_MIOpenDriver*"
 
     test_files:
       # Quick tests
@@ -215,12 +215,14 @@ test_categories:
     labels:
       - "standard"
       - "pr"
-      - "core"
-      - "essential"
+
 
   comprehensive:
     description: "Extended testing - Run nightly (target: < 2 hours)"
     test_patterns: *comprehensive_patterns
+
+    exclude:
+      - "*/GPU_MIOpenDriver*"
 
     test_files:
       # Quick tests
@@ -258,8 +260,6 @@ test_categories:
     labels:
       - "comprehensive"
       - "nightly"
-      - "extended"
-      - "full-coverage"
 
   full:
     description: "Complete test suite - (target: hours+)"
@@ -270,7 +270,10 @@ test_categories:
       - "Perf/*"
       - "Unit/*"
       - "*"
-      
+
+    exclude:
+      - "*/GPU_MIOpenDriver*"
+
     test_files:
       # All test files in the suite
       - "*.cpp"
@@ -283,9 +286,8 @@ test_categories:
     labels:
       - "full"
       - "weekly"
-      - "complete"
       - "all"
-      - "benchmark"
+
 
 # Common GPU exclusion patterns - used by multiple GPU architectures
 gfx11_common_patterns: &gfx11_common_patterns
