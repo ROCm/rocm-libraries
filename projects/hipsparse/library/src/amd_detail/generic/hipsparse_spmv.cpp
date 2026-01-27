@@ -382,6 +382,12 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
         {
             spmv_alg = rocsparse_spmv_alg_csr_rowsplit;
         }
+        else if((spmv_alg == rocsparse_spmv_alg_default)
+                && (operation != rocsparse_operation_none))
+        {
+            // Default algorithm doesn't support transpose, fallback to rowsplit
+            spmv_alg = rocsparse_spmv_alg_csr_rowsplit;
+        }
         else if(((spmv_alg == rocsparse_spmv_alg_csr_adaptive)
                  || (spmv_alg == rocsparse_spmv_alg_csr_lrb))
                 && (hip_spmv_descr->is_stage_analysis_called() == false))
