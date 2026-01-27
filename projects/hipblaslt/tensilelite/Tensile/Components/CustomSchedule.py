@@ -3749,8 +3749,8 @@ def _get_schedule_128x256x32_TF32(kernel, useLDSTr, TLDS):
         assert packB0Done < numMfma//4
 
         # LRA0 
-        lra0 = create_range(min_val = waitLRB0+4, num = numLrReadA//2, step = 1, repeat = 2)
-        grA = create_range(min_val = packB0Done+2, num = 4, step = 1, repeat = 2)
+        lra0 = create_range(min_val = waitLRB0+4, num = numLrReadA, step = 1, repeat = 1)
+        grA = create_range(min_val = packB0Done+6, num = 8, step = 2, repeat = 1)
         waitLRA0 = max(lra0)
         startPACKA0 = waitLRA0 + 2
         packAOffset = [
@@ -3768,7 +3768,7 @@ def _get_schedule_128x256x32_TF32(kernel, useLDSTr, TLDS):
 
         # LRA3
         startLRA3 = halfMFMA
-        lra3 = create_range(min_val = startLRA3, num = numLrReadA//2, step = 1, repeat = 2)
+        lra3 = create_range(min_val = startLRA3, num = numLrReadA, step = 1, repeat = 1)
         grB = create_range(min_val = startLRA3+1, num = 4, step = 2, repeat = 2)
         grB += create_range(min_val = max(lra3)+1, num = 4, step = 2, repeat = 2)
         waitLRA3 = max(lra3)
