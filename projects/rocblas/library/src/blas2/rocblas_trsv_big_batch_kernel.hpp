@@ -35,10 +35,12 @@
 
 // Block solve for lower triangular with z-dimension batching
 template <rocblas_int BLOCK_LDA, rocblas_int DIM_Z, bool UNIT, typename T>
-void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_lower_big_batch(const T* __restrict__ A, T& val)
+void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_lower_big_batch(const T* __restrict__ A,
+                                                                 T* xs,
+                                                                 T& val)
 {
     // Shared memory per batch in z-dimension
-    __shared__ T xs[DIM_Z];
+    // __shared__ T xs[DIM_Z];
 
     const int tz = threadIdx.z;
 
@@ -67,10 +69,12 @@ void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_lower_big_batch(const T* __rest
 
 // Block solve for upper triangular with z-dimension batching
 template <rocblas_int BLOCK_LDA, rocblas_int DIM_Z, bool UNIT, typename T>
-void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_upper_big_batch(const T* __restrict__ A, T& val)
+void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_upper_big_batch(const T* __restrict__ A,
+                                                                 T* xs,
+                                                                 T& val)
 {
     // Shared memory per batch in z-dimension
-    __shared__ T xs[DIM_Z];
+    // __shared__ T xs[DIM_Z];
 
     const int tz = threadIdx.z;
 
@@ -137,13 +141,13 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
     // Determine if we need forward or backward substitution
     constexpr bool backwards_sub = (!LOWER && !TRANS) || (LOWER && TRANS);
 
-    const rocblas_int num_blocks = gridDim.x;
+    const rocblas_int num_blocks = gridDim.y;
     const rocblas_int tx         = threadIdx.x;
     const rocblas_int ty         = threadIdx.y;
     const rocblas_int tz         = threadIdx.z;
 
     // This allows processing DIM_Z batches per thread block
-    uint32_t batch = blockIdx.z * DIM_Z + threadIdx.z;
+    uint32_t batch = blockIdx.x * DIM_Z + threadIdx.z;
 
     T alpha = load_scalar(alpha_device_host);
 
@@ -152,6 +156,9 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
     __shared__ T sum_z[DIM_X * DIM_Y * DIM_Z];
     __shared__ T sAdiag_z[DIM_X * DIM_X * DIM_Z];
     __shared__ T sx_z[DIM_X * DIM_Z];
+
+    // Shared memory per batch in z-dimension
+    __shared__ T xs[DIM_Z];
 
     // Register storage for off-diagonal block
     // keeping DIM_X == DIM_Y for big_batch so DIM_X / DIM_Y = 1
@@ -178,7 +185,7 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
         const int tid = DIM_X * ty + tx;
 
         // Assign to register row in each thread
-        rocblas_int block_row = backwards_sub ? num_blocks - 1 - blockIdx.x : blockIdx.x;
+        rocblas_int block_row = backwards_sub ? num_blocks - 1 - blockIdx.y : blockIdx.y;
 
         // If problem is not divisible into DIM_X sized sections, the last block row
         // will be smaller and must be handled differently
@@ -194,14 +201,14 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
             const rocblas_int local_row = TRANS ? block_col * DIM_X + ty : block_row * DIM_X + tx;
             const size_t      A_idx     = (local_row) + (local_col)*lda;
 
-            for(rocblas_int i = 0; i < DIM_X; i += DIM_Y)
+            // for(rocblas_int i = 0; i < DIM_X; i += DIM_Y)
             {
-                const size_t i_idx = TRANS ? i : i * lda;
+                // const size_t i_idx = TRANS ? i : i * lda;
 
                 __syncthreads();
-                if(TRANS ? (local_row + i < n && local_col < n)
-                         : (local_row < n && local_col + i < n))
-                    sAoff[0] = A[A_idx + i_idx]; // 0 = i / DIM_Y
+                if(TRANS ? (local_row /* + i */ < n && local_col < n)
+                         : (local_row < n && local_col /* + i */ < n))
+                    sAoff[0] = A[A_idx /* + i_idx */]; // 0 = i / DIM_Y
                 else
                     sAoff[0] = 0.0; // i / DIM_Y
             }
@@ -215,58 +222,65 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
 #else
         bool cache_transpose = TRANS; // works for ALL without inversion method
 #endif
-        if(!row_is_remainder)
         {
-            rocblas_int row = tx;
-            for(rocblas_int i = 0; i < DIM_X; i += DIM_Y)
-            {
-                const rocblas_int col    = ty + i;
-                const rocblas_int sA_idx = cache_transpose ? col + DIM_X * row : col * DIM_X + row;
-                const size_t      A_idx
-                    = (block_row * DIM_X * lda + block_row * DIM_X) + col * lda + row;
-                const rocblas_int total_col = block_row * DIM_X + col;
-                const rocblas_int total_row = block_row * DIM_X + row;
+            rocblas_int       row    = tx;
+            const rocblas_int col    = ty; // + i;
+            const rocblas_int sA_idx = cache_transpose ? col + DIM_X * row : col * DIM_X + row;
+            const size_t A_idx = (block_row * DIM_X * lda + block_row * DIM_X) + col * lda + row;
 
-                if((row > col && LOWER) || (col > row && !LOWER))
+            if(!row_is_remainder)
+            {
+                //rocblas_int row = tx;
+                //for(rocblas_int i = 0; i < DIM_X; i += DIM_Y)
                 {
-                    sAdiag[sA_idx] = CONJ ? -conj(A[A_idx]) : -A[A_idx];
-                }
-                else if(!UNIT && row == col)
-                {
-                    // Dividing here so we can just multiply later.
-                    sAdiag[sA_idx] = 1.0 / (CONJ ? conj(A[A_idx]) : A[A_idx]);
-                }
-                else if(col < DIM_X && row < DIM_X) // In off-triangular portion - set to 0
-                {
-                    sAdiag[sA_idx] = 0.0;
+                    // const rocblas_int col    = ty; // + i;
+                    // const rocblas_int sA_idx = cache_transpose ? col + DIM_X * row : col * DIM_X + row;
+                    // const size_t      A_idx
+                    //     = (block_row * DIM_X * lda + block_row * DIM_X) + col * lda + row;
+                    // const rocblas_int total_col = block_row * DIM_X + col;
+                    // const rocblas_int total_row = block_row * DIM_X + row;
+
+                    if((row > col && LOWER) || (col > row && !LOWER))
+                    {
+                        sAdiag[sA_idx] = CONJ ? -conj(A[A_idx]) : -A[A_idx];
+                    }
+                    else if(!UNIT && row == col)
+                    {
+                        // Dividing here so we can just multiply later.
+                        sAdiag[sA_idx] = 1.0 / (CONJ ? conj(A[A_idx]) : A[A_idx]);
+                    }
+                    else if(col < DIM_X && row < DIM_X) // In off-triangular portion - set to 0
+                    {
+                        sAdiag[sA_idx] = 0.0;
+                    }
                 }
             }
-        }
-        else // remainder of a block
-        {
-            rocblas_int row = tx;
-            for(rocblas_int i = 0; i < DIM_X; i += DIM_Y)
+            else // remainder of a block
             {
-                const rocblas_int col    = ty + i;
-                const rocblas_int sA_idx = cache_transpose ? col + DIM_X * row : col * DIM_X + row;
-                const size_t      A_idx
-                    = (block_row * DIM_X * lda + block_row * DIM_X) + col * lda + row;
-                const rocblas_int total_col = block_row * DIM_X + col;
-                const rocblas_int total_row = block_row * DIM_X + row;
-                if(((row > col && LOWER) || (col > row && !LOWER)) && row < remainder
-                   && col < remainder)
+                //rocblas_int row = tx;
+                //for(rocblas_int i = 0; i < DIM_X; i += DIM_Y)
                 {
-                    sAdiag[sA_idx] = CONJ ? -conj(A[A_idx]) : -A[A_idx];
-                }
-                else if(!UNIT && row == col && row < remainder)
-                {
-                    // Dividing here so we can just multiply later.
-                    sAdiag[sA_idx] = 1.0 / (CONJ ? conj(A[A_idx]) : A[A_idx]);
-                }
-                else if(col < DIM_X
-                        && row < DIM_X) // In off-triangular portion or past end of remainder
-                {
-                    sAdiag[sA_idx] = 0.0;
+                    // const rocblas_int col    = ty; //ty + i;
+                    // const rocblas_int sA_idx = cache_transpose ? col + DIM_X * row : col * DIM_X + row;
+                    // const size_t      A_idx
+                    //     = (block_row * DIM_X * lda + block_row * DIM_X) + col * lda + row;
+                    // const rocblas_int total_col = block_row * DIM_X + col;
+                    // const rocblas_int total_row = block_row * DIM_X + row;
+                    if(((row > col && LOWER) || (col > row && !LOWER)) && row < remainder
+                       && col < remainder)
+                    {
+                        sAdiag[sA_idx] = CONJ ? -conj(A[A_idx]) : -A[A_idx];
+                    }
+                    else if(!UNIT && row == col && row < remainder)
+                    {
+                        // Dividing here so we can just multiply later.
+                        sAdiag[sA_idx] = 1.0 / (CONJ ? conj(A[A_idx]) : A[A_idx]);
+                    }
+                    else if(col < DIM_X
+                            && row < DIM_X) // In off-triangular portion or past end of remainder
+                    {
+                        sAdiag[sA_idx] = 0.0;
+                    }
                 }
             }
         }
@@ -341,21 +355,21 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
             __syncthreads();
 
             // Update val with result of previous block
-            for(rocblas_int i = 0; i < DIM_X; i += DIM_Y)
+            //for(rocblas_int i = 0; i < DIM_X; i += DIM_Y)
             {
                 // Use shared memory if previous col since we cached this earlier
-                const size_t i_idx = TRANS ? i : i * lda;
-                const bool   cached
+                //const size_t i_idx = TRANS ? i : i * lda;
+                const bool cached
                     = !first_row
                       && (backwards_sub ? block_col == block_row + 1 : block_col == block_row - 1);
 
-                if(TRANS ? (local_row + i < n && local_col < n)
-                         : (local_row < n && local_col + i < n))
+                if(TRANS ? (local_row /* + i */ < n && local_col < n)
+                         : (local_row < n && local_col /* + i */ < n))
                 {
-                    auto A_val = cached ? sAoff[0] : A[A_idx + i_idx]; // i / DIM_Y
+                    auto A_val = cached ? sAoff[0] : A[A_idx /* + i_idx */]; // i / DIM_Y
                     if(CONJ)
                         A_val = conj(A_val);
-                    val += A_val * sx[i + ty];
+                    val += A_val * sx[/* i */ +ty];
                 }
             }
         }
@@ -399,9 +413,9 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
         {
             // Solve the diagonal block
             if constexpr(backwards_sub)
-                rocblas_trsv_block_solve_upper_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, val);
+                rocblas_trsv_block_solve_upper_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, xs, val);
             else
-                rocblas_trsv_block_solve_lower_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, val);
+                rocblas_trsv_block_solve_lower_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, xs, val);
 
             // Store solved value into x
             if(!row_is_remainder || tx < remainder)
@@ -411,9 +425,9 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
 #else
         // Solve the diagonal block
         if constexpr(backwards_sub)
-            rocblas_trsv_block_solve_upper_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, val);
+            rocblas_trsv_block_solve_upper_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, xs, val);
         else
-            rocblas_trsv_block_solve_lower_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, val);
+            rocblas_trsv_block_solve_lower_big_batch<DIM_X, DIM_Z, UNIT>(sAdiag, xs, val);
 
         // Store solved value into x
         if(!row_is_remainder || tx < remainder)
@@ -493,7 +507,7 @@ rocblas_status rocblas_internal_trsv_substitution_big_batch_template(rocblas_han
     rocblas_int batch_grids = (batches - 1) / DIM_Z + 1;
 
     dim3 threads(DIM_X, DIM_Y, DIM_Z);
-    dim3 grid(blocks, 1, batch_grids);
+    dim3 grid(batch_grids, blocks);
 
     bool alpha_exists = false;
     T    alpha_local  = 1.0;
