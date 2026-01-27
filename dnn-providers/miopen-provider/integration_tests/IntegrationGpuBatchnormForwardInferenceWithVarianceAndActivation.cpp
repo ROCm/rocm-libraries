@@ -81,7 +81,7 @@ protected:
                                                                      epsilonTensorAttr,
                                                                      bnAttrs);
 
-        yTensorAttr->set_data_type(dataType);
+        yTensorAttr->set_data_type(intermediateDataType);
 
         graph::PointwiseAttributes pointwiseAttrs;
         pointwiseAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activeCase.mode));
