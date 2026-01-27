@@ -37,15 +37,14 @@
 #define CREATE_BENCHMARK_PARTIAL_SORT_COPY(TYPE, SMALL_N) \
     executor.queue<device_partial_sort_copy_benchmark<TYPE>>(SMALL_N);
 
-#define CREATE_BENCHMARK(TYPE)                          \
-    {                                                   \
-        CREATE_BENCHMARK_PARTIAL_SORT_COPY(TYPE, true)  \
-        CREATE_BENCHMARK_PARTIAL_SORT_COPY(TYPE, false) \
-    }
+#define CREATE_BENCHMARK(TYPE) \
+    {CREATE_BENCHMARK_PARTIAL_SORT_COPY(TYPE, true) CREATE_BENCHMARK_PARTIAL_SORT_COPY(TYPE, false)}
 
 int main(int argc, char* argv[])
 {
-    primbench::executor executor(argc, argv, 128 * primbench::MiB, primbench::flags::sync);
+    primbench::settings settings;
+    settings.bytes = 128 * primbench::MiB;
+    primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
     CREATE_BENCHMARK(int32_t)
     CREATE_BENCHMARK(int64_t)

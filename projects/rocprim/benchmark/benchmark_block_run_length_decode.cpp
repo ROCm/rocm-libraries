@@ -29,7 +29,9 @@
 
 int main(int argc, char* argv[])
 {
-    primbench::executor executor(argc, argv, 128 * primbench::MiB);
+    primbench::settings settings;
+    settings.bytes = 128 * primbench::MiB;
+    primbench::executor executor(argc, argv, settings);
 
     CREATE_BENCHMARK(int32_t, int32_t, 1, 5, 128, 2, 4)
     CREATE_BENCHMARK(int32_t, int32_t, 1, 10, 128, 2, 4)

@@ -28,7 +28,9 @@ int main(int argc, char* argv[])
 {
     // Set the number of bytes to 1, because we want throughput stats,
     // even though config_dispatch doesn't create an input array.
-    primbench::executor executor(argc, argv, 1);
+    primbench::settings settings;
+    settings.bytes = 1;
+    primbench::executor executor(argc, argv, settings);
 
     // Queue stream variation benchmarks.
     executor.queue<config_dispatch_benchmark>("default_stream");

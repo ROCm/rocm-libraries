@@ -73,7 +73,9 @@ int main(int argc, char* argv[])
 {
     size_t bytes = 128 * primbench::MiB;
 
-    primbench::executor executor(argc, argv, bytes, primbench::flags::sync);
+    primbench::settings settings;
+    settings.bytes = bytes;
+    primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     // Tuned types

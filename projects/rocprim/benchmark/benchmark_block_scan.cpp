@@ -84,7 +84,9 @@ void add_benchmarks(primbench::executor& executor)
 
 int main(int argc, char* argv[])
 {
-    primbench::executor executor(argc, argv, 512 * primbench::MiB);
+    primbench::settings settings;
+    settings.bytes = 512 * primbench::MiB;
+    primbench::executor executor(argc, argv, settings);
 
     add_benchmarks<inclusive_scan_uws_t>(executor);
     add_benchmarks<exclusive_scan_uws_t>(executor);

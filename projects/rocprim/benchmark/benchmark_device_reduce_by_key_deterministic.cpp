@@ -25,7 +25,9 @@
 
 int main(int argc, char* argv[])
 {
-    primbench::executor executor(argc, argv, 2 * primbench::GiB);
+    primbench::settings settings;
+    settings.bytes = 2 * primbench::GiB;
+    primbench::executor executor(argc, argv, settings);
 
     add_benchmarks<true>(executor);
 

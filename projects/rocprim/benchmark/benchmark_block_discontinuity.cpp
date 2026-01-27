@@ -55,7 +55,9 @@ void add_benchmarks(primbench::executor& executor)
 
 int main(int argc, char* argv[])
 {
-    primbench::executor executor(argc, argv, 512 * primbench::MiB);
+    primbench::settings settings;
+    settings.bytes = 512 * primbench::MiB;
+    primbench::executor executor(argc, argv, settings);
 
     add_benchmarks<flag_heads>(executor);
     add_benchmarks<flag_tails>(executor);

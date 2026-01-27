@@ -42,7 +42,9 @@
 
 int main(int argc, char* argv[])
 {
-    primbench::executor executor(argc, argv, 2 * primbench::GiB, primbench::flags::sync);
+    primbench::settings settings;
+    settings.bytes = 2 * primbench::GiB;
+    primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     // Tuned types

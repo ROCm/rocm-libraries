@@ -32,22 +32,19 @@
 #define CREATE_BENCHMARK_SEARCH(TYPE, KEY_SIZE, REPEATING) \
     executor.queue<device_search_benchmark<TYPE>>(KEY_SIZE, REPEATING);
 
-#define CREATE_BENCHMARK_PATTERN(TYPE, REPEATING)       \
-    {                                                   \
-        CREATE_BENCHMARK_SEARCH(TYPE, 10, REPEATING)    \
-        CREATE_BENCHMARK_SEARCH(TYPE, 100, REPEATING)   \
-        CREATE_BENCHMARK_SEARCH(TYPE, 1000, REPEATING)  \
-        CREATE_BENCHMARK_SEARCH(TYPE, 10000, REPEATING) \
-    }
+#define CREATE_BENCHMARK_PATTERN(TYPE, REPEATING)                                               \
+    {CREATE_BENCHMARK_SEARCH(TYPE, 10, REPEATING) CREATE_BENCHMARK_SEARCH(TYPE, 100, REPEATING) \
+         CREATE_BENCHMARK_SEARCH(TYPE, 1000, REPEATING)                                         \
+             CREATE_BENCHMARK_SEARCH(TYPE, 10000, REPEATING)}
 
-#define CREATE_BENCHMARK(TYPE)                                                     \
-    {                                                                              \
-        CREATE_BENCHMARK_PATTERN(TYPE, true) CREATE_BENCHMARK_PATTERN(TYPE, false) \
-    }
+#define CREATE_BENCHMARK(TYPE) \
+    {CREATE_BENCHMARK_PATTERN(TYPE, true) CREATE_BENCHMARK_PATTERN(TYPE, false)}
 
 int main(int argc, char* argv[])
 {
-    primbench::executor executor(argc, argv, 128 * primbench::MiB);
+    primbench::settings settings;
+    settings.bytes = 128 * primbench::MiB;
+    primbench::executor executor(argc, argv, settings);
 
     CREATE_BENCHMARK(int32_t)
     CREATE_BENCHMARK(int64_t)
