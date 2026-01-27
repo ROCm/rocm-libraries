@@ -659,6 +659,7 @@ class SizeMapping:
         dtvb = bool(d['DirectToVgprB'])
         dtlA = bool(d['DirectToLdsA'])
         dtlB = bool(d['DirectToLdsB'])
+        cms  = bool(d['UseCustomMainLoopSchedule'])
 
         return cls(waveNum                  = d['NumThreads'] // d['WavefrontSize'],
                    workGroup                = d['WorkGroup'],
@@ -696,7 +697,7 @@ class SizeMapping:
                    synchronizerSizePerWG    = synchronizerSizePerWG,
                    nonTemporalA             = d['NonTemporalA'],
                    nonTemporalB             = d['NonTemporalB'],
-                   customMainLoopScheduling = d['UseCustomMainLoopSchedule'],
+                   customMainLoopScheduling = cms,
                    NonTemporalD             = d['NonTemporalD'],
                    WaveSeparateGlobalReadA  = d['WaveSeparateGlobalReadA'],
                    WaveSeparateGlobalReadB  = d['WaveSeparateGlobalReadB'],
