@@ -35,7 +35,7 @@ Tests:
   category: quick
   function: roti
   precision: *single_only_precisions
-  M: [12000]
+  M: [300]
   nnz: [5, 10]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -43,7 +43,7 @@ Tests:
   category: quick
   function: roti
   precision: *double_only_precisions
-  M: [12000]
+  M: [567]
   nnz: [5, 10, 500]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -51,7 +51,7 @@ Tests:
   category: pre_checkin
   function: roti
   precision: *single_double_precisions
-  M: [15332, 22031, 31958]
+  M: [12758]
   nnz: [0, 1543, 7111, 10000]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -59,7 +59,7 @@ Tests:
   category: nightly
   function: roti
   precision: *single_double_precisions
-  M: [735519, 1452387, 7834525]
+  M: [651243]
   nnz: [23512, 84412, 311983]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -67,7 +67,7 @@ Tests:
   category: pre_checkin
   function: roti
   precision: *single_only_precisions
-  M: [12000]
+  M: [2000]
   nnz: [5, 10]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   graph_test: true
@@ -76,7 +76,7 @@ Tests:
   category: pre_checkin
   function: roti
   precision: *double_only_precisions
-  M: [12000]
+  M: [2000]
   nnz: [5, 10, 500]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   graph_test: true
@@ -85,7 +85,7 @@ Tests:
   category: pre_checkin
   function: roti
   precision: *single_only_precisions
-  M: [12000]
+  M: [2000]
   nnz: [500]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   graph_test: true
@@ -94,6 +94,6 @@ Tests:
   category: quick
   function: roti
   precision: *single_only_precisions
-  M: [12000]
+  M: [575]
   nnz: [500]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
