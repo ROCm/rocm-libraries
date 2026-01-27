@@ -24,7 +24,7 @@
 ################################################################################
 
 from typing import Any, Optional
-from rocisa.instruction import SWaitCnt, SNop
+from rocisa.instruction import SWaitCnt, SNop, SBarrier
 
 from Tensile.Components.CMSValidator import verify_packs_start_and_end_at_correct_indices, isValid
 from Tensile.Components.CustomSchedule import ScheduleInfo
@@ -1362,11 +1362,7 @@ class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
             numCodePaths=2,
             numMfma=96,
             optSchedule={
-                "SYNC": [[1, 78]],
-                "LRA0": [[0]*16],
-                "LRB0": [[0]*32],
-                "LRA3": [[77]*16],
-                "LRB3": [[48]*32],
+
                 # BROKEN PackA0: indices 27-30 instead of 24-26, causing read-before-write
                 "PackA0": [[
                     20, 20, 21, 21, 
@@ -1377,24 +1373,52 @@ class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
                     28, 28, 
                     30, 30, 30, 30]],
 
+                "SYNC": [[1, 1, 3, 49, 78]],
+                "GRIncA": [[0]*9],
+                "GRIncB": [[0]*9],
+                "LRA0": [[0]*16],
+                "LRB0": [[0]*32],
+                "LRA3": [[77]*16],
+                "LRB3": [[48]*32],
+                "LCC": [[0]*9],
+                "LWSA": [[0]],
+                "LWSB": [[0]],
+                "LWRA": [[0]],
+                "LWRA": [[0]],
+                "GRA": [[2]*8],
+                "GRB": [[2]*8],
                 "PackB0": [[42, 42, 42, 43, 48, 48, 49, 49, 49, 50, 43, 43, 44, 44, 48, 48, 50, 50, 50, 51, 45, 45, 46, 46, 48, 48, 51, 51, 52, 52, 46, 47, 47, 47, 48, 48, 52, 53, 53, 53]],
                 "PackB3": [[67, 67, 68, 68, 75, 75, 76, 76, 77, 77, 69, 69, 70, 70, 75, 75, 78, 78, 86, 86, 71, 71, 72, 72, 75, 75, 87, 87, 88, 88, 73, 73, 74, 74, 75, 75, 89, 89, 90, 90]],
                 "PackA3": [[89, 89, 90, 90, 92, 92, 93, 93, 93, 94, 90, 91, 91, 91, 92, 92, 94, 94, 95, 95]],
             },
             syncCode=[
                 SWaitCnt(dscnt=0),
-                SWaitCnt(dscnt=0)
+                SBarrier(comment=""),
+                SWaitCnt(vlcnt=0),
+                SWaitCnt(dscnt=0),
+                SWaitCnt(dscnt=0),
             ],
             nglshift=12,
             nllshift=12,
-            mfmaReorder=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
-                         20, 21, 22, 23, 24, 40, 25, 32, 44, 33, 26, 41, 27, 34, 45, 35, 28, 42,
-                         29, 36, 46, 37, 30, 43, 31, 38, 47, 39, 48, 56, 64, 49, 57, 65, 50, 58,
-                         66, 51, 59, 67, 52, 60, 68, 53, 61, 69, 54, 62, 70, 55, 63, 71, 72, 73,
-                         74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91,
-                         92, 93, 94, 95],
+            mfmaReorder=[
+                 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 
+                24, 32, 25, 36, 44, 37, 26, 33, 27, 38, 45, 39, 28, 34, 29, 40, 46, 41, 30, 35, 31, 42, 47, 43,
+                48, 56, 64, 49, 57, 65, 50, 58, 66, 51, 59, 67, 52, 60, 68, 53, 61, 69, 54, 62, 70, 55, 63, 71,
+                72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95],
         )
 
         valid, message = isValid(schedule_info, {"kernel": kernel})
+        assert valid  # Schedule previously failed, now passes.
+
+        # Check it fails where it's expected to.
+        schedule_info.optSchedule["PackA0"] = [[
+            20, 20, 21, 21, 
+            23, 23, 
+            28, 28, 28, 28,
+
+            37, 37, 37, 37,
+            40, 40, 
+            41, 41, 41, 41]]
+        valid, message = isValid(schedule_info, {"kernel": kernel})
         assert not valid
-        assert message == "Code path 0: PackA0 @ idx=27 issued too late, must be issued before MFMA @ idx=26."
+        assert message == "Code path 0: PackA0 @ idx=37 issued too late, must be issued before MFMA @ idx=36."

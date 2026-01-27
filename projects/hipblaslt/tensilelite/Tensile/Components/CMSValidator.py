@@ -963,8 +963,8 @@ def find_earliest_mfma_execution(
     tile_index: int,
     mfma_in_tile: int,
     base_offset: int,
-    num_a_tiles: int,
-    num_b_tiles: int,
+    n_a_tiles: int,
+    n_b_tiles: int,
     mfma_reorder: list[int],
     mfmas_per_tile: int = 3,
 ) -> int:
@@ -992,7 +992,7 @@ def find_earliest_mfma_execution(
     """
     # Column-major layout: A tiles are contiguous, B tiles are strided
     a_tile_stride = mfmas_per_tile
-    b_tile_stride = num_a_tiles * mfmas_per_tile
+    b_tile_stride = n_a_tiles * mfmas_per_tile
     
     def tile_to_logical_mfma(a_tile: int, b_tile: int) -> int:
         """Convert (a_tile, b_tile) to logical MFMA index."""
@@ -1011,13 +1011,13 @@ def find_earliest_mfma_execution(
         # PackB prepares B tile data, used by MFMAs: (A0, Bi), (A1, Bi), ... for all A tiles
         return min(
             mfma_reorder[tile_to_logical_mfma(a_tile, tile_index)]
-            for a_tile in range(num_a_tiles)
+            for a_tile in range(n_a_tiles)
         )
     else:
         # PackA prepares A tile data, used by MFMAs: (Ai, B0), (Ai, B1), ... for all B tiles
         return min(
             mfma_reorder[tile_to_logical_mfma(tile_index, b_tile)]
-            for b_tile in range(num_b_tiles)
+            for b_tile in range(n_b_tiles)
         )
 
 def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reorder: list[int], mfmas_by_index: dict[int, MFMA], num_vmfma: int, kernel: 'Solution') -> None:
@@ -1098,8 +1098,8 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
                 tile_index=tile_index,
                 mfma_in_tile=0,  # BF16 has only 1 MFMA per tile
                 base_offset=base_offset,
-                num_a_tiles=n_tiles_a,
-                num_b_tiles=n_tiles_b,
+                n_a_tiles=n_tiles_a,
+                n_b_tiles=n_tiles_b,
                 mfma_reorder=mfma_reorder,
                 mfmas_per_tile=1,  # BF16: 1 MFMA per tile pair
             )
@@ -1114,8 +1114,10 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
         # First 4 packs (CVT0) feed into indices 4-5 (4x4 MFMAs)
         # Middle 2 packs are 4x4 MFMAs.
         # Last 4 packs (CVT1) feed into the actual MFMAs starting at base_offset
-        n_tiles_a_quarter = n_tiles_a // 4
-        n_tiles_b_quarter = n_tiles_b // 4
+        
+        # Half tile count since each quarter uses half of the A tiles and half of the B tiles.
+        n_tiles_a //= 2
+        n_tiles_b //= 2
 
         packs = sorted(packs, key=lambda x: x.issue_index)
         for i_pack, pack in enumerate(packs):
@@ -1155,8 +1157,8 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
                 tile_index=group_index,
                 mfma_in_tile=pack_offset,
                 base_offset=base_offset,
-                num_a_tiles=n_tiles_a_quarter,
-                num_b_tiles=n_tiles_b_quarter,
+                n_a_tiles=n_tiles_a,
+                n_b_tiles=n_tiles_b,
                 mfma_reorder=mfma_reorder,
             )
             
@@ -1168,8 +1170,9 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
                 pack.needed_by = mfma_needed_by
     else:
         # Regular TF32: Packs come in groups of 24
-        n_tiles_a_quarter = n_tiles_a // 4
-        n_tiles_b_quarter = n_tiles_b // 4
+        # Half tile count since each quarter uses half of the A tiles and half of the B tiles.
+        n_tiles_a //= 2
+        n_tiles_b //= 2
         for pack in packs:
             idx_in_group = pack.issue_index % 24
             # Which group of 24 packs (which tile) does this pack belong to?
@@ -1193,8 +1196,8 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
                 tile_index=group_index,
                 mfma_in_tile=mfma_in_tile,
                 base_offset=base_offset,
-                num_a_tiles=n_tiles_a_quarter,
-                num_b_tiles=n_tiles_b_quarter,
+                n_a_tiles=n_tiles_a,
+                n_b_tiles=n_tiles_b,
                 mfma_reorder=mfma_reorder,
             )
 
