@@ -21,15 +21,6 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
-        ASSERT_EQ(miopenCreate(&_handle.miopenHandle), miopenStatusSuccess);
-    }
-
-    void TearDown() override
-    {
-        if(_handle.miopenHandle != nullptr)
-        {
-            EXPECT_EQ(miopenDestroy(_handle.miopenHandle), miopenStatusSuccess);
-        }
     }
 
     HipdnnEnginePluginHandle _handle;

@@ -119,7 +119,6 @@ protected:
         SKIP_IF_WINDOWS();
 
         SKIP_IF_NO_DEVICES();
-        ASSERT_EQ(miopenCreate(&_handle.miopenHandle), miopenStatusSuccess);
 
         auto param = GetParam();
         auto& convTestCase = param.convTestCase;
@@ -234,14 +233,6 @@ protected:
         ASSERT_TRUE(status.is_good());
 
         _isApplicable = param.isApplicable;
-    }
-
-    void TearDown() override
-    {
-        if(_handle.miopenHandle != nullptr)
-        {
-            EXPECT_EQ(miopenDestroy(_handle.miopenHandle), miopenStatusSuccess);
-        }
     }
 
     MiopenConvFwdBiasActivPlanBuilder _planBuilder;

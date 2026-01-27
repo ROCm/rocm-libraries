@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <mutex>
+#include <type_traits>
 
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
 
@@ -12,94 +13,59 @@ namespace hipdnn_plugin_sdk
 {
 
 /**
- * @brief Base class for engine plugin containers.
+ * @brief Compile-time checks for engine plugin container requirements.
  *
- * The EnginePluginContainer encapsulates the lifecycle of an engine plugin
- * from creation to destruction. It acts as the root object that manages
- * the EngineManager and provides the bridge between the C API and the
- * C++ implementation.
+ * These type traits verify that a container class meets the requirements
+ * for use with DECLARE_ENGINE_PLUGIN_DEFAULT_IMPL macro.
  *
- * The default implementation uses a shared_ptr/weak_ptr pattern to allow
- * the plugin to be loaded multiple times while sharing resources. When the
- * last reference drops, the container is cleaned up.
- *
- * Plugin developers can extend this class to add custom initialization,
- * resources, or behavior.
- *
- * ## Usage Pattern
- *
- * 1. Derive from EnginePluginContainer
- * 2. Override registerEngines() to add your engines to the manager
- * 3. Use getOrCreateShared() to get/create the singleton instance
- *
- * @note This class is designed to be shared across multiple plugin handles.
- *       Implementations should be thread-safe.
+ * Required methods:
+ * 1. static uint32_t copyEngineIds(int64_t*, uint32_t, uint32_t&)
+ * 2. EngineManager& getEngineManager()
  */
-class EnginePluginContainer
+
+// Check for getEngineManager() method
+template <typename T, typename = void>
+struct HasGetEngineManager : std::false_type
 {
-public:
-    EnginePluginContainer()
-        : _engineManager(std::make_unique<EngineManager>())
-    {
-    }
-
-    virtual ~EnginePluginContainer() = default;
-
-    // Disallow copy
-    EnginePluginContainer(const EnginePluginContainer&) = delete;
-    EnginePluginContainer& operator=(const EnginePluginContainer&) = delete;
-
-    /**
-     * @brief Gets the engine manager for this container.
-     *
-     * @return Reference to the engine manager.
-     */
-    EngineManager& getEngineManager()
-    {
-        return *_engineManager;
-    }
-
-    /**
-     * @brief Gets the engine manager for this container (const version).
-     *
-     * @return Const reference to the engine manager.
-     */
-    const EngineManager& getEngineManager() const
-    {
-        return *_engineManager;
-    }
-
-protected:
-    /**
-     * @brief Override this method to register engines with the manager.
-     *
-     * This method is called during container initialization. Derived classes
-     * should create their engines and plan builders here and add them to
-     * the engine manager.
-     *
-     * @note This method is called once when the container is first created.
-     */
-    virtual void registerEngines()
-    {
-        // Default implementation does nothing.
-        // Derived classes should override to register their engines.
-    }
-
-    /**
-     * @brief Gets the engine manager for modification during initialization.
-     *
-     * Use this in registerEngines() to add engines to the manager.
-     *
-     * @return Reference to the engine manager.
-     */
-    EngineManager& engineManager()
-    {
-        return *_engineManager;
-    }
-
-private:
-    std::unique_ptr<EngineManager> _engineManager;
 };
+
+template <typename T>
+struct HasGetEngineManager<T, std::void_t<decltype(std::declval<T&>().getEngineManager())>>
+    : std::true_type
+{
+};
+
+// Check for static copyEngineIds method
+template <typename T, typename = void>
+struct HasCopyEngineIds : std::false_type
+{
+};
+
+template <typename T>
+struct HasCopyEngineIds<
+    T,
+    std::void_t<decltype(T::copyEngineIds(
+        std::declval<int64_t*>(), std::declval<uint32_t>(), std::declval<uint32_t&>()))>>
+    : std::true_type
+{
+};
+
+/**
+ * @brief Validates that a container type meets all requirements.
+ *
+ * This function uses static_assert to provide clear error messages if
+ * a container is missing required methods.
+ */
+template <typename ContainerType>
+constexpr void validateContainerType()
+{
+    static_assert(HasGetEngineManager<ContainerType>::value,
+                  "Container type must have a 'EngineManager& getEngineManager()' method");
+
+    static_assert(HasCopyEngineIds<ContainerType>::value,
+                  "Container type must have a 'static uint32_t copyEngineIds(int64_t*, uint32_t, "
+                  "uint32_t&)' method");
+}
 
 /**
  * @brief Helper template for managing a shared plugin container instance.
@@ -125,7 +91,7 @@ private:
  *
  * @tparam ContainerType The derived container type to manage.
  */
-template<typename ContainerType>
+template <typename ContainerType>
 class SharedContainerManager
 {
 public:
@@ -149,7 +115,9 @@ public:
 
         std::lock_guard<std::mutex> lock(_mutex);
 
-        // Double-check after acquiring lock
+        // if we do have a race condition that results in threads getting locked, we want to
+        // ensure that we only create one instance.  Therefore, the second thread to get
+        // through will just read from the weak pointer rather than create a new instance.
         containerPtr = _weakContainer.lock();
         if(containerPtr != nullptr)
         {

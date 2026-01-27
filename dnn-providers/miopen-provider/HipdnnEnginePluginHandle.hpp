@@ -19,7 +19,27 @@
 struct HipdnnEnginePluginHandle
 {
 public:
-    virtual ~HipdnnEnginePluginHandle() = default;
+    HipdnnEnginePluginHandle()
+    {
+        miopenStatus_t status = miopenCreate(&miopenHandle);
+        if(status != miopenStatusSuccess)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "Failed to create MIOpen handle");
+        }
+    }
+
+    virtual ~HipdnnEnginePluginHandle()
+    {
+        if(miopenHandle != nullptr)
+        {
+            miopenStatus_t status = miopenDestroy(miopenHandle);
+            if(status != miopenStatusSuccess)
+            {
+                HIPDNN_LOG_ERROR("Failed to destroy MIOpen handle");
+            }
+        }
+    }
 
     miopenHandle_t miopenHandle = nullptr;
 
@@ -34,10 +54,10 @@ public:
         return _stream;
     }
 
-    std::shared_ptr<miopen_legacy_plugin::MiopenContainer> miopenContainer;
+    std::shared_ptr<miopen_legacy_plugin::MiopenContainer> container;
     hipdnn_plugin_sdk::EngineManager& getEngineManager()
     {
-        return miopenContainer->getEngineManager();
+        return container->getEngineManager();
     }
 
     void storeEngineDetailsDetachedBuffer(const void* ptr,

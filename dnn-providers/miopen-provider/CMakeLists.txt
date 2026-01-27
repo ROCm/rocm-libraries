@@ -120,12 +120,10 @@ add_library(
     engines/plans/MiopenConvPlanBuilder.cpp
     engines/plans/MiopenConvWrwPlan.cpp
     MiopenActivationDescriptor.cpp
-    MiopenHandleFactory.cpp
     MiopenContainer.cpp
     MiopenConvDescriptor.cpp
     MiopenUtils.cpp
     MiopenTensor.cpp
-    MiopenLegacyPlugin.cpp
 )
 target_compile_definitions(
     miopen_legacy_plugin_private PRIVATE COMPONENT_NAME="miopen_legacy_plugin"

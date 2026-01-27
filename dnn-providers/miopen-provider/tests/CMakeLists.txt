@@ -32,11 +32,8 @@ add_executable(
     TestMiopenActivationDescriptor.cpp
     TestMiopenConvDescriptor.cpp
     TestMiopenEngineManager.cpp
-    TestMiopenHandleFactory.cpp
     TestMiopenHipdnnEnginePluginHandle.cpp
     TestMiopenHipdnnPluginExecutionContext.cpp
-    TestMiopenLegacyEnginePluginApi.cpp
-    TestMiopenLegacyPluginApi.cpp
     TestMiopenTensor.cpp
     TestMiopenUtils.cpp
 )

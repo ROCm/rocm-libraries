@@ -7,47 +7,48 @@
 #include <vector>
 
 #include <hipdnn_plugin_sdk/EnginePluginContainer.hpp>
+#include <hipdnn_plugin_sdk/EnginePluginMacros.hpp>
 
 using namespace hipdnn_plugin_sdk;
 
 namespace
 {
 
-// Test container that tracks initialization
-class TestContainer : public EnginePluginContainer
+// Test container that tracks initialization and meets requirements
+class TestContainer
 {
 public:
     TestContainer()
+        : _engineManager(std::make_unique<EngineManager>())
     {
         instanceCount++;
     }
 
-    ~TestContainer() override
+    ~TestContainer()
     {
         instanceCount--;
     }
 
+    static uint32_t copyEngineIds(int64_t* /*engineIds*/, uint32_t /*maxEngines*/, uint32_t& numEngines)
+    {
+        numEngines = 0;
+        return 0;
+    }
+
+    EngineManager& getEngineManager()
+    {
+        return *_engineManager;
+    }
+
     static int instanceCount;
+
+private:
+    std::unique_ptr<EngineManager> _engineManager;
 };
 
 int TestContainer::instanceCount = 0;
 
 } // namespace
-
-TEST(TestEnginePluginContainer, HasEngineManager)
-{
-    EnginePluginContainer container;
-    // Just verify we can get the engine manager without crashing
-    auto& manager = container.getEngineManager();
-    (void)manager;
-}
-
-TEST(TestEnginePluginContainer, EngineManagerInitiallyEmpty)
-{
-    EnginePluginContainer container;
-    auto engineIds = container.getEngineManager().getAllEngineIds();
-    EXPECT_TRUE(engineIds.empty());
-}
 
 TEST(TestSharedContainerManager, CreatesContainerOnFirstCall)
 {
@@ -99,11 +100,11 @@ TEST(TestSharedContainerManager, ThreadSafeCreation)
     std::vector<std::shared_ptr<TestContainer>> containers;
     std::mutex containersMutex;
 
-    constexpr int NUM_THREADS = 10;
+    constexpr int K_NUM_THREADS = 10;
     std::vector<std::thread> threads;
-    threads.reserve(NUM_THREADS);
+    threads.reserve(K_NUM_THREADS);
 
-    for(int i = 0; i < NUM_THREADS; ++i)
+    for(int i = 0; i < K_NUM_THREADS; ++i)
     {
         threads.emplace_back([&]() {
             auto container = manager.getOrCreate();
@@ -119,11 +120,18 @@ TEST(TestSharedContainerManager, ThreadSafeCreation)
 
     // All threads should have gotten the same container
     EXPECT_EQ(TestContainer::instanceCount, 1);
-    EXPECT_EQ(containers.size(), static_cast<size_t>(NUM_THREADS));
+    EXPECT_EQ(containers.size(), static_cast<size_t>(K_NUM_THREADS));
 
     // Verify all containers are the same instance
     for(const auto& container : containers)
     {
         EXPECT_EQ(container.get(), containers[0].get());
     }
+}
+
+TEST(TestEnginePluginContainer, ValidContainerPassesCompileTimeValidation)
+{
+    // Test that the compile-time validation works for containers meeting requirements
+    constexpr bool K_VALID = (validateContainerType<TestContainer>(), true);
+    EXPECT_TRUE(K_VALID);
 }

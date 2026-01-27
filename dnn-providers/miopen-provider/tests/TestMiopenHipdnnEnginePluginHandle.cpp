@@ -5,6 +5,8 @@
 #include <gtest/gtest.h>
 #include <memory>
 
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+
 #include "HipdnnEnginePluginHandle.hpp"
 
 class TestMiopenHipdnnEnginePluginHandle : public ::testing::Test
@@ -12,6 +14,7 @@ class TestMiopenHipdnnEnginePluginHandle : public ::testing::Test
 protected:
     void SetUp() override
     {
+        SKIP_IF_NO_DEVICES();
         _handle = std::make_unique<HipdnnEnginePluginHandle>();
     }
 
@@ -20,8 +23,9 @@ protected:
 
 TEST_F(TestMiopenHipdnnEnginePluginHandle, DefaultConstruction)
 {
-    EXPECT_EQ(_handle->miopenHandle, nullptr);
-    EXPECT_EQ(_handle->miopenContainer, nullptr);
+
+    EXPECT_NE(_handle->miopenHandle, nullptr);
+    EXPECT_EQ(_handle->container, nullptr);
     EXPECT_EQ(_handle->getStream(), nullptr);
 }
 
@@ -83,7 +87,7 @@ TEST_F(TestMiopenHipdnnEnginePluginHandle, MultipleBuffers)
     _handle->removeEngineDetailsDetachedBuffer(ptr2);
 }
 
-TEST_F(TestMiopenHipdnnEnginePluginHandle, ThrowsWithNoMiopenHandle)
+TEST_F(TestMiopenHipdnnEnginePluginHandle, WillNotThrowOnSetStreamNullptr)
 {
-    EXPECT_THROW(_handle->setStream(nullptr), hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_NO_THROW(_handle->setStream(nullptr));
 }

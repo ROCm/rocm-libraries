@@ -23,6 +23,8 @@ add_executable(
     IntegrationGpuConvFwdBiasActiv.cpp
     IntegrationGpuConvBackwardData.cpp
     IntegrationGpuConvBackwardWeights.cpp
+    TestMiopenLegacyEnginePluginApi.cpp
+    TestMiopenLegacyPluginApi.cpp
 )
 
 target_compile_options(miopen_plugin_integration_test PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
