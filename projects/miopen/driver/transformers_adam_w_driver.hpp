@@ -482,12 +482,7 @@ int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::VerifyForward()
     const Tref tolerance = GetTolerance();
     const char* ref_type = use_multithread ? "multi-threaded" : "single-threaded";
 
-    const auto t0 = std::chrono::high_resolution_clock::now();
     RunForwardCPU();
-    const auto t1 = std::chrono::high_resolution_clock::now();
-    const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
-    std::ofstream ofs("/data/Dev/MIOpenDriverStats-" + this->name + ".csv", std::ofstream::app);
-    ofs << ns;
 
     const auto error = miopen::rms_range(param_host, param);
 

@@ -49,29 +49,28 @@
 #define MLO_ADAMHOST_H_
 
 template <typename Tref>
-int64_t mloAdamRunHost(miopenTensorDescriptor_t paramDesc,
-                       Tref* params,
-                       Tref* grads,
-                       Tref* exp_avgs,
-                       Tref* exp_avg_sqs,
-                       Tref* max_exp_avg_sqs,
-                       int32_t step,
-                       float lr,
-                       float beta1,
-                       float beta2,
-                       float weight_decay,
-                       float eps,
-                       bool amsgrad,
-                       bool maximize,
-                       bool adamw,
-                       bool is_amp,
-                       int32_t grad_scale,
-                       bool found_inf,
-                       bool multi_threaded)
+void mloAdamRunHost(miopenTensorDescriptor_t paramDesc,
+                    Tref* params,
+                    Tref* grads,
+                    Tref* exp_avgs,
+                    Tref* exp_avg_sqs,
+                    Tref* max_exp_avg_sqs,
+                    int32_t step,
+                    float lr,
+                    float beta1,
+                    float beta2,
+                    float weight_decay,
+                    float eps,
+                    bool amsgrad,
+                    bool maximize,
+                    bool adamw,
+                    bool is_amp,
+                    int32_t grad_scale,
+                    bool found_inf,
+                    bool multi_threaded)
 {
-    const auto t0 = std::chrono::high_resolution_clock::now();
     if(is_amp && found_inf)
-        return 0;
+        return;
 
     const size_t numel = miopen::deref(paramDesc).GetElementSize();
 
@@ -126,10 +125,6 @@ int64_t mloAdamRunHost(miopenTensorDescriptor_t paramDesc,
 
         params[i] = param - k * exp_avg / denom;
     });
-
-    const auto t1 = std::chrono::high_resolution_clock::now();
-
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
 }
 
 #endif
