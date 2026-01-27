@@ -125,14 +125,17 @@ else
 
     # The `%m` creates a different prof file for each object file. So one for
     # rocroller.so and one for rocroller-tests.
-    # Also had to switch to using ctest so seg faults can be handled gracefully.
+    # Using sharded test runner with codecov profile for better parallelization
+    # and centralized test filtering configuration.
+    #
+    # The codecov profile excludes slow/exhaustive tests to reduce execution time
+    # while maintaining good coverage validation (basic tests still run).
 
-    echo Using $(nproc) threads for code coverage tests.
-    OMP_NUM_THREADS=8 LLVM_PROFILE_FILE=${code_cov_path}/rocroller-tests_%m.profraw ctest \
-        -j $(nproc) \
-        --test-dir ${build_path} \
-        --output-on-failure \
-        ${ctest_re_flag} "${ctest_re}"
+    echo Using sharded test runner with codecov profile.
+    LLVM_PROFILE_FILE=${code_cov_path}/rocroller-tests_%m.profraw \
+        ${script_path}/run-tests-sharded \
+        ${build_path} \
+        --profile codecov
 
     # this combines them back together.
     /opt/rocm/lib/llvm/bin/llvm-profdata merge \
