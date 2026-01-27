@@ -3303,8 +3303,6 @@ def _get_schedule_160x128x64_TF32(kernel, useLDSTr, TLDS):
     optSchedule = switch_A_B_schedule(opt.optSchedule)
     return True, ScheduleInfo(opt.numCodePaths, opt.numMfma, optSchedule, opt.syncCode, opt.nglshift, opt.nllshift)
 
-
-
 @RegisterSchedule(
     tile_config=TileConfig(128, 128, 32, 2, 0, True, 0, 0),
     dtype_predicate=isTF32,
