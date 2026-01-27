@@ -24,8 +24,8 @@ public:
                               const hipdnn_plugin_sdk::IGraph& opGraph) const
         = 0;
 
-    virtual size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                    const hipdnn_plugin_sdk::IGraph& opGraph) const;
+    virtual size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
+                                       const hipdnn_plugin_sdk::IGraph& opGraph) const;
 
     virtual void buildPlan(const HipdnnEnginePluginHandle& handle,
                            const hipdnn_plugin_sdk::IGraph& opGraph,

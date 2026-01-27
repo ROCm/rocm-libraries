@@ -748,11 +748,11 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForUnsupportedCom
     EXPECT_FALSE(applicable);
 }
 
-TEST_F(TestMiopenBatchnormPlanBuilder, GetWorkspaceSizeReturnsExpectedValue)
+TEST_F(TestMiopenBatchnormPlanBuilder, GetMaxWorkspaceSizeReturnsExpectedValue)
 {
     MockGraph mockGraph;
 
-    size_t workspaceSize = _planBuilder.getWorkspaceSize(_dummyHandle, mockGraph);
+    size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph);
 
     EXPECT_EQ(workspaceSize, 0u);
 }

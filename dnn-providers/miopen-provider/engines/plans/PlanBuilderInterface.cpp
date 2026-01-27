@@ -6,8 +6,8 @@
 namespace miopen_legacy_plugin
 {
 
-size_t IPlanBuilder::getWorkspaceSize([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-                                      [[maybe_unused]] const hipdnn_plugin_sdk::IGraph& opGraph) const
+size_t IPlanBuilder::getMaxWorkspaceSize([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+                                         [[maybe_unused]] const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
     return 0;
 }

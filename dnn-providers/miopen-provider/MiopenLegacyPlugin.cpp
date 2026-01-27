@@ -305,7 +305,7 @@ hipdnnPluginStatus_t
 
         EngineConfigWrapper engineConfigWrapper(engineConfig->ptr, engineConfig->size);
         GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);
-        *workspaceSize = engineManager.getWorkspaceSize(
+        *workspaceSize = engineManager.getMaxWorkspaceSize(
             *handle, engineConfigWrapper.engineId(), opGraphWrapper);
 
         LOG_API_SUCCESS(apiName, "workspaceSize={}", *workspaceSize);

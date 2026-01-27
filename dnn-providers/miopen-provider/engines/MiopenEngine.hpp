@@ -24,8 +24,8 @@ public:
                       const hipdnn_plugin_sdk::IGraph& opGraph) const override;
     void getDetails(HipdnnEnginePluginHandle& handle,
                     hipdnnPluginConstData_t& detailsOut) const override;
-    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                            const hipdnn_plugin_sdk::IGraph& opGraph) const override;
+    size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
+                               const hipdnn_plugin_sdk::IGraph& opGraph) const override;
 
     void initializeExecutionContext(
         const HipdnnEnginePluginHandle& handle,

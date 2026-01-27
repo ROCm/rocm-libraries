@@ -84,7 +84,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, GetWorkspaceSizeReturnsZe
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    size_t workspaceSize = _planBuilder.getWorkspaceSize(_dummyHandle, graph);
+    size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_dummyHandle, graph);
 
     EXPECT_EQ(workspaceSize, 0u);
 }

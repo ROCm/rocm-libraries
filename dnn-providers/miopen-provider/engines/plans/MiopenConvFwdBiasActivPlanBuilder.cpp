@@ -429,7 +429,7 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHan
     }
 }
 
-size_t MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSize(
+size_t MiopenConvFwdBiasActivPlanBuilder::getMaxWorkspaceSize(
     const HipdnnEnginePluginHandle& handle, const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);

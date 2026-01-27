@@ -13,7 +13,7 @@ using namespace hipdnn_test_sdk::utilities;
 
 namespace
 {
-// Minimal concrete plan builder that doesn't override getWorkspaceSize()
+// Minimal concrete plan builder that doesn't override getMaxWorkspaceSize()
 // to test the default implementation
 class SimplePlanBuilder : public IPlanBuilder
 {
@@ -30,7 +30,7 @@ public:
     {
     }
 
-    // getWorkspaceSize() NOT overridden - uses default from IPlanBuilder
+    // getMaxWorkspaceSize() NOT overridden - uses default from IPlanBuilder
 };
 } // namespace
 
@@ -41,11 +41,11 @@ protected:
     HipdnnEnginePluginHandle _dummyHandle;
 };
 
-TEST_F(TestIPlanBuilder, DefaultGetWorkspaceSizeReturnsZero)
+TEST_F(TestIPlanBuilder, DefaultGetMaxWorkspaceSizeReturnsZero)
 {
     MockGraph mockGraph;
 
-    size_t workspaceSize = _planBuilder.getWorkspaceSize(_dummyHandle, mockGraph);
+    size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph);
 
     EXPECT_EQ(workspaceSize, 0u);
 }
