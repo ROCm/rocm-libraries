@@ -34,8 +34,8 @@
 #include "client_omp.hpp"
 #include "rocblas_ostream.hpp"
 
-// Constant to reduce threads to avoid performance degradation when using all logical cores
-// Increased from 2 to 4 based on AOCL performance recommendations
+// Conservative thread reducer for multi-threaded client scenarios
+// Used in client_omp_manager constructor to avoid over-threading
 static constexpr int c_thread_reducer = 4;
 
 client_omp_manager::client_omp_manager(size_t std_thread_count)
@@ -101,15 +101,24 @@ void client_omp_manager::limit_by_processor_count()
         return;
     }
 
-    // Preserve c_thread_reducer cores free to avoid AOCL performance degradation at high
-    // thread counts. On small systems, use single-threaded mode to avoid contention entirely
-    int safe_thread_count = std::max(1, omp_default_threads - c_thread_reducer);
-    
+    // Determine optimal thread reduction based on system size
+    // AOCL oversubscription is most severe on large core-count systems (observed 64x slowdown
+    // on 24-core system). On smaller systems, use conservative reduction to preserve performance.
+    int thread_reducer;
+    if(omp_default_threads <= 16)
+    {
+        thread_reducer = 2;  // Small systems: minimal reduction
+    }
+    else
+    {
+        thread_reducer = 4;  // Large systems: aggressive reduction to prevent AOCL degradation
+    }
+
+    int safe_thread_count = std::max(1, omp_default_threads - thread_reducer);
     omp_set_num_threads(safe_thread_count);
 
-    rocblas_cout << "rocBLAS info: OMP_NUM_THREADS not set, using "
-                 << safe_thread_count << " threads (system default "
-                 << omp_default_threads << " minus " << c_thread_reducer 
-                 << " to optimize AOCL performance)" << std::endl;
+    rocblas_cout << "rocBLAS info: OMP_NUM_THREADS not set, using " << safe_thread_count
+                 << " threads (system default " << omp_default_threads << " minus "
+                 << thread_reducer << " to optimize AOCL performance)" << std::endl;
 #endif
 }
