@@ -46,8 +46,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     auto [dx, dscale, dbias] = graph->batchnorm_backward(dy, x, scale, bnBwdAttributes);
     dx->set_output(true);
-    dscale->set_output(true);
-    dbias->set_output(true);
+    dscale->set_output(true).set_data_type(intermediateType);
+    dbias->set_output(true).set_data_type(intermediateType);
 
     HIPDNN_FE_CHECK(graph->build(handle));
     std::cout << "Graph build successful.\n";

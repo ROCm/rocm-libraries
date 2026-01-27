@@ -31,6 +31,45 @@ namespace rocRoller
 {
     namespace Expression
     {
+        /**
+         * Splits a BitFieldExtract that crosses dword boundaries into two separate extracts
+         * combined with OR. This is necessary because bfe code generation does not support
+         * extracting from a source that has two registers (e.g. 64-bit source) into a destination
+         * that has one register (e.g. 32-bit destination).
+         */
+        ExpressionPtr splitBitfieldExtract(ExpressionPtr src,
+                                           uint32_t      srcOffset,
+                                           uint32_t      width,
+                                           uint32_t      dwordSize,
+                                           DataType      dataType)
+        {
+            AssertFatal(width <= dwordSize,
+                        "Expected width to be less than or equal to dword size");
+            AssertFatal(dataType == DataType::Raw32, "Expected data type to be Raw32");
+
+            uint32_t srcStartDword = srcOffset / dwordSize;
+            uint32_t srcEndDword   = (srcOffset + width - 1) / dwordSize;
+
+            // If extraction is within a single dword, just return simple bfe
+            // Even if src is 64 bits, CSE simplifies this to extracting from
+            // a single register
+            if(srcStartDword == srcEndDword)
+                return bfe(dataType, src, srcOffset, width);
+
+            // Extraction crosses dword boundary - need to split
+            uint32_t firstDwordEndBit = (srcStartDword + 1) * dwordSize - 1;
+            uint32_t lowerWidth       = firstDwordEndBit - srcOffset + 1;
+            uint32_t upperWidth       = width - lowerWidth;
+            uint32_t upperOffset      = (srcStartDword + 1) * dwordSize;
+
+            ExpressionPtr lower = bfe(dataType, src, srcOffset, lowerWidth);
+            ExpressionPtr upper = bfe(dataType, src, upperOffset, upperWidth);
+
+            // Combine
+            ExpressionPtr shiftedUpper = upper << literal(lowerWidth);
+            return lower | shiftedUpper;
+        }
+
         std::vector<ExpressionPtr>
             splitBitfield(BitfieldCombine const& expr, const size_t dstSize, const size_t dwordSize)
         {
@@ -63,7 +102,8 @@ namespace rocRoller
                     ExpressionPtr srcDWord = expr.lhs;
                     if(resultVariableType(expr.lhs).getElementSize() * 8 > dwordSize)
                     {
-                        srcDWord  = bfe(DataType::Raw32, expr.lhs, srcOffset, overlapWidth);
+                        srcDWord = splitBitfieldExtract(
+                            expr.lhs, srcOffset, overlapWidth, dwordSize, DataType::Raw32);
                         srcOffset = 0;
                     }
 

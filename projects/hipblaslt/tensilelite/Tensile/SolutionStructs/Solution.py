@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -376,6 +376,10 @@ class Solution(collections.abc.Mapping):
     state["NonDTLTailLoopA"] = False
     state["NonDTLTailLoopB"] = False
 
+    # Initialize DTLA, DTLB for tailLoopOpt/NonDTLTailLoop and initial calcLdsBlockSizePerPad() call
+    state["DirectToLdsA"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 2
+    state["DirectToLdsB"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 3
+
     bpeA = state["ProblemType"]["DataTypeA"].numBytes()
     bpeB = state["ProblemType"]["DataTypeB"].numBytes()
     aemA = state["AssertSummationElementMultiple"] if not state["ProblemType"]["TLUA"] else state["AssertFree0ElementMultiple"]
@@ -384,20 +388,26 @@ class Solution(collections.abc.Mapping):
     # a partial 32b read is required to read the last few elements of a row/col of A/B
     # i.e. ASEM * BPE % 4 != 0. In this case dword/dwordx4 DTL load will
     # zero out the entire partial 32b read and cause accuracy issues.
-    # For TLU = 0 we check AF{0,1}EM instead of ASEM.
-    if (aemA * bpeA) % 4 != 0 or not state["BufferLoad"]:
-      state["NonDTLTailLoopA"] = True
-    if (aemB * bpeB) % 4 != 0 or not state["BufferLoad"]:
-      state["NonDTLTailLoopB"] = True
+    # TLU case, we check AF{0,1}EM instead of ASEM.
+    # TLU + ShiftPtr case, we can use wider global read for TailLoop. Enable Tailloop opt for DTL
+    # (ShiftPtr is default and not set to state["EdgeType"] yet here)
+    if ((aemA * bpeA) % 4 != 0 or not state["BufferLoad"]):
+      if (not state["ProblemType"]["TLUA"]) and state["DirectToLdsA"] and not state["DirectToVgprA"]:
+        state["NonDTLTailLoopA"] = True
+        state["tailLoopOptA"] = False
+    if ((aemB * bpeB) % 4 != 0 or not state["BufferLoad"]):
+      if (not state["ProblemType"]["TLUB"]) and state["DirectToLdsB"] and not state["DirectToVgprB"]:
+        state["NonDTLTailLoopB"] = True
+        state["tailLoopOptB"] = False
 
     if (state["ISA"] != (9, 4, 2) and state["ISA"] != (9, 5, 0)) or \
        (state["ProblemType"]["Sparse"]) or \
        (state["UseDotInstruction"]):
       state["tailLoopOptA"] = False
       state["tailLoopOptB"] = False
-    if (state["DirectToVgprA"]):
+    if (not state["ProblemType"]["TLUA"]) and (state["DirectToVgprA"]):
       state["tailLoopOptA"] = False
-    if (state["DirectToVgprB"]):
+    if (not state["ProblemType"]["TLUB"]) and (state["DirectToVgprB"]):
       state["tailLoopOptB"] = False
 
     # reorder globalread instructions if dtv and TN cases. (along coalesced dim)
@@ -413,8 +423,8 @@ class Solution(collections.abc.Mapping):
       state["reorderGRInstForDTVB"] = False
 
     state["UsePLRPack"] = False
-    state["SwapGlobalReadOrder"] = False
     state["MfmaInitCVgprs"] = False
+    state["UseMFMAF32XEmulation"] = False
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
@@ -991,6 +1001,7 @@ class Solution(collections.abc.Mapping):
       return
 
     if state["StreamK"] != 0:
+      state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
       state["GlobalSplitU"] = 0 # Cannot enable both Stream-K and GSU
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for Stream-K
       state["GlobalSplitUAlgorithm"] = "MultipleBuffer" # Set default Algorithm
@@ -1199,8 +1210,11 @@ class Solution(collections.abc.Mapping):
       state["NonTemporalMetadata"] = state["NonTemporal"]
 
     # Init vars early since there are early-exit return statements below
-    state["DirectToLdsA"] = False
-    state["DirectToLdsB"] = False
+    # tentative init for UseGeneralizedNLCOneA/B
+    # set True for DTL 
+    state["UseGeneralizedNLCOneA"] = state["DirectToLdsA"]
+    state["UseGeneralizedNLCOneB"] = state["DirectToLdsB"]
+
     state["LocalWriteUseSgprA"] = False
     state["LocalWriteUseSgprB"] = False
     state["StoreSwapAddr"] = False
@@ -1279,6 +1293,8 @@ class Solution(collections.abc.Mapping):
     bufferLoad = state["BufferLoad"] and state["KernelLanguage"] == "Assembly"
     if not bufferLoad:
       state["DirectToLds"] = False
+      state["DirectToLdsA"] = False
+      state["DirectToLdsB"] = False
       state["_UseSgprForGRO"] = False
       if state["PrefetchGlobalRead"] == 2:
         reject(state, printRejectionReason, "BufferLoad=0 does not support PrefetchGlobalRead=2")
@@ -1429,11 +1445,11 @@ class Solution(collections.abc.Mapping):
           and (state["ProblemType"]["DataTypeA"].isSingle() and state["ProblemType"]["DataTypeB"].isSingle()):
           reject(state, printRejectionReason, "ConvertAfterDS doesn't support SS_BSS type")
           return
-      
+
     # Complex datatype restrictions.
     if state["ProblemType"]["DataType"].isComplex():
-      if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
-        reject(state, printRejectionReason, "Complex datatype kernel does not support GSU yet.")
+      if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) and (state["GlobalSplitUAlgorithm"] != "MultipleBuffer"):
+        reject(state, printRejectionReason, "Complex datatype kernel currently only supports MultiBuffer GSU.")
         return
       if state["MIArchVgpr"]:
         reject(state, printRejectionReason, "Complex datatype kernel does not support MIArchVgpr yet.")
@@ -1499,13 +1515,16 @@ class Solution(collections.abc.Mapping):
       state["ForceUnrollSubIter"] = True
       state["numSubTiles"] = 2
       state["PrefetchLocalRead"] = 0 if state["ClusterLocalRead"] == 0 else state["PrefetchLocalRead"]
+      # disable TailloopInNll
+      state["TailloopInNll"] = False
     else:
       state["ForceUnrollSubIter"] = False
       state["numSubTiles"] = 1
 
     # Check if CMS is available for this solution
-    hasCMS,_ = hasCustomSchedule(state)
-    state["UseCustomMainLoopSchedule"] = hasCMS
+    if state["UseCustomMainLoopSchedule"] in [-1, 1]:
+      hasCMS,_ = hasCustomSchedule(state)
+      state["UseCustomMainLoopSchedule"] = hasCMS
 
     # 0: Normal mode. Hardware applies all of the normal data dependency checks
     # 1: Full expert mode (not suppoeted yet). Disable hardware checks against: VA_VDST, VA_SDST, VA_SSRC, VA_VCC, VM_VSRC and SA_SDST.
@@ -2043,13 +2062,15 @@ class Solution(collections.abc.Mapping):
          and not disableGNLC:
 
         for tc in ['A', 'B']:
-          # Check if we are requesting b64 loads for A/B - these are not compatible with DTL
-          grwidth = state["GlobalReadVectorWidth%s"%tc] * state["ProblemType"]["DataType%s"%tc].numBytes()
-          # Check that GR layout is the same as LDS layout for A/B
-          sameLayout = state["ProblemType"]["TLU%s"%tc] != state["UnrollMajorLDS%s"%tc]
-          state["UseGeneralizedNLCOne%s"%tc] = grwidth != 8 and sameLayout \
-            and state["WaveSeparateGlobalRead%s"%tc] == 0 and not state["DirectToVgpr%s"%tc]
-
+          if state["DirectToLds%s"%tc]:
+            # Check if we are requesting b64 loads for A/B - these are not compatible with DTL
+            grwidth = state["GlobalReadVectorWidth%s"%tc] * state["ProblemType"]["DataType%s"%tc].numBytes()
+            # Check that GR layout is the same as LDS layout for A/B
+            sameLayout = state["ProblemType"]["TLU%s"%tc] != state["UnrollMajorLDS%s"%tc]
+            state["UseGeneralizedNLCOne%s"%tc] = grwidth != 8 and sameLayout \
+              and state["WaveSeparateGlobalRead%s"%tc] == 0 and not state["DirectToVgpr%s"%tc]
+          else:
+            state["UseGeneralizedNLCOne%s"%tc] = False
         state["UseGeneralizedNLCOneMetadata"] = False
         state["_UseSgprForGRO"] = 0
       else:
@@ -2495,10 +2516,34 @@ class Solution(collections.abc.Mapping):
 
     # NoTailLoop parameter initialization.
     # If ASEM is multiple of DepthU TailLoop will not be used.
-    # Unless kernel is Stream-K; Stream-K always requires TailLoop to handle work division.
     state["NoTailLoop"] = False
-    if state["AssertSummationElementMultiple"] % state["DepthU"] == 0 and state["StreamK"] == 0:
+    if state["AssertSummationElementMultiple"] % state["DepthU"] == 0:
       state["NoTailLoop"] = True
+
+    # TailloopInNll optimization check
+    if state["TailloopInNll"]:
+      # Disable TailloopInNll
+      # - (not MFMA) or WMMA
+      # - PrefetchGlobalRead is 0
+      # - NoTailLoop
+      # - DepthU is not power of 2
+      if ((not state["EnableMatrixInstruction"]) or isaInfoMap[isa].asmCaps["HasWMMA"]) or \
+         (state["PrefetchGlobalRead"] == 0) or \
+         state["NoTailLoop"] or \
+         (state["DepthU"] <=1 or (state["DepthU"] & (state["DepthU"] - 1) != 0)):
+        state["TailloopInNll"] = False
+
+      # need restrictions for TailloopInNll
+      if state["TailloopInNll"]:
+        # need to disable StaggerU
+        state["StaggerU"] = 0
+        state["StaggerUMapping"] = 0
+        state["StaggerUStride"] = 0
+        # need to disable SuppressNoLoadLoop
+        state["SuppressNoLoadLoop"] = False
+        # disable UseCustomMainLoopSchedule
+        state["UseCustomMainLoopSchedule"] = False
+        state["InternalSupportParams"]["SupportCustomStaggerU"] = False # Disable CustomStaggerU for TailloopInNll
 
     # Determine if we can load directly-to-Vgpr
     # need to check after state["LocalReadVectorWidth"] = -1 is resolved
@@ -2530,37 +2575,49 @@ class Solution(collections.abc.Mapping):
     # DirectToLDS is supported for TLU=0  (make sure transposeLDS=1)
     # LDS (load size coalesced) * LSPA must load some multiple of 256 bytes.
     # No longer support loadX2/loadx4 .
-    if state["DirectToLds"]:
-
-      for tc in ['A', 'B']:
+    for tc in ['A', 'B']:
+      if state["DirectToLds%s"%tc]:
         isDtlDoable = Solution.isDirectToLdsDoable(state, tc, isaInfoMap, printRejectionReason)
         if (not state["DirectToVgpr%s"%tc]) and isDtlDoable:
-          state['tailLoopOpt%s'%tc] = False
           state["DirectToLds%s"%tc] = True
           state["LocalWriteUseSgpr%s"%tc] = True
-        elif not isDtlDoable:
-          if state["UseGeneralizedNLCOne%s"%tc]:
-            reject(state, printRejectionReason, "DirectToLds%s not doable, but GNLC%s enabled, rejecting"%(tc, tc))
+        else:
+          state["DirectToLds%s"%tc] = False
+          if not isDtlDoable:
+            if state["UseGeneralizedNLCOne%s"%tc]:
+              reject(state, printRejectionReason, "DirectToLds%s not doable, but GNLC%s enabled, rejecting"%(tc, tc))
 
-      # Update parent variable so kernel display is accurate
-      state["DirectToLds"] = state["DirectToLdsA"] or state["DirectToLdsB"]
-      if state["1LDSBuffer"] == -1 and state["DirectToLds"]:
-        #1LDS buffer must be 0 for DirectToLdsA
-        state["1LDSBuffer"] = 0
+    # Update parent variable so kernel display is accurate
+    if state["DirectToLdsA"] and state["DirectToLdsB"]:
+      state["DirectToLds"] = 1
+    elif state["DirectToLdsA"]:
+      state["DirectToLds"] = 2
+    elif state["DirectToLdsB"]:
+      state["DirectToLds"] = 3
+    else:
+      state["DirectToLds"] = 0
+    if state["1LDSBuffer"] == -1 and state["DirectToLds"]:
+      #1LDS buffer must be 0 for DirectToLdsA
+      state["1LDSBuffer"] = 0
 
-      # Temp: Force enable CLR when DTL is used for TF32.
-      # TODO: Determine why DTL+CLR=0 causes issues
-      if state["UseF32XEmulation"] and state["DirectToLds"]:
-        state["ClusterLocalRead"] = 1
+    # does not work with UnrollLoopSwapGlobalReadOrder
+    if (state["DirectToLds"] == 2 or state["DirectToLds"] == 3) and state["UnrollLoopSwapGlobalReadOrder"]:
+      reject(state, printRejectionReason, "DirectToLdsA or B only does not supports UnrollLoopSwapGlobalReadOrder")
+      return False
 
-      # Re-check DTV + WaveGroup after DTL is confirmed
-      if state["DirectToLds"]:
-        if state["DirectToVgprA"] and state['MIWaveGroup'][1] > 1:
-          reject(state, printRejectionReason, "DirectToLds + (DirectToVgprA + WaveGroups along N-Dim) is not supported yet")
-          return False
-        if state["DirectToVgprB"] and state['MIWaveGroup'][0] > 1:
-          reject(state, printRejectionReason, "DirectToLds + (DirectToVgprB + WaveGroups along M-Dim) is not supported yet")
-          return False
+    # Temp: Force enable CLR when DTL is used for TF32.
+    # TODO: Determine why DTL+CLR=0 causes issues
+    if state["UseF32XEmulation"] and state["DirectToLds"]:
+      state["ClusterLocalRead"] = 1
+
+    # Re-check DTV + WaveGroup after DTL is confirmed
+    if state["DirectToLds"]:
+      if state["DirectToVgprA"] and state['MIWaveGroup'][1] > 1:
+        reject(state, printRejectionReason, "DirectToLds + (DirectToVgprA + WaveGroups along N-Dim) is not supported yet")
+        return False
+      if state["DirectToVgprB"] and state['MIWaveGroup'][0] > 1:
+        reject(state, printRejectionReason, "DirectToLds + (DirectToVgprB + WaveGroups along M-Dim) is not supported yet")
+        return False
 
     auto_LdsBlockSizePerPadA_for_mix = 0
     if state["LdsBlockSizePerPadA"] == -1:
@@ -2594,6 +2651,25 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "didn't support UnrollMajorLDS in VALU mode yet (except for dot2 kernel)")
       if state["LdsBlockSizePerPadA"] != 0 or state["LdsBlockSizePerPadB"] != 0:
         reject(state, printRejectionReason, "didn't support LdsBlockSizePerPad in VALU mode yet")
+
+    # disable SwapGlobalReadOrder if grmode(normal/DTL/DTV) is different between A and B
+    # GRA and GRB need to be equivalent to swap the order
+    def getGrMode(tc):
+      grmode = 0
+      if state["DirectToLds%s"%tc]:
+        grmode = 1
+      elif state["DirectToVgpr%s"%tc]:
+        grmode = 2
+      return grmode
+
+    if getGrMode("A") != getGrMode("B"):
+      state["SwapGlobalReadOrder"] = False
+    # SwapGlobalReadOrder does not work with UnrollLoopSwapGlobalReadOrder
+    if state["UnrollLoopSwapGlobalReadOrder"]:
+      state["SwapGlobalReadOrder"] = False
+    # SwapGlobalReadOrder needs to be False for CMS (SwapGlobalReadOrder will be set later in CMS code)
+    if state["UseCustomMainLoopSchedule"]:
+      state["SwapGlobalReadOrder"] = False
 
     def checkLdsBlockSizePerPad(tc):
       """
@@ -3440,6 +3516,10 @@ class Solution(collections.abc.Mapping):
           not (isa == (9, 0, 10) or isa[:2] == (9, 4) or isa == (9, 5, 0)):
         #print("Force to Disable PreloadKernArgs since this hipcc version doesn't support",)
         state["PreloadKernArgs"] = 0
+
+    # change negative ExtraLatencyForLR to 0 for non DirectToVgpr
+    if state["ExtraLatencyForLR"] < 0 and not (state["DirectToVgprA"] or state["DirectToVgprB"]):
+      state["ExtraLatencyForLR"] = 0
 
   ########################################
   @ staticmethod

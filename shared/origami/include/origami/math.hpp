@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <cmath>
+
 namespace origami {
 namespace math {
 
@@ -38,6 +40,17 @@ template <typename N, typename D>
 inline constexpr N safe_ceil_div(N n, D d) {
   // Static cast to undo integral promotion.
   return static_cast<N>(d == 0 ? 0 : (n / d + (n % d != 0 ? 1 : 0)));
+}
+
+/**
+ * @brief Ceiling math function for floating point numbers
+ * @param value The value to round up
+ * @param significance The multiple to round up to (default: 1)
+ * @return The smallest multiple of significance that is >= value
+ */
+inline double ceiling_math(double value, double significance = 1.0)
+{
+    return std::ceil(value / significance) * significance;
 }
 
 }  // namespace math
