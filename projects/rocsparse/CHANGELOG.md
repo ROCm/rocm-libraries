@@ -22,7 +22,7 @@ Documentation for rocSPARSE is available at
 * Fixed an issue where out-of-bounds memory reads can occur in the single precision bsrxmv kernels when `block_dim` equals `5` or `8`.
 
 ### Resolved issues
-* Fix bug where we sometimes read memory out of bounds in the single precision bsrxmv kernels when `block_dim` equals `5` or `8`.
+* Fixed an issue where out-of-bounds memory reads can occur in the single precision bsrxmv kernels when `block_dim` equals `5` or `8`.
 
 ## rocSPARSE 4.2.0 for ROCm 7.2.0
 
