@@ -135,6 +135,13 @@ namespace stinkytofu
 
         RegisterLimits registerLimits; // Register limits for this architecture
 
+        // Cost map system: instruction-specific costs (issue, latency)
+        std::unordered_map<std::string, std::pair<uint16_t, uint16_t>> instructionCosts_;
+
+        // Per-architecture defaults (must be explicitly set, 0 = not set/error)
+        uint16_t defaultCycle_   = 0;
+        uint16_t defaultLatency_ = 0;
+
         void updateCycleAndLatency(const InstructionInfo& info);
 
         GfxInstDef* getInst(const std::string& name);
@@ -197,6 +204,22 @@ namespace stinkytofu
         // hardware data includes default cycle, cycle for each instruction,
         // latency for each instruction, .. etc.
         bool loadHardwareDataFromYaml(const std::string& yamlPath);
+
+        // Cost map system: Set default costs for this architecture
+        // Must be called before applyInstructionCosts()
+        // cycle and latency must be non-zero
+        void setDefaultCosts(uint16_t cycle, uint16_t latency);
+
+        // Cost map system: Register instruction-specific cost
+        // Used for instructions that differ from defaults
+        void setInstructionCost(const std::string& opcode, uint16_t cycle, uint16_t latency);
+
+        // Cost map system: Apply costs to all instructions with strict validation
+        // Returns false if:
+        //   - setDefaultCosts() was not called
+        //   - Any instruction ends up with 0 issue or latency
+        // Prints detailed error messages
+        bool applyInstructionCosts();
 
         void finalize(uint16_t startOpcode = 0)
         {

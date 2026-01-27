@@ -54,6 +54,15 @@ namespace stinkytofu
         setRocisaConversionMap(*instructionsByArch.back());
         instructionsByArch.back()->loadHardwareDataFromYaml(hardwareDir + "/data/" + arch
                                                             + ".yaml");
+
+        // Check for errors immediately after initialization
+        if(instructionsByArch.back()->hasError())
+        {
+            std::cerr << "FATAL: Failed to initialize architecture " << arch << "\n";
+            error = true;
+            return;
+        }
+
         instructionsByArch.back()->finalize();
     }
 
@@ -115,10 +124,24 @@ namespace stinkytofu
 
         manager.enumAllOpcodes();
 
+        // Final validation - stop build if any errors
+        bool hasAnyError = false;
         for(const auto& arch : manager.getRegisteredArchs())
+        {
             if(arch->hasError())
-                return false;
+            {
+                std::cerr << "FATAL: Architecture " << arch->getName()
+                          << " has errors. Cannot continue.\n";
+                hasAnyError = true;
+            }
+        }
 
-        return !manager.hasError();
+        if(hasAnyError || manager.hasError())
+        {
+            std::cerr << "FATAL: Failed to initialize GPU architectures.\n";
+            return false;
+        }
+
+        return true;
     }
 } // namespace stinkytofu
