@@ -923,8 +923,6 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
     // On regular path (find-db hit) this was checked during Find().
     Problem::ValidateGroupCount(xDesc, weightsDesc, *this);
 
-    const auto& conv = problem.GetConv();
-
     auto interim = std::vector<miopenConvSolution_t>{};
     interim.reserve(maxSolutionCount); // For speed. In most cases we have less entries than asked.
 
