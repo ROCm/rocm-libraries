@@ -77,7 +77,7 @@ namespace rocsparse
         srhs[tid]             = B[tid + ldb * hipBlockIdx_x];
         srhs[tid + BLOCKSIZE] = B[tid + BLOCKSIZE + ldb * hipBlockIdx_x];
 
-        // The first entry of the lower diagonal and the last entry of the upper 
+        // The first entry of the lower diagonal and the last entry of the upper
         // diagonal should be treated as zero
         if(tid == 0)
         {
@@ -194,7 +194,7 @@ namespace rocsparse
         sc[tid]   = du[tid];
         srhs[tid] = B[tid + ldb * hipBlockIdx_x];
 
-        // The first entry of the lower diagonal and the last entry of the upper 
+        // The first entry of the lower diagonal and the last entry of the upper
         // diagonal should be treated as zero
         if(tid == 0)
         {
@@ -297,7 +297,7 @@ namespace rocsparse
         srhs[tid]             = B[tid + ldb * hipBlockIdx_x];
         srhs[tid + BLOCKSIZE] = B[tid + BLOCKSIZE + ldb * hipBlockIdx_x];
 
-        // The first entry of the lower diagonal and the last entry of the upper 
+        // The first entry of the lower diagonal and the last entry of the upper
         // diagonal should be treated as zero
         if(tid == 0)
         {
@@ -474,7 +474,7 @@ namespace rocsparse
         sc[tid]   = (tid < m) ? du[tid] : static_cast<T>(0);
         srhs[tid] = (tid < m) ? B[tid + ldb * hipBlockIdx_x] : static_cast<T>(0);
 
-        // The first entry of the lower diagonal and the last entry of the upper 
+        // The first entry of the lower diagonal and the last entry of the upper
         // diagonal should be treated as zero
         if(tid == 0)
         {
@@ -583,7 +583,7 @@ namespace rocsparse
         T k3 = -a0[left];
         T k4 = -c0[right];
 
-        // The first entry of the lower diagonal and the last entry of the upper 
+        // The first entry of the lower diagonal and the last entry of the upper
         // diagonal should be treated as zero
         if(gid == 0)
         {
@@ -647,7 +647,7 @@ namespace rocsparse
         T k3 = -a0[left];
         T k4 = -c0[right];
 
-        // The first entry of the lower diagonal and the last entry of the upper 
+        // The first entry of the lower diagonal and the last entry of the upper
         // diagonal should be treated as zero
         if(gid == 0)
         {
@@ -924,7 +924,7 @@ namespace rocsparse
         T k3 = -a0[left];
         T k4 = -c0[right];
 
-        // The first entry of the lower diagonal and the last entry of the upper 
+        // The first entry of the lower diagonal and the last entry of the upper
         // diagonal should be treated as zero
         if(gid == 0)
         {
@@ -996,7 +996,7 @@ namespace rocsparse
         T k3 = -a0[left];
         T k4 = -c0[right];
 
-        // The first entry of the lower diagonal and the last entry of the upper 
+        // The first entry of the lower diagonal and the last entry of the upper
         // diagonal should be treated as zero
         if(gid == 0)
         {
