@@ -39,6 +39,11 @@ namespace GEMMTests
     {
     };
 
+    // Params are: prefetchInFlight, prefetchLDSFactor, prefetchMixMemOps
+    class UnrollKPrefetchTestSuite : public BaseGEMMContextFixture<std::tuple<int, int, bool>>
+    {
+    };
+
     // Params are: K dimension size
     class GEMMUnrollKTailLoopTestSuite : public BaseGEMMContextFixture<std::tuple<int>>
     {
@@ -120,9 +125,15 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_LDS_Prefetch)
+    TEST_P(UnrollKPrefetchTestSuite, GPU_GEMM_Optimization_UnrollK_LDS_Prefetch)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+
+        auto params    = std::get<1>(GetParam());
+        int  inflight  = std::get<0>(params);
+        int  ldsFactor = std::get<1>(params);
+        bool mixMemOps = std::get<2>(params);
+
         GEMMProblem gemm;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
@@ -134,24 +145,22 @@ namespace GEMMTests
         gemm.macM      = gemm.waveM * 4;
         gemm.macN      = gemm.waveN * 2;
 
-        for(auto inflight : {1, 2})
-        {
-            gemm.prefetchInFlight = inflight;
-            for(auto ldsFactor : {0, 1, 2})
-            {
-                gemm.prefetchLDSFactor = ldsFactor;
-                for(auto mixMemOps : {false, true})
-                {
-                    gemm.prefetchMixMemOps = mixMemOps;
-                    basicGEMM<float>(gemm);
-                }
-            }
-        }
+        gemm.prefetchInFlight  = inflight;
+        gemm.prefetchLDSFactor = ldsFactor;
+        gemm.prefetchMixMemOps = mixMemOps;
+
+        basicGEMM<float>(gemm);
     }
 
-    TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_FP16_LDS_Prefetch)
+    TEST_P(UnrollKPrefetchTestSuite, GPU_GEMM_Optimization_UnrollK_FP16_LDS_Prefetch)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+
+        auto params    = std::get<1>(GetParam());
+        int  inflight  = std::get<0>(params);
+        int  ldsFactor = std::get<1>(params);
+        bool mixMemOps = std::get<2>(params);
+
         GEMMProblem gemm;
         gemm.k         = 64 * 16 * 2;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
@@ -168,24 +177,22 @@ namespace GEMMTests
         gemm.transA = "N";
         gemm.transB = "N";
 
-        for(auto inflight : {1, 2})
-        {
-            gemm.prefetchInFlight = inflight;
-            for(auto ldsFactor : {0, 2})
-            {
-                gemm.prefetchLDSFactor = ldsFactor;
-                for(auto mixMemOps : {false, true})
-                {
-                    gemm.prefetchMixMemOps = mixMemOps;
-                    basicGEMM<Half>(gemm);
-                }
-            }
-        }
+        gemm.prefetchInFlight  = inflight;
+        gemm.prefetchLDSFactor = ldsFactor;
+        gemm.prefetchMixMemOps = mixMemOps;
+
+        basicGEMM<Half>(gemm);
     }
 
-    TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_LDS_MultiPrefetch)
+    TEST_P(UnrollKPrefetchTestSuite, GPU_GEMM_Optimization_UnrollK_LDS_MultiPrefetch)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+
+        auto params    = std::get<1>(GetParam());
+        int  inflight  = std::get<0>(params);
+        int  ldsFactor = std::get<1>(params);
+        bool mixMemOps = std::get<2>(params);
+
         GEMMProblem gemm;
         gemm.k         = 64 * 4 * 3;
         gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
@@ -196,19 +203,11 @@ namespace GEMMTests
         gemm.macK      = 4;
         gemm.prefetch  = true;
 
-        for(auto inflight : {1, 2, 3})
-        {
-            gemm.prefetchInFlight = inflight;
-            for(auto ldsFactor : {0, 2})
-            {
-                gemm.prefetchLDSFactor = ldsFactor;
-                for(auto mixMemOps : {false, true})
-                {
-                    gemm.prefetchMixMemOps = mixMemOps;
-                    basicGEMM<float>(gemm);
-                }
-            }
-        }
+        gemm.prefetchInFlight  = inflight;
+        gemm.prefetchLDSFactor = ldsFactor;
+        gemm.prefetchMixMemOps = mixMemOps;
+
+        basicGEMM<float>(gemm);
     }
 
     TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_FP16_Prefetch3)
@@ -262,6 +261,15 @@ namespace GEMMTests
     }
 
     INSTANTIATE_TEST_SUITE_P(GEMMUnrollKTest, UnrollKTestSuite, currentGPUISA());
+
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMUnrollKTest,
+        UnrollKPrefetchTestSuite,
+        ::testing::Combine(currentGPUISA(),
+                           ::testing::Combine(::testing::Values(1, 2, 3), // prefetchInFlight
+                                              ::testing::Values(0, 1, 2), // prefetchLDSFactor
+                                              ::testing::Values(false,
+                                                                true)))); // prefetchMixMemOps
 
     INSTANTIATE_TEST_SUITE_P(
         GEMMUnrollKTest,
