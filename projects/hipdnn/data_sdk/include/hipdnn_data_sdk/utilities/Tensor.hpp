@@ -88,17 +88,13 @@ public:
     {
     }
 
-    ITensorIterator(const ITensorIterator& other)
-        : _tensor(other._tensor)
-        , _index(other._index)
-    {
-    }
+    ITensorIterator(const ITensorIterator& other) = default;
 
     ITensorIterator(ITensorIterator&&) = default;
 
-    ITensorIterator& operator=(const ITensorIterator& other) = delete;
+    ITensorIterator& operator=(const ITensorIterator& other) = default;
 
-    ITensorIterator& operator=(ITensorIterator&&) = delete;
+    ITensorIterator& operator=(ITensorIterator&&) = default;
 
     value_type operator*()
     {
@@ -148,6 +144,14 @@ public:
             }
         }
 
+        LinearIndex(const LinearIndex& other) = default;
+
+        LinearIndex(LinearIndex&&) = default;
+
+        LinearIndex& operator=(const LinearIndex& other) = default;
+
+        LinearIndex& operator=(LinearIndex&& other) = default;
+
         LinearIndex& operator++()
         {
             ++index;
@@ -196,6 +200,14 @@ public:
                 indices[0] = tensor.get().dims()[0];
             }
         }
+
+        CompositeIndex(const CompositeIndex& other) = default;
+
+        CompositeIndex(CompositeIndex&&) = default;
+
+        CompositeIndex& operator=(const CompositeIndex& other) = default;
+
+        CompositeIndex& operator=(CompositeIndex&& other) = default;
 
         CompositeIndex& operator++()
         {
