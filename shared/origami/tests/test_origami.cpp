@@ -430,19 +430,19 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
               results_m_equals_n[0].config.mt.m);  // If M == N, prefer tiles with larger MT_M
 
       // Test 5: Test with different heuristics_variance values
-      setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "0.0", 1);
+      portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "0.0", 1);
       // Read back and parse
       double env_val = origami::runtime_options::read_heuristics_variance_from_env();
       REQUIRE(env_val == 0.01);  // Return default value 0.01 when
                                  // ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to 0.0
 
-      setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "-1.0", 1);
+      portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "-1.0", 1);
       // Read back and parse
       env_val = origami::runtime_options::read_heuristics_variance_from_env();
       REQUIRE(env_val == 0.01);  // Return default value 0.01 when
                                  // ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to -1.0
 
-      setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "1.0", 1);
+      portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "1.0", 1);
       // Read back and parse
       env_val = origami::runtime_options::read_heuristics_variance_from_env();
       REQUIRE(env_val == 1.0);  // Return ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to 1.0

@@ -59,14 +59,132 @@ Definitions:
   - &alpha_range_nightly_one
     - { alpha:   1.0,  alphai:  0.0 }
 
+  - &alpha_range_stress
+    - { alpha:   1.0, alphai:  0.0}
+
 Tests:
+# Quick
 - name: spsm_coo
-  category: pre_checkin
+  category: quick
+  function: spsm_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  K: [0, 1, 65, 153, 280]
+  ld_multiplier_B: [1]
+  ld_multiplier_C: [2]
+  alpha_alphai: *alpha_range_quick
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_row]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_random]
+
+- name: spsm_coo_file
+  category: quick
   function: spsm_coo
   indextype: *i32_i64
   precision: *single_double_precisions
+  M: 1
+  N: 1
+  K: [2, 3, 4, 5]
+  ld_multiplier_B: [2]
+  ld_multiplier_C: [1]
+  alpha_alphai: *alpha_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos2]
+
+- name: spsm_coo_file
+  category: quick
+  function: spsm_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  K: [6, 7, 8, 9]
+  ld_multiplier_B: [2]
+  ld_multiplier_C: [1]
+  alpha_alphai: *alpha_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos4,]
+
+- name: spsm_coo_file
+  category: quick
+  function: spsm_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  K: [10, 11, 12, 14]
+  ld_multiplier_B: [2]
+  ld_multiplier_C: [1]
+  alpha_alphai: *alpha_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos6]
+
+- name: spsm_coo_file
+  category: quick
+  function: spsm_coo
+  indextype: *i32_i64
+  precision: *double_only_precisions_complex
+  M: 1
+  N: 1
+  K: [89]
+  ld_multiplier_B: [1]
+  ld_multiplier_C: [1]
+  alpha_alphai: *alpha_range_quick
+  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  transB: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_one]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate]
+
+# Pre-checkin
+- name: spsm_coo_bad_arg
+  category: pre_checkin
+  function: spsm_coo_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: spsm_coo
+  category: pre_checkin
+  function: spsm_coo
+  indextype: *i32
+  precision: *single_double_precisions
   M_N: *M_N_range_checkin
-  K: [0, 1, 2, 8]
+  K: [15, 16, 17, 18]
   ld_multiplier_B: [1]
   ld_multiplier_C: [2]
   alpha_alphai: *alpha_range_checkin
@@ -76,15 +194,132 @@ Tests:
   orderC: [rocsparse_order_row, rocsparse_order_column]
   diag: [rocsparse_diag_type_unit]
   uplo: [rocsparse_fill_mode_upper, rocsparse_fill_mode_lower]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_zero]
   spsm_alg: [rocsparse_spsm_alg_default]
   matrix: [rocsparse_matrix_random]
 
-- name: spsm_coo_bad_arg
+- name: spsm_coo
   category: pre_checkin
-  function: spsm_coo_bad_arg
-  precision: *single_double_precisions_complex_real
+  function: spsm_coo
+  indextype: *i64
+  precision: *single_double_precisions
+  M_N: *M_N_range_checkin_1
+  K: [19, 20]
+  ld_multiplier_B: [2]
+  ld_multiplier_C: [5]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_row, rocsparse_order_column]
+  orderC: [rocsparse_order_row, rocsparse_order_column]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_one]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_random]
 
+- name: spsm_coo
+  category: pre_checkin
+  function: spsm_coo
+  indextype: *i64
+  precision: *single_double_precisions
+  M_N: *M_N_range_checkin_1
+  K: [32, 96, 244, 764]
+  ld_multiplier_B: [3]
+  ld_multiplier_C: [2]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_random]
+
+- name: spsm_coo_file
+  category: pre_checkin
+  function: spsm_coo
+  indextype: *i64
+  precision: *single_double_precisions
+  K: [141, 875]
+  ld_multiplier_B: [2]
+  ld_multiplier_C: [2]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_one]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos5,
+             nos7]
+
+- name: spsm_coo_file
+  category: pre_checkin
+  function: spsm_coo
+  indextype: *i32
+  precision: *single_double_precisions
+  K: [141]
+  ld_multiplier_B: [2]
+  ld_multiplier_C: [3]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron2]
+
+- name: spsm_coo_file
+  category: pre_checkin
+  function: spsm_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  K: [2, 4]
+  ld_multiplier_B: [3]
+  ld_multiplier_C: [3]
+  alpha_alphai: *alpha_range_checkin
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_row]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_one]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [rma10, mc2depi, amazon0312]
+
+- name: spsm_coo_graph_test
+  category: pre_checkin
+  function: spsm_coo
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  K: [65, 153, 280]
+  ld_multiplier_B: [2]
+  ld_multiplier_C: [2]
+  alpha_alphai: *alpha_range_quick
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_row]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
+
+# Nightly
 - name: spsm_coo_file
   category: nightly
   function: spsm_coo
@@ -130,12 +365,6 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [sme3Dc]
 
-#
-# in test definition above
-# Too sensitive to roundoff errors when normalized, subject to investigation.
-# shipsec1
-#
-
 - name: spsm_coo_file
   category: nightly
   function: spsm_coo
@@ -157,215 +386,6 @@ Tests:
   spsm_alg: [rocsparse_spsm_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4, ASIC_320k]
-
-- name: spsm_coo
-  category: pre_checkin
-  function: spsm_coo
-  indextype: *i32_i64
-  precision: *single_double_precisions
-  M_N: *M_N_range_checkin
-  K: [0, 1, 2, 8]
-  ld_multiplier_B: [3]
-  ld_multiplier_C: [1]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
-  orderB: [rocsparse_order_row]
-  orderC: [rocsparse_order_column]
-  diag: [rocsparse_diag_type_unit]
-  uplo: [rocsparse_fill_mode_upper, rocsparse_fill_mode_lower]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  spsm_alg: [rocsparse_spsm_alg_default]
-  matrix: [rocsparse_matrix_random]
-
-- name: spsm_coo
-  category: pre_checkin
-  function: spsm_coo
-  indextype: *i32_i64
-  precision: *single_double_precisions
-  M_N: *M_N_range_checkin_1
-  K: [7, 16]
-  ld_multiplier_B: [2]
-  ld_multiplier_C: [5]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_transpose]
-  orderB: [rocsparse_order_row, rocsparse_order_column]
-  orderC: [rocsparse_order_row, rocsparse_order_column]
-  diag: [rocsparse_diag_type_unit]
-  uplo: [rocsparse_fill_mode_upper]
-  baseA: [rocsparse_index_base_zero]
-  spsm_alg: [rocsparse_spsm_alg_default]
-  matrix: [rocsparse_matrix_random]
-
-- name: spsm_coo
-  category: pre_checkin
-  function: spsm_coo
-  indextype: *i32_i64
-  precision: *single_double_precisions
-  M_N: *M_N_range_checkin_1
-  K: [32, 96, 244, 764]
-  ld_multiplier_B: [3]
-  ld_multiplier_C: [2]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_transpose]
-  orderB: [rocsparse_order_row]
-  orderC: [rocsparse_order_column]
-  diag: [rocsparse_diag_type_unit]
-  uplo: [rocsparse_fill_mode_lower]
-  baseA: [rocsparse_index_base_zero]
-  spsm_alg: [rocsparse_spsm_alg_default]
-  matrix: [rocsparse_matrix_random]
-
-- name: spsm_coo_file
-  category: pre_checkin
-  function: spsm_coo
-  indextype: *i32_i64
-  precision: *single_double_precisions
-  K: [141, 875]
-  ld_multiplier_B: [2]
-  ld_multiplier_C: [2]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none]
-  diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_upper]
-  baseA: [rocsparse_index_base_one]
-  spsm_alg: [rocsparse_spsm_alg_default]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos1,
-             nos5,
-             nos7,
-             mplate]
-
-- name: spsm_coo_file
-  category: pre_checkin
-  function: spsm_coo
-  indextype: *i32_i64
-  precision: *single_double_precisions
-  K: [141]
-  ld_multiplier_B: [2]
-  ld_multiplier_C: [3]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none]
-  diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_upper]
-  baseA: [rocsparse_index_base_one]
-  spsm_alg: [rocsparse_spsm_alg_default]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron3]
-
-- name: spsm_coo_file
-  category: pre_checkin
-  function: spsm_coo
-  indextype: *i32_i64
-  precision: *single_double_precisions
-  K: [875]
-  ld_multiplier_B: [1]
-  ld_multiplier_C: [1]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none]
-  diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_upper]
-  baseA: [rocsparse_index_base_one]
-  spsm_alg: [rocsparse_spsm_alg_default]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron3]
-  skip_hardware: gfx1151
-  device_memory_gb: 14
-
-- name: spsm_coo_file
-  category: pre_checkin
-  function: spsm_coo
-  indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
-  M: 1
-  N: 1
-  K: [2, 4]
-  ld_multiplier_B: [3]
-  ld_multiplier_C: [3]
-  alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none]
-  orderB: [rocsparse_order_row]
-  orderC: [rocsparse_order_row]
-  diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_upper]
-  baseA: [rocsparse_index_base_one]
-  spsm_alg: [rocsparse_spsm_alg_default]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [rma10, mc2depi, amazon0312]
-
-- name: spsm_coo
-  category: quick
-  function: spsm_coo
-  indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
-  K: [65, 153, 280]
-  ld_multiplier_B: [1]
-  ld_multiplier_C: [2]
-  alpha_alphai: *alpha_range_quick
-  transA: [rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none]
-  orderB: [rocsparse_order_column]
-  orderC: [rocsparse_order_row]
-  diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_lower]
-  baseA: [rocsparse_index_base_zero]
-  spsm_alg: [rocsparse_spsm_alg_default]
-  matrix: [rocsparse_matrix_random]
-
-- name: spsm_coo_file
-  category: quick
-  function: spsm_coo
-  indextype: *i32_i64
-  precision: *single_double_precisions
-  M: 1
-  N: 1
-  K: [1, 76]
-  ld_multiplier_B: [2]
-  ld_multiplier_C: [1]
-  alpha_alphai: *alpha_range_quick
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_transpose]
-  orderB: [rocsparse_order_row]
-  orderC: [rocsparse_order_column]
-  diag: [rocsparse_diag_type_unit]
-  uplo: [rocsparse_fill_mode_lower]
-  baseA: [rocsparse_index_base_zero]
-  spsm_alg: [rocsparse_spsm_alg_default]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
-             nos2,
-             nos4,
-             nos6,
-             scircuit]
-
-- name: spsm_coo_file
-  category: quick
-  function: spsm_coo
-  indextype: *i32_i64
-  precision: *double_only_precisions_complex
-  M: 1
-  N: 1
-  K: [89]
-  ld_multiplier_B: [1]
-  ld_multiplier_C: [1]
-  alpha_alphai: *alpha_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
-  transB: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
-  orderB: [rocsparse_order_column]
-  orderC: [rocsparse_order_column]
-  diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_upper]
-  baseA: [rocsparse_index_base_one]
-  spsm_alg: [rocsparse_spsm_alg_default]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron2]
 
 - name: spsm_coo
   category: nightly
@@ -432,12 +452,6 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [sme3Dc]
 
-#
-# in test definition above
-# Too sensitive to roundoff errors when normalized, subject to investigation.
-# shipsec1
-#
-
 - name: spsm_coo_file
   category: nightly
   function: spsm_coo
@@ -460,23 +474,23 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4, ASIC_320k]
 
-- name: spsm_coo_graph_test
-  category: pre_checkin
+# Stress
+- name: spsm_coo_file
+  category: stress
   function: spsm_coo
   indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
-  K: [65, 153, 280]
-  ld_multiplier_B: [2]
-  ld_multiplier_C: [2]
-  alpha_alphai: *alpha_range_quick
+  precision: *single_double_precisions
+  K: [875]
+  ld_multiplier_B: [1]
+  ld_multiplier_C: [1]
+  alpha_alphai: *alpha_range_stress
   transA: [rocsparse_operation_transpose]
   transB: [rocsparse_operation_none]
-  orderB: [rocsparse_order_column]
-  orderC: [rocsparse_order_row]
   diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_lower]
-  baseA: [rocsparse_index_base_zero]
+  uplo: [rocsparse_fill_mode_upper]
+  baseA: [rocsparse_index_base_one]
   spsm_alg: [rocsparse_spsm_alg_default]
-  matrix: [rocsparse_matrix_random]
-  graph_test: true
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron3]
+  skip_hardware: gfx1151
+  device_memory_gb: 14

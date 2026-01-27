@@ -13,7 +13,7 @@
   --benchmark true --plot false
 - There are .yaml files for each function that specify input argument sizes
 - rocblas-bench is called, and output will be in .csv files
-- If you are in your fork (not ROCmSoftwarePlatform) the .csv files can be checked in to github
+- If you are in your fork (not ROCm) the .csv files can be checked in to github
   on a remote machine, and checked out for plotting on a local machine
 - There is plotting of gflops vs size or gflops/theoretical_max_gflops vs size
 - plots are in .png files
