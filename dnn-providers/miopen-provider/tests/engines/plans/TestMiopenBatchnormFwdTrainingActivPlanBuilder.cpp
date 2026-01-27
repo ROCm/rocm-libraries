@@ -151,7 +151,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
     HipdnnEnginePluginExecutionContext ctx;
     MockEngineConfig mockConfig;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockConfig, ctx), std::invalid_argument);
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockConfig, ctx),
+                 std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 
@@ -252,7 +253,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
     HipdnnEnginePluginExecutionContext ctx;
     MockEngineConfig mockConfig;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockConfig, ctx), std::invalid_argument);
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockConfig, ctx),
+                 std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 

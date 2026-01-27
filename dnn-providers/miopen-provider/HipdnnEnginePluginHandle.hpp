@@ -24,8 +24,8 @@ public:
         miopenStatus_t status = miopenCreate(&miopenHandle);
         if(status != miopenStatusSuccess)
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "Failed to create MIOpen handle");
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                           "Failed to create MIOpen handle");
         }
     }
 

@@ -31,17 +31,16 @@ public:
     size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
                                const hipdnn_plugin_sdk::IGraph& opGraph) const override;
 
-    void buildPlan(
-        const HipdnnEnginePluginHandle& handle,
-        const hipdnn_plugin_sdk::IGraph& opGraph,
-        [[maybe_unused]] const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
-        HipdnnEnginePluginExecutionContext& executionContext) const override;
+    void buildPlan(const HipdnnEnginePluginHandle& handle,
+                   const hipdnn_plugin_sdk::IGraph& opGraph,
+                   [[maybe_unused]] const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
+                   HipdnnEnginePluginExecutionContext& executionContext) const override;
 
     bool hasCustomKnobs() const override;
 
-    std::vector<hipdnn_data_sdk::data_objects::KnobT> getCustomKnobs(
-        const HipdnnEnginePluginHandle& handle,
-        const hipdnn_plugin_sdk::IGraph& opGraph) const override;
+    std::vector<hipdnn_data_sdk::data_objects::KnobT>
+        getCustomKnobs(const HipdnnEnginePluginHandle& handle,
+                       const hipdnn_plugin_sdk::IGraph& opGraph) const override;
 };
 
 }

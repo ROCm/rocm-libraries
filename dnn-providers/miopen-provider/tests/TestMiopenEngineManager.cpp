@@ -149,7 +149,8 @@ TEST(TestMiopenEngineManager, GetWorkspaceSizeReturnsCorrectValue)
     EXPECT_CALL(*mockEngine, id()).WillRepeatedly(Return(42));
     HipdnnEnginePluginHandle dummyHandle = {};
     MockGraph mockGraph;
-    EXPECT_CALL(*mockEngine, getMaxWorkspaceSize(::testing::_, ::testing::_)).WillOnce(Return(4096));
+    EXPECT_CALL(*mockEngine, getMaxWorkspaceSize(::testing::_, ::testing::_))
+        .WillOnce(Return(4096));
 
     manager.addEngine(std::move(mockEngine));
 
