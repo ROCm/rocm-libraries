@@ -45,7 +45,7 @@ template <typename T>
 void testing_gtsv2_nopivot_bad_arg(const Arguments& argus)
 {
     // Dont do bad argument checking for cuda
-#if (!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION))
     int safe_size = 100;
     int m         = 10;
     int n         = 10;
