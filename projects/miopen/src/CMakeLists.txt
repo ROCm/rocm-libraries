@@ -114,6 +114,7 @@ set( MIOpen_Source
     env_debug.cpp
     execution_context.cpp
     expanduser.cpp
+    filesystem_checker.cpp
     fin/fin_interface.cpp
     find_controls.cpp
     find_db.cpp
@@ -926,7 +927,7 @@ if(MIOPEN_USE_COMPOSABLEKERNEL)
         # Use the aliased targets when we pull CK from /opt/rocm or other place on disc.
         set(MIOPEN_CK_LINK_FLAGS composable_kernel::device_conv_operations hip::host)
     endif()
-    if(GPU_TARGETS MATCHES "gfx942" OR GPU_TARGETS MATCHES "gfx950")
+    if(GPU_TARGETS MATCHES "gfx942")
         target_compile_definitions(MIOpen PRIVATE CK_ENABLE_TF32)
     endif()
 endif()

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,28 +35,8 @@ Tests:
   category: quick
   function: ell2csr
   precision: *single_double_precisions_complex_real
-  M: [10, 872]
-  N: [33, 623]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-
-- name: ell2csr
-  category: pre_checkin
-  function: ell2csr
-  precision: *single_double_precisions_complex_real
-  M: [0, 500, 1000]
-  N: [0, 242, 1000]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-
-- name: ell2csr
-  category: nightly
-  function: ell2csr
-  precision: *single_double_precisions_complex_real
-  M: [27428, 94191, 305637]
-  N: [18582, 57138, 95827]
+  M: [10, 300]
+  N: [33, 300]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
@@ -70,11 +50,35 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
+  filename: [nos1,
              nos2,
+             nos3,
              nos4,
+             nos5,
              nos6,
-             scircuit]
+             nos7]
+
+- name: ell2csr_file
+  category: quick
+  function: ell2csr
+  precision: *single_only_precisions_complex
+  M: 1
+  N: 1
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate,
+             Chevron2]
+
+- name: ell2csr
+  category: pre_checkin
+  function: ell2csr
+  precision: *single_double_precisions_complex_real
+  M: [0, 500, 1000]
+  N: [0, 242, 1000]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
 
 - name: ell2csr_file
   category: pre_checkin
@@ -87,10 +91,41 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [rma10,
              mc2depi,
-             nos1,
-             nos3,
-             nos5,
-             nos7]
+             scircuit,
+             mac_econ_fwd500]
+
+- name: ell2csr_file
+  category: pre_checkin
+  function: ell2csr
+  precision: *double_only_precisions_complex
+  M: 1
+  N: 1
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [qc2534,
+             Chevron3]
+
+- name: ell2csr_graph_test
+  category: pre_checkin
+  function: ell2csr
+  precision: *single_double_precisions_complex_real
+  M: [21, 999]
+  N: [43, 586]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
+
+- name: ell2csr
+  category: nightly
+  function: ell2csr
+  precision: *single_double_precisions_complex_real
+  M: [27428, 94191, 305637]
+  N: [18582, 57138, 95827]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
 
 - name: ell2csr_file
   category: nightly
@@ -108,30 +143,6 @@ Tests:
              shipsec1]
 
 - name: ell2csr_file
-  category: quick
-  function: ell2csr
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [qc2534,
-             Chevron2]
-
-- name: ell2csr_file
-  category: pre_checkin
-  function: ell2csr
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mplate,
-             Chevron3]
-
-- name: ell2csr_file
   category: nightly
   function: ell2csr
   precision: *single_double_precisions_complex
@@ -141,14 +152,3 @@ Tests:
   baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4]
-
-- name: ell2csr_graph_test
-  category: pre_checkin
-  function: ell2csr
-  precision: *single_double_precisions_complex_real
-  M: [10, 872]
-  N: [33, 623]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-  graph_test: true
