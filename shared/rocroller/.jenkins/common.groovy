@@ -81,7 +81,7 @@ def runTestCommand (platform, project)
 {
     String testExclude = platform.jenkinsLabel.contains('compile') ? '--gtest_filter=-*GPU*' : ''
 
-    def numThreads = 8
+    def numCTest = 6
 
     def command = """#!/usr/bin/env bash
                 set -ex
@@ -91,7 +91,7 @@ def runTestCommand (platform, project)
                 scripts/run-tests-sharded build "${testExclude}"
 
                 pushd build
-                OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 ctest --parallel ${numThreads} --output-on-failure -LE "GTEST|CATCH"
+                OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 ctest --parallel ${numCTest} --output-on-failure -LE "GTEST|CATCH"
                 popd
             """
 

@@ -138,8 +138,8 @@ else
         --profile codecov
 
     # Now do pytests etc
-    OMP_NUM_THREADS=8 LLVM_PROFILE_FILE=${code_cov_path}/rocroller-tests_%m.profraw ctest \
-        -j $(nproc) \
+    OMP_NUM_THREADS=2 LLVM_PROFILE_FILE=${code_cov_path}/rocroller-tests_%m.profraw ctest \
+        -j $(($(nproc)/2)) \
         --test-dir ${build_path} \
         --output-on-failure \
         -LE "GTEST|CATCH" \
