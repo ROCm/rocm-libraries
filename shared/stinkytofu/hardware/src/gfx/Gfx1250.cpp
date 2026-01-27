@@ -20,6 +20,7 @@
 * THE SOFTWARE.
 *
 * ************************************************************************ */
+#include <iostream>
 #include <string>
 #include <utility>
 
@@ -28,8 +29,104 @@
 
 namespace stinkytofu
 {
+    namespace
+    {
+        // Instruction cost structure
+        struct InstructionCost
+        {
+            const char* opcode;
+            uint16_t    cycle;
+            uint16_t    latency;
+        };
+
+        // Gfx1250 (RDNA4/7900) architecture-specific instruction costs
+        // Only instructions that differ from defaults are listed here
+        constexpr InstructionCost GFX1250_COSTS[] = {
+            // Buffer loads (all have cycle=12 instead of default 1)
+            {"buffer_load_b128", 12, 116},
+            {"buffer_load_b32", 12, 108},
+            {"buffer_load_b64", 12, 120},
+            {"buffer_load_b96", 12, 120},
+            {"buffer_load_sbyte", 12, 104},
+            {"buffer_load_sbyte_d16", 12, 108},
+            {"buffer_load_sbyte_d16_hi", 12, 104},
+            {"buffer_load_short_d16", 12, 104},
+            {"buffer_load_short_d16_hi", 12, 108},
+            {"buffer_load_sshort", 12, 104},
+            {"buffer_load_ubyte", 12, 108},
+            {"buffer_load_ubyte_d16", 12, 108},
+            {"buffer_load_ubyte_d16_hi", 12, 104},
+            {"buffer_load_ushort", 12, 108},
+
+            // DS load (special latency)
+            {"ds_load_b128", 1, 56},
+
+            // MFMA instructions (all have latency != 1)
+            {"v_mfma_f32_16x16x128_f8f6f4", 1, 64},
+            {"v_mfma_f32_16x16x16_bf16", 1, 16},
+            {"v_mfma_f32_16x16x16_f16", 1, 16},
+            {"v_mfma_f32_16x16x1_4b_f32", 1, 32},
+            {"v_mfma_f32_16x16x32_bf8_bf8", 1, 16},
+            {"v_mfma_f32_16x16x32_bf8_fp8", 1, 16},
+            {"v_mfma_f32_16x16x32_fp8_bf8", 1, 16},
+            {"v_mfma_f32_16x16x32_fp8_fp8", 1, 16},
+            {"v_mfma_f32_16x16x4_4b_bf16", 1, 32},
+            {"v_mfma_f32_16x16x4_4b_f16", 1, 32},
+            {"v_mfma_f32_16x16x4_f32", 1, 32},
+            {"v_mfma_f32_32x32x16_bf8_bf8", 1, 32},
+            {"v_mfma_f32_32x32x16_bf8_fp8", 1, 32},
+            {"v_mfma_f32_32x32x16_fp8_bf8", 1, 32},
+            {"v_mfma_f32_32x32x16_fp8_fp8", 1, 32},
+            {"v_mfma_f32_32x32x1_2b_f32", 1, 64},
+            {"v_mfma_f32_32x32x2_f32", 1, 64},
+            {"v_mfma_f32_32x32x4_2b_bf16", 1, 64},
+            {"v_mfma_f32_32x32x4_2b_f16", 1, 64},
+            {"v_mfma_f32_32x32x64_f8f6f4", 1, 128},
+            {"v_mfma_f32_32x32x8_bf16", 1, 32},
+            {"v_mfma_f32_32x32x8_f16", 1, 32},
+            {"v_mfma_f32_4x4x1_16b_f32", 1, 8},
+            {"v_mfma_f32_4x4x4_16b_bf16", 1, 8},
+            {"v_mfma_f32_4x4x4_16b_f16", 1, 8},
+            {"v_mfma_f64_16x16x4_f64", 1, 32},
+            {"v_mfma_f64_4x4x4_4b_f64", 1, 16},
+            {"v_mfma_i32_16x16x32_i8", 1, 16},
+            {"v_mfma_i32_16x16x4_4b_i8", 1, 32},
+            {"v_mfma_i32_32x32x16_i8", 1, 32},
+            {"v_mfma_i32_32x32x4_2b_i8", 1, 64},
+            {"v_mfma_i32_4x4x4_16b_i8", 1, 8},
+
+            // SMFMAC instructions
+            {"v_smfmac_f32_16x16x32_bf16", 1, 16},
+            {"v_smfmac_f32_16x16x32_f16", 1, 16},
+            {"v_smfmac_f32_16x16x64_bf8_bf8", 1, 16},
+            {"v_smfmac_f32_16x16x64_bf8_fp8", 1, 16},
+            {"v_smfmac_f32_16x16x64_fp8_bf8", 1, 16},
+            {"v_smfmac_f32_16x16x64_fp8_fp8", 1, 16},
+            {"v_smfmac_f32_32x32x16_bf16", 1, 32},
+            {"v_smfmac_f32_32x32x16_f16", 1, 32},
+            {"v_smfmac_f32_32x32x32_bf8_bf8", 1, 32},
+            {"v_smfmac_f32_32x32x32_bf8_fp8", 1, 32},
+            {"v_smfmac_f32_32x32x32_fp8_bf8", 1, 32},
+            {"v_smfmac_f32_32x32x32_fp8_fp8", 1, 32},
+            {"v_smfmac_i32_16x16x64_i8", 1, 16},
+            {"v_smfmac_i32_32x32x32_i8", 1, 32},
+
+            // WMMA instructions
+            {"v_wmma_f32_16x16x32_bf16", 1, 16},
+        };
+
+        // Gfx1250 default costs (RDNA4 architecture)
+        // ? Different from CDNA! RDNA has lower default costs
+        constexpr uint16_t GFX1250_DEFAULT_CYCLE   = 1;
+        constexpr uint16_t GFX1250_DEFAULT_LATENCY = 1;
+    }
+
     void defineGfx1250Insts(GpuArch& registry)
     {
+        // STEP 1: Set default costs (REQUIRED!)
+        // Note: Gfx1250 (RDNA4) uses 1,1 unlike CDNA which uses 4,4
+        registry.setDefaultCosts(GFX1250_DEFAULT_CYCLE, GFX1250_DEFAULT_LATENCY);
+
         /*
          * Begin Import gfx942 instructions
          */
@@ -688,6 +785,20 @@ namespace stinkytofu
 
         for(auto s : wmma1250)
             GEN_WMMA(registry, s, false);
+
+        // STEP 2: Register instruction-specific costs (exceptions from defaults)
+        for(const auto& cost : GFX1250_COSTS)
+        {
+            registry.setInstructionCost(cost.opcode, cost.cycle, cost.latency);
+        }
+
+        // STEP 3: Apply costs with strict validation
+        if(!registry.applyInstructionCosts())
+        {
+            // Fatal error - build will stop
+            std::cerr << "FATAL: Failed to apply instruction costs for Gfx1250\n";
+            return;
+        }
     }
 
     void setGfx1250LogicalToArchMap(GpuArch& registry)

@@ -20,6 +20,7 @@
 * THE SOFTWARE.
 *
 * ************************************************************************ */
+#include <iostream>
 #include <string>
 
 #include "gfx/CommonInstsDSL.hpp"
@@ -27,6 +28,115 @@
 
 namespace stinkytofu
 {
+    namespace
+    {
+        // Instruction cost structure
+        struct InstructionCost
+        {
+            const char* opcode;
+            uint16_t    cycle;
+            uint16_t    latency;
+        };
+
+        // Gfx942 (CDNA2/MI200) architecture-specific instruction costs
+        // Only instructions that differ from defaults are listed here
+        constexpr InstructionCost GFX942_COSTS[] = {
+            // Buffer loads
+            {"buffer_load_dword", 12, 108},
+            {"buffer_load_dwordx2", 12, 128},
+            {"buffer_load_dwordx3", 12, 120},
+            {"buffer_load_dwordx4", 12, 124},
+            {"buffer_load_sbyte", 12, 108},
+            {"buffer_load_sbyte_d16", 12, 112},
+            {"buffer_load_sbyte_d16_hi", 12, 108},
+            {"buffer_load_short_d16", 12, 112},
+            {"buffer_load_short_d16_hi", 12, 108},
+            {"buffer_load_sshort", 12, 108},
+            {"buffer_load_ubyte", 12, 112},
+            {"buffer_load_ubyte_d16", 12, 112},
+            {"buffer_load_ubyte_d16_hi", 12, 108},
+            {"buffer_load_ushort", 12, 112},
+
+            // DS reads
+            {"ds_read2_b32", 4, 52},
+            {"ds_read2_b64", 4, 64},
+            {"ds_read_b128", 4, 52},
+            {"ds_read_b32", 4, 48},
+            {"ds_read_b64", 4, 52},
+            {"ds_read_i16", 4, 48},
+            {"ds_read_u16", 4, 52},
+            {"ds_read_u16_d16_hi", 4, 48},
+            {"ds_read_u8", 4, 48},
+            {"ds_read_u8_d16_hi", 4, 48},
+
+            // DS writes
+            {"ds_write2_b32", 12, 64},
+            {"ds_write2_b64", 20, 72},
+            {"ds_write_b128", 20, 72},
+            {"ds_write_b16", 8, 56},
+            {"ds_write_b16_d16_hi", 8, 56},
+            {"ds_write_b32", 8, 56},
+            {"ds_write_b64", 12, 60},
+            {"ds_write_b8", 8, 56},
+            {"ds_write_b8_d16_hi", 8, 56},
+            {"ds_write_b96", 16, 68},
+
+            // MFMA instructions
+            {"v_mfma_f32_16x16x16_bf16", 4, 16},
+            {"v_mfma_f32_16x16x16_f16", 4, 16},
+            {"v_mfma_f32_16x16x1_4b_f32", 4, 32},
+            {"v_mfma_f32_16x16x32_bf8_bf8", 4, 16},
+            {"v_mfma_f32_16x16x32_bf8_fp8", 4, 16},
+            {"v_mfma_f32_16x16x32_fp8_bf8", 4, 16},
+            {"v_mfma_f32_16x16x32_fp8_fp8", 4, 16},
+            {"v_mfma_f32_16x16x4_4b_bf16", 4, 32},
+            {"v_mfma_f32_16x16x4_4b_f16", 4, 32},
+            {"v_mfma_f32_16x16x4_f32", 4, 32},
+            {"v_mfma_f32_16x16x8_xf32", 4, 16},
+            {"v_mfma_f32_32x32x16_bf8_bf8", 4, 32},
+            {"v_mfma_f32_32x32x16_bf8_fp8", 4, 32},
+            {"v_mfma_f32_32x32x16_fp8_bf8", 4, 32},
+            {"v_mfma_f32_32x32x16_fp8_fp8", 4, 32},
+            {"v_mfma_f32_32x32x1_2b_f32", 4, 64},
+            {"v_mfma_f32_32x32x2_f32", 4, 64},
+            {"v_mfma_f32_32x32x4_2b_bf16", 4, 64},
+            {"v_mfma_f32_32x32x4_2b_f16", 4, 64},
+            {"v_mfma_f32_32x32x4_xf32", 4, 32},
+            {"v_mfma_f32_32x32x8_bf16", 4, 32},
+            {"v_mfma_f32_32x32x8_f16", 4, 32},
+            {"v_mfma_f32_4x4x1_16b_f32", 4, 8},
+            {"v_mfma_f32_4x4x4_16b_bf16", 4, 8},
+            {"v_mfma_f32_4x4x4_16b_f16", 4, 8},
+            {"v_mfma_f64_16x16x4_f64", 4, 32},
+            {"v_mfma_f64_4x4x4_4b_f64", 4, 16},
+            {"v_mfma_i32_16x16x32_i8", 4, 16},
+            {"v_mfma_i32_16x16x4_4b_i8", 4, 32},
+            {"v_mfma_i32_32x32x16_i8", 4, 32},
+            {"v_mfma_i32_32x32x4_2b_i8", 4, 64},
+            {"v_mfma_i32_4x4x4_16b_i8", 4, 8},
+
+            // SMFMAC instructions
+            {"v_smfmac_f32_16x16x32_bf16", 4, 16},
+            {"v_smfmac_f32_16x16x32_f16", 4, 16},
+            {"v_smfmac_f32_16x16x64_bf8_bf8", 4, 16},
+            {"v_smfmac_f32_16x16x64_bf8_fp8", 4, 16},
+            {"v_smfmac_f32_16x16x64_fp8_bf8", 4, 16},
+            {"v_smfmac_f32_16x16x64_fp8_fp8", 4, 16},
+            {"v_smfmac_f32_32x32x16_bf16", 4, 32},
+            {"v_smfmac_f32_32x32x16_f16", 4, 32},
+            {"v_smfmac_f32_32x32x32_bf8_bf8", 4, 32},
+            {"v_smfmac_f32_32x32x32_bf8_fp8", 4, 32},
+            {"v_smfmac_f32_32x32x32_fp8_bf8", 4, 32},
+            {"v_smfmac_f32_32x32x32_fp8_fp8", 4, 32},
+            {"v_smfmac_i32_16x16x64_i8", 4, 16},
+            {"v_smfmac_i32_32x32x32_i8", 4, 32},
+        };
+
+        // Gfx942 default costs (CDNA2 architecture)
+        constexpr uint16_t GFX942_DEFAULT_CYCLE   = 4;
+        constexpr uint16_t GFX942_DEFAULT_LATENCY = 4;
+    }
+
     // gfx942 instruction definition
     //
     // llvm tablegen style instruction definition for gfx942 architecture
@@ -45,6 +155,9 @@ namespace stinkytofu
         limits.maxSGPR = 102; // Scalar GPRs: s0-s101 (GFX9 has 102 SGPRs)
         limits.maxAGPR = 256; // Accumulator GPRs: a0-a255
         registry.setRegisterLimits(limits);
+
+        // STEP 1: Set default costs (REQUIRED!)
+        registry.setDefaultCosts(GFX942_DEFAULT_CYCLE, GFX942_DEFAULT_LATENCY);
 
         // ============================================
         // Scalar instructions (SOP1 / SOP2 / Scalar ALU)
@@ -526,6 +639,20 @@ namespace stinkytofu
 
         DEF_T(VALU, "v_accvgpr_read_b32");
         DEF_T(VALU, "v_accvgpr_write_b32");
+
+        // STEP 2: Register instruction-specific costs (exceptions from defaults)
+        for(const auto& cost : GFX942_COSTS)
+        {
+            registry.setInstructionCost(cost.opcode, cost.cycle, cost.latency);
+        }
+
+        // STEP 3: Apply costs with strict validation
+        if(!registry.applyInstructionCosts())
+        {
+            // Fatal error - build will stop
+            std::cerr << "FATAL: Failed to apply instruction costs for Gfx942\n";
+            return;
+        }
     }
 
     void setGfx942LogicalToArchMap(GpuArch& registry)

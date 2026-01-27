@@ -52,8 +52,9 @@ namespace stinkytofu
         defineInsts(*instructionsByArch.back());
         setLogicalToArchMap(*instructionsByArch.back());
         setRocisaConversionMap(*instructionsByArch.back());
-        instructionsByArch.back()->loadHardwareDataFromYaml(hardwareDir + "/data/" + arch
-                                                            + ".yaml");
+        // YAML loading removed - costs now in C++
+        // instructionsByArch.back()->loadHardwareDataFromYaml(hardwareDir + "/data/" + arch
+        //                                                     + ".yaml");
 
         // Check for errors immediately after initialization
         if(instructionsByArch.back()->hasError())
