@@ -147,21 +147,6 @@ CXX=<g++ or clang++ path> CC=<gcc or clang path> cmake .. [cmake options]
   ctest -LE GPU
   ```
 
-**Exclude Exhaustive GEMM Tests (for faster test runs or code coverage):**
-  ```bash
-  ctest -LE GEMM_EXHAUSTIVE
-  ```
-  This excludes heavily parameterized GEMM tests that test all
-  combinations of parameters.  The excluded tests include
-  parameterized variants of StreamK, mixed precision
-  (FP8/BF8/FP6/BF6/FP4/FP16/BF16), swizzle/scale, unroll, WMMA, and
-  DirectLDS tests. Basic GEMM feature tests are still included.
-
-**Run Only Exhaustive GEMM Tests:**
-  ```bash
-  ctest -L GEMM_EXHAUSTIVE
-  ```
-
 ### With GTest
 **Run All GTest Tests:**
   ```bash

@@ -133,24 +133,6 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
             "ENVIRONMENT" "${asan_opts}"
         DISCOVERY_MODE PRE_TEST
     )
-    # Label exhaustive GEMM parameterized tests to exclude from code
-    # coverage.  These tests cover all parameter combinations for
-    # various GEMM features but take a long time to execute. Basic
-    # GEMM tests (GPU_BasicGEMM, etc.) are NOT labeled here and will
-    # still run during code coverage to ensure core functionality is
-    # tested. To exclude these tests: ctest -LE GEMM_EXHAUSTIVE To run
-    # only these tests: ctest -L GEMM_EXHAUSTIVE
-    gtest_discover_tests(
-        rocroller-tests
-        XML_OUTPUT_DIR ${TEST_REPORT_DIR}
-        TEST_FILTER "GEMMTest/StreamKWGMTestGPU.*:GEMMTest/StreamKMultipleFixupsTestGPU.*:GEMMTest/StreamKTestGPU.*:GEMMF16Test/GEMMF16TestGPU.*:GEMMF16Test/GEMMF16NTTestGPU.*:GEMMF8F6F4Test/GEMMF8F6F4TestGPU.*:MixedGEMMTest/MixedGEMMF8F6F4TestGPU.*:ScaledMixedGEMMTest/ScaledMixedGEMMF8F6F4TestGPU.*:GEMMTest/SwizzleScaledTestGPU.*:GEMMTest/SwizzleScaledUnrollTestGPU.*:GEMMTest/UnrollKTestGPU.*:GEMMJammedTest/GEMMJammedTestGPU.*:*WMMA*TestGPU*:GEMMTest/GEMMLargeMacroTileTestGPU.*:GEMMDirectLDSTestBasic/GEMMDirectLDSTestBasicGPU.*:GEMMDirectLDSTest/GEMMDirectLDSTestGPU.*:GEMMDirectLDSTestPrefetch/GEMMDirectLDSTestPrefetchGPU.*:GEMMMXFP4TNSwizzleScaledUnrollTest/*"
-        PROPERTIES
-            "LABELS" "GPU"
-            "LABELS" "GTEST"
-            "LABELS" "GEMM_EXHAUSTIVE"
-            "ENVIRONMENT" "${asan_opts}"
-        DISCOVERY_MODE PRE_TEST
-    )
     gtest_discover_tests(
         arch-gen-tests
         XML_OUTPUT_DIR ${TEST_REPORT_DIR}
