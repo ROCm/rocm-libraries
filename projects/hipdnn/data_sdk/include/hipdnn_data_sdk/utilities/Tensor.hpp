@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <functional>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
@@ -14,8 +15,8 @@
 #include <numeric>
 #include <random>
 #include <typeindex>
-#include <vector>
 #include <variant>
+#include <vector>
 
 namespace hipdnn_data_sdk::utilities
 {
@@ -66,7 +67,9 @@ public:
     using pointer = std::conditional_t<IsConst, const void*, void*>;
     using reference = std::conditional_t<IsConst, const void*, void*>;
 
-    using TensorType = std::conditional_t<IsConst, const ITensor&, ITensor&>;
+    using TensorType = std::conditional_t<IsConst,
+                                          std::reference_wrapper<const ITensor>,
+                                          std::reference_wrapper<ITensor>>;
     using IndexType = std::variant<LinearIndex, CompositeIndex>;
 
     ITensorIterator() = default;
@@ -100,7 +103,7 @@ public:
     value_type operator*()
     {
         throwIfOutOfBounds("Cannot dereference end iterator");
-        return _tensor.hostDataOffsetFromIndex(
+        return _tensor.get().hostDataOffsetFromIndex(
             std::visit([](auto& idx) { return idx.getValue(); }, _index));
     }
 
@@ -120,7 +123,7 @@ public:
 
     bool operator==(const ITensorIterator& other) const
     {
-        return (&_tensor == &other._tensor) && (_index == other._index);
+        return (&_tensor.get() == &other._tensor.get()) && (_index == other._index);
     }
 
     bool operator!=(const ITensorIterator& other) const
@@ -139,9 +142,9 @@ public:
             : tensor(tensor)
 
         {
-            if(isEnd && !tensor.dims().empty())
+            if(isEnd && !tensor.get().dims().empty())
             {
-                index = static_cast<decltype(index)>(tensor.elementCount());
+                index = static_cast<decltype(index)>(tensor.get().elementCount());
             }
         }
 
@@ -160,7 +163,7 @@ public:
 
         bool operator==(const LinearIndex& other) const
         {
-            return index == other.index && &tensor == &other.tensor;
+            return index == other.index && &tensor.get() == &other.tensor.get();
         }
 
         bool operator!=(const LinearIndex& other) const
@@ -170,7 +173,7 @@ public:
 
         bool isOutOfBounds() const
         {
-            return index == static_cast<decltype(index)>(tensor.elementCount());
+            return index == static_cast<decltype(index)>(tensor.get().elementCount());
         }
 
         int64_t getValue() const
@@ -185,18 +188,18 @@ public:
     struct CompositeIndex
     {
         CompositeIndex(TensorType tensor, bool isEnd)
-            : indices(tensor.dims().size(), 0)
+            : indices(tensor.get().dims().size(), 0)
             , tensor(tensor)
         {
-            if(isEnd && !tensor.dims().empty())
+            if(isEnd && !tensor.get().dims().empty())
             {
-                indices[0] = tensor.dims()[0];
+                indices[0] = tensor.get().dims()[0];
             }
         }
 
         CompositeIndex& operator++()
         {
-            const auto& dims = tensor.dims();
+            const auto& dims = tensor.get().dims();
             for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
             {
                 auto dimIdx = static_cast<size_t>(dim);
@@ -222,7 +225,7 @@ public:
 
         bool operator==(const CompositeIndex& other) const
         {
-            return indices == other.indices && &tensor == &other.tensor;
+            return indices == other.indices && &tensor.get() == &other.tensor.get();
         }
 
         bool operator!=(const CompositeIndex& other) const
@@ -232,13 +235,13 @@ public:
 
         bool isOutOfBounds() const
         {
-            const auto& dims = tensor.dims();
+            const auto& dims = tensor.get().dims();
             return dims.empty() || indices[0] == dims[0];
         }
 
         int64_t getValue() const
         {
-            return tensor.getIndex(indices);
+            return tensor.get().getIndex(indices);
         }
 
         std::vector<int64_t> indices;
@@ -256,7 +259,7 @@ private:
 
     IndexType makeIndex(TensorType tensor, bool isEnd)
     {
-        if(tensor.isPacked())
+        if(tensor.get().isPacked())
         {
             return LinearIndex(tensor, isEnd);
         }
