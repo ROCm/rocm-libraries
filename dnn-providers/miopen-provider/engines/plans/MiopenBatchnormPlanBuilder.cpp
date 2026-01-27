@@ -593,14 +593,6 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     }
 }
 
-size_t MiopenBatchnormPlanBuilder::getWorkspaceSize(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    [[maybe_unused]] const hipdnn_plugin_sdk::IGraph& opGraph) const
-{
-    //batchnorm plan builder does not require workspace size
-    return 0u;
-}
-
 namespace
 {
 

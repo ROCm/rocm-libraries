@@ -307,14 +307,6 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
     }
 }
 
-size_t MiopenBatchnormFwdTrainingPlanBuilder::getWorkspaceSize(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    [[maybe_unused]] const hipdnn_plugin_sdk::IGraph& opGraph) const
-{
-    // No workspace needed for batchnorm forward training
-    return 0;
-}
-
 void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     const hipdnn_plugin_sdk::IGraph& opGraph,
