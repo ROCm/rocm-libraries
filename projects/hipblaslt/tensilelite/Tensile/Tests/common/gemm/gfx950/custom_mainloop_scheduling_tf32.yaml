@@ -663,4 +663,30 @@ BenchmarkProblems:
           - Range: [[256], [192], [1], [1,1,64]]
           - Range: [[256], [192], [1], [32, 64, 256]]
         - BiasTypeArgs: ['b']
-
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 5, 4, 2, 2] # 325, 362
+        - DepthU: [ 64 ]
+        - LocalReadVectorWidth: [4]
+        - DirectToLds: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - UseCustomMainLoopSchedule: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - ClusterLocalRead: [1]
+        - TransposeLDS: [1]
+        - LDSTrInst: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2560, 2048, 1, 8192] #t
+          - Range: [[160], [128], [1], [64, 64, 256]]
+          - Range: [[160], [128], [1], [1, 1, 256]]
+          - Range: [[160], [128], [1], [32, 64, 256]]
+        - BiasTypeArgs: ['s']
+        - ICacheFlush: [True]
