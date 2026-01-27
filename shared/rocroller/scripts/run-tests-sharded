@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run rocroller tests in parallel shards.
 
-Usage: run-tests-sharded.py [BUILD_DIR] [GPU_FILTER]
+Usage: run-tests-sharded [BUILD_DIR] [GPU_FILTER]
 
 Number of shards is auto-detected as ncores/2.
 """
@@ -12,6 +12,7 @@ import pty
 import select
 import subprocess
 import sys
+import yaml
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,7 +65,85 @@ def get_available_cpus():
     return os.cpu_count() or 4
 
 
-def start_shard(shard_index, test_exe, test_type, num_shards, gpu_filter, build_dir):
+def load_test_profile(profile_name):
+    """Load test profile configuration from YAML file."""
+    # Look for test-profiles.yaml in rocroller root (parent of scripts)
+    script_dir = Path(__file__).parent
+    yaml_path = script_dir.parent / "test-profiles.yaml"
+
+    if not yaml_path.exists():
+        raise FileNotFoundError(f"Test profiles file not found: {yaml_path}")
+
+    with open(yaml_path, "r") as f:
+        config = yaml.safe_load(f)
+
+    if "profiles" not in config or profile_name not in config["profiles"]:
+        available = ", ".join(config.get("profiles", {}).keys())
+        raise ValueError(f"Profile '{profile_name}' not found. Available: {available}")
+
+    return config["profiles"][profile_name]
+
+
+def build_gtest_filter(profile_config):
+    """Build gtest filter string from profile config include/exclude lists.
+
+    Format: --gtest_filter=include1:include2-exclude1:exclude2:exclude3
+    The negative sign appears once before the first exclude pattern.
+    """
+    if not profile_config or "gtest" not in profile_config:
+        return None
+
+    gtest = profile_config["gtest"]
+    includes = gtest.get("include", [])
+    excludes = gtest.get("exclude", [])
+
+    if not includes and not excludes:
+        return None
+
+    # Build filter string with proper gtest format
+    parts = []
+    if includes:
+        parts.append(":".join(includes))
+    if excludes:
+        # Negative sign goes before the first exclude, then join rest with ':'
+        parts.append("-" + ":".join(excludes))
+
+    return "".join(parts)
+
+
+def build_catch2_filter(profile_config):
+    """Build catch2 filter string from profile config include/exclude lists.
+
+    Format: include patterns as-is, exclude patterns with ~ prefix
+    """
+    if not profile_config or "catch2" not in profile_config:
+        return None
+
+    catch2 = profile_config["catch2"]
+    includes = catch2.get("include", [])
+    excludes = catch2.get("exclude", [])
+
+    if not includes and not excludes:
+        return None
+
+    # Catch2 uses ~pattern for exclusion
+    filter_parts = []
+    filter_parts.extend(includes)
+    filter_parts.extend([f"~{pattern}" for pattern in excludes])
+
+    # Join with commas or as separate arguments depending on catch2 version
+    return ",".join(filter_parts) if filter_parts else None
+
+
+def start_shard(
+    shard_index,
+    test_exe,
+    test_type,
+    num_shards,
+    gpu_filter,
+    build_dir,
+    profile_config=None,
+):
     """Start a shard of tests and return process info."""
     test_prefix = "G" if test_type == "gtest" else "C"
     shard_tag = f"[{test_prefix}{shard_index:02d}]"
@@ -82,8 +161,15 @@ def start_shard(shard_index, test_exe, test_type, num_shards, gpu_filter, build_
 
         cmd = [test_exe]
         cmd.append("--gtest_shuffle")
-        if gpu_filter:
+
+        # Apply profile filter if provided, otherwise use gpu_filter
+        profile_filter = build_gtest_filter(profile_config)
+        if profile_filter:
+            cmd.append(f"--gtest_filter={profile_filter}")
+            print(f"{shard_tag} Applying gtest filter from profile", flush=True)
+        elif gpu_filter:
             cmd.append(gpu_filter)
+
         cmd.extend(
             ["--gtest_output=xml:test_report/gtest_shard_{}.xml".format(shard_index)]
         )
@@ -101,6 +187,13 @@ def start_shard(shard_index, test_exe, test_type, num_shards, gpu_filter, build_
             "-o",
             "test_report/catch2_shard_{}.xml".format(shard_index),
         ]
+
+        # Apply catch2 filter from profile if provided
+        profile_filter = build_catch2_filter(profile_config)
+        if profile_filter:
+            # Catch2 filter goes as a positional argument at the end
+            cmd.append(profile_filter)
+            print(f"{shard_tag} Applying catch2 filter from profile", flush=True)
 
     # Log the command being executed
     cmd_str = " ".join(cmd)
@@ -223,6 +316,16 @@ def main():
         default="",
         help="GPU filter for Google Test (e.g., --gtest_filter=-*GPU*)",
     )
+    parser.add_argument(
+        "--profile",
+        default=None,
+        help="Test profile to use from test-profiles.yaml (e.g., precheckin, codecov)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List tests that would run with the given profile/filters, but don't execute them",
+    )
 
     args = parser.parse_args()
 
@@ -255,19 +358,68 @@ def main():
         print(f"ERROR: Catch2 executable not found: {catch2_exe}")
         sys.exit(1)
 
+    # Load profile configuration if specified
+    profile_config = None
+    if args.profile:
+        profile_config = load_test_profile(args.profile)
+        print(f"Using test profile: {args.profile}")
+        if profile_config.get("description"):
+            print(f"  {profile_config['description']}")
+
     print("=" * 50)
-    print("Running sharded tests")
+    print("Running sharded tests" + (" [DRY RUN]" if args.dry_run else ""))
     print(f"Build directory: {build_dir}")
     print(f"Available cores: {num_cores}")
     if gpu_arch:
         print(f"GPU architecture: {gpu_arch}")
-    print(f"Number of shards: {num_shards} (auto-detected)")
+    if not args.dry_run:
+        print(f"Number of shards: {num_shards} (auto-detected)")
     print(f"GPU filter: {args.gpu_filter if args.gpu_filter else 'none'}")
+    if args.profile:
+        print(f"Test profile: {args.profile}")
+    if args.dry_run:
+        print("Mode: DRY RUN - listing tests only")
     print("=" * 50)
 
     # Create test report directory
     test_report_dir = build_dir / "test_report"
     test_report_dir.mkdir(exist_ok=True)
+
+    # Handle dry-run mode: list tests instead of executing
+    if args.dry_run:
+        print("\n=== DRY RUN MODE: Listing tests that would be executed ===\n")
+        
+        # List Google Test tests
+        print("--- Google Test Suite ---")
+        gtest_cmd = [str(gtest_exe), "--gtest_list_tests"]
+        profile_filter = build_gtest_filter(profile_config)
+        if profile_filter:
+            gtest_cmd.append(f"--gtest_filter={profile_filter}")
+            print(f"Applied gtest filter: {profile_filter}\n")
+        elif args.gpu_filter:
+            gtest_cmd.append(args.gpu_filter)
+            print(f"Applied gtest filter: {args.gpu_filter}\n")
+        
+        result = subprocess.run(gtest_cmd, cwd=build_dir)
+        if result.returncode != 0:
+            print(f"ERROR: Failed to list gtest tests (exit code {result.returncode})")
+            sys.exit(1)
+        
+        # List Catch2 tests
+        print("\n--- Catch2 Test Suite ---")
+        catch2_cmd = [str(catch2_exe), "--list-tests"]
+        profile_filter = build_catch2_filter(profile_config)
+        if profile_filter:
+            catch2_cmd.append(profile_filter)
+            print(f"Applied catch2 filter: {profile_filter}\n")
+        
+        result = subprocess.run(catch2_cmd, cwd=build_dir)
+        if result.returncode != 0:
+            print(f"ERROR: Failed to list catch2 tests (exit code {result.returncode})")
+            sys.exit(1)
+        
+        print("\n=== DRY RUN COMPLETE ===")
+        sys.exit(0)
 
     # Run all shards
     failed_shards = []
@@ -278,7 +430,13 @@ def main():
     for i in range(num_shards):
         try:
             info = start_shard(
-                i, str(gtest_exe), "gtest", num_shards, args.gpu_filter, build_dir
+                i,
+                str(gtest_exe),
+                "gtest",
+                num_shards,
+                args.gpu_filter,
+                build_dir,
+                profile_config,
             )
             gtest_infos.append(info)
         except Exception as e:
@@ -301,6 +459,7 @@ def main():
                 num_shards,
                 args.gpu_filter,
                 build_dir,
+                profile_config,
             )
             catch2_infos.append(info)
         except Exception as e:

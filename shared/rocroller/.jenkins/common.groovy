@@ -79,7 +79,7 @@ def runTestCommand (platform, project)
                 cd ${project.paths.project_build_prefix}
 
                 # Run sharded tests (auto-detects ncores/2, respecting cgroups)
-                python3 .jenkins/run-tests-sharded.py build "${testExclude}"
+                scripts/run-tests-sharded build "${testExclude}"
 
                 pushd build
                 OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 ctest --parallel ${numThreads} --output-on-failure -LE "GTEST|CATCH"
