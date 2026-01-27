@@ -4,6 +4,12 @@
 """Shared pytest fixtures for origami tests."""
 
 import pytest
+
+# torch is optional, tests that need it will skip appropriately
+try:
+    import torch
+except ImportError:
+    pass
 import origami
 
 
