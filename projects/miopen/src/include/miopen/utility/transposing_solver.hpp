@@ -430,7 +430,7 @@ struct VectorizedTransposeSolver : TransposePseudoSolver
                         params.in, params.out,
                         lens[0],        lens[1],        lens[2],        lens[3],        lens[4],
                         in_strides[0],  in_strides[1],  in_strides[2],  in_strides[3],  in_strides[4],
-                        out_strides[0], out_strides[1], out_strides[2], out_strides[3], out_strides[4]
+                        out_strides[0], out_strides[1], out_strides[2], out_strides[3], out_strides[4],
                         can_vectorize_in, can_vectorize_out
                     );
                     // clang-format on
@@ -450,7 +450,7 @@ struct VectorizedTransposeSolver : TransposePseudoSolver
                         params.in, params.out,
                         lens[0],        lens[1],        lens[2],        lens[3],        lens[4],
                         in_strides[0],  in_strides[1],  in_strides[2],  in_strides[3],  in_strides[4],
-                        out_strides[0], out_strides[1], out_strides[2], out_strides[3], out_strides[4]
+                        out_strides[0], out_strides[1], out_strides[2], out_strides[3], out_strides[4],
                         can_vectorize_in, can_vectorize_out
                     );
                     // clang-format on
@@ -805,13 +805,13 @@ struct TransposingSolver : Base
 
     static std::vector<AnyTransposePseudoSolver> GetTransposeSolvers()
     {
-        return {TiledTransposeSolver<16, 16, 256>{},
-                VectorizedTransposeSolver<4, 64>{},
-                VectorizedTransposeSolver<2, 64>{},
-                BatchedNchw2NhwcTransposeSolver{},
+        return {BatchedNchw2NhwcTransposeSolver{},
                 BatchedNhwc2NchwTransposeSolver{},
                 BatchedNcdhw2NdhwcTransposeSolver{},
                 BatchedNdhwc2NcdhwTransposeSolver{},
+                TiledTransposeSolver<16, 16, 256>{},
+                VectorizedTransposeSolver<4, 64>{},
+                VectorizedTransposeSolver<2, 64>{},
                 UniversalTransposeSolver{}};
     }
 
