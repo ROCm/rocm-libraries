@@ -4,6 +4,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 
 #include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
@@ -51,7 +52,18 @@ public:
         return _benchmarkingEnabled;
     }
 
+    void setWorkspaceSizeLimit(std::optional<size_t> limit)
+    {
+        _workspaceSizeLimit = limit;
+    }
+
+    std::optional<size_t> workspaceSizeLimit() const
+    {
+        return _workspaceSizeLimit;
+    }
+
 private:
     std::unique_ptr<miopen_legacy_plugin::IPlan> _plan;
     bool _benchmarkingEnabled = false;
+    std::optional<size_t> _workspaceSizeLimit;
 };

@@ -1,6 +1,8 @@
 ﻿// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <limits>
+
 #include "MiopenEngine.hpp"
 #include "plans/MiopenBatchnormPlanBuilder.hpp"
 
@@ -44,11 +46,22 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
 {
     flatbuffers::FlatBufferBuilder builder;
 
-    auto knob = hipdnn_plugin_sdk::KnobFactory::createIntKnob(
+    auto benchmarkingKnob = hipdnn_plugin_sdk::KnobFactory::createIntKnob(
         builder, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, "Enable benchmarking", 0, 0, 1, 1, {});
 
+    auto workspaceSizeLimitKnob = hipdnn_plugin_sdk::KnobFactory::createIntKnob(
+        builder,
+        hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME,
+        "Workspace size limit in bytes",
+        -1,
+        -1,
+        std::numeric_limits<int64_t>::max(),
+        1,
+        {});
+
     std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobsVector;
-    knobsVector.push_back(knob);
+    knobsVector.push_back(benchmarkingKnob);
+    knobsVector.push_back(workspaceSizeLimitKnob);
     auto knobs = builder.CreateVector(knobsVector);
 
     auto engineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
@@ -95,6 +108,34 @@ void MiopenEngine::initializeExecutionContext(
             {
                 HIPDNN_LOG_WARN(
                     "Benchmarking knob setting value is not an integer. Type: {}",
+                    hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
+            }
+        }
+
+        if(engineConfig.hasKnobSetting(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME))
+        {
+            const auto& knobSetting
+                = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME);
+            if(knobSetting.valueType() == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
+            {
+                auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
+                if(value == -1)
+                {
+                    executionContext.setWorkspaceSizeLimit(std::nullopt);
+                }
+                else if(value >= 0)
+                {
+                    executionContext.setWorkspaceSizeLimit(static_cast<size_t>(value));
+                }
+                else
+                {
+                    HIPDNN_LOG_WARN("Invalid workspace size limit value: {}. Must be -1 or >= 0", value);
+                }
+            }
+            else
+            {
+                HIPDNN_LOG_WARN(
+                    "Workspace size limit knob setting value is not an integer. Type: {}",
                     hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
             }
         }
