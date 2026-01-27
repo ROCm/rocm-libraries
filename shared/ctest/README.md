@@ -152,7 +152,7 @@ test_categories:
       - "performance-critical"
       - "numerical-stability"
     dependencies:
-      - "other_category"  # Run this category after dependencies complete
+      - "other_category"  # Metadata for related categories (not enforced by parser; for documentation/tooling)
 
     # Standard fields (from base)
     exclude: ["*always_exclude*"]
@@ -179,12 +179,13 @@ execution_settings:
 | `source_coverage` | Source files/functions tested by this category | `["library/src/gemm.cpp:matmul_kernel"]` |
 | `api_coverage` | API functions tested by this category | `["hipblasLtMatmul", "hipblasLtMatmulAlgo"]` |
 | `feature_tags` | Semantic tags for classification and filtering | `["performance-critical", "mixed-precision"]` |
-| `dependencies` | Test categories that should run first | `["auxiliary"]` - run auxiliary tests before this category |
+| `dependencies` | Related test categories (documentation only) | `["auxiliary"]` - advisory metadata for downstream tooling |
 | `llm_context` | Top-level guidance for AI-assisted workflows | Instructions for AI tools on test selection logic |
 
 **Key Points:**
 - All enhancement fields are **optional** - teams can ignore them entirely ✅
 - Projects can adopt incrementally: start with just `notes`, add more later ✅
+- **Parser does NOT process these fields** - they are for documentation and downstream tooling only ✅
 - Parser gracefully ignores unknown fields - no code changes needed ✅
 - Enables richer test documentation and future AI-assisted workflows ✅
 
