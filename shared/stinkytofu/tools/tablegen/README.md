@@ -62,16 +62,13 @@ For each architecture (e.g., `gfx942`, `gfx950`):
 ```
 hardware/
 +-- CMakeLists.txt          # Builds gfxisa library
-+-- data/
-|   +-- gfx942.yaml         # YAML config for specific cycle/latency data
-|   +-- gfx950.yaml
 +-- include/gfx/
 |   +-- GpuArchManager.hpp  # Architecture manager and common definitions
 |   +-- CommonInstsDSL.hpp  # Instruction type definitions (shared across architectures)
-|   +-- InstDefDSL.hpp      # Instruction definition DSL
+|   +-- InstDefDSL.hpp      # Instruction definition DSL with cost map system
 +-- src/gfx/
     +-- GpuArchManager.cpp  # Architecture registration and management
-    +-- Gfx942.cpp          # gfx942 instruction definitions
+    +-- Gfx942.cpp          # gfx942 instruction definitions + cost tables
     +-- Gfx950.cpp          # gfx950 instruction definitions
     +-- InstDefDSL.cpp      # DSL implementation
 ```
@@ -184,12 +181,40 @@ void defineGfx942Insts(GpuArch& registry) {
    }
    ```
 
-5. **Create optional YAML config:**
-   ```yaml
-   # hardware/data/gfx1000.yaml
-   gfx1000:
-     default_cycle: 1
-     instructions: []
+5. **Add instruction costs in the architecture file:**
+   ```cpp
+   // In hardware/src/gfx/Gfx1000.cpp
+   namespace {
+       struct InstructionCost {
+           const char* opcode;
+           uint16_t cycle;
+           uint16_t latency;
+       };
+
+       constexpr InstructionCost GFX1000_COSTS[] = {
+           {"buffer_load_dword", 12, 108},
+           {"ds_read_b32", 4, 48},
+           // ... add exception costs
+       };
+
+       constexpr uint16_t GFX1000_DEFAULT_CYCLE = 1;
+       constexpr uint16_t GFX1000_DEFAULT_LATENCY = 1;
+   }
+
+   void defineGfx1000Insts(GpuArch& registry) {
+       registry.setDefaultCosts(GFX1000_DEFAULT_CYCLE, GFX1000_DEFAULT_LATENCY);
+
+       // ... define instructions
+
+       for(const auto& cost : GFX1000_COSTS) {
+           registry.setInstructionCost(cost.opcode, cost.cycle, cost.latency);
+       }
+
+       if(!registry.applyInstructionCosts()) {
+           std::cerr << "FATAL: Failed to apply instruction costs\n";
+           return;
+       }
+   }
    ```
 
 6. **Update build:**
