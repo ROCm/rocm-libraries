@@ -1037,7 +1037,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlasr(rocblas_handle handle,
         B = Q'AP
     \f]
 
-    where the leading ``k``-by-``k`` block of B is upper bidiagonal if ``m >= n``, or lower bidiagonal if ``m < n``. Q and
+    where the leading ``k``-by-``k`` block of B is upper bidiagonal if ``m`` >= ``n``, or lower bidiagonal if ``m`` < ``n``. Q and
     P are orthogonal/unitary matrices represented as the product of Householder matrices:
 
     \f[
@@ -1056,9 +1056,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlasr(rocblas_handle handle,
         \end{array}
     \f]
 
-    If ``m >= n``, the first \f$i-1\f$ elements of the Householder vector \f$v_i\f$ are zero, and \f$v_i[i]=1\f$,
+    If ``m`` >= ``n``, the first \f$i-1\f$ elements of the Householder vector \f$v_i\f$ are zero, and \f$v_i[i]=1\f$,
     while the first \f$i\f$ elements of the Householder vector \f$u_i\f$ are zero, and  \f$u_i[i+1]=1\f$.
-    If ``m < n``, the first \f$i\f$ elements of the Householder vector  \f$v_i\f$ are zero, and  \f$v_i[i+1]=1\f$,
+    If ``m`` < ``n``, the first \f$i\f$ elements of the Householder vector  \f$v_i\f$ are zero, and  \f$v_i[i+1]=1\f$,
     while the first \f$i-1\f$ elements of the Householder vector \f$u_i\f$ are zero, and \f$u_i[i]=1\f$.
 
     The unreduced part of the matrix ``A`` can be updated using the block update
