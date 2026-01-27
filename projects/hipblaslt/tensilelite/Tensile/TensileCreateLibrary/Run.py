@@ -486,10 +486,10 @@ def writeSolutionsAndKernelsTCL(
             processed_kernel = unaryProcessKernelSource(kernel)
             written_kernel = unaryWriteAssembly(processed_kernel)
             assembled_kernel = assemble(written_kernel)
-            return assembled_kernel, processed_kernel
+            return processed_kernel
         return composed_function
 
-    ret = ParallelMap2(
+    results = ParallelMap2(
         compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
         uniqueAsmKernels,
         "Generating assembly kernels",
@@ -497,12 +497,6 @@ def writeSolutionsAndKernelsTCL(
         return_as="list"
     )
 
-    results = []
-    for r, processed_kernel in ret:
-        results.append(processed_kernel)
-
-    # result.src is very large so let garbage collector know to clean up
-    del ret
     buildAssemblyCodeObjectFiles(
         asmToolchain.linker,
         asmToolchain.bundler,
