@@ -56,6 +56,9 @@
 #elif defined(__gfx1250__)
 #define USE_GFX_BUFFER_INTRINSIC
 #define BUFFER_RESOURCE_3RD_DWORD 0x00000000
+#elif defined(__gfx1300__) || defined(__gfx1310__)
+#define USE_GFX_BUFFER_INTRINSIC
+#define BUFFER_RESOURCE_3RD_DWORD 0x1020 //(bit 101, 108), need review
 #else // not support
 #define BUFFER_RESOURCE_3RD_DWORD -1
 #endif

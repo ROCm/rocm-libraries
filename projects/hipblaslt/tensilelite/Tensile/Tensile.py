@@ -607,8 +607,8 @@ def Tensile(userArgs):
     else:
         isaList = [detectGlobalCurrentISA(device_id, enumerator)]
 
-    if IsaVersion(9, 5, 0) in isaList or IsaVersion(12, 5, 0) in isaList:
-        printWarning("HardwareMonitor currently disabled for gfx950 and gfx1250")
+    if IsaVersion(9, 5, 0) in isaList or IsaVersion(12, 5, 0) in isaList or IsaVersion(13, 0, 0) in isaList or IsaVersion(13, 1, 0) in isaList:
+        printWarning("HardwareMonitor currently disabled for gfx950, gfx1250, gfx1300 and gfx1310" )
         globalParameters["HardwareMonitor"] = False
 
     isaInfoMap = makeIsaInfoMap(isaList, cxxCompiler)

@@ -543,6 +543,31 @@ Real precisions 1 bytes: &real_precisions_mx
   - &mxf4_mxf4_precision_dst_bfp16
     { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
 
+Real precisions: &gfx13_precisions
+  - *bf8_precision_dst_bf8
+  - *bf8f8_precision_dst_bf8
+  - *bf8f8_precision_dst_f8
+  - *bf8f8_precision_dst_fp16
+  - *bf8_precision_dst_f8
+  - *bf8f8_precision_dst_fp32
+  - *bf8_precision_dst_fp16
+  - *bf8_precision_dst_fp32
+  - *hpa_bf16_precision
+  - *hpa_half_bf16_fp32dst_precision
+  - *f8bf8_precision_dst_bf8
+  - *f8bf8_precision_dst_bf16
+  - *f8bf8_precision_dst_f8
+  - *f8bf8_precision_dst_fp16
+  - *f8_precision_dst_bf8
+  - *f8bf8_precision_dst_fp32
+  - *f8_precision_dst_bf16
+  - *f8_precision_dst_f8
+  - *f8_precision_dst_fp16
+  - *f8_precision_dst_fp32
+  - *hpa_half_precision
+  - *hpa_half_fp32dst_precision
+  - *single_precision
+
 # rocRoller predicate
 rocRoller predicate: &rocroller_predicate
   - &unrollKPredicate

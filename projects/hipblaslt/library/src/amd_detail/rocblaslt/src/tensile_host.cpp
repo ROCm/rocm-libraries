@@ -2213,6 +2213,14 @@ namespace
         {
             return TensileLite::LazyLoadingInit::gfx1250;
         }
+        else if(deviceString.find("gfx1300") != std::string::npos)
+        {
+            return TensileLite::LazyLoadingInit::gfx1300;
+        }
+        else if(deviceString.find("gfx1310") != std::string::npos)
+        {
+            return TensileLite::LazyLoadingInit::gfx1310;
+        }
         return TensileLite::LazyLoadingInit::None;
     }
 

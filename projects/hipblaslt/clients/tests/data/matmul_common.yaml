@@ -1,4 +1,10 @@
 Definitions:
+  - &gfx13_size_range
+    - { M: 32, N: 32, K: 32 }
+    - { M: 256, N: 256, K: 128 }
+    - { M: 512, N: 512, K: 64 }
+    - { M: 1024, N: 1024, K: 32 }
+
   - &one_matrix_size_range
     - { M: 1, N: 1, K: 1 }
     - { M: 1, N: 1, K: 512 }

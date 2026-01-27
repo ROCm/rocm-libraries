@@ -224,6 +224,14 @@ namespace TensileLite
             {
                 return AMDGPU::Processor::gfx1250;
             }
+            else if(deviceString.find("gfx1300") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx1300;
+            }
+            else if(deviceString.find("gfx1310") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx1310;
+            }
             else
             {
                 return static_cast<AMDGPU::Processor>(0);

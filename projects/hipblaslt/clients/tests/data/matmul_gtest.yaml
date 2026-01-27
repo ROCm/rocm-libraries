@@ -62,6 +62,13 @@ Tests:
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
 
+- name: gfx13
+  category: prebto
+  function:
+    matmul: *gfx13_precisions
+  matrix_size: *gfx13_size_range
+  transA_transB: *transA_transB_range
+
 - name: matmul_one
   category: quick
   function:

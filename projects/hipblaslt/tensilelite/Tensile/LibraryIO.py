@@ -33,7 +33,7 @@ from Tensile.Common.TimingInstrumentation import timing_context
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.SolutionStructs import Solution, ProblemSizes
 from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
-
+from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters
 from typing import NamedTuple, List, Dict
 import os
 import sys
@@ -389,6 +389,18 @@ def parseLibraryLogicData(
             if "InternalSupportParams" in solutionState:
                 isp = solutionState["InternalSupportParams"]
             customConfig = getCustomKernelConfig(solutionState["CustomKernelName"], isp)
+
+            mi = customConfig.get('MatrixInstruction', [])
+            isa = next(iter(isaInfoMap.keys()))
+            wfsize = customConfig["WavefrontSize"]
+            ptype = customConfig["ProblemType"]
+            wg = customConfig.get("WorkGroup", None)
+            if len(mi) == 9:
+                miParams = matrixInstructionToMIParameters(mi, isa, wfsize, ptype, wg, isaInfoMap)
+                customConfig.update(miParams)
+            elif len(mi) == 0:
+                customConfig["EnableMatrixInstruction"] = False
+
             for key, value in customConfig.items():
                 solutionState[key] = value
 
