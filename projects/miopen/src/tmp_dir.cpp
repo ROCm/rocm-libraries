@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2019 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,10 +26,12 @@
 
 #include <miopen/tmp_dir.hpp>
 #include <miopen/env.hpp>
+#include <miopen/filesystem.hpp>
+#include <miopen/errors.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/process.hpp>
+#include <boost/filesystem/operations.hpp>
 
-#include <random>
 #include <thread>
 #include <string_view>
 
@@ -42,9 +44,8 @@ TmpDir::TmpDir(std::string_view prefix) : path{fs::temp_directory_path()}
 {
     std::string p{prefix.empty() ? "" : (prefix[0] == '-' ? "" : "-")};
 
-    std::mt19937 prng(std::random_device{}());
-    std::uniform_int_distribution<int> rand;
-    path /= "miopen" + p.append(prefix) + "-" + (std::stringstream() << std::hex << rand(prng)).str();
+    path /= boost::filesystem::unique_path("miopen" + p.append(prefix) + "-%%%%-%%%%-%%%%-%%%%")
+                .string();
 
     fs::create_directories(path);
 }
@@ -69,7 +70,7 @@ TmpDir::~TmpDir()
     {
 #ifdef _WIN32
         constexpr int remove_max_retries = 5;
-        int count{0};
+        int count                        = 0;
         while(count < remove_max_retries)
         {
             try

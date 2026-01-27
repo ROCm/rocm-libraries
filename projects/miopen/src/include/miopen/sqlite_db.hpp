@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2019 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -235,7 +235,7 @@ public:
                 if(!fs::create_directories(directory))
                     MIOPEN_LOG_W("Unable to create a directory: " << directory);
                 else
-                    fs::permissions(directory, fs::perms::all);
+                    fs::permissions(directory, FS_ENUM_PERMS_ALL);
             }
         }
         sql = SQLite{filename_, is_system};
