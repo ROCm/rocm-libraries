@@ -25,11 +25,22 @@
  *******************************************************************************/
 
 #pragma once
+#include <cstdlib>
 #include <vector>
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
+
+// Uses _putenv_s on Windows, setenv on POSIX
+inline int portable_setenv(const char* name, const char* value, int overwrite) {
+#ifdef _WIN32
+    (void)overwrite;
+    return _putenv_s(name, value);
+#else
+    return setenv(name, value, overwrite);
+#endif
+}
 
 // List of GPU architectures to test
 inline const std::vector<int> test_architectures = {942, 950};

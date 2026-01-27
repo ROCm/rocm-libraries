@@ -1182,6 +1182,10 @@ rocsparselt_status
                 status = findTopConfigs<int8_t, hip_bfloat16, float>(
                     _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
                 break;
+            case MATMUL_DATATYPE_I8_I_S:
+                status = findTopConfigs<int8_t, int32_t, float>(
+                    _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
+                break;                
             case MATMUL_DATATYPE_E4M3_S_S:
                 status = findTopConfigs<__hip_fp8_e4m3, float, float>(
                     _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
