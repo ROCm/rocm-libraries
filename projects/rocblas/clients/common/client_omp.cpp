@@ -21,7 +21,6 @@
  * ************************************************************************ */
 
 #include <thread>
-#include <cstdlib>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -86,39 +85,37 @@ void client_omp_manager::limit_by_processor_count()
     // Limit OMP usage to avoid performance degradation in reference library at high thread counts
     // See: rocBLAS Programmer's Guide - AOCL threading recommendations
 #ifdef _OPENMP
-    const int omp_default_threads = omp_get_max_threads();
-    if(omp_default_threads <= 0)
+    // Detect available cores using most conservative estimate
+    // omp_get_max_threads() respects SLURM/Docker/OMP_NUM_THREADS limits
+    // hardware_concurrency() reports physical cores
+    // Use minimum to handle all environments correctly
+    const int omp_threads       = omp_get_max_threads();
+    const int hardware_threads  = std::thread::hardware_concurrency();
+    const int available_threads = std::min(omp_threads, hardware_threads);
+
+    if(available_threads <= 0)
     {
-        return;  // Sanity check - should not happen if OpenMP is working
-    }
-    
-    // If user explicitly set OMP_NUM_THREADS, respect their choice
-    const char* env_omp_threads = std::getenv("OMP_NUM_THREADS");
-    if(env_omp_threads != nullptr)
-    {
-        rocblas_cout << "rocBLAS info: Found OMP_NUM_THREADS environment variable set to "
-                     << env_omp_threads << std::endl;
-        return;
+        return; // Sanity check - should not happen
     }
 
     // Determine optimal thread reduction based on system size
     // AOCL oversubscription is most severe on large core-count systems (observed 64x slowdown
     // on 24-core system). On smaller systems, use conservative reduction to preserve performance.
     int thread_reducer;
-    if(omp_default_threads <= 16)
+    if(available_threads <= 16)
     {
-        thread_reducer = 2;  // Small systems: minimal reduction
+        thread_reducer = 2; // Small systems: minimal reduction
     }
     else
     {
-        thread_reducer = 4;  // Large systems: aggressive reduction to prevent AOCL degradation
+        thread_reducer = 4; // Large systems: aggressive reduction to prevent AOCL degradation
     }
 
-    int safe_thread_count = std::max(1, omp_default_threads - thread_reducer);
+    int safe_thread_count = std::max(1, available_threads - thread_reducer);
     omp_set_num_threads(safe_thread_count);
 
-    rocblas_cout << "rocBLAS info: OMP_NUM_THREADS not set, using " << safe_thread_count
-                 << " threads (system default " << omp_default_threads << " minus "
+    rocblas_cout << "rocBLAS info: Limiting OpenMP threads to " << safe_thread_count
+                 << " (detected " << available_threads << " available, reduced by "
                  << thread_reducer << " to optimize AOCL performance)" << std::endl;
 #endif
 }
