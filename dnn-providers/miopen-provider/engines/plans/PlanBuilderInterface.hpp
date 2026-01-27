@@ -15,6 +15,12 @@
 namespace miopen_legacy_plugin
 {
 
+struct WorkspaceSizeRange
+{
+    size_t min;
+    size_t max;
+};
+
 class IPlanBuilder
 {
 public:
@@ -23,6 +29,9 @@ public:
     virtual bool isApplicable(const HipdnnEnginePluginHandle& handle,
                               const hipdnn_plugin_sdk::IGraph& opGraph) const
         = 0;
+
+    virtual WorkspaceSizeRange getWorkspaceSizeRange(const HipdnnEnginePluginHandle& handle,
+                                                      const hipdnn_plugin_sdk::IGraph& opGraph) const;
 
     virtual size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
                                        const hipdnn_plugin_sdk::IGraph& opGraph) const;
