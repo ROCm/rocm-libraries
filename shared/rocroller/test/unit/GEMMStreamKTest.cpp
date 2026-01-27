@@ -41,7 +41,7 @@ namespace GEMMTests
     // ProblemConfig: (dataTypeAB, macM, macN, macK, m, n, k, numWGs)
     using ProblemConfig = std::tuple<rocRoller::DataType, int, int, int, int, int, int, int>;
 
-    class StreamKMultipleFixupsTestGPU
+    class StreamKMultipleFixupsTestSuite
         : public BaseGEMMContextFixture<std::tuple<ProblemConfig,
                                                    StreamKMode,
                                                    SolutionParams::LoadPath, /* loadPathA */
@@ -50,7 +50,7 @@ namespace GEMMTests
     {
     };
 
-    class StreamKWGMTestGPU
+    class StreamKWGMTestSuite
         : public BaseGEMMContextFixture<std::tuple<int, /* workgroupMapping dim */
                                                    int, /* workgroupMapping value */
                                                    bool, /* workgroupRemapXCC */
@@ -64,18 +64,18 @@ namespace GEMMTests
     using PrefetchConfig = std::tuple<int, int>;
 
     // Params: typeAB, unrollK, loadPathA, loadPathB, storeLDSD, mode, betaZero, prefetchConfig
-    class StreamKTestGPU : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
-                                                                    int,
-                                                                    SolutionParams::LoadPath,
-                                                                    SolutionParams::LoadPath,
-                                                                    bool,
-                                                                    rocRoller::StreamKMode,
-                                                                    bool,
-                                                                    PrefetchConfig>>
+    class StreamKTestSuite : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
+                                                                      int,
+                                                                      SolutionParams::LoadPath,
+                                                                      SolutionParams::LoadPath,
+                                                                      bool,
+                                                                      rocRoller::StreamKMode,
+                                                                      bool,
+                                                                      PrefetchConfig>>
     {
     };
 
-    TEST_P(StreamKMultipleFixupsTestGPU, GPU_BasicGEMM)
+    TEST_P(StreamKMultipleFixupsTestSuite, GPU_GEMM_StreamK_MultipleFixups)
     {
         if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWMMA))
         {
@@ -127,7 +127,7 @@ namespace GEMMTests
         }
     }
 
-    TEST_P(StreamKWGMTestGPU, GPU_BasicGEMMStreamKWorkgroupMapping)
+    TEST_P(StreamKWGMTestSuite, GPU_GEMM_StreamK_WorkgroupMapping)
     {
         if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWMMA))
         {
@@ -159,7 +159,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(StreamKTestGPU, GPU_BasicGEMM)
+    TEST_P(StreamKTestSuite, GPU_GEMM_StreamK_Parameterized)
     {
         if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWMMA))
         {
@@ -224,8 +224,8 @@ namespace GEMMTests
     }
 
     INSTANTIATE_TEST_SUITE_P(
-        GEMMTest,
-        StreamKWGMTestGPU,
+        GEMMStreamKTest,
+        StreamKWGMTestSuite,
         ::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(::testing::Values(0, 1), /* workgroupMapping dim */
@@ -240,8 +240,8 @@ namespace GEMMTests
                                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 
     INSTANTIATE_TEST_SUITE_P(
-        GEMMTest,
-        StreamKMultipleFixupsTestGPU,
+        GEMMStreamKTest,
+        StreamKMultipleFixupsTestSuite,
         ::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(
@@ -269,14 +269,14 @@ namespace GEMMTests
                 ::testing::Values(true, false) /* storeLDSD */
                 )));
 
-    using StreamKParamGenerator = ::testing::internal::ParamGenerator<StreamKTestGPU::ParamType>;
+    using StreamKParamGenerator = ::testing::internal::ParamGenerator<StreamKTestSuite::ParamType>;
     static auto FilterValidStreamKParams(StreamKParamGenerator&& inputParamGenerator)
     {
         using LP = SolutionParams::LoadPath;
         using DT = rocRoller::DataType;
         using SM = rocRoller::StreamKMode;
 
-        std::vector<StreamKTestGPU::ParamType> filtered;
+        std::vector<StreamKTestSuite::ParamType> filtered;
         for(auto const& inputParam : inputParamGenerator)
         {
             auto const& params = std::get<1>(inputParam);
@@ -324,8 +324,8 @@ namespace GEMMTests
     }
 
     INSTANTIATE_TEST_SUITE_P(
-        GEMMTest,
-        StreamKTestGPU,
+        GEMMStreamKTest,
+        StreamKTestSuite,
         FilterValidStreamKParams(::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(::testing::Values(rocRoller::DataType::Float,

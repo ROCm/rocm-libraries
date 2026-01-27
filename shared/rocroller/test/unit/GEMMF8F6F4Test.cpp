@@ -40,7 +40,7 @@ namespace GEMMTests
     namespace SolutionParams = rocRoller::Parameters::Solution;
 
     // Params are: A & B type, K tile size, (transA, transB), load A path, load B path
-    class GEMMF8F6F4TestGPU
+    class GEMMF8F6F4TestSuite
         : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
                                                    int,
                                                    std::pair<std::string, std::string>,
@@ -50,7 +50,7 @@ namespace GEMMTests
     };
 
     // Params are: A type, B type, K tile size, (transA, transB), load A path, load B path
-    class MixedGEMMF8F6F4TestGPU
+    class MixedGEMMF8F6F4TestSuite
         : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
                                                    rocRoller::DataType,
                                                    int,
@@ -62,7 +62,7 @@ namespace GEMMTests
 
     // Params are: A type, B type, K tile size, load A path, load B path,
     //   scale A mode, scale B mode, Load A scale path, Load B scale path, (transA, transB)
-    class ScaledMixedGEMMF8F6F4TestGPU
+    class ScaledMixedGEMMF8F6F4TestSuite
         : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
                                                    rocRoller::DataType,
                                                    int,
@@ -77,14 +77,14 @@ namespace GEMMTests
     };
 
     using ScaledMixedGEMMF8F6F4TestParamGenerator
-        = ::testing::internal::ParamGenerator<ScaledMixedGEMMF8F6F4TestGPU::ParamType>;
+        = ::testing::internal::ParamGenerator<ScaledMixedGEMMF8F6F4TestSuite::ParamType>;
     static auto FilterValidScalePathAndScaleModeParams(
         ScaledMixedGEMMF8F6F4TestParamGenerator&& inputParamGenerator)
     {
         using LP = SolutionParams::LoadPath;
         using SM = rocRoller::Operations::ScaleMode;
 
-        std::vector<ScaledMixedGEMMF8F6F4TestGPU::ParamType> filtered;
+        std::vector<ScaledMixedGEMMF8F6F4TestSuite::ParamType> filtered;
         for(auto const& inputParam : inputParamGenerator)
         {
             auto const& params = std::get<1>(inputParam);
@@ -189,7 +189,7 @@ namespace GEMMTests
         }
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicGEMM)
+    TEST_P(GEMMF8F6F4TestSuite, GPU_GEMM_DataType_F8F6F4_Basic)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 
@@ -296,7 +296,7 @@ namespace GEMMTests
                         isF6);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_ScaledBasicGEMM)
+    TEST_P(GEMMF8F6F4TestSuite, GPU_GEMM_Scaled_F8F6F4_Basic)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -441,7 +441,7 @@ namespace GEMMTests
         }
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_DwordScaledGEMM)
+    TEST_P(GEMMF8F6F4TestSuite, GPU_GEMM_Scaled_F8F6F4_Dword)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -534,7 +534,7 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, dsWrite), 2);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_SwizzleScaled_Prefetch2)
+    TEST_P(GEMMF8F6F4TestSuite, GPU_GEMM_Scaled_F8F6F4_Swizzle_Prefetch2)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -624,7 +624,7 @@ namespace GEMMTests
         EXPECT_GE(countSubstring(generatedCode, "buffer_load_dwordx2 "), 6);
     }
 
-    TEST_P(MixedGEMMF8F6F4TestGPU, GPU_MixedBasicGEMMF8F6F4)
+    TEST_P(MixedGEMMF8F6F4TestSuite, GPU_GEMM_DataType_F8F6F4_Mixed)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto [typeA, typeB, MFMAK, transOp, loadPathA, loadPathB] = std::get<1>(GetParam());
@@ -679,7 +679,7 @@ namespace GEMMTests
         check_mfma_f8f6f4(m_context, mfma, modifierA + " " + modifierB);
     }
 
-    TEST_P(ScaledMixedGEMMF8F6F4TestGPU, GPU_ScaledMixedBasicGEMMF8F6F4)
+    TEST_P(ScaledMixedGEMMF8F6F4TestSuite, GPU_GEMM_Scaled_F8F6F4_Mixed)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
 
@@ -731,7 +731,7 @@ namespace GEMMTests
 
     INSTANTIATE_TEST_SUITE_P(
         GEMMF8F6F4Test,
-        GEMMF8F6F4TestGPU,
+        GEMMF8F6F4TestSuite,
         ::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,
@@ -750,8 +750,8 @@ namespace GEMMTests
                                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 
     INSTANTIATE_TEST_SUITE_P(
-        MixedGEMMTest,
-        MixedGEMMF8F6F4TestGPU,
+        GEMMF8F6F4Test,
+        MixedGEMMF8F6F4TestSuite,
         ::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,
@@ -775,8 +775,8 @@ namespace GEMMTests
                                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 
     INSTANTIATE_TEST_SUITE_P(
-        ScaledMixedGEMMTest,
-        ScaledMixedGEMMF8F6F4TestGPU,
+        GEMMF8F6F4Test,
+        ScaledMixedGEMMF8F6F4TestSuite,
         FilterValidScalePathAndScaleModeParams(::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,

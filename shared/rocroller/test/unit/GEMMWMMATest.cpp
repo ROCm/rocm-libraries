@@ -37,7 +37,7 @@ namespace GEMMTests
     using namespace rocRoller;
 
     // Params are: A & B type, K tile size, (transA, transB)
-    class GEMMTestWMMAGPU
+    class GEMMTestWMMASuite
         : public BaseGEMMContextFixture<std::tuple<std::pair<rocRoller::DataType, int>,
                                                    std::pair<std::string, std::string>,
                                                    SolutionParams::LoadPath,
@@ -46,7 +46,7 @@ namespace GEMMTests
     };
 
     // Params are: A & B type, K tile size, (transA, transB)
-    class GEMMTestWMMAF16AccumGPU
+    class GEMMTestWMMAF16AccumSuite
         : public BaseGEMMContextFixture<std::tuple<std::pair<rocRoller::DataType, int>,
                                                    std::pair<std::string, std::string>,
                                                    SolutionParams::LoadPath,
@@ -55,7 +55,7 @@ namespace GEMMTests
     };
 
     // Params are: A type, B type, K tile size, (transA, transB)
-    class MixedGEMMTestWMMAGPU
+    class MixedGEMMTestWMMASuite
         : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
                                                    rocRoller::DataType,
                                                    int,
@@ -65,7 +65,7 @@ namespace GEMMTests
     {
     };
 
-    TEST_P(GEMMTestWMMAGPU, GPU_BasicGEMM)
+    TEST_P(GEMMTestWMMASuite, GPU_GEMM_WMMA_Basic)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasWMMA);
         auto [typeABAndWaveK, transOp, loadPathA, loadPathB] = std::get<1>(GetParam());
@@ -104,7 +104,7 @@ namespace GEMMTests
         }
     }
 
-    TEST_P(GEMMTestWMMAF16AccumGPU, GPU_BasicGEMM)
+    TEST_P(GEMMTestWMMAF16AccumSuite, GPU_GEMM_WMMA_F16Accum)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_F16_ACC);
         auto [dataTypeAndWaveK, transOp, loadPathA, loadPathB] = std::get<1>(GetParam());
@@ -143,7 +143,7 @@ namespace GEMMTests
         }
     }
 
-    TEST_P(MixedGEMMTestWMMAGPU, GPU_BasicGEMM)
+    TEST_P(MixedGEMMTestWMMASuite, GPU_GEMM_WMMA_Mixed)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasWMMA);
         auto [typeA, typeB, waveK, transOp, loadPathA, loadPathB] = std::get<1>(GetParam());
@@ -171,8 +171,8 @@ namespace GEMMTests
     }
 
     INSTANTIATE_TEST_SUITE_P(
-        GEMMTestWMMA,
-        GEMMTestWMMAGPU,
+        GEMMWMMATest,
+        GEMMTestWMMASuite,
         ::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(
@@ -188,8 +188,8 @@ namespace GEMMTests
                                   SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 
     INSTANTIATE_TEST_SUITE_P(
-        GEMMTestWMMA,
-        GEMMTestWMMAF16AccumGPU,
+        GEMMWMMATest,
+        GEMMTestWMMAF16AccumSuite,
         ::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(
@@ -205,8 +205,8 @@ namespace GEMMTests
                                   SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 
     INSTANTIATE_TEST_SUITE_P(
-        MixedGEMMTestWMMA,
-        MixedGEMMTestWMMAGPU,
+        GEMMWMMATest,
+        MixedGEMMTestWMMASuite,
         ::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(

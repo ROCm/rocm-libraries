@@ -38,13 +38,13 @@ namespace GEMMTests
     namespace SolutionParams = rocRoller::Parameters::Solution;
 
     // Params are: load A path, load B path
-    class GEMMTestLargeMacroTileGPU
+    class GEMMTestLargeMacroTileSuite
         : public BaseGEMMContextFixture<
               std::tuple<SolutionParams::LoadPath, SolutionParams::LoadPath>>
     {
     };
 
-    TEST_P(GEMMTestLargeMacroTileGPU, DISABLED_GPU_BasicGEMM)
+    TEST_P(GEMMTestLargeMacroTileSuite, DISABLED_GPU_GEMM_LargeTile_Basic)
     {
         // NOTE: This test takes hours to finish
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
@@ -56,7 +56,7 @@ namespace GEMMTests
         // std::cout << TimerPool::summary() << std::endl;
     }
 
-    TEST_P(GEMMTestLargeMacroTileGPU, GPU_BasicGEMMF8F6F4)
+    TEST_P(GEMMTestLargeMacroTileSuite, GPU_GEMM_LargeTile_F8F6F4)
     {
         // NOTE: This test takes about 13 seconds (without enabling Unroll) to
         // finish when FuseLoops orders all pairs of memory nodes one by one.
@@ -86,8 +86,8 @@ namespace GEMMTests
     }
 
     INSTANTIATE_TEST_SUITE_P(
-        GEMMTestLargeMacroTile,
-        GEMMTestLargeMacroTileGPU,
+        GEMMLargeMacroTileTest,
+        GEMMTestLargeMacroTileSuite,
         ::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,

@@ -33,7 +33,7 @@ namespace GEMMTests
     using namespace rocRoller;
 
     // Params are: A & B type, K tile size, (transA, transB), loadPathA, and loadPathB
-    class GEMMF16TestGPU
+    class GEMMF16TestSuite
         : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
                                                    int,
                                                    std::pair<std::string, std::string>,
@@ -43,8 +43,8 @@ namespace GEMMTests
     };
 
     // Params are: loadPathA and loadPathB
-    class GEMMF16NTTestGPU : public BaseGEMMContextFixture<
-                                 std::tuple<SolutionParams::LoadPath, SolutionParams::LoadPath>>
+    class GEMMF16NTTestSuite : public BaseGEMMContextFixture<
+                                   std::tuple<SolutionParams::LoadPath, SolutionParams::LoadPath>>
     {
     };
 
@@ -114,7 +114,7 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128 "), numDSReads);
     }
 
-    TEST_P(GEMMF16TestGPU, GPU_BasicGEMM)
+    TEST_P(GEMMF16TestSuite, GPU_GEMM_DataType_FP16_Parameterized)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto [typeAB, MFMAK, transOp, loadPathA, loadPathB] = std::get<1>(GetParam());
@@ -222,7 +222,7 @@ namespace GEMMTests
                      numTrLoads);
     }
 
-    TEST_P(GEMMF16NTTestGPU, GPU_BasicGEMMFP16_32x32x8)
+    TEST_P(GEMMF16NTTestSuite, GPU_GEMM_DataType_FP16_32x32x8)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -233,7 +233,7 @@ namespace GEMMTests
         basicGEMM<Half>(gemm);
     }
 
-    TEST_P(GEMMF16NTTestGPU, GPU_BasicGEMMBF16_BF16_32x32x8)
+    TEST_P(GEMMF16NTTestSuite, GPU_GEMM_DataType_BF16_BF16_32x32x8)
     {
         GEMMProblem gemm;
         gemm.waveM = 32;
@@ -244,7 +244,7 @@ namespace GEMMTests
         basicGEMM<BFloat16, BFloat16, BFloat16>(gemm);
     }
 
-    TEST_P(GEMMF16NTTestGPU, GPU_BasicGEMMBF16_FP32_32x32x8)
+    TEST_P(GEMMF16NTTestSuite, GPU_GEMM_DataType_BF16_FP32_32x32x8)
     {
         GEMMProblem gemm;
         gemm.waveM = 32;
@@ -255,7 +255,7 @@ namespace GEMMTests
         basicGEMM<BFloat16, BFloat16, float>(gemm);
     }
 
-    TEST_P(GEMMF16TestGPU, GPU_BasicGEMMBF16_FP32_32x32x4)
+    TEST_P(GEMMF16TestSuite, GPU_GEMM_DataType_BF16_FP32_32x32x4)
     {
         GEMMProblem gemm;
         gemm.waveM = 32;
@@ -266,7 +266,7 @@ namespace GEMMTests
         basicGEMM<BFloat16, BFloat16, float>(gemm);
     }
 
-    TEST_P(GEMMF16TestGPU, GPU_BasicGEMMBF16_BF16_32x32x4)
+    TEST_P(GEMMF16TestSuite, GPU_GEMM_DataType_BF16_BF16_32x32x4)
     {
         GEMMProblem gemm;
         gemm.waveM = 32;
@@ -277,7 +277,7 @@ namespace GEMMTests
         basicGEMM<BFloat16, BFloat16, BFloat16>(gemm);
     }
 
-    TEST_P(GEMMF16TestGPU, GPU_BasicGEMMBF16_FP32_16x16x8)
+    TEST_P(GEMMF16TestSuite, GPU_GEMM_DataType_BF16_FP32_16x16x8)
     {
         GEMMProblem gemm;
         gemm.waveM = 16;
@@ -288,7 +288,7 @@ namespace GEMMTests
         basicGEMM<BFloat16, BFloat16, float>(gemm);
     }
 
-    TEST_P(GEMMF16TestGPU, GPU_BasicGEMMBF16_FP32_16x16x16)
+    TEST_P(GEMMF16TestSuite, GPU_GEMM_DataType_BF16_FP32_16x16x16)
     {
         GEMMProblem gemm;
         gemm.waveM = 16;
@@ -299,7 +299,7 @@ namespace GEMMTests
         basicGEMM<BFloat16, BFloat16, float>(gemm);
     }
 
-    TEST_P(GEMMF16TestGPU, GPU_BasicGEMMBF16_BF16_16x16x16)
+    TEST_P(GEMMF16TestSuite, GPU_GEMM_DataType_BF16_BF16_16x16x16)
     {
         GEMMProblem gemm;
         gemm.waveM = 16;
@@ -312,7 +312,7 @@ namespace GEMMTests
 
     INSTANTIATE_TEST_SUITE_P(
         GEMMF16Test,
-        GEMMF16TestGPU,
+        GEMMF16TestSuite,
         ::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(::testing::Values(rocRoller::DataType::Half,
@@ -329,7 +329,7 @@ namespace GEMMTests
 
     INSTANTIATE_TEST_SUITE_P(
         GEMMF16Test,
-        GEMMF16NTTestGPU,
+        GEMMF16NTTestSuite,
         ::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,

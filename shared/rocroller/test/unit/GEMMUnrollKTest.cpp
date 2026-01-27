@@ -35,16 +35,16 @@ namespace GEMMTests
 {
     using namespace rocRoller;
 
-    class UnrollKTestGPU : public BaseGEMMContextFixture<>
+    class UnrollKTestSuite : public BaseGEMMContextFixture<>
     {
     };
 
     // Params are: K dimension size
-    class GEMMUnrollKTailLoopTestGPU : public BaseGEMMContextFixture<std::tuple<int>>
+    class GEMMUnrollKTailLoopTestSuite : public BaseGEMMContextFixture<std::tuple<int>>
     {
     };
 
-    TEST_P(UnrollKTestGPU, GPU_BasicGEMM)
+    TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_Basic)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -64,7 +64,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(UnrollKTestGPU, GPU_BasicGEMMLDS)
+    TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_LDS)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -78,7 +78,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(UnrollKTestGPU, GPU_BasicGEMMMoreLDS)
+    TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_MoreLDS)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -92,7 +92,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(UnrollKTestGPU, GPU_BasicGEMMMoreLDSA)
+    TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_MoreLDS_A)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -106,7 +106,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(UnrollKTestGPU, GPU_BasicGEMMMoreLDSB)
+    TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_MoreLDS_B)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -120,7 +120,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(UnrollKTestGPU, GPU_BasicGEMMLDSPrefetch)
+    TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_LDS_Prefetch)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -149,7 +149,7 @@ namespace GEMMTests
         }
     }
 
-    TEST_P(UnrollKTestGPU, GPU_BasicGEMMFP16LDSPrefetch)
+    TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_FP16_LDS_Prefetch)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -183,7 +183,7 @@ namespace GEMMTests
         }
     }
 
-    TEST_P(UnrollKTestGPU, GPU_BasicGEMMLDSMultiPrefetch)
+    TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_LDS_MultiPrefetch)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -211,7 +211,7 @@ namespace GEMMTests
         }
     }
 
-    TEST_P(UnrollKTestGPU, GPU_BasicGEMMFP16Prefetch3)
+    TEST_P(UnrollKTestSuite, GPU_GEMM_Optimization_UnrollK_FP16_Prefetch3)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -238,7 +238,7 @@ namespace GEMMTests
         basicGEMM<Half>(gemm);
     }
 
-    TEST_P(GEMMUnrollKTailLoopTestGPU, GPU_BasicGEMMUnrollKTailLoop)
+    TEST_P(GEMMUnrollKTailLoopTestSuite, GPU_GEMM_Optimization_UnrollK_TailLoop)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
@@ -261,11 +261,11 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    INSTANTIATE_TEST_SUITE_P(GEMMTest, UnrollKTestGPU, currentGPUISA());
+    INSTANTIATE_TEST_SUITE_P(GEMMUnrollKTest, UnrollKTestSuite, currentGPUISA());
 
     INSTANTIATE_TEST_SUITE_P(
-        GEMMUnrollKTailLoopTest,
-        GEMMUnrollKTailLoopTestGPU,
+        GEMMUnrollKTest,
+        GEMMUnrollKTailLoopTestSuite,
         ::testing::Combine(
             currentGPUISA(),
             ::testing::Values(8, 16, 24, 32, 40, 48, 56, 64, 592))); // 592 = 18 * 4 * 8 + 8 * 2

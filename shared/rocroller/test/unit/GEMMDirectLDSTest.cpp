@@ -37,12 +37,12 @@ namespace GEMMTests
     using namespace rocRoller;
     namespace SolutionParams = rocRoller::Parameters::Solution;
 
-    class GEMMDirectLDSTestBasicGPU : public BaseGEMMContextFixture<>
+    class GEMMDirectLDSTestBasicSuite : public BaseGEMMContextFixture<>
     {
     };
 
     // Params are: A & B type, M tile size, (transA, transB), load A Path, load B Path
-    class GEMMDirectLDSTestGPU
+    class GEMMDirectLDSTestSuite
         : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
                                                    int,
                                                    std::pair<std::string, std::string>,
@@ -52,7 +52,7 @@ namespace GEMMTests
     };
 
     // Params are: A & B type, K tile size, (transA, transB), DirectLDS A & B
-    class GEMMDirectLDSF8F6F4TestGPU
+    class GEMMDirectLDSF8F6F4TestSuite
         : public BaseGEMMContextFixture<
               std::tuple<rocRoller::DataType, int, std::pair<std::string, std::string>, bool, bool>>
     {
@@ -76,7 +76,7 @@ namespace GEMMTests
                   numBufferLoadsForAB + numBufferLoadsForC);
     }
 
-    TEST_P(GEMMDirectLDSF8F6F4TestGPU, GPU_BasicGEMM)
+    TEST_P(GEMMDirectLDSF8F6F4TestSuite, GPU_GEMM_LoadPath_Direct2LDS_F8F6F4)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
@@ -138,7 +138,7 @@ namespace GEMMTests
                         problem.workgroupSizeX * problem.workgroupSizeY);
     }
 
-    TEST_P(GEMMDirectLDSF8F6F4TestGPU, GPU_ScaledBasicGEMM)
+    TEST_P(GEMMDirectLDSF8F6F4TestSuite, GPU_GEMM_LoadPath_Direct2LDS_F8F6F4_Scaled)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
@@ -211,7 +211,7 @@ namespace GEMMTests
                         problem.workgroupSizeX * problem.workgroupSizeY);
     }
 
-    TEST_P(GEMMDirectLDSTestBasicGPU, GPU_BasicGEMMFP32D2L)
+    TEST_P(GEMMDirectLDSTestBasicSuite, GPU_GEMM_LoadPath_Direct2LDS_FP32)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -225,7 +225,7 @@ namespace GEMMTests
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMDirectLDSTestBasicGPU, GPU_BasicGEMMFP32D2LPadded)
+    TEST_P(GEMMDirectLDSTestBasicSuite, GPU_GEMM_LoadPath_Direct2LDS_FP32_Padded)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
@@ -261,7 +261,7 @@ namespace GEMMTests
         EXPECT_EQ(ldsWriteStrides, expectedLDSWriteStrides);
     }
 
-    TEST_P(GEMMDirectLDSTestGPU, GPU_BasicGEMMFP32)
+    TEST_P(GEMMDirectLDSTestSuite, GPU_GEMM_LoadPath_Direct2LDS_FP32_Parameterized)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
 
@@ -286,7 +286,7 @@ namespace GEMMTests
         }
     }
 
-    TEST_P(GEMMDirectLDSF8F6F4TestGPU, GPU_ScaledBasicGEMM_Prefetch2)
+    TEST_P(GEMMDirectLDSF8F6F4TestSuite, GPU_GEMM_LoadPath_Direct2LDS_F8F6F4_Scaled_Prefetch2)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
@@ -357,7 +357,7 @@ namespace GEMMTests
         }
     }
 
-    TEST_P(GEMMDirectLDSF8F6F4TestGPU, GPU_BasicGEMM_Prefetch2)
+    TEST_P(GEMMDirectLDSF8F6F4TestSuite, GPU_GEMM_LoadPath_Direct2LDS_F8F6F4_Prefetch2)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
@@ -442,12 +442,12 @@ namespace GEMMTests
         return ::testing::ValuesIn(filtered);
     }
 
-    INSTANTIATE_TEST_SUITE_P(GEMMDirectLDSTestBasic, GEMMDirectLDSTestBasicGPU, currentGPUISA());
+    INSTANTIATE_TEST_SUITE_P(GEMMDirectLDSTest, GEMMDirectLDSTestBasicSuite, currentGPUISA());
 
     INSTANTIATE_TEST_SUITE_P(
         GEMMDirectLDSTest,
-        GEMMDirectLDSTestGPU,
-        FilterOutNonDirectLDSParamValues<GEMMDirectLDSTestGPU::ParamType>(::testing::Combine(
+        GEMMDirectLDSTestSuite,
+        FilterOutNonDirectLDSParamValues<GEMMDirectLDSTestSuite::ParamType>(::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(::testing::Values(rocRoller::DataType::Float),
                                ::testing::Values(64, 128),
@@ -466,7 +466,7 @@ namespace GEMMTests
 
     INSTANTIATE_TEST_SUITE_P(
         GEMMDirectLDSTest,
-        GEMMDirectLDSF8F6F4TestGPU,
+        GEMMDirectLDSF8F6F4TestSuite,
         ::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,
