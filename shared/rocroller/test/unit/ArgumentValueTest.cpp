@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -52,8 +52,15 @@ namespace rocRollerTest
         auto valueExpr = (two * five) * (two * five) + two - five;
         EXPECT_EQ(97.0, std::get<float>(Expression::evaluate(valueExpr)));
 
-        m_context->kernel()->addArgument(
-            {"value", {DataType::Float}, DataDirection::ReadOnly, valueExpr, -1, -1});
+        m_context->kernel()->addArgument({"value",
+                                          {DataType::Float},
+                                          DataDirection::ReadOnly,
+                                          valueExpr,
+                                          nullptr,
+                                          nullptr,
+                                          nullptr,
+                                          -1,
+                                          -1});
 
         KernelArguments argsActual;
 

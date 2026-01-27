@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -765,9 +765,24 @@ TEST_CASE("launchTimeSubExpressions works", "[expression][expression-transformat
 
     CHECK_THAT(ex2_launch, IdenticalTo(argExpr + arg2Expr));
 
-    std::vector<AssemblyKernelArgument> expectedArgs{
-        {"Multiply_0", DataType::Int64, DataDirection::ReadOnly, ex1, 0, 8},
-        {"arg1_1", DataType::Int32, DataDirection::ReadOnly, arg1e, 8, 4}};
+    std::vector<AssemblyKernelArgument> expectedArgs{{"Multiply_0",
+                                                      DataType::Int64,
+                                                      DataDirection::ReadOnly,
+                                                      ex1,
+                                                      nullptr,
+                                                      nullptr,
+                                                      nullptr,
+                                                      0,
+                                                      8},
+                                                     {"arg1_1",
+                                                      DataType::Int32,
+                                                      DataDirection::ReadOnly,
+                                                      arg1e,
+                                                      nullptr,
+                                                      nullptr,
+                                                      nullptr,
+                                                      8,
+                                                      4}};
 
     CHECK(expectedArgs == context->kernel()->arguments());
 }
@@ -1540,7 +1555,7 @@ TEST_CASE("Code gen with ConvertPropagation", "[expression][expression-transform
 
     std::string expected;
     if(DataTypeInfo::Get(dstDatatype).isSigned)
-        expected = R"(        
+        expected = R"(
             v_add_i32 v4, v0, v2
         )";
     else

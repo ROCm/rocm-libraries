@@ -295,21 +295,15 @@ namespace rocRoller
                 return true;
 
             //auto simpleArg = simplify(arg.expression);
-            auto& simpleArg = m_simplifiedArgs.at(arg.name);
-            if(simpleArg && equivalentToAny(simpleArg))
+            if(arg.simplifiedExpr && equivalentToAny(arg.simplifiedExpr))
                 return true;
 
             //auto restoredArg = restoreCommandArguments(arg.expression);
-            auto& restoredArg = m_restoredArgs.at(arg.name);
-            if(not restoredArg)
-                return false;
-
-            if(equivalentToAny(restoredArg))
+            if(arg.restoredExpr && equivalentToAny(arg.restoredExpr))
                 return true;
 
             //auto restoredSimplifiedArg = simplify(restoredArg);
-            auto& restoredSimplifiedArg = m_simplifiedRestoredArgs.at(arg.name);
-            if(restoredSimplifiedArg && equivalentToAny(restoredSimplifiedArg))
+            if(arg.simplifiedRestoredExpr && equivalentToAny(arg.simplifiedRestoredExpr))
                 return true;
 
             return false;
@@ -371,22 +365,18 @@ namespace rocRoller
 
         m_argumentNames[arg.name] = m_arguments.size();
 
-        auto simplifiedArg = simplify(arg.expression);
-        m_simplifiedArgs[arg.name]
-            = identical(simplifiedArg, arg.expression) ? nullptr : simplifiedArg;
+        auto simplifiedExpr = simplify(arg.expression);
+        if(not identical(simplifiedExpr, arg.expression))
+            arg.simplifiedExpr = std::move(simplifiedExpr);
 
-        auto restoredArg = restoreCommandArguments(arg.expression);
-        if(identical(restoredArg, arg.expression))
+        auto restoredExpr = restoreCommandArguments(arg.expression);
+        if(not identical(restoredExpr, arg.expression))
         {
-            m_restoredArgs[arg.name]           = nullptr;
-            m_simplifiedRestoredArgs[arg.name] = nullptr;
-        }
-        else
-        {
-            m_restoredArgs[arg.name]   = restoredArg;
-            auto simplifiedRestoredArg = simplify(restoredArg);
-            m_simplifiedRestoredArgs[arg.name]
-                = identical(simplifiedRestoredArg, restoredArg) ? nullptr : simplifiedRestoredArg;
+            arg.restoredExpr            = std::move(restoredExpr);
+            auto simplifiedRestoredExpr = simplify(restoredExpr);
+            arg.simplifiedRestoredExpr  = identical(simplifiedRestoredExpr, arg.restoredExpr)
+                                              ? nullptr
+                                              : std::move(simplifiedRestoredExpr);
         }
 
         m_arguments.push_back(std::move(arg));
