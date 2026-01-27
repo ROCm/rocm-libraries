@@ -52,6 +52,10 @@
 namespace miopen {
 namespace tests {
 
+// Declared in main_hip.cpp - provides access to command-line arguments
+extern int g_argc;
+extern char** g_argv;
+
 struct TestRordbEmbedFsOverrideLock
 {
     TestRordbEmbedFsOverrideLock() : cached(debug::rordb_embed_fs_override())
@@ -96,7 +100,7 @@ struct ArgsHelper
     static constexpr const char* write_arg     = "mp-test-child-write";
     static constexpr const char* id_arg        = "mp-test-child";
     static constexpr const char* path_arg      = "mp-test-child-path";
-    static constexpr const char* db_class_arg  = "mp-test-child-db-path";
+    static constexpr const char* db_class_arg  = "mp-test-child-db-class";
 
     struct db_class
     {
@@ -320,6 +324,8 @@ protected:
             ASSERT_EQ(id_value.second, read);
         }
     }
+
+    static fs::path LockFilePath(const fs::path& db_path) { return db_path + ".test.lock"; }
 };
 
 template <class TDb>
@@ -978,13 +984,15 @@ public:
             auto id = 0;
 
             // clang-format off
-            for(auto i = 0; i < DBMultiThreadedTestWork::threads_count; ++i)
+            for(auto i = 0u; i < DBMultiThreadedTestWork::threads_count; ++i)
             {
+                // Use --gtest_filter to run only the child worker test in spawned process
                 auto args =
-                    std::string{"--"} + ArgsHelper::write_arg +
-                                " --" + ArgsHelper::id_arg + " " + std::to_string(id++) +
-                                " --" + ArgsHelper::path_arg + " " + temp_file.Path() +
-                                " --" + ArgsHelper::db_class_arg + " " + ArgsHelper::db_class::Get<TDb>();
+                    std::string{"--gtest_filter=*PerfDb_ChildWorker*"} +
+                    " --" + ArgsHelper::write_arg +
+                    " --" + ArgsHelper::id_arg + " " + std::to_string(id++) +
+                    " --" + ArgsHelper::path_arg + " " + temp_file.Path() +
+                    " --" + ArgsHelper::db_class_arg + " " + ArgsHelper::db_class::Get<TDb>();
 
                 if(thread_logs_root().has_value())
                 {
@@ -1031,9 +1039,6 @@ public:
         else
             DBMultiThreadedTestWork::ReadWorkItem(id, c, "mp");
     }
-
-private:
-    static fs::path LockFilePath(const fs::path& db_path) { return db_path + ".test.lock"; }
 };
 
 template <class TDb>
@@ -1065,12 +1070,15 @@ public:
             auto id = 0;
 
             // clang-format off
-            for(auto i = 0; i < DBMultiThreadedTestWork::threads_count; ++i)
+            for(auto i = 0u; i < DBMultiThreadedTestWork::threads_count; ++i)
             {
+                // Use --gtest_filter to run only the child worker test in spawned process
+                // Note: no --write flag for read test
                 auto args =
-                    std::string{"--"} + ArgsHelper::id_arg + " " + std::to_string(id++) +
-                               " --" + ArgsHelper::path_arg + " " + temp_file +
-                               " --" + ArgsHelper::db_class_arg + " " + ArgsHelper::db_class::Get<TDb>();
+                    std::string{"--gtest_filter=*PerfDb_ChildWorker*"} +
+                    " --" + ArgsHelper::id_arg + " " + std::to_string(id++) +
+                    " --" + ArgsHelper::path_arg + " " + temp_file +
+                    " --" + ArgsHelper::db_class_arg + " " + ArgsHelper::db_class::Get<TDb>();
 
                 if(thread_logs_root().has_value())
                 {
@@ -1107,9 +1115,6 @@ public:
 
         DBMultiThreadedTestWork::WorkItem(id, c, "mp");
     }
-
-private:
-    static fs::path LockFilePath(const fs::path& db_path) { return db_path + ".test.lock"; }
 };
 
 class DbMultiFileTest : public DbTest
@@ -1423,10 +1428,100 @@ public:
 } // namespace tests
 } // namespace miopen
 
+namespace {
+
+std::string GetArg(const std::string& name)
+{
+    if(miopen::tests::g_argv == nullptr || miopen::tests::g_argc < 2)
+        return "";
+
+    for(int i = 1; i < miopen::tests::g_argc - 1; ++i)
+    {
+        if(miopen::tests::g_argv[i] != nullptr &&
+           std::string(miopen::tests::g_argv[i]) == "--" + name)
+        {
+            if(miopen::tests::g_argv[i + 1] != nullptr)
+                return miopen::tests::g_argv[i + 1];
+        }
+    }
+    return "";
+}
+
+bool HasFlag(const std::string& name)
+{
+    if(miopen::tests::g_argv == nullptr || miopen::tests::g_argc < 2)
+        return false;
+
+    for(int i = 1; i < miopen::tests::g_argc; ++i)
+    {
+        if(miopen::tests::g_argv[i] != nullptr &&
+           std::string(miopen::tests::g_argv[i]) == "--" + name)
+            return true;
+    }
+    return false;
+}
+
+bool IsChildProcessMode() { return !GetArg(miopen::tests::ArgsHelper::id_arg).empty(); }
+
+} // anonymous namespace
+
+class CPU_PerfDb_ChildWorker_NONE : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        if(!IsChildProcessMode())
+        {
+            GTEST_SKIP() << "Not in child process mode (no --" << miopen::tests::ArgsHelper::id_arg
+                         << " arg)";
+        }
+    }
+};
+
+TEST_F(CPU_PerfDb_ChildWorker_NONE, ProcessWork)
+{
+    using namespace miopen::tests;
+
+    std::string logs_root = GetArg(ArgsHelper::logs_path_arg);
+    if(!logs_root.empty())
+        thread_logs_root() = logs_root;
+
+    if(HasFlag("all"))
+    {
+        full_set()                                = true;
+        DBMultiThreadedTestWork::threads_count    = 32;
+        DBMultiThreadedTestWork::common_part_size = 128;
+        DBMultiThreadedTestWork::unique_part_size = 128;
+    }
+
+    std::string db_class = GetArg(ArgsHelper::db_class_arg);
+    std::string db_path  = GetArg(ArgsHelper::path_arg);
+    int id               = std::stoi(GetArg(ArgsHelper::id_arg));
+    bool write           = HasFlag(ArgsHelper::write_arg);
+
+    if(db_class == ArgsHelper::db_class::db)
+    {
+        DbMultiProcessTest<miopen::PlainTextDb>::WorkItem(id, db_path, write);
+    }
+    else if(db_class == ArgsHelper::db_class::ramdb)
+    {
+        DbMultiProcessTest<miopen::RamDb>::WorkItem(id, db_path, write);
+    }
+}
+
 class CPU_PerfDb_NONE : public ::testing::Test
 {
 protected:
     miopen::TempFile temp_file{"miopen.tests.perfdb"};
+
+    static void SetUpTestSuite()
+    {
+        // Save exe path for spawning child processes
+        if(miopen::tests::g_argc > 0)
+        {
+            miopen::tests::exe_path() = miopen::fs::absolute(miopen::tests::g_argv[0]);
+        }
+    }
 
     template <class TDb>
     void DbTests()
@@ -1465,169 +1560,3 @@ TEST_F(CPU_PerfDb_NONE, RamDb_AllTests) { DbTests<miopen::RamDb>(); }
 TEST_F(CPU_PerfDb_NONE, PlainTextDb_AllTests) { DbTests<miopen::PlainTextDb>(); }
 
 TEST_F(CPU_PerfDb_NONE, MultiFileDb_AllTests) { MultiFileDbTests(); }
-
-namespace miopen {
-
-namespace tests {
-namespace perfdb {
-
-#if defined(_WIN32)
-// Strong implementations for Windows (override the weak defaults in main_hip.cpp via
-// /alternatename)
-extern "C" void miopen_perfdb_SetExePath(const char* path) { exe_path() = fs::absolute(path); }
-
-extern "C" int miopen_perfdb_IsChildProcessMode(int argc, char** argv)
-{
-    for(int i = 1; i < argc; ++i)
-    {
-        std::string arg = argv[i];
-        if(arg.find("--" + std::string(ArgsHelper::id_arg)) != std::string::npos)
-        {
-            return 1;
-        }
-    }
-    return 0;
-}
-#endif
-
-void SetExePath(const char* path)
-{
-#if defined(_WIN32)
-    miopen_perfdb_SetExePath(path);
-#else
-    exe_path() = fs::absolute(path);
-#endif
-}
-
-bool IsChildProcessMode(int argc, char** argv)
-{
-#if defined(_WIN32)
-    return miopen_perfdb_IsChildProcessMode(argc, argv) != 0;
-#else
-    for(int i = 1; i < argc; ++i)
-    {
-        std::string arg = argv[i];
-        if(arg.find("--" + std::string(ArgsHelper::id_arg)) != std::string::npos)
-        {
-            return true;
-        }
-    }
-    return false;
-#endif
-}
-
-namespace {
-
-std::string GetArg(int argc, char** argv, const std::string& name)
-{
-    for(int i = 1; i < argc - 1; ++i)
-    {
-        std::string arg = argv[i];
-        if(arg == "--" + name)
-        {
-            return argv[i + 1];
-        }
-    }
-    return "";
-}
-
-bool HasFlag(int argc, char** argv, const std::string& name)
-{
-    for(int i = 1; i < argc; ++i)
-    {
-        std::string arg = argv[i];
-        if(arg == "--" + name)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-} // anonymous namespace
-
-#if defined(_WIN32)
-extern "C" int miopen_perfdb_RunChildProcess(int argc, char** argv)
-{
-    std::string logs_root         = GetArg(argc, argv, ArgsHelper::logs_path_arg);
-    bool test_write               = HasFlag(argc, argv, ArgsHelper::write_arg);
-    std::string mt_child_id_s     = GetArg(argc, argv, ArgsHelper::id_arg);
-    std::string mt_child_db_path  = GetArg(argc, argv, ArgsHelper::path_arg);
-    std::string mt_child_db_class = GetArg(argc, argv, ArgsHelper::db_class_arg);
-
-    if(!logs_root.empty())
-        thread_logs_root() = logs_root;
-
-    if(HasFlag(argc, argv, "all"))
-    {
-        full_set() = true;
-
-        DBMultiThreadedTestWork::threads_count    = 32;
-        DBMultiThreadedTestWork::common_part_size = 128;
-        DBMultiThreadedTestWork::unique_part_size = 128;
-    }
-
-    int mt_child_id = std::stoi(mt_child_id_s);
-
-    if(mt_child_id >= 0)
-    {
-        if(mt_child_db_class == ArgsHelper::db_class::db)
-        {
-            DbMultiProcessTest<miopen::PlainTextDb>::WorkItem(
-                mt_child_id, mt_child_db_path, test_write);
-        }
-        else if(mt_child_db_class == ArgsHelper::db_class::ramdb)
-        {
-            DbMultiProcessTest<miopen::RamDb>::WorkItem(mt_child_id, mt_child_db_path, test_write);
-        }
-    }
-
-    return 0;
-}
-#endif
-
-int RunChildProcess(int argc, char** argv)
-{
-#if defined(_WIN32)
-    return miopen_perfdb_RunChildProcess(argc, argv);
-#else
-    std::string logs_root         = GetArg(argc, argv, ArgsHelper::logs_path_arg);
-    bool test_write               = HasFlag(argc, argv, ArgsHelper::write_arg);
-    std::string mt_child_id_s     = GetArg(argc, argv, ArgsHelper::id_arg);
-    std::string mt_child_db_path  = GetArg(argc, argv, ArgsHelper::path_arg);
-    std::string mt_child_db_class = GetArg(argc, argv, ArgsHelper::db_class_arg);
-
-    if(!logs_root.empty())
-        thread_logs_root() = logs_root;
-
-    if(HasFlag(argc, argv, "all"))
-    {
-        full_set() = true;
-
-        DBMultiThreadedTestWork::threads_count    = 32;
-        DBMultiThreadedTestWork::common_part_size = 128;
-        DBMultiThreadedTestWork::unique_part_size = 128;
-    }
-
-    int mt_child_id = std::stoi(mt_child_id_s);
-
-    if(mt_child_id >= 0)
-    {
-        if(mt_child_db_class == ArgsHelper::db_class::db)
-        {
-            DbMultiProcessTest<miopen::PlainTextDb>::WorkItem(
-                mt_child_id, mt_child_db_path, test_write);
-        }
-        else if(mt_child_db_class == ArgsHelper::db_class::ramdb)
-        {
-            DbMultiProcessTest<miopen::RamDb>::WorkItem(mt_child_id, mt_child_db_path, test_write);
-        }
-    }
-
-    return 0;
-#endif
-}
-
-} // namespace perfdb
-} // namespace tests
-} // namespace miopen
