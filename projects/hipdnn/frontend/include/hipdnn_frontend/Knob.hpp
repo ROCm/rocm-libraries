@@ -30,10 +30,6 @@ namespace hipdnn_frontend
 // Type alias for knob IDs
 typedef std::string KnobType_t; // NOLINT(readability-identifier-naming)
 
-// Forward declarations
-class KnobSetting;
-class Knob;
-
 // KnobSetting class - represents a knob value setting
 class KnobSetting
 {
