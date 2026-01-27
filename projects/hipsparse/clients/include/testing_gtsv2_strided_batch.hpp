@@ -45,7 +45,7 @@ template <typename T>
 void testing_gtsv2_strided_batch_bad_arg(const Arguments& argus)
 {
     // Dont do bad argument checking for cuda
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int safe_size    = 100;
     int m            = 10;
     int batch_count  = 10;
@@ -136,12 +136,6 @@ void testing_gtsv2_strided_batch(Arguments argus)
     std::vector<T> hd(batch_stride * batch_count, make_DataType<T>(2));
     std::vector<T> hdu(batch_stride * batch_count, make_DataType<T>(1));
     std::vector<T> hx(batch_stride * batch_count, make_DataType<T>(3));
-
-    for(int i = 0; i < batch_count; i++)
-    {
-        hdl[batch_stride * i + 0]     = make_DataType<T>(0);
-        hdu[batch_stride * i + m - 1] = make_DataType<T>(0);
-    }
 
     std::vector<T> hx_original = hx;
 

@@ -45,7 +45,7 @@ template <typename T>
 void testing_gtsv2_nopivot_bad_arg(const Arguments& argus)
 {
     // Dont do bad argument checking for cuda
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int safe_size = 100;
     int m         = 10;
     int n         = 10;
@@ -126,9 +126,6 @@ void testing_gtsv2_nopivot(Arguments argus)
     std::vector<T> hd(m, make_DataType<T>(2));
     std::vector<T> hdu(m, make_DataType<T>(1));
     std::vector<T> hB(ldb * n, make_DataType<T>(3));
-
-    hdl[0]     = make_DataType<T>(0);
-    hdu[m - 1] = make_DataType<T>(0);
 
     std::vector<T> hB_original = hB;
 
