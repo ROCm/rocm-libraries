@@ -28,6 +28,8 @@
 #include <string>
 #include <vector>
 
+#include <Tensile/hip/HipUtils.hpp>
+
 using IsaVersion = std::array<int, 3>;
 
 std::pair<int, std::string>
@@ -65,9 +67,6 @@ bool checkNotInList(const T& a, const std::vector<T> b)
 inline int getDeviceAttribute(hipDeviceAttribute_t attr, int deviceId, int defaultValue = 0)
 {
     int value = defaultValue;
-    if(hipDeviceGetAttribute(&value, attr, deviceId) == hipSuccess)
-    {
-        return value;
-    }
-    return defaultValue;
+    HIP_CHECK_EXC(hipDeviceGetAttribute(&value, attr, deviceId));
+    return value;
 }

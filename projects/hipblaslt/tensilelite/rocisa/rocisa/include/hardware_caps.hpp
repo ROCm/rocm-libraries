@@ -391,9 +391,13 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion, int
     rv["DeviceLDS"]          = deviceLDS;
     rv["CMPXWritesSGPR"]     = checkNotInList(isaVersion[0], {10, 11, 12});
     rv["HasWave32"]          = checkInList(isaVersion[0], {10, 11, 12});
-    rv["HasSchedMode"]       = checkInList(isaVersion[0], {12})
-                                   ? getDeviceAttribute(hipDeviceAttributeExpertSchedMode, deviceId, 0)
-                                   : 0;
+#if HIP_VERSION >= 70200000
+    rv["HasSchedMode"] = checkInList(isaVersion[0], {12})
+                             ? getDeviceAttribute(hipDeviceAttributeExpertSchedMode, deviceId, 0)
+                             : 0;
+#else
+    rv["HasSchedMode"] = 0;
+#endif
     rv["HasAccCD"]           = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["CrosslaneWait"]      = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
