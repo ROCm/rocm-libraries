@@ -189,6 +189,15 @@ set_target_properties(
                BUILD_WITH_INSTALL_RPATH TRUE
 )
 
+# Set RPATH origin for TheRock integration. The plugins are installed to
+# lib/hipdnn_plugins/engines/ which is 2 levels below lib/, so TheRock needs
+# this hint to calculate correct relative RPATHs.
+# Note: TheRock's post_hook_MIOpen_plugin.cmake also sets this for miopen_legacy_plugin,
+# but setting it here ensures both plugins work regardless of TheRock's state.
+# TODO: remove once post hook in TheRock has replaced this.
+set_target_properties(miopen_plugin miopen_legacy_plugin PROPERTIES
+    THEROCK_INSTALL_RPATH_ORIGIN "lib/hipdnn_plugins/engines")
+
 if(NOT HIPDNN_SKIP_TESTS)
     add_subdirectory(tests)
     add_subdirectory(integration_tests)

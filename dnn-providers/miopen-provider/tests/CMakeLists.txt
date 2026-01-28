@@ -56,19 +56,3 @@ if(BUILD_PLUGIN_AS_DEPENDENCY)
 endif()
 
 add_unit_test_target(miopen_plugin_tests ${CMAKE_CURRENT_BINARY_DIR})
-
-# Backwards compatibility: copy the binary to the old name (miopen_legacy_plugin_tests)
-# This is needed because TheRock's current submodule references the old target name.
-# TODO: Remove this after TheRock bumps rocm-libraries submodule and updates references.
-add_custom_command(
-    TARGET miopen_plugin_tests POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy
-        $<TARGET_FILE:miopen_plugin_tests>
-        ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/miopen_legacy_plugin_tests${CMAKE_EXECUTABLE_SUFFIX}
-    COMMENT "Creating backwards compat copy: miopen_legacy_plugin_tests"
-)
-
-install(PROGRAMS
-    ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/miopen_legacy_plugin_tests${CMAKE_EXECUTABLE_SUFFIX}
-    DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
