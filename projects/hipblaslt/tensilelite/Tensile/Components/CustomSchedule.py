@@ -222,7 +222,6 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
                       ):
 
     module = Module()
-
     globalReadIncACode = removeComments(globalReadIncACode)
     globalReadIncBCode = removeComments(globalReadIncBCode)
     numLoopIter = kernel["LoopIters"]
@@ -3831,6 +3830,8 @@ def _get_schedule_256x128x32_TF32(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
     syncCode = []
+    snops = []
+    snopCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
 
     if isTN(kernel) and useLDSTr and TLDS==1:
@@ -3911,10 +3912,121 @@ def _get_schedule_256x128x32_TF32(kernel, useLDSTr, TLDS):
         }
         syncCode = syncTable[1::2]
         nglshift = nllshift = 12 # vmcnt shift for ngl and nll
+    elif isNN(kernel) and not useLDSTr and TLDS==1:
+        kernel["UsePLRPack"] = False
+        kernel["UseMFMAF32XEmulation"] = False
+
+        syncs = SyncSchedule()
+        syncs.add(-1, dscnt=0, comment="wait for prior local reads/writes")
+        syncs.add(7, dscnt=15, comment="wait for prior local reads/writes")
+        syncs.add(23, dscnt=0, comment="wait for prior local reads/writes")
+        syncs.add(46, dscnt=0, barrier=True, comment="wait for prior local reads/writes")
+        syncs.add(47, dscnt=0, vlcnt=-1, barrier=True, comment="wait for prior local reads/writes")
+        syncs.add(48, dscnt=0, vlcnt=-1, comment="wait for prior local reads/writes")
+        syncs.add(71, dscnt=-1, vlcnt=12, barrier=True, comment="wait for prior local reads/writes")
+        syncs.add(71, dscnt=0, vlcnt=-1, comment="wait for prior local reads/writes")
+
+        snopIdxs = [
+            -1, 0, 1, 2, 3, 
+            23, 24, 25, 26, 27
+        ]
+
+        snops = [
+            [x, SNop(0, comment=f"")] for x in snopIdxs
+        ]
+
+        packA3 = [
+            -1,-1,-1,-1,
+            0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+            1,1,1,1,
+            2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+            3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,
+        ]
+        packA0 = [
+            23,23,23,23,
+            24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,
+            25,25,25,25,
+            26,26,26,26,26,26,26,26,26,26,26,26,26,26,26,26,26,26,26,26,
+            27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,27,
+        ]
+
+        packB3 = [
+            -1,-1,-1,-1,
+            0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+            1,1,1,1,
+            2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+        ]
+        packB0 = [
+            23,23,23,23,
+            24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,24,
+            25,25,25,25,
+            26,26,26,26,26,26,26,26,26,26,26,26,26,26,26,26,26,26,26,26,
+        ]
+
+        lra0 = create_range(0,16)
+        lra3 = [
+            72,72,
+            73,73,
+            74,74,
+            75,75,
+            77,77,
+            78,78,
+            79,79,
+            80,80,
+            81,81,
+            82,82,
+            83,83,
+            84,84,
+            85,85,
+            86,86,
+            87,87,
+            88,88,
+        ]
+
+        lrb0 = [16,17,18,19]
+        lrb3 = [76,76, 89,90]
+
+        grA = [
+            47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,47,
+        ]
+        grB = [
+            47,47,47,47,47,47,47,47,
+        ]
+
+        grIncA = [0,0,0, 1,1,1, 2,2,2]
+        grIncB = [3,3,3, 4,4,4, 5,5,5]
+
+        optSchedule = {
+            'LRA0'   : [lra0],
+            'LRB0'   : [lrb0],
+            'GRA': [grA],
+            'GRB': [grB],
+            'SYNC': [syncs.get_indicies()],
+            'GRIncA' : [grIncA],
+            'GRIncB' : [grIncB],
+            'PackA0' : [packA0],
+            'PackB0' : [packB0],
+            'LRA3'   : [lra3],
+            'PackA3' : [packA3],
+            'LRB3'   : [lrb3],
+            'PackB3' : [packB3],
+            'LRSA': [[22]],
+            'LRSB': [[22]],
+            'LWSA': [[70]],
+            'LWSB': [[70]],
+            'LCC': [[95, 95]],
+        }
+        syncCode = syncs.get_code()
+        nglshift = nllshift = (len(grA) + len(grB)) // 2
     else:
         return False, None
 
-    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    if snops:
+        optSchedule['SNOP'] = [[s[0] for s in snops]]
+        snopCode = [s[1] for s in snops]
+
+    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift, snopCode=snopCode)
+    opt1.disableValidation()
     return True, opt1
 
 @RegisterSchedule(
