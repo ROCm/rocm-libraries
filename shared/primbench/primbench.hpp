@@ -3708,10 +3708,7 @@ private:
         auto& cli = m_cli;
         auto& s   = m_settings;
 
-        s.bytes = cli.get<size_t>("bytes",
-                                  s.bytes,
-                                  "Sets the size (in bytes) of the randomly generated input array, "
-                                  "overriding the value provided to `primbench::executor`.");
+        s.bytes = cli.get<size_t>("bytes", s.bytes, "Input bytes.");
         if(s.bytes == 0)
         {
             std::cerr << "Error: --bytes must be greater than 0\n";

@@ -103,8 +103,7 @@ struct copy_benchmark : public primbench::benchmark_interface
         // This passes a lambda to primbench, which calls it many times
         // primbench completely handles synchronization
         state.run(
-            [&]
-            {
+            [&] {
                 copy_kernel<T, BlockSize, ItemsPerThread>
                     <<<grid, block, 0, stream>>>(d_input, d_output);
             });
@@ -116,10 +115,7 @@ struct copy_benchmark : public primbench::benchmark_interface
 
 int main(int argc, char* argv[])
 {
-    // Sets the number of input bytes (128 MiB), available as state.bytes in run()
-    // The number can be overridden from the command line with `--bytes`
-    // The bytes/sec primbench reports isn't based on this number
-    primbench::executor executor(argc, argv, 128 * primbench::MiB);
+    primbench::executor executor(argc, argv);
 
     executor.queue<copy_benchmark<char>>();
     executor.queue<copy_benchmark<long long>>();
@@ -151,7 +147,7 @@ It output this `results.json`:
             "hip_version": "6.4.43482-0f2d60242",
             "clang_version": "19.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-6.4.0 25133 c7fe45cf4b819c5991fe208aaa96edf142730f1d)"
         },
-        "cli_settings": {
+        "settings": {
             "bytes": 134217728,
             "hot": false,
             "seed": 42,
@@ -182,65 +178,65 @@ It output this `results.json`:
         {
             "index": 0,
             "name": "type: char",
-            "bytes_per_second": 7.53499e+11,
-            "items_per_second": 3.7675e+11,
+            "bytes_per_second": 7.5628e+11,
+            "items_per_second": 3.7814e+11,
             "bytes_per_item": 2,
             "items": 134217728,
             "noise_timeout": false,
-            "noise_percent": 0.0378893,
+            "noise_percent": 0.0521193,
             "meta": {
                 "algo": "copy",
                 "type": "char"
             },
             "elapsed_secs": {
-                "host": 1.00539,
-                "gpu": 0.547248
+                "host": 1.01423,
+                "gpu": 0.511131
             },
             "gpu_temp_celsius": {
-                "start": 50,
-                "end": 51
+                "start": 49,
+                "end": 49
             },
             "calls": {
                 "kernel_calls_per_batch": 32,
-                "ms_per_batch": 11.393,
-                "batches": 48,
-                "kernel_calls": 1536
+                "ms_per_batch": 11.3546,
+                "batches": 45,
+                "kernel_calls": 1440
             }
         },
         {
             "index": 1,
             "name": "type: long long",
-            "bytes_per_second": 1.29973e+12,
-            "items_per_second": 8.12334e+10,
+            "bytes_per_second": 1.29793e+12,
+            "items_per_second": 8.11204e+10,
             "bytes_per_item": 16,
             "items": 16777216,
             "noise_timeout": false,
-            "noise_percent": 0.0586062,
+            "noise_percent": 0.0519677,
             "meta": {
                 "algo": "copy",
                 "type": "long long"
             },
             "elapsed_secs": {
-                "host": 1.02063,
-                "gpu": 0.449733
+                "host": 1.015,
+                "gpu": 0.423253
             },
             "gpu_temp_celsius": {
-                "start": 51,
-                "end": 52
+                "start": 49,
+                "end": 49
             },
             "calls": {
                 "kernel_calls_per_batch": 64,
-                "ms_per_batch": 13.2306,
-                "batches": 34,
-                "kernel_calls": 2176
+                "ms_per_batch": 13.2405,
+                "batches": 32,
+                "kernel_calls": 2048
             }
         }
     ],
     "summary": {
         "noise_timeouts": 0,
         "elapsed_secs": {
-            "host": 2.66022,
-            "gpu": 0.996981
+            "host": 6.67644,
+            "gpu": 0.934384
         }
     }
 }
@@ -253,8 +249,8 @@ You can also pass `--help` to benchmarks to print the available options.
 | Option                                   | Description                                                                                                                                                                        |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--help`                                 | Display this help and exit.                                                                                                                                                        |
-| `--bytes`                                | Overrides the number of input bytes passed to `primbench::executor`.                                                                                                               |
-| `--hot`                                  | Skip clearing the GPU cache between batch iterations. (default: false)                                                                                                             |
+| `--bytes`                                | Input bytes. (default: 128 MiB)                                                                                                                                                    |
+| `--hot`                                  | Skip clearing the GPU cache between batch iterations.                                                                                                                              |
 | `--seed`                                 | Seed used for input generation. (default: 42)                                                                                                                                      |
 | `--json-out`                             | JSON path to write benchmark results to. (default: results.json)                                                                                                                   |
 | `--csv-out`                              | CSV path to write benchmark results to.                                                                                                                                            |
@@ -269,9 +265,9 @@ You can also pass `--help` to benchmarks to print the available options.
 | `--max-gpu-temp`                         | Maximum GPU temperature in °C. Too low slows benchmarks; too high increases noise. (default: 60)                                                                                   |
 | `--max-warming-secs`                     | Maximum seconds allowed for GPU warming before an error is thrown. (default: 60)                                                                                                   |
 | `--max-cooling-secs`                     | Maximum seconds allowed for GPU cooling before an error is thrown. (default: 60)                                                                                                   |
-| `--output-hip-device-properties-context` | Output a `hip_device_properties` object in the context, containing GPU details. (default: false)                                                                                   |
-| `--output-amdsmi-context`                | Output an `amdsmi` object in the context, containing GPU details. (default: false)                                                                                                 |
-| `--output-batches`                       | Output a `batches` array for each specialization, containing per-batch details. (default: false)                                                                                   |
+| `--output-hip-device-properties-context` | Output a `hip_device_properties` object in the context, containing GPU details.                                                                                                    |
+| `--output-amdsmi-context`                | Output an `amdsmi` object in the context, containing GPU details.                                                                                                                  |
+| `--output-batches`                       | Output a `batches` array for each specialization, containing per-batch details.                                                                                                    |
 | `--spaces-per-indent`                    | Number of spaces per indentation level in JSON output. Set to 0 for no indentation. (default: 4)                                                                                   |
 | `--stream-blocking-timeout-secs`         | Maximum stream blocking duration in seconds before timing out. Stream is blocked while queueing kernel calls. Use `primbench::flags::sync` if kernel is synchronous. (default: 10) |
 
@@ -283,7 +279,31 @@ Benchmarks can register additional custom options, which will also be listed by 
 size_t dimensions = executor.get<size_t>("dimensions", 3, "The number of dimensions");
 ```
 
-If there are any custom options, the object `context.custom_cli_settings` is output to `results.json`.
+If there are any custom options, the object `context.custom_settings` is output to `results.json`.
+
+## Passing Settings Programmatically
+
+Benchmarks can optionally provide a `primbench::settings` struct when constructing the executor. This allows a benchmark to set sensible defaults for things like batch sizing or minimum run time directly in code:
+
+```cpp
+primbench::settings settings;
+settings.min_gpu_ms_per_batch = 1000;
+settings.batch_window_size    = 3;
+primbench::executor executor(argc, argv, settings);
+```
+
+Starting with C++20, you can also use designated initializers to set fields inline:
+
+```cpp
+primbench::executor executor(argc,
+                             argv,
+                             {
+                                 .min_gpu_ms_per_batch = 1000,
+                                 .batch_window_size    = 3,
+                             });
+```
+
+All command-line options are stored in this same `settings` struct and are written verbatim to `context.settings` in the JSON output. If an option is provided both programmatically and on the command line, the command-line value always takes precedence. This makes it easy to ship benchmarks with tuned defaults while still allowing users to override them at runtime.
 
 ## Filtering Specializations
 
@@ -369,8 +389,8 @@ This CSV is a condensed version of the `results.json` file. It includes only ind
 
 ```
 index,name,bytes_per_second,items_per_second,noise_timeout,noise_percent
-0,type: char,7.53499e+11,3.7675e+11,0,0.0378893
-1,type: long long,1.29973e+12,8.12334e+10,0,0.0586062
+0,"type: char",7.5628e+11,3.7814e+11,0,0.0521193
+1,"type: long long",1.29793e+12,8.11204e+10,0,0.0519677
 ```
 
 If you only want CSV output and don't need the JSON file, pass `--json-out /dev/null`.
