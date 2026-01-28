@@ -1264,12 +1264,18 @@ inline void sort_keys_over_4g()
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using key_type                                 = uint8_t;
+    using key_type                                 = uint32_t;
     constexpr unsigned int start_bit               = 0;
     constexpr unsigned int end_bit                 = 8ull * sizeof(key_type);
     constexpr hipStream_t  stream                  = 0;
-    constexpr size_t       size                    = (1ull << 32) + 32;
-    constexpr size_t       number_of_possible_keys = 1ull << (8ull * sizeof(key_type));
+
+    constexpr size_t total_bytes = (1ull << 32) + 32;
+    static_assert(total_bytes > (1ull << 32), "must be over 4 GiB");
+    static_assert(total_bytes % sizeof(key_type) == 0,
+                  "total_bytes must be divisible by sizeof(key_type)");
+
+    constexpr size_t size                    = total_bytes / sizeof(key_type);
+    constexpr size_t number_of_possible_keys = 1ull << (8ull * sizeof(key_type));
     assert(std::is_unsigned<key_type>::value);
     hipDeviceProp_t dev_prop;
     HIP_CHECK(hipGetDeviceProperties(&dev_prop, device_id));
