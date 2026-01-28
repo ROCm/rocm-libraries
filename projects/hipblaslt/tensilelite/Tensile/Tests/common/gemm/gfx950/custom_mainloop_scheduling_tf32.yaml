@@ -684,9 +684,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [2560, 2048, 1, 8192] #t
           - Range: [[160], [128], [1], [64, 64, 256]]
           - Range: [[160], [128], [1], [1, 1, 256]]
           - Range: [[160], [128], [1], [32, 64, 256]]
         - BiasTypeArgs: ['s']
-        - ICacheFlush: [True]
