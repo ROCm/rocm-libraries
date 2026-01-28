@@ -36,6 +36,15 @@ using hip_bfloat16 = bfloat16;
 using half         = half_float::half;
 #endif
 
+template <typename To, typename From>
+MIOPEN_HIP_HOST_DEVICE To miopen_bit_cast(const From& src)
+{
+    static_assert(std::is_trivially_copyable_v<To>, "miopen_bit_cast assumes trivial copyability");
+    To dst;
+    __builtin_memcpy(&dst, &src, sizeof(To));
+    return dst;
+}
+
 template <int wm, int we, typename T>
 MIOPEN_HIP_HOST_DEVICE uint8_t cast_to_f8_no_range_reduce(T _x,
                                                           bool stoch   = false,
@@ -44,8 +53,7 @@ MIOPEN_HIP_HOST_DEVICE uint8_t cast_to_f8_no_range_reduce(T _x,
     static_assert(we == 5, "we==5");
     static_assert(sizeof(T) == 2, "no_range_reduce only works for float16");
 
-    uint32_t x = *(reinterpret_cast<uint16_t*>(&_x));
-
+    uint32_t x = miopen_bit_cast<uint16_t>(_x);
     uint32_t head, mantissa, exponent;
     uint32_t sign;
 
@@ -102,9 +110,9 @@ MIOPEN_HIP_HOST_DEVICE uint8_t cast_to_f8(T _x, bool stoch, uint32_t rng)
     const int mfmt = (sizeof(T) == 4) ? 23 : 10;
     uint32_t x;
     if(sizeof(T) == 4)
-        x = *(reinterpret_cast<uint32_t*>(&_x)); // cppcheck-suppress invalidPointerCast
+        x = miopen_bit_cast<uint32_t>(_x);
     else
-        x = *(reinterpret_cast<uint16_t*>(&_x)); // cppcheck-suppress invalidPointerCast
+        x = miopen_bit_cast<uint16_t>(_x);
 
     uint32_t head, mantissa;
     int exponent, bias;
@@ -291,10 +299,10 @@ MIOPEN_HIP_HOST_DEVICE T cast_from_f8(uint8_t x)
         const uint16_t ihNegInf = 0xFC00;
         const uint16_t ihNaN    = 0x7C01;
         const uint16_t ihNeg0   = 0x8000;
-        fInf                    = *(reinterpret_cast<const half*>(&ihInf));
-        fNegInf                 = *(reinterpret_cast<const half*>(&ihNegInf));
-        fNaN                    = *(reinterpret_cast<const half*>(&ihNaN));
-        fNeg0                   = *(reinterpret_cast<const half*>(&ihNeg0));
+        fInf                    = miopen_bit_cast<half>(ihInf);
+        fNegInf                 = miopen_bit_cast<half>(ihNegInf);
+        fNaN                    = miopen_bit_cast<half>(ihNaN);
+        fNeg0                   = miopen_bit_cast<half>(ihNeg0);
     }
     else if(is_float)
     {
@@ -302,11 +310,10 @@ MIOPEN_HIP_HOST_DEVICE T cast_from_f8(uint8_t x)
         const uint32_t ifNegInf = 0xFF800000;
         const uint32_t ifNaN    = 0x7F800001;
         const uint32_t ifNeg0   = 0x80000000;
-        fInf = *(reinterpret_cast<const float*>(&ifInf)); // cppcheck-suppress invalidPointerCast
-        fNegInf =
-            *(reinterpret_cast<const float*>(&ifNegInf));   // cppcheck-suppress invalidPointerCast
-        fNaN  = *(reinterpret_cast<const float*>(&ifNaN));  // cppcheck-suppress invalidPointerCast
-        fNeg0 = *(reinterpret_cast<const float*>(&ifNeg0)); // cppcheck-suppress invalidPointerCast
+        fInf                    = miopen_bit_cast<float>(ifInf);
+        fNegInf                 = miopen_bit_cast<float>(ifNegInf);
+        fNaN                    = miopen_bit_cast<float>(ifNaN);
+        fNeg0                   = miopen_bit_cast<float>(ifNeg0);
     }
 
     if(x == 0)
@@ -331,7 +338,7 @@ MIOPEN_HIP_HOST_DEVICE T cast_from_f8(uint8_t x)
     if(we == 5 && is_half && !negative_zero_nan)
     {
         retval = x << 8;
-        return *(reinterpret_cast<const T*>(&retval));
+        return miopen_bit_cast<T>(retval);
     }
 
     const int exp_low_cutoff = (1 << (weo - 1)) - (1 << (we - 1)) + 1 - (negative_zero_nan ? 1 : 0);
@@ -360,7 +367,7 @@ MIOPEN_HIP_HOST_DEVICE T cast_from_f8(uint8_t x)
         retval = (sign << 15) | (exponent << 10) | mantissa;
     else
         retval = (sign << 31) | (exponent << 23) | mantissa;
-    return *(reinterpret_cast<const T*>(&retval));
+    return miopen_bit_cast<T>(retval);
 }
 
 } // namespace miopen_hip_f8_impl
