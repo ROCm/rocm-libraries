@@ -41,10 +41,6 @@ namespace rocRoller::KernelGraph
             std::ranges::sort(nodes, TopologicalCompare(graph));
             Log::debug("makeChains({})", ShowValue(nodes));
 
-            auto isBarrier = [&](int idx) -> bool {
-                return graph.control.get<ControlGraph::Barrier>(idx).has_value();
-            };
-
             for(int i = 0; i + 1 < nodes.size(); i++)
             {
                 auto order = graph.control.compareNodes(UpdateCache, nodes[i], nodes[i + 1]);
@@ -702,7 +698,7 @@ namespace rocRoller::KernelGraph
 
         auto chainSets = identifyParallelMultiplyAndLDSChainsWithTypes(rv);
 
-        // if(Log::getLogger()->should_log(LogLevel::Debug))
+        if(Log::getLogger()->should_log(LogLevel::Debug))
         {
             for(auto chainSet : chainSets)
             {

@@ -151,7 +151,7 @@ std::shared_ptr<SolutionParameters>
     {
         // For 256x256x256 tile, use BufferToLDS for scale loading to reduce register pressure
         gemm->swizzleScale   = true;
-        gemm->prefetchScale = true;
+        gemm->prefetchScale  = true;
         gemm->loadPathAScale = SolutionParams::LoadPath::BufferToLDS;
         gemm->loadPathBScale = SolutionParams::LoadPath::BufferToLDS;
     }

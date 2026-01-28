@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -108,13 +108,6 @@ namespace GEMMTests
             if((loadScalePathB != LP::BufferToVGPR or loadScalePathB != LP::GlobalToVGPR)
                && (scaleBMode == SM::None || scaleBMode == SM::SingleScale))
             {
-                continue;
-            }
-
-            if(typeA == DataType::BF6 && typeB == DataType::BF6 && waveK == 64
-               && loadPathA == LP::GlobalToLDSViaVGPR)
-            {
-                // TODO: This should be fine, but seems to hang.
                 continue;
             }
 

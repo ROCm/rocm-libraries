@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2025-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,8 @@
 
 #include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
+
+#include <rocRoller/Utilities/Logging.hpp>
 
 namespace rocRoller::KernelGraph
 {
@@ -109,8 +111,6 @@ namespace rocRoller::KernelGraph
                 {
                     if(rw.rw == ControlFlowRWTracer::WRITE
                        && m_graph.control.get<ControlGraph::LoadLDSTile>(rw.control)
-                       //    && m_graph.control.compareNodes(UpdateCache, node, rw.control)
-                       //           == ControlGraph::NodeOrdering::LeftFirst
                        && getLoopOp(rw.control) == nodeLoop)
                     {
                         auto iter = tagNodes.find(tag);
@@ -134,13 +134,16 @@ namespace rocRoller::KernelGraph
 
             m_aTagReplacements[node] = std::move(rv);
 
-            auto showEntry = [](std::pair<int, std::vector<int>> const& entry) {
-                auto const& [tag, deps] = entry;
-                return fmt::format("Multiply {}: ({})", tag, fmt::join(deps, ", "));
-            };
+            if(Log::getLogger()->should_log(LogLevel::Debug))
+            {
+                auto showEntry = [](std::pair<int, std::vector<int>> const& entry) {
+                    auto const& [tag, deps] = entry;
+                    return fmt::format("Multiply {}: ({})", tag, fmt::join(deps, ", "));
+                };
 
-            auto iter = m_aTagReplacements.find(node);
-            Log::debug(showEntry(*iter));
+                auto iter = m_aTagReplacements.find(node);
+                Log::debug(showEntry(*iter));
+            }
 
             return m_aTagReplacements[node];
         }

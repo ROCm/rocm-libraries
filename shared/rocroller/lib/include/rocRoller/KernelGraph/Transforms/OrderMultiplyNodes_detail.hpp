@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2025-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -59,8 +59,17 @@ namespace rocRoller::KernelGraph
 
             bool operator()(int a, int b) const;
 
+            /**
+             * Looks for the LoadLDSTile nodes that write the LHS and LHS_SCALE inputs ("A")
+             * to `node` within the same loop and returns them in topological order.
+             */
             std::vector<int> const& aTagReplacements(int node) const;
 
+            /**
+             * Orders by which LoadLDSTile nodes write the "A" inputs to `a` and `b` within the
+             * same loop.  This will mean that we get a whole row of Multiply nodes first (i.e.
+             * the Multiply nodes that use the same A input will be put first).
+             */
             std::optional<bool> orderByATagReplacements(int a, int b) const;
 
             /**
