@@ -316,7 +316,7 @@ public:
         }
         if(problem.GetDilationH() != problem.GetDilationW())
         {
-            MIOPEN_LOG_I2("TunaNet Inapplicable: Dilation must be 1");
+            MIOPEN_LOG_I2("TunaNet Inapplicable: Dilation must be equal along all axes");
             return false;
         }
         if(problem.GetBias() != 0)
@@ -409,7 +409,7 @@ public:
         }
         if(problem.GetDilationH() != problem.GetDilationW())
         {
-            MIOPEN_LOG_I2("TunaNet Inapplicable: Dilation must be 1");
+            MIOPEN_LOG_I2("TunaNet Inapplicable: Dilation must be equal along all axes");
             return false;
         }
         if(problem.GetBias() != 0)
