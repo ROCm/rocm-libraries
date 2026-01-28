@@ -3111,13 +3111,6 @@ public:
                     std::cerr << "Error: Boolean flag --" << key << " does not take a value.\n";
                     std::exit(EXIT_FAILURE);
                 }
-                // Disallow default value of true since --flag would have no effect.
-                if(default_val)
-                {
-                    std::cerr << "Error: Boolean flag --" << key
-                              << " cannot have a default value of true.\n";
-                    std::exit(EXIT_FAILURE);
-                }
             }
         }
 
