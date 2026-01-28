@@ -108,7 +108,7 @@ public:
     std::string knobIdStr() const override
     {
         throwIfNotValid();
-        auto str = _shallowKnob->knob_id_str();
+        auto str = _shallowKnob->knob_id();
         return str != nullptr ? str->str() : "";
     }
 
