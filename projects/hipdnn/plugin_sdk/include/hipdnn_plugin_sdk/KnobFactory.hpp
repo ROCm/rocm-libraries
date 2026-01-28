@@ -13,26 +13,19 @@
 namespace hipdnn_plugin_sdk
 {
 
-#define DEFINE_HIPDNN_KNOB_NAMED(VAR_NAME, STRING_NAME)              \
-    static constexpr const char* VAR_NAME##_KNOB_NAME = STRING_NAME; \
-    static const int64_t VAR_NAME##_KNOB_ID                          \
-        = static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash(STRING_NAME));
-
-#define DEFINE_HIPDNN_KNOB(NAME) DEFINE_HIPDNN_KNOB_NAMED(NAME, #NAME)
-
 class KnobFactory
 {
 public:
     static flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>
         createIntKnob(flatbuffers::FlatBufferBuilder& builder,
-                      int64_t id,
                       const std::string& name,
                       const std::string& description,
                       int64_t defaultValue,
                       int64_t min,
                       int64_t max,
                       int64_t step,
-                      const std::vector<int64_t>& options)
+                      const std::vector<int64_t>& options,
+                      bool deprecated = false)
     {
         auto knobIdStr = builder.CreateString(name);
         auto descStr = builder.CreateString(description);
@@ -44,24 +37,23 @@ public:
 
         return hipdnn_data_sdk::data_objects::CreateKnob(
             builder,
-            id,
             knobIdStr,
             descStr,
             hipdnn_data_sdk::data_objects::KnobValue::IntValue,
             defaultValOffset.Union(),
             hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint,
             constraintOffset.Union(),
-            false);
+            deprecated);
     }
 
     static flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>
         createFloatKnob(flatbuffers::FlatBufferBuilder& builder,
-                        int64_t id,
                         const std::string& name,
                         const std::string& description,
                         float defaultValue,
                         float min,
-                        float max)
+                        float max,
+                        bool deprecated = false)
     {
         auto knobIdStr = builder.CreateString(name);
         auto descStr = builder.CreateString(description);
@@ -72,23 +64,22 @@ public:
 
         return hipdnn_data_sdk::data_objects::CreateKnob(
             builder,
-            id,
             knobIdStr,
             descStr,
             hipdnn_data_sdk::data_objects::KnobValue::FloatValue,
             defaultValOffset.Union(),
             hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint,
             constraintOffset.Union(),
-            false);
+            deprecated);
     }
 
     static flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>
         createStringKnob(flatbuffers::FlatBufferBuilder& builder,
-                         int64_t id,
                          const std::string& name,
                          const std::string& description,
                          const std::string& defaultValue,
-                         const std::vector<std::string>& options)
+                         const std::vector<std::string>& options,
+                         bool deprecated = false)
     {
         auto knobIdStr = builder.CreateString(name);
         auto descStr = builder.CreateString(description);
@@ -108,14 +99,13 @@ public:
 
         return hipdnn_data_sdk::data_objects::CreateKnob(
             builder,
-            id,
             knobIdStr,
             descStr,
             hipdnn_data_sdk::data_objects::KnobValue::StringValue,
             defaultValOffset.Union(),
             hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint,
             constraintOffset.Union(),
-            false);
+            deprecated);
     }
 };
 

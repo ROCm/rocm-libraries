@@ -224,6 +224,24 @@
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
       "monorepo_source_of_truth": true
+    },
+    {
+      "name": "miopen-provider",
+      "url": "ROCm/MIOpen-Provider",
+      "branch": "develop",
+      "category": "dnn-providers",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "hipblaslt-provider",
+      "url": "ROCm/hipBLASLt-Provider",
+      "branch": "develop",
+      "category": "dnn-providers",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
     }
   ]
 }

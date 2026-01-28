@@ -7,6 +7,7 @@
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
@@ -156,14 +157,14 @@ TEST(TestHipblasltEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
 
 TEST(TestHipblasltEngine, GetDetailsReturnsSerializedEngineDetails)
 {
-    HipblasltEngine engine(1);
+    HipblasltEngine engine(hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
     HipdnnEnginePluginHandle dummyHandle;
 
     hipdnnPluginConstData_t result;
     engine.getDetails(dummyHandle, result);
 
     hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(result.ptr, result.size);
-    EXPECT_EQ(engineDetails.engineId(), 1);
+    EXPECT_EQ(engineDetails.engineId(), hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
 }
 
 TEST(TestHipblasltEngine, InitializeExecutionContextInvokesFirstApplicablePlanBuilder)

@@ -10,6 +10,7 @@
 #include "BatchnormGraphUtils.hpp"
 #include "BatchnormTensorBundles.hpp"
 #include "ConvolutionGraphUtils.hpp"
+#include "MatmulGraphUtils.hpp"
 #include "PointwiseGraphUtils.hpp"
 #include "PointwiseTensorBundles.hpp"
 
@@ -202,6 +203,29 @@ public:
         CpuReferenceGraphExecutor().execute(
             flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
     }
+
+    template <typename inputType, typename ComputeType>
+    static void runMatmulTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
+                              hipdnn_data_sdk::data_objects::DataType computeDataType)
+    {
+        std::vector<int64_t> aDims = {2, 5, 3};
+        std::vector<int64_t> bDims = {2, 3, 4};
+        std::vector<int64_t> cDims = {2, 5, 4};
+        MatmulTensorBundle<inputType> tensorBundle(aDims, bDims, cDims, false, false, 1);
+
+        auto graphTuple = buildMatmulGraph(tensorBundle, inputDataType, computeDataType);
+
+        auto& graph = std::get<0>(graphTuple);
+        auto& variantPack = std::get<1>(graphTuple);
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+
+        CpuReferenceGraphExecutor().execute(
+            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+    }
 };
 
 TEST(TestCpuReferenceGraphExecutor, BatchnormFwdInferenceAllFloats)
@@ -313,6 +337,20 @@ TEST(TestCpuReferenceGraphExecutor, ConvolutionWrwAllBFloat16)
 {
     TestCpuReferenceGraphExecutor::runConvolutionWrwTest<hip_bfloat16, float>(DataType::BFLOAT16,
                                                                               DataType::FLOAT);
+}
+
+TEST(TestCpuReferenceGraphExecutor, MatmulAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runMatmulTest<float, float>(DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MatmulAllHalfs)
+{
+    TestCpuReferenceGraphExecutor::runMatmulTest<half, float>(DataType::HALF, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MatmulAllBFloat16)
+{
+    TestCpuReferenceGraphExecutor::runMatmulTest<hip_bfloat16, float>(DataType::BFLOAT16,
+                                                                      DataType::FLOAT);
 }
 
 TEST(TestCpuReferenceGraphExecutor, PointwiseBinaryAdd)

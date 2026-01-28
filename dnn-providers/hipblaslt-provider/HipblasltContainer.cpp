@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
 #include "EngineManager.hpp"
 #include "HipblasltContainer.hpp"
@@ -14,8 +15,8 @@ HipblasltContainer::HipblasltContainer()
 {
     HIPDNN_LOG_INFO("Creating HipblasltContainer");
 
-    int64_t engineId = 1;
-    auto hipblasltEngine = std::make_unique<HipblasltEngine>(engineId++);
+    auto hipblasltEngine
+        = std::make_unique<HipblasltEngine>(hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
 
     _engineManager = std::make_unique<EngineManager>();
     _engineManager->addEngine(std::move(hipblasltEngine));
