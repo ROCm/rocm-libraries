@@ -423,14 +423,17 @@ defaultBenchmarkCommonParameters = [
     {"LDSTrInst": [False]},
     {"WaveSplitK": [ False ]},
     {"MbskPrefetchMethod": [-1]},
-    {"UseCustomMainLoopSchedule": [1]},
+    {"UseCustomMainLoopSchedule": [-1]},
     {"SpaceFillingAlgo": [[]]},
     {"SFCWGM": [[[1,1],[1,1]]]},
     {"AdaptiveGemm": [0]},
     {"ExtraMiLatencyLeft": [-1]},
     {"ExtraLatencyForLR": [0]},
+    {"TailloopInNll": [False]},
     {"SwapGlobalReadOrder": [0]},
-    {"TailloopInNll": [False]}
+    {"ScheduleGROverBarrier": [-1]},
+    {"DtlPlusLdsBuf": [-1]},
+    {"MinGRIncPerMfma": [-1]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter

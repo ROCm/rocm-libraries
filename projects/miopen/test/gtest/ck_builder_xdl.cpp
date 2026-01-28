@@ -19,7 +19,7 @@ using OutLayout                            = ck::tensor_layout::convolution::NHW
 using PassThrough                          = ck::tensor_operation::element_wise::PassThrough;
 using EmptyTuple                           = ck::Tuple<>;
 static constexpr ck::index_t NumDimSpatial = 2;
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGFwdDefault =
     ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<NumDimSpatial,
                                                                   InLayout,
@@ -33,14 +33,14 @@ using DeviceOpGFwdDefault =
                                                                   PassThrough,
                                                                   PassThrough,
                                                                   PassThrough>;
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGFwdDefaultPtrs =
     ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOpGFwdDefault<DataType>>;
+        DeviceOpGFwdDefault<DataType, ComputeType>>;
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGFwdBuilderPtrs = miopen::conv::ck_builder::instance::DeviceOperationInstanceFactory<
-    DeviceOpGFwdDefault<DataType>>;
+    DeviceOpGFwdDefault<DataType, ComputeType>>;
 
 template <typename DataType>
 void CompareInstanceLists()

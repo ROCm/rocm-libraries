@@ -163,6 +163,8 @@ namespace TensileLite
 
         int nonTemporalA = 0;
         int nonTemporalB = 0;
+
+        int customMainLoopScheduling = 0;
     };
 
     struct StreamKSettings

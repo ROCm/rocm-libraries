@@ -22,7 +22,7 @@ using WeiLayout   = ck::tensor_layout::convolution::GKYXC;
 using OutLayout   = ck::tensor_layout::convolution::NHWGK;
 using PassThrough = ck::tensor_operation::element_wise::PassThrough;
 using EmptyTuple  = ck::Tuple<>;
-template <typename DataType>
+template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGFwdDefault =
     ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<2,
                                                                   InLayout,
@@ -36,25 +36,24 @@ using DeviceOpGFwdDefault =
                                                                   PassThrough,
                                                                   PassThrough,
                                                                   PassThrough,
-                                                                  DataType,
-                                                                  DataType>;
+                                                                  ComputeType>;
 
 // Passthrough template for DataTypes that haven't been explicitly specialized yet - defer to the CK
 // kernels in these cases
-template <typename DataType>
-struct DeviceOperationInstanceFactory<DeviceOpGFwdDefault<DataType>>
+template <typename DataType, typename ComputeType>
+struct DeviceOperationInstanceFactory<DeviceOpGFwdDefault<DataType, ComputeType>>
 {
-    static std::vector<std::unique_ptr<DeviceOpGFwdDefault<DataType>>> GetInstances()
+    static std::vector<std::unique_ptr<DeviceOpGFwdDefault<DataType, ComputeType>>> GetInstances()
     {
         return ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-            DeviceOpGFwdDefault<DataType>>::GetInstances();
+            DeviceOpGFwdDefault<DataType, ComputeType>>::GetInstances();
     }
 };
 
 template <>
-struct DeviceOperationInstanceFactory<DeviceOpGFwdDefault<float>>
+struct DeviceOperationInstanceFactory<DeviceOpGFwdDefault<float, float>>
 {
-    static std::vector<std::unique_ptr<DeviceOpGFwdDefault<float>>> GetInstances();
+    static std::vector<std::unique_ptr<DeviceOpGFwdDefault<float, float>>> GetInstances();
 };
 } // namespace instance
 } // namespace ck_builder
