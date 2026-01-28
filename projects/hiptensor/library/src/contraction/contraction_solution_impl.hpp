@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -84,26 +84,26 @@ namespace hiptensor
         {
         }
 
-        bool initArgs(void const*                             alpha,
-                      void const*                             A,
-                      void const*                             B,
-                      void const*                             beta,
-                      void const*                             D,
-                      void*                                   E,
-                      std::vector<std::size_t>                a_ms_ks_lengths,
-                      std::vector<std::size_t>                a_ms_ks_strides,
-                      std::vector<int32_t>                    a_ms_ks_modes,
-                      std::vector<std::size_t>                b_ns_ks_lengths,
-                      std::vector<std::size_t>                b_ns_ks_strides,
-                      std::vector<int32_t>                    b_ns_ks_modes,
-                      std::vector<std::size_t>                ds_ms_ns_lengths,
-                      std::vector<std::size_t>                ds_ms_ns_strides,
-                      std::vector<int32_t>                    ds_ms_ns_modes,
-                      std::vector<std::size_t>                e_ms_ns_lengths,
-                      std::vector<std::size_t>                e_ms_ns_strides,
-                      std::vector<int32_t>                    e_ms_ns_modes,
-                      std::vector<hiptensorOperator_t> const& operators,
-                      void*                                   workspacePtr) override
+        bool initArgs(void const*                alpha,
+                      void const*                A,
+                      void const*                B,
+                      void const*                beta,
+                      void const*                D,
+                      void*                      E,
+                      std::vector<std::size_t>   a_ms_ks_lengths,
+                      std::vector<std::size_t>   a_ms_ks_strides,
+                      std::vector<int32_t>       a_ms_ks_modes,
+                      std::vector<std::size_t>   b_ns_ks_lengths,
+                      std::vector<std::size_t>   b_ns_ks_strides,
+                      std::vector<int32_t>       b_ns_ks_modes,
+                      std::vector<std::size_t>   ds_ms_ns_lengths,
+                      std::vector<std::size_t>   ds_ms_ns_strides,
+                      std::vector<int32_t>       ds_ms_ns_modes,
+                      std::vector<std::size_t>   e_ms_ns_lengths,
+                      std::vector<std::size_t>   e_ms_ns_strides,
+                      std::vector<int32_t>       e_ms_ns_modes,
+                      ContractionUnaryOps const& unaryOps,
+                      void*                      workspacePtr) override
         {
             using Base   = ContractionSolution;
             using Traits = MetaTraits<DeviceOp>;
@@ -207,11 +207,11 @@ namespace hiptensor
                     std::array<std::vector<ck::index_t>, 1>{toCKVec(normal_ds_ms_ns_strides)},
                     toCKVec(normal_e_ms_ns_lengths),
                     toCKVec(normal_e_ms_ns_strides),
-                    typename Traits::AOp{operators[0]},
-                    typename Traits::BOp{operators[1]},
+                    typename Traits::AOp{unaryOps.opA},
+                    typename Traits::BOp{unaryOps.opB},
                     typename Traits::CDEOp{
                         ck::tensor_operation::element_wise::Bilinear{alphaF, betaF},
-                        ck::tensor_operation::element_wise::HiptensorUnaryOp{operators[2]}}));
+                        ck::tensor_operation::element_wise::HiptensorUnaryOp{unaryOps.opC}}));
             }
 
             // Attach the workspace pointer
@@ -270,26 +270,26 @@ namespace hiptensor
         {
         }
 
-        bool initArgs(void const*                             alpha,
-                      void const*                             A,
-                      void const*                             B,
-                      void const*                             beta,
-                      void const*                             D,
-                      void*                                   E,
-                      std::vector<std::size_t>                a_ms_ks_lengths,
-                      std::vector<std::size_t>                a_ms_ks_strides,
-                      std::vector<int32_t>                    a_ms_ks_modes,
-                      std::vector<std::size_t>                b_ns_ks_lengths,
-                      std::vector<std::size_t>                b_ns_ks_strides,
-                      std::vector<int32_t>                    b_ns_ks_modes,
-                      std::vector<std::size_t>                ds_ms_ns_lengths,
-                      std::vector<std::size_t>                ds_ms_ns_strides,
-                      std::vector<int32_t>                    ds_ms_ns_modes,
-                      std::vector<std::size_t>                e_ms_ns_lengths,
-                      std::vector<std::size_t>                e_ms_ns_strides,
-                      std::vector<int32_t>                    e_ms_ns_modes,
-                      std::vector<hiptensorOperator_t> const& operators,
-                      void*                                   workspacePtr) override
+        bool initArgs(void const*                alpha,
+                      void const*                A,
+                      void const*                B,
+                      void const*                beta,
+                      void const*                D,
+                      void*                      E,
+                      std::vector<std::size_t>   a_ms_ks_lengths,
+                      std::vector<std::size_t>   a_ms_ks_strides,
+                      std::vector<int32_t>       a_ms_ks_modes,
+                      std::vector<std::size_t>   b_ns_ks_lengths,
+                      std::vector<std::size_t>   b_ns_ks_strides,
+                      std::vector<int32_t>       b_ns_ks_modes,
+                      std::vector<std::size_t>   ds_ms_ns_lengths,
+                      std::vector<std::size_t>   ds_ms_ns_strides,
+                      std::vector<int32_t>       ds_ms_ns_modes,
+                      std::vector<std::size_t>   e_ms_ns_lengths,
+                      std::vector<std::size_t>   e_ms_ns_strides,
+                      std::vector<int32_t>       e_ms_ns_modes,
+                      ContractionUnaryOps const& unaryOps,
+                      void*                      workspacePtr) override
         {
             using Base   = ContractionSolution;
             using Traits = MetaTraits<DeviceOp>;
@@ -384,8 +384,8 @@ namespace hiptensor
                                                   std::array<std::vector<ck::index_t>, 0>{},
                                                   toCKVec(normal_e_ms_ns_lengths),
                                                   toCKVec(normal_e_ms_ns_strides),
-                                                  typename Traits::AOp{operators[0]},
-                                                  typename Traits::BOp{operators[1]},
+                                                  typename Traits::AOp{unaryOps.opA},
+                                                  typename Traits::BOp{unaryOps.opB},
                                                   typename Traits::CDEOp(alphaF)));
             }
 

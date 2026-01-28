@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,45 +32,51 @@
 
 #include "hiptensor_ck_types.hpp"
 
-namespace ck {
-namespace tensor_operation {
-namespace device {
-namespace instance {
-
-// A[m0, m1, k0, k1] * B[n0, n1, k0, k1] + D[m0, m1, n0, n1] = E[m0, m1, n0, n1]
-// m/k/n/n are the fast changing dimension for A/B/D/E
-using device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_mkn_instance =
-    device_contraction_mk_instance<BF16,
-                                   BF16,
-                                   F32,
-                                   BF16,
-                                   Empty_Tuple,
-                                   BF16,
-                                   F32,
-                                   hiptensor::CkHiptensorUnaryOp,
-                                   hiptensor::CkHiptensorUnaryOp,
-                                   Scale,
-                                   6>;
-
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_mkn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           BF16,
-                                                           BF16,
-                                                           Empty_Tuple,
-                                                           BF16,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F32>>>& instances)
+namespace ck
 {
-    add_device_operation_instances(
-        instances,
-        device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_mkn_instance{});
-}
+    namespace tensor_operation
+    {
+        namespace device
+        {
+            namespace instance
+            {
 
-} // namespace instance
-} // namespace device
-} // namespace tensor_operation
+                // A[m0, m1, k0, k1] * B[n0, n1, k0, k1] + D[m0, m1, n0, n1] = E[m0, m1, n0, n1]
+                // m/k/n/n are the fast changing dimension for A/B/D/E
+                using device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_mkn_instance
+                    = device_contraction_mk_instance<BF16,
+                                                     BF16,
+                                                     F32,
+                                                     BF16,
+                                                     Empty_Tuple,
+                                                     BF16,
+                                                     F32,
+                                                     hiptensor::CkHiptensorUnaryOp,
+                                                     hiptensor::CkHiptensorUnaryOp,
+                                                     Scale,
+                                                     6>;
+
+                void
+                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_mkn_instance(
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       BF16,
+                                                       BF16,
+                                                       Empty_Tuple,
+                                                       BF16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F32>>>& instances)
+                {
+                    add_device_operation_instances(
+                        instances,
+                        device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_mkn_instance{});
+                }
+
+            } // namespace instance
+        } // namespace device
+    } // namespace tensor_operation
 } // namespace ck
