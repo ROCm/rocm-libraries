@@ -137,6 +137,12 @@ void testing_gtsv2_strided_batch(Arguments argus)
     std::vector<T> hdu(batch_stride * batch_count, make_DataType<T>(1));
     std::vector<T> hx(batch_stride * batch_count, make_DataType<T>(3));
 
+    for(int i = 0; i < batch_count; i++)
+    {
+        hdl[batch_stride * i + 0]     = make_DataType<T>(0);
+        hdu[batch_stride * i + m - 1] = make_DataType<T>(0);
+    }
+
     std::vector<T> hx_original = hx;
 
     // allocate memory on device

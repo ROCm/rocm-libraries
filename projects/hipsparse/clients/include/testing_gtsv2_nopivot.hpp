@@ -127,6 +127,9 @@ void testing_gtsv2_nopivot(Arguments argus)
     std::vector<T> hdu(m, make_DataType<T>(1));
     std::vector<T> hB(ldb * n, make_DataType<T>(3));
 
+    hdl[0]     = make_DataType<T>(0);
+    hdu[m - 1] = make_DataType<T>(0);
+
     std::vector<T> hB_original = hB;
 
     // allocate memory on device
