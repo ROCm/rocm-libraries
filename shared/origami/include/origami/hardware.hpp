@@ -31,6 +31,7 @@
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 
@@ -526,6 +527,30 @@ class hardware_t {
                                            size_t MT_N,
                                            size_t MT_K,
                                            data_type_t mi_input_type) const;
+
+  /**
+   * @brief Get valid matrix instruction dimensions for a given datatype.
+   *
+   * Returns a list of valid matrix instruction dimensions (M, N, K) for
+   * the specified datatype on the current hardware architecture. Multiple
+   * dimensions may be available for the same datatype.
+   *
+   * @param mi_input_type Input data type for the matrix instruction
+   * @return std::vector<dim3_t> List of valid dimensions for the datatype
+   */
+  std::vector<dim3_t> get_valid_matrix_instructions(data_type_t mi_input_type) const;
+
+  /**
+   * @brief Get recommended matrix instruction dimensions for a given datatype.
+   *
+   * Returns the single best matrix instruction dimension for the specified datatype
+   * based on throughput (M*N*K/latency). If multiple instructions are available,
+   * returns the one with the highest throughput.
+   *
+   * @param mi_input_type Input data type for the matrix instruction
+   * @return dim3_t Recommended dimension for the datatype. Returns {0,0,0} if not supported.
+   */
+  dim3_t get_recommended_matrix_instruction(data_type_t mi_input_type) const;
 
  private:
   /**
