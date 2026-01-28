@@ -47,8 +47,6 @@ __version.json__
 }
 ```
 
-For libraries with multiple components such as the plugin_sdk, multiple component versions may be specified in the same file.
-
 __CMakeLists.txt__
 ```cmake
 # Read version from json
@@ -137,7 +135,7 @@ In the proposed design, the following table lists the components of hipDNN, and 
 | schema [^1] | | Yes |
 | data_sdk | - schema | No |
 | plugin_sdk | - data_sdk | No |
-| backend | - data_sdk<br>- data_sdk<br>- plugin_sdk<br> | Yes |
+| backend | - data_sdk<br>- plugin_sdk<br> | Yes |
 | frontend | - backend<br>- data_sdk<br>- schema | No |
 [^1]: Schema refers to both serialized formats of flatbuffers and json.
 
@@ -174,12 +172,12 @@ In the future, when the library is updated to use dlopen to link to the backend,
 
 When new functionality is added dependent on a backend feature that was added since the last major release (or the moment when we commit to backwards compatibility), there must dynamic guards placed to ensure that the backend version is new enough to support that feature. The `IHipdnnBackend` interface from `frontend/include/HipdnnBackendInterface.hpp` is a good location to place these guards when appropriate.
 
-When a function is called that is not supported by the linked backend version, the frontend should fail gracefully and either throw an appropriate exception or log an error.
+When a function is called that is not supported by the linked backend version, the frontend should fail gracefully, return the appropriate error status and log the event as needed.
 
 #### 4.6.4 Plugins
-Plugins must have a function that reports the plugin version they support. The plugin is required to have implemented every function in its corresponding plugin API for this version, and tests will be put in place to verify that every function has a definition. Note, the supported version may be different from the version they have been compiled with.
+Plugins must have a function that reports the plugin version they support. The plugin is required to have implemented every function in its corresponding plugin API for this version, and tests will be put in place to verify that every function has a definition. Note, the reported API version doesn't need to match the header they were compiled against. It's expected that plugin's will report the API version they have implemented.
 
-Plugins are responsible for failing gracefully on unsupported schemas. Typically this will involve logging a warning, and registering the plugin as not applicable.
+Plugins are responsible for failing gracefully on unsupported schemas. Typically this will involve logging a warning, and returning false in the `isApplicable` API.
 
 ### 4.7 Compatibility summary
 
@@ -256,7 +254,7 @@ project(<component> VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH})
 ### 7.1 Phase 1 (Prerequisites)
 - Make hipdnn_backend agnostic to the schema version
 	- Ensure that it doesn't fail with an older or newer schema
-- Separate hipDNN into multiple projects
+- Separate hipDNN into multiple cmake projects
 	- If a version is required at the point of release, set it to 1.0.0
 - Ensure flatbuffer and json deserializations are robust to new parameters, unions, enums, etc...
 	- This impacts plugins, and the data_sdk
