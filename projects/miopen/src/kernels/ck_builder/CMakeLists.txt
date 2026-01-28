@@ -11,6 +11,7 @@ add_library(ck_builder STATIC
     factories/grouped_conv_2d_fwd_multiple_abd_f32_mem_intra.cpp
     factories/grouped_conv_2d_fwd_multiple_abd_f32_mem_inter.cpp
 )
+set_target_properties(ck_builder PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_definitions(ck_builder PRIVATE -DCK_EXPERIMENTAL_BUILDER)
 target_include_directories(ck_builder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 find_package(composable_kernel 1.0.0 COMPONENTS device_conv_operations)

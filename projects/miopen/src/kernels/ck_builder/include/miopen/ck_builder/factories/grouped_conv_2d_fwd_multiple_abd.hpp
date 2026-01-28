@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+
 #include <miopen/ck_builder/factories/base.hpp>
 
 #include "ck/ck.hpp"
@@ -38,10 +39,22 @@ using DeviceOpGFwdDefault =
                                                                   DataType,
                                                                   DataType>;
 
+// Passthrough template for DataTypes that haven't been explicitly specialized yet - defer to the CK
+// kernels in these cases
+template <typename DataType>
+struct DeviceOperationInstanceFactory<DeviceOpGFwdDefault<DataType>>
+{
+    static std::vector<std::unique_ptr<DeviceOpGFwdDefault<DataType>>> GetInstances()
+    {
+        return ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+            DeviceOpGFwdDefault<DataType>>::GetInstances();
+    }
+};
+
 template <>
 struct DeviceOperationInstanceFactory<DeviceOpGFwdDefault<float>>
 {
-    static std::vector<BaseOperatorPtr> GetInstances();
+    static std::vector<std::unique_ptr<DeviceOpGFwdDefault<float>>> GetInstances();
 };
 } // namespace instance
 } // namespace ck_builder

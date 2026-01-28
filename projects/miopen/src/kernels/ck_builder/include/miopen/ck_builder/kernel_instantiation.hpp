@@ -13,11 +13,11 @@ namespace instance {
 
 namespace ckb = ck_tile::builder;
 
-// Takes a kernel descriptor and creates a kernel instance, adding it to a collection.
-// The descriptor contains the signature and algorithm for the convolution kernel.
+// Takes a kernel descriptor and creates a kernel instance using CK Builder, adding it to a
+// collection. The descriptor contains the signature and algorithm for the convolution kernel.
 // Performs compile-time checks to ensure the Builder type is valid before instantiation.
-template <auto KernelDescriptor>
-constexpr void instantiate_kernel(std::vector<BaseOperatorPtr>& kernels)
+template <auto KernelDescriptor, typename DeviceOp>
+constexpr void instantiate_kernel(std::vector<std::unique_ptr<DeviceOp>>& kernels)
 {
     using Builder = ckb::ConvBuilder<KernelDescriptor.signature, KernelDescriptor.algorithm>;
     do_builder_checks<Builder>();
@@ -27,19 +27,19 @@ constexpr void instantiate_kernel(std::vector<BaseOperatorPtr>& kernels)
 
 // Helper function that instantiates multiple kernels using variadic templates.
 // Expands the parameter pack to call instantiate_kernel for each value.
-template <typename T, T... values>
-constexpr void build_kernels_helper(std::vector<BaseOperatorPtr>& kernels)
+template <typename DeviceOp, typename T, T... values>
+constexpr void build_kernels_helper(std::vector<std::unique_ptr<DeviceOp>>& kernels)
 {
-    // std::array<BaseOperatorPtr, sizeof...(values)> result{};
     ((instantiate_kernel<values>(kernels)), ...);
 }
 
 // Implementation detail that expands an array into individual kernel instantiations.
 // Uses index_sequence to unpack array elements at compile-time.
-template <typename T, std::size_t N, std::array<T, N> arr, std::size_t... I>
-constexpr void build_kernels_impl(std::vector<BaseOperatorPtr>& kernels, std::index_sequence<I...>)
+template <typename DeviceOp, typename T, std::size_t N, std::array<T, N> arr, std::size_t... I>
+constexpr void build_kernels_impl(std::vector<std::unique_ptr<DeviceOp>>& kernels,
+                                  std::index_sequence<I...>)
 {
-    build_kernels_helper<T, arr[I]...>(kernels);
+    build_kernels_helper<DeviceOp, T, arr[I]...>(kernels);
 }
 
 // Type trait to extract array properties (element type and size).
@@ -57,12 +57,12 @@ struct array_traits<std::array<T, N>>
 // Main entry point that builds all kernels from an array of descriptors.
 // Takes a compile-time array of kernel descriptors and instantiates each one.
 // This is the primary function used by factory implementations.
-template <auto arr>
-constexpr void build_kernels(std::vector<BaseOperatorPtr>& kernels)
+template <auto arr, typename DeviceOp>
+constexpr void build_kernels(std::vector<std::unique_ptr<DeviceOp>>& kernels)
 {
     using T                 = typename array_traits<decltype(arr)>::value_type;
     constexpr std::size_t N = array_traits<decltype(arr)>::size;
-    build_kernels_impl<T, N, arr>(kernels, std::make_index_sequence<N>{});
+    build_kernels_impl<DeviceOp, T, N, arr>(kernels, std::make_index_sequence<N>{});
 }
 
 // Implementation detail for concatenating two arrays at compile-time.

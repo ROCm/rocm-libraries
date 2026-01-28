@@ -36,6 +36,9 @@
 #include <miopen/solver/ck_utility_common.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#if CK_EXPERIMENTAL_BUILDER
+#include <miopen/ck_builder/factories/grouped_conv_2d_fwd_multiple_abd.hpp>
+#endif
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS)
@@ -63,9 +66,15 @@ using DeviceOpGFwd = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleA
     ck::tensor_operation::element_wise::PassThrough,
     ck::tensor_operation::element_wise::PassThrough>;
 
+#ifdef CK_EXPERIMENTAL_BUILDER
+template <typename DataType>
+using DeviceOpGFwdPtrs =
+    miopen::conv::ck_builder::instance::DeviceOperationInstanceFactory<DeviceOpGFwd<DataType>>;
+#else
 template <typename DataType>
 using DeviceOpGFwdPtrs =
     ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<DeviceOpGFwd<DataType>>;
+#endif
 
 namespace {
 struct CKArgs
@@ -378,6 +387,7 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     if(IsModelApplicable(ctx, problem))
     {
+        std::cout << "###Is model applicable?" << std::endl;
         if(problem.GetInDataType() == miopenFloat)
         {
             if(RunParameterPredictionModel<float>(ctx, problem))

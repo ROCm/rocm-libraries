@@ -15,9 +15,7 @@
 
 #include <miopen/logger.hpp>
 
-namespace ckb         = ck_tile::builder;
-using BaseOperator    = ck::tensor_operation::device::BaseOperator;
-using BaseOperatorPtr = std::unique_ptr<BaseOperator>;
+namespace ckb = ck_tile::builder;
 
 void print_instance_strings(std::vector<std::string>& instance_strings);
 

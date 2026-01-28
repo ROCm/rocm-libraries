@@ -90,7 +90,8 @@ create_device_grouped_conv2d_fwd_xdl_merged_groups_nhwgc_gkyxc_nhwgk_f32_instanc
     return instanceData;
 }
 
-void add_f32_merged_groups_instances(std::vector<BaseOperatorPtr>& instances)
+void add_f32_merged_groups_instances(
+    std::vector<std::unique_ptr<DeviceOpGFwdDefault<float>>>& instances)
 {
     constexpr auto kernelData =
         create_device_grouped_conv2d_fwd_xdl_merged_groups_nhwgc_gkyxc_nhwgk_f32_instance_data();

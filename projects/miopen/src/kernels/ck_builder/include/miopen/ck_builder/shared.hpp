@@ -13,8 +13,6 @@ namespace miopen {
 namespace conv {
 namespace ck_builder {
 namespace instance {
-using BaseOperator    = ck::tensor_operation::device::BaseOperator;
-using BaseOperatorPtr = std::unique_ptr<BaseOperator>;
 
 template <typename Builder>
 constexpr void do_builder_checks()

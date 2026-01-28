@@ -173,7 +173,8 @@ constexpr auto create_device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_f32_mem_in
     return defaultInstanceData;
 }
 
-void add_f32_mem_inter_instances(std::vector<BaseOperatorPtr>& instances)
+void add_f32_mem_inter_instances(
+    std::vector<std::unique_ptr<DeviceOpGFwdDefault<float>>>& instances)
 {
     constexpr auto kernelData =
         create_device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_f32_mem_inter_instance_data();
