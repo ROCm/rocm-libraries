@@ -330,6 +330,10 @@ namespace rocRoller
 
             WaitCount retval = computeImplicitWaitCount(inst, explanation);
 
+            // No wait required before LDS reads as the wait happens before LDS barriers
+            if(GPUInstructionInfo::isLDSRead(inst.getOpCode()))
+                return retval.getAsSaturatedWaitCount(architecture);
+
             if(inst.getOpCode().size() > 0 && inst.hasRegisters())
             {
                 for(int i = 0; i < static_cast<int>(GPUWaitQueue::Count); i++)
