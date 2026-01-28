@@ -30,7 +30,8 @@ namespace rocsparse
 {
     typedef enum csrmv_alg_
     {
-        csrmv_alg_rowsplit = 0,
+        csrmv_alg_default = 0,
+        csrmv_alg_rowsplit,
         csrmv_alg_adaptive,
         csrmv_alg_lrb,
         csrmv_alg_nnzsplit

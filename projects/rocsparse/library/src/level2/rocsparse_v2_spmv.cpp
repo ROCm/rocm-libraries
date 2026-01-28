@@ -712,8 +712,9 @@ namespace rocsparse
             case rocsparse_format_csr:
             {
                 rocsparse::csrmv_alg alg_csrmv;
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmv_alg2csrmv_alg(
-                    alg, rocsparse_format_csr, operation, alg_csrmv)));
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmv_alg2csrmv_alg(alg, alg_csrmv)));
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrmv_alg_default2csrmv_alg(
+                    alg_csrmv, rocsparse_format_csr, operation)));
 
                 rocsparse_csrmv_info csrmv_info = spmv_descr->get_csrmv_info();
                 if(csrmv_info == nullptr)
@@ -741,8 +742,9 @@ namespace rocsparse
             case rocsparse_format_csc:
             {
                 rocsparse::csrmv_alg alg_csrmv;
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmv_alg2csrmv_alg(
-                    alg, rocsparse_format_csc, operation, alg_csrmv)));
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmv_alg2csrmv_alg(alg, alg_csrmv)));
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrmv_alg_default2csrmv_alg(
+                    alg_csrmv, rocsparse_format_csc, operation)));
                 rocsparse_cscmv_info cscmv_info = spmv_descr->get_cscmv_info();
                 if(cscmv_info == nullptr)
                 {
@@ -918,8 +920,9 @@ namespace rocsparse
             case rocsparse_format_csr:
             {
                 rocsparse::csrmv_alg alg_csrmv;
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmv_alg2csrmv_alg(
-                    alg, rocsparse_format_csr, operation, alg_csrmv)));
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmv_alg2csrmv_alg(alg, alg_csrmv)));
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrmv_alg_default2csrmv_alg(
+                    alg_csrmv, rocsparse_format_csr, operation)));
 
                 // Set the temporary spmv descriptor in handle to allow template functions to access pre-extracted arrays
                 handle->temp_spmv_descr = spmv_descr;
@@ -964,8 +967,9 @@ namespace rocsparse
             case rocsparse_format_csc:
             {
                 rocsparse::csrmv_alg alg_csrmv;
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmv_alg2csrmv_alg(
-                    alg, rocsparse_format_csc, operation, alg_csrmv)));
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmv_alg2csrmv_alg(alg, alg_csrmv)));
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrmv_alg_default2csrmv_alg(
+                    alg_csrmv, rocsparse_format_csc, operation)));
 
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::cscmv(handle,
                                                             operation,
