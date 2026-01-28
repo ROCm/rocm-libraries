@@ -81,7 +81,7 @@ void compare_instance_vectors(std::vector<std::unique_ptr<DeviceOpA>>& instances
 
     if(in_both.size() > 0)
     {
-        MIOPEN_LOG_I("There are " << in_both.size() << " kernels in both: ");
+        MIOPEN_LOG_I("There are " << in_both.size() << " kernels in both");
         print_instance_strings(in_both);
     }
 }
