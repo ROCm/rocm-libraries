@@ -20,6 +20,7 @@ namespace miopen_legacy_plugin
 
 namespace
 {
+
 auto createBenchmarkingKnob(flatbuffers::FlatBufferBuilder& builder)
 {
     return hipdnn_plugin_sdk::KnobFactory::createIntKnob(
@@ -93,7 +94,57 @@ auto createWorkspaceSizeLimitKnob(flatbuffers::FlatBufferBuilder& builder,
         1,
         {});
 }
-} // unnamed namespace
+
+void handleBenchmarkingKnobSetting(const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
+                                    HipdnnEnginePluginExecutionContext& executionContext)
+{
+    if(engineConfig.hasKnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME))
+    {
+        const auto& knobSetting
+            = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
+        if(knobSetting.valueType() == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
+        {
+            auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
+            executionContext.setBenchmarkingEnabled(value != 0);
+        }
+        else
+        {
+            HIPDNN_LOG_WARN("Benchmarking knob setting value is not an integer. Type: {}",
+                           hipdnn_data_sdk::data_objects::EnumNameKnobValue(
+                               knobSetting.valueType()));
+        }
+    }
+}
+
+void handleWorkspaceSizeLimitKnobSetting(const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
+                                          HipdnnEnginePluginExecutionContext& executionContext)
+{
+    if(engineConfig.hasKnobSetting(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME))
+    {
+        const auto& knobSetting
+            = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME);
+        if(knobSetting.valueType() == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
+        {
+            auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
+            if(value >= 0)
+            {
+                executionContext.setWorkspaceSizeLimit(static_cast<size_t>(value));
+            }
+            else
+            {
+                HIPDNN_LOG_WARN("Invalid workspace size limit value: {}. Must be >= 0", value);
+            }
+        }
+        else
+        {
+            HIPDNN_LOG_WARN("Workspace size limit knob setting value is not an integer. Type: {}",
+                           hipdnn_data_sdk::data_objects::EnumNameKnobValue(
+                               knobSetting.valueType()));
+        }
+    }
+}
+
+} // namespace
 
 MiopenEngine::MiopenEngine(int64_t id)
     : _id(id)
@@ -165,46 +216,8 @@ void MiopenEngine::initializeExecutionContext(
 {
     if(engineConfig.isValid())
     {
-        if(engineConfig.hasKnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME))
-        {
-            const auto& knobSetting
-                = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
-            if(knobSetting.valueType() == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
-            {
-                auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
-                executionContext.setBenchmarkingEnabled(value != 0);
-            }
-            else
-            {
-                HIPDNN_LOG_WARN(
-                    "Benchmarking knob setting value is not an integer. Type: {}",
-                    hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
-            }
-        }
-
-        if(engineConfig.hasKnobSetting(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME))
-        {
-            const auto& knobSetting
-                = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME);
-            if(knobSetting.valueType() == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
-            {
-                auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
-                if(value >= 0)
-                {
-                    executionContext.setWorkspaceSizeLimit(static_cast<size_t>(value));
-                }
-                else
-                {
-                    HIPDNN_LOG_WARN("Invalid workspace size limit value: {}. Must be >= 0", value);
-                }
-            }
-            else
-            {
-                HIPDNN_LOG_WARN(
-                    "Workspace size limit knob setting value is not an integer. Type: {}",
-                    hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
-            }
-        }
+        handleBenchmarkingKnobSetting(engineConfig, executionContext);
+        handleWorkspaceSizeLimitKnobSetting(engineConfig, executionContext);
     }
     else
     {
