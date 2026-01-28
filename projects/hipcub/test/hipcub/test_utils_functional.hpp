@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,8 @@ namespace test_utils
 struct less
 {
     template<typename T>
-    HIPCUB_HOST_DEVICE constexpr bool operator()(const T& a, const T& b) const
+    HIPCUB_HOST_DEVICE
+    constexpr bool operator()(const T& a, const T& b) const
     {
         return a < b;
     }
@@ -44,7 +45,8 @@ struct less
 struct less_equal
 {
     template<typename T>
-    HIPCUB_HOST_DEVICE constexpr bool operator()(const T& a, const T& b) const
+    HIPCUB_HOST_DEVICE
+    constexpr bool operator()(const T& a, const T& b) const
     {
         return a <= b;
     }
@@ -53,7 +55,8 @@ struct less_equal
 struct greater
 {
     template<typename T>
-    HIPCUB_HOST_DEVICE constexpr bool operator()(const T& a, const T& b) const
+    HIPCUB_HOST_DEVICE
+    constexpr bool operator()(const T& a, const T& b) const
     {
         return a > b;
     }
@@ -62,7 +65,8 @@ struct greater
 struct greater_equal
 {
     template<typename T>
-    HIPCUB_HOST_DEVICE constexpr bool operator()(const T& a, const T& b) const
+    HIPCUB_HOST_DEVICE
+    constexpr bool operator()(const T& a, const T& b) const
     {
         return a >= b;
     }
@@ -71,7 +75,8 @@ struct greater_equal
 struct plus
 {
     template<class T>
-    HIPCUB_HOST_DEVICE inline constexpr T operator()(const T& a, const T& b) const
+    HIPCUB_HOST_DEVICE
+    inline constexpr T operator()(const T& a, const T& b) const
     {
         return a + b;
     }
@@ -80,7 +85,8 @@ struct plus
 struct minus
 {
     template<class T>
-    HIPCUB_HOST_DEVICE inline constexpr T operator()(const T& a, const T& b) const
+    HIPCUB_HOST_DEVICE
+    inline constexpr T operator()(const T& a, const T& b) const
     {
         return a - b;
     }
@@ -89,9 +95,20 @@ struct minus
 struct multiplies
 {
     template<class T>
-    HIPCUB_HOST_DEVICE inline constexpr T operator()(const T& a, const T& b) const
+    HIPCUB_HOST_DEVICE
+    inline constexpr T operator()(const T& a, const T& b) const
     {
         return a * b;
+    }
+};
+
+struct divides
+{
+    template<class A, class B>
+        HIPCUB_HOST_DEVICE
+    inline constexpr auto operator()(const A& a, const B& b) const -> decltype(a / b)
+    {
+        return a / b;
     }
 };
 
