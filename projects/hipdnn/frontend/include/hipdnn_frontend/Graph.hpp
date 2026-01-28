@@ -2,6 +2,10 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
+#include <HipdnnBackendFlatbufferData.h>
+#include <hipdnn_backend.h>
+#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_frontend/Knob.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
@@ -110,7 +114,10 @@ private:
         return {ErrorCode::OK, ""};
     }
 
-    Error initializeEngineConfig()
+    Error
+        getEngineConfigs(std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>>& engineConfigs,
+                         std::vector<int64_t>& engineIds,
+                         bool getAll)
     {
         int64_t availableEngineCount = 0;
         RETURN_ON_BACKEND_FAILURE(
@@ -130,8 +137,7 @@ private:
 
         // Get only top hit if preferred engine id isn't set.
         // Otherwise get all available engine configs to search for preferred id.
-        int64_t requiredCount = _preferredEngineId.has_value() ? availableEngineCount : 1;
-        std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>> engineConfigs;
+        int64_t requiredCount = getAll ? availableEngineCount : 1;
         std::vector<hipdnnBackendDescriptor_t> engineConfigsShallow;
         for(size_t i = 0; i < static_cast<size_t>(requiredCount); ++i)
         {
@@ -164,7 +170,7 @@ private:
         }
 
         // Finalize and get ids for engine configs
-        std::vector<int64_t> engineIds(static_cast<size_t>(count), -1);
+        engineIds.resize(static_cast<size_t>(count), -1);
         for(size_t i = 0; i < static_cast<size_t>(count); ++i)
         {
             auto engineConfigDesc = engineConfigsShallow[i];
@@ -194,13 +200,23 @@ private:
                 "Failed to get engine id from engine descriptor.");
         }
 
+        return {ErrorCode::OK, ""};
+    }
+
+    Error initializeEngineConfig()
+    {
+        std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>> engineConfigs;
+        std::vector<int64_t> engineIds;
+        Error status = getEngineConfigs(engineConfigs, engineIds, _preferredEngineId.has_value());
+        HIPDNN_CHECK_ERROR(status);
+
         // Select engine config based on preferred ID or use first available
         size_t selectedIndex = 0;
         if(_preferredEngineId.has_value())
         {
             bool found = false;
 
-            for(size_t i = 0; i < static_cast<size_t>(count); ++i)
+            for(size_t i = 0; i < engineIds.size(); ++i)
             {
 
                 if(engineIds[i] == _preferredEngineId.value())
@@ -221,6 +237,49 @@ private:
 
         HIPDNN_FE_LOG_INFO("Selected engine id {} for execution plan.", engineIds[selectedIndex]);
         _engineConfigDesc = std::move(engineConfigs[selectedIndex]);
+
+        return {ErrorCode::OK, ""};
+    }
+
+    Error initializeEngineConfig(int64_t engineId)
+    {
+        auto engineDesc
+            = std::make_unique<ScopedHipdnnBackendDescriptor>(HIPDNN_BACKEND_ENGINE_DESCRIPTOR);
+
+        RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendSetAttribute(engineDesc->get(),
+                                                 HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
+                                                 HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                 1,
+                                                 &_graphDesc->get()),
+            "Failed to set operation graph on the engine descriptor.");
+
+        RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendSetAttribute(engineDesc->get(),
+                                                 HIPDNN_ATTR_ENGINE_GLOBAL_INDEX,
+                                                 HIPDNN_TYPE_INT64,
+                                                 1,
+                                                 &engineId),
+            "Failed to set engine id on the engine descriptor.");
+
+        RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineDesc->get()),
+                                  "Failed to finalize engine descriptor");
+
+        auto engineConfigDesc
+            = std::make_unique<ScopedHipdnnBackendDescriptor>(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
+
+        RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendSetAttribute(engineConfigDesc->get(),
+                                                 HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                                 HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                 1,
+                                                 &engineDesc->get()),
+            "Failed to set engine on the engine config descriptor.");
+
+        RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineConfigDesc->get()),
+                                  "Failed to finalize engine config descriptor");
+
+        _engineConfigDesc = std::move(engineConfigDesc);
 
         return {ErrorCode::OK, ""};
     }
@@ -777,6 +836,140 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    // Get knobs for a specific engine
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error get_knobs_for_engine(int64_t engineId, std::vector<Knob>& knobs) const
+    {
+        if(!_graphDesc || !_graphDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Graph has not been built, build the operation graph first. Cannot create "
+                    "execution plan."};
+        }
+
+        auto engineDesc
+            = std::make_unique<ScopedHipdnnBackendDescriptor>(HIPDNN_BACKEND_ENGINE_DESCRIPTOR);
+
+        RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendSetAttribute(engineDesc->get(),
+                                                 HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
+                                                 HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                 1,
+                                                 &_graphDesc->get()),
+            "Failed to set operation graph on the engine descriptor.");
+
+        RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendSetAttribute(engineDesc->get(),
+                                                 HIPDNN_ATTR_ENGINE_GLOBAL_INDEX,
+                                                 HIPDNN_TYPE_INT64,
+                                                 1,
+                                                 &engineId),
+            "Failed to set engine id on the engine descriptor.");
+
+        RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineDesc->get()),
+                                  "Failed to finalize engine descriptor");
+
+        int64_t knobCount = 0;
+        RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendGetAttribute(engineDesc->get(),
+                                                 HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                                 HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                                 0,
+                                                 &knobCount,
+                                                 nullptr),
+            "Failed to get knob count from engine descriptor.");
+
+        if(knobCount == 0)
+        {
+            knobs.clear();
+            return {ErrorCode::OK, ""};
+        }
+
+        std::vector<hipdnnBackendFlatbufferData_t> flatbufferDataArray(
+            static_cast<size_t>(knobCount));
+
+        int64_t actualCount = 0;
+        RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendGetAttribute(engineDesc->get(),
+                                                 HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                                 HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                                 knobCount,
+                                                 &actualCount,
+                                                 flatbufferDataArray.data()),
+            "Failed to get knob flatbuffer data from engine descriptor.");
+
+        if(actualCount != knobCount)
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Mismatch between expected and actual knob count."};
+        }
+
+        knobs.clear();
+        knobs.reserve(static_cast<size_t>(actualCount));
+
+        for(size_t i = 0; i < static_cast<size_t>(actualCount); ++i)
+        {
+            const auto& fbData = flatbufferDataArray[i];
+            if(fbData.ptr == nullptr || fbData.size == 0)
+            {
+                return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                        "Invalid flatbuffer data for knob at index " + std::to_string(i)};
+            }
+
+            auto fbKnob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(
+                static_cast<const uint8_t*>(fbData.ptr));
+            if(fbKnob == nullptr)
+            {
+                return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                        "Failed to deserialize knob flatbuffer at index " + std::to_string(i)};
+            }
+
+            try
+            {
+                knobs.emplace_back(Knob::fromFlatbuffer(fbKnob));
+            }
+            catch(const std::exception& e)
+            {
+                return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                        std::string("Failed to create Knob from flatbuffer: ") + e.what()};
+            }
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
+    Error get_knob_lookup_for_engine(int64_t engineId,
+                                     std::unordered_map<KnobType_t, Knob>& knobs) const
+    {
+        std::vector<Knob> knobVector;
+        Error status = get_knobs_for_engine(engineId, knobVector);
+        HIPDNN_CHECK_ERROR(status);
+
+        for(auto& knob : knobVector)
+        {
+            knobs.try_emplace(knob.getKnobId(), std::move(knob));
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
+    // Get ranked list of engine IDs based on heuristics
+    // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
+    Error get_ranked_engine_ids(std::vector<int64_t>& rankedEngineIds,
+                                const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+    {
+        Error status = initializeHeuristicDescriptor(modes);
+        HIPDNN_CHECK_ERROR(status);
+
+        std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>> engineConfigs;
+        std::vector<int64_t> engineIds;
+        status = getEngineConfigs(engineConfigs, rankedEngineIds, true);
+        HIPDNN_CHECK_ERROR(status);
+
+        return {ErrorCode::OK, ""};
+    }
+
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error create_execution_plans(const std::vector<HeuristicMode>& modes
                                  = {HeuristicMode::FALLBACK})
@@ -803,6 +996,105 @@ public:
         {
             return {ErrorCode::HIPDNN_BACKEND_ERROR,
                     "Failed to create backend execution descriptor."};
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
+    // Create execution plan with int64 knobs (compatibility method)
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error create_execution_plan(int64_t engineId,
+                                const std::unordered_map<KnobType_t, int64_t>& settings)
+    {
+        std::vector<KnobSetting> knobSettings;
+
+        knobSettings.reserve(settings.size());
+        for(const auto& [knobId, knobValue] : settings)
+        {
+            knobSettings.emplace_back(knobId, knobValue);
+        }
+
+        return create_execution_plan_ext(engineId, knobSettings);
+    }
+
+    // Create execution plan with typed knob settings
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error create_execution_plan_ext(int64_t engineId, std::vector<KnobSetting>& settings)
+    {
+
+        HIPDNN_FE_LOG_INFO("Creating execution plans for graph {}", graph_attributes.get_name());
+
+        if(!_graphDesc || !_graphDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Graph has not been built, build the operation graph first. Cannot create "
+                    "execution plan."};
+        }
+
+        std::unordered_map<KnobType_t, Knob> existingKnobs;
+        Error status = get_knob_lookup_for_engine(engineId, existingKnobs);
+        HIPDNN_CHECK_ERROR(status);
+
+        status = initializeEngineConfig(engineId);
+        HIPDNN_CHECK_ERROR(status);
+
+        std::vector<KnobSetting> validatedSettings;
+        for(auto& setting : settings)
+        {
+            auto knobIt = existingKnobs.find(setting.getKnobId());
+            if(knobIt == existingKnobs.end())
+            {
+                HIPDNN_FE_LOG_WARN("Ignoring knob {} when creating execution plan for graph {}.  "
+                                   "Engine doesn't support chosen knob.",
+                                   setting.getKnobId(),
+                                   graph_attributes.get_name());
+                continue;
+            }
+
+            const auto& knob = knobIt->second;
+
+            if(knob.isDeprecated())
+            {
+                HIPDNN_FE_LOG_WARN("Knob {} has been marked as deprecated.", knob.getKnobId());
+            }
+
+            status = knob.validate(setting);
+            HIPDNN_CHECK_ERROR(status);
+
+            validatedSettings.emplace_back(std::move(setting));
+        }
+
+        if(!validatedSettings.empty())
+        {
+            std::vector<flatbuffers::DetachedBuffer> knobBuffers;
+            knobBuffers.reserve(validatedSettings.size());
+
+            for(const auto& setting : validatedSettings)
+            {
+                flatbuffers::FlatBufferBuilder builder;
+                auto knobSettingOffset = setting.packKnobSetting(builder);
+                builder.Finish(knobSettingOffset);
+                knobBuffers.push_back(builder.Release());
+            }
+
+            std::vector<hipdnnBackendFlatbufferData_t> flatbufferDataArray;
+            flatbufferDataArray.reserve(knobBuffers.size());
+
+            for(const auto& buffer : knobBuffers)
+            {
+                hipdnnBackendFlatbufferData_t fbData;
+                fbData.ptr = buffer.data();
+                fbData.size = buffer.size();
+                flatbufferDataArray.push_back(fbData);
+            }
+
+            RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendSetAttribute(
+                                          _engineConfigDesc->get(),
+                                          HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                          HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                          static_cast<int64_t>(flatbufferDataArray.size()),
+                                          flatbufferDataArray.data()),
+                                      "Failed to set knob settings on engine config.");
         }
 
         return {ErrorCode::OK, ""};
@@ -1028,7 +1320,6 @@ public:
                   std::unordered_map<std::shared_ptr<TensorAttributes>, void*>& tensorLookup,
                   void* workspace) const
     {
-
         std::unordered_map<int64_t, void*> variantPack;
         for(const auto& [tensor, ptr] : tensorLookup)
         {

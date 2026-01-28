@@ -201,7 +201,7 @@ TEST_F(TestKnobWrapper, ConstructFromInvalidBuffer)
     EXPECT_FALSE(wrapper.isValid());
 }
 
-TEST_F(TestKnobWrapper, GetKnobIdStrFromValidWrapper)
+TEST_F(TestKnobWrapper, GetKnobIdFromValidWrapper)
 {
     auto buffer = createKnob("CUSTOM_KNOB_NAME", "Test");
     KnobWrapper wrapper(buffer.data(), buffer.size());
