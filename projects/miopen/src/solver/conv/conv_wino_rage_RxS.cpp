@@ -55,7 +55,6 @@ protected:
     PerfModelParams model_params;
 
 public:
-    static constexpr float default_wti = -2.0f;
     ShaderModel(const WinoShaderArgsV2& shader_args, uint32_t cu_cnt)
         : args(shader_args), cu_count(cu_cnt)
     {
@@ -165,9 +164,9 @@ class ShaderModelV4_6 : public ShaderModel
 {
 public:
     ShaderModelV4_6(const WinoShaderArgsV2& shader_args,
-                    uint32_t cu_count,
+                    uint32_t cu_cnt,
                     const PerfModelParams& perf_params)
-        : ShaderModel(shader_args, cu_count)
+        : ShaderModel(shader_args, cu_cnt)
     {
         model_params = perf_params;
     }
@@ -182,9 +181,9 @@ class ShaderModelV4_9 : public ShaderModel
 {
 public:
     ShaderModelV4_9(const WinoShaderArgsV2& shader_args,
-                    uint32_t cu_count,
+                    uint32_t cu_cnt,
                     const PerfModelParams& perf_params)
-        : ShaderModel(shader_args, cu_count)
+        : ShaderModel(shader_args, cu_cnt)
     {
         model_params = perf_params;
     }
@@ -276,9 +275,6 @@ public:
         return Create(dev_name, args, cu_count, problem, kernel_version);
     }
 };
-
-// Divide two non-negative integers and return ceil of the quotient
-constexpr uint64_t DivCeil(uint64_t numer, uint64_t denom) { return (numer + denom - 1) / denom; }
 
 template <uint32_t Winodata, uint32_t Winofilter>
 struct ConvWinoRageRxSCommon
