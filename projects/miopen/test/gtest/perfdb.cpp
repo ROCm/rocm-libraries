@@ -1003,7 +1003,11 @@ public:
                 if(full_set())
                     args += " --all";
 
-                children.emplace_back(exe_path(), args);
+                // Disable gtest sharding for child processes
+                ProcessEnvironmentMap env;
+                env["GTEST_TOTAL_SHARDS"] = "1";
+                env["GTEST_SHARD_INDEX"]  = "0";
+                children.emplace_back(exe_path(), args, "", nullptr, env);
             }
             // clang-format on
         }
@@ -1089,8 +1093,12 @@ public:
                 if(full_set())
                     args += " --all";
 
+                // Disable gtest sharding for child processes
+                ProcessEnvironmentMap env;
+                env["GTEST_TOTAL_SHARDS"] = "1";
+                env["GTEST_SHARD_INDEX"]  = "0";
                 MIOPEN_LOG_CUSTOM(LoggingLevel::Default, "Test", exe_path() + " " + args);
-                children.emplace_back(exe_path(), args);
+                children.emplace_back(exe_path(), args, "", nullptr, env);
             }
             // clang-format on
         }
