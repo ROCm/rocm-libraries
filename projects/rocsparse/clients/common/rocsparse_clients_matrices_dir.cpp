@@ -46,9 +46,16 @@ private:
         {
             this->m_path
                 = rocsparse_clients_envariables::get(rocsparse_clients_envariables::MATRICES_DIR);
+            // Ensure trailing slash for proper path concatenation
+            const size_t size = this->m_path.size();
+            if((size > 0) && (this->m_path[size - 1] != '/'))
+            {
+                this->m_path += "/";
+            }
         }
 
-        fs::path default_path = rocsparse_exepath();
+        // Compute default path by checking possible relative locations
+        fs::path exe_path = rocsparse_exepath();
 
         static constexpr const char* possible_relative_paths[] = {
             // Development build: executable in build_dir/clients/staging, matrices in build_dir/clients/matrices
@@ -59,7 +66,7 @@ private:
 
         for(const auto& rel_path : possible_relative_paths)
         {
-            fs::path test_path = default_path / rel_path;
+            fs::path test_path = exe_path / rel_path;
             if(fs::exists(test_path))
             {
                 this->m_default_path = test_path.string() + "/";
@@ -67,14 +74,22 @@ private:
             }
         }
 
-        if(this->m_default_path.empty())
+        // If no default path found and no environment variable set, print warning but don't throw.
+        // The error will be handled later when the path is actually used.
+        if(this->m_default_path.empty() && !this->m_is_defined)
         {
-            std::cerr << "rocsparse: could not find matrices directory. Please set "
+            std::cerr << "rocsparse: warning: could not find matrices directory. Please set "
                          "ROCSPARSE_CLIENTS_MATRICES_DIR "
                          "environment variable, or use the option --matrices-dir"
                       << std::endl;
-
-            throw rocsparse_status_internal_error;
+            // Fall back to the old default path behavior to avoid breaking existing setups
+            this->m_default_path = exe_path.string();
+            const size_t size    = this->m_default_path.size();
+            if((size > 0) && (this->m_default_path[size - 1] != '/'))
+            {
+                this->m_default_path += "/";
+            }
+            this->m_default_path += "../matrices/";
         }
     }
 
