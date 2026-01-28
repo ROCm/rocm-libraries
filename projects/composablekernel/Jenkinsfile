@@ -12,6 +12,22 @@ def show_node_info() {
     """
 }
 
+def composableKernelCheckout()
+{
+    // checkout project
+    checkout([
+        $class: 'GitSCM',
+        branches: scm.branches,
+        doGenerateSubmoduleConfigurations: false,
+        extensions: [
+            [$class: 'SparseCheckoutPaths', sparseCheckoutPaths: [
+                [$class: 'SparseCheckoutPath', path: 'projects/composablekernel']
+            ]]
+        ],
+        userRemoteConfigs: scm.userRemoteConfigs
+    ])
+}
+
 // Given a pattern, check if the log contains the pattern and return the context.
 def checkForPattern(pattern, log) {
     def lines = log.split('\n')
@@ -722,7 +738,7 @@ def cmake_build(Map conf=[:]){
 
 def buildHipClangJob(Map conf=[:]){
         show_node_info()
-        checkout scm
+        composableKernelCheckout()
         def prefixpath = conf.get("prefixpath", "/opt/rocm")
         def dockerOpts = get_docker_options()
         def image
