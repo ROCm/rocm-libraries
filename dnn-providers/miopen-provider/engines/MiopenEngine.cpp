@@ -42,8 +42,10 @@ bool MiopenEngine::isApplicable(HipdnnEnginePluginHandle& handle,
 }
 
 void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
+                              const hipdnn_plugin_sdk::IGraph& opGraph,
                               hipdnnPluginConstData_t& detailsOut) const
 {
+    (void)opGraph; // Unused parameter for now, but available for future enhancements
     flatbuffers::FlatBufferBuilder builder;
 
     auto benchmarkingKnob = hipdnn_plugin_sdk::KnobFactory::createIntKnob(

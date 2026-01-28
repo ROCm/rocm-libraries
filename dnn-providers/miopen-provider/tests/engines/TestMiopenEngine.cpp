@@ -161,9 +161,10 @@ TEST(TestMiopenEngine, GetDetailsReturnsSerializedEngineDetails)
 {
     MiopenEngine engine(1);
     HipdnnEnginePluginHandle dummyHandle;
+    MockGraph mockGraph;
 
     hipdnnPluginConstData_t result;
-    engine.getDetails(dummyHandle, result);
+    engine.getDetails(dummyHandle, mockGraph, result);
 
     hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(result.ptr, result.size);
     EXPECT_EQ(engineDetails.engineId(), 1);
@@ -198,9 +199,10 @@ TEST(TestMiopenEngine, GetDetailsIncludesBenchmarkingKnob)
 {
     MiopenEngine engine(1);
     HipdnnEnginePluginHandle dummyHandle;
+    MockGraph mockGraph;
 
     hipdnnPluginConstData_t result;
-    engine.getDetails(dummyHandle, result);
+    engine.getDetails(dummyHandle, mockGraph, result);
 
     hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(result.ptr, result.size);
 
@@ -320,9 +322,10 @@ TEST(TestMiopenEngine, GetDetailsIncludesWorkspaceSizeLimitKnob)
 {
     MiopenEngine engine(1);
     HipdnnEnginePluginHandle dummyHandle;
+    MockGraph mockGraph;
 
     hipdnnPluginConstData_t result;
-    engine.getDetails(dummyHandle, result);
+    engine.getDetails(dummyHandle, mockGraph, result);
 
     hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(result.ptr, result.size);
 
