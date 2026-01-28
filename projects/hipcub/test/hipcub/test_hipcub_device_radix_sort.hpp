@@ -1409,6 +1409,14 @@ inline void sort_keys_large_sizes()
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+        // Avoid sizes the CUB backend can't handle
+#ifdef __HIP_PLATFORM_NVIDIA__
+        if(size > static_cast<size_t>(::cuda::std::numeric_limits<int>::max()))
+        {
+            continue;
+        }
+#endif // __HIP_PLATFORM_NVIDIA__
+
         // Generate data
         std::vector<key_type> keys_input;
         try
@@ -1423,6 +1431,10 @@ inline void sort_keys_large_sizes()
 
         key_type* d_keys;
         HIP_CHECK_MEMORY(test_common_utils::hipMallocHelper(&d_keys, size * sizeof(key_type)));
+
+        key_type* d_keys_out;
+        HIP_CHECK_MEMORY(test_common_utils::hipMallocHelper(&d_keys_out, size * sizeof(key_type)));
+
         HIP_CHECK(
             hipMemcpy(d_keys, keys_input.data(), size * sizeof(key_type), hipMemcpyHostToDevice));
 
@@ -1431,7 +1443,7 @@ inline void sort_keys_large_sizes()
         HIP_CHECK(invoke_sort_keys<descending>(d_temporary_storage,
                                                temporary_storage_bytes,
                                                d_keys,
-                                               d_keys,
+                                               d_keys_out,
                                                size,
                                                start_bit,
                                                end_bit,
@@ -1445,7 +1457,7 @@ inline void sort_keys_large_sizes()
         HIP_CHECK(invoke_sort_keys<descending>(d_temporary_storage,
                                                temporary_storage_bytes,
                                                d_keys,
-                                               d_keys,
+                                               d_keys_out,
                                                size,
                                                start_bit,
                                                end_bit,
@@ -1454,19 +1466,12 @@ inline void sort_keys_large_sizes()
         HIP_CHECK(hipFree(d_temporary_storage));
 
         std::vector<key_type> keys_output(size);
-        try
-        {
-            keys_output.resize(size);
-        }
-        catch(const std::bad_alloc& e)
-        {
-            HIP_CHECK(hipFree(d_keys));
-            continue;
-        }
+        HIP_CHECK(hipMemcpy(keys_output.data(),
+                            d_keys_out,
+                            size * sizeof(key_type),
+                            hipMemcpyDeviceToHost));
 
-        HIP_CHECK(
-            hipMemcpy(keys_output.data(), d_keys, size * sizeof(key_type), hipMemcpyDeviceToHost));
-
+        HIP_CHECK(hipFree(d_keys_out));
         HIP_CHECK(hipFree(d_keys));
 
         // Check if output values are as expected
