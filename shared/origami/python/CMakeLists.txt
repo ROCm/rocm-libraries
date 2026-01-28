@@ -81,7 +81,9 @@ endif()
 install(TARGETS _pyorigami LIBRARY DESTINATION "${PYTHON_INSTALL_DIR}")
 
 # Install Python package files
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/__init__.py"
+install(FILES 
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/__init__.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/selector.py"
     DESTINATION "${PYTHON_INSTALL_DIR}"
 )
 
