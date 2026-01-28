@@ -95,12 +95,30 @@ TEST_F(TestMiopenConvPlanBuilder, GetWorkspaceSizeThrowsForMultiNodeGraph)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
+TEST_F(TestMiopenConvPlanBuilder, GetWorkspaceSizeRangeThrowsForMultiNodeGraph)
+{
+    MockGraph mockGraph;
+    EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(2));
+
+    EXPECT_THROW(_planBuilder.getWorkspaceSizeRange(_dummyHandle, mockGraph),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
 TEST_F(TestMiopenConvPlanBuilder, GetWorkspaceSizeThrowsForUnsupportedGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graph),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST_F(TestMiopenConvPlanBuilder, GetWorkspaceSizeRangeThrowsForUnsupportedGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_THROW(_planBuilder.getWorkspaceSizeRange(_dummyHandle, graph),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -191,4 +209,46 @@ TEST_F(TestGpuMiopenConvPlanBuilder, BuildPlanCreatesValidPlanForSupportedGraph)
         EXPECT_NO_THROW(_planBuilder.buildPlan(_handle, graph, ctx));
         EXPECT_TRUE(ctx.hasValidPlan());
     }
+}
+
+TEST_F(TestGpuMiopenConvPlanBuilder, GetWorkspaceSizeRangeReturnsValidRangeForConvFwd)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    WorkspaceSizeRange range;
+    EXPECT_NO_THROW(range = _planBuilder.getWorkspaceSizeRange(_handle, graph));
+
+    EXPECT_LE(range.min, range.max);
+
+    size_t maxWorkspace = _planBuilder.getMaxWorkspaceSize(_handle, graph);
+    EXPECT_EQ(range.max, maxWorkspace);
+}
+
+TEST_F(TestGpuMiopenConvPlanBuilder, GetWorkspaceSizeRangeReturnsValidRangeForConvBwd)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    WorkspaceSizeRange range;
+    EXPECT_NO_THROW(range = _planBuilder.getWorkspaceSizeRange(_handle, graph));
+
+    EXPECT_LE(range.min, range.max);
+
+    size_t maxWorkspace = _planBuilder.getMaxWorkspaceSize(_handle, graph);
+    EXPECT_EQ(range.max, maxWorkspace);
+}
+
+TEST_F(TestGpuMiopenConvPlanBuilder, GetWorkspaceSizeRangeReturnsValidRangeForConvWrw)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    WorkspaceSizeRange range;
+    EXPECT_NO_THROW(range = _planBuilder.getWorkspaceSizeRange(_handle, graph));
+
+    EXPECT_LE(range.min, range.max);
+
+    size_t maxWorkspace = _planBuilder.getMaxWorkspaceSize(_handle, graph);
+    EXPECT_EQ(range.max, maxWorkspace);
 }

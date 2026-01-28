@@ -21,6 +21,8 @@ public:
 
     bool isApplicable(const HipdnnEnginePluginHandle& handle,
                       const hipdnn_plugin_sdk::IGraph& opGraph) const override;
+    WorkspaceSizeRange getWorkspaceSizeRange(const HipdnnEnginePluginHandle& handle,
+                                             const hipdnn_plugin_sdk::IGraph& opGraph) const override;
     size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
                                const hipdnn_plugin_sdk::IGraph& opGraph) const override;
 
