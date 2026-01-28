@@ -8,14 +8,14 @@
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/detail/IGraphNodePlanBuilder.hpp>
+#include <hipdnn_test_sdk/detail/IGraphNodePlanExecutor.hpp>
+#include <hipdnn_test_sdk/detail/PlanUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferTensorAttributesUtils.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/IGraphNodePlanBuilder.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/IGraphNodePlanExecutor.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/PlanUtils.hpp>
 
-namespace hipdnn_test_sdk::utilities
+namespace hipdnn_test_sdk::detail
 {
 
 struct ConvolutionBwdParams

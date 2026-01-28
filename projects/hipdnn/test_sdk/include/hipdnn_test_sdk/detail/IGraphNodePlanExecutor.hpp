@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <unordered_map>
 
-namespace hipdnn_test_sdk::utilities
+namespace hipdnn_test_sdk::detail
 {
 
 class IGraphNodePlanExecutor

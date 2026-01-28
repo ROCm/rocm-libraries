@@ -7,9 +7,9 @@
 
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/MatmulPlan.hpp>
+#include <hipdnn_test_sdk/detail/MatmulPlan.hpp>
 
-namespace hipdnn_test_sdk::utilities
+namespace hipdnn_test_sdk::detail
 {
 
 struct MatmulSignatureKey
@@ -137,7 +137,7 @@ struct MatmulSignatureKey
     }
 };
 
-} // namespace hipdnn_test_sdk::utilities
+} // namespace hipdnn_test_sdk::detail
 
 template <>
 struct fmt::formatter<hipdnn_test_sdk::utilities::MatmulSignatureKey>
