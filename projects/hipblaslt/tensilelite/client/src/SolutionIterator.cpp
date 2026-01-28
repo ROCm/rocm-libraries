@@ -543,6 +543,7 @@ namespace TensileLite
                     {
                         if(m_solutions.size()==0)
                         {
+                            // use all solutions from all libraries
                             m_solutions.clear();
                             std::set<std::shared_ptr<ContractionSolution>> sols;
                             sols = m_library->findAllSolutions(*gemmProblem, *m_hardware, TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
