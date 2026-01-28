@@ -56,6 +56,11 @@ nanobind_add_module(_pyorigami "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/bindings
 
 set_target_properties(_pyorigami PROPERTIES OUTPUT_NAME "origami")
 
+# Place the compiled module in the source package directory for development/testing
+set_target_properties(_pyorigami PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/origami"
+)
+
 # Link against origami library and HIP
 target_link_libraries(_pyorigami PRIVATE ${ORIGAMI_TARGET} hip::host)
 
@@ -102,7 +107,7 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
         "Python: test_origami_bindings"
         PROPERTIES
             ENVIRONMENT
-            "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}:${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
             DEPENDS _pyorigami
     )
 
@@ -117,7 +122,7 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
         "Python: test_selector"
         PROPERTIES
             ENVIRONMENT
-            "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}:${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
             DEPENDS _pyorigami
     )
 
