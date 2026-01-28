@@ -3,8 +3,12 @@
 
 #pragma once
 
+#include <hipdnn_data_sdk/flatbuffer_utilities/KnobWrapper.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/Utilities.hpp>
+
+#include <HipdnnBackendFlatbufferData.h>
 
 #include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
@@ -495,7 +499,7 @@ public:
     }
 
     // Get constraint
-    const IConstraint* getConstraint() const
+    const IConstraint* constraint() const
     {
         return _constraint.get();
     }
@@ -569,6 +573,79 @@ private:
     // Constraint (polymorphic)
     std::shared_ptr<IConstraint> _constraint;
 };
+
+namespace detail
+{
+inline Error getKnobsForEngine(std::vector<Knob>& knobs, hipdnnBackendDescriptor_t engineDesc)
+{
+    int64_t knobCount = 0;
+    HIPDNN_RETURN_ON_BACKEND_FAILURE(
+        hipdnnBackend()->backendGetAttribute(engineDesc,
+                                             HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                             HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                             0,
+                                             &knobCount,
+                                             nullptr),
+        "Failed to get knob count from engine descriptor.");
+
+    if(knobCount == 0)
+    {
+        knobs.clear();
+        return {ErrorCode::OK, ""};
+    }
+
+    std::vector<hipdnnBackendFlatbufferData_t> flatbufferDataArray(static_cast<size_t>(knobCount));
+
+    int64_t actualCount = 0;
+    HIPDNN_RETURN_ON_BACKEND_FAILURE(
+        hipdnnBackend()->backendGetAttribute(engineDesc,
+                                             HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                             HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                             knobCount,
+                                             &actualCount,
+                                             flatbufferDataArray.data()),
+        "Failed to get knob flatbuffer data from engine descriptor.");
+
+    if(actualCount != knobCount)
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Mismatch between expected and actual knob count."};
+    }
+
+    knobs.clear();
+    knobs.reserve(static_cast<size_t>(actualCount));
+
+    for(size_t i = 0; i < static_cast<size_t>(actualCount); ++i)
+    {
+        const auto& fbData = flatbufferDataArray[i];
+        if(fbData.ptr == nullptr || fbData.size == 0)
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Invalid flatbuffer data for knob at index " + std::to_string(i)};
+        }
+
+        hipdnn_data_sdk::flatbuffer_utilities::KnobWrapper knobWrapper(fbData.ptr, fbData.size);
+
+        if(!knobWrapper.isValid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Knob flatbuffer failed verification at index " + std::to_string(i)};
+        }
+        try
+        {
+            knobs.emplace_back(Knob::fromFlatbuffer(knobWrapper.getKnob()));
+        }
+        catch(const std::exception& e)
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    std::string("Failed to create Knob from flatbuffer: ") + e.what()};
+        }
+    }
+
+    return {ErrorCode::OK, ""};
+}
+
+} // namespace detail
 
 } // namespace hipdnn_frontend
 
