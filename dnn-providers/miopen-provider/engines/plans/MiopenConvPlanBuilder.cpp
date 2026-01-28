@@ -175,23 +175,6 @@ WorkspaceSizeRange getWorkspaceSizeRangeFwd(const HipdnnEnginePluginHandle& hand
     return {minWorkspace, maxWorkspace};
 }
 
-size_t getMaxWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
-                              const hipdnn_plugin_sdk::IGraph& opGraph)
-{
-    const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
-    ConvFwdParams params(attr, opGraph.getTensorMap());
-    size_t workSpaceSize;
-    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetWorkSpaceSize(handle.miopenHandle,
-                                                                     params.w().tensorDescriptor(),
-                                                                     params.x().tensorDescriptor(),
-                                                                     params.conv().convDescriptor(),
-                                                                     params.y().tensorDescriptor(),
-                                                                     &workSpaceSize));
-
-    return workSpaceSize;
-}
-
 WorkspaceSizeRange getWorkspaceSizeRangeBwd(const HipdnnEnginePluginHandle& handle,
                                             const hipdnn_plugin_sdk::IGraph& opGraph)
 {
@@ -234,25 +217,6 @@ WorkspaceSizeRange getWorkspaceSizeRangeBwd(const HipdnnEnginePluginHandle& hand
     }
 
     return {minWorkspace, maxWorkspace};
-}
-
-size_t getMaxWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
-                              const hipdnn_plugin_sdk::IGraph& opGraph)
-{
-    const auto& attr = opGraph.getNodeWrapper(0)
-                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
-    ConvBwdParams params(attr, opGraph.getTensorMap());
-    size_t workSpaceSize;
-
-    THROW_ON_MIOPEN_FAILURE(
-        miopenConvolutionBackwardDataGetWorkSpaceSize(handle.miopenHandle,
-                                                      params.dy().tensorDescriptor(),
-                                                      params.w().tensorDescriptor(),
-                                                      params.conv().convDescriptor(),
-                                                      params.dx().tensorDescriptor(),
-                                                      &workSpaceSize));
-
-    return workSpaceSize;
 }
 
 WorkspaceSizeRange getWorkspaceSizeRangeWrw(const HipdnnEnginePluginHandle& handle,
@@ -299,6 +263,42 @@ WorkspaceSizeRange getWorkspaceSizeRangeWrw(const HipdnnEnginePluginHandle& hand
     }
 
     return {minWorkspace, maxWorkspace};
+}
+
+size_t getMaxWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
+                              const hipdnn_plugin_sdk::IGraph& opGraph)
+{
+    const auto& attr = opGraph.getNodeWrapper(0)
+                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
+    ConvFwdParams params(attr, opGraph.getTensorMap());
+    size_t workSpaceSize;
+    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetWorkSpaceSize(handle.miopenHandle,
+                                                                     params.w().tensorDescriptor(),
+                                                                     params.x().tensorDescriptor(),
+                                                                     params.conv().convDescriptor(),
+                                                                     params.y().tensorDescriptor(),
+                                                                     &workSpaceSize));
+
+    return workSpaceSize;
+}
+
+size_t getMaxWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
+                              const hipdnn_plugin_sdk::IGraph& opGraph)
+{
+    const auto& attr = opGraph.getNodeWrapper(0)
+                           .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
+    ConvBwdParams params(attr, opGraph.getTensorMap());
+    size_t workSpaceSize;
+
+    THROW_ON_MIOPEN_FAILURE(
+        miopenConvolutionBackwardDataGetWorkSpaceSize(handle.miopenHandle,
+                                                      params.dy().tensorDescriptor(),
+                                                      params.w().tensorDescriptor(),
+                                                      params.conv().convDescriptor(),
+                                                      params.dx().tensorDescriptor(),
+                                                      &workSpaceSize));
+
+    return workSpaceSize;
 }
 
 size_t getMaxWorkspaceSizeWrw(const HipdnnEnginePluginHandle& handle,
