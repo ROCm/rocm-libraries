@@ -17,7 +17,7 @@ TEST(TestKnobFactory, CreateIntKnob)
     auto root
         = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(builder.GetBufferPointer());
 
-    EXPECT_STREQ(root->knob_id_str()->c_str(), "int_knob");
+    EXPECT_STREQ(root->knob_id()->c_str(), "int_knob");
     EXPECT_STREQ(root->description()->c_str(), "description");
     EXPECT_EQ(root->default_value_type(), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
     EXPECT_EQ(root->default_value_as_IntValue()->value(), 10);
@@ -60,7 +60,7 @@ TEST(TestKnobFactory, CreateFloatKnob)
     auto root
         = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(builder.GetBufferPointer());
 
-    EXPECT_STREQ(root->knob_id_str()->c_str(), "float_knob");
+    EXPECT_STREQ(root->knob_id()->c_str(), "float_knob");
     EXPECT_STREQ(root->description()->c_str(), "description");
     EXPECT_EQ(root->default_value_type(), hipdnn_data_sdk::data_objects::KnobValue::FloatValue);
     EXPECT_FLOAT_EQ(root->default_value_as_FloatValue()->value(), 1.5f);
@@ -96,7 +96,7 @@ TEST(TestKnobFactory, CreateStringKnob)
     auto root
         = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(builder.GetBufferPointer());
 
-    EXPECT_STREQ(root->knob_id_str()->c_str(), "string_knob");
+    EXPECT_STREQ(root->knob_id()->c_str(), "string_knob");
     EXPECT_STREQ(root->description()->c_str(), "description");
     EXPECT_EQ(root->default_value_type(), hipdnn_data_sdk::data_objects::KnobValue::StringValue);
     EXPECT_STREQ(root->default_value_as_StringValue()->value()->c_str(), "option1");
