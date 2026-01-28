@@ -29,8 +29,8 @@ void PerformanceConfigPooling2d<OpType>::HeuristicInit(
     switch(problem.GetXDesc().GetType())
     {
     case miopenHalf:
-    case miopenFloat: Init(problem); break;
-    case miopenBFloat16:
+    case miopenFloat:
+    case miopenBFloat16: Init(problem); break;
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
@@ -76,9 +76,7 @@ bool PerformanceConfigPooling2d<OpType>::IsValid(
     {
     case miopenHalf:
     case miopenFloat:
-        return IsValidValue(
-            problem); // perform further checks for problem & parameter set compatibility?
-    case miopenBFloat16:
+    case miopenBFloat16: return IsValidValue(problem);
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
