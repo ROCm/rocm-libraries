@@ -31,6 +31,7 @@ int main(int argc, char* argv[])
 {
     primbench::settings settings;
     settings.bytes = 128 * primbench::MiB;
+    settings.min_gpu_ms_per_batch = 100;
     primbench::executor executor(argc, argv, settings);
 
     CREATE_BENCHMARK(int32_t, int32_t, 1, 5, 128, 2, 4)
