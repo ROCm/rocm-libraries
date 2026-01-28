@@ -9,6 +9,7 @@ namespace instance {
 void add_f32_merged_groups_instances(std::vector<BaseOperatorPtr>& instances);
 void add_f32_standard_instances(std::vector<BaseOperatorPtr>& instances);
 void add_f32_16x16_instances(std::vector<BaseOperatorPtr>& instances);
+void add_f32_large_tensor_instances(std::vector<BaseOperatorPtr>& instances);
 void add_f32_comp_instances(std::vector<BaseOperatorPtr>& instances);
 void add_f32_mem_intra_instances(std::vector<BaseOperatorPtr>& instances);
 void add_f32_mem_inter_instances(std::vector<BaseOperatorPtr>& instances);
@@ -23,6 +24,7 @@ DeviceOperationInstanceFactory<DeviceOpGFwdDefault<float>>::GetInstances()
     add_f32_merged_groups_instances(instances);
     add_f32_standard_instances(instances);
     add_f32_16x16_instances(instances);
+    add_f32_large_tensor_instances(instances);
     add_f32_comp_instances(instances);
     add_f32_mem_intra_instances(instances);
     add_f32_mem_inter_instances(instances);

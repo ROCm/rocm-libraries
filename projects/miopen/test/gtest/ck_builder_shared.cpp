@@ -3,20 +3,10 @@
 
 #include "ck_builder_shared.hpp"
 
-std::size_t first_difference(const std::string& a, const std::string& b)
+void print_instance_strings(std::vector<std::string>& instance_strings)
 {
-    for(auto i = 0; i < min(a.size(), b.size()); i++)
+    for(auto&& s : instance_strings)
     {
-        if(a[i] != b[i])
-        {
-            return i;
-        }
+        MIOPEN_LOG_T("\t" << s);
     }
-
-    if(a.size() == b.size())
-    {
-        return a.size();
-    }
-
-    return min(a.size(), b.size());
 }

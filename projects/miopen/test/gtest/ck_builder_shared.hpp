@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <gtest/gtest.h>
+
 #include <ck_tile/builder/conv_builder.hpp>
 #include <ck_tile/builder/reflect/conv_description.hpp>
 #include <ck_tile/builder/reflect/instance_traits.hpp>
@@ -11,37 +13,75 @@
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_forward_scale.hpp>
 #include "ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp"
 
+#include <miopen/logger.hpp>
+
 namespace ckb         = ck_tile::builder;
 using BaseOperator    = ck::tensor_operation::device::BaseOperator;
 using BaseOperatorPtr = std::unique_ptr<BaseOperator>;
 
-std::size_t first_difference(const std::string& a, const std::string& b);
+void print_instance_strings(std::vector<std::string>& instance_strings);
 
-void print_closest_instance(std::string builderKernelInstanceString, auto&& factoryInstances)
+template <typename DeviceOpA, typename DeviceOpB>
+void compare_instance_vectors(std::vector<std::unique_ptr<DeviceOpA>>& instancesA,
+                              std::vector<std::unique_ptr<DeviceOpB>>& instancesB)
 {
-    std::size_t m = 0;
-    std::string desc{};
+    EXPECT_EQ(instancesA.size(), instancesB.size());
 
-    for(auto&& k : factoryInstances)
+    // Convert instances to string lists
+    std::vector<std::string> stringsA;
+    std::vector<std::string> stringsB;
+
+    for(const auto& instance : instancesA)
     {
-        auto kernelDescription = k->GetInstanceString();
-        auto firstDifferent    = first_difference(builderKernelInstanceString, kernelDescription);
-        if(firstDifferent > m)
-        {
-            m    = firstDifferent;
-            desc = kernelDescription;
-        }
+        stringsA.push_back(instance->GetInstanceString());
     }
 
-    if(m < builderKernelInstanceString.size())
+    for(const auto& instance : instancesB)
     {
-        std::cout << builderKernelInstanceString << std::endl << desc << std::endl;
+        stringsB.push_back(instance->GetInstanceString());
+    }
 
-        for(auto i = 0; i < m; i++)
-        {
-            std::cout << ' ';
-        }
+    // Sort for efficient set operations
+    std::sort(stringsA.begin(), stringsA.end());
+    std::sort(stringsB.begin(), stringsB.end());
 
-        std::cout << '^' << std::endl << std::endl;
+    // Strings only in A
+    std::vector<std::string> only_in_A;
+    std::set_difference(stringsA.begin(),
+                        stringsA.end(),
+                        stringsB.begin(),
+                        stringsB.end(),
+                        std::back_inserter(only_in_A));
+
+    EXPECT_EQ(only_in_A.size(), 0);
+
+    // Strings only in B
+    std::vector<std::string> only_in_B;
+    std::set_difference(stringsB.begin(),
+                        stringsB.end(),
+                        stringsA.begin(),
+                        stringsA.end(),
+                        std::back_inserter(only_in_B));
+
+    EXPECT_EQ(only_in_B.size(), 0);
+
+    if(only_in_B.size() > 0)
+    {
+        MIOPEN_LOG_E("There are " << only_in_B.size() << " kernels only in B");
+        print_instance_strings(only_in_B);
+    }
+
+    // Strings in both
+    std::vector<std::string> in_both;
+    std::set_intersection(stringsA.begin(),
+                          stringsA.end(),
+                          stringsB.begin(),
+                          stringsB.end(),
+                          std::back_inserter(in_both));
+
+    if(in_both.size() > 0)
+    {
+        MIOPEN_LOG_I("There are " << in_both.size() << " kernels in both: ");
+        print_instance_strings(in_both);
     }
 }

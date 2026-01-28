@@ -7,6 +7,7 @@ add_library(ck_builder STATIC
     factories/grouped_conv_2d_fwd_multiple_abd_f32_standard.cpp
     factories/grouped_conv_2d_fwd_multiple_abd_f32_16x16.cpp
     factories/grouped_conv_2d_fwd_multiple_abd_f32_comp.cpp
+    factories/grouped_conv_2d_fwd_multiple_abd_f32_large_tensor.cpp
     factories/grouped_conv_2d_fwd_multiple_abd_f32_mem_intra.cpp
     factories/grouped_conv_2d_fwd_multiple_abd_f32_mem_inter.cpp
 )

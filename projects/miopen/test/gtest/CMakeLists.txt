@@ -32,7 +32,7 @@ endif()
 if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
     add_definitions(-DCK_EXPERIMENTAL_BUILDER)
 else()
-    list(APPEND SKIP_TESTS ck_builder_xdl.cpp ck_builder_xdl_multiple.cpp ck_builder_xdl_v3.cpp ck_builder_shared.cpp)
+    list(APPEND SKIP_TESTS ck_builder_xdl.cpp ck_builder_shared.cpp)
 endif()
 
 function(add_gtest_negative_filter NEGATIVE_FILTER_TO_ADD)
