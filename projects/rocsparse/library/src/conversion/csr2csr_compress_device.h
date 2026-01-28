@@ -57,7 +57,8 @@ namespace rocsparse
                 // Check if value in matrix will be kept
                 const bool predicate
                     = (rocsparse::abs(value) > rocsparse::real(tol)
-                       && rocsparse::abs(value) > std::numeric_limits<float>::min());
+                       && rocsparse::abs(value)
+                              > std::numeric_limits<rocsparse::floating_data_t<T>>::min());
 
                 // Inactive threads in warp set their lane to zero in mask
                 const uint64_t wavefront_mask = __ballot(predicate);
@@ -108,7 +109,8 @@ namespace rocsparse
                 // Check if value in matrix will be kept
                 const bool predicate
                     = (rocsparse::abs(value) > rocsparse::real(tol)
-                       && rocsparse::abs(value) > std::numeric_limits<float>::min());
+                       && rocsparse::abs(value)
+                              > std::numeric_limits<rocsparse::floating_data_t<T>>::min());
 
                 // Inactive threads in warp set their lane to zero in mask
                 const uint64_t wavefront_mask = __ballot(predicate);
@@ -203,7 +205,8 @@ namespace rocsparse
                 // Check if value in matrix will be kept
                 const int predicate
                     = rocsparse::abs(value) > rocsparse::real(tol)
-                              && rocsparse::abs(value) > std::numeric_limits<float>::min()
+                              && rocsparse::abs(value)
+                                     > std::numeric_limits<rocsparse::floating_data_t<T>>::min()
                           ? 1
                           : 0;
 

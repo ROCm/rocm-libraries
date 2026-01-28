@@ -72,7 +72,8 @@ namespace rocsparse
             {
                 const T value = csr_val_A[i];
                 if(rocsparse::abs(value) > rocsparse::real(tol)
-                   && rocsparse::abs(value) > std::numeric_limits<float>::min())
+                   && rocsparse::abs(value)
+                          > std::numeric_limits<rocsparse::floating_data_t<T>>::min())
                 {
                     count++;
                 }

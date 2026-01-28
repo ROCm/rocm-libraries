@@ -4758,8 +4758,8 @@ void host_csrgeam_nnz(J                    M,
         int nthreads = omp_get_num_threads();
         int tid      = omp_get_thread_num();
 #else
-        int           nthreads = 1;
-        int           tid      = 0;
+        int nthreads = 1;
+        int tid      = 0;
 #endif
 
         J rows_per_thread = (M + nthreads - 1) / nthreads;
@@ -4852,8 +4852,8 @@ void host_csrgeam(J                    M,
         int nthreads = omp_get_num_threads();
         int tid      = omp_get_thread_num();
 #else
-        int           nthreads = 1;
-        int           tid      = 0;
+        int nthreads = 1;
+        int tid      = 0;
 #endif
 
         J rows_per_thread = (M + nthreads - 1) / nthreads;
@@ -8534,7 +8534,8 @@ void host_csr_to_csr_compress(rocsparse_int                     M,
         for(rocsparse_int j = start; j < end; j++)
         {
             if(std::abs(csr_val_A[j]) > std::real(tol)
-               && std::abs(csr_val_A[j]) > std::numeric_limits<float>::min())
+               && std::abs(csr_val_A[j])
+                      > std::numeric_limits<floating_data_t<T>>::min())
             {
                 count++;
             }
@@ -8576,7 +8577,7 @@ void host_csr_to_csr_compress(rocsparse_int                     M,
         for(rocsparse_int j = start; j < end; j++)
         {
             if(std::abs(csr_val_A[j]) > std::real(tol)
-               && std::abs(csr_val_A[j]) > std::numeric_limits<float>::min())
+               && std::abs(csr_val_A[j]) > std::numeric_limits<floating_data_t<T>>::min())
             {
                 csr_col_ind_C[index] = csr_col_ind_A[j];
                 csr_val_C[index]     = csr_val_A[j];
@@ -8615,7 +8616,7 @@ void host_prune_csr_to_csr(rocsparse_int                     M,
             j++)
         {
             if(std::abs(csr_val_A[j]) > threshold
-               && std::abs(csr_val_A[j]) > std::numeric_limits<float>::min())
+               && std::abs(csr_val_A[j]) > std::numeric_limits<floating_data_t<T>>::min())
             {
                 csr_row_ptr_C[i + 1]++;
             }
@@ -8639,7 +8640,7 @@ void host_prune_csr_to_csr(rocsparse_int                     M,
             j++)
         {
             if(std::abs(csr_val_A[j]) > threshold
-               && std::abs(csr_val_A[j]) > std::numeric_limits<float>::min())
+               && std::abs(csr_val_A[j]) > std::numeric_limits<floating_data_t<T>>::min())
             {
                 csr_col_ind_C[index] = (csr_col_ind_A[j] - csr_base_A) + csr_base_C;
                 csr_val_C[index]     = csr_val_A[j];

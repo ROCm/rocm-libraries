@@ -257,8 +257,14 @@ namespace std
         T real = rocsparse_complex_num<T>::abs(z.x);
         T imag = rocsparse_complex_num<T>::abs(z.y);
 
-        return real > imag ? (imag /= real, real * rocsparse_complex_num<T>::sqrt(imag * imag + 1))
-               : imag      ? (real /= imag, imag * rocsparse_complex_num<T>::sqrt(real * real + 1))
+        return real > imag ? (imag /= real,
+                              real
+                                  * rocsparse_complex_num<T>::sqrt(
+                                      rocsparse_complex_num<T>::fma(imag, imag, 1)))
+               : imag      ? (real /= imag,
+                         imag
+                             * rocsparse_complex_num<T>::sqrt(
+                                 rocsparse_complex_num<T>::fma(real, real, 1)))
                            : 0;
     }
 }
