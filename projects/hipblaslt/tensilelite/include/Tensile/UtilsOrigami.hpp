@@ -80,11 +80,4 @@ namespace TensileLite
             return origami::data_type_t::None;
         }
     }
-
-    // Convert rocisa::DataType to origami::data_type_t for Formocast
-    // Note: This function now just calls datatypeToAnalyticalDatatype for consistency
-    inline origami::data_type_t datatypeToFormocastDatatype(rocisa::DataType type)
-    {
-        return datatypeToAnalyticalDatatype(type);
-    }
 } // namespace TensileLite
