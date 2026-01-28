@@ -25,7 +25,7 @@
 namespace hipdnn_frontend
 {
 
-#define KNOB_TYPES int64_t, double, std::string
+using KnobValueVariant = std::variant<int64_t, double, std::string>;
 
 // Type alias for knob IDs
 typedef std::string KnobType_t; // NOLINT(readability-identifier-naming)
@@ -35,7 +35,7 @@ class KnobSetting
 {
 public:
     // Constructors
-    KnobSetting(std::string knobId, std::variant<KNOB_TYPES> value)
+    KnobSetting(std::string knobId, KnobValueVariant value)
         : _knobId(std::move(knobId))
         , _value(std::move(value))
     {
@@ -49,12 +49,12 @@ public:
     }
 
     // Accessors
-    const std::string& getKnobId() const
+    const std::string& knobId() const
     {
         return _knobId;
     }
 
-    const std::variant<KNOB_TYPES>& getValue() const
+    const KnobValueVariant& value() const
     {
         return _value;
     }
@@ -129,7 +129,7 @@ public:
 
 private:
     std::string _knobId;
-    std::variant<KNOB_TYPES> _value;
+    KnobValueVariant _value;
 };
 
 // Abstract constraint interface
@@ -162,7 +162,7 @@ public:
 
     Error validateKnobSetting(const KnobSetting& setting) const override
     {
-        auto value = std::get_if<int64_t>(&setting.getValue());
+        auto value = std::get_if<int64_t>(&setting.value());
         if(value == nullptr)
         {
             return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain an integer value"};
@@ -254,7 +254,7 @@ public:
 
     Error validateKnobSetting(const KnobSetting& setting) const override
     {
-        auto value = std::get_if<double>(&setting.getValue());
+        auto value = std::get_if<double>(&setting.value());
         if(value == nullptr)
         {
             return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain a float value"};
@@ -305,7 +305,7 @@ public:
 
     Error validateKnobSetting(const KnobSetting& setting) const override
     {
-        auto value = std::get_if<std::string>(&setting.getValue());
+        auto value = std::get_if<std::string>(&setting.value());
         if(value == nullptr)
         {
             return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain a string value"};
@@ -382,7 +382,7 @@ public:
         }
 
         // Extract default value based on type
-        std::variant<KNOB_TYPES> defaultValue;
+        KnobValueVariant defaultValue;
         switch(fbKnob->default_value_type())
         {
         case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
@@ -457,8 +457,11 @@ public:
             }
             break;
         }
-        default:
+        case hipdnn_data_sdk::data_objects::KnobConstraint::NONE:
             // No constraint
+            break;
+        default:
+            throw std::invalid_argument("Unknown knob constraint");
             break;
         }
 
@@ -466,7 +469,7 @@ public:
     }
 
     // Accessors
-    const std::string& getKnobId() const
+    const std::string& knobId() const
     {
         return _knobId;
     }
@@ -486,7 +489,7 @@ public:
         return getKnobValueTypeFromVariant(_defaultValue);
     }
 
-    const std::variant<KNOB_TYPES>& getDefaultValue() const
+    const KnobValueVariant& getDefaultValue() const
     {
         return _defaultValue;
     }
@@ -533,7 +536,7 @@ private:
     // Private constructor - use flatbuffer factory function to create instances
     Knob(std::string knobIdStr,
          std::string description,
-         std::variant<KNOB_TYPES> defaultValue,
+         KnobValueVariant defaultValue,
          bool deprecated)
         : _knobId(std::move(knobIdStr))
         , _description(std::move(description))
@@ -542,7 +545,7 @@ private:
     {
     }
 
-    static void variantToStream(std::ostringstream& oss, const std::variant<KNOB_TYPES>& variant)
+    static void variantToStream(std::ostringstream& oss, const KnobValueVariant& variant)
     {
         std::visit(
             [&oss](auto&& value) {
@@ -560,7 +563,7 @@ private:
 
     std::string _knobId;
     std::string _description;
-    std::variant<KNOB_TYPES> _defaultValue;
+    KnobValueVariant _defaultValue;
     bool _deprecated;
 
     // Constraint (polymorphic)

@@ -243,11 +243,10 @@ private:
 
     Error initializeEngineConfig(int64_t engineId)
     {
-        auto engineDesc
-            = std::make_unique<ScopedHipdnnBackendDescriptor>(HIPDNN_BACKEND_ENGINE_DESCRIPTOR);
+        ScopedHipdnnBackendDescriptor engineDesc(HIPDNN_BACKEND_ENGINE_DESCRIPTOR);
 
         RETURN_ON_BACKEND_FAILURE(
-            hipdnnBackend()->backendSetAttribute(engineDesc->get(),
+            hipdnnBackend()->backendSetAttribute(engineDesc.get(),
                                                  HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                  1,
@@ -255,14 +254,11 @@ private:
             "Failed to set operation graph on the engine descriptor.");
 
         RETURN_ON_BACKEND_FAILURE(
-            hipdnnBackend()->backendSetAttribute(engineDesc->get(),
-                                                 HIPDNN_ATTR_ENGINE_GLOBAL_INDEX,
-                                                 HIPDNN_TYPE_INT64,
-                                                 1,
-                                                 &engineId),
+            hipdnnBackend()->backendSetAttribute(
+                engineDesc.get(), HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, &engineId),
             "Failed to set engine id on the engine descriptor.");
 
-        RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineDesc->get()),
+        RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineDesc.get()),
                                   "Failed to finalize engine descriptor");
 
         auto engineConfigDesc
@@ -273,7 +269,7 @@ private:
                                                  HIPDNN_ATTR_ENGINECFG_ENGINE,
                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                  1,
-                                                 &engineDesc->get()),
+                                                 &engineDesc.get()),
             "Failed to set engine on the engine config descriptor.");
 
         RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineConfigDesc->get()),
@@ -843,15 +839,14 @@ public:
         if(!_graphDesc || !_graphDesc->valid())
         {
             return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                    "Graph has not been built, build the operation graph first. Cannot create "
-                    "execution plan."};
+                    "Graph has not been built, build the operation graph first. Cannot get knobs "
+                    "for engine."};
         }
 
-        auto engineDesc
-            = std::make_unique<ScopedHipdnnBackendDescriptor>(HIPDNN_BACKEND_ENGINE_DESCRIPTOR);
+        ScopedHipdnnBackendDescriptor engineDesc(HIPDNN_BACKEND_ENGINE_DESCRIPTOR);
 
         RETURN_ON_BACKEND_FAILURE(
-            hipdnnBackend()->backendSetAttribute(engineDesc->get(),
+            hipdnnBackend()->backendSetAttribute(engineDesc.get(),
                                                  HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                  1,
@@ -859,19 +854,16 @@ public:
             "Failed to set operation graph on the engine descriptor.");
 
         RETURN_ON_BACKEND_FAILURE(
-            hipdnnBackend()->backendSetAttribute(engineDesc->get(),
-                                                 HIPDNN_ATTR_ENGINE_GLOBAL_INDEX,
-                                                 HIPDNN_TYPE_INT64,
-                                                 1,
-                                                 &engineId),
+            hipdnnBackend()->backendSetAttribute(
+                engineDesc.get(), HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, &engineId),
             "Failed to set engine id on the engine descriptor.");
 
-        RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineDesc->get()),
+        RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineDesc.get()),
                                   "Failed to finalize engine descriptor");
 
         int64_t knobCount = 0;
         RETURN_ON_BACKEND_FAILURE(
-            hipdnnBackend()->backendGetAttribute(engineDesc->get(),
+            hipdnnBackend()->backendGetAttribute(engineDesc.get(),
                                                  HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
                                                  HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                                  0,
@@ -890,7 +882,7 @@ public:
 
         int64_t actualCount = 0;
         RETURN_ON_BACKEND_FAILURE(
-            hipdnnBackend()->backendGetAttribute(engineDesc->get(),
+            hipdnnBackend()->backendGetAttribute(engineDesc.get(),
                                                  HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
                                                  HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
                                                  knobCount,
@@ -916,13 +908,14 @@ public:
                         "Invalid flatbuffer data for knob at index " + std::to_string(i)};
             }
 
-            auto fbKnob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(
-                static_cast<const uint8_t*>(fbData.ptr));
-            if(fbKnob == nullptr)
+            flatbuffers::Verifier verifier(static_cast<const uint8_t*>(fbData.ptr), fbData.size);
+            if(!verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::Knob>())
             {
                 return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                        "Failed to deserialize knob flatbuffer at index " + std::to_string(i)};
+                        "Knob flatbuffer failed verification at index " + std::to_string(i)};
             }
+            auto fbKnob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(
+                static_cast<const uint8_t*>(fbData.ptr));
 
             try
             {
@@ -948,7 +941,7 @@ public:
 
         for(auto& knob : knobVector)
         {
-            knobs.try_emplace(knob.getKnobId(), std::move(knob));
+            knobs.try_emplace(knob.knobId(), std::move(knob));
         }
 
         return {ErrorCode::OK, ""};
@@ -1019,9 +1012,8 @@ public:
 
     // Create execution plan with typed knob settings
     // NOLINTNEXTLINE(readability-identifier-naming)
-    Error create_execution_plan_ext(int64_t engineId, std::vector<KnobSetting>& settings)
+    Error create_execution_plan_ext(int64_t engineId, const std::vector<KnobSetting>& settings)
     {
-
         HIPDNN_FE_LOG_INFO("Creating execution plans for graph {}", graph_attributes.get_name());
 
         if(!_graphDesc || !_graphDesc->valid())
@@ -1041,12 +1033,12 @@ public:
         std::vector<KnobSetting> validatedSettings;
         for(auto& setting : settings)
         {
-            auto knobIt = existingKnobs.find(setting.getKnobId());
+            auto knobIt = existingKnobs.find(setting.knobId());
             if(knobIt == existingKnobs.end())
             {
                 HIPDNN_FE_LOG_WARN("Ignoring knob {} when creating execution plan for graph {}.  "
                                    "Engine doesn't support chosen knob.",
-                                   setting.getKnobId(),
+                                   setting.knobId(),
                                    graph_attributes.get_name());
                 continue;
             }
@@ -1055,13 +1047,13 @@ public:
 
             if(knob.isDeprecated())
             {
-                HIPDNN_FE_LOG_WARN("Knob {} has been marked as deprecated.", knob.getKnobId());
+                HIPDNN_FE_LOG_WARN("Knob {} has been marked as deprecated.", knob.knobId());
             }
 
             status = knob.validate(setting);
             HIPDNN_CHECK_ERROR(status);
 
-            validatedSettings.emplace_back(std::move(setting));
+            validatedSettings.emplace_back(setting);
         }
 
         if(!validatedSettings.empty())
