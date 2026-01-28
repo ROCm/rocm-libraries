@@ -104,11 +104,6 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
     {
         spmv_alg = rocsparse_spmv_alg_csr_rowsplit;
     }
-    else if((spmv_alg == rocsparse_spmv_alg_default) && (operation != rocsparse_operation_none))
-    {
-        // Default algorithm doesn't support transpose, fallback to rowsplit
-        spmv_alg = rocsparse_spmv_alg_csr_rowsplit;
-    }
 
     hipsparseSpMVDescr_st* hip_spmv_descr = matA->get_hip_spmv_descr();
 
@@ -249,11 +244,6 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
     {
         spmv_alg = rocsparse_spmv_alg_csr_rowsplit;
     }
-    else if((spmv_alg == rocsparse_spmv_alg_default) && (operation != rocsparse_operation_none))
-    {
-        // Default algorithm doesn't support transpose, fallback to rowsplit
-        spmv_alg = rocsparse_spmv_alg_csr_rowsplit;
-    }
 
     hipsparseSpMVDescr_st* hip_spmv_descr = matA->get_hip_spmv_descr();
     rocsparse_spmv_descr   spmv_descr     = hip_spmv_descr->get_spmv_descr();
@@ -390,11 +380,6 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
         else if((spmv_alg == rocsparse_spmv_alg_csr_adaptive)
                 && (operation != rocsparse_operation_none))
         {
-            spmv_alg = rocsparse_spmv_alg_csr_rowsplit;
-        }
-        else if((spmv_alg == rocsparse_spmv_alg_default) && (operation != rocsparse_operation_none))
-        {
-            // Default algorithm doesn't support transpose, fallback to rowsplit
             spmv_alg = rocsparse_spmv_alg_csr_rowsplit;
         }
         else if(((spmv_alg == rocsparse_spmv_alg_csr_adaptive)

@@ -261,6 +261,8 @@ rocsparse_status rocsparse::check_spmv_alg(rocsparse_format format, rocsparse_sp
 }
 
 rocsparse_status rocsparse::spmv_alg2csrmv_alg(rocsparse_spmv_alg    spmv_alg,
+                                               rocsparse_format      format,
+                                               rocsparse_operation   operation,
                                                rocsparse::csrmv_alg& target)
 {
     switch(spmv_alg)
@@ -272,6 +274,25 @@ rocsparse_status rocsparse::spmv_alg2csrmv_alg(rocsparse_spmv_alg    spmv_alg,
     }
 
     case rocsparse_spmv_alg_default:
+    {
+        // Default algorithm for CSR format with transpose operation doesn't support transpose,
+        // fallback to rowsplit.
+        // Default algorithm for CSC format without transpose operation doesn't support it,
+        // fallback to rowsplit.
+        if((format == rocsparse_format_csr) && (operation != rocsparse_operation_none))
+        {
+            target = rocsparse::csrmv_alg_rowsplit;
+            return rocsparse_status_success;
+        }
+        else if((format == rocsparse_format_csc) && (operation == rocsparse_operation_none))
+        {
+            target = rocsparse::csrmv_alg_rowsplit;
+            return rocsparse_status_success;
+        }
+        target = rocsparse::csrmv_alg_adaptive;
+        return rocsparse_status_success;
+    }
+
     case rocsparse_spmv_alg_csr_adaptive:
     {
         target = rocsparse::csrmv_alg_adaptive;
@@ -580,7 +601,8 @@ namespace rocsparse
         case rocsparse_format_csr:
         {
             rocsparse::csrmv_alg alg_csrmv;
-            RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmv_alg2csrmv_alg(alg, alg_csrmv)));
+            RETURN_IF_ROCSPARSE_ERROR(
+                (rocsparse::spmv_alg2csrmv_alg(alg, rocsparse_format_csr, trans, alg_csrmv)));
 
             switch(stage)
             {
@@ -659,7 +681,8 @@ namespace rocsparse
         case rocsparse_format_csc:
         {
             rocsparse::csrmv_alg alg_csrmv;
-            RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmv_alg2csrmv_alg(alg, alg_csrmv)));
+            RETURN_IF_ROCSPARSE_ERROR(
+                (rocsparse::spmv_alg2csrmv_alg(alg, rocsparse_format_csc, trans, alg_csrmv)));
 
             switch(stage)
             {
