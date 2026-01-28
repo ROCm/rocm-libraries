@@ -39,6 +39,7 @@ target_compile_definitions(
             TEST_DUPLICATE_ID_B_PLUGIN_NAME="${TEST_DUPLICATE_ID_B_PLUGIN_NAME}"
             TEST_INCOMPLETE_API_PLUGIN_NAME="${TEST_INCOMPLETE_API_PLUGIN_NAME}"
             TEST_GOOD_DEFAULT_PLUGIN_NAME="${TEST_GOOD_DEFAULT_PLUGIN_NAME}"
+            TEST_KNOBS_PLUGIN_NAME="${TEST_KNOBS_PLUGIN_NAME}"
 )
 
 # Ensure test plugins are built before tests
@@ -51,6 +52,7 @@ add_dependencies(
     test_duplicate_id_a_plugin
     test_duplicate_id_b_plugin
     test_incomplete_api_plugin
+    test_knobs_plugin
 )
 
 clang_tidy_check(public_hipdnn_frontend_tests)
