@@ -567,11 +567,7 @@ class segmented_warp_sort_helper<
     using radix_comparator_type
         = ::rocprim::detail::radix_merge_compare<Descending, UseRadixMask, Key>;
     using sort_type
-        = ::rocprim::warp_sort_stable<Key,
-                                      BlockSize,
-                                      logical_warp_size,
-                                      items_per_thread,
-                                      Value>;
+        = ::rocprim::warp_sort_stable<Key, BlockSize, logical_warp_size, items_per_thread, Value>;
 
     static constexpr bool with_values = !std::is_same<Value, ::rocprim::empty_type>::value;
 

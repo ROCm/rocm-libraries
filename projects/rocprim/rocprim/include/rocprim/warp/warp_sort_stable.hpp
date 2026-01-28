@@ -40,7 +40,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \brief Available algorithms for warp_sort_stable primitive.
 enum class warp_sort_stable_algorithm
 {
-    /// \brief A merge-path based algorithm using Shared Memory (LDS).
+    /// \brief A merge path based algorithm using Shared Memory (LDS).
     merge_path,
 
     /// \brief A bitonic-sort based algorithm using Register Shuffles.
@@ -90,19 +90,23 @@ template<class Key,
          warp_sort_stable_algorithm Algorithm = warp_sort_stable_algorithm::merge_path>
 class warp_sort_stable
 {
-    // Define both implementations to allow fallback dispatch
+    // Always alias merge_path backend (needed for storage and fallback).
     using merge_path_impl
         = detail::warp_sort_stable<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>;
-    using shuffle_impl
-        = detail::warp_sort_shuffle_stable<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>;
+
+    // Select shuffle backend if requested, otherwise fallback to merge_path type
+    // (the fallback type is technically unused due to if constexpr, but must be valid).
+    using shuffle_impl = std::conditional_t<
+        Algorithm == warp_sort_stable_algorithm::shuffle,
+        detail::warp_sort_shuffle_stable<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>,
+        merge_path_impl>;
 
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
     /// communication during operations provided by related parallel primitive.
     ///
-    /// \note To ensure memory safety during fallback (e.g. when Algorithm is shuffle
-    /// but input_size is provided), this is always the storage type of the Merge Path implementation,
-    /// which requires Shared Memory.
+    /// \note Storage is always merge_path storage (even for shuffle Algorithm),
+    /// because shuffle backend cannot safely handle partial input without padding.
     using storage_type = typename merge_path_impl::storage_type;
 
     /// \brief Stable sort for Key only (Per-thread single value).
@@ -129,10 +133,7 @@ public:
     {
         if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
         {
-            // Shuffle impl expects empty_storage_type (size 0-1), but we have a large storage.
-            // Cast is safe because shuffle doesn't touch the memory.
-            typename shuffle_impl::storage_type dummy;
-            shuffle_impl().sort(thread_key, dummy, compare_function);
+            shuffle_impl().sort(thread_key, compare_function);
         }
         else
         {
@@ -165,8 +166,7 @@ public:
     {
         if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
         {
-            typename shuffle_impl::storage_type dummy;
-            shuffle_impl().sort(thread_keys, dummy, compare_function);
+            shuffle_impl().sort(thread_keys, compare_function);
         }
         else
         {
@@ -217,8 +217,7 @@ public:
     {
         if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
         {
-            typename shuffle_impl::storage_type dummy;
-            shuffle_impl().sort(thread_key, thread_value, dummy, compare_function);
+            shuffle_impl().sort(thread_key, thread_value, compare_function);
         }
         else
         {
@@ -268,8 +267,7 @@ public:
     {
         if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
         {
-            typename shuffle_impl::storage_type dummy;
-            shuffle_impl().sort(thread_keys, thread_values, dummy, compare_function);
+            shuffle_impl().sort(thread_keys, thread_values, compare_function);
         }
         else
         {
