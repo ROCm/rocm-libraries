@@ -443,6 +443,52 @@ TEST(TestMiopenEngine, InitializeExecutionContextDefaultsWorkspaceSizeLimitToUnl
     EXPECT_FALSE(ctx.workspaceSizeLimit().has_value());
 }
 
+TEST(TestMiopenEngine, GetDetailsUsesWorkspaceSizeRangeFromPlanBuilder)
+{
+    constexpr size_t MIN_WORKSPACE = 1024;
+    constexpr size_t MAX_WORKSPACE = 8192;
+
+    auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+    EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(true));
+    EXPECT_CALL(*mockPlanBuilder, getWorkspaceSizeRange(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(WorkspaceSizeRange{MIN_WORKSPACE, MAX_WORKSPACE}));
+
+    MiopenEngine engine(1);
+    engine.addPlanBuilder(std::move(mockPlanBuilder));
+
+    MockGraph mockGraph;
+    HipdnnEnginePluginHandle dummyHandle;
+
+    hipdnnPluginConstData_t result;
+    engine.getDetails(dummyHandle, mockGraph, result);
+
+    hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(result.ptr, result.size);
+
+    bool foundWorkspaceSizeLimitKnob = false;
+    const auto& knobWrappers = engineDetails.knobWrappers();
+    for(const auto& knobWrapper : knobWrappers)
+    {
+        const auto& knob = knobWrapper->getKnob();
+        if(std::string(knob.knob_id()->c_str()) == "global.workspace_size_limit")
+        {
+            foundWorkspaceSizeLimitKnob = true;
+            EXPECT_EQ(knob.default_value_type(), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+            auto defaultValue
+                = knob.default_value_as<hipdnn_data_sdk::data_objects::IntValue>()->value();
+            auto constraint = knob.constraint_as<hipdnn_data_sdk::data_objects::IntConstraint>();
+            auto minValue = constraint->min_value();
+            auto maxValue = constraint->max_value();
+
+            EXPECT_EQ(defaultValue, static_cast<int64_t>(MAX_WORKSPACE));
+            EXPECT_EQ(minValue, static_cast<int64_t>(MIN_WORKSPACE));
+            EXPECT_EQ(maxValue, static_cast<int64_t>(MAX_WORKSPACE));
+            break;
+        }
+    }
+    EXPECT_TRUE(foundWorkspaceSizeLimitKnob);
+}
+
 TEST(TestMiopenEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
 {
     auto mockPlanBuilder1 = std::make_unique<MockPlanBuilder>();

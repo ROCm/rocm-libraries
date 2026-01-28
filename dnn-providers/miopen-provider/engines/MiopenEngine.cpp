@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <limits>
+#include <string>
 
 #include "MiopenEngine.hpp"
 #include "plans/MiopenBatchnormPlanBuilder.hpp"
@@ -12,9 +13,87 @@
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace miopen_legacy_plugin
 {
+
+namespace
+{
+auto createBenchmarkingKnob(flatbuffers::FlatBufferBuilder& builder)
+{
+    return hipdnn_plugin_sdk::KnobFactory::createIntKnob(
+        builder,
+        hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME,
+        "Enable benchmarking",
+        0,
+        0,
+        1,
+        1,
+        {});
+}
+
+auto createWorkspaceSizeLimitKnob(flatbuffers::FlatBufferBuilder& builder,
+                                   HipdnnEnginePluginHandle& handle,
+                                   const hipdnn_plugin_sdk::IGraph& opGraph,
+                                   const std::vector<std::unique_ptr<IPlanBuilder>>& planBuilders)
+{
+    // Determine workspace size range from the applicable plan builder
+    // This is wrong if we ever have more than 1 plan builder thats applicable.
+    // If this is the case, we should split plan builders across multiple engines.
+    int64_t minWorkspace;
+    int64_t maxWorkspace;
+    bool foundApplicable = false;
+
+    for(const auto& planBuilder : planBuilders)
+    {
+        if(planBuilder->isApplicable(handle, opGraph))
+        {
+            const auto range = planBuilder->getWorkspaceSizeRange(handle, opGraph);
+
+            // Validate that size_t values can fit into int64_t
+            if(range.min > std::numeric_limits<int64_t>::max())
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                    "Workspace size range minimum (" + std::to_string(range.min) +
+                    ") exceeds maximum representable int64_t value");
+            }
+            if(range.max > std::numeric_limits<int64_t>::max())
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                    "Workspace size range maximum (" + std::to_string(range.max) +
+                    ") exceeds maximum representable int64_t value");
+            }
+
+            minWorkspace = static_cast<int64_t>(range.min);
+            maxWorkspace = static_cast<int64_t>(range.max);
+            foundApplicable = true;
+            break;
+        }
+    }
+
+    if(!foundApplicable)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "No applicable plan builder found for operation graph when calling getDetails()");
+    }
+
+    const int64_t defaultWorkspace = maxWorkspace;
+
+    return hipdnn_plugin_sdk::KnobFactory::createIntKnob(
+        builder,
+        hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME,
+        "Workspace size limit in bytes",
+        defaultWorkspace,
+        minWorkspace,
+        maxWorkspace,
+        1,
+        {});
+}
+} // unnamed namespace
 
 MiopenEngine::MiopenEngine(int64_t id)
     : _id(id)
@@ -45,21 +124,10 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
                               const hipdnn_plugin_sdk::IGraph& opGraph,
                               hipdnnPluginConstData_t& detailsOut) const
 {
-    (void)opGraph; // Unused parameter for now, but available for future enhancements
     flatbuffers::FlatBufferBuilder builder;
 
-    auto benchmarkingKnob = hipdnn_plugin_sdk::KnobFactory::createIntKnob(
-        builder, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, "Enable benchmarking", 0, 0, 1, 1, {});
-
-    auto workspaceSizeLimitKnob = hipdnn_plugin_sdk::KnobFactory::createIntKnob(
-        builder,
-        hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME,
-        "Workspace size limit in bytes",
-        std::numeric_limits<int64_t>::max(),
-        0,
-        std::numeric_limits<int64_t>::max(),
-        1,
-        {});
+    auto benchmarkingKnob = createBenchmarkingKnob(builder);
+    auto workspaceSizeLimitKnob = createWorkspaceSizeLimitKnob(builder, handle, opGraph, _planBuilders);
 
     std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobsVector;
     knobsVector.push_back(benchmarkingKnob);
