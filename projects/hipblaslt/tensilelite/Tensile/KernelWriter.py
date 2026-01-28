@@ -7036,7 +7036,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         else:
           _placeholder.add(SCBranchSCC1(labelName=_target.getLabelName()))
       elif _operation == "SCBranchVCCNZ":
-        if currentInstLength - count + 1 >= 16384:
+        if currentInstLength - count + 1 >= self.states.asmCaps["ShortBranchMaxLength"]:
           with self.allocTmpSgpr(3) as tmpSgprInfo:
               _placeholder.add(self.longBranchVccnz(_target, 1, tmpSgprInfo))
         else:
