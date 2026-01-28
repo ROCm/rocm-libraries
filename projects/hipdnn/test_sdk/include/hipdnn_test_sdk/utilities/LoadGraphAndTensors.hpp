@@ -11,9 +11,9 @@
 #include <hipdnn_data_sdk/utilities/Visitor.hpp>
 #include <hipdnn_data_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_test_sdk/detail/FlatbufferTensorAttributesUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
-#include <hipdnn_test_sdk/utilities/FlatbufferTensorAttributesUtils.hpp>
 #include <type_traits>
 #include <variant>
 
@@ -59,7 +59,7 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     tensorFromFileAndAttributes(const std::filesystem::path& filepath,
                                 const hipdnn_data_sdk::data_objects::TensorAttributes& attributes)
 {
-    auto tensor = hipdnn_test_sdk::utilities::createTensorFromAttribute(attributes);
+    auto tensor = detail::createTensorFromAttribute(attributes);
     detail::fillTensorFromFile(*tensor, filepath);
 
     return tensor;

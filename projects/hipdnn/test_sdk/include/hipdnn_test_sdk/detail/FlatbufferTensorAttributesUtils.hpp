@@ -8,7 +8,7 @@
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 
-namespace hipdnn_test_sdk::utilities
+namespace hipdnn_test_sdk::detail
 {
 
 inline hipdnn_data_sdk::data_objects::TensorAttributesT
@@ -38,4 +38,4 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     return hipdnn_data_sdk::utilities::createTensor(attribute.data_type(), dims, strides);
 }
 
-} // namespace hipdnn_test_sdk::utilities
+} // namespace hipdnn_test_sdk::detail

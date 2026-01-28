@@ -9,11 +9,11 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
+#include <hipdnn_test_sdk/detail/FlatbufferTensorAttributesUtils.hpp>
 #include <hipdnn_test_sdk/detail/IGraphNodePlanBuilder.hpp>
 #include <hipdnn_test_sdk/detail/IGraphNodePlanExecutor.hpp>
 #include <hipdnn_test_sdk/detail/PlanUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
-#include <hipdnn_test_sdk/utilities/FlatbufferTensorAttributesUtils.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 
 namespace hipdnn_test_sdk::detail
