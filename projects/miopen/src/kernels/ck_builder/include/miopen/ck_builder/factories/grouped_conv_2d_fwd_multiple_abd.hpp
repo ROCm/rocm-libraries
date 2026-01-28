@@ -16,9 +16,9 @@ namespace miopen {
 namespace conv {
 namespace ck_builder {
 namespace instance {
-using InLayout    = ck::tensor_layout::convolution::NGCHW;
-using WeiLayout   = ck::tensor_layout::convolution::GKCYX;
-using OutLayout   = ck::tensor_layout::convolution::NGKHW;
+using InLayout    = ck::tensor_layout::convolution::NHWGC;
+using WeiLayout   = ck::tensor_layout::convolution::GKYXC;
+using OutLayout   = ck::tensor_layout::convolution::NHWGK;
 using PassThrough = ck::tensor_operation::element_wise::PassThrough;
 using EmptyTuple  = ck::Tuple<>;
 template <typename DataType>
@@ -38,32 +38,8 @@ using DeviceOpGFwdDefault =
                                                                   DataType,
                                                                   DataType>;
 
-// F32 instance builder functions
-void add_f32_merged_groups_instances(std::vector<BaseOperatorPtr>& instances);
-void add_f32_standard_instances(std::vector<BaseOperatorPtr>& instances);
-void add_f32_16x16_instances(std::vector<BaseOperatorPtr>& instances);
-void add_f32_comp_instances(std::vector<BaseOperatorPtr>& instances);
-void add_f32_mem_intra_instances(std::vector<BaseOperatorPtr>& instances);
-void add_f32_mem_inter_instances(std::vector<BaseOperatorPtr>& instances);
-
-// F16 instance builder functions
-void add_f16_merged_groups_instances(std::vector<BaseOperatorPtr>& instances);
-void add_f16_standard_instances(std::vector<BaseOperatorPtr>& instances);
-void add_f16_16x16_instances(std::vector<BaseOperatorPtr>& instances);
-void add_f16_comp_instances(std::vector<BaseOperatorPtr>& instances);
-void add_f16_comp_2x_instances(std::vector<BaseOperatorPtr>& instances);
-void add_f16_comp_part2_instances(std::vector<BaseOperatorPtr>& instances);
-void add_f16_mem_intra_instances(std::vector<BaseOperatorPtr>& instances);
-void add_f16_mem_inter_instances(std::vector<BaseOperatorPtr>& instances);
-
 template <>
 struct DeviceOperationInstanceFactory<DeviceOpGFwdDefault<float>>
-{
-    static std::vector<BaseOperatorPtr> GetInstances();
-};
-
-template <>
-struct DeviceOperationInstanceFactory<DeviceOpGFwdDefault<ck::half_t>>
 {
     static std::vector<BaseOperatorPtr> GetInstances();
 };

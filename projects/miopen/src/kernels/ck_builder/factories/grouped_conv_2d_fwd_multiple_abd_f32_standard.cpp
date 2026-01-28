@@ -215,28 +215,28 @@ create_device_grouped_conv_fwd_xdl_f32_instance_data(std::size_t spatialDim,
     return result;
 }
 
-constexpr auto create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_instance_data()
+constexpr auto create_device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_f32_instance_data()
 {
     constexpr auto defaultInstanceData =
         create_device_grouped_conv_fwd_xdl_f32_instance_data(2,
-                                                             ckb::TensorLayout::NGCHW,
-                                                             ckb::TensorLayout::GKCYX,
-                                                             ckb::TensorLayout::NGKHW,
+                                                             ckb::TensorLayout::NHWGC,
+                                                             ckb::TensorLayout::GKYXC,
+                                                             ckb::TensorLayout::NHWGK,
                                                              ckb::ConvSpecialization::DEFAULT);
 
     constexpr auto filter1x1Pad0InstanceData = create_device_grouped_conv_fwd_xdl_f32_instance_data(
         2,
-        ckb::TensorLayout::NGCHW,
-        ckb::TensorLayout::GKCYX,
-        ckb::TensorLayout::NGKHW,
+        ckb::TensorLayout::NHWGC,
+        ckb::TensorLayout::GKYXC,
+        ckb::TensorLayout::NHWGK,
         ckb::ConvSpecialization::FILTER_1X1_PAD0);
 
     constexpr auto filter1x1Stride1Pad0InstanceData =
         create_device_grouped_conv_fwd_xdl_f32_instance_data(
             2,
-            ckb::TensorLayout::NGCHW,
-            ckb::TensorLayout::GKCYX,
-            ckb::TensorLayout::NGKHW,
+            ckb::TensorLayout::NHWGC,
+            ckb::TensorLayout::GKYXC,
+            ckb::TensorLayout::NHWGK,
             ckb::ConvSpecialization::FILTER_1X1_STRIDE1_PAD0);
 
     constexpr auto instanceData =
@@ -247,7 +247,8 @@ constexpr auto create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_instan
 
 void add_f32_standard_instances(std::vector<BaseOperatorPtr>& instances)
 {
-    constexpr auto kernelData = create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_instance_data();
+    constexpr auto kernelData =
+        create_device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_f32_instance_data();
     build_kernels<kernelData>(instances);
 }
 

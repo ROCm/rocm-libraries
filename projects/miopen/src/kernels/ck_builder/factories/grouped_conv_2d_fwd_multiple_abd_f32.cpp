@@ -5,19 +5,28 @@ namespace conv {
 namespace ck_builder {
 namespace instance {
 
-std::vector<BaseOperatorPtr> DeviceOperationInstanceFactory<DeviceOpGFwdDefault<float>>::GetInstances()
+// F32 instance builder functions
+void add_f32_merged_groups_instances(std::vector<BaseOperatorPtr>& instances);
+void add_f32_standard_instances(std::vector<BaseOperatorPtr>& instances);
+void add_f32_16x16_instances(std::vector<BaseOperatorPtr>& instances);
+void add_f32_comp_instances(std::vector<BaseOperatorPtr>& instances);
+void add_f32_mem_intra_instances(std::vector<BaseOperatorPtr>& instances);
+void add_f32_mem_inter_instances(std::vector<BaseOperatorPtr>& instances);
+
+std::vector<BaseOperatorPtr>
+DeviceOperationInstanceFactory<DeviceOpGFwdDefault<float>>::GetInstances()
 {
     // Adapted from GetInstances() in the composable_kernel project's file:
     // library/include/ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp
     std::vector<BaseOperatorPtr> instances{};
-    
+
     add_f32_merged_groups_instances(instances);
     add_f32_standard_instances(instances);
     add_f32_16x16_instances(instances);
     add_f32_comp_instances(instances);
     add_f32_mem_intra_instances(instances);
     add_f32_mem_inter_instances(instances);
-    
+
     return instances;
 }
 

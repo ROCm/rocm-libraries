@@ -67,22 +67,22 @@ constexpr auto create_device_grouped_conv_fwd_xdl_merged_groups_f32_instance_dat
 }
 
 constexpr auto
-create_device_grouped_conv2d_fwd_xdl_merged_groups_ngchw_gkcyx_ngkhw_f32_instance_data()
+create_device_grouped_conv2d_fwd_xdl_merged_groups_nhwgc_gkyxc_nhwgk_f32_instance_data()
 {
     constexpr auto defaultInstanceData =
         create_device_grouped_conv_fwd_xdl_merged_groups_f32_instance_data(
             2,
-            ckb::TensorLayout::NGCHW,
-            ckb::TensorLayout::GKCYX,
-            ckb::TensorLayout::NGKHW,
+            ckb::TensorLayout::NHWGC,
+            ckb::TensorLayout::GKYXC,
+            ckb::TensorLayout::NHWGK,
             ckb::ConvSpecialization::DEFAULT);
 
     constexpr auto filter3x3InstanceData =
         create_device_grouped_conv_fwd_xdl_merged_groups_f32_instance_data(
             2,
-            ckb::TensorLayout::NGCHW,
-            ckb::TensorLayout::GKCYX,
-            ckb::TensorLayout::NGKHW,
+            ckb::TensorLayout::NHWGC,
+            ckb::TensorLayout::GKYXC,
+            ckb::TensorLayout::NHWGK,
             ckb::ConvSpecialization::FILTER_3x3);
 
     constexpr auto instanceData = concat(defaultInstanceData, filter3x3InstanceData);
@@ -93,7 +93,7 @@ create_device_grouped_conv2d_fwd_xdl_merged_groups_ngchw_gkcyx_ngkhw_f32_instanc
 void add_f32_merged_groups_instances(std::vector<BaseOperatorPtr>& instances)
 {
     constexpr auto kernelData =
-        create_device_grouped_conv2d_fwd_xdl_merged_groups_ngchw_gkcyx_ngkhw_f32_instance_data();
+        create_device_grouped_conv2d_fwd_xdl_merged_groups_nhwgc_gkyxc_nhwgk_f32_instance_data();
     build_kernels<kernelData>(instances);
 }
 

@@ -82,13 +82,13 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f32_comp_instance_data(
     //*/
 }
 
-constexpr auto create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_comp_instance_data()
+constexpr auto create_device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_f32_comp_instance_data()
 {
     constexpr auto defaultInstanceData =
         create_device_grouped_conv_fwd_xdl_f32_comp_instance_data(2,
-                                                                  ckb::TensorLayout::NGCHW,
-                                                                  ckb::TensorLayout::GKCYX,
-                                                                  ckb::TensorLayout::NGKHW,
+                                                                  ckb::TensorLayout::NHWGC,
+                                                                  ckb::TensorLayout::GKYXC,
+                                                                  ckb::TensorLayout::NHWGK,
                                                                   ckb::ConvSpecialization::DEFAULT);
 
     return defaultInstanceData;
@@ -96,7 +96,8 @@ constexpr auto create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_comp_i
 
 void add_f32_comp_instances(std::vector<BaseOperatorPtr>& instances)
 {
-    constexpr auto kernelData = create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f32_comp_instance_data();
+    constexpr auto kernelData =
+        create_device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_f32_comp_instance_data();
     build_kernels<kernelData>(instances);
 }
 
