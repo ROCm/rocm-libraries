@@ -209,7 +209,7 @@ TEST(TestMiopenEngine, GetDetailsIncludesBenchmarkingKnob)
     for(const auto& knobWrapper : knobWrappers)
     {
         const auto& knob = knobWrapper->getKnob();
-        if(std::string(knob.knob_id_str()->c_str()) == "global.benchmarking")
+        if(std::string(knob.knob_id()->c_str()) == "global.benchmarking")
         {
             foundBenchmarkingKnob = true;
             EXPECT_EQ(knob.default_value_type(), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
@@ -331,7 +331,7 @@ TEST(TestMiopenEngine, GetDetailsIncludesWorkspaceSizeLimitKnob)
     for(const auto& knobWrapper : knobWrappers)
     {
         const auto& knob = knobWrapper->getKnob();
-        if(std::string(knob.knob_id_str()->c_str()) == "global.workspace_size_limit")
+        if(std::string(knob.knob_id()->c_str()) == "global.workspace_size_limit")
         {
             foundWorkspaceSizeLimitKnob = true;
             EXPECT_EQ(knob.default_value_type(), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
