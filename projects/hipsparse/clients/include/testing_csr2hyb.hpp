@@ -41,7 +41,6 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-
 template <typename T>
 void testing_csr2hyb_bad_arg(const Arguments& argus)
 {
