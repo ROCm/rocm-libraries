@@ -107,8 +107,8 @@ Tests:
   function: spmm_bell
   indextype: *i32_i64
   precision: *single_double_precisions
-  M: [0, 51]
-  N: [0, 44]
+  M: [8, 51]
+  N: [8, 44]
   K: [0, 8]
   block_dim: [1, 2, 4, 8, 16, 32, 64]
   alpha_beta: *alpha_beta_range_checkin

@@ -120,23 +120,26 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
         TEST_FILTER "-*GPU_*"
         DISCOVERY_MODE PRE_TEST
         PROPERTIES
-            ENVIRONMENT "${asan_opts}"
+            "LABELS" "GTEST"
+            "ENVIRONMENT" "${asan_opts}"
     )
     gtest_discover_tests(
         rocroller-tests
         XML_OUTPUT_DIR ${TEST_REPORT_DIR}
         TEST_FILTER "*GPU_*"
-        PROPERTIES "LABELS" "GPU"
-        DISCOVERY_MODE PRE_TEST
         PROPERTIES
-            ENVIRONMENT "${asan_opts}"
+            "LABELS" "GPU"
+            "LABELS" "GTEST"
+            "ENVIRONMENT" "${asan_opts}"
+        DISCOVERY_MODE PRE_TEST
     )
     gtest_discover_tests(
         arch-gen-tests
         XML_OUTPUT_DIR ${TEST_REPORT_DIR}
         DISCOVERY_MODE PRE_TEST
         PROPERTIES
-            ENVIRONMENT "${asan_opts}"
+            "LABELS" "GTEST"
+            "ENVIRONMENT" "${asan_opts}"
     )
 
     if(ROCROLLER_ENABLE_CATCH)

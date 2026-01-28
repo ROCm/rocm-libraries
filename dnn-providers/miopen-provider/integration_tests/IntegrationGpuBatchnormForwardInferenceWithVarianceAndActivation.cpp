@@ -69,7 +69,7 @@ protected:
 
         // Epsilon (pass-by-value)
         auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
-        epsilonTensorAttr->set_name("epsilon").set_value(1e-5f);
+        epsilonTensorAttr->set_name("epsilon").set_value(1e-5);
 
         graph::BatchnormInferenceAttributesVarianceExt bnAttrs;
 
@@ -81,7 +81,7 @@ protected:
                                                                      epsilonTensorAttr,
                                                                      bnAttrs);
 
-        yTensorAttr->set_data_type(dataType);
+        yTensorAttr->set_data_type(intermediateDataType);
 
         graph::PointwiseAttributes pointwiseAttrs;
         pointwiseAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activeCase.mode));

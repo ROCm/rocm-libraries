@@ -16,6 +16,10 @@
   - any-glob-to-any-file: 'shared/origami/**/*'
   - any-glob-to-any-file: 'shared/rocroller/**/*'
 
+"project: hipblaslt-provider":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/hipblaslt-provider/**/*'
+
 "project: hipcub":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipcub/**/*'
@@ -48,9 +52,13 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/miopen/**/*'
 
+"project: miopen-provider":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/miopen-provider/**/*'
+
 "project: none":
 - changed-files:
-  - all-globs-to-all-files: ['!projects/**/*', '!shared/**/*']
+  - all-globs-to-all-files: ['!dnn-providers/**/*', '!projects/**/*', '!shared/**/*']
 
 "project: rocblas":
 - changed-files:
@@ -88,6 +96,10 @@
 "shared: origami":
 - changed-files:
   - any-glob-to-any-file: 'shared/origami/**/*'
+
+"shared: primbench":
+- changed-files:
+  - any-glob-to-any-file: 'shared/primbench/**/*'
 
 "shared: rocroller":
 - changed-files:

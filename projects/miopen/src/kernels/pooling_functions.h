@@ -47,6 +47,14 @@ __device__ constexpr _Float16 poolingMax(_Float16 a, _Float16 b) { return __buil
 
 __device__ constexpr float poolingMax(float a, float b) { return fmaxf(a, b); }
 
+#if MIOPEN_USE_BFP16
+#include "bfloat16_dev.hpp"
+__device__ inline ushort poolingMax(ushort a, ushort b)
+{
+    return float_to_bfloat16(fmaxf(bfloat16_to_float(a), bfloat16_to_float(b)));
+}
+#endif
+
 __device__ float approxRcp(float x)
 {
     // By default, the compiler is convervative about emitting v_rcp_f32.
