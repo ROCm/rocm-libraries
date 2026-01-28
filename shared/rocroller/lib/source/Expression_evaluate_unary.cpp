@@ -88,6 +88,7 @@ namespace rocRoller::Expression::EvaluateDetail
             if(arg == 0)
                 return std::numeric_limits<uint32_t>::max() / 2;
 
+	    // When the divisor is 1, this constant has no use, so return 0.
             if(arg == 1)
                 return 0;
 
@@ -409,8 +410,10 @@ namespace rocRoller::Expression::EvaluateDetail
             if(arg == 0)
                 return 0;
 
+	    // When the divisor is 1, we set the MSB of MagicShift to 1 so we can detect this case
+	    // by checking the MSB.
             if(arg == 1)
-                return 1 << 31; // encoding denominator=1
+                return 1 << 31;
 
             auto magic = libdivide::libdivide_u32_branchfree_gen(arg);
 
