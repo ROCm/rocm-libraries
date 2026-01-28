@@ -43,10 +43,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
-size_t getpid()
-{
-    return GetCurrentProcessId();
-}
+size_t getpid() { return GetCurrentProcessId(); }
 #endif
 
 /// Enable logging of the most important function calls.
@@ -89,6 +86,12 @@ thread_local size_t log_buffer_i = 0;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
 thread_local std::vector<std::string> log_buffer(log_buffer_size, "");
 
+void BufferLog(std::string line);
+{
+    log_buffer[log_buffer_i] = line;
+    log_buffer_i             = (log_buffer_i + 1) % log_buffer_size;
+}
+
 void OutputBufferedLogs()
 {
     auto buffer_size = (log_buffer[log_buffer_size - 1] == "") ? log_buffer_i : log_buffer_size;
@@ -97,15 +100,15 @@ void OutputBufferedLogs()
     std::cerr << "Buffered " << buffer_size << " messages to file: " << sysinfo::GetSystemHostname()
               << ":" << filename.string() << std::endl;
     auto err_file = std::ofstream{filename};
-    size_t i      = miopen::log_buffer_i;
+    size_t i      = log_buffer_i;
     do
     {
-        if(miopen::log_buffer[i] != "")
+        if(log_buffer[i] != "")
         {
-            err_file << miopen::log_buffer[i];
+            err_file << log_buffer[i];
         }
-        i = (i + 1) % miopen::log_buffer_size;
-    } while(i != miopen::log_buffer_i);
+        i = (i + 1) % log_buffer_size;
+    } while(i != log_buffer_i);
 }
 
 namespace debug {
