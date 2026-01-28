@@ -37,7 +37,8 @@ class HIPErrorHandler : public testing::EmptyTestEventListener
             << ". Error string: " << hipGetErrorString(hipExtError);
     }
 };
-/ int main(int argc, char** argv)
+
+int main(int argc, char** argv)
 {
     // Save for tests that need arg access
     miopen::tests::g_argc = argc;
