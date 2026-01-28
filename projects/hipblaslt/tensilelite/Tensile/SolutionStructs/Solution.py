@@ -1448,8 +1448,8 @@ class Solution(collections.abc.Mapping):
 
     # Complex datatype restrictions.
     if state["ProblemType"]["DataType"].isComplex():
-      if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
-        reject(state, printRejectionReason, "Complex datatype kernel does not support GSU yet.")
+      if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) and (state["GlobalSplitUAlgorithm"] != "MultipleBuffer"):
+        reject(state, printRejectionReason, "Complex datatype kernel currently only supports MultiBuffer GSU.")
         return
       if state["MIArchVgpr"]:
         reject(state, printRejectionReason, "Complex datatype kernel does not support MIArchVgpr yet.")
@@ -1524,7 +1524,7 @@ class Solution(collections.abc.Mapping):
     # Check if CMS is available for this solution
     if state["UseCustomMainLoopSchedule"] in [-1, 1]:
       hasCMS,_ = hasCustomSchedule(state)
-      state["UseCustomMainLoopSchedule"] = hasCMS
+      state["UseCustomMainLoopSchedule"] = 1 if hasCMS else 0
 
     # 0: Normal mode. Hardware applies all of the normal data dependency checks
     # 1: Full expert mode (not suppoeted yet). Disable hardware checks against: VA_VDST, VA_SDST, VA_SSRC, VA_VCC, VM_VSRC and SA_SDST.
@@ -2542,7 +2542,7 @@ class Solution(collections.abc.Mapping):
         # need to disable SuppressNoLoadLoop
         state["SuppressNoLoadLoop"] = False
         # disable UseCustomMainLoopSchedule
-        state["UseCustomMainLoopSchedule"] = False
+        state["UseCustomMainLoopSchedule"] = 0
         state["InternalSupportParams"]["SupportCustomStaggerU"] = False # Disable CustomStaggerU for TailloopInNll
 
     # Determine if we can load directly-to-Vgpr

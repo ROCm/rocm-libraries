@@ -56,18 +56,6 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsTrueFo
 }
 
 TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
-       IsApplicableReturnsFalseForGraphWithRunningStatistics)
-{
-    auto builder
-        = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(true, true);
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
-
-    EXPECT_FALSE(applicable);
-}
-
-TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
        IsApplicableReturnsTrueForFusionWithoutRunningStatistics)
 {
     // Create a fused batchnorm training + activation graph WITHOUT running statistics
