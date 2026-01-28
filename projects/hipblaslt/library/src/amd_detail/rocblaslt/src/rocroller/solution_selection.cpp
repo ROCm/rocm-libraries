@@ -237,7 +237,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                 continue;
 
             // Set tailLoops = false for {256, 256, 256} tile size
-            bool useTailLoops = !is256Tile;
+            bool useTailLoops = true;
 
             params.push_back({wgt, true, false, useTailLoops});
 
