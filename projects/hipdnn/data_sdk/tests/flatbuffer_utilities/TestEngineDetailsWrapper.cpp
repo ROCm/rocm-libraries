@@ -32,7 +32,7 @@ flatbuffers::FlatBufferBuilder
         auto descOffset = builder.CreateString("Description for " + knobIdStr);
 
         hipdnn_data_sdk::data_objects::KnobBuilder knobBuilder(builder);
-        knobBuilder.add_knob_id_str(knobIdStrOffset);
+        knobBuilder.add_knob_id(knobIdStrOffset);
         knobBuilder.add_description(descOffset);
         knobs.push_back(knobBuilder.Finish());
     }
