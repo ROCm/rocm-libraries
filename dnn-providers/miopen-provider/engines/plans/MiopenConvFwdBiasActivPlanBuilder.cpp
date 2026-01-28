@@ -429,6 +429,23 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHan
     }
 }
 
+WorkspaceSizeRange MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSizeRange(
+    const HipdnnEnginePluginHandle& handle, const hipdnn_plugin_sdk::IGraph& opGraph) const
+{
+    const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
+    nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
+
+    ConvFwdBiasActivParams params(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
+
+    // Since MIOpen's fusion API doesn't provide a solution query interface,
+    // we must compile the fusion plan to determine the workspace size.
+    // This results in min == max as only one solution exists per fusion configuration.
+    ConvFwdBiasActivPlan plan(handle, std::move(params), true, true, false);
+
+    size_t workspaceSize = plan.getWorkspaceSize(handle);
+    return {workspaceSize, workspaceSize};
+}
+
 size_t MiopenConvFwdBiasActivPlanBuilder::getMaxWorkspaceSize(
     const HipdnnEnginePluginHandle& handle, const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
