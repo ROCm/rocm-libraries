@@ -4,7 +4,7 @@
 #include <miopen/ck_builder/factories/grouped_conv_2d_fwd_multiple_abd.hpp>
 
 #include <miopen/ck_builder/kernel_instantiation.hpp>
-#include <miopen/ck_builder/instances/xdl.hpp>
+#include <miopen/ck_builder/instance_data/xdl.hpp>
 
 namespace miopen {
 namespace conv {
