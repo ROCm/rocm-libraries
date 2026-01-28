@@ -5,11 +5,11 @@
 
 #include <utility>
 
-#include <hipdnn_frontend/Utilities.hpp>
-#include <hipdnn_frontend/backend/BackendLoggingHelpers.hpp>
-#include <hipdnn_frontend/backend/BackendWrapper.hpp>
+#include <hipdnn_frontend/detail/BackendLoggingHelpers.hpp>
+#include <hipdnn_frontend/detail/BackendWrapper.hpp>
+#include <hipdnn_frontend/detail/Utilities.hpp>
 
-namespace hipdnn_frontend
+namespace hipdnn_frontend::detail
 {
 
 class ScopedHipdnnBackendDescriptor

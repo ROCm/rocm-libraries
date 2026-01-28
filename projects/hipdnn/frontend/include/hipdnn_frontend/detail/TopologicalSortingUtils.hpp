@@ -8,9 +8,9 @@
 #include <unordered_set>
 #include <vector>
 
-#include <hipdnn_frontend/Utilities.hpp>
+#include <hipdnn_frontend/detail/Utilities.hpp>
 
-namespace hipdnn_frontend
+namespace hipdnn_frontend::detail
 {
 struct GraphStructure
 {

@@ -8,7 +8,7 @@
 
 #include <hipdnn_backend.h>
 
-namespace hipdnn_frontend
+namespace hipdnn_frontend::detail
 {
 
 class IHipdnnBackend

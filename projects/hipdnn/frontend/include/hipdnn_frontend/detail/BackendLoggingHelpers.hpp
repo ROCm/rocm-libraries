@@ -8,6 +8,9 @@
 #include <HipdnnStatus.h>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 
+namespace hipdnn_frontend::detail
+{
+
 inline const char* toString(hipdnnStatus_t status)
 {
     switch(status)
@@ -61,3 +64,5 @@ struct fmt::formatter<hipdnnStatus_t> : fmt::formatter<const char*>
         return fmt::formatter<const char*>::format(toString(status), ctx);
     }
 };
+
+} // namespace hipdnn_frontend::detail

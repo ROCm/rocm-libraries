@@ -4,11 +4,12 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
-#include <hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 
 #include "fake_backend/MockHipdnnBackend.hpp"
 
 using namespace hipdnn_frontend;
+using namespace hipdnn_frontend::detail;
 using namespace ::testing;
 
 class TestScopedHipdnnBackendDescriptor : public ::testing::Test
@@ -19,7 +20,7 @@ protected:
     void SetUp() override
     {
         _mockBackend = std::make_shared<Mock_hipdnn_backend>();
-        IHipdnnBackend::setInstance(_mockBackend);
+        detail::IHipdnnBackend::setInstance(_mockBackend);
 
         ON_CALL(*_mockBackend, getLastErrorString(_, _))
             .WillByDefault([](char* errorString, size_t size) {
@@ -30,7 +31,7 @@ protected:
     }
     void TearDown() override
     {
-        IHipdnnBackend::resetInstance();
+        detail::IHipdnnBackend::resetInstance();
         _mockBackend.reset();
     }
 };

@@ -6,7 +6,9 @@
 #include <sstream>
 
 #include <HipdnnStatus.h>
-#include <hipdnn_frontend/backend/BackendLoggingHelpers.hpp>
+#include <hipdnn_frontend/detail/BackendLoggingHelpers.hpp>
+
+using namespace hipdnn_frontend::detail;
 
 TEST(TestBackendLoggingHelpers, ToStringAllStatusValues)
 {

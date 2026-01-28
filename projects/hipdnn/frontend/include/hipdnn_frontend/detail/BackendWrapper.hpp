@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <hipdnn_frontend/backend/HipdnnBackendInterface.hpp>
+#include <hipdnn_frontend/detail/HipdnnBackendInterface.hpp>
 
-namespace hipdnn_frontend
+namespace hipdnn_frontend::detail
 {
 
 class HipdnnBackendWrapper : public IHipdnnBackend

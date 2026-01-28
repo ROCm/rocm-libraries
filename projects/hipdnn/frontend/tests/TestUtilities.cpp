@@ -5,12 +5,13 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
+#include <hipdnn_frontend/detail/Utilities.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <memory>
 #include <vector>
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_frontend::graph;
+using namespace hipdnn_frontend::detail;
 using namespace hipdnn_test_sdk::utilities;
 
 TEST(TestUtilities, FindCommonShapeValid)
