@@ -133,6 +133,7 @@ namespace testing
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     // TESTING_COMPUTE_TEMPLATE(csrmm)
     TESTING_COMPUTE_TEMPLATE(csrmm2)
+#endif
 
     /*
     * ===========================================================================
