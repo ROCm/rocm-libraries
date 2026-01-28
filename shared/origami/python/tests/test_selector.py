@@ -4,9 +4,12 @@
 """Tests for OrigamiMatmulSelector interface."""
 
 import pytest
-import torch
 import math
 import origami
+
+# Skip entire module if torch is not available (selector requires torch)
+torch = pytest.importorskip("torch", reason="torch is required for OrigamiMatmulSelector tests.")
+
 from origami.selector import OrigamiMatmulSelector
 from .conftest import create_config_list
 
