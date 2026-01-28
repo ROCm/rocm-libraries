@@ -203,15 +203,15 @@ public:
     // Format: {mac_rate, {const_cost, fe_cost, ph_cost, be_cost}}
     struct PerfParams
     {
-        static constexpr PerfModelParams GFX942_V4_9_fp16{1024,
-                                                          {22724, 512, 1372, 2244}};
-        static constexpr PerfModelParams GFX942_V4_9_bf16{1024,
-                                                          {22724, 512, 1660, 2656}};
+        // clang-format off
+        static constexpr PerfModelParams GFX942_V4_9_fp16{1024, {22724, 512, 1372, 2244}};
+        static constexpr PerfModelParams GFX942_V4_9_bf16{1024, {22724, 512, 1660, 2656}};
         static constexpr PerfModelParams GFX942_V4_9_fp32{128, {26044, 512, 2468, 2504}};
         static constexpr PerfModelParams GFX942_V4_6{1024, {22850, 244, 1396, 2244}};
 
         static constexpr PerfModelParams GFX12_V4_9{512, {9740, 182, 1506, 1533}};
         static constexpr PerfModelParams GFX12_V4_6{512, {9505, 79, 1522, 1533}};
+        // clang-format on
     };
 
     static KernelVersion DetermineKernelVersion(const WinoShaderArgsV2& args, bool is_fp16)
