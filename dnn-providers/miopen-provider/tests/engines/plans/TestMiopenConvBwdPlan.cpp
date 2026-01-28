@@ -7,6 +7,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
 
+#include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 #include "engines/plans/MiopenConvBwdPlan.hpp"
 
@@ -239,7 +240,8 @@ TEST_F(TestGpuConvBwdPlan, CreatesPlanWithValidGraph)
     ConvBwdParams params(*attrs, graph.getTensorMap());
 
     // Create plan
-    ConvBwdPlan(_handle, std::move(params));
+    HipdnnEnginePluginExecutionContext executionContext;
+    ConvBwdPlan(_handle, std::move(params), executionContext);
 }
 
 TEST_F(TestGpuConvBwdPlan, ThrowsOnInvalidDims)
@@ -276,5 +278,78 @@ TEST_F(TestGpuConvBwdPlan, ThrowsOnInvalidDims)
     ConvBwdParams params(*attrs, graph.getTensorMap());
 
     // Create plan and expect exception
-    EXPECT_THROW(ConvBwdPlan(_handle, std::move(params)), hipdnn_plugin_sdk::HipdnnPluginException);
+    HipdnnEnginePluginExecutionContext executionContext;
+    EXPECT_THROW(ConvBwdPlan(_handle, std::move(params), executionContext),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST_F(TestGpuConvBwdPlan, CreatesPlanWithoutWorkspaceLimit)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_ConvolutionBwdAttributes();
+
+    ConvBwdParams params(*attrs, graph.getTensorMap());
+    HipdnnEnginePluginExecutionContext executionContext;
+
+    EXPECT_FALSE(executionContext.workspaceSizeLimit().has_value());
+    EXPECT_NO_THROW(ConvBwdPlan(_handle, std::move(params), executionContext));
+}
+
+TEST_F(TestGpuConvBwdPlan, CreatesPlanWithWorkspaceLimit)
+{
+    constexpr size_t WORKSPACE_LIMIT = 1024 * 1024; // 1MB
+
+    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_ConvolutionBwdAttributes();
+
+    ConvBwdParams params(*attrs, graph.getTensorMap());
+    HipdnnEnginePluginExecutionContext executionContext;
+
+    executionContext.setWorkspaceSizeLimit(WORKSPACE_LIMIT);
+
+    EXPECT_TRUE(executionContext.workspaceSizeLimit().has_value());
+    EXPECT_EQ(executionContext.workspaceSizeLimit().value(), WORKSPACE_LIMIT);
+
+    EXPECT_NO_THROW(ConvBwdPlan(_handle, std::move(params), executionContext));
+}
+
+TEST_F(TestGpuConvBwdPlan, CreatesPlanWithZeroWorkspaceLimit)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_ConvolutionBwdAttributes();
+
+    ConvBwdParams params(*attrs, graph.getTensorMap());
+    HipdnnEnginePluginExecutionContext executionContext;
+
+    executionContext.setWorkspaceSizeLimit(0);
+
+    // Create plan - behavior depends on available solutions
+    auto plan = ConvBwdPlan(_handle, std::move(params), executionContext);
+    EXPECT_EQ(plan.getWorkspaceSize(_handle), 0);
+}
+
+TEST_F(TestGpuConvBwdPlan, WorkspaceSizeRespectsLimit)
+{
+    constexpr size_t WORKSPACE_LIMIT = 2 * 1024 * 1024; // 2MB
+
+    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_ConvolutionBwdAttributes();
+
+    ConvBwdParams params(*attrs, graph.getTensorMap());
+    HipdnnEnginePluginExecutionContext executionContext;
+
+    executionContext.setWorkspaceSizeLimit(WORKSPACE_LIMIT);
+
+    auto plan = ConvBwdPlan(_handle, std::move(params), executionContext);
+    size_t actualWorkspace = plan.getWorkspaceSize(_handle);
+    EXPECT_LE(actualWorkspace, WORKSPACE_LIMIT)
+        << "Workspace size " << actualWorkspace << " exceeds limit " << WORKSPACE_LIMIT;
 }

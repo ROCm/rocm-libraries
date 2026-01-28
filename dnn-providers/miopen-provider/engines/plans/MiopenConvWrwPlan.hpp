@@ -52,7 +52,7 @@ class ConvWrwPlan : public IPlan
 public:
     ConvWrwPlan(const HipdnnEnginePluginHandle& handle,
                 ConvWrwParams&& params,
-                bool benchmarkingEnabled = false);
+                const HipdnnEnginePluginExecutionContext& executionContext);
     ~ConvWrwPlan() override = default;
 
     ConvWrwPlan(const ConvWrwPlan&) = delete;

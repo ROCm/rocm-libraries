@@ -8,6 +8,7 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
+#include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvBwdPlan.hpp"
 #include "MiopenUtils.hpp"
@@ -67,9 +68,9 @@ bool ConvBwdParams::validTensors() const
 
 ConvBwdPlan::ConvBwdPlan(const HipdnnEnginePluginHandle& handle,
                          ConvBwdParams&& params,
-                         bool benchmarkingEnabled)
+                         const HipdnnEnginePluginExecutionContext& executionContext)
     : _params(std::move(params))
-    , _benchmarkingEnabled(benchmarkingEnabled)
+    , _benchmarkingEnabled(executionContext.benchmarkingEnabled())
 {
     (void)_benchmarkingEnabled;
     // MIOpen Find 2.0 API
@@ -86,11 +87,24 @@ ConvBwdPlan::ConvBwdPlan(const HipdnnEnginePluginHandle& handle,
     THROW_ON_MIOPEN_FAILURE(miopenSetProblemTensorDescriptor(
         problem, miopenTensorConvolutionY, _params.dy().tensorDescriptor()));
 
+    // Create find options
+    miopenFindOptions_t findOptions;
+    THROW_ON_MIOPEN_FAILURE(miopenCreateFindOptions(&findOptions));
+    hipdnn_data_sdk::utilities::ScopedResource findOptionsRes(
+        findOptions, [](miopenFindOptions_t fo) { std::ignore = miopenDestroyFindOptions(fo); });
+
+    // Set workspace limit if available
+    if(executionContext.workspaceSizeLimit().has_value())
+    {
+        THROW_ON_MIOPEN_FAILURE(miopenSetFindOptionWorkspaceLimit(
+            findOptions, executionContext.workspaceSizeLimit().value()));
+    }
+
     size_t numSolutions;
     miopenSolution_t solution = nullptr;
     // Requesting only the best solution
     THROW_ON_MIOPEN_FAILURE(
-        miopenFindSolutions(handle.miopenHandle, problem, nullptr, &solution, &numSolutions, 1));
+        miopenFindSolutions(handle.miopenHandle, problem, findOptions, &solution, &numSolutions, 1));
 
     if(solution != nullptr)
     {
