@@ -4758,8 +4758,8 @@ void host_csrgeam_nnz(J                    M,
         int nthreads = omp_get_num_threads();
         int tid      = omp_get_thread_num();
 #else
-        int nthreads = 1;
-        int tid      = 0;
+        int           nthreads = 1;
+        int           tid      = 0;
 #endif
 
         J rows_per_thread = (M + nthreads - 1) / nthreads;
@@ -4852,8 +4852,8 @@ void host_csrgeam(J                    M,
         int nthreads = omp_get_num_threads();
         int tid      = omp_get_thread_num();
 #else
-        int nthreads = 1;
-        int tid      = 0;
+        int           nthreads = 1;
+        int           tid      = 0;
 #endif
 
         J rows_per_thread = (M + nthreads - 1) / nthreads;
@@ -8534,8 +8534,7 @@ void host_csr_to_csr_compress(rocsparse_int                     M,
         for(rocsparse_int j = start; j < end; j++)
         {
             if(std::abs(csr_val_A[j]) > std::real(tol)
-               && std::abs(csr_val_A[j])
-                      > std::numeric_limits<floating_data_t<T>>::min())
+               && std::abs(csr_val_A[j]) > std::numeric_limits<floating_data_t<T>>::min())
             {
                 count++;
             }
