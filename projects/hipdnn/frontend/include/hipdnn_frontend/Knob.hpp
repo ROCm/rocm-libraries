@@ -410,7 +410,7 @@ public:
         }
 
         // Create the knob
-        Knob knob(fbKnob->knob_id_str() != nullptr ? fbKnob->knob_id_str()->str() : "",
+        Knob knob(fbKnob->knob_id() != nullptr ? fbKnob->knob_id()->str() : "",
                   fbKnob->description() != nullptr ? fbKnob->description()->str() : "",
                   defaultValue,
                   fbKnob->deprecated());
