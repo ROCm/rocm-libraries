@@ -82,9 +82,15 @@ namespace miopen {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
 static thread_local size_t log_buffer_size = env::value(MIOPEN_LOG_BUFFER_SIZE);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
-static thread_local size_t log_buffer_i    = 0;
+static thread_local size_t log_buffer_i = 0;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
 static thread_local std::vector<std::string> log_buffer(log_buffer_size, "");
+
+void ClearBufferLog()
+{
+    log_buffer_i = 0;
+    log_buffer   = std::vector<std::string>(miopen::log_buffer_size, "");
+}
 
 void BufferLog(std::string line)
 {

@@ -363,9 +363,11 @@ constexpr std::string_view LoggingParseFunction(const std::string_view func,
 #define MIOPEN_GET_FN_NAME miopen::LoggingParseFunction(__func__, __PRETTY_FUNCTION__)
 #endif
 
-void BufferLog(std::string line);
+MIOPEN_INTERNALS_EXPORT void ClearBufferLog();
 
-void OutputBufferedLogs();
+MIOPEN_INTERNALS_EXPORT void BufferLog(std::string line);
+
+MIOPEN_INTERNALS_EXPORT void OutputBufferedLogs();
 
 #define MIOPEN_LOG_XQ_CUSTOM(level, disableQuieting, category, fn_name, ...)            \
     do                                                                                  \
