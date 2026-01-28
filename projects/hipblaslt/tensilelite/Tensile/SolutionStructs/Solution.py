@@ -748,8 +748,8 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "DirectToVgpr%c does not supports UnrollLoopSwapGlobalReadOrder"%(tc))
       return False
 
-    # does not work with PGR2 + EPS
-    if state["PrefetchGlobalRead"] == 2 and state["ExpandPointerSwap"]:
+    # does not work with PGR>=2 + EPS
+    if state["PrefetchGlobalRead"] >= 2 and state["ExpandPointerSwap"]:
       # force EPS=0 and continue
       state["ExpandPointerSwap"] = 0
 
@@ -1296,8 +1296,8 @@ class Solution(collections.abc.Mapping):
       state["DirectToLdsA"] = False
       state["DirectToLdsB"] = False
       state["_UseSgprForGRO"] = False
-      if state["PrefetchGlobalRead"] == 2:
-        reject(state, printRejectionReason, "BufferLoad=0 does not support PrefetchGlobalRead=2")
+      if state["PrefetchGlobalRead"] >= 2:
+        reject(state, printRejectionReason, "BufferLoad=0 does not support PrefetchGlobalRead>=2")
         return
 
       if problemType["UseBias"]:
@@ -2830,6 +2830,58 @@ class Solution(collections.abc.Mapping):
     if (state["DirectToVgprA"] or state["DirectToLdsA"]) and (state["DirectToVgprB"] or state["DirectToLdsB"]):
       state["NoLdsWriteCode"] = True
 
+    # enable scheduling GR (in LWcode for PGR2) over barrier sync
+    if not state["EnableMatrixInstruction"]:
+      # not valid for non MFMA case
+      state["ScheduleGROverBarrier"] = 0
+    else:
+      numMFMA = state["MIWaveTile"][0] * state["MIWaveTile"][1] * (state["DepthU"] // (state["MatrixInstK"] * state["LocalSplitU"]))
+      if state["ScheduleGROverBarrier"] == -1:
+        # auto enable ScheduleGROverBarrier for PGR>=3
+        # PGR2+tripleLDS case, manual enablement only
+        state["ScheduleGROverBarrier"] = 0
+        if state["PrefetchGlobalRead"] >= 3:
+          # better to avoid applying this logic for smaller MT sizes
+          # Set threshold as 
+          #  PGR3: MT128x64x64 with MT16x16x32x1 (with 4 waves)
+          # threshold //= 2 for MI32
+          thresholdMFMA = 128*64*64 / (16*16*32*4) # MI16x16x32x1 4waves
+          if state["MatrixInstM"] == 32:
+            thresholdMFMA //= 2
+          if numMFMA >= thresholdMFMA:
+            state["ScheduleGROverBarrier"] = 1
+      if state["ScheduleGROverBarrier"]:
+        # enable ScheduleGROverBarrier only for
+        # - NoLdsWriteCode and not DTV, and
+        # - PGR>=2, and
+        # - PLR>=1
+        # - small MT (detail below)
+        if (not state["NoLdsWriteCode"]) or \
+           (state["DirectToVgprA"] or state["DirectToVgprB"]) or \
+           state["PrefetchGlobalRead"] < 2 or \
+           state["PrefetchLocalRead"] == 0:
+          state["ScheduleGROverBarrier"] = 0
+        # disable this logic for very small MT sizes
+        # Set threshold as MT64x64x64 with MT16x16x32x1 (with 4 waves)
+        # threshold //= 2 for MI32
+        thresholdMFMA = 64*64*64 / (16*16*32*4) # MI16x16x32x1 4waves
+        if state["MatrixInstM"] == 32:
+          thresholdMFMA //= 2
+        if numMFMA < thresholdMFMA:
+          state["ScheduleGROverBarrier"] = 0
+
+    # number of minimum GR inc inst per MFMA
+    # default 1
+    # Set at least 2 for gfx950 + MI16 + smaller MT case
+    if state["MinGRIncPerMfma"] == -1:
+      state["MinGRIncPerMfma"] = 1
+      if isa == (9, 5, 0):
+        if state["EnableMatrixInstruction"] and state["MatrixInstM"] == 16 and state["MatrixInstK"] == 1:
+          if numMFMA<=32:
+            state["MinGRIncPerMfma"] = 2
+          if numMFMA<=16:
+            state["MinGRIncPerMfma"] = 3
+
     # calculate ldsPad
     state["LdsPadA"], state["LdsPadB"], state["LdsPadMetadata"] = calcLdsPad(state["LocalReadVectorWidth"], isaInfoMap)
 
@@ -2860,28 +2912,89 @@ class Solution(collections.abc.Mapping):
     state["LdsNumElementsAlignedA"] = ldsNumBytesAlignedA
     state["LdsNumElementsAlignedB"] = ldsNumBytesAlignedB
     state["LdsNumElementsAlignedMetadata"] = ldsNumBytesAlignedMetadata
+    # check for auto DtlPlusLdsBuf
+    if state["DtlPlusLdsBuf"] == -1:
+      if state["PrefetchGlobalRead"] > 2:
+        state["DtlPlusLdsBuf"] = 1
+      else:
+        state["DtlPlusLdsBuf"] = 0
+    # disable DtlPlusLdsBuf if not applicable
+    if state["DtlPlusLdsBuf"]:
+      # DTLA + DTLB only
+      if not(state["DirectToLdsA"] and state["DirectToLdsB"]):
+        state["DtlPlusLdsBuf"] = 0
+      # PGR>=2 only
+      if state["PrefetchGlobalRead"] < 2:
+        state["DtlPlusLdsBuf"] = 0
+      # SIA==3 only
+      if state["ScheduleIterAlg"] != 3:
+        state["DtlPlusLdsBuf"] = 0
+      # restrict feature combinations
+      if state["DtlPlusLdsBuf"]:
+        # disable CMS for DtlPlusLdsBuf (not supported yet)
+        state["UseCustomMainLoopSchedule"] = 0
+        # force 1LDSBuffer = 0
+        state["1LDSBuffer"] = 0
+
+    # Here, 1LDSBuffer == -1 is not resolved yet.
+    # (cannot move 1LDSBuffer==-1 resolution code above because of referring ldsNumBytesAB)
+    # Assuming larger buffer here
+    numLdsBlk = 1 if state["1LDSBuffer"] == 1 else 2
+    if state["PrefetchGlobalRead"] >= 3:
+      # PGR>=3, number of LDS Block is set to PGR
+      numLdsBlk = state["PrefetchGlobalRead"]
+      # force 1LDSBuffer = 0
+      state["1LDSBuffer"] = 0
+    if state["PrefetchGlobalRead"] >= 2 and state["DtlPlusLdsBuf"]:
+      # PGR>=2 + DtlPlusLdsBuf case, try to allocate PGR+1 LDSBlk to schedule GR over barrier
+      numLdsBlk = state["PrefetchGlobalRead"] + 1
+
+    def setLdsOffsets(offsetBlk, numLdsBlk, ldsNumBytesB):
+      if numLdsBlk <= 1:
+        # 1LDSBuffer case, use 2 to calculate ldsNumBytesAB
+        numLdsBlk = 2
+      state["LdsOffsetA_Blk"] = offsetBlk
+      state["LdsOffsetMetadata_Blk"] = state["LdsOffsetA_Blk"] + state["LdsNumElementsAlignedA"]
+      state["LdsOffsetB_Blk"] = state["LdsOffsetMetadata_Blk"] + state["LdsNumElementsAlignedMetadata"]
+      ldsNumBytesAB = (numLdsBlk - 2) * offsetBlk + state["LdsOffsetB_Blk"] + ldsNumBytesB
+      return ldsNumBytesAB
+
     if state["PrefetchGlobalRead"]:
       state["LdsOffsetMetadata"] = state["LdsOffsetA"] + state["LdsNumElementsAlignedA"]
       state["LdsOffsetB"] = state["LdsOffsetMetadata"] + state["LdsNumElementsAlignedMetadata"]
 
       offsetBlk = state["LdsOffsetB"] + ldsNumBytesAlignedB
+      roundupOffsetBlk = int(2**(math.ceil(math.log(offsetBlk, 2)))) if offsetBlk > 0 else 0
 
       state["StoreSwapAddr"] = (state["PrefetchGlobalRead"] == 2) and \
-        (state["1LDSBuffer"] == 0) and \
-        (offsetBlk + int(2**(math.ceil(math.log(offsetBlk, 2)))) > state["MaxLDS"])
+        (state["1LDSBuffer"] == 0) and numLdsBlk == 2 and \
+        (offsetBlk + roundupOffsetBlk) > state["MaxLDS"]
 
-      if offsetBlk > 0 and not state["StoreSwapAddr"]:
+      if offsetBlk > 0 and not state["StoreSwapAddr"] and numLdsBlk == 2:
         # Rounds offsetBlk to a power of two to enable inlining {s,v}_xor constants for swapping offsets
-        offsetBlk = int(2**(math.ceil(math.log(offsetBlk, 2))))
+        # skip ceiling to nearest power of two for numLdsBlk>=3
+        offsetBlk = roundupOffsetBlk
 
-      state["LdsOffsetA_Blk"] = offsetBlk
-      state["LdsOffsetMetadata_Blk"] = state["LdsOffsetA_Blk"] + state["LdsNumElementsAlignedA"]
-      state["LdsOffsetB_Blk"] = state["LdsOffsetMetadata_Blk"] + state["LdsNumElementsAlignedMetadata"]
-      ldsNumBytesAB = state["LdsOffsetB_Blk"] + ldsNumBytesB
+      ldsNumBytesAB = setLdsOffsets(offsetBlk, numLdsBlk, ldsNumBytesB)
+      # decrement numLdsBlk for DtlPlusLdsBuf if it exceeds MaxLDS
+      # PGR 2 case, reject kernel (need to use StoreSwapAddr in that case)
+      if state["DtlPlusLdsBuf"] and ldsNumBytesAB > state["MaxLDS"]:
+        numLdsBlk -= 1
+        # continue with original logic for PGR2 + numLdsBlk==2
+        if state["PrefetchGlobalRead"] == 2:
+          if  (offsetBlk + roundupOffsetBlk) > state["MaxLDS"]:
+            state["StoreSwapAddr"] = True
+          else:
+            offsetBlk = roundupOffsetBlk
+        # re-calculate LDS size with numLdsBlk==2
+        ldsNumBytesAB = setLdsOffsets(offsetBlk, numLdsBlk, ldsNumBytesB)
+        # unset DtlPlusLdsBuf
+        state["DtlPlusLdsBuf"] = 0
     else:
       state["LdsOffsetMetadata"] = ldsNumBytesAlignedA
       state["LdsOffsetB"] = state["LdsOffsetMetadata"] + ldsNumBytesAlignedMetadata
       ldsNumBytesAB = state["LdsOffsetB"] + ldsNumBytesB
+    state["NumLdsBlk"] = numLdsBlk
 
     # lds buffer size for reduction
     # if User want to control the LDS usage, we may open this para in the future
@@ -3292,6 +3405,20 @@ class Solution(collections.abc.Mapping):
     # (state["ExpandPointerSwap"] != 1 or state["LoopIters"] != 1 or state["ScheduleGlobalRead"] != 1):
     #   reject(state, printRejectionReason, "ScheduleIterAlg 2 only work with EPS1_SGR1, LoopIter=1")
 
+    # reject for PGR>=3
+    if state["PrefetchGlobalRead"] >= 3:
+      # DTLA + DTLB only
+      if not(state["DirectToLdsA"] and state["DirectToLdsB"]):
+        reject(state, printRejectionReason, "PrefetchGlobalRead>=3 Supports only DirectToLdsA and DirectToLdsB")
+      # does not work with PLR=0
+      if state["PrefetchLocalRead"] == 0:
+        reject(state, printRejectionReason, "PrefetchGlobalRead>=3 Supports only PrefetchLocalRead >= 1")
+      # support SIA==3 only
+      if state["ScheduleIterAlg"] != 3:
+        reject(state, printRejectionReason, "PrefetchGlobalRead>=3 Supports only ScheduleIterAlg == 3")
+      # TODO: enable PGR>=3 for Sparse
+      if state["ProblemType"]["Sparse"]:
+        reject(state, printRejectionReason, "PrefetchGlobalRead>=3 + Sparse is not supported yet")
     if state["TransposeLDS"] == 1:
       if not state["EnableMatrixInstruction"]:
         reject(state, printRejectionReason, "TransposeLds Supports only in MatrixInstruction=1")
@@ -3309,8 +3436,8 @@ class Solution(collections.abc.Mapping):
             not state["InnerUnroll"] >= state["LocalReadVectorWidth"] // state["MIInputPerThread"]:
           reject(state, printRejectionReason, "wider localRead only support ClusterLocalRead or (InnerUnroll > WiderLocalReadxN)")
 
-    if state["GlobalReadPerMfma"] > 1 and state["PrefetchGlobalRead"] == 2:
-      reject(state, printRejectionReason, "GlobalReadPerMfma need to be 1 if PGR2")
+    if state["GlobalReadPerMfma"] > 1 and state["PrefetchGlobalRead"] >= 2:
+      reject(state, printRejectionReason, "GlobalReadPerMfma need to be 1 if PGR>=2")
 
     if state["UseInstOffsetForGRO"] == -1:
       state["UseInstOffsetForGRO"] = 1 if state["DirectToLds"] else 0
@@ -3334,8 +3461,8 @@ class Solution(collections.abc.Mapping):
         state["ULSGRODoubleG2L"] = 1
       if state["ExpandPointerSwap"] == 1:
         reject(state, printRejectionReason, "ExpandPointerSwap need to be 0 if UnrollLoopSwapGlobalReadOrder")
-      if state["PrefetchGlobalRead"] != 2:
-        reject(state, printRejectionReason, "PrefetchGlobalRead need to be 2 if UnrollLoopSwapGlobalReadOrder")
+      if state["PrefetchGlobalRead"] < 2:
+        reject(state, printRejectionReason, "PrefetchGlobalRead need to be >=2 if UnrollLoopSwapGlobalReadOrder")
       if state["ProblemType"]["DataTypeA"].numBytes() != state["ProblemType"]["DataTypeB"].numBytes():
         reject(state, printRejectionReason, "UnrollLoopSwapGlobalReadOrder doesn't support mixed precision.")
 
