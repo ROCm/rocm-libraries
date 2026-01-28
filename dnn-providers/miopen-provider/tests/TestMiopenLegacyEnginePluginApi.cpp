@@ -5,6 +5,7 @@
 
 #include <MiopenLegacyPlugin.hpp>
 #include <hipdnn_data_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginGraphTestUtils.hpp>
@@ -40,7 +41,7 @@ TEST(TestMiopenLegacyEnginePluginApi, GetAllEngineIdsValid)
 
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
     EXPECT_EQ(numEngines, 1u);
-    EXPECT_EQ(engineIds[0], 1u);
+    EXPECT_EQ(engineIds[0], hipdnn_data_sdk::utilities::engineNameToId("MIOPEN_ENGINE"));
 
     status = hipdnnEnginePluginGetAllEngineIdsImpl(nullptr, 0, &numEngines);
 
@@ -298,7 +299,7 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, GetApplicableEngineIdsValid)
 
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
     EXPECT_EQ(numEngines, 1u);
-    EXPECT_EQ(engineIds[0], 1u);
+    EXPECT_EQ(engineIds[0], hipdnn_data_sdk::utilities::engineNameToId("MIOPEN_ENGINE"));
 
     engineIds[0] = 1337;
     status = hipdnnEnginePluginGetApplicableEngineIdsImpl(
@@ -322,13 +323,18 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, GetEngineDetailsValid)
     hipdnnPluginConstData_t opGraph = hipdnn_plugin_sdk::createValidConstDataGraph(serializedGraph);
     hipdnnPluginConstData_t engineDetailsOut;
 
-    auto status = hipdnnEnginePluginGetEngineDetailsImpl(handle, 1, &opGraph, &engineDetailsOut);
+    auto status = hipdnnEnginePluginGetEngineDetailsImpl(
+        handle,
+        hipdnn_data_sdk::utilities::engineNameToId("MIOPEN_ENGINE"),
+        &opGraph,
+        &engineDetailsOut);
 
     hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(engineDetailsOut.ptr,
                                                           engineDetailsOut.size);
 
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
-    EXPECT_EQ(engineDetails.engineId(), 1);
+    EXPECT_EQ(engineDetails.engineId(),
+              hipdnn_data_sdk::utilities::engineNameToId("MIOPEN_ENGINE"));
 
     // Clean up
     EXPECT_EQ(hipdnnEnginePluginDestroyEngineDetailsImpl(handle, &engineDetailsOut),
@@ -347,7 +353,8 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, GetWorkspaceSizeValid)
     auto serializedGraph = builder.Release();
     hipdnnPluginConstData_t opGraph = hipdnn_plugin_sdk::createValidConstDataGraph(serializedGraph);
 
-    auto engineConfigBuilder = hipdnn_test_sdk::utilities::createValidEngineConfig(1);
+    auto engineConfigBuilder = hipdnn_test_sdk::utilities::createValidEngineConfig(
+        hipdnn_data_sdk::utilities::engineNameToId("MIOPEN_ENGINE"));
     auto serializedEngineConfig = engineConfigBuilder.Release();
     hipdnnPluginConstData_t engineConfig
         = hipdnn_plugin_sdk::createValidConstDataEngineConfig(serializedEngineConfig);
@@ -372,7 +379,8 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, CreateExecutionContextValid)
     auto serializedGraph = builder.Release();
     hipdnnPluginConstData_t opGraph = hipdnn_plugin_sdk::createValidConstDataGraph(serializedGraph);
 
-    auto engineConfigBuilder = hipdnn_test_sdk::utilities::createValidEngineConfig(1);
+    auto engineConfigBuilder = hipdnn_test_sdk::utilities::createValidEngineConfig(
+        hipdnn_data_sdk::utilities::engineNameToId("MIOPEN_ENGINE"));
     auto serializedEngineConfig = engineConfigBuilder.Release();
     hipdnnPluginConstData_t engineConfig
         = hipdnn_plugin_sdk::createValidConstDataEngineConfig(serializedEngineConfig);
@@ -399,7 +407,8 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, GetWorkspaceSizeFromExecutionContextVal
     auto serializedGraph = builder.Release();
     hipdnnPluginConstData_t opGraph = hipdnn_plugin_sdk::createValidConstDataGraph(serializedGraph);
 
-    auto engineConfigBuilder = hipdnn_test_sdk::utilities::createValidEngineConfig(1);
+    auto engineConfigBuilder = hipdnn_test_sdk::utilities::createValidEngineConfig(
+        hipdnn_data_sdk::utilities::engineNameToId("MIOPEN_ENGINE"));
     auto serializedEngineConfig = engineConfigBuilder.Release();
     hipdnnPluginConstData_t engineConfig
         = hipdnn_plugin_sdk::createValidConstDataEngineConfig(serializedEngineConfig);
