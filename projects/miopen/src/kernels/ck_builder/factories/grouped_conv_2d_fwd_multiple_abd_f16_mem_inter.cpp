@@ -25,6 +25,8 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f16_mem_inter_instance_data(
     // clang-format off
     std::array result = {
         // Memory friendly instances (v2)
+        // TODO - This fails to build due to "desired occupancy was 2, final occupancy is 1"
+        /*
         make_xdl_v3_instance_from_old_params(
             spatialDim, inLayout, weiLayout, outLayout,
             FP16, FP16, FP32, FP16, FP16,
@@ -35,7 +37,10 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f16_mem_inter_instance_data(
             1, 1, {1, 32, 1, 8}, 4,
             FP16, FP16,
             ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2),
+        */
         
+        // TODO - This fails to build due to "desired occupancy was 2, final occupancy is 1"
+        /*
         make_xdl_v3_instance_from_old_params(
             spatialDim, inLayout, weiLayout, outLayout,
             FP16, FP16, FP32, FP16, FP16,
@@ -46,6 +51,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f16_mem_inter_instance_data(
             1, 1, {1, 32, 1, 8}, 2,
             FP16, FP16,
             ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2),
+        */
         
         make_xdl_v3_instance_from_old_params(
             spatialDim, inLayout, weiLayout, outLayout,
@@ -177,8 +183,10 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f16_mem_inter_instance_data(
             {8, 16, 1}, {1, 0, 2}, {1, 0, 2}, 2, 8, 8, false,
             1, 1, {1, 16, 1, 8}, 8,
             FP16, FP16,
-            ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2),
+            ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2)
         
+        // TODO - This fails to build due to "desired occupancy was 2, final occupancy is 1"
+        /*
         make_xdl_v3_instance_from_old_params(
             spatialDim, inLayout, weiLayout, outLayout,
             FP16, FP16, FP32, FP16, FP16,
@@ -189,7 +197,10 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f16_mem_inter_instance_data(
             1, 1, {1, 16, 1, 16}, 4,
             FP16, FP16,
             ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2),
+        */
         
+        // TODO - This fails to build due to "desired occupancy was 2, final occupancy is 1"
+        /*
         make_xdl_v3_instance_from_old_params(
             spatialDim, inLayout, weiLayout, outLayout,
             FP16, FP16, FP32, FP16, FP16,
@@ -200,6 +211,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f16_mem_inter_instance_data(
             1, 1, {1, 16, 1, 16}, 8,
             FP16, FP16,
             ckb::PipelineScheduler::INTERWAVE, ckb::PipelineVersion::V2)
+        */
     };
     // clang-format on
 

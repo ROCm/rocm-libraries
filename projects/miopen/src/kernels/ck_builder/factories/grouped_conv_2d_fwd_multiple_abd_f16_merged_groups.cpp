@@ -25,7 +25,7 @@ create_device_grouped_conv_fwd_xdl_merged_groups_f16_instance_data(
 
     return std::array<XdlInstance, 0>{};
 
-    // TODO: These instances have a a_block_transfer_src_vector_dim value of 1, which is invalid
+    // TODO - These instances have a a_block_transfer_src_vector_dim value of 1, which is invalid
     /*
     // clang-format off
     std::array result = {

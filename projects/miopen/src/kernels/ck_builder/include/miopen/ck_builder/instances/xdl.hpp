@@ -92,7 +92,7 @@ struct XdlAlgorithm
         } c;
     } transfer;
 
-    // TODO: Fix CK Builder schema to not require these defaults.
+    // TODO - Fix CK Builder schema to not require these defaults.
     ConvSpecial fwd_specialization;
     GemmSpecial gemm_specialization;
 

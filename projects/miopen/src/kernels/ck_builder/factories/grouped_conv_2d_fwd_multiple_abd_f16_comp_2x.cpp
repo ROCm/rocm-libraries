@@ -8,8 +8,8 @@ namespace conv {
 namespace ck_builder {
 namespace instance {
 
-constexpr auto FP16 = ckb::DataType::FP16;
-constexpr auto FP32 = ckb::DataType::FP32;
+// constexpr auto FP16 = ckb::DataType::FP16;
+// constexpr auto FP32 = ckb::DataType::FP32;
 
 constexpr auto create_device_grouped_conv_fwd_xdl_f16_comp_2x_instance_data(
     std::size_t spatialDim,
@@ -18,11 +18,16 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f16_comp_2x_instance_data(
     ckb::TensorLayout outLayout,
     ckb::ConvSpecialization convSpecialization)
 {
-    // Adapted from the composable_kernel project, file:
+    return std::array<XdlV3Instance,0>{};
+
+        // Adapted from the composable_kernel project, file:
     // library/include/ck/library/tensor_operation_instance/gpu/grouped_conv_fwd/device_grouped_conv_fwd_xdl_comp_instance.hpp
     // device_grouped_conv_fwd_xdl_f16_comp_instances_2x
     // Double rate mfma instances on gfx950
 
+    // TODO - This fails to build due to "desired occupancy was 2, final occupancy is 1"
+
+    /*
     // clang-format off
     std::array result = {
         // Instance 1
@@ -40,6 +45,7 @@ constexpr auto create_device_grouped_conv_fwd_xdl_f16_comp_2x_instance_data(
     // clang-format on
 
     return result;
+    */
 }
 
 constexpr auto create_device_grouped_conv2d_fwd_xdl_ngchw_gkcyx_ngkhw_f16_comp_2x_instance_data()
