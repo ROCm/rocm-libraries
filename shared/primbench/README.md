@@ -316,8 +316,9 @@ You can use the `--filter` option with a regex pattern to benchmark only specifi
 The filter matches against the specialization name. Other valid patterns include:
 
 ```bash
-./copy_benchmark --filter long     # Matches any name containing 'long'
-./copy_benchmark --filter 'l.*g'   # Regex: starts with 'l', ends with 'g'
+./copy_benchmark --filter long  # Matches any name containing 'long'
+./copy_benchmark --filter 'l.*g'  # Contains an 'l' followed by a 'g' later
+./copy_benchmark --filter '^type: long long$'  # Exact regex match
 ```
 
 ## Noise
