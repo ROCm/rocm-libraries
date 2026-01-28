@@ -24,6 +24,7 @@
 
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
+#include "test_utils_functional.hpp"
 #include "test_utils_thread_operators.hpp"
 #include <hipcub/device/device_reduce.hpp>
 #include <hipcub/device/device_scan.hpp>
@@ -31,6 +32,7 @@
 #include <hipcub/thread/thread_operators.hpp>
 #include <hipcub/util_type.hpp>
 
+#include <iterator>
 #include <numeric>
 #include <type_traits>
 #include <vector>
@@ -227,7 +229,7 @@ TYPED_TEST(HipcubDivisionOperatorTests, Division)
 {
     using input_type  = typename TestFixture::input_type;
     using output_type = typename TestFixture::output_type;
-    using Division    = typename AlgebraicSelector<hipcub::Division, input_type, output_type>::type;
+    using Division = typename AlgebraicSelector<test_utils::divides, input_type, output_type>::type;
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
