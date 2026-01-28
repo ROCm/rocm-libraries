@@ -239,8 +239,16 @@ constexpr auto create_device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_f32_instan
             ckb::TensorLayout::NHWGK,
             ckb::ConvSpecialization::FILTER_1X1_STRIDE1_PAD0);
 
+    constexpr auto oddCInstanceData =
+        create_device_grouped_conv_fwd_xdl_f32_instance_data(
+            2,
+            ckb::TensorLayout::NHWGC,
+            ckb::TensorLayout::GKYXC,
+            ckb::TensorLayout::NHWGK,
+            ckb::ConvSpecialization::ODD_C);
+
     constexpr auto instanceData =
-        concat(defaultInstanceData, filter1x1Pad0InstanceData, filter1x1Stride1Pad0InstanceData);
+        concat(defaultInstanceData, filter1x1Pad0InstanceData, filter1x1Stride1Pad0InstanceData, oddCInstanceData);
 
     return instanceData;
 }
