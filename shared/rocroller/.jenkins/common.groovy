@@ -81,7 +81,7 @@ def runTestCommand (platform, project)
 {
     String testExclude = platform.jenkinsLabel.contains('compile') ? '--gtest_filter=-*GPU*' : ''
 
-    def numCTest = 6
+    def numCTest = 4
 
     def command = """#!/usr/bin/env bash
                 set -ex
