@@ -729,7 +729,7 @@ def buildHipClangJob(Map conf=[:]){
         def retimage
         (retimage, image) = getDockerImage(conf)
 
-        gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'ROCm', repo: 'composable_kernel') {
+        gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'ROCm', repo: 'rocm-libraries') {
             withDockerContainer(image: image, args: dockerOpts) {
                 timeout(time: 20, unit: 'HOURS')
                 {
@@ -759,7 +759,7 @@ def Build_CK(Map conf=[:]){
         def image
         def retimage
 
-        gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'ROCm', repo: 'composable_kernel') {
+        gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'ROCm', repo: 'rocm-libraries') {
             try {
                 (retimage, image) = getDockerImage(conf)
                 withDockerContainer(image: image, args: dockerOpts) {
@@ -862,7 +862,7 @@ def process_results(Map conf=[:]){
     //use older image that has user jenkins
     def image = "${env.CK_DOCKERHUB}:ck_ub22.04_rocm6.3"
 
-    gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'ROCm', repo: 'composable_kernel') {
+    gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'ROCm', repo: 'rocm-libraries') {
         try
         {
             echo "Pulling image: ${image}"
@@ -996,7 +996,7 @@ def run_aiter_tests(Map conf=[:]){
     def image = "${env.CK_DOCKERHUB_PRIVATE}:ck_aiter"
     def dockerOpts=get_docker_options() + ' --group-add irc '
 
-    gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'ROCm', repo: 'composable_kernel') {
+    gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'ROCm', repo: 'rocm-libraries') {
         try
         {
             echo "Pulling image: ${image}"
@@ -1049,7 +1049,7 @@ def run_pytorch_tests(Map conf=[:]){
     def image = "${env.CK_DOCKERHUB}:ck_pytorch"
     def dockerOpts=get_docker_options() + ' --group-add irc '
 
-    gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'ROCm', repo: 'composable_kernel') {
+    gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'ROCm', repo: 'rocm-libraries') {
         try
         {
             echo "Pulling image: ${image}"
@@ -1928,7 +1928,7 @@ pipeline {
                 success {
                     script {
                         // Report the parent stage build ck and run tests status
-                        gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'ROCm', repo: 'composable_kernel') {
+                        gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "${env.STAGE_NAME}", account: 'ROCm', repo: 'rocm-libraries') {
                             echo "Reporting success status for build ck and run tests"
                         }
                     }
@@ -1955,11 +1955,11 @@ pipeline {
                 success {
                     script {
                         // Report the skipped parent's stage status
-                        gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "Process Performance Test Results", account: 'ROCm', repo: 'composable_kernel') {
+                        gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "Process Performance Test Results", account: 'ROCm', repo: 'rocm-libraries') {
                             echo "Process Performance Test Results stage skipped."
                         }
                         // Report the skipped stage's status
-                        gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "Process results", account: 'ROCm', repo: 'composable_kernel') {
+                        gitStatusWrapper(credentialsId: "${env.ck_git_creds}", gitHubContext: "Process results", account: 'ROCm', repo: 'rocm-libraries') {
                             echo "Process Performance Test Results stage skipped."
                         }
                     }
