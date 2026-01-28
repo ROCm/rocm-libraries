@@ -5,7 +5,7 @@
 
 #include <utility>
 
-namespace hipdnn_test_sdk::utilities
+namespace hipdnn_test_sdk::detail
 {
 template <class F>
 class ScopedExecute

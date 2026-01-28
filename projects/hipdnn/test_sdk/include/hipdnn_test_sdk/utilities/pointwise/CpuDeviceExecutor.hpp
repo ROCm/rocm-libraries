@@ -5,7 +5,7 @@
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceUtilities.hpp>
+#include <hipdnn_test_sdk/detail/CpuFpReferenceUtilities.hpp>
 #include <stdexcept>
 #include <vector>
 
@@ -42,7 +42,7 @@ public:
 
             // Apply operation and set output
             auto result = op(inputValue);
-            output.setHostValue(safeConvert<OutputType>(result), indices);
+            output.setHostValue(detail::safeConvert<OutputType>(result), indices);
         };
 
         auto parallelFunc = makeParallelTensorFunctor(func, broadcastShape);
@@ -84,7 +84,7 @@ public:
 
             // Apply operation and set output
             auto result = op(input1Value, input2Value);
-            output.setHostValue(safeConvert<OutputType>(result), indices);
+            output.setHostValue(detail::safeConvert<OutputType>(result), indices);
         };
 
         auto parallelFunc = makeParallelTensorFunctor(func, broadcastShape);

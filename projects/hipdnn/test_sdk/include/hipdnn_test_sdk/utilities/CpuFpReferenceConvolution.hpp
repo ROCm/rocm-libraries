@@ -5,7 +5,7 @@
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceUtilities.hpp>
+#include <hipdnn_test_sdk/detail/CpuFpReferenceUtilities.hpp>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -161,8 +161,7 @@ public:
         std::vector<int64_t> parallelDims = {nGroups, nBatch, yChannelsPerGroup};
         parallelDims.insert(parallelDims.end(), ySpatialDims.begin(), ySpatialDims.end());
 
-        auto parallelFunc
-            = hipdnn_test_sdk::utilities::makeParallelTensorFunctor(convolutionFunc, parallelDims);
+        auto parallelFunc = detail::makeParallelTensorFunctor(convolutionFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
         y.memory().markHostModified();
@@ -295,8 +294,7 @@ public:
         std::vector<int64_t> parallelDims = {nGroups, nBatch, channelsPerGroup};
         parallelDims.insert(parallelDims.end(), xSpatialDims.begin(), xSpatialDims.end());
 
-        auto parallelFunc
-            = hipdnn_test_sdk::utilities::makeParallelTensorFunctor(convolutionFunc, parallelDims);
+        auto parallelFunc = detail::makeParallelTensorFunctor(convolutionFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
         gradX.memory().markHostModified();
@@ -417,8 +415,7 @@ public:
         std::vector<int64_t> parallelDims = {nGroups, yChannelsPerGroup, channelsPerGroup};
         parallelDims.insert(parallelDims.end(), kernelSpatialDims.begin(), kernelSpatialDims.end());
 
-        auto parallelFunc
-            = hipdnn_test_sdk::utilities::makeParallelTensorFunctor(convolutionFunc, parallelDims);
+        auto parallelFunc = detail::makeParallelTensorFunctor(convolutionFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
         gradW.memory().markHostModified();

@@ -4,9 +4,9 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/detail/ScopedExecute.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
-#include <hipdnn_test_sdk/utilities/ScopedExecute.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hipdnn_data_sdk;
@@ -43,8 +43,7 @@ void writeVectorToFile(const std::filesystem::path& filename, const std::vector<
 TEST(TestFillTensorFromFile, Valid)
 {
     std::filesystem::path filename = "SimpleTensor0123.bin";
-    hipdnn_test_sdk::utilities::ScopedExecute fileDeleter(
-        [filename]() { std::filesystem::remove(filename); });
+    detail::ScopedExecute fileDeleter([filename]() { std::filesystem::remove(filename); });
 
     std::vector<int> values{0, 1, 2, 3};
     writeVectorToFile(filename, values);

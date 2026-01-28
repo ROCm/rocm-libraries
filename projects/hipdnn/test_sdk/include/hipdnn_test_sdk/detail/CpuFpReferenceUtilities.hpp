@@ -14,7 +14,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace hipdnn_test_sdk::utilities
+namespace hipdnn_test_sdk::detail
 {
 
 // Type trait to validate tensor types (arithmetic types + half + hip_bfloat16)
@@ -170,4 +170,4 @@ static auto makeParallelTensorFunctor(F f, const std::vector<int64_t>& dimension
     return ParallelTensorFunctorDynamic<F>(f, dimensions);
 }
 
-} // namespace hipdnn_test_sdk::utilities
+} // namespace hipdnn_test_sdk::detail
