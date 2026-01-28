@@ -8,6 +8,7 @@
 #include "test_gemm_universal_util.hpp"
 ck::index_t param_mask     = 0xffff;
 ck::index_t instance_index = -1;
+using I4                   = ck::pk_i4_t;
 using BF16                 = ck::bhalf_t;
 using F32                  = float;
 
@@ -57,20 +58,31 @@ using KernelTypes_MK_KN = ::testing::Types<
 
     std::tuple<     BF16,      BF16,            BF16,    BF16>
     >;
+
 using KernelTypes_MK_NK = ::testing::Types<
     //         ADataType, BDataType, ComputeDataType, CDataType
-
-    std::tuple<     BF16,      BF16,            BF16,    BF16>
+#if defined(CK_ENABLE_FP8)
+    std::tuple<     BF16,        I4,            BF16,      BF16>,
+#endif
+    std::tuple<     BF16,      BF16,            BF16,      BF16>
     >;
 
 using KernelTypes_KM_NK = ::testing::Types<
     //         ADataType, BDataType, ComputeDataType, CDataType
-    std::tuple<     BF16,      BF16,            BF16,    BF16>
+#if defined(CK_ENABLE_FP8)
+    std::tuple<     BF16,        I4,            BF16,      BF16>,
+#endif
+    std::tuple<     BF16,      BF16,            BF16,      BF16>
     >;
 
 using KernelTypes_KM_KN = ::testing::Types<
     //         ADataType, BDataType, ComputeDataType, CDataType
     std::tuple<     BF16,      BF16,            BF16,    BF16>
+    >;
+
+    using KernelTypes_MK_KN = ::testing::Types<
+    //         ADataType, BDataType, ComputeDataType, CDataType
+    std::tuple<     BF16,      BF16,            BF16,      BF16>
     >;
 
 // clang-format on

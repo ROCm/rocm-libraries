@@ -44,30 +44,33 @@ class TestGemmUniversal_FP8_MK_NK
 // clang-format off
 using KernelTypes_MK_KN = ::testing::Types<
     //         ADataType, BDataType, ComputeDataType, CDataType
-#if defined(CK_ENABLE_FP8) && (defined(CK_USE_FP8_ON_UNSUPPORTED_ARCH) || defined(CK_USE_GFX94))
+#if defined(CK_ENABLE_FP8) && (defined(CK_USE_FP8_ON_UNSUPPORTED_ARCH) || defined(CK_USE_GFX94)) && !defined(CK_USE_WMMA_FP8)
     std::tuple<      F16,        F8,             F16,     F16>,
     std::tuple<       F8,       F16,             F16,     F16>,
-    std::tuple<       F8,        F8,              F8,    BF16>,
-#endif
+#elif defined(CK_USE_WMMA_FP8)
+    // Fallback test type when WMMA FP8 is used
+    std::tuple<       F8,        F8,              F8,    BF16>>;
+#else
     // Fallback test type when FP8 is not enabled
-    std::tuple<      F16,       F16,             F16,     F16>
-    >;
+    std::tuple<      F16,       F16,             F16,     F16>>;
+#endif
 using KernelTypes_MK_NK = ::testing::Types<
     //         ADataType, BDataType, ComputeDataType, CDataType
 
-#if defined(CK_ENABLE_FP8) && (defined(CK_USE_FP8_ON_UNSUPPORTED_ARCH) || defined(CK_USE_GFX94))
+#if defined(CK_ENABLE_FP8) && (defined(CK_USE_FP8_ON_UNSUPPORTED_ARCH) || defined(CK_USE_GFX94)) && !defined(CK_USE_WMMA_FP8)
     std::tuple<      F16,        F8,             F16,     F16>,
     std::tuple<       F8,       F16,             F16,     F16>,
-    std::tuple<       F8,        F8,              F8,    BF16>,
-#endif
+#elif defined(CK_USE_WMMA_FP8)
+    // Fallback test type when WMMA FP8 is used
+    std::tuple<       F8,        F8,              F8,    BF16>>;
+#else
     // Fallback test type when FP8 is not enabled
-    std::tuple<      F16,       F16,             F16,     F16>
-    >;
+    std::tuple<      F16,       F16,             F16,     F16>>;
+#endif
+  // clang-format on
 
-
-TYPED_TEST_SUITE(TestGemmUniversal_FP8_MK_KN, KernelTypes_MK_KN);
+    TYPED_TEST_SUITE(TestGemmUniversal_FP8_MK_KN, KernelTypes_MK_KN);
 TYPED_TEST_SUITE(TestGemmUniversal_FP8_MK_NK, KernelTypes_MK_NK);
-
 
 #include "test_gemm_universal_ut_cases_fp8.inc"
 int main(int argc, char** argv)

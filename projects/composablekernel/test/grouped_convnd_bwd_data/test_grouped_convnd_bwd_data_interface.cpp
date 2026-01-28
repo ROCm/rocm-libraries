@@ -12,6 +12,7 @@
 #include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_data_multiple_d_wmma_cshuffle.hpp"
+#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_data_multiple_d_xdl_cshuffle_v1.hpp"
 
 #include "ck/library/utility/convolution_parameter.hpp"
 #include "ck/library/utility/algorithm.hpp"
@@ -42,15 +43,23 @@ class TestGroupedConvndBwdData : public ::testing::Test
     using InLayout  = std::tuple_element_t<2, Tuple>;
 
     // clang-format off
-    using GroupedConvBwdDataDeviceInstance = ck::tensor_operation::device::DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle
+    using GroupedConvBwdDataDeviceInstanceWmma = ck::tensor_operation::device::DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle
             //|    NumDim|        A|         B|          Ds|       E|        AData|        BData|    AccData|          CShuffle|     DsData|       EData|           A|           B|          CDE|       ConvForward| Block|  MPer|  NPer| K0Per| K1|  MPer| NPer| MRepeat| NRepeat|  ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|  BBlockTransfer| BBlockTransfer| BBlockTransfer| BlockTransfer| BBlockTransfer| BBlockTransfer| BBlockLds|    CShuffle|    CShuffle| CBlockTransferClusterLengths|  CBlockTransfer|
             //|   Spatial|   Layout|    Layout|      Layout|  Layout|         Type|         Type|       Type|          DataType|       Type|        Type| Elementwise| Elementwise|  Elementwise|    Specialization|  Size| Block| Block| Block|   |  WMMA| WMMA|        |        |   ThreadCluster|  ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar|      DstScalar| AddExtraM|   ThreadCluster|  ThreadCluster| SrcAccessOrder|  SrcVectorDim|      SrcScalar|      DstScalar| AddExtraN| MXdlPerWave| NXdlPerWave|         _MBlock_MWaveMPerXdl| ScalarPerVector|
             //|          |         |          |            |        |             |             |           |                  |           |            |   Operation|   Operation|    Operation|                  |      |      |      |      |   |      |     |        |        | Lengths_K0_M_K1|   ArrangeOrder|               |               |      PerVector|   PerVector_K1|          | Lengths_K0_N_K1|   ArrangeOrder|               |              |      PerVector|   PerVector_K1|          |  PerShuffle|  PerShuffle|         _NBlock_NWaveNPerXdl|   _NWaveNPerXdl|
             //|          |         |          |            |        |             |             |           |                  |           |            |            |            |             |                  |      |      |      |      |   |      |     |        |        |                |               |               |               |               |               |          |                |               |               |              |               |               |          |            |            |                             |                |
             < NDimSpatial,OutLayout, WeiLayout, ck::Tuple<>, InLayout,       DataType,  DataType, AccDataType,          DataType,  ck::Tuple<>,   DataType,        Pass,        Pass,        Pass,         ConvSpec, 64,    32,    64,     8,  8,    16,   16,       1,       4,     S<4, 16, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              8,         1,      S<8, 8, 1>,     S<0, 2, 1>,     S<0, 2, 1>,             1,              8,              8,         1,           1,           1,               S<1, 32, 1, 2>,               8>;
+    using GroupedConvBwdDataDeviceInstanceXdl = ck::tensor_operation::device::DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
+    // ######| NDimSpatial|   ALayout|   BLayout|   DsLayout|  ELayout|       AData|       BData|     AccData|         CShuffle|       DsData|      EData| AElementwise| BElementwise| CDEElementwise| ConvolutionBackward| DoPad| DoPad|      NumGemmK| Block|  MPer|  NPer|  KPer| AK1| BK1| MPer| NPer|    MXdl|    NXdl|    ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|    BBlockTransfer| BBlockTransfer| BBlockTransfer| BBlockTransfer| BBlockTransfer| BBlockTransfer| BBlockLds| CShuffleMXdl| CShuffleNXdl|   CDEBlockTransfer| CDEBlockTransfer|
+    // ######|            |          |          |           |         |        Type|        Type|        Type|         DataType|         Type|       Type|    Operation|    Operation|      Operation|  DataSpecialization| GemmM| GemmN| PrefetchStage|  Size| Block| Block| Block|    |    |  XDL|  XDL| PerWave| PerWave|     ThreadCluster|  ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar|      DstScalar|    ExtraM|     ThreadCluster|  ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar|      DstScalar|    ExtraN|      PerWave|      PerWave|  _MBlock_MPerBlock|  ScalarPerVector|
+    // ######|            |          |          |           |         |            |            |            |                 |             |           |             |             |               |                    |      |      |              |      |      |      |      |    |    |     |     |        |        | Lengths_AK0_M_AK1|   ArrangeOrder|               |               |      PerVector|  PerVector_AK1|          | Lengths_BK0_N_BK1|   ArrangeOrder|               |               |      PerVector|  PerVector_BK1|          |   PerShuffle|   PerShuffle|  _NBlock_NPerBlock|       _NPerBlock|
+    // ######|            |          |          |           |         |            |            |            |                 |             |           |             |             |               |                    |      |      |              |      |      |      |      |    |    |     |     |        |        |                  |               |               |               |               |               |          |                  |               |               |               |               |               |          |             |             |                   |                 |
+            < NDimSpatial, OutLayout, WeiLayout, ck::Tuple<>, InLayout, DataType, DataType, AccDataType, DataType,   ck::Tuple<>, DataType, Pass, Pass,    Pass,  ConvSpec,  true,  true,             1,   256,   128,   256,    32,   8,   2,   16,   16,       4,       8,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              8,         1,       S<4, 64, 1>,     S<0, 2, 1>,     S<0, 2, 1>,              1,              4,              2,         0,            1,            1,     S<1, 32, 1, 8>,                4>;
+
     // clang-format on
 
     ck::utils::conv::ConvParam conv_param;
+    ck::index_t split_k{1};
 
     void SetUp() override
     {
@@ -100,28 +109,53 @@ class TestGroupedConvndBwdData : public ::testing::Test
         copy(conv_param.input_left_pads_, input_left_pads);
         copy(conv_param.input_right_pads_, input_right_pads);
 
-        auto conv = GroupedConvBwdDataDeviceInstance{};
+        auto convWmma = GroupedConvBwdDataDeviceInstanceWmma{};
 
-        auto argument = conv.MakeArgument(nullptr,
-                                          nullptr,
-                                          std::array<const void*, 0>{},
-                                          nullptr,
-                                          out_lengths,
-                                          out_strides,
-                                          wei_lengths,
-                                          wei_strides,
-                                          {},
-                                          {},
-                                          in_lengths,
-                                          in_strides,
-                                          conv_filter_strides,
-                                          conv_filter_dilations,
-                                          input_left_pads,
-                                          input_right_pads,
-                                          Pass{},
-                                          Pass{},
-                                          Pass{});
-        return conv.IsSupportedArgument(argument);
+        auto argumentWmma = convWmma.MakeArgument(nullptr,
+                                                  nullptr,
+                                                  std::array<const void*, 0>{},
+                                                  nullptr,
+                                                  out_lengths,
+                                                  out_strides,
+                                                  wei_lengths,
+                                                  wei_strides,
+                                                  {},
+                                                  {},
+                                                  in_lengths,
+                                                  in_strides,
+                                                  conv_filter_strides,
+                                                  conv_filter_dilations,
+                                                  input_left_pads,
+                                                  input_right_pads,
+                                                  Pass{},
+                                                  Pass{},
+                                                  Pass{});
+
+        auto convXdl = GroupedConvBwdDataDeviceInstanceXdl{};
+
+        auto argumentXdl = convXdl.MakeArgument(nullptr,
+                                                nullptr,
+                                                std::array<const void*, 0>{},
+                                                nullptr,
+                                                out_lengths,
+                                                out_strides,
+                                                wei_lengths,
+                                                wei_strides,
+                                                {},
+                                                {},
+                                                in_lengths,
+                                                in_strides,
+                                                conv_filter_strides,
+                                                conv_filter_dilations,
+                                                input_left_pads,
+                                                input_right_pads,
+                                                Pass{},
+                                                Pass{},
+                                                Pass{},
+                                                split_k);
+
+        return convWmma.IsSupportedArgument(argumentWmma) ||
+               convXdl.IsSupportedArgument(argumentXdl);
     }
 };
 
@@ -183,4 +217,25 @@ TYPED_TEST(TestGroupedConvndBwdDataDefault, VectorLoadCheck)
     this->conv_param = {2, 2, 128, 128, 257, {1, 1}, {7, 7}, {2, 2}, {1, 1}, {0, 0}, {0, 0}};
     is_supported     = this->template Run<2>();
     EXPECT_FALSE(is_supported);
+}
+
+TYPED_TEST(TestGroupedConvndBwdDataDefault, SplitK)
+{
+    if(ck::is_xdl_supported())
+    {
+        // SplitK = 1
+        this->conv_param  = {2, 2, 4, 192, 192, {1, 1}, {28, 28}, {1, 1}, {1, 1}, {0, 0}, {0, 0}};
+        this->split_k     = 1;
+        bool is_supported = this->template Run<2>();
+        EXPECT_TRUE(is_supported);
+
+        // Split-K autodeduce
+        this->split_k = -1;
+        is_supported  = this->template Run<2>();
+        EXPECT_FALSE(is_supported);
+    }
+    else
+    {
+        GTEST_SKIP() << "XDL ops not supported on this device";
+    }
 }
