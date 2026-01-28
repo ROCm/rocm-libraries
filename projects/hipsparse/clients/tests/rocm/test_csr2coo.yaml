@@ -65,3 +65,12 @@ Tests:
              webbase-1M,
              shipsec1]
 
+- name: csr2coo_graph_test
+  category: pre_checkin
+  function: csr2coo
+  precision: *single_precision
+  M: [1327]
+  N: [325]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  graph_test: true
+
