@@ -8,7 +8,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 * Enumeration value update for the Sigmoid Activation Function feature.
 
-## hipBLASLt 1.2.1 for ROCm 7.2.1
+## hipBLASLt 1.2.1 for ROCm 7.2.0
 
 ### Added
 
@@ -16,6 +16,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Support for 'BF16' input with 'FP32' output data type for gfx90a.
 * Support for hipBLASLtExt operation APIs on gfx11XX and gfx12XX.
 * Support for Sigmoid Activation Function.
+* Added `HIPBLASLT_OVERRIDE_COMPUTE_TYPE_XF32` to override compute type of xf32 to other compute types.
 
 ### Resolved issues
 
