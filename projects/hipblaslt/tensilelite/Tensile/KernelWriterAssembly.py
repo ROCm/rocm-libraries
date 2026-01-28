@@ -583,10 +583,10 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["ProblemType"]["Sparse"]:
         module.add(self.defineSgpr("ShadowLimitMetadata", 2, 2))
 
-    if self.states.staggerU:
+    if self.states.staggerUCode:
       module.add(self.defineSgpr("StaggerUIter", 1))  # stagger loop iterations, used for various iter counts in the code
       isDTVAorB = (kernel["DirectToVgprA"] != kernel["DirectToVgprB"]) #  only one of them is enabled
-      if kernel["PrefetchGlobalRead"] == 2 and isDTVAorB:
+      if kernel["PrefetchGlobalRead"] >= 2 and isDTVAorB:
         # PGR2 + DTVA or B (only 1 side), need separate StaggerUIter for DTV load
         module.add(self.defineSgpr("StaggerUIterDTV", 1))  # stagger loop iterations, used for various iter counts in the code
       module.add(self.defineSgpr("WrapUA", 2))  # Bytes to add to SrdA to reset address from N-1 iter to AddressA
@@ -603,6 +603,9 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("GlobalReadIncsMetadata", self.states.m.numSgprGlobalReadIncs))
     self.addSgprVarToPool("GlobalReadIncsA")
     self.addSgprVarToPool("GlobalReadIncsB")
+    if self.states.IncLdsBufSwitch:
+      module.add(self.defineSgpr("LDSBufferReadInc", 1))
+      module.add(self.defineSgpr("LDSBufferWriteInc", 1))
 
 
     needPackK16  = False
@@ -939,6 +942,14 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.b.numVgprLocalReadAddr > 0:
       module.add(RegSet("v", "vgprLocalReadAddrB", \
           self.states.b.startVgprLocalReadAddr))
+    if self.states.IncLdsBufSwitch:
+      # 3 or more LDS buffer case. Need to keep original vgprLocalReadAdd
+      if self.states.a.numVgprLocalReadAddr > 0:
+        module.add(RegSet("v", "vgprLocalReadAddrOrigA", \
+            self.states.a.startVgprLocalReadAddrOrig))
+      if self.states.b.numVgprLocalReadAddr > 0:
+        module.add(RegSet("v", "vgprLocalReadAddrOrigB", \
+            self.states.b.startVgprLocalReadAddrOrig))
     if self.states.m.numVgprLocalReadAddr > 0:
       module.add(RegSet("v", "vgprLocalReadAddrMetadata", \
           self.states.m.startVgprLocalReadAddr))
@@ -1104,6 +1115,11 @@ class KernelWriterAssembly(KernelWriter):
       reductionOffsetHigh32 = (reductionOffset >> 32) & 0xFFFFFFFF
       module.add(ValueSet("MTOffset", reductionOffsetLow32, format=1))
       module.add(ValueSet("MTOffsetH32", reductionOffsetHigh32, format=1))
+
+    if self.states.IncLdsBufSwitch:
+      module.addComment0("%d LDS Blocks for PGR %d"%(self.states.numLDSBlk, kernel["PrefetchGlobalRead"]))
+      module.add(ValueSet("LdsOneBlockSize", kernel["LdsOffsetA_Blk"]))
+      module.add(ValueSet("LdsBlockEndSize", kernel["LdsOffsetA_Blk"] * self.states.numLDSBlk))
 
     ########################################
     # Global Offsets
@@ -1542,8 +1558,11 @@ class KernelWriterAssembly(KernelWriter):
 
     if self.states.a.numVgprLocalReadAddr > 0:
       module.add(self.lraSwapAddressesForDTLPad(kernel, tPA))
+      module.add(self.lraAddressesInitFor3LDSBlk(kernel, tPA, False, True))
+      
     if self.states.b.numVgprLocalReadAddr > 0:
       module.add(self.lraSwapAddressesForDTLPad(kernel, tPB))
+      module.add(self.lraAddressesInitFor3LDSBlk(kernel, tPB, False, True))
     if self.states.m.numVgprLocalReadAddr > 0:
       module.add(self.lraSwapAddressesForDTLPad(kernel, tPM))
 
@@ -4332,6 +4351,24 @@ class KernelWriterAssembly(KernelWriter):
                          comment="xor both lds buffer offsets to enable swapping"))
     return module
 
+  def lraAddressesInitFor3LDSBlk(self, kernel, tP, initSreg, initVreg):
+    module = Module("lraAddressesInitForPGR3")
+    tc = tP["tensorChar"]
+    if self.states.IncLdsBufSwitch:
+      # initialize inc register for LocalReadAddress
+      if initSreg:
+        module.add(SMovB32(
+          dst=sgpr("LDSBufferReadInc"), \
+          src=0, \
+          comment="init LRAddr inc Sgpr"))
+      # 3 or more LDS block case, need to keep original LocalReadAddr
+      # need to copy to LocalReadAddrOrig after all init calculation for LocalReadAddr is done
+      if initVreg:
+        module.add(VMovB32(
+          dst=vgpr("LocalReadAddrOrig%s"%(tc)), \
+          src=vgpr("LocalReadAddr%s"%(tc)), \
+          comment="set LocalReadAddr to LocalReadAddrOrig"))
+    return module
 
   def lwaInitAddressesForDTLTailLoop(self, kernel, tP):
     module = Module("lwaInitAddressesForDTLTailLoop")
@@ -4466,6 +4503,10 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SLShiftRightB32(dst=sgpr(staggerUStrideShift), shiftHex=hex(8), src=sgpr(staggerUStrideShift)))
       module.add(SAndB32(dst=sgpr(staggerUMapping), src0=sgpr("StaggerU"), src1=hex(0xE000)))
       module.add(SAndB32(dst=sgpr("StaggerU"), src0=sgpr("StaggerU"), src1=hex(0xFF)))
+      if kernel["PrefetchGlobalRead"] >= 3:
+        module.add(SCmpLeU32(src0=sgpr("OrigLoopCounter"), src1=(kernel["PrefetchGlobalRead"] - 1), \
+            comment="loopCount <= PGR-1" ))
+        module.add(SCMovB32(dst=sgpr("StaggerU"), src=0, comment="set StaggerU=0 if loopCount <= PGR-1"))
       module.add(SMovB32(dst=sgpr(currentStaggerU), src=sgpr("StaggerU"), comment="init staggerU"))
       module.add(beginStaggerUIterLabel)
       module.add(SLShiftLeftB32(dst=sgpr(shiftedStaggerU), src=sgpr(currentStaggerU), \
@@ -4595,15 +4636,26 @@ class KernelWriterAssembly(KernelWriter):
 
     if tP["isB"]:
       isDTVAorB = (kernel["DirectToVgprA"] != kernel["DirectToVgprB"]) #  only one of them is enabled
-      if kernel["PrefetchGlobalRead"] == 2 and isDTVAorB:
+      if kernel["PrefetchGlobalRead"] >= 2 and isDTVAorB:
         # PGR2 + DTVA or B (only 1 side), need separate StaggerUIter for DTV load
         imod.add(SAddU32(dst=sgpr("StaggerUIterDTV"), src0=sgpr("StaggerUIter"), \
                 src1=(1), \
                 comment="Subtract (PGR-1); StaggerUIter now contains target iteration to wrap"))
       # Convert passed in S' to S for easy loop comparison.  S=S-(PGR-1)'
-      imod.add(SAddU32(dst=sgpr("StaggerUIter"), src0=sgpr("StaggerUIter"), \
-              src1=(2 if kernel["PrefetchGlobalRead"] else 1), \
-              comment="Subtract (PGR-1); StaggerUIter now contains target iteration to wrap"))
+      pf = 2 if kernel["PrefetchGlobalRead"] else 1
+      if kernel["PrefetchGlobalRead"] >= 3:
+        pf = kernel["PrefetchGlobalRead"]
+        imod.add(SAddU32(dst=sgpr(staggerTmp), src0=sgpr("StaggerUIter"), \
+                src1=(pf), \
+                comment="Subtract (PGR-1); StaggerUIter now contains target iteration to wrap"))
+        imod.add(SCmpGtU32(src0=sgpr("StaggerUIter"), src1=hex(0), \
+            comment="StaggerUIter > 0 (means StaggerU > 0)" ))
+        imod.add(SCMovB32(dst=sgpr("StaggerUIter"), src=sgpr(staggerTmp), \
+                             comment="StaggerUIter+=PGR only if StaggerU > 0"))
+      else:
+        imod.add(SAddU32(dst=sgpr("StaggerUIter"), src0=sgpr("StaggerUIter"), \
+                src1=(pf), \
+                comment="Subtract (PGR-1); StaggerUIter now contains target iteration to wrap"))
     return imod
 
   ##############################################################################
@@ -4632,6 +4684,18 @@ class KernelWriterAssembly(KernelWriter):
   #  = W - (S+PGR+1)*I + I
   #  = W - (S+2+PGR)*I
   ##############################################################################
+  def removeStaggerAB(self, kernel, tPA, tPB):
+    imod = Module("removeStaggerAB")
+    if kernel["PrefetchGlobalRead"] >= 3:
+      labelRemoveSUEnd = Label(label="RemoveStaggerUEnd", comment="")
+      imod.add(SCmpEQU32(src0=sgpr("StaggerUIter"), src1=0, comment="if StaggerUIter is 0 (means StaggerU is 0), skip remove stagger"))
+      imod.add(SCBranchSCC1(labelName=labelRemoveSUEnd.getLabelName(), comment="skip remove stagger"))
+    imod.add(self.removeStagger(kernel, tPA))
+    imod.add(self.removeStagger(kernel, tPB))
+    if kernel["PrefetchGlobalRead"] >= 3:
+      imod.add(labelRemoveSUEnd)
+    return imod
+
   def removeStagger(self, kernel, tP):
     imod = Module("removeStagger")
     tc = tP["tensorChar"]
@@ -4639,7 +4703,10 @@ class KernelWriterAssembly(KernelWriter):
       tmp = tmpSgprInfo.idx
       tmpIncSparse = tmpSgprInfo.idx + 2
       # might be able to refactor this to eliminate signed math
-      imod.add(SSubI32(dst=sgpr(tmp), src0=3 if kernel["PrefetchGlobalRead"] else 2, \
+      pf = 3 if kernel["PrefetchGlobalRead"] else 2
+      if kernel["PrefetchGlobalRead"] >= 3:
+        pf = kernel["PrefetchGlobalRead"] + 1
+      imod.add(SSubI32(dst=sgpr(tmp), src0=pf, \
               src1=sgpr("StaggerUIter")))
       imod.addModuleAsFlatItems(self.s_mul_i64_i32_u32(sgpr(tmp), sgpr(tmp+1), \
                   sgpr(tmp), sgpr("GlobalReadIncs%s+%u"%(tc,self.states.unrollIdx)), \
@@ -4659,7 +4726,7 @@ class KernelWriterAssembly(KernelWriter):
           incSparse = "GlobalReadIncs%s+%u"%(tc,self.states.unrollIdx)
 
         # might be able to refactor this to eliminate signed math
-        imod.add(SSubI32(dst=sgpr(tmp), src0=3 if kernel["PrefetchGlobalRead"] else 2, \
+        imod.add(SSubI32(dst=sgpr(tmp), src0=pf, \
                 src1=sgpr("StaggerUIter")))
         imod.addModuleAsFlatItems(self.s_mul_i64_i32_u32(sgpr(tmp), sgpr(tmp+1), \
                     sgpr(tmp), sgpr(incSparse), \
@@ -5630,7 +5697,7 @@ class KernelWriterAssembly(KernelWriter):
         endCounter =  0
       else:
         endCounter = 1
-    elif kernel["PrefetchGlobalRead"] == 2:
+    elif kernel["PrefetchGlobalRead"] >= 2:
       if kernel["SuppressNoLoadLoop"]:
         endCounter =  1
       else:
@@ -5647,24 +5714,45 @@ class KernelWriterAssembly(KernelWriter):
 
       if loopIdx == self.states.unrollIdx:
         # 1 loop check is necessary only when AssertSummationElementMultiple % (DepthU * 2) != 0
-        if kernel["PrefetchGlobalRead"] == 2 and kernel["AssertSummationElementMultiple"] % (kernel["DepthU"] * 2) != 0:
+        if kernel["PrefetchGlobalRead"] >= 2 and kernel["AssertSummationElementMultiple"] % (kernel["DepthU"] * 2) != 0:
           module.add(SCmpEQU32(
               src0=loopCounter, \
               src1=hex(endCounter-1), \
               comment="LoopCounter%s < EndCounter"%(loopChar) ))
           toPGR1 = Label.getFormatting(self.labels.getName("toPGR1"))
           module.add(SCBranchSCC1(labelName=toPGR1, comment="PGR=2 but only 1 loop, toPGR1"))
-
-        module.add(SCmpLeU32(
-            src0=loopCounter, \
-            src1=hex(endCounter), \
-            comment="LoopCounter%s < EndCounter"%(loopChar) ))
-        jumpLabel = loopLabelEnd
-        if kernel["PrefetchGlobalRead"]==2 and (not kernel["SuppressNoLoadLoop"]) and kernel["ExpandPointerSwap"]:
-          # PGR=2 and EPS and no SuppressNoLoadLoop case, need to jump to EvenExit
-          jumpLabel = Label("LoopEnd%s_evenexit"%(loopChar), "" )
-        module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
-                  comment="do not enter Loop%s"%loopChar ))
+        if kernel["PrefetchGlobalRead"] >= 3:
+          # early exit 1 (2<=loopCounter<=PGR-1) to second NGLL (no need GR Inc)  
+          endCounter = kernel["PrefetchGlobalRead"]-1
+          module.add(SCmpLeU32(
+              src0=loopCounter, \
+              src1=hex(endCounter), \
+              comment="LoopCounter%s <= EndCounter"%(loopChar) ))
+          remainPgr = endCounter - 1
+          jumpLabel = Label("NoGlobalLoadLoop_%d"%remainPgr, "")
+          module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
+                    comment="do not enter Loop%s"%loopChar ))
+          # early exit 2 (loopCounter==PGR) to first NGLL (need GR Inc)  
+          endCounter = kernel["PrefetchGlobalRead"]
+          module.add(SCmpLeU32(
+              src0=loopCounter, \
+              src1=hex(endCounter), \
+              comment="LoopCounter%s <= EndCounter"%(loopChar) ))
+          remainPgr = endCounter - 1
+          jumpLabel = Label("NoGlobalLoadLoop_%d"%remainPgr, "")
+          module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
+                    comment="do not enter Loop%s"%loopChar ))
+        else:
+          module.add(SCmpLeU32(
+              src0=loopCounter, \
+              src1=hex(endCounter), \
+              comment="LoopCounter%s < EndCounter"%(loopChar) ))
+          jumpLabel = loopLabelEnd
+          if kernel["PrefetchGlobalRead"]==2 and (not kernel["SuppressNoLoadLoop"]) and kernel["ExpandPointerSwap"]:
+            # PGR=2 and EPS and no SuppressNoLoadLoop case, need to jump to EvenExit
+            jumpLabel = Label("LoopEnd%s_evenexit"%(loopChar), "" )
+          module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
+                    comment="do not enter Loop%s"%loopChar ))
 
       if kernel["ExpertSchedulingMode"] > 0:
         expertSchedulingMode = int(kernel["ExpertSchedulingMode"])
@@ -5791,14 +5879,13 @@ class KernelWriterAssembly(KernelWriter):
       # So can do one more iteration (endCounter==0) in the main unroll loop, and adjust the pointer
       # increments appropriately.
       # Also sum idx other than unroll always compare against 0 (there is no PGR to account for)
-      if kernel["PrefetchGlobalRead"] == 1 and not kernel["SuppressNoLoadLoop"] and loopIdx == self.states.unrollIdx:
-        endCounter = 1
-      elif kernel["PrefetchGlobalRead"] == 2 and not kernel["SuppressNoLoadLoop"] and loopIdx == self.states.unrollIdx:
-        endCounter = 2
+      if kernel["PrefetchGlobalRead"] >= 1 and not kernel["SuppressNoLoadLoop"] and loopIdx == self.states.unrollIdx:
+        endCounter = kernel["PrefetchGlobalRead"]
       else:
         endCounter = 0
 
-      if kernel["AssertSummationElementMultiple"] % (kernel["DepthU"] * 2) == 0 and endCounter > 0:
+      if kernel["AssertSummationElementMultiple"] % (kernel["DepthU"] * 2) == 0 and endCounter > 0 and \
+         kernel["PrefetchGlobalRead"] <= 2:
         # if AssertSummationElementMultiple is multiple of DepthU*2, loop exit is necessary only once in 2 Loop iterations
         #  In endCounter % 2 == 1 case, exit at lc % 2 == 0 (= oddLabel). It means no exit if not oddLabel
         #  In endCounter % 2 == 0 case, exit at lc % 2 == 1 (= not oddLabel). It means no exit if oddLabel
@@ -5899,13 +5986,13 @@ class KernelWriterAssembly(KernelWriter):
               oddIterCode.add(self.localReadSwapOffsets(kernel, False, tPM))
 
           evenIterPreCode.add(loopLabelEndEvenExit)
-          # generate even code here (so far, for PrefetchGlobalRead=2 only)
-          if kernel["PrefetchGlobalRead"]==2:
+          # generate even code here (so far, for PrefetchGlobalRead>=2 only)
+          if kernel["PrefetchGlobalRead"]>=2:
             if not kernel["DirectToVgprA"] or not kernel["DirectToVgprB"]:
               if kernel["ExpertSchedulingMode"] > 0:
                 evenIterCode.add(SWaitAlu(vm_vsrc=0, comment="wait for local read to vgpr complete"))
 
-            # Generate local write address code only for PrefetchGlobalRead==2
+            # Generate local write address code only for PrefetchGlobalRead>=2
             if not kernel["DirectToLdsA"]:
               evenIterCode.add(self.localWriteSwapOffsets(kernel, False, tPA))
             if not kernel["DirectToLdsB"]:
@@ -7373,26 +7460,36 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   ##############################################################################
-  def closeSumAtLeastUnroll(self, kernel, tPA, tPB, prefetch, isOptNLL, isNGLL, isNotLast=False, tailloopInNll=False):
+  def closeSumAtLeastUnroll(self, kernel, tPA, tPB, prefetch, isOptNLL, isNGLL, isNotLast=False, tailloopInNll=False, remainPgr=0):
     module = Module("closeSumAtLeastUnroll")
     if not prefetch:
       if isNGLL:
-        if kernel["ProblemType"]["Sparse"] and kernel["PrefetchGlobalRead"] == 2 and kernel["DirectToVgprSparseMetadata"]:
+        if kernel["ProblemType"]["Sparse"] and kernel["PrefetchGlobalRead"] >= 2 and kernel["DirectToVgprSparseMetadata"]:
           for i in range(0, self.states.m.numVgprValuPerBlock):
             module.add(VMovB32(vgpr("ValuMetadata+%u"%i), vgpr("ValuMetadata+%u+%u"%(self.states.m.numVgprValuPerBlock, i)), \
                                     comment="copy ValuMetadata blk1 to blk0"))
-        if kernel["DirectToVgprA"] or kernel["DirectToVgprB"]:
+        loopIdx = self.states.unrollIdx
+        loopChar = self.states.indexChars[kernel["ProblemType"]["IndicesSummation"][loopIdx]]
+        loopCounter = self.loopCounter(kernel, loopIdx)
+        if (kernel["DirectToVgprA"] or kernel["DirectToVgprB"]) or (kernel["PrefetchGlobalRead"] >= 3 and remainPgr >= 2):
           # PGR2 + DTVA/B case, we need to decrement loop counter after NGLL
           # This needs to be before toPGR1 label to avoid decrementing loop counter in loopCounter==1 case
-          loopIdx = self.states.unrollIdx
-          loopChar = self.states.indexChars[kernel["ProblemType"]["IndicesSummation"][loopIdx]]
-          loopCounter = self.loopCounter(kernel, loopIdx)
+          # Also, we need to decrement loop counter for PGR>=3 and remainPgr>=2 for early exit in NGLL
           module.add(SSubU32(dst=loopCounter, src0=loopCounter, src1=1, comment="dec counter%s"%(loopChar)))
+
         toPGR1 = Label(self.labels.getName("toPGR1"), "")
-        if isNotLast:
-          module.add(SBranch(labelName=toPGR1.getLabelName(), comment="Branch to toPGR1"))
-        else:
-          module.add(toPGR1)
+        if kernel["PrefetchGlobalRead"]-1 > remainPgr >= 2:
+          # generate early exit in NGLL (no need for the first NGLL(remainPgr==PGR-1))
+          module.add(SCmpEQU32(
+              src0=loopCounter, \
+              src1=hex(1), \
+              comment="LoopCounter%s == 1"%(loopChar) ))
+          module.add(SCBranchSCC1(labelName=toPGR1.getLabelName(), comment="PGR>=3 in NGLL. Only 1 loop, toPGR1"))
+        elif remainPgr <= 1:
+          if isNotLast:
+            module.add(SBranch(labelName=toPGR1.getLabelName(), comment="Branch to toPGR1"))
+          else:
+            module.add(toPGR1)
       else:
         suffix = "OptNLL" if isOptNLL else "OrdNLL"
         toPGR1end = Label(self.labels.getName("toPGR1end_%s"%suffix), "")
@@ -7473,7 +7570,7 @@ class KernelWriterAssembly(KernelWriter):
                         src1=incUpper, \
                         comment="limit -= inc)" ))
       imod.add(SCmpEQU32(src0=sgpr("ShadowLimit%s+1"%tc), src1=0, comment="are we within 2^32?"))
-      if 1: # self.states.staggerU:
+      if 1: # self.states.staggerUCode:
         # staggerU case, need to restore BufferLimit when ShadowLimit goes to negative value
         imod.add(SCSelectB32(dst=sgpr("Srd%s+2"%tc), src0=sgpr("ShadowLimit%s+0"%tc), src1="BufferLimit", comment="Move shadow to real if we are within 2^32"))
       else:
@@ -7509,7 +7606,7 @@ class KernelWriterAssembly(KernelWriter):
                         incSparseUpper, \
                        "limit -= incSparse(uppper)" ))
       imod.add(SCmpEQU32(sgpr("ShadowLimitMetadata+1"), 0, "are we within 2^32?"))
-      if 1: # self.states.staggerU:
+      if 1: # self.states.staggerUCode:
         # staggerU case, need to restore BufferLimit when ShadowLimit goes to negative value
         imod.add(SCSelectB32(dst=sgpr("SrdMetadata+2"), src0=sgpr("ShadowLimitMetadata+0"), src1="BufferLimit", comment="Move shadow to real if we are within 2^32"))
       else:
@@ -7577,7 +7674,7 @@ class KernelWriterAssembly(KernelWriter):
       # TODO - does this handle N-dim tensors correctly?
       #if tP["isB"]:
       #  module.add(SMovB32(dst=sgpr("OffsetB"), src=sgpr("SrdB+0"), comment="hack to save"))
-      if loopIdx == self.states.unrollIdx and self.states.staggerU:
+      if loopIdx == self.states.unrollIdx and self.states.staggerUCode:
         # add a wrap increment, if needed:
         with self.allocTmpSgpr(4) as tmpSgprInfo:
           incLower = tmpSgprInfo.idx
@@ -7586,7 +7683,7 @@ class KernelWriterAssembly(KernelWriter):
           tmpIncSparse = incLower + 3
           suStr = "StaggerUIter"
           tcOther = "B" if tP["isA"] else "A"
-          if kernel["PrefetchGlobalRead"] == 2 and (tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc] and (not kernel["DirectToVgpr%s"%tcOther]):
+          if kernel["PrefetchGlobalRead"] >= 2 and (tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc] and (not kernel["DirectToVgpr%s"%tcOther]):
             suStr += "DTV"
           if prefetchIndex:
             imod.add(SAddU32(dst=sgpr(tmpS), src0=self.loopCounter(kernel, self.states.unrollIdx), src1=prefetchIndex, comment="remove pf(%u)"%prefetchIndex))
@@ -8335,7 +8432,7 @@ class KernelWriterAssembly(KernelWriter):
                 constOffset += byteIdx
                 if byteIdx == 0:
                   # For PGR=2 read metadata into the 3rd blk of vpgrValuMetadata
-                  if kernel["PrefetchGlobalRead"] == 2:
+                  if kernel["PrefetchGlobalRead"] >= 2:
                     offsetBlk = self.states.m.numVgprValuPerBlock * 2
                   else:
                     offsetBlk = 0
@@ -8529,6 +8626,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def directToLdsM0Update(self, kernel, mode, tP, skipWait = False):
     tc = tP["tensorChar"]
+    tail = mode == 2
     imod = Module("directToLdsM0Update%s_%u"%(tc,mode))
     DtldsModule = imod.add(Module("dtls_offset%s"%tP["tensorChar"]))
     if not self.do["GlobalRead%s"%tP["tensorChar"]]:
@@ -8539,14 +8637,19 @@ class KernelWriterAssembly(KernelWriter):
       # for cases both A&B are DTLS, updating m0 for each GlobalRead requires instruction schedule
       # along with global reads
       assert (kernel["LocalWriteUseSgpr%s"%tc])
-      if kernel["ExpandPointerSwap"]:
+      if self.states.IncLdsBufSwitch:
+        DtldsModule.add(SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteAddr%s"%tc), \
+                      src1=sgpr("LDSBufferWriteInc"), comment="m0 <- LDS write address (base + inc)"))
+      elif kernel["ExpandPointerSwap"]:
         DtldsModule.add(SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteAddr%s"%tc), \
                       src1=tP["localWriteSwapByteOffset"], comment="m0 <- LDS write address"))
       else:
         DtldsModule.add(SMovB32(dst=mgpr(0), src=sgpr("LocalWriteAddr%s"%tc), comment="m0 <- LDS write address"))
 
-      # PrefetchGlobalRead=2 case, generate local read wait for DirectToLds
-      if kernel["PrefetchGlobalRead"]==2 and not skipWait:
+      # PrefetchGlobalRead>=2 + (oneBufferScheduling or tailLoop) case, generate local read wait for DirectToLds
+      # Early exit + Tailloop case, barrier sync might not be executed when reaching Tailloop.
+      # Need sync before running GR for Tailloop.
+      if kernel["PrefetchGlobalRead"]>=2 and (self.states.oneBufferScheduling or tail) and not skipWait:
         # do not generate local read wait for PGR=2
         DtldsModule.addComment0("before DirectToLds load, ensure prior ds_reads have finished")
         DtldsModule.add(SWaitCnt(dscnt=0, comment=""))
@@ -8588,7 +8691,7 @@ class KernelWriterAssembly(KernelWriter):
     if self.isSwapGlobalReadOrderForDtvOrDtl(kernel, prefetch1=(mode==0)):
       tc1st = 'B'
     if tc == tc1st and (kernel["DirectToLdsA"] or kernel["DirectToLdsB"]) \
-                   and not kernel["PrefetchGlobalRead"]==2:
+                   and not kernel["PrefetchGlobalRead"]>=2:
       if doTailOpt == 0 or \
         (doTailOpt == 2 and optParams.behavior == "LOAD" and optParams.firstLoop == 1):
         # generate local read wait for DirectToLds except for
@@ -8775,7 +8878,7 @@ class KernelWriterAssembly(KernelWriter):
         if tP["is_sparse"]:
           if kernel["PrefetchGlobalRead"] == 1 and unrollLoopIdx % 2 == 0:
             offsetBlk = self.states.m.numVgprValuPerBlock
-          elif kernel["PrefetchGlobalRead"] == 2:
+          elif kernel["PrefetchGlobalRead"] >= 2:
             offsetBlk = self.states.m.numVgprValuPerBlock * 2
           else:
             offsetBlk = 0
@@ -8820,7 +8923,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Local Write: Swap Offsets A/B
   ##############################################################################
-  def localWriteSwapOffsets(self, kernel, internalPointerSwap, tP):
+  def localWriteSwapOffsets(self, kernel, internalPointerSwap, tP, prefetch=False):
     tc = tP["tensorChar"]
     if not self.do["LocalWrite%s"%tc]: return Module("localWriteSwapOffsets (No local write%s)"%tc)
     needSwap = False if kernel["1LDSBuffer"] else True
@@ -8832,7 +8935,7 @@ class KernelWriterAssembly(KernelWriter):
       needSwap = False
     if doMetadataCheck:
       if kernel["DirectToVgprSparseMetadata"]:
-        needMetaSwap = (kernel["PrefetchGlobalRead"] == 2 and kernel["ExpandPointerSwap"])
+        needMetaSwap = (kernel["PrefetchGlobalRead"] >= 2 and kernel["ExpandPointerSwap"])
 
     if not (needSwap or needMetaSwap): return Module("localWriteSwapOffsets (Empty)")
     module = Module("localWriteSwapOffsets")
@@ -8857,12 +8960,28 @@ class KernelWriterAssembly(KernelWriter):
             src1=vgpr("LocalWriteAddr%s"%tc), \
             comment="Final Offset Plus %uK"%((i * self.states.regCaps["maxLDSConstOffset"]) / 1024)))
 
+    def localWriteAddRound(tc):
+      is1st = tc == "A" # so far, A is always first
+      # LDSBufferWriteInc is common for A and B. Add this only for the first one (tc=="A")
+      if is1st:
+        module.add(SAddU32(
+          dst=sgpr("LDSBufferWriteInc"), \
+          src0="LdsOneBlockSize", \
+          src1=sgpr("LDSBufferWriteInc"), \
+          comment="add LDS block size to incSgpr"))
+        module.add(SCmpEQU32(src0=sgpr("LDSBufferWriteInc"), src1="LdsBlockEndSize", comment="LDSBufferWriteInc == End ?"))
+        module.add(SCMovB32(dst=sgpr("LDSBufferWriteInc"), src=0, comment="LDSBufferWriteInc loop back to 0"))
+
     if needSwap:
       #fixme-iui  need to use wrapping increment for double or triple buffering:
 
       if internalPointerSwap and not kernel["StoreSwapAddr"]:
         tP["localWriteSwapByteOffset"] = 0 if tP["localWriteSwapByteOffset"] else kernel["LdsOffsetA_Blk"]
         module.addComment1("(EPS=1) local write swap internal offset -> %u" % tP["localWriteSwapByteOffset"])
+      elif self.states.IncLdsBufSwitch:
+        # 3 or more LDS block case, we do not use xor. Instead, use add and max check for round back
+        # (numLDSBlk>=3 is for DTL (and LocalWriteUseSgpr) only)
+        localWriteAddRound(tc)
       else:
         src0Val = None
         if kernel["StoreSwapAddr"]:
@@ -8916,7 +9035,7 @@ class KernelWriterAssembly(KernelWriter):
       needReset = False
     if doMetadataCheck:
       if kernel["DirectToVgprSparseMetadata"]:
-        needMetaReset = (kernel["PrefetchGlobalRead"] == 2 and kernel["ExpandPointerSwap"])
+        needMetaReset = (kernel["PrefetchGlobalRead"] >= 2 and kernel["ExpandPointerSwap"])
     if not (needReset or needMetaReset): # no local write code if DirectToVgpr is enabled
       return Module("localWriteResetOffsets (Empty)")
     module = Module("localWriteResetOffsets")
@@ -8949,6 +9068,13 @@ class KernelWriterAssembly(KernelWriter):
                                src1=vgpr(tmpvgpr),
                                comment="Set LWA to first buffer offset"))
             self.vgprPool.checkIn(tmpvgpr)
+      elif self.states.IncLdsBufSwitch:
+        # IncLdsBufSwitch case, round back to 0
+        # (numLDSBlk>=3 is for DTL (and LocalWriteUseSgpr) only)
+        module.add(SMovB32(
+          dst=sgpr("LDSBufferWriteInc"), \
+          src=0, \
+          comment="reset incSgpr"))
       else:
         if kernel["LocalWriteUseSgpr%s"%tc]:
           module.add(SAndB32(
@@ -9765,7 +9891,7 @@ class KernelWriterAssembly(KernelWriter):
 
       if kernel["ProblemType"]["Sparse"] and kernel["DirectToVgprSparseMetadata"]:
           miWaveTile = kernel["MIWaveTileB"] if (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) else kernel["MIWaveTileA"] if (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) else 0
-          if kernel["PrefetchGlobalRead"] == 2 and miWaveTile > 0:
+          if kernel["PrefetchGlobalRead"] >= 2 and miWaveTile > 0:
             #vpgr to store metadata
             offsetBlk = tP["metadataWriteSwapByteOffset"]
             instructionCnt = -1
@@ -9809,7 +9935,38 @@ class KernelWriterAssembly(KernelWriter):
       return Module("localReadSwapOffsets (Empty)")
     module = Module("localReadSwapOffsets")
 
-    if internalPointerSwap or kernel["StoreSwapAddr"]:
+    numLra = 0
+    if tP["isA"]:
+      numLra = self.states.a.numVgprLocalReadAddr
+    elif tP["isB"]:
+      numLra = self.states.b.numVgprLocalReadAddr
+    elif tP["isM"]:
+      numLra = self.states.m.numVgprLocalReadAddr
+
+    if self.states.IncLdsBufSwitch:
+      # IncLdsBufSwitch case, we do not use xor. Instead, use add and max check for round back
+      # (numLDSBlk>=3 is for DTL (and LocalWriteUseSgpr) only)
+      is1st = tc == "A" # so far, A is always first
+      # LDSBufferReadInc is common for A and B. Add this only for the first one (tc=="A")
+      if is1st:
+        module.add(SAddU32(
+          dst=sgpr("LDSBufferReadInc"), \
+          src0="LdsOneBlockSize", \
+          src1=sgpr("LDSBufferReadInc"), \
+          comment="add LDS block size to incSgpr"))
+        module.add(SCmpEQU32(
+          src0=sgpr("LDSBufferReadInc"), \
+          src1="LdsBlockEndSize", \
+          comment="LDSBufferReadInc == End ?"))
+        module.add(SCMovB32(
+          dst=sgpr("LDSBufferReadInc"), \
+          src=0, comment="LDSBufferReadInc loop back to 0"))
+      module.add(VAddU32(
+        dst=vgpr("LocalReadAddr%s"%(tc)), \
+        src0=sgpr("LDSBufferReadInc"), \
+        src1=vgpr("LocalReadAddrOrig%s"%(tc)), \
+        comment="LocalReadAddr = Inc + Orig"))
+    elif internalPointerSwap or kernel["StoreSwapAddr"]:
       if not kernel["StoreSwapAddr"]:
         tP["localReadSwapByteOffset"] = 0 if tP["localReadSwapByteOffset"] else kernel["LdsOffsetA_Blk"]
         module.addComment1("local read swap internal offset -> %u" % tP["localReadSwapByteOffset"])
@@ -9825,14 +9982,6 @@ class KernelWriterAssembly(KernelWriter):
         src0=hex(kernel["LdsOffsetA_Blk"]), \
         src1=vgpr("LocalReadAddr%s"%tc), \
         comment="swap Red Blk"))
-
-    numLra = 0
-    if tP["isA"]:
-      numLra = self.states.a.numVgprLocalReadAddr
-    elif tP["isB"]:
-      numLra = self.states.b.numVgprLocalReadAddr
-    elif tP["isM"]:
-      numLra = self.states.m.numVgprLocalReadAddr
 
     for i in range(1,numLra):
       module.add(VAddU32(
@@ -9861,7 +10010,26 @@ class KernelWriterAssembly(KernelWriter):
       tP["localReadOffset"] = 0
       module.addComment0("handled internally")
 
-    if kernel["StoreSwapAddr"]:
+    numLra = 0
+    if tP["isA"]:
+      numLra = self.states.a.numVgprLocalReadAddr
+    elif tP["isB"]:
+      numLra = self.states.b.numVgprLocalReadAddr
+    elif tP["isM"]:
+      numLra = self.states.m.numVgprLocalReadAddr
+
+    if self.states.IncLdsBufSwitch:
+      # 3 or more LDS block case, round back to 0 and set LocalReadAddrOrig to LocalReadAddr
+      # (numLDSBlk>=3 is for DTL (and LocalWriteUseSgpr) only)
+      module.add(SMovB32(
+        dst=sgpr("LDSBufferReadInc"), \
+        src=0, \
+        comment="reset incSgpr"))
+      module.add(VMovB32(
+        dst=vgpr("LocalReadAddr%s"%(tc)), \
+        src=vgpr("LocalReadAddrOrig%s"%(tc)), \
+        comment="set LocalReadAddrOrig to LocalReadAddr"))
+    elif kernel["StoreSwapAddr"]:
       # Reset offset, by picking smaller of the two
       tmpvgpr = self.vgprPool.checkOut(1) # contains other offsets
       module.add(VXorB32(
@@ -9879,14 +10047,6 @@ class KernelWriterAssembly(KernelWriter):
         src0=hex(kernel["LdsOffsetA_Blk"]-1), \
         src1=vgpr("LocalReadAddr%s+%u"%(tP["tensorChar"], 0)), \
         comment="reset Red,Blk -> Red"))
-
-    numLra = 0
-    if tP["isA"]:
-      numLra = self.states.a.numVgprLocalReadAddr
-    elif tP["isB"]:
-      numLra = self.states.b.numVgprLocalReadAddr
-    elif tP["isM"]:
-      numLra = self.states.m.numVgprLocalReadAddr
 
     for i in range(1,numLra):
       module.add(VAddU32(
@@ -12896,18 +13056,35 @@ class KernelWriterAssembly(KernelWriter):
         self.assembler.version)
 
   ##############################################################################
-  def openPrefetchGlobalRead2(self, kernel):
+  def openPrefetchGlobalRead2orMore(self, kernel, idxPgr):
     imod = Module()
+    # early exit check
+    # jump to idxPgr=1 label (wait 0)
     loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
-    imod.add(SCmpEQU32(src0=loopCounter, src1=hex(1), comment="PGR=2 but only 1 loop"))
-    skipPGR2 = Label(self.labels.getName("skipPGR2"), "")
-    imod.add(SCBranchSCC1(labelName=skipPGR2.getLabelName(), comment="PGR=2 but only 1 loop"))
+    imod.add(SCmpEQU32(src0=loopCounter, src1=hex(idxPgr), comment="PGR=%d but only %d loop"%(kernel["PrefetchGlobalRead"], idxPgr)))
+    skipPGRn = Label(self.labels.getName("skipPGR%d_%d"%(kernel["PrefetchGlobalRead"], 1)), "")
+    imod.add(SCBranchSCC1(labelName=skipPGRn.getLabelName(), comment="PGR=%d but only %d loop"%(kernel["PrefetchGlobalRead"], idxPgr)))
     return imod
 
-  def closePrefetchGlobalRead2(self):
+  def closePrefetchGlobalRead2orMore(self, kernel, tensorParametersA, tensorParametersB, idxPgr):
     imod = Module()
-    skipPGR2 = Label(self.labels.getName("skipPGR2"), "")
-    imod.add(skipPGR2)
+    PGR = kernel["PrefetchGlobalRead"]
+    if idxPgr == 0:
+      # first, generate branch to the last idxPgr (= PGR)
+      skipPGRn = Label(self.labels.getName("skipPGR%d_%d"%(PGR, PGR)), "")
+      imod.add(SBranch(labelName=skipPGRn.getLabelName(), comment="jump to PGR=%d label"%(PGR)))
+    elif idxPgr == 1 or idxPgr == kernel["PrefetchGlobalRead"]:
+      skipPGRn = Label(self.labels.getName("skipPGR%d_%d"%(PGR, idxPgr)), "")
+      imod.add(skipPGRn)
+      if (kernel["DirectToLdsA"] and kernel["DirectToLdsB"]):
+        # early exit case (idxPgr < PGR), need to wait for all prefetch here (vmcnt=0).
+        # non early exit case, we wait only 1 set. Skip wait for (PGR-1) set
+        numWait = idxPgr - 1 if idxPgr == kernel["PrefetchGlobalRead"] else 0
+        comment = "wait for global reads with lds"
+        if idxPgr == 1:
+          # add more comment for early exit
+          comment += " (for early exit)"
+        imod.add(self._wait(kernel, tensorParametersA, tensorParametersB, numWait, -1, -1, comment))
     return imod
 
   ########################################
@@ -13958,7 +14135,7 @@ class KernelWriterAssembly(KernelWriter):
       if isNLL:
         # NLL case, no (non DTV) global load A, B in no load loop. Reset numGlobalReadNonDTV
         numGlobalReadNonDTV = 0
-      if kernel["PrefetchGlobalRead"] == 2:
+      if kernel["PrefetchGlobalRead"] >= 2:
         # PGR=2 case, add numGlobalReadNonDTV for second set of prefetch
         needToWait += numGlobalReadNonDTV
       if u > 0:
@@ -13988,8 +14165,10 @@ class KernelWriterAssembly(KernelWriter):
   def getWaitcntCodeForPGR(self, kernel, tensorParametersA, tensorParametersB, comment):
     module = Module("PGR wait")
     # generate wait
-    if (kernel["DirectToVgprA"] and kernel["DirectToVgprB"]):
-      # DTVA and DTVB case, wait code for prefetch is unnecessary
+    if (kernel["DirectToVgprA"] and kernel["DirectToVgprB"]) or \
+       (kernel["DirectToLdsA"] and kernel["DirectToLdsB"] and kernel["PrefetchGlobalRead"] >= 2):
+      # DTVA and DTVB, or ((DTLA + DTLB) + PGR>=2) case, wait code for prefetch is unnecessary
+      # (because wait is for local write code in PGR>=2 case)
       return module
     count = 0
     if kernel["DirectToVgprA"]:
@@ -14020,14 +14199,14 @@ class KernelWriterAssembly(KernelWriter):
       # DTVA. Swap with the following conditions
       # - PGR=2 and prefetch1
       # - PGR=1
-      if  kernel["PrefetchGlobalRead"] == 2 and prefetch1:
+      if  kernel["PrefetchGlobalRead"] >= 2 and prefetch1:
         return True
       elif kernel["PrefetchGlobalRead"] == 1:
         return True
     elif kernel["DirectToVgprB"]:
       # DTVB. Swap with the following conditions
       # - PGR=2 and not prefetch1
-      if kernel["PrefetchGlobalRead"] == 2 and (not prefetch1):
+      if kernel["PrefetchGlobalRead"] >= 2 and (not prefetch1):
         return True
     elif (not kernel["DirectToLdsA"]) and kernel["DirectToLdsB"]:
       # (no DTLA) + DTLB (need to put DTLB first)
