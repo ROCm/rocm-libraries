@@ -67,6 +67,20 @@ struct rocfft_brick_t
 {
     // all vectors here are column-major, with same length as FFT
     // dimension + 1 (for batch dimension)
+    rocfft_brick_t(const size_t*            field_lower,
+                   const size_t*            field_upper,
+                   const size_t*            brick_stride,
+                   size_t                   dim,
+                   const rocfft_location_t& location)
+        : lower(field_lower, field_lower + dim)
+        , upper(field_upper, field_upper + dim)
+        , stride(brick_stride, brick_stride + dim)
+        , location(location)
+    {
+    }
+    rocfft_brick_t()                      = default;
+    rocfft_brick_t(const rocfft_brick_t&) = default;
+    rocfft_brick_t& operator=(const rocfft_brick_t&) = default;
 
     // inclusive lower bound of brick
     std::vector<size_t> lower;
