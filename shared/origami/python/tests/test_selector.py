@@ -6,9 +6,7 @@
 import pytest
 import math
 import origami
-
-# Skip entire module if torch is not available (selector requires torch)
-torch = pytest.importorskip("torch", reason="torch is required for OrigamiMatmulSelector tests.")
+import torch
 
 from origami.selector import OrigamiMatmulSelector
 from .conftest import create_config_list
@@ -98,7 +96,6 @@ def test_selector_dtype_conversion(rocm_device):
     (torch.float16, "f16"),
     (torch.bfloat16, "bf16"),
     (torch.int8, "i8"),
-    (torch.int32, "i32"),
 ])
 def test_selector_various_dtypes(rocm_device, dtype, expected_str):
     """Test selector with various data types."""

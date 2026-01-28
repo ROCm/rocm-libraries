@@ -91,15 +91,30 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     # Enable CTest so add_test() registers tests for ctest
     enable_testing()
 
-    # Run pytest tests
+    # Run core origami binding tests (no torch required)
     add_test(
-        NAME "Python: test_bindings"
-        COMMAND ${Python_EXECUTABLE} -m pytest tests/ -v
+        NAME "Python: test_origami_bindings"
+        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_origami.py -v
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
     set_tests_properties(
-        "Python: test_bindings"
+        "Python: test_origami_bindings"
+        PROPERTIES
+            ENVIRONMENT
+            "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}:${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            DEPENDS _pyorigami
+    )
+
+    # Run selector tests (requires torch)
+    add_test(
+        NAME "Python: test_selector"
+        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_selector.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    set_tests_properties(
+        "Python: test_selector"
         PROPERTIES
             ENVIRONMENT
             "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}:${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
