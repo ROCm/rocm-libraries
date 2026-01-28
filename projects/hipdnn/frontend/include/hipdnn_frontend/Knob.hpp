@@ -478,7 +478,7 @@ public:
         return _knobId;
     }
 
-    const std::string& getDescription() const
+    const std::string& description() const
     {
         return _description;
     }
@@ -488,12 +488,12 @@ public:
         return _deprecated;
     }
 
-    KnobValueType getValueType() const
+    KnobValueType valueType() const
     {
         return getKnobValueTypeFromVariant(_defaultValue);
     }
 
-    const KnobValueVariant& getDefaultValue() const
+    const KnobValueVariant& defaultValue() const
     {
         return _defaultValue;
     }
@@ -615,6 +615,8 @@ inline Error getKnobsForEngine(std::vector<Knob>& knobs, hipdnnBackendDescriptor
     knobs.clear();
     knobs.reserve(static_cast<size_t>(actualCount));
 
+    std::unordered_set<std::string> usedKnobIds;
+
     for(size_t i = 0; i < static_cast<size_t>(actualCount); ++i)
     {
         const auto& fbData = flatbufferDataArray[i];
@@ -633,7 +635,12 @@ inline Error getKnobsForEngine(std::vector<Knob>& knobs, hipdnnBackendDescriptor
         }
         try
         {
-            knobs.emplace_back(Knob::fromFlatbuffer(knobWrapper.getKnob()));
+            knobs.emplace_back(Knob::fromFlatbuffer(&knobWrapper.getKnob()));
+            if(!usedKnobIds.insert(knobs.back().knobId()).second)
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        "Engine description had knob with duplicate ID: " + knobs.back().knobId()};
+            }
         }
         catch(const std::exception& e)
         {

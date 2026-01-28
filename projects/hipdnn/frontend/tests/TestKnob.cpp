@@ -122,11 +122,11 @@ TEST(TestKnob, CreateIntKnob)
     auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
     EXPECT_EQ(knob.knobId(), "test_int_knob");
-    EXPECT_EQ(knob.getDescription(), "Test integer knob");
-    EXPECT_EQ(knob.getValueType(), KnobValueType::INT64);
+    EXPECT_EQ(knob.description(), "Test integer knob");
+    EXPECT_EQ(knob.valueType(), KnobValueType::INT64);
     EXPECT_FALSE(knob.isDeprecated());
 
-    auto defaultValue = std::get_if<int64_t>(&knob.getDefaultValue());
+    auto defaultValue = std::get_if<int64_t>(&knob.defaultValue());
     ASSERT_NE(defaultValue, nullptr);
     EXPECT_EQ(*defaultValue, 42);
 }
@@ -138,11 +138,11 @@ TEST(TestKnob, CreateFloatKnob)
     auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
     EXPECT_EQ(knob.knobId(), "test_float_knob");
-    EXPECT_EQ(knob.getDescription(), "Test float knob");
-    EXPECT_EQ(knob.getValueType(), KnobValueType::FLOAT64);
+    EXPECT_EQ(knob.description(), "Test float knob");
+    EXPECT_EQ(knob.valueType(), KnobValueType::FLOAT64);
     EXPECT_FALSE(knob.isDeprecated());
 
-    auto defaultValue = std::get_if<double>(&knob.getDefaultValue());
+    auto defaultValue = std::get_if<double>(&knob.defaultValue());
     ASSERT_NE(defaultValue, nullptr);
     EXPECT_DOUBLE_EQ(*defaultValue, 3.14);
 }
@@ -154,11 +154,11 @@ TEST(TestKnob, CreateStringKnob)
     auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
     EXPECT_EQ(knob.knobId(), "test_string_knob");
-    EXPECT_EQ(knob.getDescription(), "Test string knob");
-    EXPECT_EQ(knob.getValueType(), KnobValueType::STRING);
+    EXPECT_EQ(knob.description(), "Test string knob");
+    EXPECT_EQ(knob.valueType(), KnobValueType::STRING);
     EXPECT_FALSE(knob.isDeprecated());
 
-    auto defaultValue = std::get_if<std::string>(&knob.getDefaultValue());
+    auto defaultValue = std::get_if<std::string>(&knob.defaultValue());
     ASSERT_NE(defaultValue, nullptr);
     EXPECT_EQ(*defaultValue, "default");
 }
@@ -260,7 +260,7 @@ TEST(TestKnobIntConstraint, ConstraintWithValidValues)
     auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
     auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
-    auto constraint = knob.getConstraint();
+    auto constraint = knob.constraint();
     ASSERT_NE(constraint, nullptr);
 
     std::string str = constraint->toString();
@@ -289,7 +289,7 @@ TEST(TestKnobFloatConstraint, ConstraintFromFlatbuffer)
     auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
     auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
-    auto constraint = knob.getConstraint();
+    auto constraint = knob.constraint();
     ASSERT_NE(constraint, nullptr);
 
     std::string str = constraint->toString();
@@ -316,7 +316,7 @@ TEST(TestKnobStringConstraint, ConstraintWithValidValues)
     auto fbKnob = flatbuffers::GetRoot<fb::Knob>(buffer.data());
     auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
-    auto constraint = knob.getConstraint();
+    auto constraint = knob.constraint();
     ASSERT_NE(constraint, nullptr);
 
     std::string str = constraint->toString();
@@ -623,14 +623,14 @@ TEST(TestKnob, GetDefaultValueWrongType)
     auto knob = hipdnn_frontend::Knob::fromFlatbuffer(fbKnob);
 
     // Try to get default value as wrong type
-    auto wrongDefault = std::get_if<double>(&knob.getDefaultValue());
+    auto wrongDefault = std::get_if<double>(&knob.defaultValue());
     EXPECT_EQ(wrongDefault, nullptr);
 
-    auto stringDefault = std::get_if<std::string>(&knob.getDefaultValue());
+    auto stringDefault = std::get_if<std::string>(&knob.defaultValue());
     EXPECT_EQ(stringDefault, nullptr);
 
     // Correct type should work
-    auto correctDefault = std::get_if<int64_t>(&knob.getDefaultValue());
+    auto correctDefault = std::get_if<int64_t>(&knob.defaultValue());
     ASSERT_NE(correctDefault, nullptr);
     EXPECT_EQ(*correctDefault, 42);
 }

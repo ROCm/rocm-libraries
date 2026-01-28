@@ -4916,19 +4916,19 @@ TEST_F(TestGraph, GetKnobsForEngineReturnsKnobsWhenAvailable)
 
     // Verify first knob
     EXPECT_EQ(knobs[0].knobId(), "test_knob_1");
-    EXPECT_EQ(knobs[0].getDescription(), "First test knob");
-    EXPECT_EQ(knobs[0].getValueType(), KnobValueType::INT64);
+    EXPECT_EQ(knobs[0].description(), "First test knob");
+    EXPECT_EQ(knobs[0].valueType(), KnobValueType::INT64);
     EXPECT_FALSE(knobs[0].isDeprecated());
-    auto defaultValue1 = std::get_if<int64_t>(&knobs[0].getDefaultValue());
+    auto defaultValue1 = std::get_if<int64_t>(&knobs[0].defaultValue());
     ASSERT_NE(defaultValue1, nullptr);
     EXPECT_EQ(*defaultValue1, 10);
 
     // Verify second knob
     EXPECT_EQ(knobs[1].knobId(), "test_knob_2");
-    EXPECT_EQ(knobs[1].getDescription(), "Second test knob");
-    EXPECT_EQ(knobs[1].getValueType(), KnobValueType::FLOAT64);
+    EXPECT_EQ(knobs[1].description(), "Second test knob");
+    EXPECT_EQ(knobs[1].valueType(), KnobValueType::FLOAT64);
     EXPECT_FALSE(knobs[1].isDeprecated());
-    auto defaultValue2 = std::get_if<double>(&knobs[1].getDefaultValue());
+    auto defaultValue2 = std::get_if<double>(&knobs[1].defaultValue());
     ASSERT_NE(defaultValue2, nullptr);
     EXPECT_DOUBLE_EQ(*defaultValue2, 0.5);
 }
@@ -5150,8 +5150,8 @@ TEST_F(TestGraph, GetKnobsForEngineHandlesStringKnobs)
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(knobs.size(), 1);
     EXPECT_EQ(knobs[0].knobId(), "string_knob");
-    EXPECT_EQ(knobs[0].getValueType(), KnobValueType::STRING);
-    auto defaultValue = std::get_if<std::string>(&knobs[0].getDefaultValue());
+    EXPECT_EQ(knobs[0].valueType(), KnobValueType::STRING);
+    auto defaultValue = std::get_if<std::string>(&knobs[0].defaultValue());
     ASSERT_NE(defaultValue, nullptr);
     EXPECT_EQ(*defaultValue, "option1");
 }
