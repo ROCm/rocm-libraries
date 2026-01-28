@@ -109,7 +109,7 @@ TYPED_TEST(HipcubThreadOperatorsTests, Equality)
     using input_type  = typename TestFixture::input_type;
     using output_type = typename TestFixture::output_type;
 
-    using Equality = typename EqualitySelector<hipcub::Equality, input_type, output_type>::type;
+    using Equality = typename EqualitySelector<test_utils::equal, input_type, output_type>::type;
     Equality op{};
 
     equality_op_test<input_type, output_type>(op, true);
@@ -120,7 +120,8 @@ TYPED_TEST(HipcubThreadOperatorsTests, Inequality)
     using input_type  = typename TestFixture::input_type;
     using output_type = typename TestFixture::output_type;
 
-    using Inequality = typename EqualitySelector<hipcub::Inequality, input_type, output_type>::type;
+    using Inequality =
+        typename EqualitySelector<test_utils::not_equal, input_type, output_type>::type;
     Inequality op{};
 
     equality_op_test<input_type, output_type>(op, false);
@@ -131,7 +132,7 @@ TYPED_TEST(HipcubThreadOperatorsTests, InequalityWrapper)
     using input_type  = typename TestFixture::input_type;
     using output_type = typename TestFixture::output_type;
 
-    using Equality = typename EqualitySelector<hipcub::Equality, input_type, output_type>::type;
+    using Equality = typename EqualitySelector<test_utils::equal, input_type, output_type>::type;
     Equality                            wrapped_op{};
     hipcub::InequalityWrapper<Equality> op{wrapped_op};
 

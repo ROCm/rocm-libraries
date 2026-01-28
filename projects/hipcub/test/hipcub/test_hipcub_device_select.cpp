@@ -1019,11 +1019,11 @@ struct TestUniqueEqualityOp
 using HipcubDeviceUniqueByKeyTestsParams = ::testing::Types<
     DeviceUniqueByKeyParams<int, int>,
     DeviceUniqueByKeyParams<size_t, int, TestUniqueEqualityOp, double, long long, size_t>,
-    DeviceUniqueByKeyParams<double, float, hipcub::Equality, double, double, size_t>,
+    DeviceUniqueByKeyParams<double, float, test_utils::equal, double, double, size_t>,
     DeviceUniqueByKeyParams<uint8_t, long long>,
     DeviceUniqueByKeyParams<test_utils::custom_test_type<double>,
                             test_utils::custom_test_type<int>>,
-    DeviceUniqueByKeyParams<int, int, hipcub::Equality, int, int, unsigned int, true>>;
+    DeviceUniqueByKeyParams<int, int, test_utils::equal, int, int, unsigned int, true>>;
 
 TYPED_TEST_SUITE(HipcubDeviceUniqueByKeyTests, HipcubDeviceUniqueByKeyTestsParams);
 
