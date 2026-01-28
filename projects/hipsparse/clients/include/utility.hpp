@@ -2996,7 +2996,7 @@ inline void host_csrmv(hipsparseOperation_t trans,
             I row_begin = csr_row_ptr[i] - base;
             I row_end   = csr_row_ptr[i + 1] - base;
 
-            std::vector<T> sum(WF_SIZE, static_cast<T>(0));
+            std::vector<T> sum(WF_SIZE, make_DataType<T>(0));
 
             for(I j = row_begin; j < row_end; j += WF_SIZE)
             {
@@ -7241,7 +7241,7 @@ void host_sddmm_csr(J                    C_m,
                       ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[ldb * c] : &B[c])
                       : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[c] : &B[ldb * c]);
 
-            T sum = static_cast<T>(0);
+            T sum = make_DataType<T>(0);
             for(J s = 0; s < k; ++s)
             {
                 sum = testing_fma(Aptr[incA * s], Bptr[incB * s], sum);
@@ -7299,7 +7299,7 @@ void host_sddmm_csc(J                    C_m,
                       ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[ldb * c] : &B[c])
                       : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[c] : &B[ldb * c]);
 
-            T sum = static_cast<T>(0);
+            T sum = make_DataType<T>(0);
             for(J s = 0; s < k; ++s)
             {
                 sum = testing_fma(Aptr[incA * s], Bptr[incB * s], sum);
@@ -7351,7 +7351,7 @@ void host_sddmm_coo(I                    C_m,
                             ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[ldb * c] : &B[c])
                             : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[c] : &B[ldb * c]);
 
-        T sum = static_cast<T>(0);
+        T sum = make_DataType<T>(0);
         for(I j = 0; j < k; ++j)
         {
             sum = testing_fma(Aptr[incA * j], Bptr[incB * j], sum);
@@ -7401,7 +7401,7 @@ void host_sddmm_coo_aos(I                    C_m,
                             ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[ldb * c] : &B[c])
                             : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[c] : &B[ldb * c]);
 
-        T sum = static_cast<T>(0);
+        T sum = make_DataType<T>(0);
         for(I j = 0; j < k; ++j)
         {
             sum = testing_fma(Aptr[incA * j], Bptr[incB * j], sum);
