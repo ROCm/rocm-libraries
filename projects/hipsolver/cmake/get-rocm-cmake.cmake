@@ -1,6 +1,6 @@
 # This finds the rocm-cmake project, and installs it if not found
 # rocm-cmake contains common cmake code for rocm projects to help setup and install
-set(PROJECT_EXTERN_DIR ${CMAKE_CURRENT_BINARY_DIR}/extern)
+# set(PROJECT_EXTERN_DIR ${CMAKE_CURRENT_BINARY_DIR}/extern)
 
 # By default, rocm software stack is expected at /opt/rocm
 # set environment variable ROCM_PATH to change location
@@ -10,33 +10,17 @@ endif()
 
 find_package(ROCmCMakeBuildTools QUIET PATHS ${ROCM_PATH})
 if(NOT ROCmCMakeBuildTools_FOUND)
-  find_package(ROCM 0.7.3 CONFIG QUIET PATHS ${ROCM_PATH})
+  find_package(ROCM 0.7.3 CONFIG QUIET PATHS "${ROCM_PATH}") # deprecated fallback
   if(NOT ROCM_FOUND)
+    message(STATUS "ROCmCMakeBuildTools not found. Fetching...")
     set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")
-    set(rocm_cmake_url "https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.zip")
-    set(rocm_cmake_path "${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag}")
-    set(rocm_cmake_archive "${rocm_cmake_path}.zip")
-    file(DOWNLOAD "${rocm_cmake_url}" "${rocm_cmake_archive}" STATUS status LOG log)
-
-    list(GET status 0 status_code)
-    list(GET status 1 status_string)
-
-    if(status_code EQUAL 0)
-      message(STATUS "downloading... done")
-    else()
-      message(FATAL_ERROR "error: downloading\n'${rocm_cmake_url}' failed
-      status_code: ${status_code}
-      status_string: ${status_string}
-      log: ${log}\n")
-    endif()
-
-    execute_process(COMMAND ${CMAKE_COMMAND} -E tar xzvf "${rocm_cmake_archive}"
-      WORKING_DIRECTORY ${PROJECT_EXTERN_DIR})
-    execute_process( COMMAND ${CMAKE_COMMAND} -DCMAKE_INSTALL_PREFIX=${PROJECT_EXTERN_DIR}/rocm-cmake .
-      WORKING_DIRECTORY ${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag} )
-    execute_process( COMMAND ${CMAKE_COMMAND} --build rocm-cmake-${rocm_cmake_tag} --target install
-      WORKING_DIRECTORY ${PROJECT_EXTERN_DIR})
-
-    find_package( ROCM 0.7.3 REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake )
+    FetchContent_Declare(
+      rocm-cmake
+      GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
+      GIT_TAG        ${rocm_cmake_tag}
+      SOURCE_SUBDIR "DISABLE ADDING TO BUILD" # We don't really want to consume the build and test targets of ROCm CMake.
+    )
+    FetchContent_MakeAvailable(rocm-cmake)
+    find_package(ROCmCMakeBuildTools CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
   endif()
 endif()
