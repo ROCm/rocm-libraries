@@ -400,7 +400,9 @@ def config_cmd():
             prefix_paths.append(cmake_path(msgpack_install))
     prefix_paths.append(raw_rocm_path)  # Use raw_rocm_path (without quotes) for path list
     
-    cmake_base_options = f"-DROCM_PATH={rocm_path} -DCMAKE_PREFIX_PATH:PATH={os.pathsep.join(prefix_paths)}"
+    # Quote the CMAKE_PREFIX_PATH value to handle spaces in paths
+    prefix_path_value = os.pathsep.join(prefix_paths)
+    cmake_base_options = f'-DROCM_PATH={rocm_path} -DCMAKE_PREFIX_PATH:PATH="{prefix_path_value}"'
     cmake_options.append(cmake_base_options)
     
     # Explicitly tell CMake where to find our Boost-free msgpack (overrides any vcpkg version)

@@ -379,8 +379,8 @@ if(CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)
               COMPONENT clients)
     endif()
 
-    # Install OpenBLAS DLL (required by all clients for reference BLAS)
-    if(EXISTS "${VCPKG_INSTALLED_DIR}/openblas.dll")
+    # Install OpenBLAS DLL only when using OpenBLAS as reference BLAS (not AOCL)
+    if(NOT LINK_BLIS AND EXISTS "${VCPKG_INSTALLED_DIR}/openblas.dll")
       install(FILES "${VCPKG_INSTALLED_DIR}/openblas.dll"
               DESTINATION "${CMAKE_INSTALL_BINDIR}"
               COMPONENT clients)
