@@ -1,0 +1,396 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#include <algorithm>
+#include <cmath>
+#include <iostream>
+
+#include "origami/gemm.hpp"
+#include "origami/hardware.hpp"
+#include "origami/heuristics.hpp"
+#include "origami/types.hpp"
+
+namespace origami {
+
+// ============================================================================
+// heuristic_params_t Implementation
+// ============================================================================
+
+void heuristic_params_t::merge_with(const heuristic_params_t& other) {
+  // Only override with non-default values from other
+  // We compare against default values and check if they differ
+
+  using defaults = heuristic_defaults_t;
+
+  // Latency component weights
+  if (other.weight_mem_l2 != defaults::WEIGHT_MEM_L2) weight_mem_l2 = other.weight_mem_l2;
+  if (other.weight_mem_mall != defaults::WEIGHT_MEM_MALL) weight_mem_mall = other.weight_mem_mall;
+  if (other.weight_mem_dram != defaults::WEIGHT_MEM_DRAM) weight_mem_dram = other.weight_mem_dram;
+  if (other.weight_compute != defaults::WEIGHT_COMPUTE) weight_compute = other.weight_compute;
+  if (other.weight_memory != defaults::WEIGHT_MEMORY) weight_memory = other.weight_memory;
+  if (other.weight_wg_setup != defaults::WEIGHT_WG_SETUP) weight_wg_setup = other.weight_wg_setup;
+  if (other.weight_prologue != defaults::WEIGHT_PROLOGUE) weight_prologue = other.weight_prologue;
+  if (other.weight_epilogue != defaults::WEIGHT_EPILOGUE) weight_epilogue = other.weight_epilogue;
+  if (other.weight_loop_overhead != defaults::WEIGHT_LOOP_OVERHEAD)
+    weight_loop_overhead = other.weight_loop_overhead;
+  if (other.weight_tile_total != defaults::WEIGHT_TILE_TOTAL)
+    weight_tile_total = other.weight_tile_total;
+
+  // Empirical constants
+  if (other.l2_min_hit_rate_default != defaults::L2_MIN_HIT_RATE)
+    l2_min_hit_rate_default = other.l2_min_hit_rate_default;
+  if (other.main_memory_load_latency != defaults::MAIN_MEMORY_LOAD_LATENCY)
+    main_memory_load_latency = other.main_memory_load_latency;
+  if (other.occupancy_decay_base != defaults::OCCUPANCY_DECAY_BASE)
+    occupancy_decay_base = other.occupancy_decay_base;
+  if (other.ksplit_reduction_overhead != defaults::KSPLIT_REDUCTION_OVERHEAD)
+    ksplit_reduction_overhead = other.ksplit_reduction_overhead;
+  if (other.k_padding_penalty != defaults::K_PADDING_PENALTY)
+    k_padding_penalty = other.k_padding_penalty;
+
+  // Main loop efficiency
+  if (other.main_loop_efficiency != defaults::MAIN_LOOP_EFFICIENCY)
+    main_loop_efficiency = other.main_loop_efficiency;
+}
+
+// ============================================================================
+// heuristic_key_t Implementation
+// ============================================================================
+
+bool heuristic_key_t::matches(const problem_t& problem,
+                              const hardware_t& hardware,
+                              const config_t& config) const {
+  // Check each field - if optional is set, it must match
+  if (arch.has_value() && arch.value() != hardware.arch) return false;
+  if (a_dtype.has_value() && a_dtype.value() != problem.a_dtype) return false;
+  if (b_dtype.has_value() && b_dtype.value() != problem.b_dtype) return false;
+  if (mi_dtype.has_value() && mi_dtype.value() != problem.mi_dtype) return false;
+  if (a_transpose.has_value() && a_transpose.value() != problem.a_transpose) return false;
+  if (b_transpose.has_value() && b_transpose.value() != problem.b_transpose) return false;
+  if (mt_m.has_value() && mt_m.value() != config.mt.m) return false;
+  if (mt_n.has_value() && mt_n.value() != config.mt.n) return false;
+  if (mt_k.has_value() && mt_k.value() != config.mt.k) return false;
+  if (optimized_main_loop.has_value() &&
+      optimized_main_loop.value() != config.optimized_main_loop)
+    return false;
+
+  // Problem size ranges
+  if (min_m.has_value() && problem.size.m < min_m.value()) return false;
+  if (max_m.has_value() && problem.size.m > max_m.value()) return false;
+  if (min_n.has_value() && problem.size.n < min_n.value()) return false;
+  if (max_n.has_value() && problem.size.n > max_n.value()) return false;
+  if (min_k.has_value() && problem.size.k < min_k.value()) return false;
+  if (max_k.has_value() && problem.size.k > max_k.value()) return false;
+
+  return true;
+}
+
+size_t heuristic_key_t::specificity() const {
+  size_t count = 0;
+  if (arch.has_value()) count++;
+  if (a_dtype.has_value()) count++;
+  if (b_dtype.has_value()) count++;
+  if (mi_dtype.has_value()) count++;
+  if (a_transpose.has_value()) count++;
+  if (b_transpose.has_value()) count++;
+  if (mt_m.has_value()) count++;
+  if (mt_n.has_value()) count++;
+  if (mt_k.has_value()) count++;
+  if (optimized_main_loop.has_value()) count++;
+  if (min_m.has_value()) count++;
+  if (max_m.has_value()) count++;
+  if (min_n.has_value()) count++;
+  if (max_n.has_value()) count++;
+  if (min_k.has_value()) count++;
+  if (max_k.has_value()) count++;
+  return count;
+}
+
+std::size_t heuristic_key_t::hash() const {
+  std::size_t seed = 0;
+
+  constexpr std::size_t golden_ratio = 0x9e3779b9;
+  auto hash_combine                  = [](std::size_t& seed, std::size_t value) {
+    seed ^= value + golden_ratio + (seed << 6) + (seed >> 2);
+  };
+
+  auto hash_optional = [&hash_combine, &seed](const auto& opt) {
+    if (opt.has_value()) {
+      hash_combine(seed, std::hash<std::decay_t<decltype(opt.value())>>()(opt.value()));
+    } else {
+      hash_combine(seed, 0);
+    }
+  };
+
+  hash_optional(arch);
+  hash_optional(a_dtype);
+  hash_optional(b_dtype);
+  hash_optional(mi_dtype);
+  hash_optional(a_transpose);
+  hash_optional(b_transpose);
+  hash_optional(mt_m);
+  hash_optional(mt_n);
+  hash_optional(mt_k);
+  hash_optional(optimized_main_loop);
+  hash_optional(min_m);
+  hash_optional(max_m);
+  hash_optional(min_n);
+  hash_optional(max_n);
+  hash_optional(min_k);
+  hash_optional(max_k);
+
+  return seed;
+}
+
+bool heuristic_key_t::operator==(const heuristic_key_t& other) const {
+  return arch == other.arch && a_dtype == other.a_dtype && b_dtype == other.b_dtype &&
+         mi_dtype == other.mi_dtype && a_transpose == other.a_transpose &&
+         b_transpose == other.b_transpose && mt_m == other.mt_m && mt_n == other.mt_n &&
+         mt_k == other.mt_k && optimized_main_loop == other.optimized_main_loop &&
+         min_m == other.min_m && max_m == other.max_m && min_n == other.min_n &&
+         max_n == other.max_n && min_k == other.min_k && max_k == other.max_k;
+}
+
+// ============================================================================
+// heuristics_database_t Implementation
+// ============================================================================
+
+heuristics_database_t::heuristics_database_t() { initialize_defaults(); }
+
+heuristics_database_t& heuristics_database_t::get_instance() {
+  static heuristics_database_t instance;
+  return instance;
+}
+
+/**
+ * @brief Apply TF32 emulation heuristics based on runtime arithmetic intensity.
+ *
+ * These heuristics cannot be precomputed since they depend on problem size.
+ */
+static void apply_tf32_heuristics(heuristic_params_t& params,
+                                  const problem_t& problem,
+                                  const hardware_t& hardware,
+                                  const config_t& config) {
+  // Check if this is TF32 emulation on gfx950
+  const bool is_gfx950   = (hardware.arch == hardware_t::architecture_t::gfx950);
+  const bool is_tf32_emu = (problem.mi_dtype == data_type_t::XFloat32) && is_gfx950;
+
+  if (!is_tf32_emu) return;
+
+  const size_t M = problem.size.m;
+  const size_t N = problem.size.n;
+  const size_t K = problem.size.k;
+
+  const size_t MT_M = config.mt.m;
+  const size_t MT_N = config.mt.n;
+  const size_t MT_K = config.mt.k;
+
+  const bool a_trans = (problem.a_transpose == transpose_t::T);
+  const bool b_trans = (problem.b_transpose == transpose_t::T);
+
+  const auto a_bytes = data_type_to_bytes(problem.a_dtype);
+
+  // Compute arithmetic intensity for this specific problem
+  double arith     = emulated_tf32_arithmetic_intensity(M, N, K, static_cast<double>(a_bytes));
+  double threshold = heuristic_defaults_t::TF32_ARITH_INTENSITY_THRESHOLD;
+
+  // Custom kernel optimizations based on transpose mode and tile config
+  // NT: N-transpose configuration
+  if ((!a_trans && b_trans) && MT_M == 256 && MT_N == 256 && MT_K == 32) {
+    if (arith < threshold) {
+      params.weight_tile_total *= 0.6;
+    } else {
+      params.weight_tile_total *= 0.4;
+    }
+  }
+
+  // NN: No-transpose configuration
+  if ((!a_trans && !b_trans) && MT_M == 256 && MT_N == 256 && MT_K == 32) {
+    if (arith < threshold) {
+      params.weight_tile_total *= 0.8;
+    } else {
+      params.weight_tile_total *= 0.4;
+    }
+  }
+
+  // TN: Transpose-A configuration
+  if ((a_trans && !b_trans) && MT_M == 256 && MT_N == 256 && MT_K == 32) {
+    if (arith < threshold) {
+      params.weight_tile_total *= 0.8;
+    } else {
+      params.weight_tile_total *= 0.4;
+    }
+  }
+
+  // Bias for large K-dimension (depth upscaling)
+  if ((K >= (M * 16) && K >= (N * 16)) && (MT_K >= 128)) { params.weight_tile_total *= 0.5; }
+}
+
+heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,
+                                                 const hardware_t& hardware,
+                                                 const config_t& config) const {
+  // Start with default parameters
+  heuristic_params_t result = default_params_;
+
+  // Find all matching entries and sort by specificity
+  std::vector<std::pair<size_t, const heuristic_params_t*>> matches;
+  for (const auto& [key, params] : entries_) {
+    if (key.matches(problem, hardware, config)) { matches.push_back({key.specificity(), &params}); }
+  }
+
+  // Sort by specificity (least specific first, so more specific ones override)
+  std::sort(matches.begin(), matches.end(), [](const auto& a, const auto& b) {
+    return a.first < b.first;
+  });
+
+  // Apply matches in order of increasing specificity
+  for (const auto& [spec, params] : matches) { result.merge_with(*params); }
+
+  // Apply TF32 emulation heuristics (runtime-dependent on arithmetic intensity)
+  apply_tf32_heuristics(result, problem, hardware, config);
+
+  return result;
+}
+
+void heuristics_database_t::add_entry(const heuristic_key_t& key,
+                                      const heuristic_params_t& params) {
+  entries_.push_back({key, params});
+}
+
+void heuristics_database_t::initialize_defaults() {
+  // ========================================================================
+  // HEURISTIC 1: Problematic tile configuration (MT64x32x32)
+  // ========================================================================
+  {
+    auto key    = make_tile_key(64, 32, 32, transpose_t::N, transpose_t::N);
+    key.a_dtype = data_type_t::BFloat16;
+    key.b_dtype = data_type_t::BFloat16;
+
+    heuristic_params_t params;
+    params.weight_tile_total = 10.0;
+
+    add_entry(key, params);
+  }
+
+  // ========================================================================
+  // HEURISTIC 2: CMS Kernel Efficiencies (gfx950, BF16)
+  // ========================================================================
+  {
+    // BF16 NT configurations
+    struct cms_config {
+      size_t m, n, k;
+      double eff;
+    };
+    std::vector<cms_config> bf16_nt_configs = {
+        {160, 256, 64, 1.0 / 1.20},
+        {192, 256, 64, 1.0 / 1.10},
+        {208, 256, 64, 1.0 / 1.20},
+        {256, 160, 64, 1.0 / 1.20},
+        {256, 192, 64, 1.0 / 1.20},
+        {256, 256, 64, 1.0 / 1.15},
+    };
+
+    for (const auto& cfg : bf16_nt_configs) {
+      auto key = make_kernel_variant_key(hardware_t::architecture_t::gfx950,
+                                         data_type_t::BFloat16,
+                                         transpose_t::N,
+                                         transpose_t::T,
+                                         cfg.m,
+                                         cfg.n,
+                                         cfg.k);
+      heuristic_params_t params;
+      params.main_loop_efficiency = cfg.eff;
+      add_entry(key, params);
+    }
+
+    // BF16 NN configurations
+    std::vector<cms_config> bf16_nn_configs = {
+        {160, 256, 64, 1.0 / 1.10},
+        {208, 256, 64, 1.0 / 1.10},
+        {256, 192, 64, 1.0 / 1.00},
+        {256, 256, 64, 1.0 / 1.05},
+    };
+
+    for (const auto& cfg : bf16_nn_configs) {
+      auto key = make_kernel_variant_key(hardware_t::architecture_t::gfx950,
+                                         data_type_t::BFloat16,
+                                         transpose_t::N,
+                                         transpose_t::N,
+                                         cfg.m,
+                                         cfg.n,
+                                         cfg.k);
+      heuristic_params_t params;
+      params.main_loop_efficiency = cfg.eff;
+      add_entry(key, params);
+    }
+
+    // BF16 TN configurations
+    std::vector<cms_config> bf16_tn_configs = {
+        {160, 256, 64, 1.0 / 1.10},
+        {192, 256, 64, 1.0 / 1.05},
+        {256, 96, 64, 1.0 / 1.10},
+        {256, 192, 64, 1.0 / 1.10},
+        {256, 224, 64, 1.0 / 1.05},
+        {256, 256, 64, 1.0 / 1.05},
+    };
+
+    for (const auto& cfg : bf16_tn_configs) {
+      auto key = make_kernel_variant_key(hardware_t::architecture_t::gfx950,
+                                         data_type_t::BFloat16,
+                                         transpose_t::T,
+                                         transpose_t::N,
+                                         cfg.m,
+                                         cfg.n,
+                                         cfg.k);
+      heuristic_params_t params;
+      params.main_loop_efficiency = cfg.eff;
+      add_entry(key, params);
+    }
+  }
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+heuristic_key_t make_kernel_variant_key(hardware_t::architecture_t arch,
+                                        data_type_t mi_dtype,
+                                        transpose_t transA,
+                                        transpose_t transB,
+                                        size_t MT_M,
+                                        size_t MT_N,
+                                        size_t MT_K) {
+  heuristic_key_t key;
+  key.arch                = arch;
+  key.mi_dtype            = mi_dtype;
+  key.a_transpose         = transA;
+  key.b_transpose         = transB;
+  key.mt_m                = MT_M;
+  key.mt_n                = MT_N;
+  key.mt_k                = MT_K;
+  key.optimized_main_loop = true;
+  return key;
+}
+
+heuristic_key_t make_tile_key(size_t MT_M,
+                              size_t MT_N,
+                              size_t MT_K,
+                              std::optional<transpose_t> transA,
+                              std::optional<transpose_t> transB) {
+  heuristic_key_t key;
+  key.mt_m        = MT_M;
+  key.mt_n        = MT_N;
+  key.mt_k        = MT_K;
+  key.a_transpose = transA;
+  key.b_transpose = transB;
+  return key;
+}
+
+heuristic_key_t make_arch_dtype_key(hardware_t::architecture_t arch, data_type_t mi_dtype) {
+  heuristic_key_t key;
+  key.arch     = arch;
+  key.mi_dtype = mi_dtype;
+  return key;
+}
+
+}  // namespace origami
