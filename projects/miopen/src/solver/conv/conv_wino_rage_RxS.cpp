@@ -69,7 +69,7 @@ public:
 
         for(uint32_t n_dispatches = 1; n_dispatches <= max_dispatches; n_dispatches++)
         {
-            const uint64_t n_groups = cu_count * n_dispatches;
+            const uint64_t n_groups = static_cast<uint64_t>(cu_count) * n_dispatches;
             if(!IsShaderConstraintsMet(n_groups))
                 continue;
 
@@ -88,7 +88,7 @@ public:
         return args.dimsFit16bit()
             && args.batchTensorSizesFit31bits()
             && args.paddedSizesFit16bits()
-            && n_groups < args.PowOf2<16>()
+            && n_groups < WinoShaderArgsV2::PowOf2<16>()
             && DivCeil(args.Kg, 32) <= n_groups;
         // clang-format on
     }
@@ -134,7 +134,7 @@ protected:
 
         const uint64_t macsg =
             n_dispatches * n_works_per_cu * cu_count * nkhw_per_work * nhw_factor_g * Cg * Rg * Sg;
-        const uint64_t macs = args.N * args.G * Kg * Cg * args.out_h * args.R * args.out_w * args.S;
+        const uint64_t macs = static_cast<uint64_t>(args.N) * args.G * Kg * Cg * args.out_h * args.R * args.out_w * args.S;
 
         out.granularity_loss = static_cast<float>(macsg - macs) / macsg;
 
