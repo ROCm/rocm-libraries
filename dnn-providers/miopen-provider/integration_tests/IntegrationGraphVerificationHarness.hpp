@@ -26,6 +26,9 @@ template <typename DataType, typename TestCaseType>
 class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<TestCaseType>
 {
 protected:
+    static constexpr float DEFAULT_MIN = -1.0f;
+    static constexpr float DEFAULT_MAX = 1.0f;
+
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
@@ -176,7 +179,7 @@ protected:
     {
         for(auto& tensorPair : bundle.tensors)
         {
-            bundle.randomizeTensor(tensorPair.first, -1.0f, 1.0f, seed);
+            bundle.randomizeTensor(tensorPair.first, DEFAULT_MIN, DEFAULT_MAX, seed);
         }
     }
 

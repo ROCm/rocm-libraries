@@ -47,15 +47,15 @@ OutputType calculateConvWrwTolerance(double inputMin,
     // Accumulation for weights (dw) happens over N and Spatial dimensions.
     // dw[k, c, r, s] = sum_{n, h, w} dy[n, k, h, w] * x[n, c, h+r, w+s]
 
-    if(dyDims.empty())
+    if(dyDims.empty() || dyDims.size() < 2)
     {
-        return hipdnn_data_sdk::utilities::staticCast<OutputType>(0.0);
+        throw std::invalid_argument("dyDims must have at least 2 dimensions (N, K).");
     }
 
-    int64_t nAccum = dyDims[0]; // Batch size N
+    auto numberOfAccumulations = static_cast<uint64_t>(dyDims[0]); // Batch size N
     for(size_t i = 2; i < dyDims.size(); ++i)
     {
-        nAccum *= dyDims[i]; // Spatial dimensions
+        numberOfAccumulations *= static_cast<uint64_t>(dyDims[i]); // Spatial dimensions
     }
 
     double maxAbsInput = std::max(std::abs(inputMin), std::abs(inputMax));
@@ -66,17 +66,17 @@ OutputType calculateConvWrwTolerance(double inputMin,
 
     // Calculate the worst-case accumulation error.
     //
-    // We model the accumulation of 'nAccum' products. In the worst-case scenario,
+    // We model the accumulation of 'numberOfAccumulations' products. In the worst-case scenario,
     // all inputs have the maximum magnitude, causing the accumulated value to grow linearly:
     // V_i = i * maxProduct
     //
     // At each accumulation step 'i', the floating-point addition introduces a rounding error.
     // This error is bounded by the machine epsilon relative to the current magnitude V_i.
-    // Error_i <= getPrecision(V_i)
+    // Error_i <= V_i * epsilon_compute
     //
-    // We approximate getPrecision(V_i) as (V_i * epsilon_compute), where epsilon_compute
-    // is the machine epsilon of the compute type (getPrecision(1.0)). This assumes the
-    // relative error is constant, which is a standard property of floating-point arithmetic.
+    // We approximate the error at step i as (V_i * epsilon_compute), where epsilon_compute
+    // is the machine epsilon of the compute type. This assumes the relative error is constant,
+    // which is a standard property of floating-point arithmetic.
     //
     // The total accumulation error is the sum of errors at each step:
     // TotalError ≈ sum_{i=1}^{N} (i * maxProduct * epsilon_compute)
@@ -87,17 +87,17 @@ OutputType calculateConvWrwTolerance(double inputMin,
     // requiring an O(N) loop, which is efficient for large accumulation counts.
 
     double epsilon = getEpsilon<ComputeType>();
-    double accumulatedTolerance = maxProduct * epsilon * static_cast<double>(nAccum)
-                                  * static_cast<double>(nAccum + 1) / 2.0;
+    double accumulatedTolerance = maxProduct * epsilon * static_cast<double>(numberOfAccumulations)
+                                  * static_cast<double>(numberOfAccumulations + 1) * 0.5;
 
     // Calculate final accumulated value
-    double finalVal = static_cast<double>(nAccum) * maxProduct;
+    double maxPossibleOutputValue = static_cast<double>(numberOfAccumulations) * maxProduct;
 
     // Calculate precision loss due to casting from ComputeType to OutputType
     // The error is bounded by the precision of the OutputType at the final value.
     // We approximate the resolution as value * epsilon.
     double outputEpsilon = getEpsilon<OutputType>();
-    double castTolerance = std::abs(finalVal) * outputEpsilon;
+    double castTolerance = std::abs(maxPossibleOutputValue) * outputEpsilon;
 
     // Total tolerance is the sum of accumulation error and cast error
     double totalTolerance = accumulatedTolerance + castTolerance;

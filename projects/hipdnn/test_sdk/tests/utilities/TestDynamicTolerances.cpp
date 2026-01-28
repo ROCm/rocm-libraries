@@ -21,6 +21,7 @@ struct ConvWrwToleranceTestCase
     double dyMax;
     std::vector<int64_t> dyDims;
     double expectedTolerance;
+    bool expectThrow = false;
 
     friend std::ostream& operator<<(std::ostream& os, const ConvWrwToleranceTestCase& tc)
     {
@@ -30,7 +31,8 @@ struct ConvWrwToleranceTestCase
         {
             os << tc.dyDims[i] << (i < tc.dyDims.size() - 1 ? ", " : "");
         }
-        os << "], expectedTolerance: " << tc.expectedTolerance;
+        os << "], expectedTolerance: " << tc.expectedTolerance
+           << ", expectThrow: " << (tc.expectThrow ? "true" : "false");
         return os;
     }
 };
@@ -49,7 +51,8 @@ std::vector<ConvWrwToleranceTestCase> getConvWrwToleranceTestCases();
 template <>
 std::vector<ConvWrwToleranceTestCase> getConvWrwToleranceTestCases<TypePair<float, float>>()
 {
-    return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0},
+    return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
+            {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 2.0 * std::pow(2.0, -23)},
             {-1.0, 1.0, -1.0, 1.0, {2, 1, 1, 1}, 5.0 * std::pow(2.0, -23)},
             {-1.0, 1.0, -1.0, 1.0, {10, 1, 1, 1}, 65.0 * std::pow(2.0, -23)}};
@@ -60,7 +63,8 @@ template <>
 std::vector<ConvWrwToleranceTestCase> getConvWrwToleranceTestCases<TypePair<hip_bfloat16, float>>()
 {
     return {
-        {-1.0, 1.0, -1.0, 1.0, {}, 0.0},
+        {-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
+        {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
         {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, std::pow(2.0, -23) + std::pow(2.0, -7)},
         {-1.0, 1.0, -1.0, 1.0, {2, 1, 1, 1}, 3.0 * std::pow(2.0, -23) + 2.0 * std::pow(2.0, -7)},
         {-1.0,
@@ -76,7 +80,8 @@ template <>
 std::vector<ConvWrwToleranceTestCase>
     getConvWrwToleranceTestCases<TypePair<hip_bfloat16, hip_bfloat16>>()
 {
-    return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0},
+    return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
+            {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 2.0 * std::pow(2.0, -7)},
             {-1.0, 1.0, -1.0, 1.0, {2, 1, 1, 1}, 5.0 * std::pow(2.0, -7)},
             {-1.0, 1.0, -1.0, 1.0, {10, 1, 1, 1}, 65.0 * std::pow(2.0, -7)}};
@@ -87,7 +92,8 @@ template <>
 std::vector<ConvWrwToleranceTestCase> getConvWrwToleranceTestCases<TypePair<half, float>>()
 {
     return {
-        {-1.0, 1.0, -1.0, 1.0, {}, 0.0},
+        {-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
+        {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
         {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, std::pow(2.0, -23) + std::pow(2.0, -10)},
         {-1.0, 1.0, -1.0, 1.0, {2, 1, 1, 1}, 3.0 * std::pow(2.0, -23) + 2.0 * std::pow(2.0, -10)},
         {-1.0,
@@ -102,7 +108,8 @@ std::vector<ConvWrwToleranceTestCase> getConvWrwToleranceTestCases<TypePair<half
 template <>
 std::vector<ConvWrwToleranceTestCase> getConvWrwToleranceTestCases<TypePair<half, half>>()
 {
-    return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0},
+    return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
+            {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 2.0 * std::pow(2.0, -10)},
             {-1.0, 1.0, -1.0, 1.0, {2, 1, 1, 1}, 5.0 * std::pow(2.0, -10)},
             {-1.0, 1.0, -1.0, 1.0, {10, 1, 1, 1}, 65.0 * std::pow(2.0, -10)}};
@@ -115,10 +122,21 @@ protected:
     void verifyTolerance()
     {
         const auto& params = GetParam();
-        auto tol = calculateConvWrwTolerance<Out, Comp>(
-            params.inputMin, params.inputMax, params.dyMin, params.dyMax, params.dyDims);
-        EXPECT_NEAR(static_cast<float>(tol), params.expectedTolerance, 1e-5)
-            << "Failed for dims size: " << params.dyDims.size();
+        if(params.expectThrow)
+        {
+            EXPECT_THROW(
+                (calculateConvWrwTolerance<Out, Comp>(
+                    params.inputMin, params.inputMax, params.dyMin, params.dyMax, params.dyDims)),
+                std::invalid_argument)
+                << "Failed to throw for dims size: " << params.dyDims.size();
+        }
+        else
+        {
+            auto tol = calculateConvWrwTolerance<Out, Comp>(
+                params.inputMin, params.inputMax, params.dyMin, params.dyMax, params.dyDims);
+            EXPECT_NEAR(static_cast<float>(tol), params.expectedTolerance, 1e-5)
+                << "Failed for dims size: " << params.dyDims.size();
+        }
     }
 };
 

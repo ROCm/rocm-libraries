@@ -12,6 +12,22 @@
 namespace hipdnn_test_sdk::utilities
 {
 
+/**
+ * @brief Returns the machine epsilon for a given floating-point type.
+ *
+ * The epsilon value represents the difference between 1.0 and the next representable value.
+ * It is related to the number of mantissa bits by the formula: epsilon = 2^(-mantissa_bits).
+ *
+ * Type         | Mantissa Bits | Epsilon (2^-bits)
+ * -------------|---------------|-------------------
+ * half (fp16)  | 10            | 2^-10 ≈ 0.0009765625
+ * hip_bfloat16 | 7             | 2^-7  = 0.0078125
+ * float (fp32) | 23            | 2^-23 ≈ 1.19209e-07
+ * double (fp64)| 52            | 2^-52 ≈ 2.22044e-16
+ *
+ * @tparam T The floating-point type.
+ * @return The machine epsilon as a double.
+ */
 template <typename T>
 constexpr double getEpsilon()
 {
