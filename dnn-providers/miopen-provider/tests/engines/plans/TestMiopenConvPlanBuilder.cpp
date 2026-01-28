@@ -252,3 +252,87 @@ TEST_F(TestGpuMiopenConvPlanBuilder, GetWorkspaceSizeRangeReturnsValidRangeForCo
     size_t maxWorkspace = _planBuilder.getMaxWorkspaceSize(_handle, graph);
     EXPECT_EQ(range.max, maxWorkspace);
 }
+
+TEST_F(TestGpuMiopenConvPlanBuilder, WorkspaceSizeRespectsLimitFwd)
+{
+    // Note: This test requires a graph for which MIOpen has multiple solutions
+    // with at least two different workspace sizes. Otherwise, we cannot verify
+    // that the workspace limit is enforced.
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    WorkspaceSizeRange range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    ASSERT_NE(range.min, range.max)
+        << "No workspace size range available for testing";
+
+    // TODO: We should force MIOpen to select an algorithm that uses more than the minimum workspace.
+    HipdnnEnginePluginExecutionContext ctxUnlimited;
+    _planBuilder.buildPlan(_handle, graph, ctxUnlimited);
+    size_t workspaceUnlimited = ctxUnlimited.plan().getWorkspaceSize(_handle);
+
+    ASSERT_GT(workspaceUnlimited, range.min)
+        << "Unlimited workspace is already at minimum, cannot test limit";
+
+    HipdnnEnginePluginExecutionContext ctxLimited;
+    ctxLimited.setWorkspaceSizeLimit(range.min);
+    _planBuilder.buildPlan(_handle, graph, ctxLimited);
+
+    size_t workspaceLimited = ctxLimited.plan().getWorkspaceSize(_handle);
+    EXPECT_EQ(workspaceLimited, range.min);
+}
+
+TEST_F(TestGpuMiopenConvPlanBuilder, WorkspaceSizeRespectsLimitBwd)
+{
+    // Note: This test requires a graph for which MIOpen has multiple solutions
+    // with at least two different workspace sizes. Otherwise, we cannot verify
+    // that the workspace limit is enforced.
+    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    WorkspaceSizeRange range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    ASSERT_NE(range.min, range.max)
+        << "No workspace size range available for testing";
+
+    // TODO: We should force MIOpen to select an algorithm that uses more than the minimum workspace.
+    HipdnnEnginePluginExecutionContext ctxUnlimited;
+    _planBuilder.buildPlan(_handle, graph, ctxUnlimited);
+    size_t workspaceUnlimited = ctxUnlimited.plan().getWorkspaceSize(_handle);
+
+    ASSERT_GT(workspaceUnlimited, range.min)
+        << "Unlimited workspace is already at minimum, cannot test limit";
+
+    HipdnnEnginePluginExecutionContext ctxLimited;
+    ctxLimited.setWorkspaceSizeLimit(range.min);
+    _planBuilder.buildPlan(_handle, graph, ctxLimited);
+
+    size_t workspaceLimited = ctxLimited.plan().getWorkspaceSize(_handle);
+    EXPECT_EQ(workspaceLimited, range.min);
+}
+
+TEST_F(TestGpuMiopenConvPlanBuilder, WorkspaceSizeRespectsLimitWrw)
+{
+    // Note: This test requires a graph for which MIOpen has multiple solutions
+    // with at least two different workspace sizes. Otherwise, we cannot verify
+    // that the workspace limit is enforced.
+    auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    WorkspaceSizeRange range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    ASSERT_NE(range.min, range.max)
+        << "No workspace size range available for testing";
+
+    // TODO: We should force MIOpen to select an algorithm that uses more than the minimum workspace.
+    HipdnnEnginePluginExecutionContext ctxUnlimited;
+    _planBuilder.buildPlan(_handle, graph, ctxUnlimited);
+    size_t workspaceUnlimited = ctxUnlimited.plan().getWorkspaceSize(_handle);
+
+    ASSERT_GT(workspaceUnlimited, range.min)
+        << "Unlimited workspace is already at minimum, cannot test limit";
+
+    HipdnnEnginePluginExecutionContext ctxLimited;
+    ctxLimited.setWorkspaceSizeLimit(range.min);
+    _planBuilder.buildPlan(_handle, graph, ctxLimited);
+
+    size_t workspaceLimited = ctxLimited.plan().getWorkspaceSize(_handle);
+    EXPECT_EQ(workspaceLimited, range.min);
+}
