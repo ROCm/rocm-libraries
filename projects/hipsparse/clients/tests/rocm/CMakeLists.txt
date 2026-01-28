@@ -105,6 +105,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_spmv_coo.cpp
     test_spmv_coo_aos.cpp
     test_spmv_csr.cpp
+    test_spmv_csr_pytorch_compat.cpp
     test_spmv_sell.cpp
     test_spsm_coo.cpp
     test_spsm_csr.cpp

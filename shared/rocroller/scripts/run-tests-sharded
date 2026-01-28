@@ -12,6 +12,7 @@ import pty
 import select
 import subprocess
 import sys
+import time
 import yaml
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,7 @@ class ShardInfo:
     shard_index: int
     test_type: str
     output_buffer: str = ""
+    start_time: float = 0.0
 
 
 def get_gpu_arch():
@@ -222,13 +224,20 @@ def start_shard(
         shard_index=shard_index,
         test_type=test_type,
         output_buffer="",
+        start_time=time.time(),
     )
 
 
 def run_shards(shard_infos):
-    """Run multiple shards and multiplex their I/O using select."""
+    """Run multiple shards and multiplex their I/O using select.
+
+    Returns: (failed_shards, timing_info)
+        failed_shards: list of (shard_index, test_type, exit_code) tuples
+        timing_info: list of (shard_index, test_type, elapsed_seconds) tuples
+    """
     active_shards = {info.master_fd: info for info in shard_infos}
     failed_shards = []
+    timing_info = []
 
     while active_shards:
         fds = list(active_shards.keys())
@@ -283,21 +292,29 @@ def run_shards(shard_infos):
             # Close file descriptor
             os.close(fd)
 
-            # Get return code
+            # Get return code and elapsed time
             return_code = info.process.wait()
+            elapsed_time = time.time() - info.start_time
+
+            # Record timing information
+            timing_info.append((info.shard_index, info.test_type, elapsed_time))
 
             if return_code == 0:
-                print(f"{info.shard_tag} Completed successfully", flush=True)
+                print(
+                    f"{info.shard_tag} Completed successfully in {elapsed_time:.1f}s",
+                    flush=True,
+                )
             else:
                 print(
-                    f"{info.shard_tag} Failed with exit code {return_code}", flush=True
+                    f"{info.shard_tag} Failed with exit code {return_code} after {elapsed_time:.1f}s",
+                    flush=True,
                 )
                 failed_shards.append((info.shard_index, info.test_type, return_code))
 
             # Remove from active shards
             del active_shards[fd]
 
-    return failed_shards
+    return failed_shards, timing_info
 
 
 def main():
@@ -339,6 +356,11 @@ def main():
         if num_shards > 8:
             print(f"Detected {gpu_arch}, capping shards to 8 (was {num_shards})")
             num_shards = 8
+
+    # Cap shards to 48 maximum
+    if num_shards > 48:
+        print(f"Capping shards to 48 (was {num_shards})")
+        num_shards = 48
 
     # Resolve build directory
     build_dir = Path(args.build_dir).resolve()
@@ -388,7 +410,7 @@ def main():
     # Handle dry-run mode: list tests instead of executing
     if args.dry_run:
         print("\n=== DRY RUN MODE: Listing tests that would be executed ===\n")
-        
+
         # List Google Test tests
         print("--- Google Test Suite ---")
         gtest_cmd = [str(gtest_exe), "--gtest_list_tests"]
@@ -399,12 +421,12 @@ def main():
         elif args.gpu_filter:
             gtest_cmd.append(args.gpu_filter)
             print(f"Applied gtest filter: {args.gpu_filter}\n")
-        
+
         result = subprocess.run(gtest_cmd, cwd=build_dir)
         if result.returncode != 0:
             print(f"ERROR: Failed to list gtest tests (exit code {result.returncode})")
             sys.exit(1)
-        
+
         # List Catch2 tests
         print("\n--- Catch2 Test Suite ---")
         catch2_cmd = [str(catch2_exe), "--list-tests"]
@@ -412,17 +434,18 @@ def main():
         if profile_filter:
             catch2_cmd.append(profile_filter)
             print(f"Applied catch2 filter: {profile_filter}\n")
-        
+
         result = subprocess.run(catch2_cmd, cwd=build_dir)
         if result.returncode != 0:
             print(f"ERROR: Failed to list catch2 tests (exit code {result.returncode})")
             sys.exit(1)
-        
+
         print("\n=== DRY RUN COMPLETE ===")
         sys.exit(0)
 
     # Run all shards
     failed_shards = []
+    all_timing_info = []
 
     # Run Google Test shards first
     print("\n--- Running Google Test shards ---")
@@ -444,8 +467,9 @@ def main():
             failed_shards.append((i, "gtest", 1))
 
     # Run all gtest shards and wait for completion
-    gtest_failures = run_shards(gtest_infos)
+    gtest_failures, gtest_timing = run_shards(gtest_infos)
     failed_shards.extend(gtest_failures)
+    all_timing_info.extend(gtest_timing)
 
     # Run Catch2 shards after Google Test completes
     print("\n--- Running Catch2 shards ---")
@@ -467,10 +491,52 @@ def main():
             failed_shards.append((i, "catch2", 1))
 
     # Run all catch2 shards and wait for completion
-    catch2_failures = run_shards(catch2_infos)
+    catch2_failures, catch2_timing = run_shards(catch2_infos)
     failed_shards.extend(catch2_failures)
+    all_timing_info.extend(catch2_timing)
 
     print()
+
+    # Print timing summary
+    if all_timing_info:
+        print("=" * 50)
+        print("TIMING SUMMARY")
+        print("=" * 50)
+
+        # Separate gtest and catch2 timings
+        gtest_timings = [
+            (idx, t) for idx, test_type, t in all_timing_info if test_type == "gtest"
+        ]
+        catch2_timings = [
+            (idx, t) for idx, test_type, t in all_timing_info if test_type == "catch2"
+        ]
+
+        if gtest_timings:
+            print("\nGoogle Test shards:")
+            for idx, elapsed in sorted(gtest_timings):
+                print(f"  [G{idx:02d}] {elapsed:6.1f}s")
+            gtest_total = sum(t for _, t in gtest_timings)
+            gtest_avg = gtest_total / len(gtest_timings)
+            gtest_min = min(t for _, t in gtest_timings)
+            gtest_max = max(t for _, t in gtest_timings)
+            print(
+                f"  Total: {gtest_total:.1f}s, Avg: {gtest_avg:.1f}s, Min: {gtest_min:.1f}s, Max: {gtest_max:.1f}s"
+            )
+
+        if catch2_timings:
+            print("\nCatch2 shards:")
+            for idx, elapsed in sorted(catch2_timings):
+                print(f"  [C{idx:02d}] {elapsed:6.1f}s")
+            catch2_total = sum(t for _, t in catch2_timings)
+            catch2_avg = catch2_total / len(catch2_timings)
+            catch2_min = min(t for _, t in catch2_timings)
+            catch2_max = max(t for _, t in catch2_timings)
+            print(
+                f"  Total: {catch2_total:.1f}s, Avg: {catch2_avg:.1f}s, Min: {catch2_min:.1f}s, Max: {catch2_max:.1f}s"
+            )
+
+        print("=" * 50)
+        print()
 
     # Report results
     if failed_shards:
