@@ -387,7 +387,6 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     if(IsModelApplicable(ctx, problem))
     {
-        std::cout << "###Is model applicable?" << std::endl;
         if(problem.GetInDataType() == miopenFloat)
         {
             if(RunParameterPredictionModel<float>(ctx, problem))

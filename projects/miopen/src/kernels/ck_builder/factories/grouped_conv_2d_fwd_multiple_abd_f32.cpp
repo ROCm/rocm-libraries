@@ -1,3 +1,6 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include <miopen/ck_builder/factories/grouped_conv_2d_fwd_multiple_abd.hpp>
 
 namespace miopen {
@@ -22,7 +25,6 @@ void add_f32_mem_inter_instances(
 std::vector<std::unique_ptr<DeviceOpGFwdDefault<float>>>
 DeviceOperationInstanceFactory<DeviceOpGFwdDefault<float>>::GetInstances()
 {
-    std::cout << "### Using CK Builder instances!" << std::endl;
     // Adapted from GetInstances() in the composable_kernel project's file:
     // library/include/ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp
     std::vector<std::unique_ptr<DeviceOpGFwdDefault<float>>> instances{};
