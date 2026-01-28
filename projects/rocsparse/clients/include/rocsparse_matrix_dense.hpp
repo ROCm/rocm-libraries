@@ -353,6 +353,32 @@ public:
         }
         }
     }
+
+    void check_integer() const
+    {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+        switch(MODE)
+        {
+        case memory_mode::device:
+        {
+            dense_matrix<memory_mode::host, T, I> on_host(*this);
+            on_host.check_integer();
+            break;
+        }
+
+        case memory_mode::managed:
+        case memory_mode::host:
+        {
+            const I size = this->m * this->n;
+            for(I i = 0; i < size; ++i)
+            {
+                ::check_integer(&this->val[i]);
+            }
+            break;
+        }
+        }
+    }
 };
 
 /* ============================================================================================ */

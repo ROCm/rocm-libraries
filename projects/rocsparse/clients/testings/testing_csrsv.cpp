@@ -120,6 +120,103 @@ void testing_csrsv_bad_arg(const Arguments& arg)
                             rocsparse_status_invalid_pointer);
 }
 
+// Helper function to setup integer-based manufactured solution for csrsv testing.
+// This creates an integer matrix with diagonal dominance and computes the corresponding
+// right-hand side for a known solution vector.
+template <typename T>
+static void setup_integer_based_manufactured_solution(host_csr_matrix<T>&    hA,
+                                                      host_dense_matrix<T>&  hx,
+                                                      host_dense_matrix<T>&  hx_expected,
+                                                      const T&               alpha,
+                                                      rocsparse_fill_mode    uplo,
+                                                      rocsparse_diag_type    diag,
+                                                      rocsparse_index_base   base,
+                                                      rocsparse_int          M)
+{
+    // Initialize matrix values to random integers between 1 and 10
+    for(rocsparse_int i = 0; i < hA.nnz; ++i)
+    {
+        // Use simple integer values for off-diagonal elements
+        hA.val[i] = static_cast<T>(1 + (i % 10));
+    }
+
+    // Make matrix diagonally dominant to ensure stability
+    for(rocsparse_int i = 0; i < M; ++i)
+    {
+        T             sum        = static_cast<T>(0);
+        rocsparse_int diag_index = -1;
+
+        for(rocsparse_int j = hA.ptr[i] - base; j < hA.ptr[i + 1] - base; ++j)
+        {
+            rocsparse_int col = hA.ind[j] - base;
+
+            if(col == i)
+            {
+                diag_index = j;
+            }
+            else
+            {
+                // Only consider entries in the active triangular part for the sum
+                bool use_entry = (uplo == rocsparse_fill_mode_lower) ? (col < i) : (col > i);
+                if(use_entry)
+                {
+                    sum += std::abs(hA.val[j]);
+                }
+            }
+        }
+
+        // Set diagonal to be greater than sum of off-diagonals (diagonal dominance)
+        if(diag_index >= 0 && diag == rocsparse_diag_type_non_unit)
+        {
+            hA.val[diag_index] = sum + static_cast<T>(1);
+        }
+    }
+
+    // Set all entries of the expected solution to alpha
+    for(rocsparse_int i = 0; i < M; ++i)
+    {
+        hx_expected[i] = alpha;
+    }
+
+    // Compute b = A * x / alpha (the right-hand side) using only the triangular part
+    // As we set all entries of x to alpha, this simplifies to: b[i] = sum of row entries
+    host_dense_matrix<T> hb(M, 1);
+    for(rocsparse_int i = 0; i < M; ++i)
+    {
+        hb[i] = static_cast<T>(0);
+    }
+
+    for(rocsparse_int i = 0; i < M; ++i)
+    {
+        for(rocsparse_int j = hA.ptr[i] - base; j < hA.ptr[i + 1] - base; ++j)
+        {
+            rocsparse_int col = hA.ind[j] - base;
+
+            // Only use entries in the active triangular part
+            bool use_entry = (uplo == rocsparse_fill_mode_lower) ? (col <= i) : (col >= i);
+
+            if(use_entry)
+            {
+                T aval = hA.val[j];
+                // For unit diagonal, use 1 instead of stored diagonal value
+                if(diag == rocsparse_diag_type_unit && col == i)
+                {
+                    aval = static_cast<T>(1);
+                }
+                hb[i] += aval;
+            }
+        }
+    }
+
+    // Verify that hb[i] and hx_expected[i] are integers
+    hb.check_integer();
+    hx_expected.check_integer();
+
+    // Use b as the right-hand side for csrsv testing
+    // We'll solve A*y = b, and y should equal x_expected
+    hx = hb;
+}
+
 template <typename T>
 void testing_csrsv(const Arguments& arg)
 {
@@ -219,78 +316,7 @@ void testing_csrsv(const Arguments& arg)
     // If integer_based_manufactured_solution is enabled, construct integer matrix and generate corresponding right-hand side
     if(arg.integer_based_manufactured_solution)
     {
-        for(rocsparse_int i = 0; i < hA.nnz; ++i)
-        {
-            hA.val[i] = static_cast<T>(1);
-        }
-
-        if(diag == rocsparse_diag_type_non_unit)
-        {
-            for(rocsparse_int i = 0; i < M; ++i)
-            {
-                for(rocsparse_int j = hA.ptr[i] - base; j < hA.ptr[i + 1] - base; ++j)
-                {
-                    rocsparse_int col = hA.ind[j] - base;
-
-                    if(col == i)
-                    {
-                        // Find the lowest power of 2 strictly greater than the number of elements in the current row
-                        rocsparse_int row_nnz = hA.ptr[i + 1] - hA.ptr[i];
-                        rocsparse_int diag_val
-                            = 1 << static_cast<rocsparse_int>(std::ceil(std::log2(row_nnz + 1)));
-                        hA.val[j] = static_cast<T>(diag_val);
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Set all the entries of the expected solution to alpha
-        for(rocsparse_int i = 0; i < M; ++i)
-        {
-            hx_expected[i] = (*h_alpha);
-        }
-
-        // Compute b = A * x / alpha (the right-hand side) using only the triangular part
-        // As we set all entries of x to alpha, this simplifies to b = A * o where o is a vector of ones.
-        // This is equivalent to summing the rows of A in the triangular part
-        host_dense_matrix<T> hb(M, 1);
-        for(rocsparse_int i = 0; i < M; ++i)
-        {
-            hb[i] = static_cast<T>(0);
-        }
-
-        for(rocsparse_int i = 0; i < M; ++i)
-        {
-            for(rocsparse_int j = hA.ptr[i] - base; j < hA.ptr[i + 1] - base; ++j)
-            {
-                rocsparse_int col = hA.ind[j] - base;
-
-                // Only use entries in the active triangular part
-                bool use_entry = (uplo == rocsparse_fill_mode_lower) ? (col <= i) : (col >= i);
-
-                if(use_entry)
-                {
-                    T aval = hA.val[j];
-                    // For unit diagonal, use 1 instead of stored diagonal value
-                    if(diag == rocsparse_diag_type_unit && col == i)
-                    {
-                        aval = static_cast<T>(1);
-                    }
-                    hb[i] += aval;
-                }
-            }
-        }
-        // Verify that hb[i] and hx_expected[i] are integers
-        for(rocsparse_int i = 0; i < M; ++i)
-        {
-            check_integer(&hb[i]);
-            check_integer(&hx_expected[i]);
-        }
-
-        // Use b as the right-hand side for csrsv testing
-        // We'll solve A*y = b, and y should equal x_expected
-        hx = hb;
+        setup_integer_based_manufactured_solution(hA, hx, hx_expected, *h_alpha, uplo, diag, base, M);
     }
     else
     {
@@ -384,10 +410,7 @@ void testing_csrsv(const Arguments& arg)
                 hx_expected.near_check(dy, tol);
 
                 // Additionally, verify that each entry in dy is an integer
-                for(rocsparse_int i = 0; i < M; ++i)
-                {
-                    check_integer(&dy[i]);
-                }
+                dy.check_integer();
             }
         }
 

@@ -247,10 +247,9 @@ Tests:
   M_N: *M_N_range_quick
   alpha_alphai: *alpha_range_int
   transA: [rocsparse_operation_none]
-  diag: [rocsparse_diag_type_non_unit]
+  diag: [rocsparse_diag_type_non_unit, rocsparse_diag_type_unit]
   uplo: *all_rocsparse_fill_mode
   apol: [rocsparse_analysis_policy_reuse]
-  spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   integer_based_manufactured_solution: true
@@ -262,10 +261,9 @@ Tests:
   M_N: *M_N_range_nightly
   alpha_alphai: *alpha_range_int
   transA: [rocsparse_operation_none]
-  diag: [rocsparse_diag_type_non_unit]
+  diag: [rocsparse_diag_type_non_unit, rocsparse_diag_type_unit]
   uplo: *all_rocsparse_fill_mode
   apol: [rocsparse_analysis_policy_reuse]
-  spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   integer_based_manufactured_solution: true
