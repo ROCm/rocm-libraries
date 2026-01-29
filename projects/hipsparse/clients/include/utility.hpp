@@ -7638,10 +7638,6 @@ void host_csr2csc(I                    m,
 
 /* ============================================================================================ */
 /*! \brief  Host csr2hyb (convert CSR to HYB format) */
-#define ELL_IND_ROW(i, el, m, width) (el) * (m) + (i)
-#define ELL_IND_EL(i, el, m, width) (el) + (width) * (i)
-#define ELL_IND(i, el, m, width) ELL_IND_ROW(i, el, m, width)
-
 template <typename I, typename T>
 void host_csr2hyb(I                    m,
                   I                    nnz,
