@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include <MiopenLegacyPlugin.hpp>
+#include <MiopenPlugin.hpp>
 #include <hipdnn_data_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
@@ -16,7 +16,7 @@
 #include "HipdnnEnginePluginHandle.hpp"
 #include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
 
-TEST(TestMiopenLegacyEnginePluginApi, GetAllEngineIdsNull)
+TEST(TestMiopenEnginePluginApi, GetAllEngineIdsNull)
 {
     std::array<int64_t, 1> engineIds = {0};
     uint32_t numEngines = 0;
@@ -31,7 +31,7 @@ TEST(TestMiopenLegacyEnginePluginApi, GetAllEngineIdsNull)
               HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
-TEST(TestMiopenLegacyEnginePluginApi, GetAllEngineIdsValid)
+TEST(TestMiopenEnginePluginApi, GetAllEngineIdsValid)
 {
     std::array<int64_t, 1> engineIds = {0};
     uint32_t numEngines = 0;
@@ -49,22 +49,22 @@ TEST(TestMiopenLegacyEnginePluginApi, GetAllEngineIdsValid)
     EXPECT_EQ(numEngines, 1u);
 }
 
-TEST(TestMiopenLegacyEnginePluginApi, CreateNullHandle)
+TEST(TestMiopenEnginePluginApi, CreateNullHandle)
 {
     EXPECT_EQ(hipdnnEnginePluginCreateImpl(nullptr), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
-TEST(TestMiopenLegacyEnginePluginApi, DestroyNullHandle)
+TEST(TestMiopenEnginePluginApi, DestroyNullHandle)
 {
     EXPECT_EQ(hipdnnEnginePluginDestroyImpl(nullptr), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
-TEST(TestMiopenLegacyEnginePluginApi, SetStreamNullHandle)
+TEST(TestMiopenEnginePluginApi, SetStreamNullHandle)
 {
     EXPECT_EQ(hipdnnEnginePluginSetStreamImpl(nullptr, nullptr), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
-TEST(TestMiopenLegacyEnginePluginApi, GetApplicableEngineIdsNull)
+TEST(TestMiopenEnginePluginApi, GetApplicableEngineIdsNull)
 {
     auto handle = reinterpret_cast<hipdnnEnginePluginHandle_t>(0x1234);
     auto opGraph = reinterpret_cast<hipdnnPluginConstData_t*>(0x5678);
@@ -91,7 +91,7 @@ TEST(TestMiopenLegacyEnginePluginApi, GetApplicableEngineIdsNull)
         HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
-TEST(TestMiopenLegacyEnginePluginApi, GetEngineDetailsNull)
+TEST(TestMiopenEnginePluginApi, GetEngineDetailsNull)
 {
     auto handle = reinterpret_cast<hipdnnEnginePluginHandle_t>(0x1234);
     auto opGraph = reinterpret_cast<hipdnnPluginConstData_t*>(0x5678);
@@ -110,7 +110,7 @@ TEST(TestMiopenLegacyEnginePluginApi, GetEngineDetailsNull)
               HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
-TEST(TestMiopenLegacyEnginePluginApi, DestroyEngineDetailsNull)
+TEST(TestMiopenEnginePluginApi, DestroyEngineDetailsNull)
 {
     auto handle = reinterpret_cast<hipdnnEnginePluginHandle_t>(0x1234);
     hipdnnPluginConstData_t engineDetailsOut;
@@ -126,7 +126,7 @@ TEST(TestMiopenLegacyEnginePluginApi, DestroyEngineDetailsNull)
               HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
-TEST(TestMiopenLegacyEnginePluginApi, GetWorkspaceSizeNull)
+TEST(TestMiopenEnginePluginApi, GetWorkspaceSizeNull)
 {
     auto handle = reinterpret_cast<hipdnnEnginePluginHandle_t>(0x1234);
     auto engineConfig = reinterpret_cast<hipdnnPluginConstData_t*>(0x5678);
@@ -151,7 +151,7 @@ TEST(TestMiopenLegacyEnginePluginApi, GetWorkspaceSizeNull)
               HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
-TEST(TestMiopenLegacyEnginePluginApi, CreateExecutionContextNull)
+TEST(TestMiopenEnginePluginApi, CreateExecutionContextNull)
 {
     auto handle = reinterpret_cast<hipdnnEnginePluginHandle_t>(0x1234);
     auto engineConfig = reinterpret_cast<hipdnnPluginConstData_t*>(0x5678);
@@ -178,7 +178,7 @@ TEST(TestMiopenLegacyEnginePluginApi, CreateExecutionContextNull)
               HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
-TEST(TestMiopenLegacyEnginePluginApi, DestroyExecutionContextNull)
+TEST(TestMiopenEnginePluginApi, DestroyExecutionContextNull)
 {
     auto handle = reinterpret_cast<hipdnnEnginePluginHandle_t>(0x1234);
     MockHipdnnEnginePluginExecutionContext executionContext;
@@ -190,7 +190,7 @@ TEST(TestMiopenLegacyEnginePluginApi, DestroyExecutionContextNull)
               HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
-TEST(TestMiopenLegacyEnginePluginApi, GetWorkspaceSizeFromExecutionContextNull)
+TEST(TestMiopenEnginePluginApi, GetWorkspaceSizeFromExecutionContextNull)
 {
     auto handle = reinterpret_cast<hipdnnEnginePluginHandle_t>(0x1234);
     auto executionContext = reinterpret_cast<hipdnnEnginePluginExecutionContext_t>(0x5678);
@@ -212,7 +212,7 @@ TEST(TestMiopenLegacyEnginePluginApi, GetWorkspaceSizeFromExecutionContextNull)
               HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
-TEST(TestGpuMiopenLegacyEnginePluginApi, CreateAlsoCreatesMIOpenHandleOnSuccess)
+TEST(TestGpuMiopenEnginePluginApi, CreateAlsoCreatesMIOpenHandleOnSuccess)
 {
     SKIP_IF_NO_DEVICES();
     hipdnnEnginePluginHandle_t handle = nullptr;
@@ -226,7 +226,7 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, CreateAlsoCreatesMIOpenHandleOnSuccess)
     EXPECT_EQ(hipdnnEnginePluginDestroyImpl(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
-TEST(TestGpuMiopenLegacyEnginePluginApi, CreateTwiceGivesTheSameContainerHandle)
+TEST(TestGpuMiopenEnginePluginApi, CreateTwiceGivesTheSameContainerHandle)
 {
     SKIP_IF_NO_DEVICES();
     hipdnnEnginePluginHandle_t handle1 = nullptr;
@@ -244,7 +244,7 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, CreateTwiceGivesTheSameContainerHandle)
     EXPECT_EQ(hipdnnEnginePluginDestroyImpl(handle2), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
-TEST(TestGpuMiopenLegacyEnginePluginApi, CreateNonNullHandlePointer)
+TEST(TestGpuMiopenEnginePluginApi, CreateNonNullHandlePointer)
 {
     SKIP_IF_NO_DEVICES();
     auto handle = reinterpret_cast<hipdnnEnginePluginHandle_t>(0x1234);
@@ -255,7 +255,7 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, CreateNonNullHandlePointer)
     EXPECT_EQ(hipdnnEnginePluginDestroyImpl(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
-TEST(TestGpuMiopenLegacyEnginePluginApi, SetStreamNullStream)
+TEST(TestGpuMiopenEnginePluginApi, SetStreamNullStream)
 {
     SKIP_IF_NO_DEVICES();
     hipdnnEnginePluginHandle_t handle = nullptr;
@@ -266,7 +266,7 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, SetStreamNullStream)
     EXPECT_EQ(hipdnnEnginePluginDestroyImpl(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
-TEST(TestGpuMiopenLegacyEnginePluginApi, SetStreamValidStream)
+TEST(TestGpuMiopenEnginePluginApi, SetStreamValidStream)
 {
     SKIP_IF_NO_DEVICES();
     hipdnnEnginePluginHandle_t handle = nullptr;
@@ -281,7 +281,7 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, SetStreamValidStream)
     EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
 }
 
-TEST(TestGpuMiopenLegacyEnginePluginApi, GetApplicableEngineIdsValid)
+TEST(TestGpuMiopenEnginePluginApi, GetApplicableEngineIdsValid)
 {
     SKIP_IF_NO_DEVICES();
     hipdnnEnginePluginHandle_t handle = nullptr;
@@ -312,7 +312,7 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, GetApplicableEngineIdsValid)
     // Clean up
     EXPECT_EQ(hipdnnEnginePluginDestroyImpl(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
-TEST(TestGpuMiopenLegacyEnginePluginApi, GetEngineDetailsValid)
+TEST(TestGpuMiopenEnginePluginApi, GetEngineDetailsValid)
 {
     SKIP_IF_NO_DEVICES();
     hipdnnEnginePluginHandle_t handle = nullptr;
@@ -342,7 +342,7 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, GetEngineDetailsValid)
     EXPECT_EQ(hipdnnEnginePluginDestroyImpl(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
-TEST(TestGpuMiopenLegacyEnginePluginApi, GetWorkspaceSizeValid)
+TEST(TestGpuMiopenEnginePluginApi, GetWorkspaceSizeValid)
 {
     SKIP_IF_NO_DEVICES();
     hipdnnEnginePluginHandle_t handle = nullptr;
@@ -369,7 +369,7 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, GetWorkspaceSizeValid)
     EXPECT_EQ(hipdnnEnginePluginDestroyImpl(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
-TEST(TestGpuMiopenLegacyEnginePluginApi, CreateExecutionContextValid)
+TEST(TestGpuMiopenEnginePluginApi, CreateExecutionContextValid)
 {
     SKIP_IF_NO_DEVICES();
     hipdnnEnginePluginHandle_t handle = nullptr;
@@ -397,7 +397,7 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, CreateExecutionContextValid)
     EXPECT_EQ(hipdnnEnginePluginDestroyImpl(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
-TEST(TestGpuMiopenLegacyEnginePluginApi, GetWorkspaceSizeFromExecutionContextValid)
+TEST(TestGpuMiopenEnginePluginApi, GetWorkspaceSizeFromExecutionContextValid)
 {
     SKIP_IF_NO_DEVICES();
     hipdnnEnginePluginHandle_t handle = nullptr;
