@@ -1,0 +1,1182 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta content="Learn how to develop plugins for hipDNN." name="description" />
+<meta content="hipDNN, ROCm, API, how-to" name="keywords" />
+
+    <title>Develop plugins for hipDNN (Advanced) &#8212; hipDNN 1.0.0 Documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=a746c00c" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=384b581d" />
+    <link rel="stylesheet" type="text/css" href="../_static/mystnb.4510f1fc1dee50b3e5859aac5469c37c29e427902b24a333a5f9fcb2f0b3ac41.css?v=be8a1c11" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=643846e8" />
+    <link rel="stylesheet" type="text/css" href="../_static/rocm_header.css?v=9557e3d1" />
+    <link rel="stylesheet" type="text/css" href="../_static/rocm_footer.css?v=7095035a" />
+    <link rel="stylesheet" type="text/css" href="../_static/fonts.css?v=fcff5274" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="../_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="../_static/documentation_options.js?v=f9c1cefe"></script>
+    <script src="../_static/doctools.js?v=9a2dae69"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=91c4cb68"></script>
+    <script async="async" src="../_static/code_word_breaks.js?v=327952c4"></script>
+    <script async="async" src="../_static/renameVersionLinks.js?v=929fe5e4"></script>
+    <script async="async" src="../_static/rdcMisc.js?v=01f88d96"></script>
+    <script async="async" src="../_static/theme_mode_captions.js?v=15f4ec5d"></script>
+    <script defer="defer" src="../_static/search.js?v=90a4452c"></script>
+    <script src="../_static/scripts/sphinx-book-theme.js?v=efea14e4"></script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'how-to/develop-plugins';</script>
+    <script async="async" src="https://download.amd.com/js/analytics/analyticsinit.js"></script>
+    <link rel="icon" href="https://www.amd.com/content/dam/code/images/favicon/favicon.ico"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="hipDNN environment variables" href="../reference/environment-variables.html" />
+    <link rel="prev" title="Extend hipDNN functionality (Advanced)" href="extend-hipdnn.html" />
+    <meta name="google-site-verification" content="vo35SZt_GASsTHAEmdww7AYKPCvZyzLvOXBl8guBME4" />
+
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+<aside class="bd-header-announcement" aria-label="Announcement">
+  <div class="bd-header-announcement__content">This page contains proposed changes for a future release of ROCm. Read the <a id='rocm-banner' href='https://rocm.docs.amd.com/en/latest/'>latest Linux release of ROCm documentation</a> for your production environments.</div>
+</aside>
+
+  
+
+<header class="common-header" >
+    <nav class="navbar navbar-expand-xl">
+        <div class="container-fluid main-nav rocm-header">
+            
+            <button class="navbar-toggler collapsed" id="nav-icon" data-tracking-information="mainMenuToggle" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+            
+            <div class="header-logo">
+                <a class="navbar-brand" href="https://www.amd.com/">
+                    <img src="../_static/images/amd-header-logo.svg" alt="AMD Logo" title="AMD Logo" width="90" class="d-inline-block align-text-top hover-opacity"/>
+                </a>
+                <div class="vr vr mx-40 my-25"></div>
+                
+        
+    
+    <a class="klavika-font hover-opacity" href="https://rocm.docs.amd.com/en/develop">ROCm&#8482; Software Future Release</a>
+                <a class="header-all-versions" href="https://rocm.docs.amd.com/en/latest/release/versions.html">Version List</a>
+            </div>
+            <div class="icon-nav text-center d-flex ms-auto">
+            </div>
+        </div>
+    </nav>
+    
+    <nav class="navbar navbar-expand-xl second-level-nav">
+        <div class="container-fluid main-nav">
+            <div class="navbar-nav-container collapse navbar-collapse" id="navbarSupportedContent">
+                <ul class="navbar-nav nav-mega me-auto mb-2 mb-lg-0 col-xl-10">
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://github.com/ROCm/rocm-libraries" id="navgithub" role="button" aria-expanded="false" target="_blank" >
+                                GitHub
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://github.com/ROCm/ROCm/discussions" id="navcommunity" role="button" aria-expanded="false" target="_blank" >
+                                Community
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://rocm.blogs.amd.com/" id="navblogs" role="button" aria-expanded="false" target="_blank" >
+                                Blogs
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://www.amd.com/en/developer/resources/rocm-hub.html" id="navrocm-developer-hub" role="button" aria-expanded="false" target="_blank" >
+                                ROCm Developer Hub
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://instinct.docs.amd.com" id="navinstinct&#8482;-docs" role="button" aria-expanded="false" target="_blank" >
+                                Instinct&#8482; Docs
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://www.amd.com/en/developer/resources/infinity-hub.html" id="navinfinity-hub" role="button" aria-expanded="false" target="_blank" >
+                                Infinity Hub
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://github.com/ROCm/rocm-libraries/issues/new/choose" id="navsupport" role="button" aria-expanded="false" target="_blank" >
+                                Support
+                            </a>
+                        </li>
+                    
+                </ul>
+            </div>
+        </div>
+    </nav>
+    
+</header>
+
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          
+          
+            <div class="navbar-item">
+
+<a class="navbar-brand logo" href="https://rocm.docs.amd.com/en/develop">
+    <p>ROCm documentation</p>
+</a></div>
+          
+        
+      </div>
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">hipDNN 1.0.0 Documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../what-is-hipdnn.html">What is hipDNN?</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Install</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../install/hipdnn-prerequisites.html">Prerequisites</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../install/hipdnn-install.html">hipDNN installation (Linux)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../install/hipdnn-install-windows.html">hipDNN installation (Windows)</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Conceptual</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../conceptual/miopen-plugin.html">MIOpen Provider plugin architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../conceptual/architecture.html">High-level architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../conceptual/backend-architecture.html">Backend architecture (Advanced)</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">How to</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="build-execute-hipdnn.html">Build and execute operation graphs</a></li>
+<li class="toctree-l1"><a class="reference internal" href="extend-hipdnn.html">Extend hipDNN functionality (Advanced)</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Develop plugins for hipDNN (Advanced)</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../reference/environment-variables.html">Environment variables</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/naming-guidelines.html">Coding style and naming guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/glossary.html">Glossary</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">About</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../license.html">License</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><label class="sidebar-toggle primary-toggle btn btn-sm" for="__primary" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-angle-right"></span>
+  </label></div>
+      
+        <div class="header-article-item">
+
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Develop plugins for hipDNN (Advanced)</span></li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+<label class="sidebar-toggle secondary-toggle btn btn-sm" for="__secondary"title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</label>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Develop plugins for hipDNN (Advanced)</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-types">Plugin Types</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#sdk-libraries">SDK libraries</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#data-sdk-data-sdk">Data SDK (<code class="docutils literal notranslate"><span class="pre">data_sdk</span></code>)</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-sdk-plugin-sdk">Plugin SDK (<code class="docutils literal notranslate"><span class="pre">plugin_sdk</span></code>)</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#test-sdk-test-sdk">Test SDK (<code class="docutils literal notranslate"><span class="pre">test_sdk</span></code>)</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-api">Plugin API</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#engine-ids">Engine IDs</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#use-engine-ids">Use Engine IDs</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#register-new-engine-names">Register new engine names</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#benefits">Benefits</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#create-a-kernel-engine-plugin">Create a kernel engine plugin</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#prerequisites">Prerequisites</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#steps">Steps</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#implementation-details">Implementation details</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#key-files-reference">Key files reference</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-architecture">Plugin architecture</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#directory-structure-for-kernel-engine-plugins">Directory structure for kernel engine plugins</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#build-configuration">Build configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#use-hipdnn-sdks-in-external-plugins">Use hipDNN SDKs in external plugins</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#build-and-install-directory-structure">Build and install directory structure</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-loading">Plugin loading</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#default-plugin-loading">Default plugin loading</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#environment-variable-override">Environment variable override</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#custom-plugin-paths">Custom plugin paths</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-symbol-resolution">Plugin symbol resolution</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#path-resolution">Path resolution</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#loading-modes">Loading modes</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#example-usage">Example usage</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#query-loaded-plugins">Query loaded plugins</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#test-plugins">Test plugins</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#test-structure">Test structure</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#unit-tests">Unit tests</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#integration-tests">Integration tests</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#example-miopen-provider-plugin">Example: MIOpen Provider Plugin</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#structure">Structure</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#troubleshooting">Troubleshooting</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-loading-failures">Plugin loading failures</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-handle-creation-fails">Plugin handle creation fails</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#null-handle-returned">Null handle returned</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#symbol-collisions-between-plugins">Symbol collisions between plugins</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#example-error-log">Example error log</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#solution">Solution</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#verification">Verification</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="develop-plugins-for-hipdnn-advanced">
+<span id="develop-plugins"></span><h1>Develop plugins for hipDNN (Advanced)<a class="headerlink" href="#develop-plugins-for-hipdnn-advanced" title="Link to this heading">#</a></h1>
+<p>hipDNN supports a plugin architecture that allows for modular extensions to the framework. Plugins are designed to be separate projects that extend hipDNN’s capabilities without being part of the core repository.
+The backend discovers and manages these plugins, leveraging them for different aspects of deep learning routines. This architecture provides flexibility in implementation choices and enables optimizations for specific hardware or use cases.</p>
+<section id="plugin-types">
+<h2>Plugin Types<a class="headerlink" href="#plugin-types" title="Link to this heading">#</a></h2>
+<p>hipDNN will support three types of plugins, each serving a specific purpose:</p>
+<ul class="simple">
+<li><p>Engine Heuristic and Selection Plugins (<code class="docutils literal notranslate"><span class="pre">hipdnn_plugins/heuristics/</span></code>): These plugins help determine the best execution strategy for a given operation or graph. They analyze the computation requirements and available resources to select optimal implementations.</p></li>
+<li><p>Benchmarking and Tuning Plugins (<code class="docutils literal notranslate"><span class="pre">hipdnn_plugins/benchmarking/</span></code>): These plugins focus on performance optimization by benchmarking different implementations and tuning parameters for specific hardware configurations.</p></li>
+<li><p>Kernel Engine Plugins (<code class="docutils literal notranslate"><span class="pre">hipdnn_plugins/engines/</span></code>): These plugins provide the actual kernel implementations for operations. They contain the compute kernels that execute on the target hardware (GPUs, accelerators, etc.).</p></li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Only kernel engine plugins are supported in hipDNN.</p>
+</div>
+</section>
+<section id="sdk-libraries">
+<h2>SDK libraries<a class="headerlink" href="#sdk-libraries" title="Link to this heading">#</a></h2>
+<p>hipDNN provides several C++ SDK libraries for plugin development:</p>
+<section id="data-sdk-data-sdk">
+<h3>Data SDK (<code class="docutils literal notranslate"><span class="pre">data_sdk</span></code>)<a class="headerlink" href="#data-sdk-data-sdk" title="Link to this heading">#</a></h3>
+<p>The Data SDK contains the FlatBuffers schemas and data structures for graph representation. It includes:</p>
+<ul class="simple">
+<li><p>FlatBuffers schema definitions for graphs, nodes, and attributes.</p></li>
+<li><p>Data structures for deserializing serialized graphs.</p></li>
+<li><p>Utilities for working with graph data.</p></li>
+</ul>
+<p>For adding new operations to the Data SDK (schemas, nodes, attributes), see <a class="reference internal" href="extend-hipdnn.html#add-operation"><span class="std std-ref">Add a new operation</span></a>.</p>
+</section>
+<section id="plugin-sdk-plugin-sdk">
+<h3>Plugin SDK (<code class="docutils literal notranslate"><span class="pre">plugin_sdk</span></code>)<a class="headerlink" href="#plugin-sdk-plugin-sdk" title="Link to this heading">#</a></h3>
+<p>The Plugin SDK contains the plugin API and utilities needed to create a plugin that hipDNN can consume. It includes:</p>
+<ul class="simple">
+<li><p>Plugin interface definitions.</p></li>
+<li><p>Base classes for engine implementation.</p></li>
+<li><p>Utilities for plugin development.</p></li>
+</ul>
+</section>
+<section id="test-sdk-test-sdk">
+<h3>Test SDK (<code class="docutils literal notranslate"><span class="pre">test_sdk</span></code>)<a class="headerlink" href="#test-sdk-test-sdk" title="Link to this heading">#</a></h3>
+<p>The Test SDK provides utilities for testing plugins. It includes:</p>
+<ul class="simple">
+<li><p>CPU reference implementations for validation (convolution, batchnorm, etc.).</p></li>
+<li><p>Test utilities (tolerances, seeds, logging).</p></li>
+<li><p>Mock objects for unit testing.</p></li>
+<li><p>FlatBuffer test utilities.</p></li>
+</ul>
+</section>
+</section>
+<section id="plugin-api">
+<h2>Plugin API<a class="headerlink" href="#plugin-api" title="Link to this heading">#</a></h2>
+<p>The plugin API defines how kernel engine plugins interact with hipDNN:</p>
+<ul class="simple">
+<li><p><strong>Graph Processing</strong>: Topologically sorted graphs are passed in a serialized format to plugins using FlatBuffers.</p></li>
+<li><p><strong>Data SDK Objects</strong>: Plugins use Data SDK objects to deserialize and process graphs.</p></li>
+<li><p><strong>Capability Reporting</strong>: Plugins analyze graphs and report whether they can execute them.</p></li>
+<li><p><strong>Execution Interface</strong>: Plugins provide execution methods for supported operations.</p></li>
+</ul>
+</section>
+<section id="engine-ids">
+<h2>Engine IDs<a class="headerlink" href="#engine-ids" title="Link to this heading">#</a></h2>
+<p>hipDNN uses a deterministic hash-based system for managing engine IDs. This system converts human-readable engine names to unique <code class="docutils literal notranslate"><span class="pre">int64_t</span></code> identifiers.</p>
+<p>Here’s the workflow:</p>
+<ol class="arabic simple">
+<li><p><strong>Engine Names</strong>: Define human-readable string names for your engines (e.g., <code class="docutils literal notranslate"><span class="pre">MIOPEN_PLUGIN</span></code>, <code class="docutils literal notranslate"><span class="pre">MY_CUSTOM_ENGINE</span></code>).</p></li>
+<li><p><strong>Hash Function</strong>: The <code class="docutils literal notranslate"><span class="pre">hipdnn_plugin_sdk::engine_names::engineNameToId()</span></code> function converts names to IDs using a FNV-1a hash algorithm.</p></li>
+<li><p><strong>Registration</strong>: Engine names are registered in the Plugin SDK header for discoverability.</p></li>
+</ol>
+<section id="use-engine-ids">
+<h3>Use Engine IDs<a class="headerlink" href="#use-engine-ids" title="Link to this heading">#</a></h3>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;hipdnn_plugin_sdk/EngineNames.hpp&gt;</span>
+
+<span class="c1">// Option 1: Use a registered engine ID</span>
+<span class="k">const</span><span class="w"> </span><span class="kt">int64_t</span><span class="w"> </span><span class="n">engineId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">hipdnn_plugin_sdk</span><span class="o">::</span><span class="n">engine_names</span><span class="o">::</span><span class="n">MIOPEN_PLUGIN_ID</span><span class="p">;</span>
+
+<span class="c1">// Option 2: Generate ID from custom name</span>
+<span class="k">const</span><span class="w"> </span><span class="kt">int64_t</span><span class="w"> </span><span class="n">customEngineId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">hipdnn_data_sdk</span><span class="o">::</span><span class="n">engineNameToId</span><span class="p">(</span><span class="s">&quot;MY_CUSTOM_ENGINE&quot;</span><span class="p">);</span>
+
+<span class="c1">// In your engine implementation</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">MyEngine</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int64_t</span><span class="w"> </span><span class="n">_id</span><span class="p">;</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="n">MyEngine</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">engineName</span><span class="p">)</span>
+<span class="w">        </span><span class="o">:</span><span class="w"> </span><span class="n">_id</span><span class="p">(</span><span class="n">hipdnn_data_sdk</span><span class="o">::</span><span class="n">engineNameToId</span><span class="p">(</span><span class="n">engineName</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Engine is now initialized with a unique ID</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+</section>
+<section id="register-new-engine-names">
+<h3>Register new engine names<a class="headerlink" href="#register-new-engine-names" title="Link to this heading">#</a></h3>
+<p>To add your engine name to the official registry:</p>
+<ol class="arabic simple">
+<li><p>Choose a unique name.</p>
+<ul class="simple">
+<li><p>Use <code class="docutils literal notranslate"><span class="pre">UPPER_CASE</span></code> with underscores</p></li>
+<li><p>Make the name match the value.</p></li>
+</ul>
+</li>
+</ol>
+<ol class="arabic" start="2">
+<li><p>Add it to the registry. Submit a PR to add your engine name to <code class="docutils literal notranslate"><span class="pre">plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp</span></code>:</p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="n">HIPDNN_REGISTER_ENGINE</span><span class="p">(</span><span class="n">MY_NEW_ENGINE</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;MY_NEW_ENGINE&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</li>
+<li><p>Test it locally. You can use unregistered names during development; they’ll generate a warning, but they’ll work correctly.</p></li>
+</ol>
+</section>
+<section id="benefits">
+<h3>Benefits<a class="headerlink" href="#benefits" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p><strong>Deterministic</strong>: Same name always produces same ID.</p></li>
+<li><p><strong>No Collisions</strong>: Hash algorithm minimizes collision risk.</p></li>
+<li><p><strong>Human-Readable</strong>: Debug logs can show meaningful engine names.</p></li>
+<li><p><strong>Forward Compatible</strong>: New engines can be used without registry updates.</p></li>
+</ul>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>The engine ID system ensures globally unique identifiers across all plugins. You can query registered engines using <code class="docutils literal notranslate"><span class="pre">hipdnn_plugin_sdk::engine_names::getAllEngineNames()</span></code> and check for name collisions using the provided test utilities.</p>
+</div>
+</section>
+</section>
+<section id="create-a-kernel-engine-plugin">
+<h2>Create a kernel engine plugin<a class="headerlink" href="#create-a-kernel-engine-plugin" title="Link to this heading">#</a></h2>
+<p>This section focuses on developing kernel engine plugins.</p>
+</section>
+<section id="prerequisites">
+<h2>Prerequisites<a class="headerlink" href="#prerequisites" title="Link to this heading">#</a></h2>
+<p>Before creating a plugin, ensure you’ve built and installed hipDNN. Plugins depend on the hipDNN Data SDK and Plugin SDK headers.</p>
+</section>
+<section id="steps">
+<h2>Steps<a class="headerlink" href="#steps" title="Link to this heading">#</a></h2>
+<ol class="arabic">
+<li><p>Create plugin structure.</p>
+<ol class="arabic simple">
+<li><p>Create a new project/repository for your plugin.</p></li>
+<li><p>Implement the plugin interface defined in <a class="reference external" href="https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h">plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h</a>. See <a class="reference internal" href="../conceptual/miopen-plugin.html#miopen"><span class="std std-ref">MIOpen Provider plugin architecture</span></a> for an implementation reference.</p></li>
+</ol>
+</li>
+<li><p>Implement the plugin API functions.</p>
+<p>The underlying implementation below the plugin API level is entirely at the developer’s discretion. While the following architectural components are recommended for code organization and maintainability, the only true requirement is to implement the exported API functions defined in <code class="docutils literal notranslate"><span class="pre">engine_plugin_api.h</span></code>. However, the common architectural pattern consists of:</p>
+<ul class="simple">
+<li><p><strong>Engine manager</strong>: Manages available engines and their capabilities.</p></li>
+<li><p><strong>Engine</strong>: Implements graph execution for specific operations (each engine must have a globally unique <code class="docutils literal notranslate"><span class="pre">int64_t</span></code> ID).</p></li>
+<li><p><strong>Execution plans</strong>: Define how operations are executed.</p></li>
+<li><p><strong>Engine name and ID</strong>: Name your engine and place it in the EngineNames registry</p></li>
+</ul>
+</li>
+<li><p>Build and deploy the plugin.</p>
+<ul class="simple">
+<li><p>Configure CMake to build the plugin as a shared library.</p></li>
+<li><p>Install to the appropriate plugin directory where hipDNN can discover it at runtime.</p></li>
+</ul>
+</li>
+</ol>
+</section>
+<section id="implementation-details">
+<h2>Implementation details<a class="headerlink" href="#implementation-details" title="Link to this heading">#</a></h2>
+<p>The <strong>Engine Manager</strong> is responsible for:</p>
+<ul class="simple">
+<li><p>Creating and managing engine instances.</p></li>
+<li><p>Reporting supported operations.</p></li>
+<li><p>Handling resource allocation.</p></li>
+<li><p>Managing device-specific contexts.</p></li>
+</ul>
+<p>For <strong>Engine Implementations</strong>:</p>
+<ul class="simple">
+<li><p>Each engine must have a unique inter-plugin <code class="docutils literal notranslate"><span class="pre">int64_t</span></code> identifier.</p></li>
+<li><p>Implement the <code class="docutils literal notranslate"><span class="pre">execute()</span></code> method for graph execution.</p></li>
+<li><p>Provide <code class="docutils literal notranslate"><span class="pre">get_supported_operations()</span></code> to report capabilities.</p></li>
+<li><p>Handle operation-specific kernel launches.</p></li>
+<li><p>Manage memory transfers and synchronization.</p></li>
+</ul>
+<p><strong>Execution plans</strong> for kernel engines:</p>
+<ul class="simple">
+<li><p>Map hipDNN operations to backend-specific kernel implementations.</p></li>
+<li><p>Define memory layouts and data transformations.</p></li>
+<li><p>Specify kernel launch configurations.</p></li>
+<li><p>Handle device-specific optimizations.</p></li>
+</ul>
+<p>In general, the best practices consist of:</p>
+<ul class="simple">
+<li><p>Organizing kernels by operation type.</p></li>
+<li><p>Efficiently managing device memory allocations and transfers.</p></li>
+<li><p>Validating inputs and provide meaningful error messages and logs via the sdk.</p></li>
+<li><p>Properly managing compute streams for asynchronous execution.</p></li>
+<li><p>Profiling kernels and optimize for target hardware.</p></li>
+<li><p>Validating and documenting supported operations, hardware requirements, and limitations.</p></li>
+<li><p>Including unit tests and integration tests.</p></li>
+</ul>
+<section id="key-files-reference">
+<h3>Key files reference<a class="headerlink" href="#key-files-reference" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h">Plugin API Interface</a></p></li>
+<li><p><a class="reference external" href="https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/MiopenLegacyPlugin.cpp">Example Plugin Implementation</a></p></li>
+<li><p><a class="reference external" href="https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/EngineManager.cpp">Example Engine Manager</a></p></li>
+<li><p><a class="reference external" href="https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/engines/MiopenEngine.cpp">Example Engine Implementation</a></p></li>
+</ul>
+</section>
+</section>
+<section id="plugin-architecture">
+<h2>Plugin architecture<a class="headerlink" href="#plugin-architecture" title="Link to this heading">#</a></h2>
+<section id="directory-structure-for-kernel-engine-plugins">
+<h3>Directory structure for kernel engine plugins<a class="headerlink" href="#directory-structure-for-kernel-engine-plugins" title="Link to this heading">#</a></h3>
+<p>Your plugin should be structured as an independent project:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>your_kernel_plugin_project/
+├── CMakeLists.txt
+├── YourPlugin.cpp           # Main plugin entry point
+├── EngineManager.cpp        # Engine management
+├── engines/
+│   ├── EngineInterface.hpp  # Engine interface
+│   ├── YourEngine.cpp       # Engine implementation
+│   └── plans/                # Internal plans
+├── tests/                    # Plugin-specific tests
+└── integration_tests/        # End-to-end integration tests
+</pre></div>
+</div>
+</section>
+<section id="build-configuration">
+<h3>Build configuration<a class="headerlink" href="#build-configuration" title="Link to this heading">#</a></h3>
+<p>Your plugin’s <code class="docutils literal notranslate"><span class="pre">CMakeLists.txt</span></code> should:</p>
+<ul class="simple">
+<li><p>Build as a shared library.</p></li>
+<li><p>Link against hipDNN Data SDK and Plugin SDK.</p></li>
+<li><p>Set appropriate install paths.</p></li>
+<li><p>Link to required compute libraries (that is, HIP).</p></li>
+</ul>
+</section>
+<section id="use-hipdnn-sdks-in-external-plugins">
+<h3>Use hipDNN SDKs in external plugins<a class="headerlink" href="#use-hipdnn-sdks-in-external-plugins" title="Link to this heading">#</a></h3>
+<p>When building an external plugin, the hipDNN Data SDK provides CMake variables to help you install your plugin in the correct location:</p>
+<ul class="simple">
+<li><p>Absolute path: (<code class="docutils literal notranslate"><span class="pre">HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR</span></code>):</p>
+<ul>
+<li><p>Hardcoded at CMake configure time.</p></li>
+<li><p>This is intended for developer use <em>only</em>.</p></li>
+</ul>
+</li>
+<li><p>Relative path (<code class="docutils literal notranslate"><span class="pre">HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR</span></code>):</p>
+<ul>
+<li><p>This is recommended for installations.</p></li>
+<li><p>Automatically prepends the <code class="docutils literal notranslate"><span class="pre">CMAKE_INSTALL_PREFIX</span></code> of the consumer.</p></li>
+<li><p>Remains correct when setting the prefix during the CMake install command.</p></li>
+</ul>
+</li>
+</ul>
+<div class="highlight-cmake notranslate"><div class="highlight"><pre><span></span><span class="nb">find_package</span><span class="p">(</span><span class="s">hipdnn_data_sdk</span><span class="w"> </span><span class="s">CONFIG</span><span class="w"> </span><span class="s">REQUIRED</span><span class="p">)</span><span class="w"> </span><span class="c"># or hipdnn_frontend which includes hipdnn_data_sdk</span>
+
+<span class="c"># Example: Configure your plugin to install to the correct location</span>
+<span class="nb">install</span><span class="p">(</span>
+<span class="w">    </span><span class="s">TARGETS</span><span class="w"> </span><span class="s">your_plugin_name</span>
+<span class="w">    </span><span class="s">LIBRARY</span><span class="w"> </span><span class="s">DESTINATION</span><span class="w"> </span><span class="o">${</span><span class="nv">HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR</span><span class="o">}</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p>This ensures your plugin will be installed to the same directory structure that hipDNN expects for plugin discovery.</p>
+<section id="build-and-install-directory-structure">
+<h4>Build and install directory structure<a class="headerlink" href="#build-and-install-directory-structure" title="Link to this heading">#</a></h4>
+<p>The hipDNN build system maintains consistent directory structures for plugins:</p>
+<p>Build directory structure:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>build/lib/
+└── hipdnn_plugins/
+    └── engines/
+        └── your_plugin.so
+</pre></div>
+</div>
+<p>Install directory structure:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>/opt/rocm/lib/
+└── hipdnn_plugins/
+    └── engines/
+        └── your_plugin.so
+</pre></div>
+</div>
+<p>External plugins should follow this same structure to ensure compatibility.</p>
+</section>
+</section>
+</section>
+<section id="plugin-loading">
+<h2>Plugin loading<a class="headerlink" href="#plugin-loading" title="Link to this heading">#</a></h2>
+<p>hipDNN supports dynamic plugin loading with configurable search paths.</p>
+<section id="default-plugin-loading">
+<h3>Default plugin loading<a class="headerlink" href="#default-plugin-loading" title="Link to this heading">#</a></h3>
+<p>By default, hipDNN loads plugins from <code class="docutils literal notranslate"><span class="pre">./hipdnn_plugins/engines/</span></code>.
+This path is relative to the backend shared library location, typically: <code class="docutils literal notranslate"><span class="pre">/opt/rocm/lib/</span></code>.</p>
+<p>Default structure example:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>/opt/rocm/lib/
+└── hipdnn_plugins/
+    └── engines/
+        ├── miopen_legacy_plugin.so
+        └── other_plugin.so
+</pre></div>
+</div>
+</section>
+<section id="environment-variable-override">
+<h3>Environment variable override<a class="headerlink" href="#environment-variable-override" title="Link to this heading">#</a></h3>
+<p>You can override the default plugin directory using the <code class="docutils literal notranslate"><span class="pre">HIPDNN_PLUGIN_DIR</span></code> environment variable. This is particularly useful for testing and development:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Load plugins from a custom directory</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">HIPDNN_PLUGIN_DIR</span><span class="o">=</span>/path/to/test/plugins
+
+<span class="c1"># Example: Load test plugins during testing</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">HIPDNN_PLUGIN_DIR</span><span class="o">=</span>/home/user/hipDNN/build/lib/test_plugins
+</pre></div>
+</div>
+<p>When <code class="docutils literal notranslate"><span class="pre">HIPDNN_PLUGIN_DIR</span></code> is set, hipDNN will <em>only</em> load plugins from the specified directory and supplementary custom paths, ignoring the default location. This allows complete control over which plugins are loaded, which is essential for:</p>
+<ul class="simple">
+<li><p>Running tests with test-specific plugins.</p></li>
+<li><p>Development and debugging of new plugins.</p></li>
+<li><p>Isolating production plugins from test plugins.</p></li>
+</ul>
+</section>
+<section id="custom-plugin-paths">
+<h3>Custom plugin paths<a class="headerlink" href="#custom-plugin-paths" title="Link to this heading">#</a></h3>
+<p>Prior to creating a hipDNN handle, you can specify custom plugin paths using the <code class="docutils literal notranslate"><span class="pre">hipdnnSetEnginePluginPaths_ext</span></code> function:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">hipdnnStatus_t</span><span class="w"> </span><span class="nf">hipdnnSetEnginePluginPaths_ext</span><span class="p">(</span>
+<span class="w">    </span><span class="kt">size_t</span><span class="w"> </span><span class="n">num_paths</span><span class="p">,</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="k">const</span><span class="o">*</span><span class="w"> </span><span class="n">plugin_paths</span><span class="p">,</span>
+<span class="w">    </span><span class="n">hipdnnPluginLoadingMode_ext_t</span><span class="w"> </span><span class="n">loading_mode</span>
+<span class="p">);</span>
+</pre></div>
+</div>
+</section>
+<section id="plugin-symbol-resolution">
+<h3>Plugin symbol resolution<a class="headerlink" href="#plugin-symbol-resolution" title="Link to this heading">#</a></h3>
+<p>All plugins are loaded with <code class="docutils literal notranslate"><span class="pre">RTLD_NOW</span></code> to ensure that all symbols are resolved at load time.
+This means that all dependencies must be satisfied when the plugin is loaded. To avoid symbol conflicts, all plugins must be built with with <code class="docutils literal notranslate"><span class="pre">-fvisibility=hidden</span></code> to limit symbol exposure.</p>
+<section id="path-resolution">
+<h4>Path resolution<a class="headerlink" href="#path-resolution" title="Link to this heading">#</a></h4>
+<p>Custom paths can be:</p>
+<ul class="simple">
+<li><p><strong>Relative paths</strong>: Resolved from the backend shared library location.</p></li>
+<li><p><strong>Absolute paths</strong>: Used as specified.</p></li>
+</ul>
+</section>
+<section id="loading-modes">
+<h4>Loading modes<a class="headerlink" href="#loading-modes" title="Link to this heading">#</a></h4>
+<p><code class="docutils literal notranslate"><span class="pre">HIPDNN_PLUGIN_LOADING_ADDITIVE</span></code>: Adds new paths to the existing plugin search paths.
+<code class="docutils literal notranslate"><span class="pre">HIPDNN_PLUGIN_LOADING_ABSOLUTE</span></code>: Only loads from the specified paths.</p>
+</section>
+<section id="example-usage">
+<h4>Example usage<a class="headerlink" href="#example-usage" title="Link to this heading">#</a></h4>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="c1">// Add custom plugin directories</span>
+<span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">custom_paths</span><span class="p">[]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="s">&quot;/home/user/my_plugins&quot;</span><span class="p">,</span><span class="w">        </span><span class="c1">// Absolute path</span>
+<span class="w">    </span><span class="s">&quot;./local_plugins&quot;</span><span class="p">,</span><span class="w">              </span><span class="c1">// Relative to backend shared library</span>
+<span class="w">    </span><span class="s">&quot;/opt/custom/hipdnn/plugins&quot;</span>
+<span class="p">};</span>
+
+<span class="n">hipdnnSetEnginePluginPaths_ext</span><span class="p">(</span>
+<span class="w">    </span><span class="mi">3</span><span class="p">,</span><span class="w">                              </span><span class="c1">// Number of paths</span>
+<span class="w">    </span><span class="n">custom_paths</span><span class="p">,</span><span class="w">                   </span><span class="c1">// Array of path strings</span>
+<span class="w">    </span><span class="n">HIPDNN_PLUGIN_LOADING_ADDITIVE</span><span class="w">  </span><span class="c1">// Add to existing paths</span>
+<span class="p">);</span>
+</pre></div>
+</div>
+<p>Plugins are loaded according to the selected path schema during hipDNN handle creation. Changing paths after handle creation has no effect until another handle is created.</p>
+</section>
+</section>
+<section id="query-loaded-plugins">
+<h3>Query loaded plugins<a class="headerlink" href="#query-loaded-plugins" title="Link to this heading">#</a></h3>
+<p>After creating a hipDNN handle, you can query which engine plugins were successfully loaded using the <code class="docutils literal notranslate"><span class="pre">hipdnnGetLoadedEnginePluginPaths_ext</span></code> function:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">hipdnnStatus_t</span><span class="w"> </span><span class="nf">hipdnnGetLoadedEnginePluginPaths_ext</span><span class="p">(</span>
+<span class="w">    </span><span class="n">hipdnnHandle_t</span><span class="w"> </span><span class="n">handle</span><span class="p">,</span>
+<span class="w">    </span><span class="kt">size_t</span><span class="o">*</span><span class="w"> </span><span class="n">num_plugin_paths</span><span class="p">,</span>
+<span class="w">    </span><span class="kt">char</span><span class="o">**</span><span class="w"> </span><span class="n">plugin_paths</span><span class="p">,</span>
+<span class="w">    </span><span class="kt">size_t</span><span class="o">*</span><span class="w"> </span><span class="n">max_string_len</span>
+<span class="p">);</span>
+</pre></div>
+</div>
+<p>This function uses a two-call pattern:</p>
+<ul>
+<li><p><strong>First call</strong>: Query the number of plugins and required buffer size:</p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="kt">size_t</span><span class="w"> </span><span class="n">num_plugins</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="kt">size_t</span><span class="w"> </span><span class="n">max_len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+
+<span class="n">hipdnnGetLoadedEnginePluginPaths_ext</span><span class="p">(</span><span class="n">handle</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">num_plugins</span><span class="p">,</span><span class="w"> </span><span class="k">nullptr</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">max_len</span><span class="p">);</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>Second call</strong>: Retrieve the actual plugin paths:</p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="n">hipdnnGetLoadedEnginePluginPaths_ext</span><span class="p">(</span><span class="n">handle</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">num_plugins</span><span class="p">,</span><span class="w"> </span><span class="k">nullptr</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">max_len</span><span class="p">);</span>
+
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">char</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">buffers</span><span class="p">(</span><span class="n">num_plugins</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">char</span><span class="o">&gt;</span><span class="p">(</span><span class="n">max_len</span><span class="p">));</span>
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">char</span><span class="o">*&gt;</span><span class="w"> </span><span class="n">ptrs</span><span class="p">;</span>
+<span class="n">ptrs</span><span class="p">.</span><span class="n">reserve</span><span class="p">(</span><span class="n">num_plugins</span><span class="p">);</span>
+<span class="k">for</span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">num_plugins</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="n">ptrs</span><span class="p">.</span><span class="n">push_back</span><span class="p">(</span><span class="n">buffers</span><span class="p">[</span><span class="n">i</span><span class="p">].</span><span class="n">data</span><span class="p">());</span>
+
+<span class="n">hipdnnGetLoadedEnginePluginPaths_ext</span><span class="p">(</span><span class="n">handle</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">num_plugins</span><span class="p">,</span><span class="w"> </span><span class="n">ptrs</span><span class="p">.</span><span class="n">data</span><span class="p">(),</span><span class="w"> </span><span class="o">&amp;</span><span class="n">max_len</span><span class="p">);</span>
+
+<span class="k">for</span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">num_plugins</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Loaded plugin: &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">buffers</span><span class="p">[</span><span class="n">i</span><span class="p">].</span><span class="n">data</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="sc">&#39;\n&#39;</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+</section>
+<section id="test-plugins">
+<h2>Test plugins<a class="headerlink" href="#test-plugins" title="Link to this heading">#</a></h2>
+<p>Testing is crucial for ensuring plugin reliability and correctness. Plugins should include both unit tests and integration tests to validate their functionality.</p>
+<section id="test-structure">
+<h3>Test structure<a class="headerlink" href="#test-structure" title="Link to this heading">#</a></h3>
+<p>Following the <a class="reference external" href="https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/testing/TestingStrategy.md">Testing Strategy</a>, plugins should organize tests as follows:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>your_kernel_plugin_project/
+├── tests/                    # Unit tests
+│   ├── TestEngine.cpp
+│   ├── TestKernels.cpp
+│   └── TestUtilties.cpp
+└── integration_tests/        # End-to-end integration tests
+    ├── Operation1Test.cpp
+    └── Operation2Test.cpp
+</pre></div>
+</div>
+</section>
+<section id="unit-tests">
+<h3>Unit tests<a class="headerlink" href="#unit-tests" title="Link to this heading">#</a></h3>
+<p>Unit tests focus on the internal implementation of your plugin components:</p>
+<ul class="simple">
+<li><p><strong>Location</strong>: <code class="docutils literal notranslate"><span class="pre">plugins/&lt;plugin_name&gt;/tests/</span></code></p></li>
+<li><p><strong>Purpose</strong>: Test individual components in isolation (engines, utilities, kernel logic).</p></li>
+<li><p><strong>Requirements</strong>:</p>
+<ul>
+<li><p>Must be fast-running.</p></li>
+<li><p>GPU operations must be marked with the <code class="docutils literal notranslate"><span class="pre">SKIP_IF_NO_DEVICE()</span></code> macro.</p></li>
+<li><p>Use mocking/stubbing for dependencies where appropriate.</p></li>
+<li><p>Should work on both Windows and Linux.</p></li>
+</ul>
+</li>
+</ul>
+</section>
+<section id="integration-tests">
+<h3>Integration tests<a class="headerlink" href="#integration-tests" title="Link to this heading">#</a></h3>
+<p>Integration tests validate end-to-end functionality of your plugin:</p>
+<ul class="simple">
+<li><p><strong>Location</strong>: <code class="docutils literal notranslate"><span class="pre">plugins/&lt;plugin_name&gt;/integration_tests/</span></code></p></li>
+<li><p><strong>Purpose</strong>: Validate correctness of graph execution and accuracy of results.</p></li>
+<li><p><strong>Requirements</strong>:</p>
+<ul>
+<li><p>Test complete operation graphs.</p></li>
+<li><p>Validate against reference implementations.</p></li>
+<li><p>Test different data types, layouts, dimensions, and edge-cases for each.</p></li>
+<li><p>Enable tests for all supported ASICs.</p></li>
+<li><p>GPU typically required for meaningful validation.</p></li>
+<li><p>Tests are divided into two categories described by the prefix argument passed to <code class="docutils literal notranslate"><span class="pre">INSTANTIATE_TEST_SUITE_P</span></code>.</p>
+<ul>
+<li><p><strong>Smoke</strong> - These tests are designed to test features using the smallest possible shape and run quickly (combined smoke test run time must be under 5 mins).</p></li>
+<li><p><strong>Full</strong> - These tests can contain regression shapes, large shapes, or slow shapes.</p></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p>For a comprehensive example of an integration test, see <a class="reference external" href="https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp">IntegrationGpuBatchnormForwardInference.cpp</a>.</p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>See our <a class="reference external" href="https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp">general testing requirements</a>.</p>
+</div>
+</section>
+</section>
+<section id="example-miopen-provider-plugin">
+<span id="example-miopen"></span><h2>Example: MIOpen Provider Plugin<a class="headerlink" href="#example-miopen-provider-plugin" title="Link to this heading">#</a></h2>
+<p><a class="reference external" href="https://github.com/ROCm/rocm-libraries/tree/develop/dnn-providers/miopen-provider">MIOpen Provider Plugin</a></p>
+<p>The MIOpen Provider Plugin is a complete example of a kernel engine plugin. It demonstrates how a plugin integrates with hipDNN and delegates execution to a backend. Furthermore, it incorporates the recommended structure and best practices for kernel engine plugins.</p>
+<p>At a high level, it:</p>
+<ul class="simple">
+<li><p>Initializes and manages the GPU context using MIOpen handles.</p></li>
+<li><p>Translates hipDNN tensors into MIOpen tensor descriptors.</p></li>
+<li><p>Dispatches MIOpen kernels to execute operations.</p></li>
+<li><p>Coordinates streams and handles synchronization.</p></li>
+</ul>
+<section id="structure">
+<h3>Structure<a class="headerlink" href="#structure" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/MiopenLegacyPlugin.cpp">Main Plugin</a>: Entry point and plugin registration.</p></li>
+<li><p><a class="reference external" href="https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/EngineManager.hpp">Engine Manager</a>: Manages MIOpen engines.</p></li>
+<li><p><a class="reference external" href="https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/engines/MiopenEngine.cpp">MIOpen Engine</a>: Implements graph execution using MIOpen kernels.</p></li>
+</ul>
+</section>
+</section>
+<section id="troubleshooting">
+<h2>Troubleshooting<a class="headerlink" href="#troubleshooting" title="Link to this heading">#</a></h2>
+<section id="plugin-loading-failures">
+<h3>Plugin loading failures<a class="headerlink" href="#plugin-loading-failures" title="Link to this heading">#</a></h3>
+<p>When a plugin fails to load or initialize, hipDNN logs an error and continues loading other plugins. Common issues include the following.</p>
+<section id="plugin-handle-creation-fails">
+<h4>Plugin handle creation fails<a class="headerlink" href="#plugin-handle-creation-fails" title="Link to this heading">#</a></h4>
+<p>If you see errors like <code class="docutils literal notranslate"><span class="pre">&quot;Failed</span> <span class="pre">to</span> <span class="pre">create</span> <span class="pre">handle</span> <span class="pre">for</span> <span class="pre">plugin</span> <span class="pre">'PluginName'&quot;</span></code>, this typically indicates:</p>
+<ul class="simple">
+<li><p>Missing dependencies that the plugin requires at runtime.</p></li>
+<li><p>GPU initialization failures (e.g., no compatible device found).</p></li>
+<li><p>Plugin internal initialization errors.</p></li>
+</ul>
+<p><strong>Solution</strong>: Check that all plugin dependencies are satisfied and a compatible GPU device is available.</p>
+</section>
+<section id="null-handle-returned">
+<h4>Null handle returned<a class="headerlink" href="#null-handle-returned" title="Link to this heading">#</a></h4>
+<p>If you see <code class="docutils literal notranslate"><span class="pre">&quot;Plugin</span> <span class="pre">'PluginName'</span> <span class="pre">returned</span> <span class="pre">null</span> <span class="pre">handle&quot;</span></code>, the plugin’s <code class="docutils literal notranslate"><span class="pre">hipdnnEnginePluginCreate</span></code> function returned a null pointer without throwing an exception.</p>
+<p><strong>Solution</strong>: Review the plugin’s handle creation logic to ensure it either returns a valid handle or throws an exception with a meaningful error message.</p>
+</section>
+</section>
+<section id="symbol-collisions-between-plugins">
+<h3>Symbol collisions between plugins<a class="headerlink" href="#symbol-collisions-between-plugins" title="Link to this heading">#</a></h3>
+<p>When multiple plugins are loaded and one or more plugins don’t properly hide their symbols, you may encounter:</p>
+<ul class="simple">
+<li><p>Handle collision errors: <code class="docutils literal notranslate"><span class="pre">&quot;Plugin</span> <span class="pre">'PluginName'</span> <span class="pre">returned</span> <span class="pre">a</span> <span class="pre">handle</span> <span class="pre">that</span> <span class="pre">collides</span> <span class="pre">with</span> <span class="pre">another</span> <span class="pre">plugin&quot;</span></code></p></li>
+<li><p>Unexpected behavior where one plugin’s functions are called instead of another plugin’s functions.</p></li>
+<li><p>Crashes or undefined behavior during plugin operations.</p></li>
+</ul>
+<p>This occurs because dynamically loaded shared libraries can inadvertently share symbols, causing one plugin’s function to override another plugin’s function.</p>
+<section id="example-error-log">
+<h4>Example error log<a class="headerlink" href="#example-error-log" title="Link to this heading">#</a></h4>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">[</span><span class="n">ERROR</span><span class="p">]</span> <span class="n">Plugin</span> <span class="s1">&#39;my_plugin&#39;</span> <span class="n">returned</span> <span class="n">a</span> <span class="n">handle</span> <span class="n">that</span> <span class="n">collides</span> <span class="k">with</span> <span class="n">another</span> <span class="n">plugin</span><span class="o">.</span>
+        <span class="n">This</span> <span class="n">may</span> <span class="n">indicate</span> <span class="n">a</span> <span class="n">symbol</span> <span class="n">collision</span> <span class="n">between</span> <span class="n">plugins</span><span class="o">.</span>
+        <span class="n">Ensure</span> <span class="nb">all</span> <span class="n">plugins</span> <span class="n">are</span> <span class="n">built</span> <span class="k">with</span> <span class="o">-</span><span class="n">fvisibility</span><span class="o">=</span><span class="n">hidden</span><span class="o">.</span>
+</pre></div>
+</div>
+</section>
+<section id="solution">
+<h4>Solution<a class="headerlink" href="#solution" title="Link to this heading">#</a></h4>
+<p>All plugins must be built with symbol visibility hidden to prevent symbol collisions:</p>
+<ol class="arabic">
+<li><p>Add this code to your plugin’s <code class="docutils literal notranslate"><span class="pre">CMakeLists.txt</span></code>:</p>
+<div class="highlight-cmake notranslate"><div class="highlight"><pre><span></span><span class="nb">set</span><span class="p">(</span><span class="s">CMAKE_CXX_VISIBILITY_PRESET</span><span class="w"> </span><span class="s">hidden</span><span class="p">)</span>
+<span class="nb">set</span><span class="p">(</span><span class="s">CMAKE_VISIBILITY_INLINES_HIDDEN</span><span class="w"> </span><span class="s">ON</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Alternatively, add <code class="docutils literal notranslate"><span class="pre">-fvisibility=hidden</span></code> to your compiler flags:</p>
+<div class="highlight-cmake notranslate"><div class="highlight"><pre><span></span><span class="nb">target_compile_options</span><span class="p">(</span><span class="s">your_plugin</span><span class="w"> </span><span class="s">PRIVATE</span><span class="w"> </span><span class="s">-fvisibility=hidden</span><span class="p">)</span>
+</pre></div>
+</div>
+</li>
+<li><p>Only export the required plugin API symbols. The plugin SDK macros handle this automatically when visibility is hidden by default.</p></li>
+</ol>
+</section>
+<section id="verification">
+<h4>Verification<a class="headerlink" href="#verification" title="Link to this heading">#</a></h4>
+<p>To verify your plugin has proper symbol visibility:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># List exported symbols (should only show plugin API functions)</span>
+nm<span class="w"> </span>-gD<span class="w"> </span>your_plugin.so<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s2">&quot; T &quot;</span>
+
+<span class="c1"># Expected output should only contain:</span>
+<span class="c1"># hipdnnEnginePluginCreate</span>
+<span class="c1"># hipdnnEnginePluginDestroy</span>
+<span class="c1"># hipdnnEnginePluginGetAllEngineIds</span>
+<span class="c1"># ... (other plugin API functions)</span>
+</pre></div>
+</div>
+<p>If you see many internal symbols exported, your visibility settings are incorrect.</p>
+</section>
+</section>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="extend-hipdnn.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Extend hipDNN functionality (Advanced)</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="../reference/environment-variables.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">hipDNN environment variables</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-types">Plugin Types</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#sdk-libraries">SDK libraries</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#data-sdk-data-sdk">Data SDK (<code class="docutils literal notranslate"><span class="pre">data_sdk</span></code>)</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-sdk-plugin-sdk">Plugin SDK (<code class="docutils literal notranslate"><span class="pre">plugin_sdk</span></code>)</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#test-sdk-test-sdk">Test SDK (<code class="docutils literal notranslate"><span class="pre">test_sdk</span></code>)</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-api">Plugin API</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#engine-ids">Engine IDs</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#use-engine-ids">Use Engine IDs</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#register-new-engine-names">Register new engine names</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#benefits">Benefits</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#create-a-kernel-engine-plugin">Create a kernel engine plugin</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#prerequisites">Prerequisites</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#steps">Steps</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#implementation-details">Implementation details</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#key-files-reference">Key files reference</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-architecture">Plugin architecture</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#directory-structure-for-kernel-engine-plugins">Directory structure for kernel engine plugins</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#build-configuration">Build configuration</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#use-hipdnn-sdks-in-external-plugins">Use hipDNN SDKs in external plugins</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#build-and-install-directory-structure">Build and install directory structure</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-loading">Plugin loading</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#default-plugin-loading">Default plugin loading</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#environment-variable-override">Environment variable override</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#custom-plugin-paths">Custom plugin paths</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-symbol-resolution">Plugin symbol resolution</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#path-resolution">Path resolution</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#loading-modes">Loading modes</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#example-usage">Example usage</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#query-loaded-plugins">Query loaded plugins</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#test-plugins">Test plugins</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#test-structure">Test structure</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#unit-tests">Unit tests</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#integration-tests">Integration tests</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#example-miopen-provider-plugin">Example: MIOpen Provider Plugin</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#structure">Structure</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#troubleshooting">Troubleshooting</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-loading-failures">Plugin loading failures</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-handle-creation-fails">Plugin handle creation fails</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#null-handle-returned">Null handle returned</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#symbol-collisions-between-plugins">Symbol collisions between plugins</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#example-error-log">Example error log</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#solution">Solution</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#verification">Verification</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            <p>
+  </p>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+<footer class="rocm-footer">
+    <div class="container-lg">
+        <section class="bottom-menu menu py-45">
+            <div class="row d-flex align-items-center">
+                <div class="col-12 text-center">
+                    <ul>
+                        <li><a href="https://www.amd.com/en/corporate/copyright" target="_blank">Terms and Conditions</a></li>
+                        <li><a href="https://rocm.docs.amd.com/en/develop/about/license.html">ROCm Licenses and Disclaimers</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/privacy" target="_blank">Privacy</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/trademarks" target="_blank">Trademarks</a></li>
+                        <li><a href="https://www.amd.com/content/dam/amd/en/documents/corporate/cr/supply-chain-transparency.pdf" target="_blank">Supply Chain Transparency</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/competition" target="_blank">Fair and Open Competition</a></li>
+                        <li><a href="https://www.amd.com/system/files/documents/amd-uk-tax-strategy.pdf" target="_blank">UK Tax Strategy</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/cookies" target="_blank">Cookie Policy</a></li>
+                        <!-- OneTrust Cookies Settings button start -->
+                        <li><a href="#cookie-settings" id="ot-sdk-btn" class="ot-sdk-show-settings">Cookie Settings</a></li>
+                        <!-- OneTrust Cookies Settings button end -->
+                    </ul>
+                </div>
+            </div>
+            <div class="row d-flex align-items-center">
+                <div class="col-12 text-center">
+                    <div>
+                        <span class="copyright">© 2025 Advanced Micro Devices, Inc</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</footer>
+
+<!-- <div id="rdc-watermark-container">
+    <img id="rdc-watermark" src="../_static/images/alpha-watermark.svg" alt="DRAFT watermark"/>
+</div> -->
+  </body>
+</html>

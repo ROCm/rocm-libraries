@@ -1,0 +1,802 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta content="hipDNN installation on Linux" name="description" />
+<meta content="hipDNN, ROCm, install" name="keywords" />
+
+    <title>hipDNN installation on Linux &#8212; hipDNN 1.0.0 Documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=a746c00c" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=384b581d" />
+    <link rel="stylesheet" type="text/css" href="../_static/mystnb.4510f1fc1dee50b3e5859aac5469c37c29e427902b24a333a5f9fcb2f0b3ac41.css?v=be8a1c11" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=643846e8" />
+    <link rel="stylesheet" type="text/css" href="../_static/rocm_header.css?v=9557e3d1" />
+    <link rel="stylesheet" type="text/css" href="../_static/rocm_footer.css?v=7095035a" />
+    <link rel="stylesheet" type="text/css" href="../_static/fonts.css?v=fcff5274" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="../_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="../_static/documentation_options.js?v=f9c1cefe"></script>
+    <script src="../_static/doctools.js?v=9a2dae69"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=91c4cb68"></script>
+    <script async="async" src="../_static/code_word_breaks.js?v=327952c4"></script>
+    <script async="async" src="../_static/renameVersionLinks.js?v=929fe5e4"></script>
+    <script async="async" src="../_static/rdcMisc.js?v=01f88d96"></script>
+    <script async="async" src="../_static/theme_mode_captions.js?v=15f4ec5d"></script>
+    <script defer="defer" src="../_static/search.js?v=90a4452c"></script>
+    <script src="../_static/scripts/sphinx-book-theme.js?v=efea14e4"></script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'install/hipdnn-install';</script>
+    <script async="async" src="https://download.amd.com/js/analytics/analyticsinit.js"></script>
+    <link rel="icon" href="https://www.amd.com/content/dam/code/images/favicon/favicon.ico"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="hipDNN installation on Windows" href="hipdnn-install-windows.html" />
+    <link rel="prev" title="hipDNN prerequisites" href="hipdnn-prerequisites.html" />
+    <meta name="google-site-verification" content="vo35SZt_GASsTHAEmdww7AYKPCvZyzLvOXBl8guBME4" />
+
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+<aside class="bd-header-announcement" aria-label="Announcement">
+  <div class="bd-header-announcement__content">This page contains proposed changes for a future release of ROCm. Read the <a id='rocm-banner' href='https://rocm.docs.amd.com/en/latest/'>latest Linux release of ROCm documentation</a> for your production environments.</div>
+</aside>
+
+  
+
+<header class="common-header" >
+    <nav class="navbar navbar-expand-xl">
+        <div class="container-fluid main-nav rocm-header">
+            
+            <button class="navbar-toggler collapsed" id="nav-icon" data-tracking-information="mainMenuToggle" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+            
+            <div class="header-logo">
+                <a class="navbar-brand" href="https://www.amd.com/">
+                    <img src="../_static/images/amd-header-logo.svg" alt="AMD Logo" title="AMD Logo" width="90" class="d-inline-block align-text-top hover-opacity"/>
+                </a>
+                <div class="vr vr mx-40 my-25"></div>
+                
+        
+    
+    <a class="klavika-font hover-opacity" href="https://rocm.docs.amd.com/en/develop">ROCm&#8482; Software Future Release</a>
+                <a class="header-all-versions" href="https://rocm.docs.amd.com/en/latest/release/versions.html">Version List</a>
+            </div>
+            <div class="icon-nav text-center d-flex ms-auto">
+            </div>
+        </div>
+    </nav>
+    
+    <nav class="navbar navbar-expand-xl second-level-nav">
+        <div class="container-fluid main-nav">
+            <div class="navbar-nav-container collapse navbar-collapse" id="navbarSupportedContent">
+                <ul class="navbar-nav nav-mega me-auto mb-2 mb-lg-0 col-xl-10">
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://github.com/ROCm/rocm-libraries" id="navgithub" role="button" aria-expanded="false" target="_blank" >
+                                GitHub
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://github.com/ROCm/ROCm/discussions" id="navcommunity" role="button" aria-expanded="false" target="_blank" >
+                                Community
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://rocm.blogs.amd.com/" id="navblogs" role="button" aria-expanded="false" target="_blank" >
+                                Blogs
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://www.amd.com/en/developer/resources/rocm-hub.html" id="navrocm-developer-hub" role="button" aria-expanded="false" target="_blank" >
+                                ROCm Developer Hub
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://instinct.docs.amd.com" id="navinstinct&#8482;-docs" role="button" aria-expanded="false" target="_blank" >
+                                Instinct&#8482; Docs
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://www.amd.com/en/developer/resources/infinity-hub.html" id="navinfinity-hub" role="button" aria-expanded="false" target="_blank" >
+                                Infinity Hub
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://github.com/ROCm/rocm-libraries/issues/new/choose" id="navsupport" role="button" aria-expanded="false" target="_blank" >
+                                Support
+                            </a>
+                        </li>
+                    
+                </ul>
+            </div>
+        </div>
+    </nav>
+    
+</header>
+
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          
+          
+            <div class="navbar-item">
+
+<a class="navbar-brand logo" href="https://rocm.docs.amd.com/en/develop">
+    <p>ROCm documentation</p>
+</a></div>
+          
+        
+      </div>
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">hipDNN 1.0.0 Documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../what-is-hipdnn.html">What is hipDNN?</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Install</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="hipdnn-prerequisites.html">Prerequisites</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">hipDNN installation (Linux)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="hipdnn-install-windows.html">hipDNN installation (Windows)</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Conceptual</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../conceptual/miopen-plugin.html">MIOpen Provider plugin architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../conceptual/architecture.html">High-level architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../conceptual/backend-architecture.html">Backend architecture (Advanced)</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">How to</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../how-to/build-execute-hipdnn.html">Build and execute operation graphs</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../how-to/extend-hipdnn.html">Extend hipDNN functionality (Advanced)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../how-to/develop-plugins.html">Develop plugins for hipDNN (Advanced)</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../reference/environment-variables.html">Environment variables</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/naming-guidelines.html">Coding style and naming guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/glossary.html">Glossary</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">About</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../license.html">License</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><label class="sidebar-toggle primary-toggle btn btn-sm" for="__primary" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-angle-right"></span>
+  </label></div>
+      
+        <div class="header-article-item">
+
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">hipDNN installation on Linux</span></li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+<label class="sidebar-toggle secondary-toggle btn btn-sm" for="__secondary"title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</label>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>hipDNN installation on Linux</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#build-hipdnn-from-therock">Build hipDNN from TheROCK</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#build-and-install-hipdnn-from-source">Build and install hipDNN from source</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#build-configurations">Build configurations</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#release-build-default">Release build (default)</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#debug-build">Debug build</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#code-coverage-build">Code coverage build</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#address-sanitizer-build">Address sanitizer build</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#build-specific-components">Build-specific components</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#configure-cmake-variables">Configure CMake variables</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#clang-tools">Clang tools</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#version-suffix">Version suffix</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#llvm-tools-search-prefix"><code class="docutils literal notranslate"><span class="pre">LLVM_TOOLS_SEARCH_PREFIX</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#build-targets">Build targets</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#build-commands">Build commands</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#troubleshooting">Troubleshooting</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#common-build-issues">Common build issues</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#out-of-memory-during-build">Out of memory during build</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#docker-gpu-access-issues">Docker GPU access issues</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#verify-the-installation">Verify the installation</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="hipdnn-installation-on-linux">
+<span id="install"></span><h1>hipDNN installation on Linux<a class="headerlink" href="#hipdnn-installation-on-linux" title="Link to this heading">#</a></h1>
+<p>This guide shows you how to install hipDNN on Linux. Before you begin, ensure you’ve installed the required dependencies outlined in <a class="reference internal" href="hipdnn-prerequisites.html#prerequisites"><span class="std std-ref">hipDNN prerequisites</span></a>.</p>
+<section id="build-hipdnn-from-therock">
+<h2>Build hipDNN from TheROCK<a class="headerlink" href="#build-hipdnn-from-therock" title="Link to this heading">#</a></h2>
+<p>You can install hipDNN and all the dependencies from <a class="reference external" href="https://github.com/ROCm/TheRock/blob/main/RELEASES.md">TheROCK</a>.
+Follow the installation instructions for the latest release to install hipDNN and other ROCm release artifacts.</p>
+</section>
+<section id="build-and-install-hipdnn-from-source">
+<h2>Build and install hipDNN from source<a class="headerlink" href="#build-and-install-hipdnn-from-source" title="Link to this heading">#</a></h2>
+<p>Alternatively, you can build hipDNN from source instead:</p>
+<ol class="arabic">
+<li><p>Clone the rocm-libraries repository with <code class="docutils literal notranslate"><span class="pre">git</span> <span class="pre">sparse-checkout</span></code>:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>clone<span class="w"> </span>--no-checkout<span class="w"> </span>--filter<span class="o">=</span>blob:none<span class="w"> </span>https://github.com/ROCm/rocm-libraries.git
+<span class="nb">cd</span><span class="w"> </span>rocm-libraries
+git<span class="w"> </span>sparse-checkout<span class="w"> </span>init<span class="w"> </span>--cone
+git<span class="w"> </span>sparse-checkout<span class="w"> </span><span class="nb">set</span><span class="w"> </span>projects/hipdnn
+git<span class="w"> </span>checkout<span class="w"> </span>develop<span class="w"> </span><span class="c1"># or the branch you are starting from</span>
+</pre></div>
+</div>
+</li>
+<li><p>Build hipDNN:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">cd</span><span class="w"> </span>rocm-libraries/projects/hipdnn
+mkdir<span class="w"> </span>build<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>build
+
+<span class="c1"># Configure with Ninja (recommended)</span>
+cmake<span class="w"> </span>-GNinja<span class="w"> </span>..
+
+<span class="c1"># Build and run all tests</span>
+<span class="c1"># Note that some tests may take several minutes to complete</span>
+ninja<span class="w"> </span>check
+</pre></div>
+</div>
+<p>Refer to the <a class="reference internal" href="#target"><span class="std std-ref">Build targets</span></a> section below for information on additional build targets.</p>
+</li>
+<li><p>Install hipDNN.</p>
+<p>Set the install path with a build configuration. Refer to the <a class="reference internal" href="#configure"><span class="std std-ref">Build configurations</span></a> section to determine which build configuration suits your workflow.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sudo<span class="w"> </span>ninja<span class="w"> </span>install
+</pre></div>
+</div>
+</li>
+</ol>
+</section>
+<section id="build-configurations">
+<span id="configure"></span><h2>Build configurations<a class="headerlink" href="#build-configurations" title="Link to this heading">#</a></h2>
+<p>Use the code in these sections to configure specific hipDNN builds for your workflow.</p>
+<section id="release-build-default">
+<h3>Release build (default)<a class="headerlink" href="#release-build-default" title="Link to this heading">#</a></h3>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>cmake<span class="w"> </span>-GNinja<span class="w"> </span>..
+</pre></div>
+</div>
+</section>
+<section id="debug-build">
+<h3>Debug build<a class="headerlink" href="#debug-build" title="Link to this heading">#</a></h3>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>cmake<span class="w"> </span>-GNinja<span class="w"> </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Debug<span class="w"> </span>..
+</pre></div>
+</div>
+</section>
+<section id="code-coverage-build">
+<h3>Code coverage build<a class="headerlink" href="#code-coverage-build" title="Link to this heading">#</a></h3>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>cmake<span class="w"> </span>-GNinja<span class="w"> </span>-DHIPDNN_ENABLE_COVERAGE<span class="o">=</span>ON<span class="w"> </span>..
+ninja<span class="w"> </span>coverage
+<span class="c1"># Unit tests will be run and coverage reports will be generated in build/coverage_report/</span>
+</pre></div>
+</div>
+</section>
+<section id="address-sanitizer-build">
+<h3>Address sanitizer build<a class="headerlink" href="#address-sanitizer-build" title="Link to this heading">#</a></h3>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>cmake<span class="w"> </span>-GNinja<span class="w"> </span>-DBUILD_ADDRESS_SANITIZER<span class="o">=</span>ON<span class="w"> </span>..
+ninja<span class="w"> </span>check
+<span class="c1"># Note: Some HIP-related tests may be skipped due to AddressSanitizer incompatibility</span>
+</pre></div>
+</div>
+</section>
+<section id="build-specific-components">
+<h3>Build-specific components<a class="headerlink" href="#build-specific-components" title="Link to this heading">#</a></h3>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Build without plugins</span>
+cmake<span class="w"> </span>-GNinja<span class="w"> </span>-DHIP_DNN_BUILD_PLUGINS<span class="o">=</span>OFF<span class="w"> </span>..
+
+<span class="c1"># Build without frontend</span>
+cmake<span class="w"> </span>-GNinja<span class="w"> </span>-DHIP_DNN_BUILD_FRONTEND<span class="o">=</span>OFF<span class="w"> </span>..
+
+<span class="c1"># Build without backend</span>
+cmake<span class="w"> </span>-GNinja<span class="w"> </span>-DHIP_DNN_BUILD_BACKEND<span class="o">=</span>OFF<span class="w"> </span>..
+</pre></div>
+</div>
+</section>
+</section>
+<section id="configure-cmake-variables">
+<span id="rocm-path"></span><h2>Configure CMake variables<a class="headerlink" href="#configure-cmake-variables" title="Link to this heading">#</a></h2>
+<p>If the ROCm <code class="docutils literal notranslate"><span class="pre">bin</span></code> folder is included in your system path, then the AMD toolchain should be detected automatically.
+If not, these CMake variables can be used to assist CMake in the tool discovery.</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code>: Specifies the root ROCm folder location. The toolchain folders are hard-coded using that path, skipping auto-detection of the toolchain (does not have a default value).</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Do <em>not</em> set <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> in your environment. Setting <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> in the environment will cause the compiler check to fail. Instead, use the <code class="docutils literal notranslate"><span class="pre">-D</span></code> option to cmake. For example, <code class="docutils literal notranslate"><span class="pre">-DROCM_PATH=/path/to/rocm</span></code>.</p>
+</div>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ROCM_CMAKE_PATH</span></code> (preferred): Similar to <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> but relies on CMake’s built-in detection to locate the toolchain. (Default: <code class="docutils literal notranslate"><span class="pre">/opt/rocm</span></code> (Linux) / <code class="docutils literal notranslate"><span class="pre">C:/dist/therock</span></code> (Windows)). This can be set in your system environment. This can be set automatically if the ROCm <code class="docutils literal notranslate"><span class="pre">bin</span></code> folder is in your system path.</p></li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>If <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> is set using the <code class="docutils literal notranslate"><span class="pre">-D</span></code> option in CMake, then it’ll take precedence over <code class="docutils literal notranslate"><span class="pre">ROCM_CMAKE_PATH</span></code>.</p>
+</div>
+<p>The HIP compiler is required to build some integration tests, but isn’t required for the hipDNN library itself.</p>
+<p>Use this CMake variable to control where the hipDNN library files will be installed when the <code class="docutils literal notranslate"><span class="pre">install</span></code> target is run: <code class="docutils literal notranslate"><span class="pre">CMAKE_INSTALL_PREFIX</span></code>. This specifies where hipDNN will be installed (defaults to <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> if <code class="docutils literal notranslate"><span class="pre">ROCM_PAth</span></code> is set, then <code class="docutils literal notranslate"><span class="pre">ROCM_CMAKE_PATH</span></code> if set, otherwise uses the CMake system default).</p>
+<p>These variables can all be set independently:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Default: Use system path to locate ROCm folder, install path is unset.</span>
+cmake<span class="w"> </span>-GNinja<span class="w"> </span>..
+
+<span class="c1"># Install hipDNN to custom location, find ROCm dependencies in the default location</span>
+cmake<span class="w"> </span>-GNinja<span class="w"> </span>-DCMAKE_INSTALL_PREFIX<span class="o">=</span>/custom/install/path<span class="w"> </span>..
+
+<span class="c1"># Both custom</span>
+cmake<span class="w"> </span>-GNinja<span class="w"> </span>-DROCM_CMAKE_PATH<span class="o">=</span>/custom/rocm<span class="w"> </span>-DCMAKE_INSTALL_PREFIX<span class="o">=</span>/another/path<span class="w"> </span>..
+</pre></div>
+</div>
+</section>
+<section id="clang-tools">
+<h2>Clang tools<a class="headerlink" href="#clang-tools" title="Link to this heading">#</a></h2>
+<p>Different versions of Clang tools are required. For example, clang-format version 18 and clang-tidy version 20. The hipDNN project tool discovery provides two mechanisms to assist with finding the needed version of each tool.</p>
+<section id="version-suffix">
+<h3>Version suffix<a class="headerlink" href="#version-suffix" title="Link to this heading">#</a></h3>
+<p>Before searching for the tool using it’s standard name, a search will be made for a tool that has the version appended as a suffix. For example, before looking for <code class="docutils literal notranslate"><span class="pre">clang-format</span></code> a search for a file named <code class="docutils literal notranslate"><span class="pre">clang-format-18</span></code> will be run first, and if that fails then a search will be made for <code class="docutils literal notranslate"><span class="pre">clang-format</span></code>.
+Similarly, <code class="docutils literal notranslate"><span class="pre">clang-tidy-20</span></code> will be searched for first, and then <code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code>. This approach can be used if it’s possible to modify the Clang toolchain folder(s) on your system to give the tools the corresponding names.</p>
+</section>
+<section id="llvm-tools-search-prefix">
+<span id="llvm"></span><h3><code class="docutils literal notranslate"><span class="pre">LLVM_TOOLS_SEARCH_PREFIX</span></code><a class="headerlink" href="#llvm-tools-search-prefix" title="Link to this heading">#</a></h3>
+<p>As an alternative, <code class="docutils literal notranslate"><span class="pre">LLVM_TOOLS_SEARCH_PREFIX</span></code> can be set as a prefix for the folder path where the Clang tools are installed, such that <code class="docutils literal notranslate"><span class="pre">${LLVM_TOOLS_SEARCH_PREFIX}18/bin</span></code> is where the Clang version 18 tools are located, and <code class="docutils literal notranslate"><span class="pre">${LLVM_TOOLS_SEARCH_PREFIX}20/bin</span></code> is where the Clang version 20 tools are located.
+The CMake configuration step will automatically select the required version for each tool from these folders.
+For example with <code class="docutils literal notranslate"><span class="pre">-DLLVM_TOOLS_SEARCH_PREFIX=c:\tools\clang</span></code> these folders will be searched for Clang tools (depending on the version of each tool that is needed):</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">c:\tools\clang18\bin</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">c:\tools\clang20\bin</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">c:\tools\clang\bin</span></code></p></li>
+</ul>
+</section>
+</section>
+<section id="build-targets">
+<span id="target"></span><h2>Build targets<a class="headerlink" href="#build-targets" title="Link to this heading">#</a></h2>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Make is supported for all targets. Configure with <code class="docutils literal notranslate"><span class="pre">cmake</span> <span class="pre">-G</span> <span class="pre">&quot;Unix</span> <span class="pre">Makefiles&quot;</span> <span class="pre">..</span></code> if it is not the default generator in your environment. For parallel builds, use <code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">-j$(nproc)</span></code> on Linux. Unlike <code class="docutils literal notranslate"><span class="pre">ninja</span></code>, <code class="docutils literal notranslate"><span class="pre">make</span></code> doesn’t build in parallel by default.</p>
+</div>
+<p>All targets support parallel builds with <code class="docutils literal notranslate"><span class="pre">ninja</span></code>.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 37.5%" />
+<col style="width: 62.5%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Target</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">\&lt;no</span> <span class="pre">target\&gt;</span></code></p></td>
+<td><p>Builds all components</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">check</span></code> / <code class="docutils literal notranslate"><span class="pre">check-verbose</span></code></p></td>
+<td><p>Build and run all tests (see <a class="reference external" href="https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/Testing.md">hipDNN testing</a> for more information)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">unit-check</span></code> / <code class="docutils literal notranslate"><span class="pre">unit-check-verbose</span></code></p></td>
+<td><p>Build and run the unit tests exclusively and the API tests (minimal version of <code class="docutils literal notranslate"><span class="pre">check</span></code>)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">integration-check</span></code> / <code class="docutils literal notranslate"><span class="pre">integration-check-verbose</span></code></p></td>
+<td><p>Build and run the E2E integration tests exclusively (this is the bulk of the testing time)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">install</span></code></p></td>
+<td><p>Install libraries and headers</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">format</span></code></p></td>
+<td><p>Auto-format all C++ source files</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">check_format</span></code></p></td>
+<td><p>Check code formatting compliance</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">coverage</span></code></p></td>
+<td><p>Run <code class="docutils literal notranslate"><span class="pre">check</span></code> and generate test coverage reports (requires <code class="docutils literal notranslate"><span class="pre">-DHIPDNN_ENABLE_COVERAGE=ON</span></code>)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">\&lt;no</span> <span class="pre">target\&gt;</span></code></p></td>
+<td><p>Builds all components</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">unit-coverage</span></code> / <code class="docutils literal notranslate"><span class="pre">integration-coverage</span></code></p></td>
+<td><p>Run <code class="docutils literal notranslate"><span class="pre">unit-check</span></code> or <code class="docutils literal notranslate"><span class="pre">integration-check</span></code> (respectively) and generate test coverage reports (requires <code class="docutils literal notranslate"><span class="pre">-DHIPDNN_ENABLE_COVERAGE=ON</span></code>)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">current-coverage</span></code></p></td>
+<td><p>Generate test coverage reports using coverage data already on disk (does not automatically run <code class="docutils literal notranslate"><span class="pre">check</span></code>; it requires <code class="docutils literal notranslate"><span class="pre">-DHIPDNN_ENABLE_COVERAGE=ON</span></code>)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">clean</span></code></p></td>
+<td><p>Clean build artifacts</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">validate_test_names</span></code></p></td>
+<td><p>Validates test names conform to naming rules</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">generate_hipdnn_data_sdk_headers</span></code></p></td>
+<td><p>Generate C++ headers from schema (<code class="docutils literal notranslate"><span class="pre">.fbs</span></code>) files</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<section id="build-commands">
+<h3>Build commands<a class="headerlink" href="#build-commands" title="Link to this heading">#</a></h3>
+<p>These example build commands are equivalent (depending on which generator was used) and will build the <code class="docutils literal notranslate"><span class="pre">check</span></code> target to build and run all tests.</p>
+<p>Use <code class="docutils literal notranslate"><span class="pre">cmake</span></code> to invoke build (regardless of which generator was used):</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>projects/hipdnn/build&gt;<span class="w"> </span>cmake<span class="w"> </span>--build<span class="w"> </span>.<span class="w"> </span>--target<span class="w"> </span>check
+</pre></div>
+</div>
+<p>If <code class="docutils literal notranslate"><span class="pre">Ninja</span></code> was used as the generator:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>projects/hipdnn/build&gt;<span class="w"> </span>ninja<span class="w"> </span>check
+</pre></div>
+</div>
+<p>If a Makefile-type generator was used (not recommended):</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>projects/hipdnn/build&gt;<span class="w"> </span>make<span class="w"> </span>check
+</pre></div>
+</div>
+</section>
+</section>
+<section id="troubleshooting">
+<h2>Troubleshooting<a class="headerlink" href="#troubleshooting" title="Link to this heading">#</a></h2>
+<section id="common-build-issues">
+<h3>Common build issues<a class="headerlink" href="#common-build-issues" title="Link to this heading">#</a></h3>
+<section id="out-of-memory-during-build">
+<h4>Out of memory during build<a class="headerlink" href="#out-of-memory-during-build" title="Link to this heading">#</a></h4>
+<blockquote>
+<div><div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Reduce parallel jobs</span>
+ninja<span class="w"> </span>-j4<span class="w">  </span><span class="c1"># or even -j2 for systems with limited RAM</span>
+</pre></div>
+</div>
+</div></blockquote>
+</section>
+<section id="docker-gpu-access-issues">
+<h4>Docker GPU access issues<a class="headerlink" href="#docker-gpu-access-issues" title="Link to this heading">#</a></h4>
+<ul>
+<li><p>Ensure ROCm is installed on the host system.</p></li>
+<li><p>Verify the GPU is visible using <code class="docutils literal notranslate"><span class="pre">rocm-smi</span></code> or <code class="docutils literal notranslate"><span class="pre">rocminfo</span></code>.</p></li>
+<li><p>Ensure the user is in <code class="docutils literal notranslate"><span class="pre">video</span></code> and <code class="docutils literal notranslate"><span class="pre">render</span></code> groups:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sudo<span class="w"> </span>usermod<span class="w"> </span>-a<span class="w"> </span>-G<span class="w"> </span>video,render<span class="w"> </span><span class="nv">$USER</span>
+<span class="c1"># Log out and back in for changes to take effect</span>
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+</section>
+</section>
+<section id="verify-the-installation">
+<h2>Verify the installation<a class="headerlink" href="#verify-the-installation" title="Link to this heading">#</a></h2>
+<p>See <a class="reference external" href="https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/samples/README.md">hipDNN Samples</a> for detailed instructions on building test sample programs using hipDNN.</p>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="hipdnn-prerequisites.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">hipDNN prerequisites</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="hipdnn-install-windows.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">hipDNN installation on Windows</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#build-hipdnn-from-therock">Build hipDNN from TheROCK</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#build-and-install-hipdnn-from-source">Build and install hipDNN from source</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#build-configurations">Build configurations</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#release-build-default">Release build (default)</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#debug-build">Debug build</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#code-coverage-build">Code coverage build</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#address-sanitizer-build">Address sanitizer build</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#build-specific-components">Build-specific components</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#configure-cmake-variables">Configure CMake variables</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#clang-tools">Clang tools</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#version-suffix">Version suffix</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#llvm-tools-search-prefix"><code class="docutils literal notranslate"><span class="pre">LLVM_TOOLS_SEARCH_PREFIX</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#build-targets">Build targets</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#build-commands">Build commands</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#troubleshooting">Troubleshooting</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#common-build-issues">Common build issues</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#out-of-memory-during-build">Out of memory during build</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#docker-gpu-access-issues">Docker GPU access issues</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#verify-the-installation">Verify the installation</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            <p>
+  </p>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+<footer class="rocm-footer">
+    <div class="container-lg">
+        <section class="bottom-menu menu py-45">
+            <div class="row d-flex align-items-center">
+                <div class="col-12 text-center">
+                    <ul>
+                        <li><a href="https://www.amd.com/en/corporate/copyright" target="_blank">Terms and Conditions</a></li>
+                        <li><a href="https://rocm.docs.amd.com/en/develop/about/license.html">ROCm Licenses and Disclaimers</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/privacy" target="_blank">Privacy</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/trademarks" target="_blank">Trademarks</a></li>
+                        <li><a href="https://www.amd.com/content/dam/amd/en/documents/corporate/cr/supply-chain-transparency.pdf" target="_blank">Supply Chain Transparency</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/competition" target="_blank">Fair and Open Competition</a></li>
+                        <li><a href="https://www.amd.com/system/files/documents/amd-uk-tax-strategy.pdf" target="_blank">UK Tax Strategy</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/cookies" target="_blank">Cookie Policy</a></li>
+                        <!-- OneTrust Cookies Settings button start -->
+                        <li><a href="#cookie-settings" id="ot-sdk-btn" class="ot-sdk-show-settings">Cookie Settings</a></li>
+                        <!-- OneTrust Cookies Settings button end -->
+                    </ul>
+                </div>
+            </div>
+            <div class="row d-flex align-items-center">
+                <div class="col-12 text-center">
+                    <div>
+                        <span class="copyright">© 2025 Advanced Micro Devices, Inc</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</footer>
+
+<!-- <div id="rdc-watermark-container">
+    <img id="rdc-watermark" src="../_static/images/alpha-watermark.svg" alt="DRAFT watermark"/>
+</div> -->
+  </body>
+</html>

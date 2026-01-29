@@ -1,0 +1,907 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta content="Follow these best practices for coding style and naming guidelines when interacting with the hipDNN frontend." name="description" />
+<meta content="hipDNN, ROCm, coding, naming" name="keywords" />
+
+    <title>hipDNN coding style and naming guidelines &#8212; hipDNN 1.0.0 Documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=a746c00c" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=384b581d" />
+    <link rel="stylesheet" type="text/css" href="../_static/mystnb.4510f1fc1dee50b3e5859aac5469c37c29e427902b24a333a5f9fcb2f0b3ac41.css?v=be8a1c11" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=643846e8" />
+    <link rel="stylesheet" type="text/css" href="../_static/rocm_header.css?v=9557e3d1" />
+    <link rel="stylesheet" type="text/css" href="../_static/rocm_footer.css?v=7095035a" />
+    <link rel="stylesheet" type="text/css" href="../_static/fonts.css?v=fcff5274" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="../_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="../_static/documentation_options.js?v=f9c1cefe"></script>
+    <script src="../_static/doctools.js?v=9a2dae69"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=91c4cb68"></script>
+    <script async="async" src="../_static/code_word_breaks.js?v=327952c4"></script>
+    <script async="async" src="../_static/renameVersionLinks.js?v=929fe5e4"></script>
+    <script async="async" src="../_static/rdcMisc.js?v=01f88d96"></script>
+    <script async="async" src="../_static/theme_mode_captions.js?v=15f4ec5d"></script>
+    <script defer="defer" src="../_static/search.js?v=90a4452c"></script>
+    <script src="../_static/scripts/sphinx-book-theme.js?v=efea14e4"></script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'reference/naming-guidelines';</script>
+    <script async="async" src="https://download.amd.com/js/analytics/analyticsinit.js"></script>
+    <link rel="icon" href="https://www.amd.com/content/dam/code/images/favicon/favicon.ico"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="hipDNN glossary" href="glossary.html" />
+    <link rel="prev" title="hipDNN environment variables" href="environment-variables.html" />
+    <meta name="google-site-verification" content="vo35SZt_GASsTHAEmdww7AYKPCvZyzLvOXBl8guBME4" />
+
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+<aside class="bd-header-announcement" aria-label="Announcement">
+  <div class="bd-header-announcement__content">This page contains proposed changes for a future release of ROCm. Read the <a id='rocm-banner' href='https://rocm.docs.amd.com/en/latest/'>latest Linux release of ROCm documentation</a> for your production environments.</div>
+</aside>
+
+  
+
+<header class="common-header" >
+    <nav class="navbar navbar-expand-xl">
+        <div class="container-fluid main-nav rocm-header">
+            
+            <button class="navbar-toggler collapsed" id="nav-icon" data-tracking-information="mainMenuToggle" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+            
+            <div class="header-logo">
+                <a class="navbar-brand" href="https://www.amd.com/">
+                    <img src="../_static/images/amd-header-logo.svg" alt="AMD Logo" title="AMD Logo" width="90" class="d-inline-block align-text-top hover-opacity"/>
+                </a>
+                <div class="vr vr mx-40 my-25"></div>
+                
+        
+    
+    <a class="klavika-font hover-opacity" href="https://rocm.docs.amd.com/en/develop">ROCm&#8482; Software Future Release</a>
+                <a class="header-all-versions" href="https://rocm.docs.amd.com/en/latest/release/versions.html">Version List</a>
+            </div>
+            <div class="icon-nav text-center d-flex ms-auto">
+            </div>
+        </div>
+    </nav>
+    
+    <nav class="navbar navbar-expand-xl second-level-nav">
+        <div class="container-fluid main-nav">
+            <div class="navbar-nav-container collapse navbar-collapse" id="navbarSupportedContent">
+                <ul class="navbar-nav nav-mega me-auto mb-2 mb-lg-0 col-xl-10">
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://github.com/ROCm/rocm-libraries" id="navgithub" role="button" aria-expanded="false" target="_blank" >
+                                GitHub
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://github.com/ROCm/ROCm/discussions" id="navcommunity" role="button" aria-expanded="false" target="_blank" >
+                                Community
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://rocm.blogs.amd.com/" id="navblogs" role="button" aria-expanded="false" target="_blank" >
+                                Blogs
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://www.amd.com/en/developer/resources/rocm-hub.html" id="navrocm-developer-hub" role="button" aria-expanded="false" target="_blank" >
+                                ROCm Developer Hub
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://instinct.docs.amd.com" id="navinstinct&#8482;-docs" role="button" aria-expanded="false" target="_blank" >
+                                Instinct&#8482; Docs
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://www.amd.com/en/developer/resources/infinity-hub.html" id="navinfinity-hub" role="button" aria-expanded="false" target="_blank" >
+                                Infinity Hub
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://github.com/ROCm/rocm-libraries/issues/new/choose" id="navsupport" role="button" aria-expanded="false" target="_blank" >
+                                Support
+                            </a>
+                        </li>
+                    
+                </ul>
+            </div>
+        </div>
+    </nav>
+    
+</header>
+
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          
+          
+            <div class="navbar-item">
+
+<a class="navbar-brand logo" href="https://rocm.docs.amd.com/en/develop">
+    <p>ROCm documentation</p>
+</a></div>
+          
+        
+      </div>
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">hipDNN 1.0.0 Documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../what-is-hipdnn.html">What is hipDNN?</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Install</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../install/hipdnn-prerequisites.html">Prerequisites</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../install/hipdnn-install.html">hipDNN installation (Linux)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../install/hipdnn-install-windows.html">hipDNN installation (Windows)</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Conceptual</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../conceptual/miopen-plugin.html">MIOpen Provider plugin architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../conceptual/architecture.html">High-level architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../conceptual/backend-architecture.html">Backend architecture (Advanced)</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">How to</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../how-to/build-execute-hipdnn.html">Build and execute operation graphs</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../how-to/extend-hipdnn.html">Extend hipDNN functionality (Advanced)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../how-to/develop-plugins.html">Develop plugins for hipDNN (Advanced)</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="environment-variables.html">Environment variables</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Coding style and naming guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="glossary.html">Glossary</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">About</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../license.html">License</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><label class="sidebar-toggle primary-toggle btn btn-sm" for="__primary" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-angle-right"></span>
+  </label></div>
+      
+        <div class="header-article-item">
+
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">hipDNN coding style and naming guidelines</span></li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+<label class="sidebar-toggle secondary-toggle btn btn-sm" for="__secondary"title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</label>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>hipDNN coding style and naming guidelines</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#naming-summary">Naming summary</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#file-and-class-naming">File and class naming</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#functions">Functions</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#unused-function-arguments">Unused function arguments</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#variables">Variables</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#members">Members</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#globals">Globals</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#interfaces">Interfaces</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#enums">Enums</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#constants">Constants</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#namespaces">Namespaces</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#test-naming-guidelines">Test naming guidelines</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#keywords">Keywords</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#unit-tests">Unit Tests</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#naming-examples">Naming examples</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#file-naming">File naming</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#integration-tests">Integration tests</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id1">Naming examples</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id2">File naming</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#test-case-naming">Test case naming</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#rationale">Rationale</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#examples">Examples</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#class-and-file">Class and file</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#interface">Interface</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#constant-and-enum">Constant and enum</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#test-gtest">Test (gtest)</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#decision-checklist">Decision checklist</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#deviation-process">Deviation process</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#automated-tooling">Automated tooling</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clang-tidy-rules">Clang-Tidy rules</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#test-naming-enforcement-tool">Test naming enforcement tool</a></li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="hipdnn-coding-style-and-naming-guidelines">
+<span id="guidelines"></span><h1>hipDNN coding style and naming guidelines<a class="headerlink" href="#hipdnn-coding-style-and-naming-guidelines" title="Link to this heading">#</a></h1>
+<p>Follow these best practices for coding style and naming guidelines when interacting with the hipDNN frontend.</p>
+<section id="naming-summary">
+<h2>Naming summary<a class="headerlink" href="#naming-summary" title="Link to this heading">#</a></h2>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 27.3%" />
+<col style="width: 27.3%" />
+<col style="width: 45.5%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Kind</p></th>
+<th class="head"><p>Format</p></th>
+<th class="head"><p>Example</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Class / Struct</p></td>
+<td><p>PascalCase</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">TensorDescriptor</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Interface</p></td>
+<td><p>I + PascalCase</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ITensorView</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Function</p></td>
+<td><p>camelCase</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">buildGraph()</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Variable (local / parameter)</p></td>
+<td><p>camelCase</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">workspaceSize</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Private Member variable</p></td>
+<td><p>_camelCase</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">_cachedPlan</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Static variable</p></td>
+<td><p>s_camelCase</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">s_engineCount</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Global variable</p></td>
+<td><p>g_camel_case</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">g_global_state</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Constant / Macro</p></td>
+<td><p>UPPER_CASE</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">MAX_WORKSPACE_BYTES</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Enum Type</p></td>
+<td><p>PascalCase</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">EngineMode</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Enum Value</p></td>
+<td><p>UPPER_SNAKE</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ENGINE_MODE_DEFAULT</span></code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="file-and-class-naming">
+<h2>File and class naming<a class="headerlink" href="#file-and-class-naming" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p>Prefer the filename to match the primary class it contains: <code class="docutils literal notranslate"><span class="pre">ExecutionPlan.hpp</span></code>, <code class="docutils literal notranslate"><span class="pre">ExecutionPlan.cpp</span></code>.</p></li>
+<li><p>Utility collections (no single dominant class) may use a name that makes sense to describe the contents (for example, <code class="docutils literal notranslate"><span class="pre">Error.hpp</span></code>).</p></li>
+<li><p>Interfaces: prefix <code class="docutils literal notranslate"><span class="pre">I</span></code>, for example, <code class="docutils literal notranslate"><span class="pre">IAllocator.hpp</span></code>.</p></li>
+<li><p>Keep one major class per file when practical.</p></li>
+<li><p>Avoid excessively long filenames; lean on directory structure for grouping.</p></li>
+</ul>
+</section>
+<section id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Link to this heading">#</a></h2>
+<p>Use descriptive action-oriented verbs: <code class="docutils literal notranslate"><span class="pre">createPlan</span></code>, <code class="docutils literal notranslate"><span class="pre">finalizeConfig</span></code>, <code class="docutils literal notranslate"><span class="pre">launchKernels</span></code>.</p>
+<section id="unused-function-arguments">
+<h3>Unused function arguments<a class="headerlink" href="#unused-function-arguments" title="Link to this heading">#</a></h3>
+<p>Prefer use of <code class="docutils literal notranslate"><span class="pre">[[maybe_unused]]</span></code> rather than commenting-out argument names or using <code class="docutils literal notranslate"><span class="pre">std::ignore</span></code>.
+Exception is for arguments that <em>shall not</em> be used, such as the case in a legacy version of a method that has an argument that is no longer relevant and shouldn’t be used.
+In this case, comment-out the argument name and leave a comment indicating the reason.</p>
+</section>
+</section>
+<section id="variables">
+<h2>Variables<a class="headerlink" href="#variables" title="Link to this heading">#</a></h2>
+<p>Favor clarity over abbreviation: prefer <code class="docutils literal notranslate"><span class="pre">intermediateSize</span></code> to <code class="docutils literal notranslate"><span class="pre">intSz</span></code>.</p>
+</section>
+<section id="members">
+<h2>Members<a class="headerlink" href="#members" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p>Private / protected data members: prefix single underscore <code class="docutils literal notranslate"><span class="pre">_</span></code> then camelCase (<code class="docutils literal notranslate"><span class="pre">_opGraph</span></code>).</p></li>
+<li><p>Static data members: <code class="docutils literal notranslate"><span class="pre">s_camelCase</span></code>.</p></li>
+<li><p>Exposed constants inside a class: <code class="docutils literal notranslate"><span class="pre">static</span> <span class="pre">constexpr</span></code> UPPER_CASE.</p></li>
+<li><p>Plain structs whose intent is a passive aggregate (all or mostly public data). Do <em>not</em> prefix member names with <code class="docutils literal notranslate"><span class="pre">_</span></code>; just use camelCase.</p>
+<ul>
+<li><p>Rationale: underscores communicate encapsulation; POD-style structs are transparent.</p></li>
+</ul>
+</li>
+</ul>
+<p>Example:</p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="k">struct</span><span class="w"> </span><span class="nc">TensorExtent</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">n</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">c</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">h</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">w</span><span class="p">;</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+<p>If later you add invariants or non-trivial behavior, consider converting to a class and applying the underscore rule to newly private members.</p>
+</section>
+<section id="globals">
+<h2>Globals<a class="headerlink" href="#globals" title="Link to this heading">#</a></h2>
+<p>Avoid unless absolutely required; prefix <code class="docutils literal notranslate"><span class="pre">g_</span></code> to make visibility explicit.</p>
+</section>
+<section id="interfaces">
+<h2>Interfaces<a class="headerlink" href="#interfaces" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p>Naming: <code class="docutils literal notranslate"><span class="pre">IInterfaceName</span></code>.</p></li>
+<li><p>Keep pure abstract; avoid data members.</p></li>
+</ul>
+</section>
+<section id="enums">
+<h2>Enums<a class="headerlink" href="#enums" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p>Enum type name: PascalCase (for example, <code class="docutils literal notranslate"><span class="pre">EngineMode</span></code>, <code class="docutils literal notranslate"><span class="pre">ConvolutionMode</span></code>).</p></li>
+<li><p>Enumerator names: UPPER_SNAKE (<code class="docutils literal notranslate"><span class="pre">ENGINE_MODE_DEFAULT</span></code>, <code class="docutils literal notranslate"><span class="pre">ENGINE_MODE_DETERMINISTIC</span></code>).</p></li>
+<li><p>When mirroring external APIs, keep exact enumerator spellings.</p></li>
+</ul>
+</section>
+<section id="constants">
+<h2>Constants<a class="headerlink" href="#constants" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p>UPPER_CASE with optional single underscores: <code class="docutils literal notranslate"><span class="pre">DEFAULT_ALIGNMENT</span></code>, <code class="docutils literal notranslate"><span class="pre">MAX_TENSOR_RANK</span></code>.</p></li>
+<li><p>Prefer <code class="docutils literal notranslate"><span class="pre">constexpr</span></code> over macros when possible.</p></li>
+</ul>
+</section>
+<section id="namespaces">
+<h2>Namespaces<a class="headerlink" href="#namespaces" title="Link to this heading">#</a></h2>
+<ul>
+<li><p>lower_snake_case with single underscores</p></li>
+<li><p>Nested namespaces should be defined on the same line, for example,</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>```
+namespace hipdnn_data_sdk::test_utilities::pointwise
+{
+  ...
+} // namespace hipdnn_data_sdk::test_utilities::pointwise
+</pre></div>
+</div>
+</li>
+<li><p>Do not use redundant namespace qualifiers (for example, do not use <code class="docutils literal notranslate"><span class="pre">hipdnn_data_sdk::</span></code> qualifier when inside the <code class="docutils literal notranslate"><span class="pre">hipdnn_data_sdk</span></code> namespace).</p></li>
+<li><p>Most code should fit generally within a few namespaces:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">hipdnn_&lt;component&gt;</span></code>: (for example, <code class="docutils literal notranslate"><span class="pre">hipdnn_frontend</span></code>) Contains all basic code required for the component.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">utilities</span></code>: Contains code that can aid and assist in using component code.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">test_utilities</span></code>: Contains code that can aid and assist in testing component code.</p></li>
+</ul>
+</li>
+</ul>
+</section>
+<section id="test-naming-guidelines">
+<h2>Test naming guidelines<a class="headerlink" href="#test-naming-guidelines" title="Link to this heading">#</a></h2>
+<p>GoogleTest reserves underscores in test suite and test names for future expansion. Current repository names with underscores risk future incompatibility; we proactively constrain test suite naming.</p>
+<p>Rules below apply ONLY to the TestSuite name (first parameter of <code class="docutils literal notranslate"><span class="pre">TEST</span></code> / <code class="docutils literal notranslate"><span class="pre">TEST_F</span></code> / <code class="docutils literal notranslate"><span class="pre">TEST_P</span></code>).
+The TestCase (second parameter) can be descriptive but should still avoid the reserved keywords where noted.
+When writing parameterized tests the prefix(parameter name is <code class="docutils literal notranslate"><span class="pre">InstantiationName</span></code>) in the <code class="docutils literal notranslate"><span class="pre">INSTANTIATE_TEST_SUITE_P</span></code> macro can be left blank or used for another purpose that make sense for that test.</p>
+<section id="keywords">
+<h3>Keywords<a class="headerlink" href="#keywords" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p><strong>Integration</strong>: Only for integration tests, always first if present</p></li>
+<li><p><strong>Test</strong>: Mainly for unit tests, always first if test is not an Integration test.</p></li>
+<li><p><strong>Gpu</strong>: Optional after Integration or Test but before suite name if the test needs Gpu support.</p></li>
+<li><p><strong>Datatypes</strong>: Bfp16, Fp16, Fp32. Always last if present.</p></li>
+</ul>
+</section>
+<section id="unit-tests">
+<h3>Unit Tests<a class="headerlink" href="#unit-tests" title="Link to this heading">#</a></h3>
+<p>In most cases unit style tests should be named so they directly mirror the class under test.
+If the class is named <code class="docutils literal notranslate"><span class="pre">MyClass</span></code>, then the test suite should be named <code class="docutils literal notranslate"><span class="pre">TestMyClass</span></code>.
+In general these kinds of tests should try to avoid using anything that requires Gpu support.
+This is not always possible, in the cases where Gpu support is required, the test suite should be named <code class="docutils literal notranslate"><span class="pre">TestGpuMyClass</span></code>.</p>
+</section>
+<section id="naming-examples">
+<h3>Naming examples<a class="headerlink" href="#naming-examples" title="Link to this heading">#</a></h3>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="n">TestBackendLogger</span>
+<span class="n">TestHandle</span>
+<span class="n">TestGpuHandle</span>
+<span class="n">TestBatchnormBwdPlan</span>
+<span class="n">TestBatchnormBwdPlanFp32</span>
+<span class="n">TestBatchnormBwdPlanFp16</span>
+</pre></div>
+</div>
+</section>
+<section id="file-naming">
+<h3>File naming<a class="headerlink" href="#file-naming" title="Link to this heading">#</a></h3>
+<p>The test file name should mirror the primary test suite it contains. For example, if the main test in a suite is <code class="docutils literal notranslate"><span class="pre">TestMyClass</span></code>, the file should be named <code class="docutils literal notranslate"><span class="pre">TestMyClass.cpp</span></code>.
+That same file may also contain <code class="docutils literal notranslate"><span class="pre">TestGpuMyClass</span></code> but it is not the primary test suite so the file name does not need to reflect it.</p>
+</section>
+<section id="integration-tests">
+<h3>Integration tests<a class="headerlink" href="#integration-tests" title="Link to this heading">#</a></h3>
+<p>See <a class="reference external" href="https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/testing/TestingStrategy.md">Testing Strategy on GitHub</a> for more information on integration tests.
+Integration tests should be named to reflect the feature or component under test.</p>
+</section>
+<section id="id1">
+<h3>Naming examples<a class="headerlink" href="#id1" title="Link to this heading">#</a></h3>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="n">IntegrationGpuBatchnormBackwardNchwFp32</span>
+<span class="n">IntegrationGpuBatchnormBackwardNchwBfp16</span>
+<span class="n">IntegrationGpuBatchnormBackwardNchwFp16</span>
+<span class="n">IntegrationGraphFusion</span>
+</pre></div>
+</div>
+</section>
+<section id="id2">
+<h3>File naming<a class="headerlink" href="#id2" title="Link to this heading">#</a></h3>
+<p>For integration tests, the main test suite might be named <code class="docutils literal notranslate"><span class="pre">IntegrationGpuFeatureX</span></code> but have several child suites like <code class="docutils literal notranslate"><span class="pre">IntegrationGpuFeatureXFp32</span></code> and <code class="docutils literal notranslate"><span class="pre">IntegrationGpuFeatureXBfp16</span></code>.
+The parent suite name is the primary suite, so the file name should be <code class="docutils literal notranslate"><span class="pre">IntegrationGpuFeatureX`.cpp</span></code>.</p>
+</section>
+<section id="test-case-naming">
+<h3>Test case naming<a class="headerlink" href="#test-case-naming" title="Link to this heading">#</a></h3>
+<p>May be richly descriptive <code class="docutils literal notranslate"><span class="pre">HandlesLargeStride</span></code>, <code class="docutils literal notranslate"><span class="pre">RejectsMismatchedLayouts</span></code> or very simple <code class="docutils literal notranslate"><span class="pre">Correctness</span></code>, <code class="docutils literal notranslate"><span class="pre">Accuracy</span></code>. Avoid duplicating suite-level keywords (<code class="docutils literal notranslate"><span class="pre">Integration</span></code>, <code class="docutils literal notranslate"><span class="pre">Gpu</span></code>, datatype tokens) redundantly inside the test case name.
+The test case name is the preferred place to list the shape/layout variant being tested (for example, <code class="docutils literal notranslate"><span class="pre">Nchw</span></code>, <code class="docutils literal notranslate"><span class="pre">Nhwc</span></code>).
+In general there should not be duplication across the suite name and test case name.
+Otherwise the naming of the test case is entirely up to the developer.</p>
+</section>
+<section id="rationale">
+<h3>Rationale<a class="headerlink" href="#rationale" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p>Ordering enforces quick visual parsing (environment → scope → subject → specialization).</p></li>
+<li><p>Avoid underscores to remain future-proof with gtest evolution.</p></li>
+<li><p>Suffix datatype to emphasize functional context before precision variant.</p></li>
+<li><p>Consistent pattern simplifies filtering (for example, <code class="docutils literal notranslate"><span class="pre">--gtest_filter=*Gpu*Fp32</span></code>).</p></li>
+</ul>
+</section>
+</section>
+<section id="examples">
+<h2>Examples<a class="headerlink" href="#examples" title="Link to this heading">#</a></h2>
+<section id="class-and-file">
+<h3>Class and file<a class="headerlink" href="#class-and-file" title="Link to this heading">#</a></h3>
+<p>File: <code class="docutils literal notranslate"><span class="pre">ExecutionPlan.hpp</span></code></p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">ExecutionPlan</span><span class="w"> </span><span class="p">{</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="k">constexpr</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">MAX_STEPS</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">explicit</span><span class="w"> </span><span class="n">ExecutionPlan</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">initialSteps</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="nf">buildGraph</span><span class="p">();</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="nf">stepCount</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="p">;</span>
+
+<span class="k">private</span><span class="o">:</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">_stepCount</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="n">_isFinalized</span><span class="p">;</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+</section>
+<section id="interface">
+<h3>Interface<a class="headerlink" href="#interface" title="Link to this heading">#</a></h3>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">IAllocator</span><span class="w"> </span><span class="p">{</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="k">virtual</span><span class="w"> </span><span class="o">~</span><span class="n">IAllocator</span><span class="p">()</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">default</span><span class="p">;</span>
+<span class="w">    </span><span class="k">virtual</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="nf">allocate</span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">bytes</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="k">virtual</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">deallocate</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">ptr</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+</section>
+<section id="constant-and-enum">
+<h3>Constant and enum<a class="headerlink" href="#constant-and-enum" title="Link to this heading">#</a></h3>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="k">enum</span><span class="w"> </span><span class="nc">EngineMode</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">ENGINE_MODE_DEFAULT</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">    </span><span class="n">ENGINE_MODE_DETERMINISTIC</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span>
+<span class="p">};</span>
+
+<span class="k">constexpr</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">MAX_WORKSPACE_BYTES</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1ull</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">32</span><span class="p">;</span>
+</pre></div>
+</div>
+</section>
+<section id="test-gtest">
+<h3>Test (gtest)<a class="headerlink" href="#test-gtest" title="Link to this heading">#</a></h3>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="n">TEST</span><span class="p">(</span><span class="n">IntegrationGpuGraphFusionFp32</span><span class="p">,</span><span class="w"> </span><span class="n">FusesThreeSequentialOps</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// ...</span>
+<span class="p">}</span>
+<span class="n">TEST</span><span class="p">(</span><span class="n">IntegrationGpuGraphFusionBfp16</span><span class="p">,</span><span class="w"> </span><span class="n">FusesThreeSequentialOps</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// ...</span>
+<span class="p">}</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">TestExecutionPlan</span><span class="p">,</span><span class="w"> </span><span class="n">BuildsGraphCorrectly</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// ...</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="decision-checklist">
+<h2>Decision checklist<a class="headerlink" href="#decision-checklist" title="Link to this heading">#</a></h2>
+<p>When adding new code, verify:</p>
+<ul class="simple">
+<li><p>Names follow the table in Section 1.</p></li>
+<li><p>File name matches main class (or is a justified utility collection).</p></li>
+<li><p>Test suite names follow ordering &amp; allowed tokens.</p></li>
+<li><p>Layout tokens appear before datatype tokens when both used.</p></li>
+<li><p>No stray underscores in test suite names.</p></li>
+</ul>
+</section>
+<section id="deviation-process">
+<h2>Deviation process<a class="headerlink" href="#deviation-process" title="Link to this heading">#</a></h2>
+<p>If an external API or standard library interop forces divergence (for example,, fixed enum value names), document the exception with a brief comment near the declaration.</p>
+</section>
+<section id="automated-tooling">
+<h2>Automated tooling<a class="headerlink" href="#automated-tooling" title="Link to this heading">#</a></h2>
+<p>The repository includes automated tooling to enforce coding standards and maintain consistency across the codebase.</p>
+<section id="clang-tidy-rules">
+<h3>Clang-Tidy rules<a class="headerlink" href="#clang-tidy-rules" title="Link to this heading">#</a></h3>
+<p>The project uses clang-tidy to automatically enforce many of the coding style guidelines defined in this document. The configuration can be found in <code class="docutils literal notranslate"><span class="pre">.clang-tidy</span></code> at the repository root.</p>
+<p>The CI pipeline automatically runs clang-tidy on all pull requests to ensure compliance before merging.</p>
+</section>
+<section id="test-naming-enforcement-tool">
+<h3>Test naming enforcement tool<a class="headerlink" href="#test-naming-enforcement-tool" title="Link to this heading">#</a></h3>
+<p>A dedicated test naming enforcement tool is available to automatically validate that all test names follow the conventions outlined in Section 11.</p>
+<p>The tool is located at <code class="docutils literal notranslate"><span class="pre">cmake/scripts/test_name_validator.py</span></code> and is integrated into the build system.</p>
+<p>Use this command to run the validation manually:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>ninja<span class="w"> </span>validate_test_names
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This validation also runs automatically as part of the <code class="docutils literal notranslate"><span class="pre">ninja</span> <span class="pre">check</span></code> target.</p>
+</div>
+<p>This tool:</p>
+<ul class="simple">
+<li><p>Parses all test executables to extract test names.</p></li>
+<li><p>Validates ordering of keywords (Integration, Gpu, Feature, Layout, Datatype).</p></li>
+<li><p>Checks for prohibited underscores in test suite names.</p></li>
+<li><p>Generates reports on non-compliant test names.</p></li>
+<li><p>Is integrated with CI to block merges with invalid test names.</p></li>
+</ul>
+<p>Adhering to these rules and utilizing the automated tooling maintains readability, consistency, and tooling friendliness across the codebase.</p>
+</section>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="environment-variables.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">hipDNN environment variables</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="glossary.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">hipDNN glossary</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#naming-summary">Naming summary</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#file-and-class-naming">File and class naming</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#functions">Functions</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#unused-function-arguments">Unused function arguments</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#variables">Variables</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#members">Members</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#globals">Globals</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#interfaces">Interfaces</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#enums">Enums</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#constants">Constants</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#namespaces">Namespaces</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#test-naming-guidelines">Test naming guidelines</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#keywords">Keywords</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#unit-tests">Unit Tests</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#naming-examples">Naming examples</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#file-naming">File naming</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#integration-tests">Integration tests</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id1">Naming examples</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id2">File naming</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#test-case-naming">Test case naming</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#rationale">Rationale</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#examples">Examples</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#class-and-file">Class and file</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#interface">Interface</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#constant-and-enum">Constant and enum</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#test-gtest">Test (gtest)</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#decision-checklist">Decision checklist</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#deviation-process">Deviation process</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#automated-tooling">Automated tooling</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clang-tidy-rules">Clang-Tidy rules</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#test-naming-enforcement-tool">Test naming enforcement tool</a></li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            <p>
+  </p>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+<footer class="rocm-footer">
+    <div class="container-lg">
+        <section class="bottom-menu menu py-45">
+            <div class="row d-flex align-items-center">
+                <div class="col-12 text-center">
+                    <ul>
+                        <li><a href="https://www.amd.com/en/corporate/copyright" target="_blank">Terms and Conditions</a></li>
+                        <li><a href="https://rocm.docs.amd.com/en/develop/about/license.html">ROCm Licenses and Disclaimers</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/privacy" target="_blank">Privacy</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/trademarks" target="_blank">Trademarks</a></li>
+                        <li><a href="https://www.amd.com/content/dam/amd/en/documents/corporate/cr/supply-chain-transparency.pdf" target="_blank">Supply Chain Transparency</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/competition" target="_blank">Fair and Open Competition</a></li>
+                        <li><a href="https://www.amd.com/system/files/documents/amd-uk-tax-strategy.pdf" target="_blank">UK Tax Strategy</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/cookies" target="_blank">Cookie Policy</a></li>
+                        <!-- OneTrust Cookies Settings button start -->
+                        <li><a href="#cookie-settings" id="ot-sdk-btn" class="ot-sdk-show-settings">Cookie Settings</a></li>
+                        <!-- OneTrust Cookies Settings button end -->
+                    </ul>
+                </div>
+            </div>
+            <div class="row d-flex align-items-center">
+                <div class="col-12 text-center">
+                    <div>
+                        <span class="copyright">© 2025 Advanced Micro Devices, Inc</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</footer>
+
+<!-- <div id="rdc-watermark-container">
+    <img id="rdc-watermark" src="../_static/images/alpha-watermark.svg" alt="DRAFT watermark"/>
+</div> -->
+  </body>
+</html>

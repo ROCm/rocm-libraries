@@ -1,0 +1,841 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta content="hipDNN has a plugin-based architecture in order to allow contributors and users to extend hipDNN without modifying the core library." name="description" />
+<meta content="hipDNN, ROCm, API," name="keywords" />
+
+    <title>hipDNN high-level architecture &#8212; hipDNN 1.0.0 Documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=a746c00c" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=384b581d" />
+    <link rel="stylesheet" type="text/css" href="../_static/mystnb.4510f1fc1dee50b3e5859aac5469c37c29e427902b24a333a5f9fcb2f0b3ac41.css?v=be8a1c11" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=643846e8" />
+    <link rel="stylesheet" type="text/css" href="../_static/rocm_header.css?v=9557e3d1" />
+    <link rel="stylesheet" type="text/css" href="../_static/rocm_footer.css?v=7095035a" />
+    <link rel="stylesheet" type="text/css" href="../_static/fonts.css?v=fcff5274" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="../_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="../_static/documentation_options.js?v=f9c1cefe"></script>
+    <script src="../_static/doctools.js?v=9a2dae69"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=91c4cb68"></script>
+    <script async="async" src="../_static/code_word_breaks.js?v=327952c4"></script>
+    <script async="async" src="../_static/renameVersionLinks.js?v=929fe5e4"></script>
+    <script async="async" src="../_static/rdcMisc.js?v=01f88d96"></script>
+    <script async="async" src="../_static/theme_mode_captions.js?v=15f4ec5d"></script>
+    <script defer="defer" src="../_static/search.js?v=90a4452c"></script>
+    <script src="../_static/scripts/sphinx-book-theme.js?v=efea14e4"></script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'conceptual/architecture';</script>
+    <script async="async" src="https://download.amd.com/js/analytics/analyticsinit.js"></script>
+    <link rel="icon" href="https://www.amd.com/content/dam/code/images/favicon/favicon.ico"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="hipDNN backend architecture (Advanced)" href="backend-architecture.html" />
+    <link rel="prev" title="MIOpen Provider plugin architecture" href="miopen-plugin.html" />
+    <meta name="google-site-verification" content="vo35SZt_GASsTHAEmdww7AYKPCvZyzLvOXBl8guBME4" />
+
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+<aside class="bd-header-announcement" aria-label="Announcement">
+  <div class="bd-header-announcement__content">This page contains proposed changes for a future release of ROCm. Read the <a id='rocm-banner' href='https://rocm.docs.amd.com/en/latest/'>latest Linux release of ROCm documentation</a> for your production environments.</div>
+</aside>
+
+  
+
+<header class="common-header" >
+    <nav class="navbar navbar-expand-xl">
+        <div class="container-fluid main-nav rocm-header">
+            
+            <button class="navbar-toggler collapsed" id="nav-icon" data-tracking-information="mainMenuToggle" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+            
+            <div class="header-logo">
+                <a class="navbar-brand" href="https://www.amd.com/">
+                    <img src="../_static/images/amd-header-logo.svg" alt="AMD Logo" title="AMD Logo" width="90" class="d-inline-block align-text-top hover-opacity"/>
+                </a>
+                <div class="vr vr mx-40 my-25"></div>
+                
+        
+    
+    <a class="klavika-font hover-opacity" href="https://rocm.docs.amd.com/en/develop">ROCm&#8482; Software Future Release</a>
+                <a class="header-all-versions" href="https://rocm.docs.amd.com/en/latest/release/versions.html">Version List</a>
+            </div>
+            <div class="icon-nav text-center d-flex ms-auto">
+            </div>
+        </div>
+    </nav>
+    
+    <nav class="navbar navbar-expand-xl second-level-nav">
+        <div class="container-fluid main-nav">
+            <div class="navbar-nav-container collapse navbar-collapse" id="navbarSupportedContent">
+                <ul class="navbar-nav nav-mega me-auto mb-2 mb-lg-0 col-xl-10">
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://github.com/ROCm/rocm-libraries" id="navgithub" role="button" aria-expanded="false" target="_blank" >
+                                GitHub
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://github.com/ROCm/ROCm/discussions" id="navcommunity" role="button" aria-expanded="false" target="_blank" >
+                                Community
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://rocm.blogs.amd.com/" id="navblogs" role="button" aria-expanded="false" target="_blank" >
+                                Blogs
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://www.amd.com/en/developer/resources/rocm-hub.html" id="navrocm-developer-hub" role="button" aria-expanded="false" target="_blank" >
+                                ROCm Developer Hub
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://instinct.docs.amd.com" id="navinstinct&#8482;-docs" role="button" aria-expanded="false" target="_blank" >
+                                Instinct&#8482; Docs
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://www.amd.com/en/developer/resources/infinity-hub.html" id="navinfinity-hub" role="button" aria-expanded="false" target="_blank" >
+                                Infinity Hub
+                            </a>
+                        </li>
+                    
+                        <li class="nav-item">
+                            <a class="nav-link top-level header-menu-links" href="https://github.com/ROCm/rocm-libraries/issues/new/choose" id="navsupport" role="button" aria-expanded="false" target="_blank" >
+                                Support
+                            </a>
+                        </li>
+                    
+                </ul>
+            </div>
+        </div>
+    </nav>
+    
+</header>
+
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          
+          
+            <div class="navbar-item">
+
+<a class="navbar-brand logo" href="https://rocm.docs.amd.com/en/develop">
+    <p>ROCm documentation</p>
+</a></div>
+          
+        
+      </div>
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">hipDNN 1.0.0 Documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../what-is-hipdnn.html">What is hipDNN?</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Install</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../install/hipdnn-prerequisites.html">Prerequisites</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../install/hipdnn-install.html">hipDNN installation (Linux)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../install/hipdnn-install-windows.html">hipDNN installation (Windows)</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Conceptual</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="miopen-plugin.html">MIOpen Provider plugin architecture</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">High-level architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend-architecture.html">Backend architecture (Advanced)</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">How to</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../how-to/build-execute-hipdnn.html">Build and execute operation graphs</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../how-to/extend-hipdnn.html">Extend hipDNN functionality (Advanced)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../how-to/develop-plugins.html">Develop plugins for hipDNN (Advanced)</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../reference/environment-variables.html">Environment variables</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/naming-guidelines.html">Coding style and naming guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/glossary.html">Glossary</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">About</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../license.html">License</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><label class="sidebar-toggle primary-toggle btn btn-sm" for="__primary" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-angle-right"></span>
+  </label></div>
+      
+        <div class="header-article-item">
+
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">hipDNN high-level architecture</span></li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+<label class="sidebar-toggle secondary-toggle btn btn-sm" for="__secondary"title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</label>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>hipDNN high-level architecture</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#architecture-overview">Architecture overview</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#components">Components</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#frontend">Frontend</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#frontend-architecture">Frontend architecture</a><ul class="nav section-nav flex-column">
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#graph-class">Graph class</a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#nodes">Nodes</a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#attributes">Attributes</a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#simplified-workflow-example">Simplified workflow example</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#sdks">SDKs</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#data-sdk-data-sdk">Data SDK (<code class="docutils literal notranslate"><span class="pre">data_sdk</span></code>)</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-sdk-plugin-sdk">Plugin SDK (<code class="docutils literal notranslate"><span class="pre">plugin_sdk</span></code>)</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#test-sdk-test-sdk">Test SDK (<code class="docutils literal notranslate"><span class="pre">test_sdk</span></code>)</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-architecture">Plugin architecture</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-loading">Plugin loading</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#engine-management">Engine management</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#key-plugin-functions">Key plugin functions</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#engine-plugins">Engine plugins</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#engine-plugin-types">Engine plugin types</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#static-kernel-engines">Static kernel engines</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#dynamic-kernel-engines">Dynamic kernel engines</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#backend">Backend</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#key-characteristics">Key characteristics</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#workflow">Workflow</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#error-handling-strategy">Error handling strategy</a></li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="hipdnn-high-level-architecture">
+<span id="architecture"></span><h1>hipDNN high-level architecture<a class="headerlink" href="#hipdnn-high-level-architecture" title="Link to this heading">#</a></h1>
+<p>hipDNN has a plugin-based architecture in order to allow contributors and users to extend hipDNN without modifying the core library.
+hipDNN has support for engine plugins, which provide the kernels to solve graphs.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>See <a class="reference internal" href="backend-architecture.html#backend-architecture"><span class="std std-ref">hipDNN backend architecture (Advanced)</span></a> for a more granular breakdown of the system architecture and the backend API.</p>
+</div>
+<section id="architecture-overview">
+<h2>Architecture overview<a class="headerlink" href="#architecture-overview" title="Link to this heading">#</a></h2>
+<img alt="../_images/hipDNN_Architecture.png" src="../_images/hipDNN_Architecture.png" />
+</section>
+<section id="components">
+<h2>Components<a class="headerlink" href="#components" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p><strong>Frontend</strong>: A header-only C++ library that provides the industry standard API for interacting with hipDNN. The frontend wraps the backend C API to provide a more user-friendly C++ interface.</p></li>
+<li><p><strong>Backend</strong>: A shared library which provides a C API for hipDNN. The backend is the core component of hipDNN which acts as a plugin loader and manager, connecting problems to plugins that can solve them.</p></li>
+<li><p><strong>SDKs</strong>: Header-only libraries that provide shared utilities and interfaces. hipDNN provides three SDKs: Data SDK (graph schemas and data structures), Plugin SDK (plugin API and utilities), and Test SDK (testing utilities and CPU reference implementations).</p></li>
+<li><p><strong>MIOpen Provider Plugin</strong>: A plugin that wraps MIOpen and provides access to the existing API through hipDNN. In the future, the MIOpen Provider Plugin will be its own separate project from hipDNN.</p></li>
+<li><p><strong>Other Plugins</strong>: Plugins will be added over time to provide additional operational support, or performance improvements. Plugins should be external projects to hipDNN.</p></li>
+</ul>
+<section id="frontend">
+<h3>Frontend<a class="headerlink" href="#frontend" title="Link to this heading">#</a></h3>
+<p>The frontend provides a user-friendly C++ interface to hipDNN, wrapping the lower-level C API provided by the backend.</p>
+<p>Key characteristics:</p>
+<ul class="simple">
+<li><p><strong>Header-only C++ library</strong>: There are no compiled libraries, which simplifies integration.</p></li>
+<li><p><strong>Dependencies</strong>: The frontend is dependent on the <a class="reference internal" href="#backend"><span class="std std-ref">Backend</span></a> and <a class="reference internal" href="#data"><span class="std std-ref">Data SDK (data_sdk)</span></a>.</p></li>
+<li><p><strong>Purpose</strong>: It provides the API for users consuming hipDNN.</p></li>
+<li><p><strong>Expected usage</strong>: The frontend should be consumed as a header-only dependency in user projects.</p></li>
+</ul>
+<section id="frontend-architecture">
+<h4>Frontend architecture<a class="headerlink" href="#frontend-architecture" title="Link to this heading">#</a></h4>
+<section id="graph-class">
+<h5>Graph class<a class="headerlink" href="#graph-class" title="Link to this heading">#</a></h5>
+<p>The central abstraction in the frontend is the <code class="docutils literal notranslate"><span class="pre">Graph</span></code> class, which:</p>
+<ul class="simple">
+<li><p>Manages the construction of operation graphs.</p></li>
+<li><p>Handles the creation and configuration of nodes.</p></li>
+<li><p>Orchestrates the execution workflow.</p></li>
+</ul>
+</section>
+<section id="nodes">
+<h5>Nodes<a class="headerlink" href="#nodes" title="Link to this heading">#</a></h5>
+<p>Nodes represent individual operations within a graph:</p>
+<ul class="simple">
+<li><p>Each node type (for example, <code class="docutils literal notranslate"><span class="pre">BatchnormNode</span></code>, <code class="docutils literal notranslate"><span class="pre">PointwiseNode</span></code>) inherits from <code class="docutils literal notranslate"><span class="pre">INode</span></code>.</p></li>
+<li><p>Nodes encapsulate their specific attributes and tensor connections.</p></li>
+<li><p>Support serialization to Flatbuffer format for backend consumption.</p></li>
+</ul>
+</section>
+<section id="attributes">
+<h5>Attributes<a class="headerlink" href="#attributes" title="Link to this heading">#</a></h5>
+<p>Attributes configure the behavior of nodes:</p>
+<ul class="simple">
+<li><p>Each node type has corresponding attribute classes (for example, <code class="docutils literal notranslate"><span class="pre">Batchnorm_attributes</span></code>).</p></li>
+<li><p>Attributes include operation-specific parameters like epsilon, momentum, etc.</p></li>
+<li><p>Support builder pattern for easy configuration.</p></li>
+</ul>
+</section>
+<section id="simplified-workflow-example">
+<h5>Simplified workflow example<a class="headerlink" href="#simplified-workflow-example" title="Link to this heading">#</a></h5>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="c1">// Create a graph</span>
+<span class="n">Graph</span><span class="w"> </span><span class="n">graph</span><span class="p">;</span>
+<span class="n">graph</span><span class="p">.</span><span class="n">set_compute_data_type</span><span class="p">(</span><span class="n">DataType_t</span><span class="o">::</span><span class="n">FLOAT</span><span class="p">);</span>
+
+<span class="c1">// Create tensors</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Graph</span><span class="o">::</span><span class="n">tensor</span><span class="p">(</span><span class="cm">/* tensor attributes */</span><span class="p">);</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">scale</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Graph</span><span class="o">::</span><span class="n">tensor</span><span class="p">(</span><span class="cm">/* tensor attributes */</span><span class="p">);</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">bias</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Graph</span><span class="o">::</span><span class="n">tensor</span><span class="p">(</span><span class="cm">/* tensor attributes */</span><span class="p">);</span>
+
+<span class="c1">// Add operations</span>
+<span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">y</span><span class="p">,</span><span class="w"> </span><span class="n">mean</span><span class="p">,</span><span class="w"> </span><span class="n">inv_var</span><span class="p">,</span><span class="w"> </span><span class="n">_</span><span class="p">,</span><span class="w"> </span><span class="n">_</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">graph</span><span class="p">.</span><span class="n">batchnorm</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">scale</span><span class="p">,</span><span class="w"> </span><span class="n">bias</span><span class="p">,</span><span class="w"> </span><span class="n">bn_attributes</span><span class="p">);</span>
+
+<span class="c1">// Build and execute</span>
+<span class="n">graph</span><span class="p">.</span><span class="n">build_operation_graph</span><span class="p">(</span><span class="n">handle</span><span class="p">);</span>
+<span class="n">graph</span><span class="p">.</span><span class="n">create_execution_plans</span><span class="p">();</span>
+<span class="n">graph</span><span class="p">.</span><span class="n">build_plans</span><span class="p">();</span>
+<span class="n">graph</span><span class="p">.</span><span class="n">execute</span><span class="p">(</span><span class="n">handle</span><span class="p">,</span><span class="w"> </span><span class="n">variant_pack</span><span class="p">,</span><span class="w"> </span><span class="n">workspace</span><span class="p">);</span>
+</pre></div>
+</div>
+<p>For complete working examples, see the official <a class="reference external" href="https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn/samples">samples on GitHub</a>.</p>
+</section>
+</section>
+</section>
+<section id="sdks">
+<h3>SDKs<a class="headerlink" href="#sdks" title="Link to this heading">#</a></h3>
+<p>hipDNN provides three header-only SDK libraries that serve as the foundation for communication between different components.</p>
+<section id="data-sdk-data-sdk">
+<span id="data"></span><h4>Data SDK (<code class="docutils literal notranslate"><span class="pre">data_sdk</span></code>)<a class="headerlink" href="#data-sdk-data-sdk" title="Link to this heading">#</a></h4>
+<p>The Data SDK contains <code class="docutils literal notranslate"><span class="pre">FlatBuffers</span></code> schemas and data structures for graph representation.</p>
+<ul class="simple">
+<li><p><strong>Dependencies</strong>: <code class="docutils literal notranslate"><span class="pre">FlatBuffers</span></code> and <code class="docutils literal notranslate"><span class="pre">spdlog</span></code>.</p></li>
+<li><p><strong>Purpose</strong>: Provides data structures and serialization for graphs, tensors, and configurations.</p></li>
+<li><p><strong>Expected usage</strong>: Consumed by the frontend, backend, and plugins for graph data handling.</p></li>
+<li><p><strong>Core functionality</strong>:</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">FlatBuffer</span></code> schema definitions for graphs, nodes, and attributes.</p></li>
+<li><p>Data structures for deserializing serialized graphs.</p></li>
+<li><p>Logging utilities and type helpers (<code class="docutils literal notranslate"><span class="pre">half</span></code>, <code class="docutils literal notranslate"><span class="pre">bfloat16</span></code>, etc.).</p></li>
+</ul>
+</li>
+</ul>
+</section>
+<section id="plugin-sdk-plugin-sdk">
+<span id="plugin-sdk"></span><h4>Plugin SDK (<code class="docutils literal notranslate"><span class="pre">plugin_sdk</span></code>)<a class="headerlink" href="#plugin-sdk-plugin-sdk" title="Link to this heading">#</a></h4>
+<p>The Plugin SDK contains the plugin API and utilities for creating engine plugins.</p>
+<ul class="simple">
+<li><p><strong>Dependencies</strong>: <a class="reference internal" href="#data"><span class="std std-ref">Data SDK (data_sdk)</span></a>.</p></li>
+<li><p><strong>Purpose</strong>: Provides the interface and utilities for plugin development.</p></li>
+<li><p><strong>Expected usage</strong>: Consumed by plugin projects.</p></li>
+<li><p><strong>Core functionality</strong>:</p>
+<ul>
+<li><p>Plugin API definitions (for example, <code class="docutils literal notranslate"><span class="pre">hipdnnEnginePluginCreate</span></code> and <code class="docutils literal notranslate"><span class="pre">hipdnnEnginePluginExecuteOpGraph</span></code>).</p></li>
+<li><p>Base classes for engine implementation.</p></li>
+<li><p>Utilities for plugin development.</p></li>
+</ul>
+</li>
+</ul>
+</section>
+<section id="test-sdk-test-sdk">
+<h4>Test SDK (<code class="docutils literal notranslate"><span class="pre">test_sdk</span></code>)<a class="headerlink" href="#test-sdk-test-sdk" title="Link to this heading">#</a></h4>
+<p>The Test SDK provides utilities for testing plugins.</p>
+<ul class="simple">
+<li><p><strong>Dependencies</strong>: <a class="reference internal" href="#data"><span class="std std-ref">Data SDK (data_sdk)</span></a> and <a class="reference internal" href="#plugin-sdk"><span class="std std-ref">Plugin SDK (plugin_sdk)</span></a>.</p></li>
+<li><p><strong>Purpose</strong>: Provides testing infrastructure for plugin validation.</p></li>
+<li><p><strong>Expected usage</strong>: Consumed by plugin test suites.</p></li>
+<li><p><strong>Core functionality</strong>:</p>
+<ul>
+<li><p>CPU reference implementations for validation (convolution, batchnorm, etc.).</p></li>
+<li><p>Test utilities (tolerances, seeds, logging).</p></li>
+<li><p>Mock objects for unit testing.</p></li>
+</ul>
+</li>
+</ul>
+</section>
+</section>
+<section id="plugin-architecture">
+<h3>Plugin architecture<a class="headerlink" href="#plugin-architecture" title="Link to this heading">#</a></h3>
+<section id="plugin-loading">
+<h4>Plugin loading<a class="headerlink" href="#plugin-loading" title="Link to this heading">#</a></h4>
+<ul class="simple">
+<li><p>The backend discovers plugins at runtime via the default plugin path, or by using <code class="docutils literal notranslate"><span class="pre">hipdnnSetEnginePluginPaths_ext</span></code> to provide additional paths from which to load the plugins.</p></li>
+<li><p>Each plugin exports standard entry points defined in the Plugin SDK.</p></li>
+</ul>
+</section>
+<section id="engine-management">
+<h4>Engine management<a class="headerlink" href="#engine-management" title="Link to this heading">#</a></h4>
+<ul class="simple">
+<li><p>Each plugin can provide multiple engines.</p></li>
+<li><p>Engines must have globally unique IDs that remain constant for each run.</p></li>
+<li><p>Plugins determine which engines are applicable for a given graph.</p></li>
+</ul>
+</section>
+<section id="key-plugin-functions">
+<h4>Key plugin functions<a class="headerlink" href="#key-plugin-functions" title="Link to this heading">#</a></h4>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="c1">// Get all available engine IDs</span>
+<span class="n">hipdnnEnginePluginGetAllEngineIds</span><span class="p">(</span><span class="n">engine_ids</span><span class="p">,</span><span class="w"> </span><span class="n">max_engines</span><span class="p">,</span><span class="w"> </span><span class="n">num_engines</span><span class="p">);</span>
+
+<span class="c1">// Check which engines can solve a graph</span>
+<span class="n">hipdnnEnginePluginGetApplicableEngineIds</span><span class="p">(</span><span class="n">handle</span><span class="p">,</span><span class="w"> </span><span class="n">graph</span><span class="p">,</span><span class="w"> </span><span class="n">engine_ids</span><span class="p">,</span><span class="w"> </span><span class="n">max</span><span class="p">,</span><span class="w"> </span><span class="n">num</span><span class="p">);</span>
+
+<span class="c1">// Create execution context for a specific engine</span>
+<span class="n">hipdnnEnginePluginCreateExecutionContext</span><span class="p">(</span><span class="n">handle</span><span class="p">,</span><span class="w"> </span><span class="n">config</span><span class="p">,</span><span class="w"> </span><span class="n">graph</span><span class="p">,</span><span class="w"> </span><span class="n">context</span><span class="p">);</span>
+
+<span class="c1">// Execute the graph</span>
+<span class="n">hipdnnEnginePluginExecuteOpGraph</span><span class="p">(</span><span class="n">handle</span><span class="p">,</span><span class="w"> </span><span class="n">context</span><span class="p">,</span><span class="w"> </span><span class="n">workspace</span><span class="p">,</span><span class="w"> </span><span class="n">buffers</span><span class="p">,</span><span class="w"> </span><span class="n">num_buffers</span><span class="p">);</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="engine-plugins">
+<h3>Engine plugins<a class="headerlink" href="#engine-plugins" title="Link to this heading">#</a></h3>
+<p>Engine plugins provide the actual computational implementations for hipDNN graphs.</p>
+<p>Key characteristics:</p>
+<ul class="simple">
+<li><p><strong>Separate installable projects</strong>: Independent development and deployment.</p></li>
+<li><p><strong>Dependencies</strong>: <a class="reference internal" href="#data"><span class="std std-ref">Data SDK (data_sdk)</span></a> and <a class="reference internal" href="#plugin-sdk"><span class="std std-ref">Plugin SDK (plugin_sdk)</span></a> (and plugin-specific dependencies as needed).</p></li>
+<li><p><strong>Purpose</strong>: Provides engines which are capable of solving graphs.</p></li>
+<li><p><strong>Expected usage</strong>: Loaded at runtime by the backend.</p></li>
+</ul>
+</section>
+<section id="engine-plugin-types">
+<h3>Engine plugin types<a class="headerlink" href="#engine-plugin-types" title="Link to this heading">#</a></h3>
+<section id="static-kernel-engines">
+<h4>Static kernel engines<a class="headerlink" href="#static-kernel-engines" title="Link to this heading">#</a></h4>
+<ul class="simple">
+<li><p>Provides pre-compiled kernels for specific operations.</p></li>
+<li><p>Only handles specific configurations.</p></li>
+<li><p>For example, the MIOpen Provider plugin.</p></li>
+<li><p><strong>Advantages</strong>:</p>
+<ul>
+<li><p>Highly optimized for supported cases.</p></li>
+<li><p>Predictable performance.</p></li>
+<li><p>Lower compilation overhead.</p></li>
+</ul>
+</li>
+</ul>
+</section>
+<section id="dynamic-kernel-engines">
+<h4>Dynamic kernel engines<a class="headerlink" href="#dynamic-kernel-engines" title="Link to this heading">#</a></h4>
+<ul class="simple">
+<li><p>Generate kernels at runtime based on graph structure.</p></li>
+<li><p>Broad support: Handles general graph patterns.</p></li>
+<li><p>For example, future JIT-compilation plugins</p></li>
+<li><p><strong>Advantages</strong>:</p>
+<ul>
+<li><p>Flexible operation fusion.</p></li>
+<li><p>Support for novel graph patterns.</p></li>
+<li><p>Adaptable to hardware capabilities.</p></li>
+</ul>
+</li>
+</ul>
+<p>See Plugin Development for advanced information on developing and using plugins.</p>
+</section>
+</section>
+<section id="backend">
+<span id="id1"></span><h3>Backend<a class="headerlink" href="#backend" title="Link to this heading">#</a></h3>
+<p>The backend is the core engine of hipDNN responsible for managing plugins and orchestrating graph execution.</p>
+<section id="key-characteristics">
+<h4>Key characteristics<a class="headerlink" href="#key-characteristics" title="Link to this heading">#</a></h4>
+<ul class="simple">
+<li><p><strong>Installable library</strong>: C API with ABI for language interoperability, which is dynamically loadable.</p></li>
+<li><p><strong>Dependencies</strong>: <a class="reference internal" href="#data"><span class="std std-ref">Data SDK (data_sdk)</span></a>.</p></li>
+<li><p><strong>Purpose</strong>: Provides a stable C API for interacting with the hipDNN kernel providers.</p></li>
+<li><p><strong>Expected usage</strong>: Library linked to the frontend API and expert user projects that provides access to the backend API.</p></li>
+</ul>
+</section>
+<section id="workflow">
+<h4>Workflow<a class="headerlink" href="#workflow" title="Link to this heading">#</a></h4>
+<ol class="arabic simple">
+<li><p><strong>Create a Graph</strong>: Build an operation graph using the frontend.</p></li>
+<li><p><strong>Create heuristic descriptor</strong>: Initialize with the graph and desired heuristic mode.</p></li>
+<li><p><strong>Get engine configs</strong>: Query available engine configurations from the heuristic.</p></li>
+<li><p><strong>Create execution plan</strong>: Combine selected engine config with the graph.</p></li>
+<li><p><strong>Run execution plan</strong>: Execute with variant pack containing tensor data.</p></li>
+</ol>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="c1">// Simplified Backend workflow</span>
+<span class="n">hipdnnBackendDescriptor_t</span><span class="w"> </span><span class="n">graph_desc</span><span class="p">,</span><span class="w"> </span><span class="n">heuristic_desc</span><span class="p">,</span><span class="w"> </span><span class="n">config_desc</span><span class="p">,</span><span class="w"> </span><span class="n">plan_desc</span><span class="p">,</span><span class="w"> </span><span class="n">variant_desc</span><span class="p">;</span>
+
+<span class="c1">// 1. Create graph (from serialized data)</span>
+<span class="n">hipdnnBackendCreateAndDeserializeGraph_ext</span><span class="p">(</span><span class="o">&amp;</span><span class="n">graph_desc</span><span class="p">,</span><span class="w"> </span><span class="n">serialized_graph</span><span class="p">,</span><span class="w"> </span><span class="n">size</span><span class="p">);</span>
+
+<span class="c1">// 2. Create and configure heuristic</span>
+<span class="n">hipdnnBackendCreateDescriptor</span><span class="p">(</span><span class="n">HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">heuristic_desc</span><span class="p">);</span>
+<span class="n">hipdnnBackendSetAttribute</span><span class="p">(</span><span class="n">heuristic_desc</span><span class="p">,</span><span class="w"> </span><span class="n">HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH</span><span class="p">,</span><span class="w"> </span><span class="p">...);</span>
+<span class="n">hipdnnBackendFinalize</span><span class="p">(</span><span class="n">heuristic_desc</span><span class="p">);</span>
+
+<span class="c1">// 3. Get engine configurations</span>
+<span class="n">hipdnnBackendGetAttribute</span><span class="p">(</span><span class="n">heuristic_desc</span><span class="p">,</span><span class="w"> </span><span class="n">HIPDNN_ATTR_ENGINEHEUR_RESULTS</span><span class="p">,</span><span class="w"> </span><span class="p">...);</span>
+
+<span class="c1">// 4. Create execution plan</span>
+<span class="n">hipdnnBackendCreateDescriptor</span><span class="p">(</span><span class="n">HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">plan_desc</span><span class="p">);</span>
+<span class="n">hipdnnBackendSetAttribute</span><span class="p">(</span><span class="n">plan_desc</span><span class="p">,</span><span class="w"> </span><span class="n">HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG</span><span class="p">,</span><span class="w"> </span><span class="p">...);</span>
+<span class="n">hipdnnBackendFinalize</span><span class="p">(</span><span class="n">plan_desc</span><span class="p">);</span>
+
+<span class="c1">// 5. Execute</span>
+<span class="n">hipdnnBackendExecute</span><span class="p">(</span><span class="n">handle</span><span class="p">,</span><span class="w"> </span><span class="n">plan_desc</span><span class="p">,</span><span class="w"> </span><span class="n">variant_desc</span><span class="p">);</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="error-handling-strategy">
+<h3>Error handling strategy<a class="headerlink" href="#error-handling-strategy" title="Link to this heading">#</a></h3>
+<p>hipDNN uses a layered error handling approach designed to be robust across C/C++ boundaries:</p>
+<ul class="simple">
+<li><p><strong>Plugins</strong>: Plugin entry points return <code class="docutils literal notranslate"><span class="pre">hipdnnPluginStatus_t</span></code> codes. Internal exceptions are caught at the plugin boundary and converted to status codes. Error strings are stored in thread-local storage via <code class="docutils literal notranslate"><span class="pre">PluginLastErrorManager</span></code>.</p></li>
+<li><p><strong>Backend (C API)</strong>: All public API functions return <code class="docutils literal notranslate"><span class="pre">hipdnnStatus_t</span></code> codes. The backend catches any internal C++ exceptions, converts them to the appropriate status code, and stores the exception message. Users can retrieve descriptive error messages using <code class="docutils literal notranslate"><span class="pre">hipdnnGetLastErrorString</span></code>.</p></li>
+<li><p><strong>Frontend (C++ API)</strong>: The C++ frontend checks <code class="docutils literal notranslate"><span class="pre">hipdnnStatus_t</span></code> codes from the backend. On failure, it retrieves the detailed error message via <code class="docutils literal notranslate"><span class="pre">hipdnnGetLastErrorString</span></code> and returns an <code class="docutils literal notranslate"><span class="pre">Error</span></code> object containing the error code and description. The frontend utilizes <em>value-based error handling</em> rather than throwing exceptions.</p></li>
+</ul>
+</section>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="miopen-plugin.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">MIOpen Provider plugin architecture</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="backend-architecture.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">hipDNN backend architecture (Advanced)</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#architecture-overview">Architecture overview</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#components">Components</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#frontend">Frontend</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#frontend-architecture">Frontend architecture</a><ul class="nav section-nav flex-column">
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#graph-class">Graph class</a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#nodes">Nodes</a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#attributes">Attributes</a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#simplified-workflow-example">Simplified workflow example</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#sdks">SDKs</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#data-sdk-data-sdk">Data SDK (<code class="docutils literal notranslate"><span class="pre">data_sdk</span></code>)</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-sdk-plugin-sdk">Plugin SDK (<code class="docutils literal notranslate"><span class="pre">plugin_sdk</span></code>)</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#test-sdk-test-sdk">Test SDK (<code class="docutils literal notranslate"><span class="pre">test_sdk</span></code>)</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-architecture">Plugin architecture</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-loading">Plugin loading</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#engine-management">Engine management</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#key-plugin-functions">Key plugin functions</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#engine-plugins">Engine plugins</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#engine-plugin-types">Engine plugin types</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#static-kernel-engines">Static kernel engines</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#dynamic-kernel-engines">Dynamic kernel engines</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#backend">Backend</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#key-characteristics">Key characteristics</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#workflow">Workflow</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#error-handling-strategy">Error handling strategy</a></li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            <p>
+  </p>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+<footer class="rocm-footer">
+    <div class="container-lg">
+        <section class="bottom-menu menu py-45">
+            <div class="row d-flex align-items-center">
+                <div class="col-12 text-center">
+                    <ul>
+                        <li><a href="https://www.amd.com/en/corporate/copyright" target="_blank">Terms and Conditions</a></li>
+                        <li><a href="https://rocm.docs.amd.com/en/develop/about/license.html">ROCm Licenses and Disclaimers</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/privacy" target="_blank">Privacy</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/trademarks" target="_blank">Trademarks</a></li>
+                        <li><a href="https://www.amd.com/content/dam/amd/en/documents/corporate/cr/supply-chain-transparency.pdf" target="_blank">Supply Chain Transparency</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/competition" target="_blank">Fair and Open Competition</a></li>
+                        <li><a href="https://www.amd.com/system/files/documents/amd-uk-tax-strategy.pdf" target="_blank">UK Tax Strategy</a></li>
+                        <li><a href="https://www.amd.com/en/corporate/cookies" target="_blank">Cookie Policy</a></li>
+                        <!-- OneTrust Cookies Settings button start -->
+                        <li><a href="#cookie-settings" id="ot-sdk-btn" class="ot-sdk-show-settings">Cookie Settings</a></li>
+                        <!-- OneTrust Cookies Settings button end -->
+                    </ul>
+                </div>
+            </div>
+            <div class="row d-flex align-items-center">
+                <div class="col-12 text-center">
+                    <div>
+                        <span class="copyright">© 2025 Advanced Micro Devices, Inc</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</footer>
+
+<!-- <div id="rdc-watermark-container">
+    <img id="rdc-watermark" src="../_static/images/alpha-watermark.svg" alt="DRAFT watermark"/>
+</div> -->
+  </body>
+</html>
