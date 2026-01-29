@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_frontend/Knob.hpp>
+#include <hipdnn_frontend/knob/Knob.hpp>
 
 using namespace hipdnn_frontend;
 namespace fb = hipdnn_data_sdk::data_objects;

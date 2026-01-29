@@ -5,9 +5,11 @@
 
 #include <string>
 
+#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 
-namespace frontend
+namespace hipdnn_frontend
 {
 using KnobValueVariant = std::variant<int64_t, double, std::string>;
 
