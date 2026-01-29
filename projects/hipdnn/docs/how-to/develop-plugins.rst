@@ -1,5 +1,5 @@
 .. meta::
-  :description: Develop plugins for hipDNN
+  :description: Learn how to develop plugins for hipDNN.
   :keywords: hipDNN, ROCm, API, how-to 
 
 .. _develop-plugins:
@@ -16,9 +16,9 @@ Plugin Types
 
 hipDNN will support three types of plugins, each serving a specific purpose:
 
-- Engine Heuristic and Selection Plugins (``hipdnn_plugins/heuristics/``): These plugins help determine the best execution strategy for a given operation or graph. They analyze the computation requirements and available resources to select optimal implementations.
-- Benchmarking and Tuning Plugins (``hipdnn_plugins/benchmarking/``): These plugins focus on performance optimization by benchmarking different implementations and tuning parameters for specific hardware configurations.
-- Kernel Engine Plugins (``hipdnn_plugins/engines/``): These plugins provide the actual kernel implementations for operations. They contain the compute kernels that execute on the target hardware (GPUs, accelerators, etc.).
+- Engine heuristic and selection plugins (``hipdnn_plugins/heuristics/``): These plugins help determine the best execution strategy for a given operation or graph. They analyze the computation requirements and available resources to select optimal implementations.
+- Benchmarking and tuning plugins (``hipdnn_plugins/benchmarking/``): These plugins focus on performance optimization by benchmarking different implementations and tuning parameters for specific hardware configurations.
+- Kernel engine plugins (``hipdnn_plugins/engines/``): These plugins provide the actual kernel implementations for operations. They contain the compute kernels that execute on the target hardware (GPUs, accelerators, etc.).
 
 .. note::
 
@@ -27,47 +27,47 @@ hipDNN will support three types of plugins, each serving a specific purpose:
 SDK libraries
 =============
 
-hipDNN provides several C++ SDK libraries for plugin development:
+hipDNN provides several C++ SDK libraries for plugin development.
 
 Data SDK (``data_sdk``)
 -----------------------
 
 The Data SDK contains the FlatBuffers schemas and data structures for graph representation. It includes:
 
-- FlatBuffers schema definitions for graphs, nodes, and attributes
-- Data structures for deserializing serialized graphs
-- Utilities for working with graph data
+- FlatBuffers schema definitions for graphs, nodes, and attributes.
+- Data structures for deserializing serialized graphs.
+- Utilities for working with graph data.
 
-For adding new operations to the Data SDK (schemas, nodes, attributes), see :ref:`add-operation`.
+See :ref:`add-operation` for more information on adding new operations to the Data SDK (schemas, nodes, attributes).
 
 Plugin SDK (``plugin_sdk``)
 ---------------------------
 
 The Plugin SDK contains the plugin API and utilities needed to create a plugin that hipDNN can consume. It includes:
 
-- Plugin interface definitions
-- Base classes for engine implementation
-- Utilities for plugin development
+- Plugin interface definitions.
+- Base classes for engine implementation.
+- Utilities for plugin development.
 
 Test SDK (``test_sdk``)
 -----------------------
 
 The Test SDK provides utilities for testing plugins. It includes:
 
-- CPU reference implementations for validation (convolution, batchnorm, etc.)
-- Test utilities (tolerances, seeds, logging)
-- Mock objects for unit testing
-- FlatBuffer test utilities
+- CPU reference implementations for validation (convolution, batchnorm, etc.).
+- Test utilities (tolerances, seeds, logging).
+- Mock objects for unit testing.
+- FlatBuffer test utilities.
 
 Plugin API
 ==========
 
 The plugin API defines how kernel engine plugins interact with hipDNN:
 
-- **Graph Processing**: Topologically sorted graphs are passed in a serialized format to plugins using FlatBuffers
-- **Data SDK Objects**: Plugins use Data SDK objects to deserialize and process graphs
-- **Capability Reporting**: Plugins analyze graphs and report whether they can execute them
-- **Execution Interface**: Plugins provide execution methods for supported operations
+- **Graph Processing**: Topologically sorted graphs are passed in a serialized format to plugins using FlatBuffers.
+- **Data SDK Objects**: Plugins use Data SDK objects to deserialize and process graphs.
+- **Capability Reporting**: Plugins analyze graphs and report whether they can execute them.
+- **Execution Interface**: Plugins provide execution methods for supported operations.
 
 Engine IDs
 ==========
@@ -76,7 +76,7 @@ hipDNN uses a deterministic hash-based system for managing engine IDs. This syst
 
 Here's the workflow:
 
-1. **Engine Names**: Define human-readable string names for your engines (e.g., ``MIOPEN_PLUGIN``, ``MY_CUSTOM_ENGINE``).
+1. **Engine Names**: Define human-readable string names for your engines (for example, ``MIOPEN_PLUGIN``, ``MY_CUSTOM_ENGINE``).
 2. **Hash Function**: The ``hipdnn_plugin_sdk::engine_names::engineNameToId()`` function converts names to IDs using a FNV-1a hash algorithm.
 3. **Registration**: Engine names are registered in the Plugin SDK header for discoverability.
 
@@ -111,11 +111,11 @@ To add your engine name to the official registry:
 
 1. Choose a unique name.
    
-   - Use ``UPPER_CASE`` with underscores
+   - Use ``UPPER_CASE`` with underscores.
    - Make the name match the value.
 
 .. link in this sentence is missing in the repo
-2. Add it to the registry. Submit a PR to add your engine name to ``plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp`` 
+2. Add it to the registry. Submit a PR to add your engine name to ``plugin_sdk/include/hipdnn_plugin_sdk/EngineNames.hpp``:
    
    .. code:: cpp
 
@@ -126,10 +126,10 @@ To add your engine name to the official registry:
 Benefits
 --------
 
-- **Deterministic**: Same name always produces same ID
-- **No Collisions**: Hash algorithm minimizes collision risk
-- **Human-Readable**: Debug logs can show meaningful engine names
-- **Forward Compatible**: New engines can be used without registry updates
+- **Deterministic**: Same name always produces same ID.
+- **No Collisions**: Hash algorithm minimizes collision risk.
+- **Human-Readable**: Debug logs can show meaningful engine names.
+- **Forward Compatible**: New engines can be used without registry updates.
 
 .. tip::
 
@@ -172,35 +172,35 @@ Implementation details
 
 The **Engine Manager** is responsible for:
 
-- Creating and managing engine instances
-- Reporting supported operations
-- Handling resource allocation
-- Managing device-specific contexts
+- Creating and managing engine instances.
+- Reporting supported operations.
+- Handling resource allocation.
+- Managing device-specific contexts.
 
 For **Engine Implementations**:
 
-- Each engine must have a unique inter-plugin ``int64_t`` identifier
-- Implement the ``execute()`` method for graph execution
-- Provide ``get_supported_operations()`` to report capabilities
-- Handle operation-specific kernel launches
-- Manage memory transfers and synchronization
+- Each engine must have a unique inter-plugin ``int64_t`` identifier.
+- Implement the ``execute()`` method for graph execution.
+- Provide ``get_supported_operations()`` to report capabilities.
+- Handle operation-specific kernel launches.
+- Manage memory transfers and synchronization.
 
 **Execution plans** for kernel engines:
 
-- Map hipDNN operations to backend-specific kernel implementations
-- Define memory layouts and data transformations
-- Specify kernel launch configurations
-- Handle device-specific optimizations
+- Map hipDNN operations to backend-specific kernel implementations.
+- Define memory layouts and data transformations.
+- Specify kernel launch configurations.
+- Handle device-specific optimizations.
 
 In general, the best practices consist of:
 
-- Organizing kernels by operation type
-- Efficiently managing device memory allocations and transfers
-- Validating inputs and provide meaningful error messages and logs via the sdk
-- Properly managing compute streams for asynchronous execution
-- Profiling kernels and optimize for target hardware
-- Validating and documenting supported operations, hardware requirements, and limitations
-- Including unit tests and integration tests
+- Organizing kernels by operation type.
+- Efficiently managing device memory allocations and transfers.
+- Validating inputs and provide meaningful error messages and logs via the sdk.
+- Properly managing compute streams for asynchronous execution.
+- Profiling kernels and optimize for target hardware.
+- Validating and documenting supported operations, hardware requirements, and limitations.
+- Including unit tests and integration tests.
 
 Key files reference
 -------------------
@@ -237,10 +237,10 @@ Build configuration
 
 Your plugin's ``CMakeLists.txt`` should:
 
-- Build as a shared library
-- Link against hipDNN Data SDK and Plugin SDK
-- Set appropriate install paths
-- Link to required compute libraries (that is, HIP)
+- Build as a shared library.
+- Link against hipDNN Data SDK and Plugin SDK.
+- Set appropriate install paths.
+- Link to required compute libraries (that is, HIP).
 
 Use hipDNN SDKs in external plugins
 -----------------------------------
@@ -249,14 +249,14 @@ When building an external plugin, the hipDNN Data SDK provides CMake variables t
 
 - Absolute path: (``HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR``):
   
-  - Hardcoded at CMake configure time
-  - This is intended for developer use *only*
+  - Hardcoded at CMake configure time.
+  - This is intended for developer use *only*.
 
 - Relative path (``HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR``):
   
-  - This is recommended for installations
-  - Automatically prepends the ``CMAKE_INSTALL_PREFIX`` of the consumer
-  - Remains correct when setting the prefix during the CMake install command
+  - This is recommended for installations.
+  - Automatically prepends the ``CMAKE_INSTALL_PREFIX`` of the consumer.
+  - Remains correct when setting the prefix during the CMake install command.
 
 .. code:: cmake
 
@@ -333,9 +333,9 @@ You can override the default plugin directory using the ``HIPDNN_PLUGIN_DIR`` en
 
 When ``HIPDNN_PLUGIN_DIR`` is set, hipDNN will *only* load plugins from the specified directory and supplementary custom paths, ignoring the default location. This allows complete control over which plugins are loaded, which is essential for:
 
-- Running tests with test-specific plugins
-- Development and debugging of new plugins
-- Isolating production plugins from test plugins
+- Running tests with test-specific plugins.
+- Development and debugging of new plugins.
+- Isolating production plugins from test plugins.
 
 Custom plugin paths
 -------------------
@@ -361,14 +361,14 @@ Path resolution
 
 Custom paths can be:
 
-- **Relative paths**: Resolved from the backend shared library location
-- **Absolute paths**: Used as specified
+- **Relative paths**: Resolved from the backend shared library location.
+- **Absolute paths**: Used as specified.
 
 Loading modes
 ~~~~~~~~~~~~~~
 
-``HIPDNN_PLUGIN_LOADING_ADDITIVE``: Adds new paths to the existing plugin search paths 
-``HIPDNN_PLUGIN_LOADING_ABSOLUTE``: Only loads from the specified paths 
+``HIPDNN_PLUGIN_LOADING_ADDITIVE``: Adds new paths to the existing plugin search paths. 
+``HIPDNN_PLUGIN_LOADING_ABSOLUTE``: Only loads from the specified paths. 
 
 Example usage
 ~~~~~~~~~~~~~
@@ -460,13 +460,13 @@ Unit tests
 Unit tests focus on the internal implementation of your plugin components:
 
 - **Location**: ``plugins/<plugin_name>/tests/``
-- **Purpose**: Test individual components in isolation (engines, utilities, kernel logic)
+- **Purpose**: Test individual components in isolation (engines, utilities, kernel logic).
 - **Requirements**:
 
-  - Must be fast-running
-  - GPU operations must be marked with the ``SKIP_IF_NO_DEVICE()`` macro
-  - Use mocking/stubbing for dependencies where appropriate
-  - Should work on both Windows and Linux
+  - Must be fast-running.
+  - GPU operations must be marked with the ``SKIP_IF_NO_DEVICE()`` macro.
+  - Use mocking/stubbing for dependencies where appropriate.
+  - Should work on both Windows and Linux.
 
 Integration tests
 -----------------
@@ -474,17 +474,18 @@ Integration tests
 Integration tests validate end-to-end functionality of your plugin:
 
 - **Location**: ``plugins/<plugin_name>/integration_tests/``
-- **Purpose**: Validate correctness of graph execution and accuracy of results
+- **Purpose**: Validate correctness of graph execution and accuracy of results.
 - **Requirements**:
 
-  - Test complete operation graphs
-  - Validate against reference implementations
-  - Test different data types, layouts, dimensions, and edge-cases for each
-  - Enable tests for all supported ASICs
-  - GPU typically required for meaningful validation
-  - Tests are divided into two categories described by the prefix argument passed to ``INSTANTIATE_TEST_SUITE_P``
-    - **Smoke** - These tests are designed to test features using the smallest possible shape and run quickly (combined smoke test run time must be under 5 mins)
-    - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
+  - Test complete operation graphs.
+  - Validate against reference implementations.
+  - Test different data types, layouts, dimensions, and edge-cases for each.
+  - Enable tests for all supported ASICs.
+  - GPU typically required for meaningful validation.
+  - Tests are divided into two categories described by the prefix argument passed to ``INSTANTIATE_TEST_SUITE_P``.
+
+    - **Smoke** - These tests are designed to test features using the smallest possible shape and run quickly (combined smoke test run time must be under 5 mins).
+    - **Full** - These tests can contain regression shapes, large shapes, or slow shapes.
 
 For a comprehensive example of an integration test, see `IntegrationGpuBatchnormForwardInference.cpp <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp>`_.
 
@@ -503,17 +504,17 @@ The MIOpen Provider Plugin is a complete example of a kernel engine plugin. It d
 
 At a high level, it:
 
-- Initializes and manages the GPU context using MIOpen handles
-- Translates hipDNN tensors into MIOpen tensor descriptors
-- Dispatches MIOpen kernels to execute operations
-- Coordinates streams and handles synchronization
+- Initializes and manages the GPU context using MIOpen handles.
+- Translates hipDNN tensors into MIOpen tensor descriptors.
+- Dispatches MIOpen kernels to execute operations.
+- Coordinates streams and handles synchronization.
 
 Structure
 ---------
 
-- `Main Plugin <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/MiopenLegacyPlugin.cpp>`_: Entry point and plugin registration
-- `Engine Manager <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/EngineManager.hpp>`_: Manages MIOpen engines
-- `MIOpen Engine <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/engines/MiopenEngine.cpp>`_: Implements graph execution using MIOpen kernels
+- `Main Plugin <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/MiopenLegacyPlugin.cpp>`_: Entry point and plugin registration.
+- `Engine Manager <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/EngineManager.hpp>`_: Manages MIOpen engines.
+- `MIOpen Engine <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/engines/MiopenEngine.cpp>`_: Implements graph execution using MIOpen kernels.
 
 Troubleshooting
 ===============
@@ -526,11 +527,11 @@ When a plugin fails to load or initialize, hipDNN logs an error and continues lo
 Plugin handle creation fails
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-If you see errors like "Failed to create handle for plugin 'PluginName'", this typically indicates:
+If you see errors like ``"Failed to create handle for plugin 'PluginName'"``, this typically indicates:
 
-- Missing dependencies that the plugin requires at runtime
-- GPU initialization failures (e.g., no compatible device found)
-- Plugin internal initialization errors
+- Missing dependencies that the plugin requires at runtime.
+- GPU initialization failures (e.g., no compatible device found).
+- Plugin internal initialization errors.
 
 **Solution**: Check that all plugin dependencies are satisfied and a compatible GPU device is available.
 
@@ -547,10 +548,10 @@ Symbol collisions between plugins
 When multiple plugins are loaded and one or more plugins don't properly hide their symbols, you may encounter:
 
 - Handle collision errors: ``"Plugin 'PluginName' returned a handle that collides with another plugin"``
-- Unexpected behavior where one plugin's functions are called instead of another's
-- Crashes or undefined behavior during plugin operations
+- Unexpected behavior where one plugin's functions are called instead of another plugin's functions.
+- Crashes or undefined behavior during plugin operations.
 
-This occurs because dynamically loaded shared libraries can inadvertently share symbols, causing one plugin's function to override another's.
+This occurs because dynamically loaded shared libraries can inadvertently share symbols, causing one plugin's function to override another plugin's function.
 
 Example error log
 ~~~~~~~~~~~~~~~~~

@@ -1,5 +1,5 @@
 .. meta::
-  :description: MIOpen Provider plugin architecture
+  :description: The MIOpen Provider plugin serves as the kernel provider. It employs a modular C++ architecture, largely decoupled from the API layer.
   :keywords: hipDNN, ROCm, API, 
 
 .. _miopen:
@@ -9,6 +9,8 @@ MIOpen Provider plugin architecture
 ***********************************
 
 The MIOpen Provider plugin serves as the kernel provider. It employs a modular C++ architecture, largely decoupled from the API layer.
+
+The plugin consists of these components:
 
 - Dependency injection container (``MiopenContainer``): This is the root object that manages the lifecycle and dependencies of all other components. It initializes the ``EngineManager`` and ensures that all necessary services are correctly injected.
 - Engine manager (``EngineManager``): The central registry for execution engines. It orchestrates the selection of the appropriate engine for a given operation graph by querying its registered engines.
@@ -25,6 +27,19 @@ The MIOpen Provider plugin serves as the kernel provider. It employs a modular C
 
 Operation support
 =================
+
+These are the supported datatypes:
+
+- **FP16**: Half-precision floating point (16-bit)
+- **BFP16**: Brain floating point (16-bit)
+- **FP32**: Single-precision floating point (32-bit)
+
+These are the supported layouts:
+
+- **NCHW**: Batch, Channels, Height, Width (2D, channel-first)
+- **NHWC**: Batch, Height, Width, Channels (2D, channel-last)
+- **NCDHW**: Batch, Channels, Depth, Height, Width (3D, channel-first)
+- **NDHWC**: Batch, Depth, Height, Width, Channels (3D, channel-last)
 
 This table lists all operations supported in hipDNN:
 
@@ -75,26 +90,8 @@ This table lists all operations supported in hipDNN:
 
 .. note::
 
-  - For annotations ¹ through ⁴, refer to :ref:`operations`
-  - For annotation ⁵, see :ref:`detailed` for more info.
-
-Legend
-------
-
-Datatypes
-~~~~~~~~~
-
-- **FP16**: Half-precision floating point (16-bit)
-- **BFP16**: Brain floating point (16-bit)
-- **FP32**: Single-precision floating point (32-bit)
-
-Layouts
-~~~~~~~
-
-- **NCHW**: Batch, Channels, Height, Width (2D, channel-first)
-- **NHWC**: Batch, Height, Width, Channels (2D, channel-last)
-- **NCDHW**: Batch, Channels, Depth, Height, Width (3D, channel-first)
-- **NDHWC**: Batch, Depth, Height, Width, Channels (3D, channel-last)
+  - For annotations ¹ through ⁴, refer to :ref:`operations`.
+  - For annotation ⁵, see :ref:`detailed` for more information.
 
 .. _detailed:
 

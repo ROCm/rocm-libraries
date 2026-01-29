@@ -1,5 +1,5 @@
 .. meta::
-  :description: hipDNN coding style and naming guidelines
+  :description: Follow these best practices for coding style and naming guidelines when using hipDNN.
   :keywords: hipDNN, ROCm, coding, naming
 
 .. _guidelines:
@@ -7,6 +7,8 @@
 ******************************************
 hipDNN coding style and naming guidelines
 ******************************************
+
+Follow these best practices for coding style and naming guidelines when using hipDNN.
 
 Naming summary
 ==============
@@ -329,7 +331,7 @@ A dedicated test naming enforcement tool is available to automatically validate 
 
 The tool is located at ``cmake/scripts/test_name_validator.py`` and is integrated into the build system.
 
-To run the validation manually:
+Use this command to run the validation manually:
 
 .. code:: bash
 
@@ -342,11 +344,11 @@ To run the validation manually:
 
 This tool:
 
-- Parses all test executables to extract test names
-- Validates ordering of keywords (Integration, Gpu, Feature, Layout, Datatype)
-- Checks for prohibited underscores in test suite names
-- Generates reports on non-compliant test names
-- Is integrated with CI to block merges with invalid test names
+- Parses all test executables to extract test names.
+- Validates ordering of keywords (Integration, Gpu, Feature, Layout, Datatype).
+- Checks for prohibited underscores in test suite names.
+- Generates reports on non-compliant test names.
+- Is integrated with CI to block merges with invalid test names.
 
 
 Adhering to these rules and utilizing the automated tooling maintains readability, consistency, and tooling friendliness across the codebase.

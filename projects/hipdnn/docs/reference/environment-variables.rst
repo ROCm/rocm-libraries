@@ -1,5 +1,5 @@
 .. meta::
-  :description: hipDNN environment variables
+  :description: Learn about the environment variables used by hipDNN for logging, plugins, tests, and more.
   :keywords: hipDNN, ROCm, environment, API, variables
 
 .. _variables:
@@ -7,6 +7,8 @@
 ****************************
 hipDNN environment variables
 ****************************
+
+Learn about the environment variables used by hipDNN for logging, plugins, tests, and more.
 
 Logging configuration
 =====================

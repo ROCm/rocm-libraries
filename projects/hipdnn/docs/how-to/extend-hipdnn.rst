@@ -1,5 +1,5 @@
 .. meta::
-  :description: Extend hipDNN functionality
+  :description: Extend hipDNN functionality with new functionality.
   :keywords: hipDNN, ROCm, API, how-to 
 
 .. _extend:
@@ -53,6 +53,7 @@ Plugins extend hipDNN to support new or additional implementations of kernel eng
 For comprehensive guidance on plugin development, including architecture details, implementation steps, and examples, see :ref:`develop-plugins`.
 
 .. _add-operation:
+
 Add a new operation
 ===================
 

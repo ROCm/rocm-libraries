@@ -39,44 +39,44 @@ The backend uses descriptors as opaque handles to manage different aspects of gr
 Operation Graph Descriptor (``HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR``)
 -------------------------------------------------------------------------
 
-- Represents the computational graph to be executed
-- Contains nodes, tensors, and their connections
-- Created from serialized Flatbuffer data
+- Represents the computational graph to be executed.
+- Contains nodes, tensors, and their connections.
+- Created from serialized Flatbuffer data.
 
 Engine Heuristic Descriptor (``HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR``)
 ----------------------------------------------------------------------
 
-- Manages the selection of appropriate engines for a graph
-- Queries plugins for applicable engines
-- Extensible plugin design to control engine selection
+- Manages the selection of appropriate engines for a graph.
+- Queries plugins for applicable engines.
+- Extensible plugin design to control engine selection.
 
 Engine Config Descriptor (``HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR``)
 ------------------------------------------------------------------
 
-- Represents a specific engine configuration
-- Contains engine ID and configuration parameters
-- Retrieved from heuristic results
+- Represents a specific engine configuration.
+- Contains engine ID and configuration parameters.
+- Retrieved from heuristic results.
 
 Engine Descriptor (``HIPDNN_BACKEND_ENGINE_DESCRIPTOR``)
 --------------------------------------------------------
 
-- Represents a backend engine
-- Contains engine ID, and a set of behavioral notes + configurable settings
-- Retrieved from engine config Descriptor
+- Represents a backend engine.
+- Contains engine ID, and a set of behavioral notes + configurable settings.
+- Retrieved from engine config Descriptor.
 
 Execution Plan Descriptor (``HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR``)
 ------------------------------------------------------------------------
 
-- Combines an engine configuration with a graph
-- Manages workspace requirements
-- Prepares for actual execution
+- Combines an engine configuration with a graph.
+- Manages workspace requirements.
+- Prepares for actual execution.
 
 Variant Pack Descriptor (``HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR``)
 --------------------------------------------------------------------
 
-- Contains runtime data for execution
-- Maps tensor UIDs to device memory pointers
-- Includes workspace device memory pointer
+- Contains runtime data for execution.
+- Maps tensor UIDs to device memory pointers.
+- Includes workspace device memory pointer.
 
 Memory management
 =================

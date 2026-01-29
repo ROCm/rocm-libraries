@@ -1,5 +1,5 @@
 .. meta::
-  :description: hipDNN high-level architecture
+  :description: hipDNN has a plugin-based architecture in order to allow contributors and users to extend hipDNN without modifying the core library. 
   :keywords: hipDNN, ROCm, API, 
 
 .. _architecture:
@@ -112,6 +112,7 @@ The Data SDK contains ``FlatBuffers`` schemas and data structures for graph repr
 - **Purpose**: Provides data structures and serialization for graphs, tensors, and configurations.
 - **Expected usage**: Consumed by the frontend, backend, and plugins for graph data handling.
 - **Core functionality**:
+
   - ``FlatBuffer`` schema definitions for graphs, nodes, and attributes.
   - Data structures for deserializing serialized graphs.
   - Logging utilities and type helpers (``half``, ``bfloat16``, etc.).
@@ -127,6 +128,7 @@ The Plugin SDK contains the plugin API and utilities for creating engine plugins
 - **Purpose**: Provides the interface and utilities for plugin development.
 - **Expected usage**: Consumed by plugin projects.
 - **Core functionality**:
+
   - Plugin API definitions (for example, ``hipdnnEnginePluginCreate`` and ``hipdnnEnginePluginExecuteOpGraph``).
   - Base classes for engine implementation.
   - Utilities for plugin development.
@@ -136,10 +138,11 @@ Test SDK (``test_sdk``)
 
 The Test SDK provides utilities for testing plugins.
 
-- **Dependencies**: :ref:`data` and :ref:`plugin-sdk`
+- **Dependencies**: :ref:`data` and :ref:`plugin-sdk`.
 - **Purpose**: Provides testing infrastructure for plugin validation.
 - **Expected usage**: Consumed by plugin test suites.
 - **Core functionality**:
+
   - CPU reference implementations for validation (convolution, batchnorm, etc.).
   - Test utilities (tolerances, seeds, logging).
   - Mock objects for unit testing.
@@ -199,6 +202,7 @@ Static kernel engines
 - Only handles specific configurations.
 - For example, the MIOpen Provider plugin.
 - **Advantages**:
+
   - Highly optimized for supported cases.
   - Predictable performance.
   - Lower compilation overhead.
@@ -210,11 +214,12 @@ Dynamic kernel engines
 - Broad support: Handles general graph patterns.
 - For example, future JIT-compilation plugins
 - **Advantages**:
+
   - Flexible operation fusion.
   - Support for novel graph patterns.
   - Adaptable to hardware capabilities.
 
-See Plugin Development for advanced information on developing and using plugins.
+See :ref:`develop-plugins` for information on developing and using plugins.
 
 .. _backend:
 

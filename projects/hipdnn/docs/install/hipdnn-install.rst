@@ -4,19 +4,22 @@
 
 .. _install:
 
-*******************
-hipDNN installation
-*******************
+****************************
+hipDNN installation on Linux
+****************************
 
 This guide shows you how to install hipDNN on Linux. Before you begin, ensure you've installed the required dependencies outlined in :ref:`prerequisites`. 
 
 Build hipDNN from TheROCK
 =========================
 
-You can install hipDNN and all the dependencies from `TheROCK <https://github.com/ROCm/TheRock/blob/main/RELEASES.md>`_
+You can install hipDNN and all the dependencies from `TheROCK <https://github.com/ROCm/TheRock/blob/main/RELEASES.md>`_. 
+Follow the installation instructions for the latest release to install hipDNN and other ROCm release artifacts.
 
 Build and install hipDNN from source
 ====================================
+
+Alternatively, you can build hipDNN from the GitHub repository instead:
 
 1. Clone the rocm-libraries repository with ``git sparse-checkout``:
 
@@ -42,7 +45,7 @@ Build and install hipDNN from source
       # Note that some tests may take several minutes to complete
       ninja check
 
-   Refer to the :ref:`target` section below for info on additional build targets.
+   Refer to the :ref:`target` section below for information on additional build targets.
 
 3. Install hipDNN.
 
@@ -109,8 +112,8 @@ Build-specific components
 
 .. _rocm-path:
 
-``ROCM_PATH``, ``ROCM_CMAKE_PATH``, and ``CMAKE_INSTALL_PREFIX``
-----------------------------------------------------------------
+Configure CMake variables
+=========================
 
 If the ROCm ``bin`` folder is included in your system path, then the AMD toolchain should be detected automatically. 
 If not, these CMake variables can be used to assist CMake in the tool discovery.
@@ -180,23 +183,47 @@ Build targets
 
 All targets support parallel builds with ``ninja``.
 
-- ``\<no target\>``: Builds all components 
-- ``check`` or ``check-verbose``: Build and run all tests (see [Testing](./Testing.md))
-- ``unit-check`` or ``unit-check-verbose``: Build and run the unit tests exclusively and the API tests (minimal version of ``check``)
-- ``integration-check`` or ``integration-check-verbose``: Build and run the E2E integration tests exclusively (this is the bulk of the testing time)
-- ``install``: Install libraries and headers
-- ``format``: Auto-format all C++ source files
-- ``check_format``: Check code formatting compliance
-- ``coverage``: Run ``check`` and generate test coverage reports (requires ``-DHIPDNN_ENABLE_COVERAGE=ON``)
-- ``unit-coverage`` or ``integration-coverage``: Run ``unit-check`` or ``integration-check`` (respectively) and generate test coverage reports (requires ``-DHIPDNN_ENABLE_COVERAGE=ON``)
-- ``current-coverage``: Generate test coverage reports using coverage data already on disk (does not automatically run ``check``; requires ``-DHIPDNN_ENABLE_COVERAGE=ON``)
-- ``clean``: Clean build artifacts
-- ``validate_test_names``: Validates test names conform to naming rules
-- ``generate_hipdnn_data_sdk_headers``: Generate C++ headers from schema (``.fbs``) files
+.. list-table::
+   :widths: 3 5
+   :header-rows: 1
 
-These example build commands are equivalent (depending on which generator was used) and will build the ``check`` target, to build and run all tests.
+   * - Target
+     - Description
+   * - ``\<no target\>``
+     - Builds all components 
+   * - ``check`` / ``check-verbose``
+     - Build and run all tests (see `hipDNN testing <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/Testing.md>`_ for more information)
+   * - ``unit-check`` / ``unit-check-verbose``
+     - Build and run the unit tests exclusively and the API tests (minimal version of ``check``)
+   * - ``integration-check`` / ``integration-check-verbose``
+     - Build and run the E2E integration tests exclusively (this is the bulk of the testing time)
+   * - ``install``
+     - Install libraries and headers
+   * - ``format``
+     - Auto-format all C++ source files
+   * - ``check_format``
+     - Check code formatting compliance
+   * - ``coverage``
+     - Run ``check`` and generate test coverage reports (requires ``-DHIPDNN_ENABLE_COVERAGE=ON``)
+   * - ``\<no target\>``
+     - Builds all components 
+   * - ``unit-coverage`` / ``integration-coverage``
+     - Run ``unit-check`` or ``integration-check`` (respectively) and generate test coverage reports (requires ``-DHIPDNN_ENABLE_COVERAGE=ON``)
+   * - ``current-coverage``
+     - Generate test coverage reports using coverage data already on disk (does not automatically run ``check``; it requires ``-DHIPDNN_ENABLE_COVERAGE=ON``)
+   * - ``clean``
+     - Clean build artifacts
+   * - ``validate_test_names``
+     - Validates test names conform to naming rules
+   * - ``generate_hipdnn_data_sdk_headers``
+     - Generate C++ headers from schema (``.fbs``) files
 
-Using ``cmake`` to invoke build (regardless of which generator was used):
+Build commands
+--------------
+
+These example build commands are equivalent (depending on which generator was used) and will build the ``check`` target to build and run all tests.
+
+Use ``cmake`` to invoke build (regardless of which generator was used):
 
 .. code:: bash
 
@@ -220,22 +247,27 @@ Troubleshooting
 Common build issues
 -------------------
 
-- **Out of memory during build**
-   
+Out of memory during build
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Run this code to resolve this issue:
+
+.. code:: bash
+
+   # Reduce parallel jobs
+   ninja -j4  # or even -j2 for systems with limited RAM
+
+Docker GPU access issues
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Ensure ROCm is installed on the host system.
+- Verify the GPU is visible using ``rocm-smi`` or ``rocminfo``.
+- Ensure the user is in ``video`` and ``render`` groups:
+ 
   .. code:: bash
 
-    # Reduce parallel jobs
-    ninja -j4  # or even -j2 for systems with limited RAM
-
-- **Docker GPU access issues**
-   - Ensure ROCm is installed on the host system
-   - Verify the GPU is visible: ``rocm-smi`` or ``rocminfo``
-   - Ensure the user is in ``video`` and ``render`` groups:
-     
-     .. code:: bash
-
-      sudo usermod -a -G video,render $USER
-      # Log out and back in for changes to take effect
+    sudo usermod -a -G video,render $USER
+    # Log out and back in for changes to take effect
 
 Verify the installation
 =======================

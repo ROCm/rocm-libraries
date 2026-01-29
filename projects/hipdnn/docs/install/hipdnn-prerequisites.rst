@@ -8,14 +8,16 @@
 hipDNN prerequisites
 ********************
 
+Ensure your system has these requirements before installing hipDNN.
+
 System requirements
 ===================
 
 - An AMD GPU with ROCm support
-- **Operating System**:
+- Operating System:
 
-  - **Linux**: Any distribution supported by `TheRock <https://github.com/ROCm/TheRock>`_ (such as Ubuntu 24)
-  - **Windows**: Windows 11 (hipDNN has limited Windows support. See :ref:`windows` for more info)
+  - **Linux**: Any distribution supported by `TheRock <https://github.com/ROCm/TheRock>`_ (such as Ubuntu 24).
+  - **Windows**: Windows 11 (hipDNN has limited Windows support. See :ref:`windows` for more info).
 
 Dependencies
 ============
@@ -38,7 +40,7 @@ Required dependencies
      - Version
      - Description
    * - ROCm
-     - Matching TheRock (ROCm version 7.0 or later)
+     - Matching TheRock (ROCm version 7.0.0 or later)
      - AMD GPU programming stack (see `TheRock releases <https://github.com/ROCm/TheRock/releases>`_)
    * - CMake
      - 3.25.2 or later
@@ -53,13 +55,13 @@ Required dependencies
      - Matching TheRock
      - GPU programming interface (included with ROCm/TheRock)
    * - clang-format
-     - 18.x
+     - 18.X
      - Code formatting tool
    * - clang-tidy 
-     - 20.x
+     - 20.X
      - Static analysis tool
    * - LLVM Tools 
-     - 20.x
+     - 20.X
      - LLVM tools for code_coverage, and ASAN enabled builds
 
 Optional dependencies
@@ -74,7 +76,7 @@ Optional dependencies
      - Description
    * - Docker
      - Latest
-     - For containerized build environment
+     - For a containerized build environment
    * - Python3
      - Latest
      - For test name validation
@@ -82,8 +84,8 @@ Optional dependencies
 Third-party libraries
 ---------------------
 
-These libraries are automatically managed by CMake (see `Dependencies.cmake <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/cmake/Dependencies.cmake>`_):
+These libraries are automatically managed by CMake (see `Dependencies.cmake <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/cmake/Dependencies.cmake>`_ for more information):
 
-- `FlatBuffers <https://github.com/google/flatbuffers>`_: Serialization library
-- `Google Test <https://github.com/google/googletest>`_: Unit testing framework
-- `spdlog <https://github.com/gabime/spdlog>`_: Logging library
+- `FlatBuffers <https://github.com/google/flatbuffers>`_: The serialization library
+- `Google Test <https://github.com/google/googletest>`_: A unit testing framework
+- `spdlog <https://github.com/gabime/spdlog>`_: The logging library

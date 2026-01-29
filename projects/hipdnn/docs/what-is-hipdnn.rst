@@ -1,5 +1,5 @@
 .. meta::
-   :description: hipDNN is a plugin-based deep learning library that provides graph-based operation support through various backend plugins 
+   :description: hipDNN is a plugin-based deep learning library that provides graph-based operation support through backend plugins 
    :keywords: hipDNN, ROCm, library, API
 
 .. _what-is:
@@ -13,7 +13,7 @@ It uses operation graphs as an intermediate representation to describe computati
 
 hipDNN allows developers to run deep learning workloads on AMD GPUs while maintaing compatibility with NVIDIA's cuDNN API.
 
-For advanced users, hipDNN also has a plugin-based architecture which allows you to extend hipDNN without modifying the core library.
+hipDNN has a plugin-based architecture which allows advanced users to extend hipDNN without modifying the core library.
 
 hipDNN and the ROCm ecosystem
 =============================

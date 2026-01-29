@@ -1,6 +1,6 @@
 .. meta::
-  :description: hipDNN install 
-  :keywords: Component, ROCm, install
+  :description: hipDNN installation on Windows 
+  :keywords: hipDNN, ROCm, install, Windows
 
 .. _windows:
 
@@ -22,30 +22,30 @@ hipDNN supports Windows 10 and Windows 11 (recommended).
 
 To do a standalone build of hipDNN, you will need to set up a number of prerequisites.
 The standalone build of hipDNN requires a subset of the full environment required for building TheRock. 
-Refer to `TheRock Windows Support <https://github.com/ROCm/TheRock/blob/main/docs/development/windows_support.md>`_ for a full Windows 11 build environment setup for TheRock (but do not perform a build of TheRock as this is generally not necessary for building hipDNN standalone).
 
-Installation steps
-==================
+Refer to `TheRock Windows Support <https://github.com/ROCm/TheRock/blob/main/docs/development/windows_support.md>`_ for a full Windows 11 build environment setup for TheRock (but do *not* perform a build of TheRock as this is generally not necessary for building hipDNN standalone).
+
+Install hipDNN
+==============
 
 Follow these steps to manually install hipDNN for your Windows system.
 
 .. tip:: 
    
-   Automated Setup Script (Optional)
    An automated PowerShell script is available to perform the steps outlined below. This script is provided as a convenience and may not work in all environments. 
    `Review the script <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/scripts/windows/windows_build_setup.ps1>`_ before running it to ensure it meets your needs.
 
 Install Chocolatey Package Manager
 ----------------------------------
 
-Use `Chocolatey <https://community.chocolatey.org/>`_ to streamline the environment setup. The Chocolatey client, ``choco`` is used in these instructions.
+Use `Chocolatey <https://community.chocolatey.org/>`_ to streamline the environment setup. The Chocolatey client, ``choco``, is used in these instructions.
 
 Install utilities
 -----------------
 
-These third-party tools are needed for building hipDNN:
+These third-party tools are required to build hipDNN:
 
-- Git (installed with both git and unix tools available on the windows PATH)
+- Git (installed with both git and unix tools available on the windows ``PATH``)
 - Visual Studio 2022 with C++ workload (easy way to get Windows libraries)
 - CMake 3.25.2+
 - Ninja
@@ -130,7 +130,7 @@ Restart your computer for the settings to take effect.
 Configure Git
 -------------
 
-With ``long-paths`` and symlinks enabled, enable symlink and ``long-path`` support in git:
+With ``long-paths`` and symlinks enabled, enable symlink and ``long-path`` support in Git:
 
 .. code:: bash
 
@@ -144,16 +144,16 @@ With ``long-paths`` and symlinks enabled, enable symlink and ``long-path`` suppo
 Install Clang Toolchain
 -----------------------
 
-Though TheRock toolchain is used to build hipDNN, utilities such as clang-format are currently provided by Clang.
+Though TheRock toolchain is used to build hipDNN, utilities such as clang-format are provided by Clang.
 
-Download and unzip a recent ``20.x.x`` version of the `Clang Toolchain <https://github.com/llvm/llvm-project/releases?q=20>`_.
+Download and unzip a recent ``20.X.X`` version of the `Clang Toolchain <https://github.com/llvm/llvm-project/releases?q=20>`_.
 
-Unzip it to a path with no spaces. For example, after being unzipped to ``C:\dist\clang`` the bin folder will be located at ``C:\dist\clang\bin``.
+Unzip it to a path with no spaces. For example, after being unzipped to ``C:\dist\clang``, the bin folder will be located at ``C:\dist\clang\bin``.
 
 Install ROCm SDK
 ----------------
 
-Run ``amdgpu-arch.exe`` from the Clang release you just downloaded to find the GPU architecture you're using, and record the result (it'll be something like ``gfx1103``).
+Run ``amdgpu-arch.exe`` from the Clang release you just downloaded to find the GPU architecture you're using, and then record the result (it'll be something like ``gfx1103``).
 
 For example:
 
@@ -172,7 +172,7 @@ Complete instructions and alternate methods for installing TheRock are available
 
 .. note::
 
-   If a nightly tarball is not available for your GFX Family, you  may be able to `build TheRock from source <https://github.com/ROCm/TheRock/tree/main#building-from-source>`_ or follow the [Roadmap for Support](https://github.com/ROCm/TheRock/blob/main/ROADMAP.md) for more details.
+   If a nightly tarball is not available for your GFX Family, you  may be able to `build TheRock from source <https://github.com/ROCm/TheRock/tree/main#building-from-source>`_ or follow the `hipDNN Roadmap <https://github.com/ROCm/TheRock/blob/main/ROADMAP.md>`_ for more details.
 
 Unzip the downloaded tarball to a path with no spaces. For example, after unzipped to ``C:\dist\therock`` the bin folder will be located at ``c:\dist\therock\bin``.
 
@@ -223,10 +223,10 @@ Here's an example CMake configuration command (including ``ROCM_CMAKE_PATH`` for
 
 .. note::
 
-   When generating the project, be sure to set ``GPU_TARGETS`` to your GPU as auto-detection isn't currently on Windows. For example, ``cmake -DGPU_TARGETS=gfx1103 ..`` (replacing `gfx1103` with your GPU).
+   When generating the project, be sure to set ``GPU_TARGETS`` to your GPU as auto-detection isn't currently on Windows. For example, ``cmake -DGPU_TARGETS=gfx1103 ..`` (replacing ``gfx1103`` with your GPU).
 
 
-Clone the repository and Build hipDNN
+Clone the repository and build hipDNN
 -------------------------------------
 
 1. Clone the rocm-libraries repository with ``git sparse-checkout``:
