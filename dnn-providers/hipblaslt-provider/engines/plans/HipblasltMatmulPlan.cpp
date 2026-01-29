@@ -69,13 +69,15 @@ MatmulParams::MatmulParams(
     const hipdnn_data_sdk::data_objects::MatmulAttributes& attributes,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap)
-    : _matrixLayoutA(hipblaslt_utils::findTensorAttributes(tensorMap, attributes.a_tensor_uid()))
-    , _matrixLayoutB(hipblaslt_utils::findTensorAttributes(tensorMap, attributes.b_tensor_uid()))
-    , _matrixLayoutC(hipblaslt_utils::findTensorAttributes(tensorMap, attributes.c_tensor_uid()))
 {
     const auto tA = hipblaslt_utils::findTensorAttributes(tensorMap, attributes.a_tensor_uid());
     const auto tB = hipblaslt_utils::findTensorAttributes(tensorMap, attributes.b_tensor_uid());
     const auto tC = hipblaslt_utils::findTensorAttributes(tensorMap, attributes.c_tensor_uid());
+
+    _matrixLayoutA = HipblasltMatrixLayout(tA);
+    _matrixLayoutB = HipblasltMatrixLayout(tB);
+    _matrixLayoutC = HipblasltMatrixLayout(tC);
+
     // Row-major BLAS trick: to compute C = A * B with row-major data,
     // we compute C^T = B^T * A^T with column-major BLAS.
     // So we swap the transpose operations: transA in desc = getTrans(B), transB in desc = getTrans(A)

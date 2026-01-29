@@ -12,6 +12,7 @@ namespace hipblaslt_plugin
 class HipblasltMatrixLayout
 {
 public:
+    HipblasltMatrixLayout() = default;
     HipblasltMatrixLayout(const hipdnn_plugin_sdk::TensorAttributesWrapper& tensor);
 
     HipblasltMatrixLayout(const HipblasltMatrixLayout&) = delete;
@@ -30,7 +31,7 @@ public:
     void setStridedBatchOffset(int64_t stride);
 
 private:
-    int64_t _uid;
+    int64_t _uid{0};
     hipblasLtMatrixLayout_t _matrix_layout{nullptr};
 };
 

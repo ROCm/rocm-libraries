@@ -42,6 +42,15 @@ TEST(TestHipblasltMatrixLayout, TensorDescriptorIsValid)
     EXPECT_NE(matLayout.matrixLayout(), nullptr);
 }
 
+TEST(TestHipblasltMatrixLayout, CanCreateAndDestroyDefaultMatrix)
+{
+    EXPECT_NO_THROW({
+        HipblasltMatrixLayout matLayout;
+        EXPECT_EQ(matLayout.uid(), 0);
+        EXPECT_EQ(matLayout.matrixLayout(), nullptr);
+    });
+}
+
 TEST(TestHipblasltMatrixLayout, TensorWithEmptyShape)
 {
     std::vector<int64_t> strides = {1};
