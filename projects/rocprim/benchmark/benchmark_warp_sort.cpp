@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -181,19 +181,26 @@ void run_benchmark(benchmark_utils::state&& state)
     HIP_CHECK(hipFree(d_output_value));
 }
 
-#define CREATE_SORT_BENCHMARK(K, BS, WS, IPT)                                                      \
-    executor.queue_fn(bench_naming::format_name("{lvl:warp,algo:sort,key_type:" #K ",value_type:"  \
-                                                + std::string(Traits<rocprim::empty_type>::name()) \
-                                                + ",ws:" #WS ",cfg:{bs:" #BS ",ipt:" #IPT "}}")    \
-                          .c_str(),                                                                \
-                      run_benchmark<K, BS, WS, IPT>);
+#define CREATE_SORT_BENCHMARK(K, BS, WS, IPT)                                            \
+    if(is_warp_size_supported(WS, hip_device))                                           \
+    {                                                                                    \
+        executor.queue_fn(                                                               \
+            bench_naming::format_name("{lvl:warp,algo:sort,key_type:" #K ",value_type:"  \
+                                      + std::string(Traits<rocprim::empty_type>::name()) \
+                                      + ",ws:" #WS ",cfg:{bs:" #BS ",ipt:" #IPT "}}")    \
+                .c_str(),                                                                \
+            run_benchmark<K, BS, WS, IPT>);                                              \
+    }
 
-#define CREATE_SORTBYKEY_BENCHMARK(K, V, BS, WS, IPT)                                        \
-    executor.queue_fn(bench_naming::format_name("{lvl:warp,algo:sort,key_type:" #K           \
-                                                ",value_type:" #V ",ws:" #WS ",cfg:{bs:" #BS \
-                                                ",ipt:" #IPT "}}")                           \
-                          .c_str(),                                                          \
-                      run_benchmark<K, BS, WS, IPT, V, true>);
+#define CREATE_SORTBYKEY_BENCHMARK(K, V, BS, WS, IPT)                                            \
+    if(is_warp_size_supported(WS, hip_device))                                                   \
+    {                                                                                            \
+        executor.queue_fn(bench_naming::format_name("{lvl:warp,algo:sort,key_type:" #K           \
+                                                    ",value_type:" #V ",ws:" #WS ",cfg:{bs:" #BS \
+                                                    ",ipt:" #IPT "}}")                           \
+                              .c_str(),                                                          \
+                          run_benchmark<K, BS, WS, IPT, V, true>);                               \
+    }
 
 // clang-format off
 #define BENCHMARK_TYPE(type)                \
@@ -233,6 +240,9 @@ int main(int argc, char* argv[])
     using custom_int2            = common::custom_type<int, int>;
     using custom_char_double     = common::custom_type<char, double>;
     using custom_longlong_double = common::custom_type<long long, double>;
+
+    int hip_device = 0;
+    HIP_CHECK(::rocprim::detail::get_device_from_stream(hipStreamDefault, hip_device));
 
     BENCHMARK_TYPE(int)
     BENCHMARK_TYPE(float)
