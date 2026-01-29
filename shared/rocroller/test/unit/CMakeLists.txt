@@ -84,6 +84,7 @@ target_sources(rocroller-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/HalfPrecisionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphTest/ConstantPropagation.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphTest/Simplify.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphTest/UpdateParameters.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelIndexTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelOptionsTest.cpp"
