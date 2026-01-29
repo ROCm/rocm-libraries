@@ -129,7 +129,7 @@ static std::string GetREFName(TestReference ref)
 
 /**
  * Number of runs that will be performed and analyzed when after test failure configuration is
- * miopenAfterTestFailureAnalyze
+ * AfterTestFailure::analyze
  */
 constexpr int number_of_runs_after_failure = 5;
 
@@ -280,7 +280,7 @@ private:
     }
 
     /**
-     * Struct to save error values for AFT == miopenAfterTestFailureAnalyze, and do analysis
+     * Struct to save error values for AFT == AfterTestFailure::analyze, and do analysis
      * of the values at the end
      */
     struct ErrorAnalysisInfo
@@ -288,7 +288,7 @@ private:
         int num_of_runs_failed = 0;
         std::unordered_map<std::string, std::array<double, number_of_runs_after_failure>> errors;
 
-        void analyze()
+        void Analyze()
         {
 
             std::cout << num_of_runs_failed << " out of " << number_of_runs_after_failure
@@ -352,7 +352,7 @@ protected:
      *
      * setREFData is called after every execution of the reference implementation, it is not
      * constexpr as the reference can be changed throughout the test execution (when ATF ==
-     * miopenAfterTestFailureMoveOn)
+     * AfterTestFailure::moveOn)
      *
      * setUUTData is called once at the start of the test, it is constexpr because the UUT is set at
      * the beginning and cannot be changed throughout the test texecution
