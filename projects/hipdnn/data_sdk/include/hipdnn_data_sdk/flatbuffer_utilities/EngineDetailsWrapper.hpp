@@ -155,6 +155,6 @@ private:
 // Backward compatibility aliases
 namespace hipdnn_plugin_sdk
 {
-using IEngineDetails       = hipdnn_data_sdk::flatbuffer_utilities::IEngineDetails;
+using IEngineDetails = hipdnn_data_sdk::flatbuffer_utilities::IEngineDetails;
 using EngineDetailsWrapper = hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper;
 } // namespace hipdnn_plugin_sdk

@@ -107,8 +107,8 @@ TEST(TestBatchnormTrainPlanBuilder, PlanConstruction)
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    auto graphWrap
-        = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
+                                                                         flatbufferGraph.size());
 
     BatchnormTrainPlanBuilder<DataType::FLOAT,
                               DataType::FLOAT,
@@ -136,8 +136,8 @@ TEST(TestBatchnormTrainPlanBuilder, IsApplicable)
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    auto graphWrap
-        = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
+                                                                         flatbufferGraph.size());
 
     BatchnormTrainPlanBuilder<DataType::FLOAT,
                               DataType::FLOAT,

@@ -33,10 +33,11 @@ public:
                 getTensorMap,
                 (),
                 (const, override));
-    MOCK_METHOD(const std::vector<std::unique_ptr<hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper>>&,
-                nodeWrappers,
-                (),
-                (const, override));
+    MOCK_METHOD(
+        const std::vector<std::unique_ptr<hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper>>&,
+        nodeWrappers,
+        (),
+        (const, override));
 
     ~MockGraph() override = default;
 };

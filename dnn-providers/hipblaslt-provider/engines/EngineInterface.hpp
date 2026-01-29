@@ -26,8 +26,9 @@ public:
                             hipdnnPluginConstData_t& detailsOut) const
         = 0;
 
-    virtual size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    virtual size_t
+        getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
+                         const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
 
     virtual void

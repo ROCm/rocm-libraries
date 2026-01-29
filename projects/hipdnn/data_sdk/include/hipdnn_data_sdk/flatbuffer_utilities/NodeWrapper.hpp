@@ -127,5 +127,5 @@ private:
 namespace hipdnn_plugin_sdk
 {
 using INodeWrapper = hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper;
-using NodeWrapper  = hipdnn_data_sdk::flatbuffer_utilities::NodeWrapper;
+using NodeWrapper = hipdnn_data_sdk::flatbuffer_utilities::NodeWrapper;
 } // namespace hipdnn_plugin_sdk

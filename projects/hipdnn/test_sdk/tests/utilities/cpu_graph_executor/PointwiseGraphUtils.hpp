@@ -100,8 +100,8 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 
     // Serialize graph and create tensor bundle
     auto serializedGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap
-        = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(), serializedGraph.size());
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(),
+                                                                         serializedGraph.size());
     auto nodeWrap = hipdnn_data_sdk::flatbuffer_utilities::NodeWrapper(&graphWrap.getNode(0));
 
     PointwiseUnaryTensorBundle tensorBundle(nodeWrap, graphWrap.getTensorMap(), seed);
@@ -205,8 +205,8 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 
     // Serialize graph and create tensor bundle
     auto serializedGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap
-        = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(), serializedGraph.size());
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(serializedGraph.data(),
+                                                                         serializedGraph.size());
     auto nodeWrap = hipdnn_data_sdk::flatbuffer_utilities::NodeWrapper(&graphWrap.getNode(0));
 
     PointwiseBinaryTensorBundle tensorBundle(nodeWrap, graphWrap.getTensorMap(), seed);

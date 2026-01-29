@@ -194,6 +194,6 @@ private:
 // Backward compatibility aliases
 namespace hipdnn_plugin_sdk
 {
-using IGraph       = hipdnn_data_sdk::flatbuffer_utilities::IGraph;
+using IGraph = hipdnn_data_sdk::flatbuffer_utilities::IGraph;
 using GraphWrapper = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper;
 } // namespace hipdnn_plugin_sdk

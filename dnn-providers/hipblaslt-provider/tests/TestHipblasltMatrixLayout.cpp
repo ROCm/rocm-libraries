@@ -13,7 +13,8 @@ using namespace hipblaslt_plugin;
 TEST(TestHipblasltMatrixLayout, CanCreateAndDestroy)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidMatmulGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     const auto& tensorMap = graph.getTensorMap();
     ASSERT_FALSE(tensorMap.empty());
@@ -31,7 +32,8 @@ TEST(TestHipblasltMatrixLayout, CanCreateAndDestroy)
 TEST(TestHipblasltMatrixLayout, TensorDescriptorIsValid)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidMatmulGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     const auto& tensorMap = graph.getTensorMap();
     ASSERT_FALSE(tensorMap.empty());
@@ -122,7 +124,8 @@ TEST(TestHipblasltMatrixLayout, TensorWithInvalidMatrixType)
 TEST(TestHipblasltMatrixLayout, SetBatchCount)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidMatmulGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     const auto& tensorMap = graph.getTensorMap();
     ASSERT_FALSE(tensorMap.empty());
@@ -138,7 +141,8 @@ TEST(TestHipblasltMatrixLayout, SetBatchCount)
 TEST(TestHipblasltMatrixLayout, setStridedBatchOffset)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidMatmulGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     const auto& tensorMap = graph.getTensorMap();
     ASSERT_FALSE(tensorMap.empty());

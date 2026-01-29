@@ -19,8 +19,8 @@ void EngineManager::addEngine(std::unique_ptr<IEngine> engine)
     _engines.emplace(engine->id(), std::move(engine));
 }
 
-std::vector<int64_t> EngineManager::getApplicableEngineIds(HipdnnEnginePluginHandle& handle,
-                                                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
+std::vector<int64_t> EngineManager::getApplicableEngineIds(
+    HipdnnEnginePluginHandle& handle, const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     std::vector<int64_t> applicable;
     for(const auto& engine : _engines)
@@ -43,9 +43,10 @@ void EngineManager::getEngineDetails(HipdnnEnginePluginHandle& handle,
     engine.getDetails(handle, engineDetailsOut);
 }
 
-size_t EngineManager::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                       int64_t engineId,
-                                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+size_t EngineManager::getWorkspaceSize(
+    const HipdnnEnginePluginHandle& handle,
+    int64_t engineId,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     auto& engine = getEngine(engineId);
     return engine.getWorkspaceSize(handle, opGraph);

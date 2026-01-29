@@ -67,8 +67,9 @@ void validateGraphConfiguration(const hipdnn_data_sdk::flatbuffer_utilities::IGr
 
 } // namespace
 
-bool HipblasltMatmulPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
-                                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+bool HipblasltMatmulPlanBuilder::isApplicable(
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     try
     {
@@ -97,8 +98,9 @@ bool HipblasltMatmulPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& ha
     }
 }
 
-size_t HipblasltMatmulPlanBuilder::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                                    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+size_t HipblasltMatmulPlanBuilder::getWorkspaceSize(
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     validateGraphConfiguration(opGraph);
 
