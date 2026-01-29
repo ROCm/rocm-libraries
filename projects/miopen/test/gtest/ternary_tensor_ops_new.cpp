@@ -103,10 +103,11 @@ struct TestCase
 };
 
 template <typename T,
-          miopenUnitUnderTest_t UUT    = miopenUnitNaiveGPU,
-          miopenTestReference_t REF    = miopenTestReferenceNaiveCPU,
-          miopenAfterTestFailure_t ATF = miopenAfterTestFailureMoveOn>
-struct TensorOpsCommonNew : public GTestBase<UUT, REF, ATF>, public testing::TestWithParam<TestCase>
+          test::adaptive::UnitUnderTest UUT    = test::adaptive::UnitUnderTest::naiveGPU,
+          test::adaptive::TestReference REF    = test::adaptive::TestReference::naiveCPU,
+          test::adaptive::AfterTestFailure ATF = test::adaptive::AfterTestFailure::moveOn>
+struct TensorOpsCommonNew : public test::adaptive::AdaptiveTest<UUT, REF, ATF>,
+                            public testing::TestWithParam<TestCase>
 {
 private:
     tensor<T> tensorA;
@@ -118,17 +119,17 @@ private:
 
     std::vector<T>& referenceData     = naiveCPUData;
     std::vector<T>& unitUnderTestData = naiveGPUData;
-    constexpr void setUUTData() override
+    constexpr void SetUUTData() override
     {
-        if(UUT == miopenUnitNaiveGPU)
+        if(UUT == test::adaptive::UnitUnderTest::naiveGPU)
         {
             unitUnderTestData = naiveGPUData;
         }
     }
 
-    void setREFData() override
+    void SetREFData() override
     {
-        if(this->currentREF == miopenTestReferenceNaiveCPU)
+        if(this->current_REF == test::adaptive::TestReference::naiveCPU)
         {
             referenceData = naiveCPUData;
         }
@@ -137,7 +138,7 @@ private:
 protected:
     static void SetUpTestSuite()
     {
-        if constexpr(!checkTestConfiguration(UUT, REF))
+        if constexpr(!CheckTestConfiguration(UUT, REF))
         {
             GTEST_SKIP() << "Test configuration is incorrect";
         }
@@ -182,8 +183,8 @@ protected:
         }
     }
 
-    miopenStatus_t runOptimizedGPU() override { return miopenStatusNotImplemented; }
-    miopenStatus_t runNaiveGPU() override
+    miopenStatus_t RunOptimizedGPU() override { return miopenStatusNotImplemented; }
+    miopenStatus_t RunNaiveGPU() override
     {
         const TestCase& testCase = GetParam();
 
@@ -212,8 +213,8 @@ protected:
         naiveGPUData = handle.Read<T>(c_dev, tensorC.data.size());
         return miopenStatusSuccess;
     }
-    miopenStatus_t runOptimizedCPU() override { return miopenStatusNotImplemented; }
-    miopenStatus_t runNaiveCPU() override
+    miopenStatus_t RunOptimizedCPU() override { return miopenStatusNotImplemented; }
+    miopenStatus_t RunNaiveCPU() override
     {
         const TestCase& testCase = GetParam();
 
@@ -269,7 +270,7 @@ protected:
         return r.data;
     }
 
-    std::pair<bool, std::unordered_map<std::string, double>> verify() override
+    std::pair<bool, std::unordered_map<std::string, double>> Verify() override
     {
         const TestCase& testCase = GetParam();
 
@@ -303,7 +304,7 @@ protected:
     };
 
 public:
-    void Run() { this->runTest(); }
+    void Run() { this->RunAdaptiveTest(); }
 };
 
 using GPU_TernaryTensorOpsNew_FP32 = TensorOpsCommonNew<float>;
@@ -339,6 +340,7 @@ void AddTestCases(std::vector<TestCase>& testCases,
     const auto& stride_c = stridesArr[0];
 
     for(bool packed : packedArr)
+    {
         for(const auto& offsets : offsetsArr)
         {
             std::vector<int64_t> final_offsets{0, 0, 0};
@@ -385,6 +387,7 @@ void AddTestCases(std::vector<TestCase>& testCases,
                 continue;
 
             for(const auto& alphabeta : alphabetaArr)
+            {
                 for(const auto& operation : operationArr)
                 {
                     TestCase& testCase = testCases.emplace_back();
@@ -399,7 +402,9 @@ void AddTestCases(std::vector<TestCase>& testCases,
                     testCase.stride_b      = stride_b;
                     testCase.stride_c      = stride_c;
                 }
+            }
         }
+    }
 }
 
 std::vector<TestCase> GenCases()
@@ -407,6 +412,7 @@ std::vector<TestCase> GenCases()
     std::vector<TestCase> testCases;
 
     for(const auto& tensorALens : tensorALensArr)
+    {
         for(const auto& tensorBLens : tensorBLensArr)
         {
             if(!checkTensorsCompatibility(tensorALens, tensorBLens))
@@ -416,7 +422,7 @@ std::vector<TestCase> GenCases()
 
             AddTestCases(testCases, tensorALens, tensorBLens);
         }
-
+    }
     return testCases;
 }
 

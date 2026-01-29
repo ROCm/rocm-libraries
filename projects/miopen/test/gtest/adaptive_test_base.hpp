@@ -32,95 +32,97 @@
 #include "miopen/miopen.h"
 #include "miopen/errors.hpp"
 
-/*! @enum miopenUnitUnderTest_t
+namespace test::adaptive {
+
+/*! @enum class UnitUnderTest
  * Enum values for selecting unit under test (UUT).
  * There is no option to choose Naive CPU implementation as UUT because that is 'the most trusted'
  * implementation that should verify result of other implementations.
  */
-typedef enum
+enum class UnitUnderTest
 {
-    miopenUnitOptimizedGPU = 0, /*!< Optimized GPU implementation as UUT. */
-    miopenUnitNaiveGPU     = 1, /*!< Naive GPU implementation as UUT. */
-    miopenUnitOptimizedCPU = 2, /*!< Optimized CPU implementation as UUT. */
-} miopenUnitUnderTest_t;
+    optimizedGPU = 0, /*!< Optimized GPU implementation as UUT. */
+    naiveGPU     = 1, /*!< Naive GPU implementation as UUT. */
+    optimizedCPU = 2, /*!< Optimized CPU implementation as UUT. */
+};
 
-/*! @enum miopenTestReference_t
+/*! @enum class TestReference
  * Enum values for selecting test reference (REF).
  * There is no option to choose Optimized GPU as test reference because that is 'the least trusted'
  * implementation and it can only be used as UUT.
  */
-typedef enum
+enum class TestReference
 {
-    miopenTestReferenceNaiveGPU     = 0, /*!< Naive GPU implementation as reference. */
-    miopenTestReferenceOptimizedCPU = 1, /*!< Optimized CPU implementation as reference. */
-    miopenTestReferenceNaiveCPU     = 2, /*!< Naive CPU implementation as reference. */
-} miopenTestReference_t;
+    naiveGPU     = 0, /*!< Naive GPU implementation as reference. */
+    optimizedCPU = 1, /*!< Optimized CPU implementation as reference. */
+    naiveCPU     = 2, /*!< Naive CPU implementation as reference. */
+};
 
-/*! @enum miopenAfterTestFailure_t
+/*! @enum class AfterTestFailure
  * Enum values for selecting an option on what to do after failure of the choosen configuration.
  * There are two options, do additional runs and provide more information about errors or move on to
  * the next, more trusted, implementations and try to verify with next reference.
  */
-typedef enum
+enum class AfterTestFailure
 {
-    miopenAfterTestFailureNone    = 0, /*!< Do not do anything on test failure. */
-    miopenAfterTestFailureAnalyze = 1, /*!< Analyze and provide more information. */
-    miopenAfterTestFailureMoveOn  = 2, /*!< Move on to the next, more trusted, reference. */
-} miopenAfterTestFailure_t;
+    none    = 0, /*!< Do not do anything on test failure. */
+    analyze = 1, /*!< Analyze and provide more information. */
+    moveOn  = 2, /*!< Move on to the next, more trusted, reference. */
+};
 
-constexpr bool isValidUUT(miopenUnitUnderTest_t uut)
+constexpr bool IsValidUUT(UnitUnderTest uut)
 {
-    return (uut >= miopenUnitOptimizedGPU && uut <= miopenUnitOptimizedCPU);
+    return (uut >= UnitUnderTest::optimizedGPU && uut <= UnitUnderTest::optimizedCPU);
 }
 
-constexpr bool isValidREF(miopenTestReference_t ref)
+constexpr bool IsValidREF(TestReference ref)
 {
-    return (ref >= miopenTestReferenceNaiveGPU && ref <= miopenTestReferenceNaiveCPU);
+    return (ref >= TestReference::naiveGPU && ref <= TestReference::naiveCPU);
 }
 
-constexpr bool checkReferenceChoice(miopenUnitUnderTest_t uut, miopenTestReference_t ref)
+constexpr bool CheckReferenceChoice(UnitUnderTest uut, TestReference ref)
 {
     switch(uut)
     {
-    case miopenUnitOptimizedGPU: return (ref >= miopenTestReferenceNaiveGPU);
-    case miopenUnitNaiveGPU: return (ref >= miopenTestReferenceOptimizedCPU);
-    case miopenUnitOptimizedCPU: return (ref == miopenTestReferenceNaiveCPU);
+    case UnitUnderTest::optimizedGPU: return (ref >= TestReference::naiveGPU);
+    case UnitUnderTest::naiveGPU: return (ref >= TestReference::optimizedCPU);
+    case UnitUnderTest::optimizedCPU: return (ref == TestReference::naiveCPU);
     default: return false;
     }
 }
 
-constexpr bool checkTestConfiguration(miopenUnitUnderTest_t uut, miopenTestReference_t ref)
+constexpr bool CheckTestConfiguration(UnitUnderTest uut, TestReference ref)
 {
-    return isValidUUT(uut) && isValidREF(ref) && checkReferenceChoice(uut, ref);
+    return IsValidUUT(uut) && IsValidREF(ref) && CheckReferenceChoice(uut, ref);
 }
 
-static miopenTestReference_t getNextREF(miopenTestReference_t ref)
+static TestReference GetNextREF(TestReference ref)
 {
-    if(!isValidREF(ref))
+    if(!IsValidREF(ref))
     {
         MIOPEN_THROW("Invalid reference parameter in getNextREF() call");
     }
 
     switch(ref)
     {
-    case miopenTestReferenceNaiveGPU: return miopenTestReferenceOptimizedCPU;
-    case miopenTestReferenceOptimizedCPU: return miopenTestReferenceNaiveCPU;
-    default: return miopenTestReferenceNaiveCPU;
+    case TestReference::naiveGPU: return TestReference::optimizedCPU;
+    case TestReference::optimizedCPU: return TestReference::naiveCPU;
+    default: return TestReference::naiveCPU;
     }
 }
 
-static std::string getREFName(miopenTestReference_t ref)
+static std::string GetREFName(TestReference ref)
 {
-    if(!isValidREF(ref))
+    if(!IsValidREF(ref))
     {
         MIOPEN_THROW("Invalid reference parameter in getREFName() call");
     }
 
     switch(ref)
     {
-    case miopenTestReferenceNaiveGPU: return "naive GPU";
-    case miopenTestReferenceOptimizedCPU: return "optimized CPU";
-    case miopenTestReferenceNaiveCPU: return "naive CPU";
+    case TestReference::naiveGPU: return "naive GPU";
+    case TestReference::optimizedCPU: return "optimized CPU";
+    case TestReference::naiveCPU: return "naive CPU";
     default: return "Unknown";
     }
 }
@@ -129,7 +131,7 @@ static std::string getREFName(miopenTestReference_t ref)
  * Number of runs that will be performed and analyzed when after test failure configuration is
  * miopenAfterTestFailureAnalyze
  */
-constexpr int numberOfRunsAfterFailure = 5;
+constexpr int number_of_runs_after_failure = 5;
 
 /**
  * Base class for gtests, it provides interface to have different runs based on template parameters
@@ -139,40 +141,41 @@ constexpr int numberOfRunsAfterFailure = 5;
  * (TestReference)    REF - desired implementation that will be used as reference
  * (AfterTestFailure) ATF - option that determine what to do (if anything) after test failure
  */
-template <miopenUnitUnderTest_t UUT, miopenTestReference_t REF, miopenAfterTestFailure_t ATF>
-class GTestBase
+template <UnitUnderTest UUT, TestReference REF, AfterTestFailure ATF>
+class AdaptiveTest
 {
 private:
     /**
      * Run numberOfRunsAfterFailure times with selected configuration, do not change the reference,
      * after runs extract some statistical information
      */
-    void analyzeAfterTestFailure()
+    void AnalyzeAfterTestFailure()
     {
-        std::cout << "Test failed against " << getREFName(currentREF) << " reference." << std::endl
+        std::cout << "Test failed against " << GetREFName(current_REF) << " reference." << std::endl
                   << "Doing additional runs with selected configuration." << std::endl
                   << "Collecting more information." << std::endl;
 
-        for(int i{0}; i < numberOfRunsAfterFailure; i++)
+        for(int i{0}; i < number_of_runs_after_failure; i++)
         {
-            std::ignore                         = runUUT();
-            std::ignore                         = runREF();
-            std::tie(testPassed, failureErrors) = verify();
+            std::ignore                           = RunUUT();
+            std::ignore                           = RunREF();
+            std::tie(test_passed, failure_errors) = Verify();
 
-            if(!testPassed)
+            if(!test_passed)
             {
-                for(auto [key, value] : failureErrors)
+                for(auto [key, value] : failure_errors)
                 {
-                    if(!info.errors.contains(key))
+                    if(!info.errors.Contains(key))
                     {
-                        info.errors.insert({key, std::array<double, numberOfRunsAfterFailure>{}});
+                        info.errors.Insert(
+                            {key, std::array<double, number_of_runs_after_failure>{}});
                     }
-                    info.errors[key][info.numOfRunsFailed] = value;
+                    info.errors[key][info.num_of_runs_failed] = value;
                 }
-                info.numOfRunsFailed++;
+                info.num_of_runs_failed++;
             }
         }
-        info.analyze();
+        info.Analyze();
     }
 
     /**
@@ -180,10 +183,11 @@ private:
      * the process until verification succeeded or we've run with all of the 'more trusted'
      * references.
      */
-    void moveOnAfterTestFailure()
+    void MoveOnAfterTestFailure()
     {
-        std::cout << "Test failed against " << getREFName(currentREF) << " reference." << std::endl;
-        if(currentREF != miopenTestReferenceNaiveCPU)
+        std::cout << "Test failed against " << GetREFName(current_REF) << " reference."
+                  << std::endl;
+        if(current_REF != TestReference::naiveCPU)
         {
             std::cout << "Moving on to more trusted reference implementations." << std::endl;
         }
@@ -195,55 +199,55 @@ private:
         }
 
         /*
-        if(currentREF == miopenTestReferenceNaiveGPU)
+        if(currentREF == TestReference::naiveGPU)
         {
             // TODO: in future implementations, this will probably mean that all data is on GPU
             // therefore copy to cpu is needed.
         }
         */
 
-        while(currentREF != miopenTestReferenceNaiveCPU)
+        while(current_REF != TestReference::naiveCPU)
         {
-            currentREF = getNextREF(currentREF);
+            current_REF = GetNextREF(current_REF);
 
             // Do we need to re-run UUT?
-            auto ret = runREF();
+            auto ret = RunREF();
 
             if(ret == miopenStatusNotImplemented)
             {
                 continue;
             }
 
-            std::tie(testPassed, std::ignore) = verify();
+            std::tie(test_passed, std::ignore) = Verify();
 
-            if(testPassed)
+            if(test_passed)
             {
-                std::cout << "Test passed against " << getREFName(currentREF) << " reference."
+                std::cout << "Test passed against " << GetREFName(current_REF) << " reference."
                           << std::endl;
                 break;
             }
             else
             {
-                std::cout << "Test failed against " << getREFName(currentREF) << " reference."
+                std::cout << "Test failed against " << GetREFName(current_REF) << " reference."
                           << std::endl;
             }
         }
     }
 
-    miopenStatus_t runUUT()
+    miopenStatus_t RunUUT()
     {
         miopenStatus_t ret;
-        if constexpr(UUT == miopenUnitOptimizedGPU)
+        if constexpr(UUT == UnitUnderTest::optimizedGPU)
         {
-            ret = runOptimizedGPU();
+            ret = RunOptimizedGPU();
         }
-        else if constexpr(UUT == miopenUnitNaiveGPU)
+        else if constexpr(UUT == UnitUnderTest::naiveGPU)
         {
-            ret = runNaiveGPU();
+            ret = RunNaiveGPU();
         }
         else
         {
-            ret = runOptimizedCPU();
+            ret = RunOptimizedCPU();
         }
 
         if(ret == miopenStatusNotImplemented)
@@ -256,22 +260,22 @@ private:
         }
     }
 
-    miopenStatus_t runREF()
+    miopenStatus_t RunREF()
     {
         miopenStatus_t ret;
-        if(currentREF == miopenTestReferenceNaiveGPU)
+        if(current_REF == TestReference::naiveGPU)
         {
-            ret = runNaiveGPU();
+            ret = RunNaiveGPU();
         }
-        else if(currentREF == miopenTestReferenceOptimizedCPU)
+        else if(current_REF == TestReference::optimizedCPU)
         {
-            ret = runOptimizedCPU();
+            ret = RunOptimizedCPU();
         }
         else
         {
-            ret = runNaiveCPU();
+            ret = RunNaiveCPU();
         }
-        setREFData();
+        SetREFData();
         return ret;
     }
 
@@ -281,22 +285,22 @@ private:
      */
     struct ErrorAnalysisInfo
     {
-        int numOfRunsFailed = 0;
-        std::unordered_map<std::string, std::array<double, numberOfRunsAfterFailure>> errors;
+        int num_of_runs_failed = 0;
+        std::unordered_map<std::string, std::array<double, number_of_runs_after_failure>> errors;
 
         void analyze()
         {
 
-            std::cout << numOfRunsFailed << " out of " << numberOfRunsAfterFailure
+            std::cout << num_of_runs_failed << " out of " << number_of_runs_after_failure
                       << " runs have failed." << std::endl;
             for(auto [key, value] : errors)
             {
-                double meanError = std::reduce(value.begin(), value.begin() + numOfRunsFailed) /
-                                   static_cast<double>(numOfRunsFailed);
-                double maxError =
-                    *(std::max_element(value.begin(), value.begin() + numOfRunsFailed));
-                double minError =
-                    *(std::min_element(value.begin(), value.begin() + numOfRunsFailed));
+                double mean_error = std::reduce(value.begin(), value.begin() + num_of_runs_failed) /
+                                    static_cast<double>(num_of_runs_failed);
+                double max_error =
+                    *(std::max_element(value.begin(), value.begin() + num_of_runs_failed));
+                double min_error =
+                    *(std::min_element(value.begin(), value.begin() + num_of_runs_failed));
 
                 std::cout << key << ": " << std::endl;
                 std::cout << "\terrors [ ";
@@ -305,19 +309,19 @@ private:
                     std::cout << el << " ";
                 }
                 std::cout << "]" << std::endl;
-                std::cout << "\tmean error: " << std::to_string(meanError) << std::endl
-                          << "\tmax error:  " << std::to_string(maxError) << std::endl
-                          << "\tmin error:  " << std::to_string(minError) << std::endl;
+                std::cout << "\tmean error: " << std::to_string(mean_error) << std::endl
+                          << "\tmax error:  " << std::to_string(max_error) << std::endl
+                          << "\tmin error:  " << std::to_string(min_error) << std::endl;
             }
         }
     };
 
-    bool testPassed = true;
-    std::unordered_map<std::string, double> failureErrors;
+    bool test_passed = true;
+    std::unordered_map<std::string, double> failure_errors;
     ErrorAnalysisInfo info;
 
 protected:
-    miopenTestReference_t currentREF = REF;
+    TestReference current_REF = REF;
     /**
      * Invoking corresponding implementation. These should be able to be called several times
      * without invoking SetUp again.
@@ -326,10 +330,10 @@ protected:
      * miopenStatusNotImplemented - if corresponding implementation does not exists.
      * miopenStatusSuccess        - if correspongin implementation exists.
      */
-    virtual miopenStatus_t runOptimizedGPU() = 0;
-    virtual miopenStatus_t runNaiveGPU()     = 0;
-    virtual miopenStatus_t runOptimizedCPU() = 0;
-    virtual miopenStatus_t runNaiveCPU()     = 0;
+    virtual miopenStatus_t RunOptimizedGPU() = 0;
+    virtual miopenStatus_t RunNaiveGPU()     = 0;
+    virtual miopenStatus_t RunOptimizedCPU() = 0;
+    virtual miopenStatus_t RunNaiveCPU()     = 0;
 
     /**
      * Use EXPECT_* instead of ASSERT_* in verifying function so that on failure execution can
@@ -340,7 +344,7 @@ protected:
      * second [unordered_map] map should contain small name of the value(s) that failed and error
      * value(s)
      */
-    virtual std::pair<bool, std::unordered_map<std::string, double>> verify() = 0;
+    virtual std::pair<bool, std::unordered_map<std::string, double>> Verify() = 0;
 
     /**
      * Since there is an option to choose between different implementations that will be UUT/REF, we
@@ -353,31 +357,31 @@ protected:
      * setUUTData is called once at the start of the test, it is constexpr because the UUT is set at
      * the beginning and cannot be changed throughout the test texecution
      */
-    virtual void setREFData()           = 0;
-    virtual void constexpr setUUTData() = 0;
+    virtual void SetREFData()           = 0;
+    virtual void constexpr SetUUTData() = 0;
 
-    void runTest()
+    void RunAdaptiveTest()
     {
-        setUUTData();
-        std::ignore = runUUT();
-        auto ret    = runREF();
+        SetUUTData();
+        std::ignore = RunUUT();
+        auto ret    = RunREF();
 
         if(ret == miopenStatusNotImplemented)
         {
             MIOPEN_THROW("Selected reference is not implemented.");
         }
 
-        std::tie(testPassed, failureErrors) = verify();
+        std::tie(test_passed, failure_errors) = Verify();
 
-        if(!testPassed && ATF != miopenAfterTestFailureNone)
+        if(!test_passed && ATF != AfterTestFailure::none)
         {
-            if constexpr(ATF == miopenAfterTestFailureAnalyze)
+            if constexpr(ATF == AfterTestFailure::analyze)
             {
-                analyzeAfterTestFailure();
+                AnalyzeAfterTestFailure();
             }
-            else if constexpr(ATF == miopenAfterTestFailureMoveOn)
+            else if constexpr(ATF == AfterTestFailure::moveOn)
             {
-                moveOnAfterTestFailure();
+                MoveOnAfterTestFailure();
             }
             else
             {
@@ -386,5 +390,7 @@ protected:
         }
     };
 
-    virtual ~GTestBase() {}
+    virtual ~AdaptiveTest() {}
 };
+
+} // namespace test::adaptive
