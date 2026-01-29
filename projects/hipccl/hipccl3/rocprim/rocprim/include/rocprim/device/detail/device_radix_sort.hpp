@@ -571,10 +571,12 @@ struct radix_sort_and_scatter_helper
             ::rocprim::syncthreads();
 
             // Update the digit offsets
+            // Note: exclusive_digit_prefix and digit_counts are arrays of size digits_per_thread (=1),
+            // so we must use index 0, not flat_id, to avoid out-of-bounds access.
             if(flat_id < radix_size)
             {
                 storage.digit_offsets[flat_id]
-                    += exclusive_digit_prefix[flat_id] + digit_counts[flat_id];
+                    += exclusive_digit_prefix[0] + digit_counts[0];
             }
         }
     }
