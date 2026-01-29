@@ -20,9 +20,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from rrtest import get_test_commands
 
 
@@ -38,9 +35,7 @@ class TestResult:
     success: bool
 
 
-def run_test_command(
-    command: List[str], cwd: Optional[Path] = None
-) -> TestResult:
+def run_test_command(command: List[str], cwd: Optional[Path] = None) -> TestResult:
     """
     Run a test command and capture timing and results.
 

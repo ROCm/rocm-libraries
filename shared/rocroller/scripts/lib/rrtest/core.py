@@ -4,12 +4,10 @@ Core functionality for rocRoller test management.
 
 import json
 import logging
-import re
 import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from fnmatch import fnmatch
 from pathlib import Path
 from typing import List, Optional, Set
 
