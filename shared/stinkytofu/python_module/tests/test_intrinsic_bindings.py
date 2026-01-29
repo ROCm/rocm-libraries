@@ -36,13 +36,19 @@ def test_intrinsics_loaded():
 
 def test_get_signatures():
     """Test getting intrinsic signatures."""
+    # ReluF32 has a simple 2-argument signature
     sig = st.get_intrinsic_signature('ReluF32')
-    assert sig == ['dest', 'src', 'temp']
+    assert sig == ['dest', 'src']
 
     info = st.get_intrinsic_info('ReluF32')
     assert info is not None
     assert 'signature' in info
     assert 'comment' in info
+
+    # ExpF32 has a temp register
+    exp_sig = st.get_intrinsic_signature('ExpF32')
+    assert exp_sig == ['dest', 'src', 'temp']
+
     print("\n? Signatures accessible")
 
 
@@ -50,14 +56,15 @@ def test_order_independent():
     """Test that argument order doesn't matter."""
     v0, v1, v2 = st.vgpr(0), st.vgpr(1), st.vgpr(2)
 
+    # Use ExpF32 which has dest, src, temp
     # Different orders - all should work
-    r1 = st.Intrinsic('ReluF32', dest=v0, src=v1, temp=v2)
-    r2 = st.Intrinsic('ReluF32', temp=v2, src=v1, dest=v0)
-    r3 = st.Intrinsic('ReluF32', src=v1, temp=v2, dest=v0)
+    r1 = st.Intrinsic('ExpF32', dest=v0, src=v1, temp=v2)
+    r2 = st.Intrinsic('ExpF32', temp=v2, src=v1, dest=v0)
+    r3 = st.Intrinsic('ExpF32', src=v1, temp=v2, dest=v0)
 
-    assert r1.function_name == 'ReluF32'
-    assert r2.function_name == 'ReluF32'
-    assert r3.function_name == 'ReluF32'
+    assert r1.function_name == 'ExpF32'
+    assert r2.function_name == 'ExpF32'
+    assert r3.function_name == 'ExpF32'
 
     print("\n? Order-independent arguments work!")
 
@@ -78,8 +85,9 @@ def test_missing_argument():
     """Test error handling for missing arguments."""
     v0, v1 = st.vgpr(0), st.vgpr(1)
 
+    # ExpF32 requires dest, src, temp - test with missing temp
     with pytest.raises(ValueError) as exc_info:
-        st.Intrinsic('ReluF32', dest=v0, src=v1)  # Missing 'temp'
+        st.Intrinsic('ExpF32', dest=v0, src=v1)  # Missing 'temp'
 
     assert "missing" in str(exc_info.value).lower()
     assert "temp" in str(exc_info.value)
@@ -90,8 +98,9 @@ def test_extra_argument():
     """Test error handling for extra arguments."""
     v0, v1, v2 = st.vgpr(0), st.vgpr(1), st.vgpr(2)
 
+    # ReluF32 only takes dest and src - test with extra temp
     with pytest.raises(ValueError) as exc_info:
-        st.Intrinsic('ReluF32', dest=v0, src=v1, temp=v2, extra=v0)
+        st.Intrinsic('ReluF32', dest=v0, src=v1, extra=v2)
 
     assert "unexpected" in str(exc_info.value).lower()
     print("\n? Extra argument validation works!")
@@ -115,10 +124,10 @@ def test_module_integration():
     v0, v1, v2 = st.vgpr(0), st.vgpr(1), st.vgpr(2)
 
     # Add regular instruction
-    module.add(st.VAddF32(dest=v0, src0=v1, src1=st.literal(1.0)))
+    module.add(st.VAddF32(dest=v0, src0=v1, src1=v2))
 
-    # Add intrinsic with reordered args
-    module.add(st.Intrinsic('ReluF32', temp=v2, dest=v0, src=v1))
+    # Add intrinsic with reordered args (using ReluF32 which only needs dest + src)
+    module.add(st.Intrinsic('ReluF32', src=v1, dest=v0))
 
     dump = module.dump()
     assert "VAddF32" in dump
