@@ -16,7 +16,7 @@
 #include <numeric>
 #endif
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 ConvFwdBiasActivParams::ConvFwdBiasActivParams(
@@ -120,7 +120,9 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
     : _params(std::move(params))
     , _benchmarkingEnabled(benchmarkingEnabled)
 {
-    (void)_benchmarkingEnabled;
+    // Set tuning policy based on benchmarking flag - RAII ensures restoration
+    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _benchmarkingEnabled);
+
     miopenFusionPlanDescriptor_t fusePlanDesc;
     THROW_ON_MIOPEN_FAILURE(miopenCreateFusionPlan(
         &fusePlanDesc, miopenVerticalFusion, _params.x().tensorDescriptor()));
@@ -159,9 +161,14 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
         THROW_ON_MIOPEN_FAILURE(miopenCompileFusionPlan(handle.miopenHandle, fusePlanDesc));
     }
 
-    if(getWsSize)
+    if(!getWsSize)
     {
+        return;
+    }
+
 #if WORKAROUND_LWPMIOPEN_1815
+    if(!compile)
+    {
         // MIOpen's fusion API does not calculate the workspace size correctly. To work around
         // this issue, the workspace size is calculated as the sum of the sizes of the input,
         // weight, and output tensors, each aligned to 256 bytes.
@@ -185,14 +192,22 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
 
         // Calculate the total workspace size as the sum of aligned sizes
         _workspaceSize = std::accumulate(sizes.begin(), sizes.end(), static_cast<size_t>(0));
-#else
+    }
+    else
+    {
         THROW_ON_MIOPEN_FAILURE(miopenFusionPlanGetWorkSpaceSize(
             handle.miopenHandle,
             fusePlanDesc,
             &_workspaceSize,
             static_cast<miopenConvFwdAlgorithm_t>(-1))); // Algo is not used in MIOpen
-#endif
     }
+#else
+    THROW_ON_MIOPEN_FAILURE(miopenFusionPlanGetWorkSpaceSize(
+        handle.miopenHandle,
+        fusePlanDesc,
+        &_workspaceSize,
+        static_cast<miopenConvFwdAlgorithm_t>(-1))); // Algo is not used in MIOpen
+#endif
 }
 
 size_t ConvFwdBiasActivPlan::getWorkspaceSize(
@@ -277,4 +292,4 @@ void ConvFwdBiasActivPlan::execute(const HipdnnEnginePluginHandle& handle,
                                                        workspaceSize));
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

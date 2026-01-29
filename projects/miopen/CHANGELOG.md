@@ -7,6 +7,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [BatchNorm] Added V3 batch normalization API with separate running statistics buffers (prevResultRunningMean/Variance and nextResultRunningMean/Variance)
 * [BatchNorm] New API entry-points `miopenBatchNormalizationForwardInferenceInvVariance` and
   `miopenBatchNormForwardInferenceActivationInvVariance` to support hipDNN.
+* [Conv] Enabled CK wrw and bwd solvers with split-k disabled in deterministic mode.
 * [Conv] Added initial Composable Kernel (CK) support for RDNA3.X and RDNA4
 
 ### Changed

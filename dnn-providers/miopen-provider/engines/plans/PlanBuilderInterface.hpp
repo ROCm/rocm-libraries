@@ -12,7 +12,7 @@
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class IPlanBuilder
