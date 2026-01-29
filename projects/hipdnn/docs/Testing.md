@@ -64,33 +64,81 @@ Standardized template for recording and tracking test results:
 | API | `tests/backend/` | Black box API tests |
 | Frontend Integration | `tests/frontend/` | Integration tests |
 
-### Multi-Datatype Testing with TYPED_TEST
+### Choosing Between TYPED_TEST and TEST_P
 
-When testing functionality that should work across multiple data types (float, half, bfloat16), use Google Test's `TYPED_TEST` to avoid code duplication:
-
-```cpp
-#include <gtest/gtest.h>
-#include <hip/hip_fp16.h>
-#include <hip/hip_bfloat16.h>
-
-template <typename T>
-class MyTypedTest : public ::testing::Test { };
-
-using TestTypes = ::testing::Types<float, __half, hip_bfloat16>;
-TYPED_TEST_SUITE(MyTypedTest, TestTypes);
-
-TYPED_TEST(MyTypedTest, TestSomething)
-{
-    // TypeParam is the current type (float, __half, or hip_bfloat16)
-    TypeParam value = static_cast<TypeParam>(1.0f);
-    // Test implementation runs for each type
-}
+```
+Need to test across multiple data types (float, half, bfloat16)?
+│
+├── NO → Use TEST() or TEST_F()
+│
+└── YES → Also need parameterized test cases?
+          │
+          ├── NO → Use TYPED_TEST
+          │        (Compile-time type safety, simple)
+          │
+          └── YES → Use TEST_P with multi-declarations
+                    (Handles both types AND parameters)
 ```
 
-**When to use TYPED_TEST:**
-- GPU kernel tests that should work for multiple precisions
-- Validation utilities that are type-agnostic
-- Any test logic that applies identically across float, half, and bfloat16
+**Key Principle:** Prefer `TEST_P` over `TYPED_TEST` when both type variation and parameterized cases are needed. `TYPED_TEST` and `TEST_P` don't mix well together.
+
+| Scenario | Approach |
+|----------|----------|
+| Single type, no params | `TEST()` / `TEST_F()` |
+| Single type, with params | `TEST_P()` |
+| Multi-type, no params | `TYPED_TEST` |
+| Multi-type, with params | `TEST_P` + multi-declarations |
+
+### Multi-Declaration Pattern (for types + parameters)
+
+When you need both type variation AND parameterized tests, use explicit type aliases with `TEST_P`:
+
+```cpp
+template <typename DataType>
+class ConvTest : public ::testing::TestWithParam<ConvTestCase> { };
+
+// Explicit type aliases - one per type
+using ConvTestFp32 = ConvTest<float>;
+using ConvTestFp16 = ConvTest<half>;
+using ConvTestBfp16 = ConvTest<hip_bfloat16>;
+
+// Separate TEST_P for each type
+TEST_P(ConvTestFp32, Correctness) { runTest(); }
+TEST_P(ConvTestFp16, Correctness) { runTest(); }
+TEST_P(ConvTestBfp16, Correctness) { runTest(); }
+
+// Separate instantiation for each type
+INSTANTIATE_TEST_SUITE_P(Smoke, ConvTestFp32, testing::ValuesIn(getCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke, ConvTestFp16, testing::ValuesIn(getCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke, ConvTestBfp16, testing::ValuesIn(getCases()));
+```
+
+**Why multi-declarations over macros?** Modern tooling makes boilerplate easy to handle, and avoiding macros makes tests easier to debug and understand.
+
+### Type Combinations with TypePair
+
+For testing type combinations (e.g., input type + compute type), define a struct to hold the types:
+
+```cpp
+template <typename T1, typename T2>
+struct TypePair
+{
+    using InputType = T1;
+    using ComputeType = T2;
+};
+
+using TypeCombinations = ::testing::Types<TypePair<float, float>,
+                                          TypePair<half, float>,
+                                          TypePair<hip_bfloat16, float>>;
+TYPED_TEST_SUITE(MyTypedTest, TypeCombinations);
+
+TYPED_TEST(MyTypedTest, Correctness)
+{
+    using InputType = typename TypeParam::InputType;
+    using ComputeType = typename TypeParam::ComputeType;
+    // Test implementation using InputType and ComputeType
+}
+```
 
 ### Testing Requirements
 
