@@ -555,8 +555,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenBatchNormActivBwdSpatial.cpp
         kernels/MIOpenBatchNormActivFwdTrainPerAct.cl
         kernels/MIOpenBatchNormActivFwdTrainSpatial.cl
-        kernels/MIOpenBatchNormFwdTrainSpatial.cl
-        kernels/MIOpenBatchNormFwdTrainSpatialHIP.cpp
+        kernels/MIOpenBatchNormFwdTrainSpatial.cpp
         kernels/MIOpenBatchNormFwdTrainPerAct.cl
         kernels/MIOpenBatchNormFwdInferSpatial.cl
         kernels/MIOpenBatchNormFwdInferSpatialHIP.cpp

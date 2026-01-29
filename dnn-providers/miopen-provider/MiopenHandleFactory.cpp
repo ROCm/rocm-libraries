@@ -9,7 +9,7 @@
 
 using namespace hipdnn_plugin_sdk;
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 void MiopenHandleFactory::createMiopenHandle(hipdnnEnginePluginHandle_t* handle)
@@ -48,4 +48,4 @@ void MiopenHandleFactory::destroyMiopenHandle(hipdnnEnginePluginHandle_t handle)
     }
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

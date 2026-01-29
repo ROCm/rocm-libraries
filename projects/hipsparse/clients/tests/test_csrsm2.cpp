@@ -35,4 +35,5 @@ TEST_ROUTINE(csrsm2,
              arg.diag_type,
              arg.fill_mode,
              arg.solve_policy,
-             arg.baseA);
+             arg.baseA,
+             arg.graph_test);
