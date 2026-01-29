@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "hipdnn_plugin_sdk/PluginApi.h"
-#include <MiopenLegacyPlugin.hpp>
+#include <MiopenPlugin.hpp>
 #include <array>
 #include <gtest/gtest.h>
 #include <iostream>
@@ -17,7 +17,7 @@ void testLoggingCallback(hipdnnSeverity_t severity, const char* msg)
     (void)msg;
 }
 
-class TestMiopenLegacyPluginApi : public ::testing::Test
+class TestMiopenPluginApi : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -28,43 +28,43 @@ protected:
 };
 } // namespace
 
-TEST_F(TestMiopenLegacyPluginApi, GetNameSuccess)
+TEST_F(TestMiopenPluginApi, GetNameSuccess)
 {
     const char* name = nullptr;
     EXPECT_EQ(hipdnnPluginGetNameImpl(&name), HIPDNN_PLUGIN_STATUS_SUCCESS);
-    EXPECT_STREQ(name, "miopen_provider_plugin");
+    EXPECT_STREQ(name, "miopen_plugin");
 }
 
-TEST_F(TestMiopenLegacyPluginApi, GetNameNullptr)
+TEST_F(TestMiopenPluginApi, GetNameNullptr)
 {
     EXPECT_EQ(hipdnnPluginGetNameImpl(nullptr), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
-TEST_F(TestMiopenLegacyPluginApi, GetVersionSuccess)
+TEST_F(TestMiopenPluginApi, GetVersionSuccess)
 {
     const char* version = nullptr;
     EXPECT_EQ(hipdnnPluginGetVersionImpl(&version), HIPDNN_PLUGIN_STATUS_SUCCESS);
     EXPECT_STREQ(version, "1.0.0");
 }
 
-TEST_F(TestMiopenLegacyPluginApi, GetVersionNullptr)
+TEST_F(TestMiopenPluginApi, GetVersionNullptr)
 {
     EXPECT_EQ(hipdnnPluginGetVersionImpl(nullptr), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
-TEST_F(TestMiopenLegacyPluginApi, GetTypeSuccess)
+TEST_F(TestMiopenPluginApi, GetTypeSuccess)
 {
     hipdnnPluginType_t type;
     EXPECT_EQ(hipdnnPluginGetTypeImpl(&type), HIPDNN_PLUGIN_STATUS_SUCCESS);
     EXPECT_EQ(type, HIPDNN_PLUGIN_TYPE_ENGINE);
 }
 
-TEST_F(TestMiopenLegacyPluginApi, GetTypeNullptr)
+TEST_F(TestMiopenPluginApi, GetTypeNullptr)
 {
     EXPECT_EQ(hipdnnPluginGetTypeImpl(nullptr), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
-TEST_F(TestMiopenLegacyPluginApi, GetLastErrorStringSuccess)
+TEST_F(TestMiopenPluginApi, GetLastErrorStringSuccess)
 {
     const char* errorStr = nullptr;
     hipdnnPluginGetLastErrorStringImpl(&errorStr);
@@ -72,7 +72,7 @@ TEST_F(TestMiopenLegacyPluginApi, GetLastErrorStringSuccess)
     EXPECT_GE(strlen(errorStr), 0u);
 }
 
-TEST_F(TestMiopenLegacyPluginApi, GetLastErrorStringNullptr)
+TEST_F(TestMiopenPluginApi, GetLastErrorStringNullptr)
 {
     EXPECT_NO_THROW(hipdnnPluginGetLastErrorStringImpl(nullptr));
 }

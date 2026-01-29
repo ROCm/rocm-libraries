@@ -9,7 +9,7 @@
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
-using namespace miopen_legacy_plugin;
+using namespace miopen_plugin;
 using namespace miopen_utils;
 
 TEST(TestMiopenUtils, FindDeviceBufferReturnsCorrectBuffer)
