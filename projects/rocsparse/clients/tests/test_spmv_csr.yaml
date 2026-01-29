@@ -73,7 +73,7 @@ Tests:
   M: [10, 500]
   N: [33, 842]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+transA: *all_rocsparse_operation
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
@@ -87,7 +87,7 @@ Tests:
   M: [0, 7111]
   N: [0, 4441]
   alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+transA: *all_rocsparse_operation
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
