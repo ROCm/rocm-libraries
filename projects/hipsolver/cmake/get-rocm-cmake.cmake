@@ -8,7 +8,7 @@ if(NOT ROCM_PATH)
   set(ROCM_PATH /opt/rocm)
 endif()
 
-find_package(ROCmCMakeBuildTools QUIET PATHS ${ROCM_PATH})
+find_package(ROCmCMakeBuildTools QUIET PATHS "${ROCM_PATH}")
 if(NOT ROCmCMakeBuildTools_FOUND)
   find_package(ROCM 0.7.3 CONFIG QUIET PATHS "${ROCM_PATH}") # deprecated fallback
   if(NOT ROCM_FOUND)
