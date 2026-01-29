@@ -208,7 +208,6 @@ BatchnormFwdTrainingPlan::BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& 
     : _trainingParams(std::move(trainingParams))
     , _benchmarkingEnabled(benchmarkingEnabled)
 {
-    (void)_benchmarkingEnabled;
 }
 
 size_t BatchnormFwdTrainingPlan::getWorkspaceSize(
@@ -223,6 +222,9 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
                                        uint32_t numDeviceBuffers,
                                        [[maybe_unused]] void* workspace) const
 {
+    // Set tuning policy based on benchmarking flag - RAII ensures restoration
+    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _benchmarkingEnabled);
+
     float alpha = 1.0f;
     float beta = 0.0f;
 
