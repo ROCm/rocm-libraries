@@ -329,7 +329,7 @@ TEST(TestGpuMiopenEnginePluginApi, GetEngineDetailsValid)
         &opGraph,
         &engineDetailsOut);
 
-    hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(engineDetailsOut.ptr,
+    hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(engineDetailsOut.ptr,
                                                           engineDetailsOut.size);
 
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);

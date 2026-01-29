@@ -23,7 +23,7 @@ namespace
 {
 
 bool isApplicableFwd(const HipdnnEnginePluginHandle& handle,
-                     const hipdnn_plugin_sdk::IGraph& opGraph)
+                     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
@@ -59,7 +59,7 @@ bool isApplicableFwd(const HipdnnEnginePluginHandle& handle,
 }
 
 bool isApplicableBwd(const HipdnnEnginePluginHandle& handle,
-                     const hipdnn_plugin_sdk::IGraph& opGraph)
+                     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
@@ -95,7 +95,7 @@ bool isApplicableBwd(const HipdnnEnginePluginHandle& handle,
 }
 
 bool isApplicableWrw(const HipdnnEnginePluginHandle& handle,
-                     const hipdnn_plugin_sdk::IGraph& opGraph)
+                     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
@@ -132,7 +132,7 @@ bool isApplicableWrw(const HipdnnEnginePluginHandle& handle,
 }
 
 size_t getWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
-                           const hipdnn_plugin_sdk::IGraph& opGraph)
+                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
@@ -149,7 +149,7 @@ size_t getWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
 }
 
 size_t getWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
-                           const hipdnn_plugin_sdk::IGraph& opGraph)
+                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
@@ -168,7 +168,7 @@ size_t getWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
 }
 
 size_t getWorkspaceSizeWrw(const HipdnnEnginePluginHandle& handle,
-                           const hipdnn_plugin_sdk::IGraph& opGraph)
+                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
@@ -187,7 +187,7 @@ size_t getWorkspaceSizeWrw(const HipdnnEnginePluginHandle& handle,
 }
 
 void buildPlanFwd(const HipdnnEnginePluginHandle& handle,
-                  const hipdnn_plugin_sdk::IGraph& opGraph,
+                  const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                   HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
@@ -199,7 +199,7 @@ void buildPlanFwd(const HipdnnEnginePluginHandle& handle,
 }
 
 void buildPlanBwd(const HipdnnEnginePluginHandle& handle,
-                  const hipdnn_plugin_sdk::IGraph& opGraph,
+                  const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                   HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
@@ -211,7 +211,7 @@ void buildPlanBwd(const HipdnnEnginePluginHandle& handle,
 }
 
 void buildPlanWrw(const HipdnnEnginePluginHandle& handle,
-                  const hipdnn_plugin_sdk::IGraph& opGraph,
+                  const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                   HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
@@ -225,7 +225,7 @@ void buildPlanWrw(const HipdnnEnginePluginHandle& handle,
 } // namespace
 
 bool MiopenConvPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
-                                         const hipdnn_plugin_sdk::IGraph& opGraph) const
+                                         const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     if(opGraph.nodeCount() != 1)
     {
@@ -268,7 +268,7 @@ bool MiopenConvPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
 }
 
 size_t MiopenConvPlanBuilder::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                               const hipdnn_plugin_sdk::IGraph& opGraph) const
+                                               const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     if(opGraph.nodeCount() != 1)
     {
@@ -297,7 +297,7 @@ size_t MiopenConvPlanBuilder::getWorkspaceSize(const HipdnnEnginePluginHandle& h
 }
 
 void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
-                                      const hipdnn_plugin_sdk::IGraph& opGraph,
+                                      const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                                       HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() != 1)

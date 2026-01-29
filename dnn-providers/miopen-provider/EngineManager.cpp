@@ -20,7 +20,7 @@ void EngineManager::addEngine(std::unique_ptr<IEngine> engine)
 }
 
 std::vector<int64_t> EngineManager::getApplicableEngineIds(HipdnnEnginePluginHandle& handle,
-                                                           const hipdnn_plugin_sdk::IGraph& opGraph)
+                                                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     std::vector<int64_t> applicable;
     for(const auto& engine : _engines)
@@ -34,7 +34,7 @@ std::vector<int64_t> EngineManager::getApplicableEngineIds(HipdnnEnginePluginHan
 }
 
 void EngineManager::getEngineDetails(HipdnnEnginePluginHandle& handle,
-                                     const hipdnn_plugin_sdk::IGraph& opGraph,
+                                     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                                      int64_t engineId,
                                      hipdnnPluginConstData_t& engineDetailsOut)
 {
@@ -45,7 +45,7 @@ void EngineManager::getEngineDetails(HipdnnEnginePluginHandle& handle,
 
 size_t EngineManager::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
                                        int64_t engineId,
-                                       const hipdnn_plugin_sdk::IGraph& opGraph) const
+                                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     auto& engine = getEngine(engineId);
     return engine.getWorkspaceSize(handle, opGraph);
@@ -53,8 +53,8 @@ size_t EngineManager::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
 
 void EngineManager::initializeExecutionContext(
     const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin_sdk::IGraph& opGraph,
-    const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     auto& engine = getEngine(engineConfig.engineId());
