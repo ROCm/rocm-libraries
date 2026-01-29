@@ -69,7 +69,7 @@ RUN pip3 install setuptools --upgrade && \
     pip3 install tox pyyaml msgpack joblib
 
 # Parameters related to building Tensile
-ARG tensile_fork=ROCmSoftwarePlatform
+ARG tensile_fork=ROCm
 ARG tensile_branch=develop
 ARG tensile_commit=HEAD
 

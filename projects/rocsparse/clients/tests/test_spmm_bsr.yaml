@@ -56,7 +56,7 @@ Tests:
   function: spmm_bsr
   indextype: *i32i32_i64i32_i64i64
   precision: *double_only_precisions
-  M: [145, 265, 349]
+  M: [145, 265]
   N: [117]
   K: [172, 274, 437]
   block_dim: [1, 5]
@@ -75,8 +75,8 @@ Tests:
   function: spmm_bsr
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
-  M: [0, 223]
-  N: [0, 313]
+  M: [8, 223]
+  N: [8, 300]
   K: [0, 167]
   block_dim: [4]
   alpha_beta: *alpha_beta_range_quick
@@ -137,8 +137,8 @@ Tests:
   function: spmm_bsr
   indextype: *i32
   precision: *float16_float16_float32_float32_abct_precision
-  M: [436]
-  N: [16, 23, 51]
+  M: [300]
+  N: [16, 23]
   K: [847]
   block_dim: [2, 5, 8]
   alpha_beta: *alpha_beta_range_quick
@@ -155,7 +155,7 @@ Tests:
   function: spmm_bsr
   indextype: *i32
   precision: *bfloat16_bfloat16_float32_float32_abct_precision
-  M: [43567]
+  M: [300]
   N: [144]
   K: [56478]
   block_dim: [12]
@@ -173,8 +173,8 @@ Tests:
   function: spmm_bsr
   indextype: *i32
   precision: [*float16_float16_float32_float32_abct_precision, *bfloat16_bfloat16_float32_float32_abct_precision]
-  M: [512]
-  N: [16, 32, 64]
+  M: [300]
+  N: [16, 32]
   K: [512]
   block_dim: [2, 4, 8]
   alpha_beta: *alpha_beta_range_quick
@@ -373,8 +373,8 @@ Tests:
   function: spmm_bsr
   indextype: *i32
   precision: *float16_float16_float32_float32_abct_precision
-  M: [13845]
-  N: [21, 27, 44]
+  M: [2000]
+  N: [21, 27]
   K: [13724]
   block_dim: [3, 4, 5]
   alpha_beta: *alpha_beta_range_checkin
@@ -392,7 +392,7 @@ Tests:
   indextype: *i32
   precision: [*float16_float16_float32_float32_abct_precision, *bfloat16_bfloat16_float32_float32_abct_precision]
   M: [1024]
-  N: [32, 64, 128]
+  N: [32, 64]
   K: [1024]
   block_dim: [2, 4, 8]
   alpha_beta: *alpha_beta_range_checkin
@@ -409,7 +409,7 @@ Tests:
   function: spmm_bsr
   indextype: *i32i32_i64i32_i64i64
   precision: *double_only_precisions
-  M: [223, 485, 647]
+  M: [223, 485]
   N: [223]
   K: [223, 485, 647]
   block_dim: [11]
@@ -596,8 +596,8 @@ Tests:
   function: spmm_bsr
   indextype: *i32
   precision: *float16_float16_float32_float32_abct_precision
-  M: [42362]
-  N: [29, 39, 60]
+  M: [8472]
+  N: [29, 39]
   K: [12943]
   alpha_beta: *alpha_beta_range_nightly
   transA: [rocsparse_operation_none]

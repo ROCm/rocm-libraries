@@ -527,7 +527,6 @@ namespace TensileLite
             {
                 auto vec         = split_nums<T>(str);
                 outValue[vec[0]] = vec[1];
-                // std::cout << "map: [" << vec[0] << "," << vec[1] << "]" << std::endl;
             }
 
             boost::any v(outValue);
