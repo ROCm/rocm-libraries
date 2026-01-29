@@ -39,7 +39,7 @@ bool checkDataTypes(const hipdnn_plugin_sdk::TensorAttributesWrapper& tA,
     return true;
 }
 
-void validateGraphConfiguration(const hipdnn_plugin_sdk::IGraph& opGraph)
+void validateGraphConfiguration(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     if(opGraph.nodeCount() != 1)
     {
@@ -68,7 +68,7 @@ void validateGraphConfiguration(const hipdnn_plugin_sdk::IGraph& opGraph)
 } // namespace
 
 bool HipblasltMatmulPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
-                                              const hipdnn_plugin_sdk::IGraph& opGraph) const
+                                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     try
     {
@@ -98,7 +98,7 @@ bool HipblasltMatmulPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& ha
 }
 
 size_t HipblasltMatmulPlanBuilder::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                                    const hipdnn_plugin_sdk::IGraph& opGraph) const
+                                                    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     validateGraphConfiguration(opGraph);
 
@@ -111,7 +111,7 @@ size_t HipblasltMatmulPlanBuilder::getWorkspaceSize(const HipdnnEnginePluginHand
 
 void HipblasltMatmulPlanBuilder::buildPlan(
     const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin_sdk::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     validateGraphConfiguration(opGraph);

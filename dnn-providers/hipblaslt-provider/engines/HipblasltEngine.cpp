@@ -19,7 +19,7 @@ int64_t HipblasltEngine::id() const
 }
 
 bool HipblasltEngine::isApplicable(HipdnnEnginePluginHandle& handle,
-                                   const hipdnn_plugin_sdk::IGraph& opGraph) const
+                                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     // This is wrong if we ever have more than 1 plan builder thats applicable.
     // If this is the case, we should split plan builders accross multiple engines.
@@ -47,7 +47,7 @@ void HipblasltEngine::getDetails(HipdnnEnginePluginHandle& handle,
 }
 
 size_t HipblasltEngine::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                         const hipdnn_plugin_sdk::IGraph& opGraph) const
+                                         const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     size_t workspaceSize = 0;
     for(const auto& planBuilder : _planBuilders)
@@ -62,7 +62,7 @@ size_t HipblasltEngine::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
 
 void HipblasltEngine::initializeExecutionContext(
     const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin_sdk::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     for(const auto& planBuilder : _planBuilders)
