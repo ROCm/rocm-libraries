@@ -291,9 +291,8 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
         const auto& activAttr = checkActivationNode(opGraph.getNodeWrapper(1), bnAttr);
         checkTensorVirtuality2Node(bnAttr, activAttr, opGraph.getTensorMap());
 
-        // Since MIOpen does not provide an API to validate batchnorm applicability, we perform the
-        // checks manually.
-        checkBatchnormFwdTrainingTensorConfigSupported(bnAttr, opGraph.getTensorMap());
+        checkBatchnormFwdTrainingActivationTensorConfigSupported(
+            bnAttr, activAttr, opGraph.getTensorMap());
         checkBatchnormFwdActivationModeSupported(activAttr);
 
         HIPDNN_LOG_INFO(

@@ -154,7 +154,7 @@ protected:
               nextRunningVarianceTensorAttr]
             = graphObj.batchnorm(xTensorAttr, scaleTensorAttr, biasTensorAttr, bnAttrs);
 
-        yBnTensorAttr->set_data_type(inputDataType);
+        yBnTensorAttr->set_data_type(intermediateDataType);
 
         // Add activation node with parameters from test case
         graph::PointwiseAttributes activAttrs;
