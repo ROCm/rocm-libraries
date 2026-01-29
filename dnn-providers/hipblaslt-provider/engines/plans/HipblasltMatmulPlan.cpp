@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <array>
+#include <limits>
 #include <numeric>
 #include <string>
 
@@ -163,7 +164,11 @@ const HipblasltMatmulDesc& MatmulParams::desc() const
 MatmulPlan::MatmulPlan(const HipdnnEnginePluginHandle& handle, MatmulParams&& params)
     : _params(std::move(params))
 {
-    size_t max_workspace_size = 0;
+    // hipBLASLt requests the max workspace size for the search algorithm
+    // so that it fits within the available memory size.
+    // So for better performance we set 128 MB here since
+    // it is enough to get the most performant solution from hipblaslt.
+    size_t max_workspace_size = 128 * 1024 * 1024; // 128MB
     hipblasLtMatmulPreference_t pref;
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulPreferenceCreate(&pref));
     THROW_ON_HIPBLASLT_FAILURE(
