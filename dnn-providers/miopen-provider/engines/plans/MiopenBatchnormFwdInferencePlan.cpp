@@ -88,7 +88,6 @@ BatchnormFwdInferencePlan::BatchnormFwdInferencePlan(BatchnormFwdInferenceParams
     : _inferenceParams(std::move(inferenceParams))
     , _benchmarkingEnabled(benchmarkingEnabled)
 {
-    (void)_benchmarkingEnabled;
 }
 
 size_t BatchnormFwdInferencePlan::getWorkspaceSize(
@@ -98,12 +97,14 @@ size_t BatchnormFwdInferencePlan::getWorkspaceSize(
     return 0;
 }
 
-void BatchnormFwdInferencePlan::execute(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    [[maybe_unused]] const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-    [[maybe_unused]] uint32_t numDeviceBuffers,
-    [[maybe_unused]] void* workspace) const
+void BatchnormFwdInferencePlan::execute(const HipdnnEnginePluginHandle& handle,
+                                        const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                        uint32_t numDeviceBuffers,
+                                        [[maybe_unused]] void* workspace) const
 {
+    // Set tuning policy based on benchmarking flag - RAII ensures restoration
+    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _benchmarkingEnabled);
+
     // Hardcoded values from bn_driver in miopen
     auto alpha = static_cast<float>(1);
     auto beta = static_cast<float>(0);
