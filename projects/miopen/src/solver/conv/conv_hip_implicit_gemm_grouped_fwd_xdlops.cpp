@@ -36,7 +36,7 @@
 #include <miopen/solver/ck_utility_common.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
-#if CK_EXPERIMENTAL_BUILDER
+#ifdef CK_EXPERIMENTAL_BUILDER
 #include <miopen/ck_builder/factories/grouped_conv_2d_fwd_multiple_abd.hpp>
 #endif
 #endif
