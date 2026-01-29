@@ -119,6 +119,7 @@ add_library(
     engines/plans/MiopenConvFwdPlan.cpp
     engines/plans/MiopenConvPlanBuilder.cpp
     engines/plans/MiopenConvWrwPlan.cpp
+    engines/plans/MiopenPlanCommon.cpp
     engines/plans/PlanBuilderInterface.cpp
     EngineManager.cpp
     MiopenActivationDescriptor.cpp

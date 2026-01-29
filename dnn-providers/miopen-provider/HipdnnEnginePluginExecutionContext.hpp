@@ -19,6 +19,13 @@
 struct HipdnnEnginePluginExecutionContext
 {
 public:
+    enum class DebugMode
+    {
+        NONE,                  // Debug mode disabled (default)
+        FORCE_MIN_WORKSPACE,   // Force selection of minimum workspace size solution
+        FORCE_MAX_WORKSPACE    // Force selection of maximum workspace size solution
+    };
+
     virtual ~HipdnnEnginePluginExecutionContext() = default;
 
     bool hasValidPlan() const
@@ -62,8 +69,19 @@ public:
         return _workspaceSizeLimit;
     }
 
+    void setDebugMode(DebugMode mode)
+    {
+        _debugMode = mode;
+    }
+
+    DebugMode debugMode() const
+    {
+        return _debugMode;
+    }
+
 private:
     std::unique_ptr<miopen_legacy_plugin::IPlan> _plan;
     bool _benchmarkingEnabled = false;
     std::optional<size_t> _workspaceSizeLimit;
+    DebugMode _debugMode = DebugMode::NONE;
 };

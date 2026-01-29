@@ -11,6 +11,7 @@
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvBwdPlan.hpp"
+#include "MiopenPlanCommon.hpp"
 #include "MiopenUtils.hpp"
 
 namespace miopen_legacy_plugin
@@ -89,42 +90,7 @@ ConvBwdPlan::ConvBwdPlan(const HipdnnEnginePluginHandle& handle,
     THROW_ON_MIOPEN_FAILURE(miopenSetProblemTensorDescriptor(
         problem, miopenTensorConvolutionY, _params.dy().tensorDescriptor()));
 
-    // Create find options
-    miopenFindOptions_t findOptions;
-    THROW_ON_MIOPEN_FAILURE(miopenCreateFindOptions(&findOptions));
-    hipdnn_data_sdk::utilities::ScopedResource findOptionsRes(
-        findOptions, [](miopenFindOptions_t fo) { std::ignore = miopenDestroyFindOptions(fo); });
-
-    // Set workspace limit if available
-    if(executionContext.workspaceSizeLimit().has_value())
-    {
-        THROW_ON_MIOPEN_FAILURE(miopenSetFindOptionWorkspaceLimit(
-            findOptions, executionContext.workspaceSizeLimit().value()));
-    }
-
-    size_t numSolutions;
-    miopenSolution_t solution = nullptr;
-    // Requesting only the best solution
-    THROW_ON_MIOPEN_FAILURE(
-        miopenFindSolutions(handle.miopenHandle, problem, findOptions, &solution, &numSolutions, 1));
-
-    if(solution != nullptr)
-    {
-        _solution = hipdnn_data_sdk::utilities::ScopedResource<miopenSolution_t>(
-            solution, [](miopenSolution_t s) {
-                auto status = miopenDestroySolution(s);
-                if(status != miopenStatusSuccess)
-                {
-                    HIPDNN_LOG_ERROR("miopenDestroySolution failed in ConvBwdPlan destructor");
-                }
-            });
-    }
-
-    if(numSolutions != 1)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "miopenFindSolutions returned no solutions");
-    }
+    _solution = find20Solution(handle.miopenHandle, problem, executionContext);
 
     THROW_ON_MIOPEN_FAILURE(miopenGetSolutionWorkspaceSize(_solution.get(), &_workspaceSize));
 }
