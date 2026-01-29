@@ -114,7 +114,7 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapUnary)
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
     auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
 
@@ -156,7 +156,7 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapBinary)
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
     auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
 

@@ -127,7 +127,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnary)
 
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         patient;
@@ -157,7 +157,7 @@ TEST(TestPointwisePlanBuilder, PlanConstructionBinary)
 
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         patient;
@@ -184,7 +184,7 @@ TEST(TestPointwisePlanBuilder, IsApplicableUnary)
 
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
@@ -216,7 +216,7 @@ TEST(TestPointwisePlanBuilder, IsApplicableBinary)
 
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
@@ -245,7 +245,7 @@ TEST(TestPointwisePlanBuilder, UnsupportedOperation)
 
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         planBuilder;
@@ -273,7 +273,7 @@ TEST(TestPointwisePlanBuilder, PlanBuilderThrowsIfSwishBetaValueSet)
 
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         planBuilder;
@@ -302,7 +302,7 @@ TEST(TestPointwisePlanBuilder, PlanBuilderThrowsIfEluAlphaValueSet)
 
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         planBuilder;
@@ -333,7 +333,7 @@ TEST(TestPointwisePlanBuilder, PlanBuilderThrowsIfSoftPlusBetaValueSet)
 
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         planBuilder;

@@ -206,7 +206,7 @@ TEST(TestBatchnormBwdSignatureKey, CreateFromNodeAndTensorMap)
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
     auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     BatchnormBwdSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
 

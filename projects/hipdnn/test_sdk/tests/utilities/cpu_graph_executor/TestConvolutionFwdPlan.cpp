@@ -97,7 +97,7 @@ TEST(TestConvolutionFwdPlanBuilder, PlanConstruction)
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
     auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     ConvolutionFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         patient;
@@ -123,7 +123,7 @@ TEST(TestConvolutionFwdPlanBuilder, IsApplicable)
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
     auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
     ConvolutionFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;

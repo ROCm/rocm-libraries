@@ -135,7 +135,7 @@ public:
             hipdnn_plugin_sdk::throwIfNull(executionContext);
 
             // Deserialize engineConfig to access knob settings
-            hipdnn_plugin_sdk::EngineConfigWrapper configWrapper(engineConfig->ptr,
+            hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(engineConfig->ptr,
                                                                  engineConfig->size);
 
             // Validate knob types
