@@ -11,7 +11,7 @@
 #include "MiopenBatchnormApplicabilityChecks.hpp"
 #include "MiopenUtils.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 // --- Type Configuration Helpers ---
@@ -660,4 +660,4 @@ void checkBatchnormBwdActivationModeSupported(
     checkBatchnormActivationModeSupported(activAttr, true);
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin
