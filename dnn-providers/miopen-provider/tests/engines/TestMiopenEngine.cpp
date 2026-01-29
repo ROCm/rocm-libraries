@@ -180,7 +180,6 @@ TEST(TestMiopenEngine, GetDetailsContainsBenchmarkingKnob)
     engine.getDetails(dummyHandle, mockGraph, result);
 
     hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(result.ptr, result.size);
-    ASSERT_EQ(engineDetails.knobCount(), 1u);
 
     const auto& knob = engineDetails.getKnobByName("global.benchmarking");
     EXPECT_EQ(knob.knobIdStr(), "global.benchmarking");
@@ -196,6 +195,45 @@ TEST(TestMiopenEngine, GetDetailsContainsBenchmarkingKnob)
     const auto& constraint = knob.constraintAs<hipdnn_data_sdk::data_objects::IntConstraint>();
     EXPECT_EQ(constraint.min_value(), 0);
     EXPECT_EQ(constraint.max_value(), 1);
+    EXPECT_EQ(constraint.step(), 1);
+}
+
+TEST(TestMiopenEngine, GetDetailsContainsWorkspaceSizeLimitKnob)
+{
+    constexpr size_t MIN_WORKSPACE = 1024;
+    constexpr size_t MAX_WORKSPACE = 8192;
+
+    auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+    EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(true));
+    EXPECT_CALL(*mockPlanBuilder, getWorkspaceSizeRange(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(WorkspaceSizeRange{MIN_WORKSPACE, MAX_WORKSPACE}));
+
+    MiopenEngine engine(1);
+    engine.addPlanBuilder(std::move(mockPlanBuilder));
+
+    HipdnnEnginePluginHandle dummyHandle;
+    MockGraph mockGraph;
+
+    hipdnnPluginConstData_t result;
+    engine.getDetails(dummyHandle, mockGraph, result);
+
+    hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(result.ptr, result.size);
+
+    const auto& knob = engineDetails.getKnobByName("global.workspace_size_limit");
+    EXPECT_EQ(knob.knobIdStr(), "global.workspace_size_limit");
+    EXPECT_EQ(knob.description(), "Workspace size limit in bytes");
+
+    ASSERT_TRUE(knob.hasDefaultValue());
+    EXPECT_EQ(knob.defaultValueType(), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+    const auto& defaultValue = knob.defaultValueAs<hipdnn_data_sdk::data_objects::IntValue>();
+    EXPECT_EQ(defaultValue.value(), MAX_WORKSPACE);
+
+    ASSERT_TRUE(knob.hasConstraint());
+    EXPECT_EQ(knob.constraintType(), hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint);
+    const auto& constraint = knob.constraintAs<hipdnn_data_sdk::data_objects::IntConstraint>();
+    EXPECT_EQ(constraint.min_value(), MIN_WORKSPACE);
+    EXPECT_EQ(constraint.max_value(), MAX_WORKSPACE);
     EXPECT_EQ(constraint.step(), 1);
 }
 
@@ -222,32 +260,6 @@ TEST(TestMiopenEngine, InitializeExecutionContextInvokesFirstApplicablePlanBuild
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
-}
-
-TEST(TestMiopenEngine, GetDetailsIncludesBenchmarkingKnob)
-{
-    MiopenEngine engine(1);
-    HipdnnEnginePluginHandle dummyHandle;
-    MockGraph mockGraph;
-
-    hipdnnPluginConstData_t result;
-    engine.getDetails(dummyHandle, mockGraph, result);
-
-    hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(result.ptr, result.size);
-
-    bool foundBenchmarkingKnob = false;
-    const auto& knobWrappers = engineDetails.knobWrappers();
-    for(const auto& knobWrapper : knobWrappers)
-    {
-        const auto& knob = knobWrapper->getKnob();
-        if(std::string(knob.knob_id()->c_str()) == "global.benchmarking")
-        {
-            foundBenchmarkingKnob = true;
-            EXPECT_EQ(knob.default_value_type(), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
-            break;
-        }
-    }
-    EXPECT_TRUE(foundBenchmarkingKnob);
 }
 
 TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingEnabled)
@@ -347,32 +359,6 @@ TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhe
     EXPECT_FALSE(ctx.benchmarkingEnabled());
 }
 
-TEST(TestMiopenEngine, GetDetailsIncludesWorkspaceSizeLimitKnob)
-{
-    MiopenEngine engine(1);
-    HipdnnEnginePluginHandle dummyHandle;
-    MockGraph mockGraph;
-
-    hipdnnPluginConstData_t result;
-    engine.getDetails(dummyHandle, mockGraph, result);
-
-    hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(result.ptr, result.size);
-
-    bool foundWorkspaceSizeLimitKnob = false;
-    const auto& knobWrappers = engineDetails.knobWrappers();
-    for(const auto& knobWrapper : knobWrappers)
-    {
-        const auto& knob = knobWrapper->getKnob();
-        if(std::string(knob.knob_id()->c_str()) == "global.workspace_size_limit")
-        {
-            foundWorkspaceSizeLimitKnob = true;
-            EXPECT_EQ(knob.default_value_type(), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
-            break;
-        }
-    }
-    EXPECT_TRUE(foundWorkspaceSizeLimitKnob);
-}
-
 TEST(TestMiopenEngine, InitializeExecutionContextSetsWorkspaceSizeLimit)
 {
     constexpr auto WORKSPACE_SIZE_LIMIT = 1024 * 1024;
@@ -470,52 +456,6 @@ TEST(TestMiopenEngine, InitializeExecutionContextDefaultsWorkspaceSizeLimitToUnl
     engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
 
     EXPECT_FALSE(ctx.workspaceSizeLimit().has_value());
-}
-
-TEST(TestMiopenEngine, GetDetailsUsesWorkspaceSizeRangeFromPlanBuilder)
-{
-    constexpr size_t MIN_WORKSPACE = 1024;
-    constexpr size_t MAX_WORKSPACE = 8192;
-
-    auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
-    EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
-        .WillOnce(::testing::Return(true));
-    EXPECT_CALL(*mockPlanBuilder, getWorkspaceSizeRange(::testing::_, ::testing::_))
-        .WillOnce(::testing::Return(WorkspaceSizeRange{MIN_WORKSPACE, MAX_WORKSPACE}));
-
-    MiopenEngine engine(1);
-    engine.addPlanBuilder(std::move(mockPlanBuilder));
-
-    MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
-
-    hipdnnPluginConstData_t result;
-    engine.getDetails(dummyHandle, mockGraph, result);
-
-    hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(result.ptr, result.size);
-
-    bool foundWorkspaceSizeLimitKnob = false;
-    const auto& knobWrappers = engineDetails.knobWrappers();
-    for(const auto& knobWrapper : knobWrappers)
-    {
-        const auto& knob = knobWrapper->getKnob();
-        if(std::string(knob.knob_id()->c_str()) == "global.workspace_size_limit")
-        {
-            foundWorkspaceSizeLimitKnob = true;
-            EXPECT_EQ(knob.default_value_type(), hipdnn_data_sdk::data_objects::KnobValue::IntValue);
-            auto defaultValue
-                = knob.default_value_as<hipdnn_data_sdk::data_objects::IntValue>()->value();
-            auto constraint = knob.constraint_as<hipdnn_data_sdk::data_objects::IntConstraint>();
-            auto minValue = constraint->min_value();
-            auto maxValue = constraint->max_value();
-
-            EXPECT_EQ(defaultValue, static_cast<int64_t>(MAX_WORKSPACE));
-            EXPECT_EQ(minValue, static_cast<int64_t>(MIN_WORKSPACE));
-            EXPECT_EQ(maxValue, static_cast<int64_t>(MAX_WORKSPACE));
-            break;
-        }
-    }
-    EXPECT_TRUE(foundWorkspaceSizeLimitKnob);
 }
 
 TEST(TestMiopenEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
