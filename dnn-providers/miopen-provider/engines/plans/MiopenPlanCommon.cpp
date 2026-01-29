@@ -95,9 +95,9 @@ auto find20SolutionByWorkspaceSize(
         THROW_ON_MIOPEN_FAILURE(miopenGetSolutionWorkspaceSize(scopedSolution.get(), &wsSize));
 
         if((debugMode == HipdnnEnginePluginExecutionContext::DebugMode::FORCE_MIN_WORKSPACE
-            && wsSize < selectedWorkspaceSize)
+            && wsSize <= selectedWorkspaceSize)
            || (debugMode == HipdnnEnginePluginExecutionContext::DebugMode::FORCE_MAX_WORKSPACE
-               && wsSize > selectedWorkspaceSize))
+               && wsSize >= selectedWorkspaceSize))
         {
             selectedSolution = &scopedSolution;
             selectedWorkspaceSize = wsSize;
