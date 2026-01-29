@@ -28,30 +28,318 @@
 #include <hip/hip_runtime.h>
 #include <gtest/gtest_common.hpp>
 
-template <typename T>
-class GPU_lstm_Test : public ::testing::Test
+struct verifier
 {
-protected:
+    int warmup_iter{0};
+    int time_iter{1};
+    int iteration{0};
+    double tolerance{80.0};
+    bool verbose{false};
+    bool time{false};
+    bool no_validate{false};
+    bool rethrow{false};
+
+    template <class V, class... Ts>
+    auto run_cpu(bool retry, bool& miss, V& v, Ts&&... xs) -> std::future<decltype(v.cpu(xs...))>
+    {
+        return cpu_async(v, xs...);
+    }
+
+    template <class CpuRange, class GpuRange, class Compare, class Report, class Fail>
+    bool compare_and_report(
+        const CpuRange& out_cpu, const GpuRange& out_gpu, Compare compare, Report report, Fail fail)
+    {
+        std::vector<double> error;
+        bool pass = compare(error, out_cpu, out_gpu);
+        return report(pass, error, out_cpu, out_gpu, fail);
+    }
+
+    template <class... CpuRanges, class... GpuRanges, class Compare, class Report, class Fail>
+    bool compare_and_report(const std::tuple<CpuRanges...>& out_cpu,
+                            const std::tuple<GpuRanges...>& out_gpu,
+                            Compare compare,
+                            Report report,
+                            Fail fail)
+    {
+        static_assert(sizeof...(CpuRanges) == sizeof...(GpuRanges), "CPU and GPU mismatch");
+        return miopen::sequence([&](auto... is) {
+            bool continue_ = true;
+            miopen::each_args(
+                [&](auto i) {
+                    // cppcheck-suppress knownConditionTrueFalse
+                    if(continue_)
+                    {
+                        continue_ = this->compare_and_report(
+                            std::get<i>(out_cpu), std::get<i>(out_gpu), compare, report, [&](int) {
+                                return fail(i);
+                            });
+                    }
+                },
+                is...);
+            return continue_;
+        })(std::integral_constant<std::size_t, sizeof...(CpuRanges)>{});
+    }
+
+    auto verify_reporter()
+    {
+        return [=](bool pass,
+                   std::vector<double> error,
+                   const auto& out_cpu,
+                   const auto& out_gpu,
+                   auto fail) {
+            if(not pass or verbose)
+            {
+                if(not error.empty() or not pass)
+                {
+                    if(not error.empty())
+                        std::cout << (pass ? "error: " : "FAILED: ") << error.front() << std::endl;
+                    else
+                        std::cout << "FAILED: " << std::endl;
+
+                    if(not verbose)
+                    {
+                        std::cout << "Iteration: " << iteration << std::endl;
+                        fail(-1);
+                    }
+                }
+
+                auto mxdiff = miopen::max_diff(out_cpu, out_gpu);
+                std::cout << "Max diff: " << mxdiff << std::endl;
+
+                if(miopen::range_zero(out_cpu))
+                    std::cout << "CPU data is all zeros" << std::endl;
+                if(miopen::range_zero(out_gpu))
+                    std::cout << "GPU data is all zeros" << std::endl;
+
+                auto idx = miopen::mismatch_idx(out_cpu, out_gpu, miopen::float_equal);
+                if(idx < miopen::range_distance(out_cpu))
+                {
+                    std::cout << "Mismatch at " << idx << ": " << out_cpu[idx]
+                              << " != " << out_gpu[idx] << std::endl;
+                }
+
+                auto cpu_nan_idx = find_idx(out_cpu, miopen::not_finite);
+                if(cpu_nan_idx >= 0)
+                {
+                    std::cout << "Non finite number found in CPU data at " << cpu_nan_idx << ": "
+                              << out_cpu[cpu_nan_idx] << std::endl;
+                }
+
+                auto gpu_nan_idx = find_idx(out_gpu, miopen::not_finite);
+                if(gpu_nan_idx >= 0)
+                {
+                    std::cout << "Non finite number found in GPU data at " << gpu_nan_idx << ": "
+                              << out_gpu[gpu_nan_idx] << std::endl;
+                }
+            }
+            else if(miopen::range_zero(out_cpu) and miopen::range_zero(out_gpu) and
+                    (miopen::range_distance(out_cpu) != 0))
+            {
+                std::cout << "Warning: Both CPU and GPU data is all zero" << std::endl;
+                fail(-1);
+            }
+            return true;
+        };
+    }
+
+    template <class F, class V, class... Ts>
+    auto verify_impl(F&& f, V&& v, Ts&&... xs)
+        -> decltype(std::make_pair(v.cpu(xs...), v.gpu(xs...)))
+    {
+        decltype(v.cpu(xs...)) cpu;
+        decltype(v.gpu(xs...)) gpu;
+
+        try
+        {
+            auto&& h = get_handle();
+            // Compute cpu
+            std::future<decltype(v.cpu(xs...))> cpuf;
+            bool cache_miss = true;
+            if(not no_validate)
+            {
+                cpuf = run_cpu(false, cache_miss, v, xs...);
+            }
+            // Compute gpu
+            if(time)
+            {
+                for(size_t i = 0; i < warmup_iter; ++i)
+                {
+                    v.gpu(xs...);
+                }
+
+                h.EnableProfiling();
+                h.ResetKernelTime();
+            }
+            gpu = v.gpu(xs...);
+            if(time)
+            {
+                float total_time = h.GetKernelTime();
+                for(size_t i = 1; i < time_iter; ++i)
+                {
+                    h.ResetKernelTime();
+                    v.gpu(xs...);
+                    total_time += h.GetKernelTime();
+                }
+                std::cout << "Kernel time: " << (total_time / time_iter) << " ms" << std::endl;
+                h.EnableProfiling(false);
+            }
+
+            // Validate
+            if(!no_validate)
+            {
+                cpu         = cpuf.get();
+                auto report = verify_reporter();
+                bool retry  = true;
+                if(not cache_miss)
+                {
+                    retry             = false;
+                    auto report_retry = [&](bool pass,
+                                            std::vector<double> error,
+                                            const auto& out_cpu,
+                                            const auto& out_gpu,
+                                            auto fail) {
+                        if(not pass)
+                        {
+                            retry = true;
+                            return false;
+                        }
+                        return report(pass, error, out_cpu, out_gpu, fail);
+                    };
+                    compare_and_report(
+                        cpu, gpu, f, report_retry, [&](int mode) { v.fail(mode, xs...); });
+                    // cppcheck-suppress knownConditionTrueFalse
+                    if(retry)
+                    {
+                        std::cout << "Warning: verify cache failed, rerunning CPU." << std::endl;
+                        cpu = run_cpu(retry, cache_miss, v, xs...).get();
+                    }
+                }
+                if(retry)
+                    compare_and_report(cpu, gpu, f, report, [&](int mode) { v.fail(mode, xs...); });
+            }
+
+            if(verbose or time)
+                v.fail(std::integral_constant<int, -1>{}, xs...);
+        }
+        catch(const std::exception& ex)
+        {
+            std::cout << "FAILED: " << ex.what() << std::endl;
+            v.fail(-1, xs...);
+            if(rethrow)
+                throw;
+        }
+        catch(...)
+        {
+            std::cout << "FAILED with unknown exception" << std::endl;
+            v.fail(-1, xs...);
+            if(rethrow)
+                throw;
+        }
+        if(no_validate)
+        {
+            return std::make_pair(gpu, gpu);
+        }
+        else
+        {
+            return std::make_pair(cpu, gpu);
+        }
+    }
+
+    template <class V, class... Ts>
+    auto verify(V&& v, Ts&&... xs) -> decltype(std::make_pair(v.cpu(xs...), v.gpu(xs...)))
+    {
+        return verify_impl(
+            [&](std::vector<double>& error, auto&& cpu, auto&& gpu) {
+                CHECK(miopen::range_distance(cpu) == miopen::range_distance(gpu));
+
+                using value_type = miopen::range_value<decltype(gpu)>;
+                double threshold = std::numeric_limits<value_type>::epsilon() * tolerance;
+                error            = {miopen::rms_range(cpu, gpu)};
+                return error.front() <= threshold;
+            },
+            v,
+            xs...);
+    }
+};
+
+auto GetTestCases()
+{
+    int batchSize{17};
+    int seqLength{2};
+    int inVecLen{17};
+    int hiddenSize{67};
+    int numLayers{1};
+    int useDropout{0};
+    int usePadding{0};
+    int inputMode{0};
+    int biasMode{0};
+    int dirMode{0};
+    int algoMode{0};
+    std::vector<int> batchSeq = generate_batchSeq(batchSize, seqLength)[0];
+
+    return std::make_tuple(batchSize,
+                           seqLength,
+                           inVecLen,
+                           hiddenSize,
+                           numLayers,
+                           useDropout,
+                           usePadding,
+                           inputMode,
+                           biasMode,
+                           dirMode,
+                           algoMode,
+                           batchSeq);
+}
+
+template <typename T>
+struct GPU_lstm_Test
+    : testing::TestWithParam<
+          std::tuple<int, int, int, int, int, int, int, int, int, int, int, std::vector<int>>>,
+      verifier
+{
+    int device_count{0};
+    miopenDataType_t dataType{miopenFloat};
+
     void SetUp() override
     {
-        //if(hipGetDeviceCount(&device_count) != hipSuccess)
-        //    device_count = 0;
+        if(hipGetDeviceCount(&device_count) != hipSuccess)
+            device_count = 0;
     }
 
     void Run()
     {
-        //std::vector<std::string> params = GetParam();
-        std::cout << "running MIOpenDriver...\n";
-
-        const double Data_scale = 0.001;
 #if(MIOPEN_BACKEND_OPENCL == 1)
 #if WORKAROUND_ISSUE_692 == 1
         std::cout << "Skip test for Issue #692: " << std::endl;
         exit(EXIT_SUCCESS); // NOLINT (concurrency-mt-unsafe)
 #endif
-        if(type == miopenHalf)
+        if(dataType == miopenHalf)
             exit(EXIT_SUCCESS); // NOLINT (concurrency-mt-unsafe)
 #endif
+
+        const double Data_scale = 0.001;
+        bool nohx{false};
+        bool nodhy{false};
+        bool nocx{false};
+        bool nodcy{false};
+        bool nohy{false};
+        bool nodhx{false};
+        bool nocy{false};
+        bool nodcx{false};
+        bool flatBatchFill{false};
+
+        auto [batchSize,
+              seqLength,
+              inVecLen,
+              hiddenSize,
+              numLayers,
+              useDropout,
+              usePadding,
+              inputMode,
+              biasMode,
+              dirMode,
+              algoMode,
+              batchSeq] = GetParam();
 
         if(batchSeq.empty() || 0 == batchSeq[0])
         {
@@ -137,7 +425,7 @@ protected:
                                       miopenLSTM,
                                       miopenRNNBiasMode_t(biasMode),
                                       miopenRNNAlgo_t(algoMode),
-                                      type);
+                                      dataType);
         }
         else
         {
@@ -149,7 +437,7 @@ protected:
                                    miopenLSTM,
                                    miopenRNNBiasMode_t(biasMode),
                                    miopenRNNAlgo_t(algoMode),
-                                   type); // defined in superclass testdriver
+                                   dataType);
         }
 
         if(usePadding)
@@ -187,9 +475,8 @@ protected:
         std::vector<int> inlens(2, 0);
         inlens.at(0)        = batchSeq.at(0);
         inlens.at(1)        = inVecReal;
-        auto firstInputDesc = miopen::TensorDescriptor(miopen::deref(rnnDesc).dataType, inlens);
-        miopenGetRNNParamsSize(
-            &handle, rnnDesc, &firstInputDesc, &wei_bytes, miopen::deref(rnnDesc).dataType);
+        auto firstInputDesc = miopen::TensorDescriptor(dataType, inlens);
+        miopenGetRNNParamsSize(&handle, rnnDesc, &firstInputDesc, &wei_bytes, dataType);
         auto wei_sz = int(wei_bytes / sizeof(T));
         std::vector<T> weights(wei_sz);
         for(std::size_t i = 0; i < wei_sz; i++)
@@ -197,7 +484,7 @@ protected:
             weights[i] = prng::gen_descreet_uniform_sign<T>(Data_scale, 100);
         }
 
-#if(MIO_LSTM_TEST_DEBUG > 0)
+#if(MIO_LSTM_TEST_DEBUG == 2)
         printf("inputMode: %d, biasMode: %d, dirMode: %d\n", inputMode, biasMode, dirMode);
         printf("hz: %d, batch_n: %d, seqLength: %d, inputLen: %d, numLayers: %d\n",
                hiddenSize,
@@ -249,8 +536,7 @@ protected:
 
         std::vector<miopen::TensorDescriptor> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
-        createTensorDescArray(
-            inputCPPDescs, inputDescs, batchSeq, inVecLen, miopen::deref(rnnDesc).dataType);
+        createTensorDescArray(inputCPPDescs, inputDescs, batchSeq, inVecLen, dataType);
         size_t reserveSpaceSize;
         miopenGetRNNTrainingReserveSize(
             &handle, rnnDesc, seqLength, inputDescs.data(), &reserveSpaceSize);
@@ -261,7 +547,7 @@ protected:
                               outputDescs,
                               batchSeq,
                               hiddenSize * ((dirMode != 0) ? 2 : 1),
-                              miopen::deref(rnnDesc).dataType);
+                              dataType);
 
         size_t out_sz = getSuperTensorSize(batchSeq,
                                            seqLength,
@@ -283,10 +569,9 @@ protected:
         size_t device_mem = handle.GetGlobalMemorySize();
         if(total_mem >= device_mem)
         {
-            show_command();
             std::cout << "Config requires " << total_mem
                       << " Bytes to write all necessary tensors to GPU. GPU has " << device_mem
-                      << " Bytes of memory." << std::endl;
+                      << " bytes of memory." << std::endl;
         }
 
         reserveSpaceSize = (reserveSpaceSize + sizeof(T) - 1) / sizeof(T);
@@ -334,7 +619,7 @@ protected:
             dyin[i] = prng::gen_descreet_unsigned<T>(Data_scale, 100);
         }
 
-#if(MIO_LSTM_TEST_DEBUG > 0)
+#if(MIO_LSTM_TEST_DEBUG == 2)
         printf("Running backward data LSTM.\n");
 #endif
         auto bwdDataOutputPair =
@@ -352,7 +637,7 @@ protected:
         // RETURNS:  std::make_tuple(dx, dhx, dcx, reserveSpace, workSpace);
         auto workSpaceBwdData = std::get<3>(bwdDataOutputPair.second);
 
-#if(MIO_LSTM_TEST_DEBUG > 0)
+#if(MIO_LSTM_TEST_DEBUG == 2)
         printf("Running backward weights LSTM.\n");
         printf("reserve sz: %zu, workSpace sz: %zu, weight sz: %d\n",
                rsvcpu.size(),
@@ -367,44 +652,17 @@ protected:
             dirMode,  inputMode,  inVecReal, hx_sz,   nohx,      bool(useDropout), usePadding});
 
     }
-
-    int device_count = 1;//0
-
-    int seqLength;
-    int inVecLen;
-    int hiddenSize;
-    int numLayers;
-    int inputMode;
-    int biasMode;
-    int dirMode;
-    int algoMode;
-    int batchSize;
-    int useDropout;
-    std::vector<int> batchSeq;
-
-    bool nohx          = false;
-    bool nodhy         = false;
-    bool nocx          = false;
-    bool nodcy         = false;
-    bool nohy          = false;
-    bool nodhx         = false;
-    bool nocy          = false;
-    bool nodcx         = false;
-    bool flatBatchFill = false;
-    bool usePadding    = false;
 };
 
 using GPU_lstm_FP32 = GPU_lstm_Test<float>;
 
-TEST_F(GPU_lstm_FP32, FloatTest_lstm)
+TEST_P(GPU_lstm_FP32, FloatTest_lstm)
 {
     if(device_count == 0)
     {
         GTEST_SKIP() << "No HIP devices available for testing";
     }
-
-    testing::internal::CaptureStderr();
     Run();
-    auto capture = testing::internal::GetCapturedStderr();
-    std::cout << capture;
 }
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_lstm_FP32, testing::Values(GetTestCases()));

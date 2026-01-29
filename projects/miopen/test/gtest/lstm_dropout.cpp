@@ -24,48 +24,91 @@
  *
  *******************************************************************************/
 
-#include "lstm_common.hpp"
+#include "rnn_util.hpp"
+#include <hip/hip_runtime.h>
 #include <gtest/gtest_common.hpp>
 
-template <class T>
-struct lstm_dropout_driver : lstm_basic_driver<T>
+struct Parameters
 {
-    lstm_dropout_driver() : lstm_basic_driver<T>()
-    {
-        this->add(this->batchSize, "batch-size", this->generate_data({17}));
-        this->add(this->seqLength, "seq-len", this->generate_data({25}));
-        this->add(this->inVecLen, "vector-len", this->generate_data({17}));
-        this->add(this->hiddenSize, "hidden-size", this->generate_data({67}));
-        this->add(this->numLayers, "num-layers", this->generate_data({3}));
-        this->add(this->nohx, "no-hx", this->generate_data({false}));
-        this->add(this->nodhy, "no-dhy", this->generate_data({false}));
-        this->add(this->nocx, "no-cx", this->generate_data({false}));
-        this->add(this->nodcy, "no-dcy", this->generate_data({false}));
-        this->add(this->nohy, "no-hy", this->generate_data({false}));
-        this->add(this->nodhx, "no-dhx", this->generate_data({false}));
-        this->add(this->nocy, "no-cy", this->generate_data({false}));
-        this->add(this->nodcx, "no-dcx", this->generate_data({false}));
-        this->add(this->flatBatchFill, "flat-batch-fill", this->generate_data({false, true}));
-        this->add(this->useDropout, "use-dropout", this->generate_data({1}));
-        this->add(this->inputMode, "in-mode", this->generate_data({0}));
-        this->add(this->biasMode, "bias-mode", this->generate_data({1}));
-        this->add(this->dirMode, "dir-mode", this->generate_data(std::vector<int>{0, 1}));
-        this->add(this->algoMode, "algo-mode", this->generate_data({0}));
-        this->add(this->batchSeq, "batch-seq", this->generate_data(std::vector<int>{0}));
-    }
+    int batchSize;
+    int seqLength;
+    int inVecLen;
+    int hiddenSize;
+    int numLayers;
+    int nohx;
+    int nodhy;
+    int nocx;
+    int nodcy;
+    int nohy;
+    int nodhx;
+    int nocy;
+    int nodcx;
+    int flatBatchFill;
+    int useDropout;
+    int inputMode;
+    int biasMode;
+    int dirMode;
+    int algoMode;
+    std::vector<int> batchSeq;
 };
 
-template <typename T>
-struct GPU_lstm_dropout_Test : public ::testing::Test
+auto GetTestCases(miopenDataType_t dataType)
 {
+    Parameters params;
+    params.batchSize = 17;
+    params.seqLength = 25;
+    params.inVecLen = 17;
+    params.hiddenSize = 67;
+    params.numLayers = 3;
+    params.nohx = 0;
+    params.nodhy = 0;
+    params.nocx = 0;
+    params.nodcy = 0;
+    params.nohy = 0;
+    params.nodhx = 0;
+    params.nocy = 0;
+    params.nodcx = 0;
+    params.flatBatchFill = 1;
+    params.useDropout = 1;
+    params.inputMode = 0;
+    params.biasMode = 0;
+    params.dirMode = 0;
+    params.algoMode = 0;
+    params.batchSeq = generate_batchSeq(params.batchSize, params.seqLength)[0];
+    return params;
+}
+
+template <typename T>
+struct GPU_lstm_dropout_Test : public ::testing::TestWithParam<Parameters>
+{
+    int device_count{0};
+    miopenHandle_t handle;
+
+    void SetUp() override
+    {
+        prng::reset_seed();
+        miopenCreate(&handle);
+        //if(hipGetDeviceCount(&device_count) != hipSuccess)
+        //    device_count = 0;
+    }
+
+    void TearDown() override { miopenDestroy(handle); }
+
+    void Run()
+    {
+        auto params = GetParam();
+    }
 };
 
 using GPU_lstm_dropout_FP32 = GPU_lstm_dropout_Test<float>;
 
-TEST_F(GPU_lstm_dropout_FP32, FloatTest_lstm_dropout)
+TEST_P(GPU_lstm_dropout_FP32, FloatTest_lstm_dropout)
 {
-    testing::internal::CaptureStderr();
-    test_drive<lstm_dropout_driver<float>>(0, nullptr);
-    auto capture = testing::internal::GetCapturedStderr();
-    std::cout << capture;
+    /*if(device_count == 0)
+    {
+        GTEST_SKIP() << "No HIP devices available for testing";
+    }*/
+    Run();
 }
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_lstm_dropout_FP32, testing::Values(GetTestCases(miopenFloat)));

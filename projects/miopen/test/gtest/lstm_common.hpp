@@ -45,7 +45,7 @@
 #include <algorithm>
 #include <cstdlib> //for std::abort()
 
-#define MIO_LSTM_TEST_DEBUG 0
+#define MIO_LSTM_TEST_DEBUG 2
 #define MIO_RNN_TIME_EVERYTHING 0
 
 #define WORKAROUND_ISSUE_692 1
