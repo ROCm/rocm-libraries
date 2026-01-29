@@ -14,8 +14,10 @@ CTestTestfile.cmake
 compile_commands.json
 !CMakeLists.txt
 
-# Generated files
-*.inc
+# Generated files (only in build directories)
+# Note: Source .inc and .pattern files are NOT ignored (e.g., LogicalInstructionDefs.inc, *.pattern)
+build/**/*.inc
+build*/**/*.inc
 *.generated.*
 *_generated.*
 
