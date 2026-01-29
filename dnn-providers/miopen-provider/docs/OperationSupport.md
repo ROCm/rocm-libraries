@@ -11,21 +11,22 @@ The following table lists all operations currently supported in hipDNN:
 | Operation | Datatypes | Layouts | Notes |
 |-----------|-----------|---------|-------|
 | Batchnorm Inference | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Spatial mode only¹ |
+| Batchnorm Inference + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph³ |
 | Batchnorm Inference with Variance | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only¹ |
+| Batchnorm Inference with Variance + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph³ |
 | Batchnorm Inference + DRelu + Backward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph³ |
-| Batchnorm Training  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only¹, No running stats⁴ |
-| Batchnorm Training + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph³⁴ |
+| Batchnorm Training  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only¹ |
+| Batchnorm Training + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph³ |
 | Batchnorm Backward  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only¹ |
 | Convolution Dgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
 | Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
-| Convolution Forward + (Bias) + Activation⁵ | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph²³ |
+| Convolution Forward + (Bias) + Activation⁴ | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph²³ |
 | Convolution Wgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
 
 ¹ See Batchnorm Operations note below
 ² See Convolution Operations note below
 ³ See Fused Operations note below
-⁴ See Batchnorm Training Running Statistics note below
-⁵ See Detailed Requirements below
+⁴ See Detailed Requirements below
 
 ## Detailed Requirements
 
@@ -58,6 +59,8 @@ The following table lists all operations currently supported in hipDNN:
 
 > [!NOTE]
 > **Fused Operations:** Fused graph patterns combine multiple operations:
+> - **Batchnorm Inference + Activation:** Combines batchnorm inference (using invVariance) with forward activation (ReLU)
+> - **Batchnorm Inference with Variance + Activation:** Combines batchnorm inference (using variance) with forward activation (ReLU)
 > - **Batchnorm Inference + DReLU + Backward:** Combines batchnorm inference, activation backward (DReLU), and batchnorm backward
 > - **Batchnorm Training + Activation:** Combines batchnorm training with forward activation
 > - **Convolution Forward + (Bias) + Activation:** Combines convolution forward, optional bias addition, and forward activation
@@ -69,7 +72,7 @@ The following table lists all operations currently supported in hipDNN:
 > **Sparse Support:** All operations currently work with dense tensors only.
 
 > [!NOTE]
-> **Batchnorm Training Running Statistics:** Currently, batchnorm training only supports computing batch statistics (mean and inverse variance) without updating running statistics.
+> **Batchnorm Training Running Statistics:** Batchnorm training supports updating running statistics using separate read and write buffers. The previous running statistics (`prev_running_mean`, `prev_running_variance`) are read-only inputs, while the next running statistics (`next_running_mean`, `next_running_variance`) are write-only outputs. The exponential moving average is computed as: `next_running = (1 - momentum) * prev_running + momentum * batch_statistic`.
 
 ## Legend
 
