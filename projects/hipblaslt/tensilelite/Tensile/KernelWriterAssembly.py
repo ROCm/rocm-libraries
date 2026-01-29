@@ -5982,7 +5982,7 @@ class KernelWriterAssembly(KernelWriter):
               for i in range(0, self.states.m.numVgprValuPerBlock):
                 oddIterCode.add(VMovB32(vgpr("ValuMetadata+%u"%i), vgpr("ValuMetadata+%u+%u"%(self.states.m.numVgprValuPerBlock, i)), \
                                         comment="copy ValuMetadata blk1 to blk0"))
-            else:
+            elif not kernel["StoreSwapAddr"]:
               oddIterCode.add(self.localReadSwapOffsets(kernel, False, tPM))
 
           evenIterPreCode.add(loopLabelEndEvenExit)
