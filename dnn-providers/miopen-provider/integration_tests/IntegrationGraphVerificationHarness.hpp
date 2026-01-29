@@ -18,7 +18,7 @@
 
 #include <functional>
 
-namespace miopen_legacy_plugin::test_utilities
+namespace miopen_plugin::test_utilities
 {
 
 // NOLINTBEGIN (portability-template-virtual-member-function)

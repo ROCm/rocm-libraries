@@ -348,11 +348,19 @@ namespace rocRollerTest
         }
 
         {
+            auto barrier = Instruction("s_barrier", {}, {}, {}, "");
+            barrier.addExtraSrc(lds);
+            auto kmDsCount{WaitCount::DSCnt(arch, 0)};
+            peeked = m_context->observer()->peek(barrier);
+            EXPECT_EQ(peeked.waitCount, kmDsCount);
+            m_context->schedule(barrier);
+        }
+
+        {
             auto inst4 = Instruction("ds_read_b32", {}, {}, {}, "");
             inst4.addExtraSrc(lds);
             peeked = m_context->observer()->peek(inst4);
-            auto kmDsCount{WaitCount::DSCnt(arch, 0)};
-            EXPECT_EQ(peeked.waitCount, kmDsCount);
+            EXPECT_EQ(peeked.waitCount, WaitCount());
             m_context->schedule(inst4);
         }
 
@@ -366,6 +374,7 @@ namespace rocRollerTest
         std::string expected = R"(
                                    ds_write_b32 0, v0
                                    s_waitcnt lgkmcnt(0)
+                                   s_barrier
                                    ds_read_b32
                                    s_endpgm
                                 )";
@@ -397,11 +406,19 @@ namespace rocRollerTest
         }
 
         {
+            auto barrier = Instruction("s_barrier", {}, {}, {}, "");
+            barrier.addExtraSrc(lds);
+            auto kmDsCount{WaitCount::DSCnt(arch, 0)};
+            peeked = m_context->observer()->peek(barrier);
+            EXPECT_EQ(peeked.waitCount, kmDsCount);
+            m_context->schedule(barrier);
+        }
+
+        {
             auto inst4 = Instruction("ds_read_b32", {dst1}, {zero, src1}, {}, "");
             inst4.addExtraSrc(lds);
             peeked = m_context->observer()->peek(inst4);
-            auto kmDsCount{WaitCount::DSCnt(arch, 0)};
-            EXPECT_EQ(peeked.waitCount, kmDsCount);
+            EXPECT_EQ(peeked.waitCount, WaitCount());
             m_context->schedule(inst4);
         }
 
@@ -415,6 +432,7 @@ namespace rocRollerTest
         std::string expected = R"(
                                    ds_write_b32 0, v0
                                    s_waitcnt lgkmcnt(0)
+                                   s_barrier
                                    ds_read_b32 v1, 0, v0
                                    s_endpgm
                                 )";
