@@ -16,7 +16,7 @@
 #include "engines/plans/MiopenBatchnormFwdInferenceWithVariancePlan.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlan.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 namespace
@@ -768,4 +768,4 @@ void MiopenBatchnormPlanBuilder::buildPlan(
     }
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

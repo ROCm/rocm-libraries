@@ -11,7 +11,7 @@
 #include "HipdnnEnginePluginHandle.hpp"
 #include "engines/plans/MiopenConvBwdPlan.hpp"
 
-using namespace miopen_legacy_plugin;
+using namespace miopen_plugin;
 
 class TestGpuConvBwdPlan : public ::testing::Test
 {

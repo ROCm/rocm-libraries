@@ -14,7 +14,7 @@
 #include "MiopenPlanCommon.hpp"
 #include "MiopenUtils.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 ConvFwdParams::ConvFwdParams(
@@ -136,4 +136,4 @@ void ConvFwdPlan::execute(const HipdnnEnginePluginHandle& handle,
                                               workspaceSize));
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

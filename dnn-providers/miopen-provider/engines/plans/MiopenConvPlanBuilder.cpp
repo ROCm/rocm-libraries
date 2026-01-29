@@ -16,7 +16,7 @@
 #include "engines/plans/MiopenConvFwdPlan.hpp"
 #include "engines/plans/MiopenConvWrwPlan.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 namespace
@@ -494,4 +494,4 @@ void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
     }
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

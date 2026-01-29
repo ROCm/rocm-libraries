@@ -16,7 +16,7 @@
 #include <numeric>
 #endif
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 ConvFwdBiasActivParams::ConvFwdBiasActivParams(
@@ -292,4 +292,4 @@ void ConvFwdBiasActivPlan::execute(const HipdnnEnginePluginHandle& handle,
                                                        workspaceSize));
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

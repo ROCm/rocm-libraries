@@ -15,7 +15,7 @@
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 namespace
