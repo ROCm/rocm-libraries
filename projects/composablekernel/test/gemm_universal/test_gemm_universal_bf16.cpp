@@ -80,11 +80,6 @@ using KernelTypes_KM_KN = ::testing::Types<
     std::tuple<     BF16,      BF16,            BF16,    BF16>
     >;
 
-    using KernelTypes_MK_KN = ::testing::Types<
-    //         ADataType, BDataType, ComputeDataType, CDataType
-    std::tuple<     BF16,      BF16,            BF16,      BF16>
-    >;
-
 // clang-format on
 
 TYPED_TEST_SUITE(TestGemmUniversal_BF16_MK_KN, KernelTypes_MK_KN);
