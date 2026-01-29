@@ -21,13 +21,22 @@ namespace hipdnn_test_sdk::utilities::conv
  * @brief Calculates the expected tolerance for Convolution Backward Weights (WrW) operations.
  *
  * This function estimates the maximum expected error due to floating-point accumulation during the
- * computation of weight gradients. It considers the accumulation of products of inputs and output gradients
- * over the batch and spatial dimensions.
+ * computation of weight gradients. It considers the accumulation of products of inputs and output
+ * gradients over the batch and spatial dimensions.
  *
  * The tolerance is calculated by simulating the accumulation process using `ComputeType` precision
  * and adding the precision loss from casting the final result to `OutputType`.
  *
+ * Error Estimation Strategy:
+ * - High Precision (FP32, FP64): Uses a linear worst-case bound (Classical).
+ *   Error ≈ n * epsilon * maxProduct
+ * - Lower Precision (FP16, BF16): Uses a statistical/probabilistic bound.
+ *   Error ≈ k * sqrt(n) * epsilon * maxProduct
+ *
+ * It also accounts for precision loss if inputs are cast to a lower precision ComputeType.
+ *
  * @tparam OutputType The data type of the output (weight gradients).
+ * @tparam InputType The data type of the input tensor.
  * @tparam ComputeType The data type used for accumulation (default: float).
  * @param inputMin The minimum value in the input tensor.
  * @param inputMax The maximum value in the input tensor.
@@ -36,13 +45,19 @@ namespace hipdnn_test_sdk::utilities::conv
  * @param dyDims The dimensions of the output gradient tensor (dy).
  * @return The calculated tolerance value cast to `OutputType`.
  */
-template <typename OutputType, typename ComputeType = float>
+template <typename OutputType, typename InputType, typename ComputeType = float>
 OutputType calculateConvWrwTolerance(double inputMin,
                                      double inputMax,
                                      double dyMin,
                                      double dyMax,
                                      const std::vector<int64_t>& dyDims)
 {
+    // Validate ComputeType
+    static_assert(std::is_same_v<ComputeType, float> || std::is_same_v<ComputeType, double>
+                      || std::is_same_v<ComputeType, half>
+                      || std::is_same_v<ComputeType, hip_bfloat16>,
+                  "ComputeType must be float, double, half, or hip_bfloat16");
+
     // dyDims: [N, K, Spatial...]
     // Accumulation for weights (dw) happens over N and Spatial dimensions.
     // dw[k, c, r, s] = sum_{n, h, w} dy[n, k, h, w] * x[n, c, h+r, w+s]
@@ -61,43 +76,70 @@ OutputType calculateConvWrwTolerance(double inputMin,
     double maxAbsInput = std::max(std::abs(inputMin), std::abs(inputMax));
     double maxAbsDy = std::max(std::abs(dyMin), std::abs(dyMax));
 
-    // Worst case: inputs are always max magnitude and signs align to always add up.
+    // Worst case product magnitude
     double maxProduct = maxAbsInput * maxAbsDy;
 
-    // Calculate the worst-case accumulation error.
-    //
-    // We model the accumulation of 'numberOfAccumulations' products. In the worst-case scenario,
-    // all inputs have the maximum magnitude, causing the accumulated value to grow linearly:
-    // V_i = i * maxProduct
-    //
-    // At each accumulation step 'i', the floating-point addition introduces a rounding error.
-    // This error is bounded by the machine epsilon relative to the current magnitude V_i.
-    // Error_i <= V_i * epsilon_compute
-    //
-    // We approximate the error at step i as (V_i * epsilon_compute), where epsilon_compute
-    // is the machine epsilon of the compute type. This assumes the relative error is constant,
-    // which is a standard property of floating-point arithmetic.
-    //
-    // The total accumulation error is the sum of errors at each step:
-    // TotalError ≈ sum_{i=1}^{N} (i * maxProduct * epsilon_compute)
-    //            = maxProduct * epsilon_compute * sum_{i=1}^{N} (i)
-    //            = maxProduct * epsilon_compute * (N * (N + 1) / 2)
-    //
-    // This analytical formula provides a conservative upper bound on the error without
-    // requiring an O(N) loop, which is efficient for large accumulation counts.
-
     double epsilon = getEpsilon<ComputeType>();
-    double accumulatedTolerance = maxProduct * epsilon * static_cast<double>(numberOfAccumulations)
-                                  * static_cast<double>(numberOfAccumulations + 1) * 0.5;
+    double accumulatedTolerance = 0.0;
 
-    // Calculate final accumulated value
+    if constexpr(std::is_same_v<ComputeType, float> || std::is_same_v<ComputeType, double>)
+    {
+        // High Precision: Linear bound (Classical)
+        // Error <= n * epsilon * maxProduct
+        // We assume FMAs are used, so factor is n, not 2n.
+        accumulatedTolerance = static_cast<double>(numberOfAccumulations) * epsilon * maxProduct;
+    }
+    else
+    {
+        // Lower Precision (FP16, BF16): Statistical bound (Probabilistic)
+        // Error <= k * sqrt(n) * epsilon * maxProduct
+        // k_sigma = 6.0 for high confidence
+        constexpr double K_SIGMA = 6.0;
+        accumulatedTolerance = K_SIGMA * std::sqrt(static_cast<double>(numberOfAccumulations))
+                               * epsilon * maxProduct;
+    }
+
+    // Calculate input casting error
+    // If InputType has higher precision (smaller epsilon) than ComputeType, we lose precision on load (downcasting).
+    // Example: double -> float.
+    // If InputType has lower precision (larger epsilon) than ComputeType, we preserve precision (upcasting).
+    // Example: half -> float.
+    // We only need to add tolerance if we are downcasting.
+    if constexpr(getEpsilon<InputType>() < getEpsilon<ComputeType>())
+    {
+        // Input precision is higher than compute precision, so we have casting error.
+        // We add this to the tolerance.
+        // Note: This is a worst-case bound.
+        //
+        // Derivation:
+        // Let x_approx = x_true * (1 + d_x) and dy_approx = dy_true * (1 + d_dy)
+        // where |d_x|, |d_dy| <= epsilon_compute (relative error bound).
+        // Product P_approx = x_approx * dy_approx ≈ x_true * dy_true * (1 + d_x + d_dy)
+        // Error_P = |P_approx - P_true| ≈ |P_true| * |d_x + d_dy|
+        // Error_P <= |P_true| * (|d_x| + |d_dy|) <= |P_true| * (epsilon + epsilon)
+        // Error_P <= 2 * |P_true| * epsilon
+        // Summing over N accumulations: Total_Error <= 2 * N * maxProduct * epsilon
+        double castingError
+            = 2.0 * static_cast<double>(numberOfAccumulations) * maxProduct * epsilon;
+        accumulatedTolerance += castingError;
+    }
+
+    // Calculate final accumulated value magnitude for casting error
     double maxPossibleOutputValue = static_cast<double>(numberOfAccumulations) * maxProduct;
 
-    // Calculate precision loss due to casting from ComputeType to OutputType
-    // The error is bounded by the precision of the OutputType at the final value.
-    // We approximate the resolution as value * epsilon.
-    double outputEpsilon = getEpsilon<OutputType>();
-    double castTolerance = std::abs(maxPossibleOutputValue) * outputEpsilon;
+    double castTolerance = 0.0;
+    // Calculate precision loss due to casting from ComputeType to OutputType.
+    // If OutputType has lower precision (larger epsilon) than ComputeType, we lose precision (downcasting).
+    // Example: float -> half.
+    // If OutputType has higher precision (smaller epsilon) than ComputeType, the value is exactly representable (upcasting).
+    // Example: float -> double.
+    // We only need to add tolerance if we are downcasting.
+    if constexpr(getEpsilon<OutputType>() > getEpsilon<ComputeType>())
+    {
+        // The error is bounded by the precision of the OutputType at the final value.
+        double outputEpsilon = getEpsilon<OutputType>();
+        castTolerance = std::abs(maxPossibleOutputValue) * outputEpsilon;
+    }
 
     // Total tolerance is the sum of accumulation error and cast error
     double totalTolerance = accumulatedTolerance + castTolerance;

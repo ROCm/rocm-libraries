@@ -69,7 +69,6 @@ protected:
                               = hipdnn_data_sdk::utilities::TensorLayout::NCHW)
         = 0;
 
-protected:
     void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
     {
         hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, cpuBundle;
