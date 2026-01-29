@@ -4136,6 +4136,15 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithKnobSettings)
                                     NotNull()))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
+    // Mock execution plan descriptor creation
+    auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
+        .WillOnce([&executionPlanDesc](hipdnnBackendDescriptorType_t,
+                                       hipdnnBackendDescriptor_t* descriptor) {
+            *descriptor = executionPlanDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
     // Create knob setting for "global.deterministic" = 1
     std::vector<KnobSetting> settings;
     settings.emplace_back("global.deterministic", static_cast<int64_t>(1));
@@ -4275,6 +4284,15 @@ TEST_F(TestGraph, CreateExecutionPlanWithInt64Knobs)
                                     1,
                                     NotNull()))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Mock execution plan descriptor creation
+    auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
+        .WillOnce([&executionPlanDesc](hipdnnBackendDescriptorType_t,
+                                       hipdnnBackendDescriptor_t* descriptor) {
+            *descriptor = executionPlanDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
 
     // Use the compatibility method with int64 map
     std::unordered_map<KnobType_t, int64_t> settings;
@@ -4433,6 +4451,15 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithMultipleKnobs)
                                     NotNull()))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
+    // Mock execution plan descriptor creation
+    auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
+        .WillOnce([&executionPlanDesc](hipdnnBackendDescriptorType_t,
+                                       hipdnnBackendDescriptor_t* descriptor) {
+            *descriptor = executionPlanDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
     // Create multiple knob settings
     std::vector<KnobSetting> settings;
     settings.emplace_back("global.deterministic", static_cast<int64_t>(1));
@@ -4543,6 +4570,15 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithEmptySettings)
 
     EXPECT_CALL(*_mockBackend, backendFinalize(engineConfigDesc))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Mock execution plan descriptor creation
+    auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
+        .WillOnce([&executionPlanDesc](hipdnnBackendDescriptorType_t,
+                                       hipdnnBackendDescriptor_t* descriptor) {
+            *descriptor = executionPlanDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
 
     // Empty settings - should not call backendSetAttribute for knobs
     std::vector<KnobSetting> settings;
@@ -4682,6 +4718,15 @@ TEST_F(TestGraph, CreateExecutionPlanExtIgnoresUnsupportedKnobs)
                                     1,
                                     NotNull()))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Mock execution plan descriptor creation
+    auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
+        .WillOnce([&executionPlanDesc](hipdnnBackendDescriptorType_t,
+                                       hipdnnBackendDescriptor_t* descriptor) {
+            *descriptor = executionPlanDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
 
     // Create settings with one supported and one unsupported knob
     std::vector<KnobSetting> settings;
