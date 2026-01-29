@@ -82,6 +82,7 @@ def getRequiredParametersMin() -> set:
         'PrefetchLocalRead',
         'PreloadKernArgs',
         'ScheduleIterAlg',
+        'ScheduleGROverBarrier',
         'SourceSwap',
         'SpaceFillingAlgo',
         'StorePriorityOpt',
@@ -105,4 +106,6 @@ def getRequiredParametersMin() -> set:
         'WaveSeparateGlobalReadB',
         'WavefrontSize',
         'WorkGroup',
+        'DtlPlusLdsBuf',
+        'MinGRIncPerMfma'
     })

@@ -123,6 +123,17 @@ TEST_CASE("Origami: hardware_arch_enum", "[origami]") {
   }
 }
 
+TEST_CASE("Origami: has_MALL", "[origami]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - MALL support check") {
+      auto hardware = make_hardware(gpu_arch);
+
+      // gfx942 and gfx950 have MALL support
+      if (gpu_arch == 942 || gpu_arch == 950) { REQUIRE(hardware.has_MALL() == true); }
+    }
+  }
+}
+
 TEST_CASE("Origami: best_grid_size", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - grid size selection") {
@@ -430,19 +441,19 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
               results_m_equals_n[0].config.mt.m);  // If M == N, prefer tiles with larger MT_M
 
       // Test 5: Test with different heuristics_variance values
-      setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "0.0", 1);
+      portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "0.0", 1);
       // Read back and parse
       double env_val = origami::runtime_options::read_heuristics_variance_from_env();
       REQUIRE(env_val == 0.01);  // Return default value 0.01 when
                                  // ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to 0.0
 
-      setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "-1.0", 1);
+      portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "-1.0", 1);
       // Read back and parse
       env_val = origami::runtime_options::read_heuristics_variance_from_env();
       REQUIRE(env_val == 0.01);  // Return default value 0.01 when
                                  // ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to -1.0
 
-      setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "1.0", 1);
+      portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "1.0", 1);
       // Read back and parse
       env_val = origami::runtime_options::read_heuristics_variance_from_env();
       REQUIRE(env_val == 1.0);  // Return ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to 1.0
