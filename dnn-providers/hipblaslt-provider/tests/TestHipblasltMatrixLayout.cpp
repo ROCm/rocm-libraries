@@ -22,7 +22,7 @@ TEST(TestHipblasltMatrixLayout, CanCreateAndDestroy)
     ASSERT_NE(tensorAttr, nullptr);
 
     EXPECT_NO_THROW({
-        hipdnn_plugin_sdk::TensorAttributesWrapper tensorWrapper(tensorAttr);
+        hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper tensorWrapper(tensorAttr);
         HipblasltMatrixLayout matLayout(tensorWrapper);
         EXPECT_EQ(matLayout.uid(), tensorWrapper.uid());
         EXPECT_NE(matLayout.matrixLayout(), nullptr);
@@ -37,7 +37,8 @@ TEST(TestHipblasltMatrixLayout, TensorDescriptorIsValid)
 
     const auto& tensorMap = graph.getTensorMap();
     ASSERT_FALSE(tensorMap.empty());
-    hipdnn_plugin_sdk::TensorAttributesWrapper tensorWrapper(tensorMap.begin()->second);
+    hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper tensorWrapper(
+        tensorMap.begin()->second);
     HipblasltMatrixLayout matLayout(tensorWrapper);
 
     // The descriptor should be non-null and can be used in HipBLASLt API calls
@@ -65,7 +66,7 @@ TEST(TestHipblasltMatrixLayout, TensorWithEmptyShape)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::TensorAttributes>(
         builder.GetBufferPointer());
 
-    hipdnn_plugin_sdk::TensorAttributesWrapper tensorWrapper(attrPtr);
+    hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper tensorWrapper(attrPtr);
     EXPECT_THROW(HipblasltMatrixLayout matLayout(tensorWrapper), std::invalid_argument);
 }
 
@@ -81,7 +82,7 @@ TEST(TestHipblasltMatrixLayout, TensorWithEmptyStride)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::TensorAttributes>(
         builder.GetBufferPointer());
 
-    hipdnn_plugin_sdk::TensorAttributesWrapper tensorWrapper(attrPtr);
+    hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper tensorWrapper(attrPtr);
     EXPECT_THROW(HipblasltMatrixLayout matLayout(tensorWrapper), std::invalid_argument);
 }
 
@@ -98,7 +99,7 @@ TEST(TestHipblasltMatrixLayout, TensorWithInvalidShapeRank)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::TensorAttributes>(
         builder.GetBufferPointer());
 
-    hipdnn_plugin_sdk::TensorAttributesWrapper tensorWrapper(attrPtr);
+    hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper tensorWrapper(attrPtr);
     EXPECT_THROW(HipblasltMatrixLayout matLayout(tensorWrapper),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
@@ -116,7 +117,7 @@ TEST(TestHipblasltMatrixLayout, TensorWithInvalidMatrixType)
     auto attrPtr = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::TensorAttributes>(
         builder.GetBufferPointer());
 
-    hipdnn_plugin_sdk::TensorAttributesWrapper tensorWrapper(attrPtr);
+    hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper tensorWrapper(attrPtr);
     EXPECT_THROW(HipblasltMatrixLayout matLayout(tensorWrapper),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
@@ -132,7 +133,7 @@ TEST(TestHipblasltMatrixLayout, SetBatchCount)
     const auto* tensorAttr = tensorMap.begin()->second;
 
     EXPECT_NO_THROW({
-        hipdnn_plugin_sdk::TensorAttributesWrapper tensorWrapper(tensorAttr);
+        hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper tensorWrapper(tensorAttr);
         HipblasltMatrixLayout matLayout(tensorWrapper);
         matLayout.setBatchCount(2);
     });
@@ -149,7 +150,7 @@ TEST(TestHipblasltMatrixLayout, setStridedBatchOffset)
     const auto* tensorAttr = tensorMap.begin()->second;
 
     EXPECT_NO_THROW({
-        hipdnn_plugin_sdk::TensorAttributesWrapper tensorWrapper(tensorAttr);
+        hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper tensorWrapper(tensorAttr);
         HipblasltMatrixLayout matLayout(tensorWrapper);
         matLayout.setStridedBatchOffset(2);
     });

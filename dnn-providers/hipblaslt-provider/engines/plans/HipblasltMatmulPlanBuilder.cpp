@@ -16,9 +16,9 @@ namespace hipblaslt_plugin
 {
 namespace
 {
-bool checkDataTypes(const hipdnn_plugin_sdk::TensorAttributesWrapper& tA,
-                    const hipdnn_plugin_sdk::TensorAttributesWrapper& tB,
-                    const hipdnn_plugin_sdk::TensorAttributesWrapper& tC)
+bool checkDataTypes(const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tA,
+                    const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB,
+                    const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tC)
 {
     const auto& aType = tA.dataType();
     const auto& bType = tB.dataType();
