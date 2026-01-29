@@ -337,11 +337,6 @@ void MiopenConvPlanBuilder::buildPlan(
     }
 }
 
-bool MiopenConvPlanBuilder::hasCustomKnobs() const
-{
-    return true;
-}
-
 std::vector<hipdnn_data_sdk::data_objects::KnobT>
     MiopenConvPlanBuilder::getCustomKnobs(const HipdnnEnginePluginHandle& handle,
                                           const hipdnn_plugin_sdk::IGraph& opGraph) const

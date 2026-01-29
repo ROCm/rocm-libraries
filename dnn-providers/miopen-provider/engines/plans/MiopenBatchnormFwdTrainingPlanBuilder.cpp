@@ -356,11 +356,6 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
     }
 }
 
-bool MiopenBatchnormFwdTrainingPlanBuilder::hasCustomKnobs() const
-{
-    return false;
-}
-
 std::vector<hipdnn_data_sdk::data_objects::KnobT>
     MiopenBatchnormFwdTrainingPlanBuilder::getCustomKnobs(
         [[maybe_unused]] const HipdnnEnginePluginHandle& handle,

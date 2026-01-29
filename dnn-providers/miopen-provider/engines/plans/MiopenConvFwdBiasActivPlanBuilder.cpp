@@ -455,11 +455,6 @@ void MiopenConvFwdBiasActivPlanBuilder::buildPlan(
     executionContext.setPlan(std::move(plan));
 }
 
-bool MiopenConvFwdBiasActivPlanBuilder::hasCustomKnobs() const
-{
-    return false;
-}
-
 std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenConvFwdBiasActivPlanBuilder::getCustomKnobs(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     [[maybe_unused]] const hipdnn_plugin_sdk::IGraph& opGraph) const

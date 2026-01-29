@@ -54,15 +54,22 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
     // Collect custom knobs from plan builders
     for(const auto& planBuilder : _planBuilders)
     {
-        if(planBuilder->hasCustomKnobs())
+        auto customKnobs = planBuilder->getCustomKnobs(handle, opGraph);
+
+        if(customKnobs.empty())
         {
-            auto customKnobs = planBuilder->getCustomKnobs(handle, opGraph);
-            for(const auto& knobT : customKnobs)
-            {
-                auto knobOffset = hipdnn_data_sdk::data_objects::Knob::Pack(builder, &knobT);
-                knobsVector.push_back(knobOffset);
-            }
+            continue;
         }
+
+        for(const auto& knobT : customKnobs)
+        {
+            auto knobOffset = hipdnn_data_sdk::data_objects::Knob::Pack(builder, &knobT);
+            knobsVector.push_back(knobOffset);
+        }
+
+        // Only one plan builder should be applicable for a given graph and return custom knobs.
+        // Stop after finding the first one to avoid duplicates.
+        break;
     }
 
     auto knobs = builder.CreateVector(knobsVector);

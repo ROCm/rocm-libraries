@@ -37,8 +37,6 @@ public:
                            HipdnnEnginePluginExecutionContext& executionContext) const
         = 0;
 
-    virtual bool hasCustomKnobs() const = 0;
-
     virtual std::vector<hipdnn_data_sdk::data_objects::KnobT>
         getCustomKnobs(const HipdnnEnginePluginHandle& handle,
                        const hipdnn_plugin_sdk::IGraph& opGraph) const
