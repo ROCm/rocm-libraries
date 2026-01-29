@@ -83,7 +83,7 @@ def runTestCommand (platform, project)
                 set -ex
                 cd ${project.paths.project_build_prefix}
                 # Run sharded tests (auto-detects ncores/2, respecting cgroups)
-                scripts/run-tests-sharded precheckin build
+                scripts/run-tests-sharded precheckin-mci build
             """
 
     try

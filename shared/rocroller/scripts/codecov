@@ -126,7 +126,7 @@ else
 
     echo Using sharded test runner with codecov profile.
     LLVM_PROFILE_FILE=${code_cov_path}/rocroller-tests_%m.profraw \
-        ${script_path}/run-tests-sharded codecov ${build_path}
+        ${script_path}/run-tests-sharded codecov-mci ${build_path}
 
     # this combines them back together.
     /opt/rocm/lib/llvm/bin/llvm-profdata merge \

@@ -32,10 +32,10 @@ def test_smoke_subset_of_precheckin(build_dir):
     )
 
 
-def test_codecov_subset_of_precheckin(build_dir):
+def test_codecov_subset_of_precheckin_mci(build_dir):
     """Test that codecov profile tests are a subset of precheckin."""
-    codecov = list_tests("codecov", build_dir)
-    precheckin = list_tests("precheckin", build_dir)
+    codecov = list_tests("codecov-mci", build_dir)
+    precheckin = list_tests("precheckin-mci", build_dir)
 
     assert len(codecov) > 0, "codecov profile should have tests"
     assert len(precheckin) > 0, "precheckin profile should have tests"

@@ -4,7 +4,7 @@
 
 profiles:
   smoke:
-    description: "Test suite for fires"
+    description: "Smoke tests (TheRock CI)."
     tests:
     - executable: "test/rocroller-tests"
       framework: "gtest"
@@ -19,7 +19,7 @@ profiles:
       - "[gpu]"
 
   precheckin:
-    description: "Test suite for pre-commit validation"
+    description: "Test suite for pre-commit validation (TheRock CI)."
     tests:
     - executable: "test/rocroller-tests"
       framework: "gtest"
@@ -33,9 +33,26 @@ profiles:
       framework: "ctest"
       include: []
       exclude: [["-LE", "GTEST|CATCH"]]
-  
-  codecov:
-    description: "Reduced test suite for code coverage analysis"
+
+  codecov-mci:
+    description: "Reduced test suite for code coverage analysis (Math CI)."
+    tests:
+    - executable: "test/rocroller-tests"
+      framework: "gtest"
+      include: []
+      exclude:
+        - "*GEMM*"
+    - executable: "test/rocroller-tests-catch"
+      framework: "catch2"
+      include: []
+      exclude: []
+    - executable: "ctest"
+      framework: "ctest"
+      include: []
+      exclude: [["-LE", "GTEST|CATCH"]]
+
+  precheckin-mci:
+    description: "Test suite for pre-commit validation (Math CI)."
     tests:
     - executable: "test/rocroller-tests"
       framework: "gtest"
