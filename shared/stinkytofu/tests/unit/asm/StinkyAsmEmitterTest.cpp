@@ -113,7 +113,8 @@ TEST_F(AsmEmitterTest, EmitWithCycleInfo)
     inst->latencyCycles = 52;
 
     AsmEmitterOptions options;
-    options.emitCycleInfo = true;
+    options.emitCycleInfo      = true;
+    options.commentAlignColumn = 0; // Disable comment alignment for this test
 
     StinkyAsmEmitter emitter(options);
     std::string      assembly = emitter.emit(*inst);
@@ -359,7 +360,8 @@ TEST_F(AsmEmitterTest, EmitToStreamWithCycleInfo)
     inst->latencyCycles = 52;
 
     AsmEmitterOptions options;
-    options.emitCycleInfo = true;
+    options.emitCycleInfo      = true;
+    options.commentAlignColumn = 0; // Disable comment alignment for this test
 
     std::ostringstream oss;
     StinkyAsmEmitter   emitter(options);
@@ -401,8 +403,9 @@ TEST_F(AsmEmitterTest, ToAssemblyUtilityWithCycleInfo)
     inst->latencyCycles = 52;
 
     AsmEmitterOptions options;
-    options.emitComments  = false;
-    options.emitCycleInfo = true;
+    options.emitComments       = false;
+    options.emitCycleInfo      = true;
+    options.commentAlignColumn = 0; // Disable comment alignment for this test
 
     std::string assembly = toAssembly(insts, options);
     std::string expected = "    ds_read_b128 v[0:3], v40 // issue=4 latency=52\n";
@@ -464,8 +467,9 @@ TEST_F(AsmEmitterTest, EmitWithUserComment)
     inst->addModifier(CommentData("load C"));
 
     AsmEmitterOptions options;
-    options.emitComments  = true;
-    options.emitCycleInfo = false;
+    options.emitComments       = true;
+    options.emitCycleInfo      = false;
+    options.commentAlignColumn = 0; // Disable comment alignment for this test
 
     StinkyAsmEmitter emitter(options);
     std::string      assembly = emitter.emit(*inst);
@@ -488,8 +492,9 @@ TEST_F(AsmEmitterTest, EmitWithCycleInfoAndUserComment)
     inst->addModifier(CommentData("load C"));
 
     AsmEmitterOptions options;
-    options.emitComments  = true;
-    options.emitCycleInfo = true;
+    options.emitComments       = true;
+    options.emitCycleInfo      = true;
+    options.commentAlignColumn = 0; // Disable comment alignment for this test
 
     StinkyAsmEmitter emitter(options);
     std::string      assembly = emitter.emit(*inst);
@@ -536,8 +541,9 @@ TEST_F(AsmEmitterTest, EmitCycleInfoOnlyWithUserComment)
     inst->addModifier(CommentData("load C"));
 
     AsmEmitterOptions options;
-    options.emitComments  = false; // User comments disabled
-    options.emitCycleInfo = true; // But cycle info enabled
+    options.emitComments       = false; // User comments disabled
+    options.emitCycleInfo      = true; // But cycle info enabled
+    options.commentAlignColumn = 0; // Disable comment alignment for this test
 
     StinkyAsmEmitter emitter(options);
     std::string      assembly = emitter.emit(*inst);
