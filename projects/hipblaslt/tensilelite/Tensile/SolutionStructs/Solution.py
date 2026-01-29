@@ -1494,8 +1494,9 @@ class Solution(collections.abc.Mapping):
       state["numSubTiles"] = 1
 
     # Check if CMS is available for this solution
-    hasCMS,_ = hasCustomSchedule(state)
-    state["UseCustomMainLoopSchedule"] = hasCMS
+    if state["UseCustomMainLoopSchedule"] in [-1, 1]:
+      hasCMS,_ = hasCustomSchedule(state)
+      state["UseCustomMainLoopSchedule"] = hasCMS
 
     # 0: Normal mode. Hardware applies all of the normal data dependency checks
     # 1: Full expert mode (not suppoeted yet). Disable hardware checks against: VA_VDST, VA_SDST, VA_SSRC, VA_VCC, VM_VSRC and SA_SDST.
