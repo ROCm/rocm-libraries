@@ -65,7 +65,6 @@ namespace stinkytofu
             SMFMA,
             Label,
             IntrinsicCall,
-            TensorLoadToLds,
 
             NUM_OPCODES // Sentinel value
         };

@@ -48,7 +48,8 @@ namespace stinkytofu
         std::string className; // e.g., "VAddF32"
         std::string mnemonic; // e.g., "v_add_f32"
         std::string comment; // e.g., "Vector add F32: dst = src0 + src1"
-        int         numSrcs; // Number of source operands
+        int         numSrcs; // Total number of source operands (required + optional)
+        int         numRequiredSrcs; // Number of required sources (rest are optional pointers)
         bool        hasDest; // Whether it has a destination operand
         std::string category; // e.g., "Vector Arithmetic", "Scalar Bitwise"
         bool        supportsDPP; // Whether this instruction supports DPP modifiers
@@ -65,11 +66,14 @@ namespace stinkytofu
                   bool               dpp   = false,
                   bool               sdwa  = false,
                   bool               ds    = false,
-                  const std::string& flags = "")
+                  const std::string& flags = "",
+                  int                reqSrcs
+                  = -1) // -1 means all sources are required (at end for backward compat)
             : className(cls)
             , mnemonic(mn)
             , comment(cmt)
             , numSrcs(srcs)
+            , numRequiredSrcs(reqSrcs == -1 ? srcs : reqSrcs)
             , hasDest(dest)
             , category(cat)
             , supportsDPP(dpp)
@@ -225,40 +229,6 @@ namespace stinkytofu
         out << "        return inst;\n";
         out << "    }\n\n";
 
-        // TensorLoadToLds factory
-        out << "    // "
-               "========================================================================\n";
-        out << "    // Tensor Memory Instructions\n";
-        out << "    // "
-               "========================================================================\n\n";
-
-        out << "    /**\n";
-        out << "     * @brief TensorLoadToLds factory function\n";
-        out << "     * \n";
-        out << "     * Loads tensor data to LDS (Local Data Share). Takes 2-4 SGPR groups.\n";
-        out << "     * All groups must be scalar registers (SGPRs).\n";
-        out << "     * Registers: srcs[0-3] = group0-3\n";
-        out << "     * No special data needed (simple instruction)\n";
-        out << "     */\n";
-        out << "    inline LogicalInstruction* TensorLoadToLds(\n";
-        out << "        const StinkyRegister& group0,\n";
-        out << "        const StinkyRegister& group1,\n";
-        out << "        const StinkyRegister* group2 = nullptr,\n";
-        out << "        const StinkyRegister* group3 = nullptr,\n";
-        out << "        const std::string& comment = \"\")\n";
-        out << "    {\n";
-        out << "        auto* inst = new LogicalInstruction(logical::TensorLoadToLds);\n";
-        out << "        \n";
-        out << "        // No destination register for this instruction\n";
-        out << "        inst->srcs.push_back(group0);\n";
-        out << "        inst->srcs.push_back(group1);\n";
-        out << "        if (group2) inst->srcs.push_back(*group2);\n";
-        out << "        if (group3) inst->srcs.push_back(*group3);\n";
-        out << "        inst->comment = comment;\n";
-        out << "        \n";
-        out << "        return inst;\n";
-        out << "    }\n\n";
-
         // Label factory
         out << "    // "
                "========================================================================\n";
@@ -365,8 +335,6 @@ namespace stinkytofu
         out << "        return \"Label\";\n";
         out << "    case IntrinsicCall:\n";
         out << "        return \"IntrinsicCall\";\n";
-        out << "    case TensorLoadToLds:\n";
-        out << "        return \"TensorLoadToLds\";\n";
 
         out << "    default:\n";
         out << "        return \"INVALID\";\n";
@@ -398,8 +366,6 @@ namespace stinkytofu
         out << "        return \"label\";\n";
         out << "    case IntrinsicCall:\n";
         out << "        return \"intrinsic_call\";\n";
-        out << "    case TensorLoadToLds:\n";
-        out << "        return \"tensor_load_to_lds\";\n";
 
         out << "    default:\n";
         out << "        return \"invalid\";\n";
@@ -504,13 +470,31 @@ namespace stinkytofu
             {
                 if(i > 0 || inst.hasDest)
                 {
-                    out << "const StinkyRegister& src" << i;
+                    // Optional sources use pointer with default nullptr
+                    if(i >= inst.numRequiredSrcs)
+                    {
+                        out << "const StinkyRegister* src" << i << " = nullptr";
+                    }
+                    else
+                    {
+                        out << "const StinkyRegister& src" << i;
+                    }
+
                     if(i < inst.numSrcs - 1)
                         out << ",\n" << std::string(inst.className.length() + 12, ' ');
                 }
                 else
                 {
-                    out << "const StinkyRegister& src" << i;
+                    // First source (no dest case)
+                    if(i >= inst.numRequiredSrcs)
+                    {
+                        out << "const StinkyRegister* src" << i << " = nullptr";
+                    }
+                    else
+                    {
+                        out << "const StinkyRegister& src" << i;
+                    }
+
                     if(i < inst.numSrcs - 1)
                         out << ",\n" << std::string(inst.className.length() + 12, ' ');
                 }
@@ -551,10 +535,19 @@ namespace stinkytofu
                 out << "        inst->dests.push_back(dst);\n";
             }
 
-            // Set sources
+            // Set sources (required and optional)
             for(int i = 0; i < inst.numSrcs; ++i)
             {
-                out << "        inst->srcs.push_back(src" << i << ");\n";
+                if(i >= inst.numRequiredSrcs)
+                {
+                    // Optional source: check if pointer is non-null before adding
+                    out << "        if(src" << i << ") inst->srcs.push_back(*src" << i << ");\n";
+                }
+                else
+                {
+                    // Required source: always add
+                    out << "        inst->srcs.push_back(src" << i << ");\n";
+                }
             }
 
             // Set modifiers
@@ -642,7 +635,7 @@ namespace stinkytofu
 
         std::cout << "Generated " << getIRInstructions().size()
                   << " LogicalInstruction factory functions + 5 special instruction factories "
-                     "(MFMA/MXMFMA/SMFMA/TensorLoadToLds/Label) -> "
+                     "(MFMA/MXMFMA/SMFMA/Label/IntrinsicCall) -> "
                      "LogicalInstructions_generated.hpp\n";
         return true;
     }
@@ -675,8 +668,8 @@ namespace stinkytofu
             count++;
         }
 
-        // Note: Special instructions (MFMA/MXMFMA/SMFMA/TensorLoadToLds/Label)
-        // generate their mnemonics dynamically, not through this mapping
+        // Note: Some special instructions (MFMA/MXMFMA/SMFMA/Label/IntrinsicCall)
+        // generate their mnemonics dynamically at runtime and need custom lowering
 
         std::cout << "Generated " << count << " mnemonic mappings -> IRMnemonics_generated.inc\n";
         return true;
@@ -719,12 +712,23 @@ namespace stinkytofu
                 defaults.push_back("");
             }
 
-            // Add source operands
+            // Add source operands (required and optional)
             for(int i = 0; i < inst.numSrcs; i++)
             {
-                paramTypes.push_back("const StinkyRegister&");
-                paramNames.push_back("src" + std::to_string(i));
-                defaults.push_back("");
+                if(i >= inst.numRequiredSrcs)
+                {
+                    // Optional source: use std::optional wrapper for Python
+                    paramTypes.push_back("std::optional<StinkyRegister>");
+                    paramNames.push_back("src" + std::to_string(i));
+                    defaults.push_back("std::nullopt");
+                }
+                else
+                {
+                    // Required source: regular reference
+                    paramTypes.push_back("const StinkyRegister&");
+                    paramNames.push_back("src" + std::to_string(i));
+                    defaults.push_back("");
+                }
             }
 
             // Add optional modifiers
@@ -761,9 +765,29 @@ namespace stinkytofu
 
             // Return factory function wrapped in shared_ptr
             out << "        return std::shared_ptr<LogicalInstruction>(" << className << "(";
+
+            // Pass parameters, converting optional sources to pointers
+            size_t srcIdx = 0;
             for(size_t i = 0; i < paramNames.size(); i++)
             {
-                out << paramNames[i];
+                std::string paramName = paramNames[i];
+
+                // Check if this is an optional source parameter
+                bool isOptionalSrc = paramName.find("src") == 0
+                                     && paramTypes[i].find("std::optional") != std::string::npos;
+
+                if(isOptionalSrc)
+                {
+                    // Convert std::optional<StinkyRegister> to const StinkyRegister*
+                    out << "(" << paramName << ".has_value() ? &" << paramName
+                        << ".value() : nullptr)";
+                }
+                else
+                {
+                    // Regular parameter: pass as-is
+                    out << paramName;
+                }
+
                 if(i + 1 < paramNames.size())
                     out << ", ";
             }
