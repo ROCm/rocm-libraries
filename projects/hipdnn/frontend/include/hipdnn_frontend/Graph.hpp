@@ -243,7 +243,11 @@ private:
         return {ErrorCode::OK, ""};
     }
 
-    Error initializeEngineConfig(int64_t engineId)
+    /// Initialize engine config for a specific engine ID.
+    /// @param engineId The engine to configure
+    /// @param finalize If true, finalize immediately. Set to false when knobs
+    ///                 need to be set before finalization (caller must finalize).
+    Error initializeEngineConfig(int64_t engineId, bool finalize = true)
     {
         ScopedHipdnnBackendDescriptor engineDesc(HIPDNN_BACKEND_ENGINE_DESCRIPTOR);
 
@@ -261,8 +265,12 @@ private:
                                                  &engineDesc.get()),
             "Failed to set engine on the engine config descriptor.");
 
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineConfigDesc->get()),
-                                         "Failed to finalize engine config descriptor");
+        if(finalize)
+        {
+            HIPDNN_RETURN_ON_BACKEND_FAILURE(
+                hipdnnBackend()->backendFinalize(engineConfigDesc->get()),
+                "Failed to finalize engine config descriptor");
+        }
 
         _engineConfigDesc = std::move(engineConfigDesc);
 
@@ -938,11 +946,12 @@ public:
         Error status = get_knob_lookup_for_engine(engineId, existingKnobs);
         HIPDNN_CHECK_ERROR(status);
 
-        status = initializeEngineConfig(engineId);
+        // Initialize engine config WITHOUT finalizing so we can set knob settings first
+        status = initializeEngineConfig(engineId, false);
         HIPDNN_CHECK_ERROR(status);
 
         std::vector<KnobSetting> validatedSettings;
-        for(auto& setting : settings)
+        for(const auto& setting : settings)
         {
             auto knobIt = existingKnobs.find(setting.knobId());
             if(knobIt == existingKnobs.end())
@@ -998,6 +1007,20 @@ public:
                                                  static_cast<int64_t>(flatbufferDataArray.size()),
                                                  flatbufferDataArray.data()),
                                              "Failed to set knob settings on engine config.");
+        }
+
+        // Now finalize the engine config after setting knobs
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(_engineConfigDesc->get()),
+                                         "Failed to finalize engine config descriptor");
+
+        // Create execution plan descriptor
+        _executionPlanDesc = std::make_unique<ScopedHipdnnBackendDescriptor>(
+            HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
+
+        if(!_executionPlanDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Failed to create backend execution descriptor."};
         }
 
         return {ErrorCode::OK, ""};

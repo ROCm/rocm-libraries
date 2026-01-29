@@ -181,7 +181,7 @@ TEST(TestMiopenEngine, GetDetailsContainsBenchmarkingKnob)
     ASSERT_EQ(engineDetails.knobCount(), 1u);
 
     const auto& knob = engineDetails.getKnobByName("global.benchmarking");
-    EXPECT_EQ(knob.knobIdStr(), "global.benchmarking");
+    EXPECT_EQ(knob.knobId(), "global.benchmarking");
     EXPECT_EQ(knob.description(), "Enable benchmarking");
 
     ASSERT_TRUE(knob.hasDefaultValue());
