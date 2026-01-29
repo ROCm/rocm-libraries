@@ -91,7 +91,7 @@ bool Softmax::IsApplicable(
 }
 
 PerformanceConfigSoftmax
-Softmax::GetDefaultPerformanceConfig(const ExecutionContext& context,
+Softmax::GetDefaultPerformanceConfig(const ExecutionContext&,
                                      const miopen::softmax::ProblemDescription& problem) const
 {
     PerformanceConfigSoftmax config;

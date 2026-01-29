@@ -68,35 +68,39 @@ struct Softmax final : SoftmaxTunableSolver<PerformanceConfigSoftmax>
         // Forward y and backward dx are both an input and an output, so we need to restore them
         // after tuning to make sure tuning doesn't affect the output
         auto invoke_context_softmax = invoke_context.CastTo<miopen::softmax::InvokeParams>();
-        Allocator::ManageDataPtr data_backup;
+        std::vector<unsigned char> data_backup;
         if(invoke_context_softmax.forward_y != nullptr)
         {
-            data_backup = context.GetStream().Create(invoke_context_softmax.yDesc.GetNumBytes());
-            context.GetStream().Copy(invoke_context_softmax.forward_y,
-                                     data_backup.get(),
-                                     invoke_context_softmax.yDesc.GetNumBytes());
+            auto y_bytepointer = reinterpret_cast<unsigned char*>(invoke_context_softmax.forward_y);
+            data_backup        = std::vector<unsigned char>(
+                y_bytepointer, y_bytepointer + invoke_context_softmax.yDesc.GetNumBytes());
+            context.GetStream().ReadTo(data_backup.data(),
+                                       invoke_context_softmax.forward_y,
+                                       invoke_context_softmax.yDesc.GetNumBytes());
         }
-        else if(invoke_context_softmax.dx != nullptr)
+        if(invoke_context_softmax.dx != nullptr)
         {
-            data_backup = context.GetStream().Create(invoke_context_softmax.xdxDesc.GetNumBytes());
-            context.GetStream().Copy(invoke_context_softmax.dx,
-                                     data_backup.get(),
-                                     invoke_context_softmax.yDesc.GetNumBytes());
+            auto dx_bytepointer = reinterpret_cast<unsigned char*>(invoke_context_softmax.dx);
+            data_backup         = std::vector<unsigned char>(
+                dx_bytepointer, dx_bytepointer + invoke_context_softmax.xdxDesc.GetNumBytes());
+            context.GetStream().ReadTo(invoke_context_softmax.dx,
+                                       data_backup.data(),
+                                       invoke_context_softmax.xdxDesc.GetNumBytes());
         }
 
         auto result = GenericSearch(*this, context, problem, invoke_context);
 
         if(invoke_context_softmax.forward_y != nullptr)
         {
-            context.GetStream().Copy(data_backup.get(),
-                                     invoke_context_softmax.forward_y,
-                                     invoke_context_softmax.yDesc.GetNumBytes());
+            context.GetStream().WriteTo(data_backup.data(),
+                                        invoke_context_softmax.forward_y,
+                                        invoke_context_softmax.yDesc.GetNumBytes());
         }
         if(invoke_context_softmax.dx != nullptr)
         {
-            context.GetStream().Copy(data_backup.get(),
-                                     invoke_context_softmax.dx,
-                                     invoke_context_softmax.xdxDesc.GetNumBytes());
+            context.GetStream().WriteTo(data_backup.data(),
+                                        invoke_context_softmax.dx,
+                                        invoke_context_softmax.xdxDesc.GetNumBytes());
         }
 
         return result;
