@@ -318,6 +318,7 @@ size_t MiopenBatchnormFwdTrainingPlanBuilder::getWorkspaceSize(
 void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     const hipdnn_plugin_sdk::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() == 1)
@@ -353,6 +354,19 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Batchnorm fwd training plan builder supports only 1 or 2 node graphs");
     }
+}
+
+bool MiopenBatchnormFwdTrainingPlanBuilder::hasCustomKnobs() const
+{
+    return false;
+}
+
+std::vector<hipdnn_data_sdk::data_objects::KnobT>
+    MiopenBatchnormFwdTrainingPlanBuilder::getCustomKnobs(
+        [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+        [[maybe_unused]] const hipdnn_plugin_sdk::IGraph& opGraph) const
+{
+    return {};
 }
 
 } // namespace miopen_legacy_plugin

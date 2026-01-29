@@ -717,6 +717,7 @@ void buildPlanFusedFwdInferenceWithVarianceActivation(
 void MiopenBatchnormPlanBuilder::buildPlan(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_plugin_sdk::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() == 2)
@@ -774,6 +775,18 @@ void MiopenBatchnormPlanBuilder::buildPlan(
                 + std::string(
                     hipdnn_data_sdk::data_objects::toString(nodeWrapper.attributesType())));
     }
+}
+
+bool MiopenBatchnormPlanBuilder::hasCustomKnobs() const
+{
+    return false;
+}
+
+std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenBatchnormPlanBuilder::getCustomKnobs(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const hipdnn_plugin_sdk::IGraph& opGraph) const
+{
+    return {};
 }
 
 } // namespace miopen_legacy_plugin

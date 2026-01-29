@@ -38,9 +38,8 @@ void EngineManager::getEngineDetails(HipdnnEnginePluginHandle& handle,
                                      int64_t engineId,
                                      hipdnnPluginConstData_t& engineDetailsOut)
 {
-    (void)opGraph; // Unused parameter
     auto& engine = getEngine(engineId);
-    engine.getDetails(handle, engineDetailsOut);
+    engine.getDetails(handle, opGraph, engineDetailsOut);
 }
 
 size_t EngineManager::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,

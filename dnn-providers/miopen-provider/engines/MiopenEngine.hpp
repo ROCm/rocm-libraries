@@ -23,6 +23,7 @@ public:
     bool isApplicable(HipdnnEnginePluginHandle& handle,
                       const hipdnn_plugin_sdk::IGraph& opGraph) const override;
     void getDetails(HipdnnEnginePluginHandle& handle,
+                    const hipdnn_plugin_sdk::IGraph& opGraph,
                     hipdnnPluginConstData_t& detailsOut) const override;
     size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
                             const hipdnn_plugin_sdk::IGraph& opGraph) const override;

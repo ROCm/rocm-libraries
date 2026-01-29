@@ -51,7 +51,18 @@ public:
         return _benchmarkingEnabled;
     }
 
+    void setDeterministicEnabled(bool enabled)
+    {
+        _deterministicEnabled = enabled;
+    }
+
+    bool deterministicEnabled() const
+    {
+        return _deterministicEnabled;
+    }
+
 private:
     std::unique_ptr<miopen_legacy_plugin::IPlan> _plan;
     bool _benchmarkingEnabled = false;
+    bool _deterministicEnabled = false;
 };

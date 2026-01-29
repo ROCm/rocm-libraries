@@ -6,6 +6,7 @@
 #include <string>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <miopen/miopen.h>
 
@@ -296,9 +297,11 @@ size_t MiopenConvPlanBuilder::getWorkspaceSize(const HipdnnEnginePluginHandle& h
     }
 }
 
-void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
-                                      const hipdnn_plugin_sdk::IGraph& opGraph,
-                                      HipdnnEnginePluginExecutionContext& executionContext) const
+void MiopenConvPlanBuilder::buildPlan(
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_plugin_sdk::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
+    HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() != 1)
     {
@@ -332,6 +335,39 @@ void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
                 + std::string(
                     hipdnn_data_sdk::data_objects::toString(nodeWrapper.attributesType())));
     }
+}
+
+bool MiopenConvPlanBuilder::hasCustomKnobs() const
+{
+    return true;
+}
+
+std::vector<hipdnn_data_sdk::data_objects::KnobT>
+    MiopenConvPlanBuilder::getCustomKnobs(const HipdnnEnginePluginHandle& handle,
+                                          const hipdnn_plugin_sdk::IGraph& opGraph) const
+{
+    std::vector<hipdnn_data_sdk::data_objects::KnobT> knobs;
+
+    if(isApplicable(handle, opGraph))
+    {
+        hipdnn_data_sdk::data_objects::KnobT knob;
+        knob.knob_id = hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME;
+        knob.description = "Enable deterministic mode";
+
+        hipdnn_data_sdk::data_objects::IntValueT defaultValue;
+        defaultValue.value = 0;
+        knob.default_value.Set(defaultValue);
+
+        hipdnn_data_sdk::data_objects::IntConstraintT constraint;
+        constraint.min_value = 0;
+        constraint.max_value = 1;
+        constraint.step = 1;
+        knob.constraint.Set(constraint);
+
+        knobs.push_back(std::move(knob));
+    }
+
+    return knobs;
 }
 
 } // namespace miopen_legacy_plugin

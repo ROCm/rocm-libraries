@@ -40,6 +40,7 @@ bool MiopenEngine::isApplicable(HipdnnEnginePluginHandle& handle,
 }
 
 void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
+                              const hipdnn_plugin_sdk::IGraph& opGraph,
                               hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
@@ -49,6 +50,21 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
 
     std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobsVector;
     knobsVector.push_back(knob);
+
+    // Collect custom knobs from plan builders
+    for(const auto& planBuilder : _planBuilders)
+    {
+        if(planBuilder->hasCustomKnobs())
+        {
+            auto customKnobs = planBuilder->getCustomKnobs(handle, opGraph);
+            for(const auto& knobT : customKnobs)
+            {
+                auto knobOffset = hipdnn_data_sdk::data_objects::Knob::Pack(builder, &knobT);
+                knobsVector.push_back(knobOffset);
+            }
+        }
+    }
+
     auto knobs = builder.CreateVector(knobsVector);
 
     auto engineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
@@ -98,6 +114,23 @@ void MiopenEngine::initializeExecutionContext(
                     hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
             }
         }
+
+        if(engineConfig.hasKnobSetting(hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME))
+        {
+            const auto& knobSetting
+                = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME);
+            if(knobSetting.valueType() == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
+            {
+                auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
+                executionContext.setDeterministicEnabled(value != 0);
+            }
+            else
+            {
+                HIPDNN_LOG_WARN(
+                    "Deterministic knob setting value is not an integer. Type: {}",
+                    hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
+            }
+        }
     }
     else
     {
@@ -108,7 +141,7 @@ void MiopenEngine::initializeExecutionContext(
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
-            planBuilder->buildPlan(handle, opGraph, executionContext);
+            planBuilder->buildPlan(handle, opGraph, engineConfig, executionContext);
             break;
         }
     }
