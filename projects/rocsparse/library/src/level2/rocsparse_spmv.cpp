@@ -309,56 +309,6 @@ rocsparse_status rocsparse::spmv_alg2csrmv_alg(rocsparse_spmv_alg    spmv_alg,
     // LCOV_EXCL_STOP
 }
 
-rocsparse_status rocsparse::csrmv_alg_default2csrmv_alg(rocsparse::csrmv_alg& alg,
-                                                        rocsparse_format      format,
-                                                        rocsparse_operation   operation)
-{
-    if(alg != rocsparse::csrmv_alg_default)
-    {
-        // Algorithm is already specific, no dispatch needed
-        return rocsparse_status_success;
-    }
-
-    // Dispatch default algorithm to a specific algorithm based on format and operation:
-    // - CSR format with transpose/conjugate_transpose: use rowsplit (adaptive doesn't support transpose)
-    // - CSC format without transpose: use rowsplit (adaptive doesn't support this case)
-    // - Otherwise: use adaptive
-    switch(format)
-    {
-    case rocsparse_format_csr:
-    {
-        if(operation != rocsparse_operation_none)
-        {
-            alg = rocsparse::csrmv_alg_rowsplit;
-        }
-        else
-        {
-            alg = rocsparse::csrmv_alg_adaptive;
-        }
-        return rocsparse_status_success;
-    }
-    case rocsparse_format_csc:
-    {
-        if(operation == rocsparse_operation_none)
-        {
-            alg = rocsparse::csrmv_alg_rowsplit;
-        }
-        else
-        {
-            alg = rocsparse::csrmv_alg_adaptive;
-        }
-        return rocsparse_status_success;
-    }
-    default:
-    {
-        // LCOV_EXCL_START
-        // Format is not CSR or CSC, which is an internal error for this function
-        return rocsparse_status_internal_error;
-        // LCOV_EXCL_STOP
-    }
-    }
-}
-
 rocsparse_status rocsparse::spmv_alg2coomv_alg(rocsparse_spmv_alg   spmv_alg,
                                                rocsparse_coomv_alg& coomv_alg)
 {
@@ -636,8 +586,6 @@ namespace rocsparse
         {
             rocsparse::csrmv_alg alg_csrmv;
             RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmv_alg2csrmv_alg(alg, alg_csrmv)));
-            RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::csrmv_alg_default2csrmv_alg(alg_csrmv, rocsparse_format_csr, trans)));
 
             switch(stage)
             {
@@ -717,8 +665,6 @@ namespace rocsparse
         {
             rocsparse::csrmv_alg alg_csrmv;
             RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmv_alg2csrmv_alg(alg, alg_csrmv)));
-            RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::csrmv_alg_default2csrmv_alg(alg_csrmv, rocsparse_format_csc, trans)));
 
             switch(stage)
             {

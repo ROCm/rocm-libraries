@@ -33,10 +33,6 @@ namespace rocsparse
 
     rocsparse_status spmv_alg2csrmv_alg(rocsparse_spmv_alg spmv_alg, rocsparse::csrmv_alg& target);
 
-    rocsparse_status csrmv_alg_default2csrmv_alg(rocsparse::csrmv_alg& alg,
-                                                 rocsparse_format      format,
-                                                 rocsparse_operation   operation);
-
     rocsparse_status spmv_alg2coomv_alg(rocsparse_spmv_alg   spmv_alg,
                                         rocsparse_coomv_alg& coomv_alg);
 
