@@ -51,37 +51,42 @@ template <typename T>
 std::vector<ConvWrwToleranceTestCase> getConvWrwToleranceTestCases();
 
 // Float / Float / Float (High Precision: Linear)
+// Error = 2 * N^2 * u * maxProduct
 template <>
 std::vector<ConvWrwToleranceTestCase>
     getConvWrwToleranceTestCases<TypeTriple<float, float, float>>()
 {
     return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
-            // N=1. Accum = 1.
-            {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 1.0 * std::pow(2.0, -23)},
-            // N=2. Accum = 2.
-            {-1.0, 1.0, -1.0, 1.0, {2, 1, 1, 1}, 2.0 * std::pow(2.0, -23)},
-            // N=10. Accum = 10.
-            {-1.0, 1.0, -1.0, 1.0, {10, 1, 1, 1}, 10.0 * std::pow(2.0, -23)},
+            // N=1. Accum = 1. Tol = 2 * 1^2 * 2^-23 = 2 * 2^-23
+            {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 2.0 * std::pow(2.0, -23)},
+            // N=2. Accum = 2. Tol = 2 * 2^2 * 2^-23 = 8 * 2^-23
+            {-1.0, 1.0, -1.0, 1.0, {2, 1, 1, 1}, 8.0 * std::pow(2.0, -23)},
+            // N=10. Accum = 10. Tol = 2 * 10^2 * 2^-23 = 200 * 2^-23
+            {-1.0, 1.0, -1.0, 1.0, {10, 1, 1, 1}, 200.0 * std::pow(2.0, -23)},
             // Large values: range -1000, 1000. maxProduct = 10^6.
-            // N=10. Accum = 10.
-            {-1000.0, 1000.0, -1000.0, 1000.0, {10, 1, 1, 1}, 10.0 * 1.0e6 * std::pow(2.0, -23)}};
+            // N=10. Accum = 10. Tol = 200 * 10^6 * 2^-23
+            {-1000.0, 1000.0, -1000.0, 1000.0, {10, 1, 1, 1}, 200.0 * 1.0e6 * std::pow(2.0, -23)}};
 }
 
 // Float / Double / Float (Input casting error)
 // Input is double, Compute is float. We lose precision.
-// Error = (N * maxProduct * eps) + (2 * N * maxProduct * eps) = 3 * N * maxProduct * eps
+// Accumulation Error = 2 * N^2 * u * maxProduct
+// Casting Error = 2 * N * maxProduct * u
+// Total = (2 * N^2 + 2 * N) * u * maxProduct
 template <>
 std::vector<ConvWrwToleranceTestCase>
     getConvWrwToleranceTestCases<TypeTriple<float, double, float>>()
 {
-    return {// N=1. Accum = 1. Tol = 3 * 2^-23
-            {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 3.0 * std::pow(2.0, -23)},
-            // N=10. Accum = 10. Tol = 3 * 10 * 2^-23 = 30 * 2^-23
-            {-1.0, 1.0, -1.0, 1.0, {10, 1, 1, 1}, 30.0 * std::pow(2.0, -23)}};
+    return {// N=1. Accum = 1. Tol = (2 + 2) * 2^-23 = 4 * 2^-23
+            {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 4.0 * std::pow(2.0, -23)},
+            // N=10. Accum = 10. Tol = (200 + 20) * 2^-23 = 220 * 2^-23
+            {-1.0, 1.0, -1.0, 1.0, {10, 1, 1, 1}, 220.0 * std::pow(2.0, -23)}};
 }
 
 // HipBfloat16 / Float / Float (High Precision Compute: Linear)
+// Accumulation Error = 2 * N^2 * u_float * maxProduct
+// Output Cast Error = N * maxProduct * u_bfp16
 template <>
 std::vector<ConvWrwToleranceTestCase>
     getConvWrwToleranceTestCases<TypeTriple<hip_bfloat16, float, float>>()
@@ -89,20 +94,21 @@ std::vector<ConvWrwToleranceTestCase>
     return {
         {-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
         {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
-        // N=1. Accum = 1.
-        {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, std::pow(2.0, -23) + std::pow(2.0, -7)},
-        // N=2. Accum = 2.
-        {-1.0, 1.0, -1.0, 1.0, {2, 1, 1, 1}, 2.0 * std::pow(2.0, -23) + 2.0 * std::pow(2.0, -7)},
-        // N=10. Accum = 10.
+        // N=1. Accum = 1. Tol = 2 * 2^-23 + 1 * 2^-7
+        {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 2.0 * std::pow(2.0, -23) + std::pow(2.0, -7)},
+        // N=2. Accum = 2. Tol = 8 * 2^-23 + 2 * 2^-7
+        {-1.0, 1.0, -1.0, 1.0, {2, 1, 1, 1}, 8.0 * std::pow(2.0, -23) + 2.0 * std::pow(2.0, -7)},
+        // N=10. Accum = 10. Tol = 200 * 2^-23 + 10 * 2^-7
         {-1.0,
          1.0,
          -1.0,
          1.0,
          {10, 1, 1, 1},
-         10.0 * std::pow(2.0, -23) + 10.0 * std::pow(2.0, -7)}};
+         200.0 * std::pow(2.0, -23) + 10.0 * std::pow(2.0, -7)}};
 }
 
 // HipBfloat16 / HipBfloat16 / HipBfloat16 (Lower Precision: Statistical)
+// Error = K * sqrt(2N) * u * (N * maxProduct) = K * N * sqrt(2N) * u * maxProduct
 template <>
 std::vector<ConvWrwToleranceTestCase>
     getConvWrwToleranceTestCases<TypeTriple<hip_bfloat16, hip_bfloat16, hip_bfloat16>>()
@@ -111,48 +117,51 @@ std::vector<ConvWrwToleranceTestCase>
     // 2^-7 = 0.0078125
     return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
-            // N=1. Accum = 1. Tol = 6*1 * 2^-7 = 6 * 2^-7 = 0.046875
-            {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 0.046875},
-            // N=2. Accum = 2. Tol = 6*sqrt(2) * 2^-7 = 8.485 * 2^-7 = 0.06629...
+            // N=1. Accum = 1. Tol = 6 * 1 * sqrt(2) * 2^-7 = 8.485 * 2^-7 = 0.06629...
             // Rounded to Bfp16: 0.06640625 (17/256)
-            {-1.0, 1.0, -1.0, 1.0, {2, 1, 1, 1}, 0.06640625},
-            // N=10. Accum = 10. Tol = 6*sqrt(10) * 2^-7 = 18.97 * 2^-7 = 0.14823...
-            // Rounded to Bfp16: 0.1484375 (19/128)
-            {-1.0, 1.0, -1.0, 1.0, {10, 1, 1, 1}, 0.1484375}};
+            {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 0.06640625},
+            // N=2. Accum = 2. Tol = 6 * 2 * sqrt(4) * 2^-7 = 24 * 2^-7 = 0.1875
+            {-1.0, 1.0, -1.0, 1.0, {2, 1, 1, 1}, 0.1875},
+            // N=10. Accum = 10. Tol = 6 * 10 * sqrt(20) * 2^-7 = 268.328 * 2^-7 = 2.0963...
+            // Rounded to Bfp16: 2.09375 (134/64)
+            {-1.0, 1.0, -1.0, 1.0, {10, 1, 1, 1}, 2.09375}};
 }
 
 // Half / Float / Float (High Precision Compute: Linear)
+// Accumulation Error = 2 * N^2 * u_float * maxProduct
+// Output Cast Error = N * maxProduct * u_half
 template <>
 std::vector<ConvWrwToleranceTestCase> getConvWrwToleranceTestCases<TypeTriple<half, float, float>>()
 {
     return {
         {-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
         {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
-        // N=1. Accum = 1.
-        {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, std::pow(2.0, -23) + std::pow(2.0, -10)},
-        // N=2. Accum = 2.
-        {-1.0, 1.0, -1.0, 1.0, {2, 1, 1, 1}, 2.0 * std::pow(2.0, -23) + 2.0 * std::pow(2.0, -10)},
-        // N=10. Accum = 10.
+        // N=1. Accum = 1. Tol = 2 * 2^-23 + 1 * 2^-10
+        {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 2.0 * std::pow(2.0, -23) + std::pow(2.0, -10)},
+        // N=2. Accum = 2. Tol = 8 * 2^-23 + 2 * 2^-10
+        {-1.0, 1.0, -1.0, 1.0, {2, 1, 1, 1}, 8.0 * std::pow(2.0, -23) + 2.0 * std::pow(2.0, -10)},
+        // N=10. Accum = 10. Tol = 200 * 2^-23 + 10 * 2^-10
         {-1.0,
          1.0,
          -1.0,
          1.0,
          {10, 1, 1, 1},
-         10.0 * std::pow(2.0, -23) + 10.0 * std::pow(2.0, -10)}};
+         200.0 * std::pow(2.0, -23) + 10.0 * std::pow(2.0, -10)}};
 }
 
 // Half / Half / Half (Lower Precision: Statistical)
+// Error = K * N * sqrt(2N) * u * maxProduct
 template <>
 std::vector<ConvWrwToleranceTestCase> getConvWrwToleranceTestCases<TypeTriple<half, half, half>>()
 {
     return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
-            // N=1. Accum = 1.
-            {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 6.0 * std::pow(2.0, -10)},
-            // N=2. Accum = 2.
-            {-1.0, 1.0, -1.0, 1.0, {2, 1, 1, 1}, 6.0 * std::sqrt(2.0) * std::pow(2.0, -10)},
-            // N=10. Accum = 10.
-            {-1.0, 1.0, -1.0, 1.0, {10, 1, 1, 1}, 6.0 * std::sqrt(10.0) * std::pow(2.0, -10)}};
+            // N=1. Accum = 1. Tol = 6 * 1 * sqrt(2) * 2^-10
+            {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 6.0 * std::sqrt(2.0) * std::pow(2.0, -10)},
+            // N=2. Accum = 2. Tol = 6 * 2 * sqrt(4) * 2^-10 = 24 * 2^-10
+            {-1.0, 1.0, -1.0, 1.0, {2, 1, 1, 1}, 24.0 * std::pow(2.0, -10)},
+            // N=10. Accum = 10. Tol = 6 * 10 * sqrt(20) * 2^-10
+            {-1.0, 1.0, -1.0, 1.0, {10, 1, 1, 1}, 60.0 * std::sqrt(20.0) * std::pow(2.0, -10)}};
 }
 
 template <typename Out, typename In, typename Comp>
@@ -251,9 +260,9 @@ INSTANTIATE_TEST_SUITE_P(
 // Test that calculateConvWrwTolerance catches simulated wrong outputs
 TEST(TestCalculateConvWrwTolerance, DetectsFailure)
 {
-    // Setup
-    std::vector<int64_t> dims = {10, 10, 10, 10};
-    std::vector<int64_t> strides = {1000, 100, 10, 1};
+    // N=1, Spatial=10x10 => Accumulations = 100
+    std::vector<int64_t> dims = {1, 1, 10, 10};
+    std::vector<int64_t> strides = {100, 100, 10, 1};
 
     // Create tensors
     auto baseline = hipdnn_data_sdk::utilities::createTensor(
@@ -265,17 +274,19 @@ TEST(TestCalculateConvWrwTolerance, DetectsFailure)
 
     // Populate with values
     // Correct value: 1.0
-    // Okay value: 1.5
-    // Wrong value: 2.0
+    // Tolerance for N=100, Half/Float/Half is approx 0.1
+    // Okay value: 1.05 (Error 0.05)
+    // Wrong value: 1.2 (Error 0.2)
 
     baseline->fillTensorWithValue(1.0f);
-    actualPassing->fillTensorWithValue(1.5f);
-    actualFailing->fillTensorWithValue(2.0f);
+    actualPassing->fillTensorWithValue(1.05f);
+    actualFailing->fillTensorWithValue(1.2f);
 
     auto tol = calculateConvWrwTolerance<half, half, float>(-1.0, 1.0, -1.0, 1.0, dims);
 
-    // tol approx .96~
-    EXPECT_LT(tol, 1.0_h);
+    // tol approx 0.1
+    EXPECT_LT(tol, 0.15_h);
+    EXPECT_GT(tol, 0.09_h);
 
     auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
         hipdnn_data_sdk::data_objects::DataType::FLOAT, tol, 0);

@@ -79,24 +79,34 @@ OutputType calculateConvWrwTolerance(double inputMin,
     // Worst case product magnitude
     double maxProduct = maxAbsInput * maxAbsDy;
 
+    // Bound on sum(|x_i * y_i|)
+    double sumAbsProductBound = static_cast<double>(numberOfAccumulations) * maxProduct;
+
     double epsilon = getEpsilon<ComputeType>();
     double accumulatedTolerance = 0.0;
 
     if constexpr(std::is_same_v<ComputeType, float> || std::is_same_v<ComputeType, double>)
     {
         // High Precision: Linear bound (Classical)
-        // Error <= n * epsilon * maxProduct
-        // We assume FMAs are used, so factor is n, not 2n.
-        accumulatedTolerance = static_cast<double>(numberOfAccumulations) * epsilon * maxProduct;
+        // Error <= gamma_2n * sum(|x_i * y_i|)
+        // gamma_n = n * u / (1 - n * u) approx n * u
+        // We assume NO FMAs are used, so factor is 2n.
+        // gamma_2n approx 2 * n * u
+        double gamma = 2.0 * static_cast<double>(numberOfAccumulations) * epsilon;
+        accumulatedTolerance = gamma * sumAbsProductBound;
     }
     else
     {
         // Lower Precision (FP16, BF16): Statistical bound (Probabilistic)
-        // Error <= k * sqrt(n) * epsilon * maxProduct
+        // Error <= gamma_2n * sum(|x_i * y_i|)
+        // gamma_n = sqrt(n) * u
+        // We assume NO FMAs are used, so factor is 2n.
+        // gamma_2n = sqrt(2n) * u
         // k_sigma = 6.0 for high confidence
         constexpr double K_SIGMA = 6.0;
-        accumulatedTolerance = K_SIGMA * std::sqrt(static_cast<double>(numberOfAccumulations))
-                               * epsilon * maxProduct;
+        double gamma
+            = K_SIGMA * std::sqrt(2.0 * static_cast<double>(numberOfAccumulations)) * epsilon;
+        accumulatedTolerance = gamma * sumAbsProductBound;
     }
 
     // Calculate input casting error
@@ -118,14 +128,13 @@ OutputType calculateConvWrwTolerance(double inputMin,
         // Error_P = |P_approx - P_true| ≈ |P_true| * |d_x + d_dy|
         // Error_P <= |P_true| * (|d_x| + |d_dy|) <= |P_true| * (epsilon + epsilon)
         // Error_P <= 2 * |P_true| * epsilon
-        // Summing over N accumulations: Total_Error <= 2 * N * maxProduct * epsilon
-        double castingError
-            = 2.0 * static_cast<double>(numberOfAccumulations) * maxProduct * epsilon;
+        // Summing over N accumulations: Total_Error <= 2 * sum(|x_i * y_i|) * epsilon
+        double castingError = 2.0 * sumAbsProductBound * epsilon;
         accumulatedTolerance += castingError;
     }
 
     // Calculate final accumulated value magnitude for casting error
-    double maxPossibleOutputValue = static_cast<double>(numberOfAccumulations) * maxProduct;
+    double maxPossibleOutputValue = sumAbsProductBound;
 
     double castTolerance = 0.0;
     // Calculate precision loss due to casting from ComputeType to OutputType.
