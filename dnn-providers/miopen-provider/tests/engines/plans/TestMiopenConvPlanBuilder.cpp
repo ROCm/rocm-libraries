@@ -11,7 +11,7 @@
 #include "HipdnnEnginePluginHandle.hpp"
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
 
-using namespace miopen_legacy_plugin;
+using namespace miopen_plugin;
 using namespace hipdnn_plugin_sdk;
 using namespace hipdnn_test_sdk::utilities;
 

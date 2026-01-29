@@ -12,7 +12,7 @@
 #include "engines/plans/MiopenBatchnormApplicabilityChecks.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlan.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 namespace
@@ -369,4 +369,4 @@ std::vector<hipdnn_data_sdk::data_objects::KnobT>
     return {};
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

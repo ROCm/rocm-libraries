@@ -17,7 +17,7 @@
 #include "engines/plans/MiopenConvFwdPlan.hpp"
 #include "engines/plans/MiopenConvWrwPlan.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 namespace
@@ -370,4 +370,4 @@ std::vector<hipdnn_data_sdk::data_objects::KnobT>
     return knobs;
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

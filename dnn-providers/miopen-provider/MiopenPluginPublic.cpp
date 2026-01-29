@@ -4,7 +4,7 @@
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 
-#include "MiopenLegacyPlugin.hpp"
+#include "MiopenPlugin.hpp"
 
 extern "C" {
 

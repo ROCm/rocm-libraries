@@ -10,7 +10,7 @@
 #include "MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlan.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 namespace
@@ -467,4 +467,4 @@ std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenConvFwdBiasActivPlanBuil
     return {};
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin
