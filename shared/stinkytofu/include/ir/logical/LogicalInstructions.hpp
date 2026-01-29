@@ -200,6 +200,18 @@ namespace stinkytofu
          */
         void dump(std::ostream& out) const override
         {
+            // Special handling for Label instructions
+            if(opcode_ == logical::Label)
+            {
+                auto* labelData = asLabel();
+                if(labelData)
+                {
+                    out << labelData->labelName << ":";
+                    return;
+                }
+            }
+
+            // Regular instructions
             out << getLogicalName() << " (IR)";
             if(!comment.empty())
                 out << "  // " << comment;
