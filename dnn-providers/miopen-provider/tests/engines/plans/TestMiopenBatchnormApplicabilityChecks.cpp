@@ -11,7 +11,7 @@
 
 #include "engines/plans/MiopenBatchnormApplicabilityChecks.hpp"
 
-using namespace miopen_legacy_plugin;
+using namespace miopen_plugin;
 
 namespace
 {

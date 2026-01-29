@@ -9,6 +9,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/AddDirect2LDS.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddF6LDSPadding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddLDS.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AddLDSBarriers.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddLDSPadding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddPRNG.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddPrefetch.cpp"
