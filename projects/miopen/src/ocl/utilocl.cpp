@@ -1,42 +1,19 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include <miopen/datatype.hpp>
 #include <miopen/float_equal.hpp>
 #include <miopen/kernel_cache.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/util.hpp>
 
-#include <boost/range/adaptors.hpp>
-
 #include <cmath>
 #include <cstdint>
+#include <span>
 
-#define WG_SIZE (static_cast<size_t>(256))
-#define MAX_ACTIVE_THREADS (64 * 4 * 64)
-#define MAX_LOCAL_MEM 65536
+constexpr size_t WG_SIZE            = 256;
+constexpr size_t MAX_ACTIVE_THREADS = static_cast<const size_t>(64 * 4 * 64);
+constexpr size_t MAX_LOCAL_MEM      = 65536;
 
 namespace miopen {
 
@@ -647,20 +624,19 @@ float Col2Im3dGPU(const Handle& handle,
     return handle.GetKernelTime();
 }
 
-float Im2ColGPU(
-    const Handle& handle,
-    std::size_t spatial_dim,
-    ConstData_t im,
-    std::size_t im_offset,
-    std::size_t in_c,
-    const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& in_spatial,
-    const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& wei_spatial,
-    const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& out_spatial,
-    const std::vector<int>& pad_spatial,
-    const std::vector<int>& stride_spatial,
-    const std::vector<int>& dilation_spatial,
-    Data_t col,
-    miopenDataType_t type)
+float Im2ColGPU(const Handle& handle,
+                std::size_t spatial_dim,
+                ConstData_t im,
+                std::size_t im_offset,
+                std::size_t in_c,
+                std::span<const size_t> in_spatial,
+                std::span<const size_t> wei_spatial,
+                std::span<const size_t> out_spatial,
+                const std::vector<int>& pad_spatial,
+                const std::vector<int>& stride_spatial,
+                const std::vector<int>& dilation_spatial,
+                Data_t col,
+                miopenDataType_t type)
 {
     switch(spatial_dim)
     {
@@ -716,20 +692,19 @@ float Im2ColGPU(
     }
 }
 
-float Col2ImGPU(
-    const Handle& handle,
-    std::size_t spatial_dim,
-    ConstData_t col,
-    const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& out_spatial,
-    const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& wei_spatial,
-    const std::vector<int>& pad_spatial,
-    const std::vector<int>& stride_spatial,
-    const std::vector<int>& dilation_spatial,
-    std::size_t in_c,
-    const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& in_spatial,
-    Data_t im,
-    std::size_t im_offset,
-    miopenDataType_t type)
+float Col2ImGPU(const Handle& handle,
+                std::size_t spatial_dim,
+                ConstData_t col,
+                std::span<const size_t> out_spatial,
+                std::span<const size_t> wei_spatial,
+                const std::vector<int>& pad_spatial,
+                const std::vector<int>& stride_spatial,
+                const std::vector<int>& dilation_spatial,
+                std::size_t in_c,
+                std::span<const size_t> in_spatial,
+                Data_t im,
+                std::size_t im_offset,
+                miopenDataType_t type)
 {
     switch(spatial_dim)
     {

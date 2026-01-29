@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2020 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/conv/solvers.hpp>
 
@@ -36,7 +13,7 @@
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/solver/gemm_common.hpp>
 
-#include <boost/range/adaptors.hpp>
+#include <ranges>
 
 namespace miopen {
 namespace solver {
@@ -129,7 +106,7 @@ float GemmFwdBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
     std::size_t in_n, in_c;
     std::tie(in_n, in_c)    = tie_pick<0, 1>()(xDesc.GetLengths());
     std::size_t spatial_dim = conv.GetSpatialDimension();
-    auto wei_spatial        = boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
+    auto wei_spatial = wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
     // Use transpose path 1x1, stride=2
     if(conv.GetSpatialDimension() == 2 &&
@@ -199,7 +176,7 @@ size_t GemmFwd1x1_0_2::GetWorkspaceSize(const ExecutionContext& context,
     std::tie(in_n, in_c) = miopen::tie_pick<0, 1>{}(xDesc.GetLengths());
 
     const auto out_spatial =
-        boost::adaptors::slice(yDesc.GetLengths(), 2, 2 + conv.GetSpatialDimension());
+        yDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
 
     const auto x_t_size = in_n * in_c * (xDesc.GetType() == miopenInt8 ? 2 : 1) *
                           std::accumulate(out_spatial.begin(),
@@ -235,7 +212,8 @@ bool GemmFwd1x1_0_2::IsApplicable(const ExecutionContext& context,
     decltype(auto) wDesc = problem.GetWeights();
 
     const auto spatial_dim = conv.GetSpatialDimension();
-    const auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
+    const auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
     return conv.GetSpatialDimension() == 2 &&
            miopen::all_of(wei_spatial, [](auto v) { return v == 1; }) &&
@@ -278,8 +256,10 @@ ConvSolution GemmFwd1x1_0_2::GetSolution(const ExecutionContext& context,
     const auto workspace_req = GetWorkspaceSize(context, problem);
 
     const std::size_t spatial_dim = conv.GetSpatialDimension();
-    const auto& in_spatial_       = boost::adaptors::slice(xDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto& out_spatial_      = boost::adaptors::slice(yDesc.GetLengths(), 2, 2 + spatial_dim);
+    const auto in_spatial_ =
+        xDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto out_spatial_ =
+        yDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
     std::size_t in_n, in_c;
     std::tie(in_n, in_c) = tie_pick<0, 1>()(xDesc.GetLengths());
@@ -293,153 +273,156 @@ ConvSolution GemmFwd1x1_0_2::GetSolution(const ExecutionContext& context,
     const auto lowp_quant   = conv.lowp_quant;
     const auto conv_strides = conv.GetConvStrides();
 
-    solution.invoker_factory = [=](const std::vector<Kernel>&) {
-        const auto in_spatial  = std::vector<std::size_t>(in_spatial_.begin(), in_spatial_.end());
-        const auto out_spatial = std::vector<std::size_t>(out_spatial_.begin(), out_spatial_.end());
+    solution.invoker_factory =
+        [            =,
+         in_spatial  = std::vector<std::size_t>(in_spatial_.begin(), in_spatial_.end()),
+         out_spatial = std::vector<std::size_t>(out_spatial_.begin(), out_spatial_.end())](
+            const std::vector<Kernel>&) {
+            const std::size_t out_spatial_size = std::accumulate(out_spatial.begin(),
+                                                                 out_spatial.end(),
+                                                                 std::size_t(1),
+                                                                 std::multiplies<std::size_t>());
 
-        const std::size_t out_spatial_size = std::accumulate(
-            out_spatial.begin(), out_spatial.end(), std::size_t(1), std::multiplies<std::size_t>());
+            return [=](const Handle& handle, const AnyInvokeParams& primitive_params) {
+                float time_gemm         = 0;
+                const auto& conv_params = primitive_params.CastTo<miopen::conv::DataInvokeParams>();
+                const auto& workSpace   = conv_params.workSpace;
+                const auto workSpaceSize = conv_params.workSpaceSize;
+                const auto x             = conv_params.tensors.in;
+                const auto w             = conv_params.tensors.w;
+                const auto y             = conv_params.tensors.out;
 
-        return [=](const Handle& handle, const AnyInvokeParams& primitive_params) {
-            float time_gemm          = 0;
-            const auto& conv_params  = primitive_params.CastTo<miopen::conv::DataInvokeParams>();
-            const auto& workSpace    = conv_params.workSpace;
-            const auto workSpaceSize = conv_params.workSpaceSize;
-            const auto x             = conv_params.tensors.in;
-            const auto w             = conv_params.tensors.w;
-            const auto y             = conv_params.tensors.out;
-
-            if((workSpace == nullptr && workspace_req > 0) || workSpaceSize < workspace_req)
-            {
-                MIOPEN_THROW("Not enough workspace for GEMM (" + std::to_string(workSpaceSize) +
-                             " provided, " + std::to_string(workspace_req) + " required)");
-            }
-
-            const std::string name = group_count > 1 ? "groupconv" : "convolution";
-            MIOPEN_LOG_FUNCTION(name + ", 1x1 u2xv2");
-
-            // y = CNHW2NCHW(w * NCHW2CNHW(x))
-            transpose_NCHW2CNHW(handle,
-                                in_n,
-                                in_c,
-                                in_spatial[0],
-                                in_spatial[1],
-                                out_spatial[0],
-                                out_spatial[1],
-                                x,
-                                workSpace,
-                                0,
-                                0,
-                                conv_strides[0],
-                                conv_strides[1],
-                                xDesc.GetType());
-            if(handle.IsProfilingEnabled())
-                time_gemm = handle.GetKernelTime();
-
-            std::size_t x_t_size = in_n * in_c * out_spatial_size;
-
-            std::size_t wksp_offset = 0;
-            if(wDesc.GetType() == miopenInt8)
-            {
-                wksp_offset = x_t_size;
-                transpose_packed_MN2NM(handle,
-                                       in_c,
-                                       static_cast<int>(in_n * out_spatial_size),
-                                       0,
-                                       wksp_offset,
-                                       workSpace,
-                                       workSpace,
-                                       xDesc.GetType());
-
-                if(handle.IsProfilingEnabled())
-                    time_gemm += handle.GetKernelTime();
-
-                x_t_size *= 2;
-            }
-
-            if(wDesc.GetType() == miopenInt8)
-            {
-                const auto xts = GetTypeSize(xDesc.GetType());
-                if(xts > 0)
+                if((workSpace == nullptr && workspace_req > 0) || workSpaceSize < workspace_req)
                 {
-                    const auto yts_div_xts = GetTypeSize(yDesc.GetType()) / xts;
-                    if(yts_div_xts > 0)
-                        x_t_size /= yts_div_xts;
+                    MIOPEN_THROW("Not enough workspace for GEMM (" + std::to_string(workSpaceSize) +
+                                 " provided, " + std::to_string(workspace_req) + " required)");
                 }
-            }
 
-            miopenStatus_t gemm_status;
-            auto gemm_desc = [&]() {
-                auto tmp            = tmp_gemm_desc;
-                tmp.gfx90a_alt_impl = conv_params.gfx90aFp16alt;
-                return tmp;
-            }();
+                const std::string name = group_count > 1 ? "groupconv" : "convolution";
+                MIOPEN_LOG_FUNCTION(name + ", 1x1 u2xv2");
 
-            if(group_count > 1)
-            {
-                gemm_status = CallGemmStridedBatched(handle,
-                                                     gemm_desc,
-                                                     w,
-                                                     0,
-                                                     workSpace,
-                                                     0,
-                                                     workSpace,
-                                                     x_t_size,
-                                                     GemmBackend_t::rocblas);
-            }
-            else
-            {
-                // tensors.y = CNHW2NCHW(tensors.w * NCHW2CNHW(tensors.x))
-                gemm_status = CallGemm(handle,
-                                       gemm_desc,
-                                       w,
-                                       0,
-                                       workSpace,
-                                       wksp_offset,
-                                       workSpace,
-                                       x_t_size,
-                                       GemmBackend_t::rocblas);
-            }
+                // y = CNHW2NCHW(w * NCHW2CNHW(x))
+                transpose_NCHW2CNHW(handle,
+                                    in_n,
+                                    in_c,
+                                    in_spatial[0],
+                                    in_spatial[1],
+                                    out_spatial[0],
+                                    out_spatial[1],
+                                    x,
+                                    workSpace,
+                                    0,
+                                    0,
+                                    conv_strides[0],
+                                    conv_strides[1],
+                                    xDesc.GetType());
+                if(handle.IsProfilingEnabled())
+                    time_gemm = handle.GetKernelTime();
 
-            if(gemm_status != miopenStatusSuccess)
-                MIOPEN_THROW("GEMM execution failure");
+                std::size_t x_t_size = in_n * in_c * out_spatial_size;
 
-            if(handle.IsProfilingEnabled())
-                time_gemm += handle.GetKernelTime();
+                std::size_t wksp_offset = 0;
+                if(wDesc.GetType() == miopenInt8)
+                {
+                    wksp_offset = x_t_size;
+                    transpose_packed_MN2NM(handle,
+                                           in_c,
+                                           static_cast<int>(in_n * out_spatial_size),
+                                           0,
+                                           wksp_offset,
+                                           workSpace,
+                                           workSpace,
+                                           xDesc.GetType());
 
-            transpose_CNHW2NCHW(handle,
-                                in_n,
-                                wei_k,
-                                out_spatial[0],
-                                out_spatial[1],
-                                out_spatial[0],
-                                out_spatial[1],
-                                workSpace,
-                                y,
-                                x_t_size,
-                                0,
-                                1,
-                                1,
-                                yDesc.GetType());
-            if(handle.IsProfilingEnabled())
-                time_gemm += handle.GetKernelTime();
+                    if(handle.IsProfilingEnabled())
+                        time_gemm += handle.GetKernelTime();
 
-            if(wDesc.GetType() == miopenInt8 && yDesc.GetType() != miopenInt32)
-            {
-                TensorDescriptor ygemmDesc(miopenInt32, yDesc.GetLengths(), yDesc.GetStrides());
+                    x_t_size *= 2;
+                }
 
-                CastTensor(handle, &lowp_quant, true, ygemmDesc, y, yDesc, y, 0, 0);
+                if(wDesc.GetType() == miopenInt8)
+                {
+                    const auto xts = GetTypeSize(xDesc.GetType());
+                    if(xts > 0)
+                    {
+                        const auto yts_div_xts = GetTypeSize(yDesc.GetType()) / xts;
+                        if(yts_div_xts > 0)
+                            x_t_size /= yts_div_xts;
+                    }
+                }
+
+                miopenStatus_t gemm_status;
+                auto gemm_desc = [&]() {
+                    auto tmp            = tmp_gemm_desc;
+                    tmp.gfx90a_alt_impl = conv_params.gfx90aFp16alt;
+                    return tmp;
+                }();
+
+                if(group_count > 1)
+                {
+                    gemm_status = CallGemmStridedBatched(handle,
+                                                         gemm_desc,
+                                                         w,
+                                                         0,
+                                                         workSpace,
+                                                         0,
+                                                         workSpace,
+                                                         x_t_size,
+                                                         GemmBackend_t::rocblas);
+                }
+                else
+                {
+                    // tensors.y = CNHW2NCHW(tensors.w * NCHW2CNHW(tensors.x))
+                    gemm_status = CallGemm(handle,
+                                           gemm_desc,
+                                           w,
+                                           0,
+                                           workSpace,
+                                           wksp_offset,
+                                           workSpace,
+                                           x_t_size,
+                                           GemmBackend_t::rocblas);
+                }
+
+                if(gemm_status != miopenStatusSuccess)
+                    MIOPEN_THROW("GEMM execution failure");
+
                 if(handle.IsProfilingEnabled())
                     time_gemm += handle.GetKernelTime();
-            }
 
-            if(handle.IsProfilingEnabled())
-            {
-                handle.ResetKernelTime();
-                handle.AccumKernelTime(time_gemm);
-            }
+                transpose_CNHW2NCHW(handle,
+                                    in_n,
+                                    wei_k,
+                                    out_spatial[0],
+                                    out_spatial[1],
+                                    out_spatial[0],
+                                    out_spatial[1],
+                                    workSpace,
+                                    y,
+                                    x_t_size,
+                                    0,
+                                    1,
+                                    1,
+                                    yDesc.GetType());
+                if(handle.IsProfilingEnabled())
+                    time_gemm += handle.GetKernelTime();
+
+                if(wDesc.GetType() == miopenInt8 && yDesc.GetType() != miopenInt32)
+                {
+                    TensorDescriptor ygemmDesc(miopenInt32, yDesc.GetLengths(), yDesc.GetStrides());
+
+                    CastTensor(handle, &lowp_quant, true, ygemmDesc, y, yDesc, y, 0, 0);
+                    if(handle.IsProfilingEnabled())
+                        time_gemm += handle.GetKernelTime();
+                }
+
+                if(handle.IsProfilingEnabled())
+                {
+                    handle.ResetKernelTime();
+                    handle.AccumKernelTime(time_gemm);
+                }
+            };
         };
-    };
 
     return solution;
 #else
@@ -459,9 +442,11 @@ size_t GemmFwd1x1_0_1_int8::GetWorkspaceSize(const ExecutionContext& context,
     decltype(auto) yDesc  = problem.GetOut();
 
     const auto spatial_dim = conv.GetSpatialDimension();
-    const auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto out_spatial = boost::adaptors::slice(yDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto wei_c       = wDesc.GetLengths()[1];
+    const auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto out_spatial =
+        yDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto wei_c = wDesc.GetLengths()[1];
 
     const auto ws_size = wei_c *
                          std::accumulate(wei_spatial.begin(),
@@ -498,7 +483,8 @@ bool GemmFwd1x1_0_1_int8::IsApplicable(const ExecutionContext& context,
     decltype(auto) wDesc = problem.GetWeights();
 
     const auto spatial_dim = conv.GetSpatialDimension();
-    const auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
+    const auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
     if(problem.IsTensorsCasted() || problem.IsFp8() || problem.IsBfp8())
         return false;
 
@@ -530,8 +516,10 @@ ConvSolution GemmFwd1x1_0_1_int8::GetSolution(const ExecutionContext& context,
     const std::size_t spatial_dim = conv.GetSpatialDimension();
 
     // This ones do not store data directly, so they should be copied to vectors for invokers.
-    const auto& in_spatial_  = boost::adaptors::slice(xDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto& out_spatial_ = boost::adaptors::slice(yDesc.GetLengths(), 2, 2 + spatial_dim);
+    const auto in_spatial_ =
+        xDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto out_spatial_ =
+        yDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
     const auto workspace_req = GetWorkspaceSize(context, problem);
 
@@ -556,10 +544,12 @@ ConvSolution GemmFwd1x1_0_1_int8::GetSolution(const ExecutionContext& context,
     const auto x_type     = xDesc.GetType();
     const auto lowp_quant = conv.lowp_quant;
 
-    solution.invoker_factory = [=](const std::vector<Kernel>&) {
-        const auto in_spatial  = std::vector<std::size_t>(in_spatial_.begin(), in_spatial_.end());
-        const auto out_spatial = std::vector<std::size_t>(out_spatial_.begin(), out_spatial_.end());
-
+    solution.invoker_factory = [            =,
+                                in_spatial  = std::vector<std::size_t>(in_spatial_.begin(),
+                                                                      in_spatial_.end()),
+                                out_spatial = std::vector<std::size_t>(out_spatial_.begin(),
+                                                                       out_spatial_.end())](
+                                   const std::vector<Kernel>&) {
         const std::size_t in_spatial_size = std::accumulate(
             in_spatial.begin(), in_spatial.end(), std::size_t(1), std::multiplies<std::size_t>());
 
@@ -647,7 +637,8 @@ bool GemmFwd1x1_0_1::IsApplicable(const ExecutionContext& context,
     decltype(auto) wDesc = problem.GetWeights();
 
     const auto spatial_dim = conv.GetSpatialDimension();
-    const auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
+    const auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
     return miopen::all_of(wei_spatial, [](auto v) { return v == 1; }) &&
            miopen::all_of(conv.GetConvPads(), [](auto v) { return v == 0; }) &&
@@ -677,8 +668,10 @@ ConvSolution GemmFwd1x1_0_1::GetSolution(const ExecutionContext& context,
     const std::size_t spatial_dim = conv.GetSpatialDimension();
 
     // This ones do not store data directly, so they should be copied to vectors for invokers.
-    const auto& in_spatial_  = boost::adaptors::slice(xDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto& out_spatial_ = boost::adaptors::slice(yDesc.GetLengths(), 2, 2 + spatial_dim);
+    const auto& in_spatial =
+        xDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto& out_spatial =
+        yDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
     auto solution = ConvSolution{miopenStatusSuccess};
 
@@ -700,9 +693,6 @@ ConvSolution GemmFwd1x1_0_1::GetSolution(const ExecutionContext& context,
             tmp.conv_attributes = problem.GetConv().attribute;
             return tmp;
         }();
-
-        const auto in_spatial  = std::vector<std::size_t>(in_spatial_.begin(), in_spatial_.end());
-        const auto out_spatial = std::vector<std::size_t>(out_spatial_.begin(), out_spatial_.end());
 
         const std::size_t in_spatial_size = std::accumulate(
             in_spatial.begin(), in_spatial.end(), std::size_t(1), std::multiplies<std::size_t>());
@@ -778,9 +768,6 @@ ConvSolution GemmFwd1x1_0_1::GetSolution(const ExecutionContext& context,
             return tmp;
         }();
 
-        const auto in_spatial  = std::vector<std::size_t>(in_spatial_.begin(), in_spatial_.end());
-        const auto out_spatial = std::vector<std::size_t>(out_spatial_.begin(), out_spatial_.end());
-
         solution.invoker_factory = [=](const std::vector<Kernel>&) {
             MIOPEN_LOG_FUNCTION("convolution, 1x1");
 
@@ -829,9 +816,11 @@ size_t GemmFwdRest::GetWorkspaceSize(const ExecutionContext& context,
     decltype(auto) yDesc  = problem.GetOut();
 
     const auto spatial_dim = conv.GetSpatialDimension();
-    const auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto out_spatial = boost::adaptors::slice(yDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto wei_c       = wDesc.GetLengths()[1];
+    const auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto out_spatial =
+        yDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto wei_c = wDesc.GetLengths()[1];
 
     const auto workspace_size = wei_c *
                                 std::accumulate(wei_spatial.begin(),
@@ -920,11 +909,12 @@ ConvSolution GemmFwdRest::GetSolution(const ExecutionContext& context,
             return tmp;
         }();
 
-        decltype(auto) in_spatial_ = boost::adaptors::slice(xDesc.GetLengths(), 2, 2 + spatial_dim);
+        decltype(auto) in_spatial_ =
+            xDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
         decltype(auto) out_spatial_ =
-            boost::adaptors::slice(yDesc.GetLengths(), 2, 2 + spatial_dim);
+            yDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
         decltype(auto) wei_spatial_ =
-            boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
+            wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
         const auto in_spatial  = std::vector<std::size_t>(in_spatial_.begin(), in_spatial_.end());
         const auto out_spatial = std::vector<std::size_t>(out_spatial_.begin(), out_spatial_.end());
