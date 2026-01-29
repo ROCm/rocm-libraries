@@ -622,6 +622,11 @@ def cmake_build(Map conf=[:]){
     }
 
     echo cmd
+    echo "current build path"
+    sh """
+        ls -l
+        cd projects/composablekernel
+    """
 
     dir("build"){
         // Start sccache monitoring
