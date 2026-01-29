@@ -82,3 +82,17 @@ Tests:
              bmwcra_1,
              shipsec1,
              sme3Dc]
+
+- name: gemmi
+  category: pre_checkin
+  function: gemmi
+  precision: *single_only_precisions
+  M: [230]
+  N: 1
+  K: 1
+  alpha: [1.5]
+  alphai: [-0.75]
+  beta: [0.75]
+  betai: [-1.5]
+  filename: [nos6]
+  graph_test: [true]

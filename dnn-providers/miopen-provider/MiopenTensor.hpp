@@ -6,7 +6,7 @@
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <miopen/miopen.h>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class MiopenTensor
