@@ -90,7 +90,7 @@ namespace stinkytofu
     static std::vector<IRInstDef> getIRInstructions()
     {
         return {
-#include "LogicalInstructionDefs.inc"
+#include "../../src/ir/logical/LogicalInstructionDefs.inc"
         };
     }
 
