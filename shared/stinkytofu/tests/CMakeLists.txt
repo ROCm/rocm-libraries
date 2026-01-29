@@ -99,3 +99,64 @@ add_dependencies(tests unit_tests)
 # Note: Future test executables can be added here, e.g.:
 # add_executable(integration_tests ...)
 # add_dependencies(tests integration_tests)
+
+# =============================================================================
+# Python Tests (pytest)
+# =============================================================================
+
+# Only register Python tests if the Python module is being built
+if(STINKYTOFU_BUILD_PYTHON)
+    # Find Python (also done in python_module, but tests are configured first)
+    find_package(Python COMPONENTS Interpreter QUIET)
+
+    if(Python_FOUND)
+        # Check if pytest is available
+        execute_process(
+            COMMAND ${Python_EXECUTABLE} -m pytest --version
+            RESULT_VARIABLE PYTEST_NOT_FOUND
+            OUTPUT_QUIET
+            ERROR_QUIET
+        )
+
+        if(NOT PYTEST_NOT_FOUND)
+            message(STATUS "pytest found - adding Python tests to CTest")
+
+            # Discover all test files in python_module/tests/
+            file(GLOB PYTEST_FILES "${CMAKE_SOURCE_DIR}/python_module/tests/test_*.py")
+
+            # Register each test file as a separate CTest entry
+            foreach(PYTEST_FILE ${PYTEST_FILES})
+                # Extract test file name without path and extension
+                get_filename_component(TEST_NAME ${PYTEST_FILE} NAME_WE)
+
+                # Add individual test
+                add_test(
+                    NAME python.${TEST_NAME}
+                    COMMAND ${Python_EXECUTABLE} -m pytest
+                            ${PYTEST_FILE}
+                            -v
+                            --tb=short
+                    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                )
+
+                # Set PYTHONPATH so pytest can find the module
+                set_tests_properties(python.${TEST_NAME} PROPERTIES
+                    ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/lib"
+                    LABELS "python;unit_tests"
+                )
+            endforeach()
+
+            list(LENGTH PYTEST_FILES PYTEST_FILE_COUNT)
+            message(STATUS "  - Registered ${PYTEST_FILE_COUNT} Python test files as individual CTest entries")
+            message(STATUS "  - Run Python tests with: ctest -L python")
+            message(STATUS "  - Run specific test with: ctest -R python.test_ir_basic")
+        else()
+            message(WARNING "pytest not found - Python tests will not be added to CTest")
+            message(STATUS "  - Install pytest with: pip3 install pytest")
+        endif()
+    else()
+        message(WARNING "Python interpreter not found - Python tests will not be added to CTest")
+    endif()
+else()
+    message(STATUS "Python module build disabled (STINKYTOFU_BUILD_PYTHON=OFF) - skipping Python tests")
+endif()
