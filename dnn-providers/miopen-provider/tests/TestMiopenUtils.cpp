@@ -397,7 +397,7 @@ TEST(TestMiopenUtils, MapPointwiseModeUnsupported)
 // GPU-required tests for ScopedTuningPolicy
 // =============================================================================
 
-class TestGpuScopedTuningPolicy : public test_common::MiopenHandleFixture
+class TestGpuScopedTuningPolicy : public miopen_legacy_plugin::test_common::MiopenHandleFixture
 {
 };
 
