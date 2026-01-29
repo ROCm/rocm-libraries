@@ -86,7 +86,7 @@ int main()
     }
 
     std::cout << "Input:\n";
-    printarraylimit(rinput, Nx, Ny, Nz + 2, printlimit);
+    printarraylimit(rinput, Nx, Ny, (Nz / 2 + 1) * 2, printlimit);
     std::cout << "\n";
         
     hipfftHandle plan;

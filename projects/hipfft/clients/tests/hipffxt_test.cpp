@@ -26,6 +26,7 @@
 
 // For test parameters (eg verbose)
 #include "../../shared/accuracy_test.h"
+#include "../hipfft_params.h"
 
 // FIXME: only on cuda?
 DISABLE_WARNING_PUSH
@@ -83,7 +84,9 @@ std::string directionname(const int direction)
     }
 }
 
-class hipfftxtdirectionformat : public ::testing::TestWithParam<std::tuple<int, hipfftXtSubFormat>>
+// Params are direction, format, and batch size.
+class hipfftxtdirectionformat : public ::testing::TestWithParam<std::tuple<int, hipfftXtSubFormat,
+                                                                           int>>
 {};
 
 TEST_P(hipfftxtdirectionformat, c2cinplace)
@@ -96,6 +99,7 @@ TEST_P(hipfftxtdirectionformat, c2cinplace)
 
     const int direction = std::get<0>(GetParam());
     const hipfftXtSubFormat informat = std::get<1>(GetParam());
+    const int batch = std::get<2>(GetParam());
     
     const hipfftXtSubFormat outformat
         = informat == HIPFFT_XT_FORMAT_INPLACE
@@ -169,17 +173,18 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Combine(
         ::testing::Values(HIPFFT_FORWARD, HIPFFT_BACKWARD),
         ::testing::Values(HIPFFT_XT_FORMAT_INPLACE,
-                          HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
+                          HIPFFT_XT_FORMAT_INPLACE_SHUFFLED),
+        ::testing::Values(1, 2)
         ),
     [](const testing::TestParamInfo<hipfftxtdirectionformat::ParamType>& info) {
         const int direction = std::get<0>(info.param);
         const hipfftXtSubFormat informat = std::get<1>(info.param);
         std::string name = direction == HIPFFT_FORWARD ? "forward" : "backward";
         name += informat == HIPFFT_XT_FORMAT_INPLACE ? "inplace" : "shuffled";
+        name += "batch" + std::to_string(std::get<2>(info.param));
         return name;
     }
     );
-
 
 TEST_P(hipfftxtdirectionformat, r2cinplace)
 {
@@ -194,11 +199,42 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
     
     const int direction = std::get<0>(GetParam());
     const hipfftXtSubFormat informat = std::get<1>(GetParam());
+    const int batch = std::get<2>(GetParam());
 
-    const hipfftXtSubFormat outformat
-        = informat == HIPFFT_XT_FORMAT_INPLACE
-        ? HIPFFT_XT_FORMAT_INPLACE_SHUFFLED
-        : HIPFFT_XT_FORMAT_INPLACE;
+    // Skip the unhappy paths
+    if(direction == HIPFFT_FORWARD && batch == 1 && informat != HIPFFT_XT_FORMAT_INPLACE)
+    {
+        GTEST_SKIP();
+    }
+    if(direction == HIPFFT_BACKWARD && batch == 1 && informat != HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
+    {
+        GTEST_SKIP();
+    }
+    if(direction == HIPFFT_FORWARD && batch > 1 && informat != HIPFFT_XT_FORMAT_INPLACE)
+    {
+        GTEST_SKIP();
+    }
+    if(direction == HIPFFT_BACKWARD && batch > 1)
+    {
+        GTEST_SKIP();
+    }
+    if(direction == HIPFFT_BACKWARD)
+    {
+        GTEST_SKIP();
+    }
+        
+    
+    hipfftXtSubFormat outformat;
+    if(batch == 1)
+    {
+        outformat = informat == HIPFFT_XT_FORMAT_INPLACE
+            ? HIPFFT_XT_FORMAT_INPLACE_SHUFFLED
+            : HIPFFT_XT_FORMAT_INPLACE;
+    }
+    else
+    {
+        outformat = informat;
+    }
 
     const hipfftType transform_type  = (direction == HIPFFT_FORWARD) ? HIPFFT_D2Z : HIPFFT_Z2D;
     
@@ -208,7 +244,8 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
         std::cout << "\tNx: " << Nx << "\n";
         std::cout << "\tNy: " << Ny << "\n";
         std::cout << "\tngpus: " << ngpus << "\n";
-         std::cout << "\ttransform_type: " << transform_type << " : "  << hipffttype_to_name(transform_type) << "\n";
+        std::cout << "\ttransform_type: " << transform_type << " : "
+                  << hipffttype_to_name(transform_type) << "\n";
         std::cout << "\tdirection: " << direction << " : " << directionname(direction)
                   << "\n\tinput subformat: " << informat << " : " << formatname(informat)
                   << "\n\toutput subformat: " << outformat << " : " << formatname(outformat)
@@ -219,10 +256,12 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
     hipfft_rt =   hipfftCreate(&plan);
     EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 
-    const bool goodcombo =
-        (direction == HIPFFT_FORWARD && informat == HIPFFT_XT_FORMAT_INPLACE)
-        ||
-        (direction == HIPFFT_BACKWARD && informat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED);
+    if(verbose > 1)
+    {
+        std::cout << "direction: " << directionname(direction)
+                  << " informat: " << formatname(informat)
+                  << " batch: " << batch << "\n";
+    }
 
     std::vector<int> gpus(ngpus);
     std::iota(gpus.begin(), gpus.end(), 0);
@@ -230,24 +269,55 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
     EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtSetGPUs failed";
         
     std::vector<size_t> workSize(ngpus);
-    hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny,
-                                 transform_type,
-                                 workSize.data());
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftMakePlan2d failed";
 
-    hipLibXtDesc*       inoutdesc = nullptr;
-    hipfft_rt                     = hipfftXtMalloc(plan, &inoutdesc, informat);
-    if(goodcombo)
+    if(batch > 1)
     {
-        EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed";
+        int rank = 2;
+        int n[2] = {Nx, Ny};
+    
+        int n1_complex_elements      = n[1] / 2 + 1;
+        int n1_padding_real_elements = n1_complex_elements * 2;
+
+        int istride    = 1;
+        int ostride    = istride;
+        int inembed[2] = {n[0],
+                          direction == HIPFFT_FORWARD
+                          ? n1_padding_real_elements
+                          : n1_complex_elements};
+        int onembed[2] = {n[0],
+                          direction == HIPFFT_FORWARD
+                          ? n1_complex_elements
+                          : n1_padding_real_elements}; 
+        int idist      = istride * inembed[0] * inembed[1];
+        int odist      = ostride * onembed[0] * onembed[1];
+
+        // NB: it seems that cufftxt will treat the batch=1 hipfftPlanMany case as batched, so the
+        // data decomposition is trivial if one calls hipfftPlanMany (even if batch=1).
+        hipfft_rt = hipfftPlanMany(&plan,
+                                   rank,
+                                   n,
+                                   inembed,
+                                   istride,
+                                   idist,
+                                   onembed,
+                                   ostride,
+                                   odist,
+                                   transform_type,
+                                   batch);
+        EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftPlanMany failed";
     }
     else
     {
-        EXPECT_NE(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc worked but shouldn't";
-        hipfft_rt = hipfftDestroy(plan);
-        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-        SUCCEED();
+        hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny,
+                                     transform_type,
+                                     workSize.data());
+        EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftMakePlan2d failed";
     }
+
+
+    hipLibXtDesc*       inoutdesc = nullptr;
+    hipfft_rt                     = hipfftXtMalloc(plan, &inoutdesc, informat);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed";
 
     std::vector<double> real(Nx * Nypp);
     std::vector<std::complex<double>> complex(Nx * Nyp);
@@ -290,11 +360,6 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
 
     hipfft_rt = hipfftXtExecDescriptor(plan, inoutdesc, inoutdesc, direction);
     EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "exec failed"; 
-    // if(direction == HIPFFT_FORWARD)
-    //     hipfft_rt = hipfftXtExecDescriptorD2Z(plan, inoutdesc, inoutdesc);
-    // else
-    //     hipfft_rt = hipfftXtExecDescriptorZ2D(plan, inoutdesc, inoutdesc);
-    // ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 
     EXPECT_EQ(inoutdesc->subFormat, outformat)
         << "outformat not what expected:"
@@ -302,7 +367,7 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
         << formatname((hipfftXtSubFormat)inoutdesc->subFormat)
         << " expected "  << outformat << " "
         << formatname((hipfftXtSubFormat)outformat);
-        
+    
     hipfft_rt = hipfftXtMemcpy(plan,
                                direction == HIPFFT_FORWARD
                                ? reinterpret_cast<void*>(complex.data())
@@ -310,6 +375,7 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
                                reinterpret_cast<void*>(inoutdesc),
                                HIPFFT_COPY_DEVICE_TO_HOST);
     EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+        
 
     hipfft_rt = hipfftXtFree(inoutdesc);
     EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);

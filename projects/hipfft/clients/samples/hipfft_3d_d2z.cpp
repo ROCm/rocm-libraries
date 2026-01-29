@@ -54,10 +54,17 @@ int main()
         throw std::runtime_error("hipMalloc failed");
 
     // Inititalize the data
-    std::vector<double> rdata(Nx * Ny * rstride);
-    for(size_t i = 0; i < Nx * Ny * rstride; i++)
+    std::vector<double> rdata(Nx * Ny * rstride, 0.0);
+    for(size_t i = 0; i < Nx; i++)
     {
-        rdata[i] = i;
+        for(size_t j = 0; j < Ny; j++)
+        {
+            for(size_t k = 0; k < Nz; k++)
+            {
+                const auto pos = (i * Ny + j) * rstride + k;
+                rdata[pos] = i + j + k;
+            }
+        }
     }
     std::cout << "input:\n";
     for(size_t i = 0; i < Nx; i++)
@@ -66,7 +73,7 @@ int main()
         {
             for(size_t k = 0; k < rstride; k++)
             {
-                auto pos = (i * Ny + j) * rstride + k;
+                const auto pos = (i * Ny + j) * rstride + k;
                 std::cout << rdata[pos] << " ";
             }
             std::cout << "\n";
@@ -98,7 +105,7 @@ int main()
         throw std::runtime_error("hipfftExecD2Z failed");
 
     std::cout << "output:\n";
-    std::vector<std::complex<double>> cdata(Nx * Ny * Nz);
+    std::vector<std::complex<double>> cdata(Nx * Ny * Nzcomplex);
     hip_rt = hipMemcpy(cdata.data(), x, complex_bytes, hipMemcpyDeviceToHost);
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMemcpy failed");
