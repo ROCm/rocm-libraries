@@ -27,7 +27,7 @@
 
 #include "gtsv_nopivot_device.h"
 
-#define LAUNCH_GTSV_NOPIVOT_CR_POW2_SHARED(T, block_size)            \
+#define LAUNCH_GTSV_NOPIVOT_CR_POW2_SHARED(block_size)            \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                              \
         (rocsparse::gtsv_nopivot_cr_pow2_shared_kernel<block_size>), \
         dim3(n),                                                     \
@@ -42,7 +42,7 @@
         du,                                                          \
         B);
 
-#define LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(T, block_size)            \
+#define LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(block_size)            \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
         (rocsparse::gtsv_nopivot_pcr_pow2_shared_kernel<block_size>), \
         dim3(n),                                                      \
@@ -57,7 +57,88 @@
         du,                                                           \
         B);
 
-#define LAUNCH_GTSV_NOPIVOT_CRPCR_POW2_SHARED(T, block_size, pcr_size)            \
+
+
+
+
+
+
+
+
+
+#define LAUNCH_GTSV_NOPIVOT_2x2_CRAMERS_RULE(BLOCKSIZE)            \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                     \
+        (rocsparse::gtsv_nopivot_2x2_kernel<BLOCKSIZE>), \
+        dim3((n - 1) / BLOCKSIZE + 1),                                            \
+        dim3(BLOCKSIZE),                                             \
+        0,                                                            \
+        handle->stream,                                               \
+        n,                                                            \
+        ldb,                                                          \
+        dl,                                                           \
+        d,                                                            \
+        du,                                                           \
+        B);
+
+#define LAUNCH_GTSV_NOPIVOT_3x3_THOMAS(BLOCKSIZE)            \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                     \
+        (rocsparse::gtsv_nopivot_3x3_kernel<BLOCKSIZE>), \
+        dim3((n - 1) / BLOCKSIZE + 1),                                            \
+        dim3(BLOCKSIZE),                                             \
+        0,                                                            \
+        handle->stream,                                               \
+        n,                                                            \
+        ldb,                                                          \
+        dl,                                                           \
+        d,                                                            \
+        du,                                                           \
+        B);
+
+#define LAUNCH_GTSV_NOPIVOT_4x4_THOMAS(BLOCKSIZE)            \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                     \
+        (rocsparse::gtsv_nopivot_4x4_kernel<BLOCKSIZE>), \
+        dim3((n - 1) / BLOCKSIZE + 1),                                            \
+        dim3(BLOCKSIZE),                                             \
+        0,                                                            \
+        handle->stream,                                               \
+        n,                                                            \
+        ldb,                                                          \
+        dl,                                                           \
+        d,                                                            \
+        du,                                                           \
+        B);
+
+#define LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED_SMALL(BLOCKSIZE, M)            \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                     \
+        (rocsparse::gtsv_nopivot_pcr_pow2_shared_small_kernel<BLOCKSIZE, M>), \
+        dim3((n - 1) / (BLOCKSIZE / M) + 1),                                            \
+        dim3(BLOCKSIZE),                                             \
+        0,                                                            \
+        handle->stream,                                               \
+        n,                                                            \
+        ldb,                                                          \
+        dl,                                                           \
+        d,                                                            \
+        du,                                                           \
+        B);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#define LAUNCH_GTSV_NOPIVOT_CRPCR_POW2_SHARED(block_size, pcr_size)            \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                           \
         (rocsparse::gtsv_nopivot_crpcr_pow2_shared_kernel<block_size, pcr_size>), \
         dim3(n),                                                                  \
@@ -72,7 +153,7 @@
         du,                                                                       \
         B);
 
-#define LAUNCH_GTSV_NOPIVOT_PCR_SHARED(T, block_size)                                           \
+#define LAUNCH_GTSV_NOPIVOT_PCR_SHARED(block_size)                                           \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_pcr_shared_kernel<block_size>), \
                                        dim3(n),                                                 \
                                        dim3(block_size),                                        \
@@ -171,79 +252,87 @@ namespace rocsparse
 
         rocsparse_host_assert(m <= 512, "This function is designed for m <= 512.");
 
+        if(m == 2)
+        {
+            LAUNCH_GTSV_NOPIVOT_2x2_CRAMERS_RULE(256);
+            return rocsparse_status_success;
+        }
+        else if(m == 3)
+        {
+            LAUNCH_GTSV_NOPIVOT_3x3_THOMAS(256);
+            return rocsparse_status_success;
+        }
+        else if(m == 4)
+        {
+            LAUNCH_GTSV_NOPIVOT_4x4_THOMAS(256);
+            return rocsparse_status_success;
+        }
+
         // Run special algorithm if m is power of 2
         if((m & (m - 1)) == 0)
         {
-            if(m == 2)
+            if(m == 8)
             {
-                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(T, 2);
-            }
-            else if(m == 4)
-            {
-                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(T, 4);
-            }
-            else if(m == 8)
-            {
-                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(T, 8);
+                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(8);
+                // LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED_SMALL(256, 8);
             }
             else if(m == 16)
             {
-                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(T, 16);
+                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(16);
+                // LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED_SMALL(256, 16);
             }
             else if(m == 32)
             {
-                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(T, 32);
+                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(32);
+                // LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED_SMALL(256, 32);
             }
             else if(m == 64)
             {
-                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(T, 64);
+                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(64);
+                // LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED_SMALL(256, 64);
             }
             else if(m == 128)
             {
-                LAUNCH_GTSV_NOPIVOT_CRPCR_POW2_SHARED(T, 64, 64);
+                LAUNCH_GTSV_NOPIVOT_CRPCR_POW2_SHARED(64, 64);
             }
             else if(m == 256)
             {
-                LAUNCH_GTSV_NOPIVOT_CRPCR_POW2_SHARED(T, 128, 64);
+                LAUNCH_GTSV_NOPIVOT_CRPCR_POW2_SHARED(128, 64);
             }
             else if(m == 512)
             {
-                LAUNCH_GTSV_NOPIVOT_CRPCR_POW2_SHARED(T, 256, 64);
+                LAUNCH_GTSV_NOPIVOT_CRPCR_POW2_SHARED(256, 64);
             }
         }
         else
         {
-            if(m <= 4)
+            if(m <= 8)
             {
-                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(T, 4);
-            }
-            else if(m <= 8)
-            {
-                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(T, 8);
+                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(8);
             }
             else if(m <= 16)
             {
-                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(T, 16);
+                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(16);
             }
             else if(m <= 32)
             {
-                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(T, 32);
+                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(32);
             }
             else if(m <= 64)
             {
-                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(T, 64);
+                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(64);
             }
             else if(m <= 128)
             {
-                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(T, 128);
+                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(128);
             }
             else if(m <= 256)
             {
-                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(T, 256);
+                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(256);
             }
             else if(m <= 512)
             {
-                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(T, 512);
+                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(512);
             }
         }
 

@@ -232,6 +232,313 @@ namespace rocsparse
         B[tid + ldb * hipBlockIdx_x] = sx[tid];
     }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    template <uint32_t BLOCKSIZE, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void gtsv_nopivot_2x2_kernel(rocsparse_int n,
+                                 rocsparse_int ldb,
+                                 const T* __restrict__ dl,
+                                 const T* __restrict__ d,
+                                 const T* __restrict__ du,
+                                 T* __restrict__ B)
+    {
+        const int tid = hipThreadIdx_x;
+        const int bid = hipBlockIdx_x;
+        const int gid = BLOCKSIZE * bid + tid;
+
+        if(gid < n)
+        {
+            // a0 | b0 c0 |
+            //    | a1 b1 | c1
+            const T a1 = dl[1];
+            const T b0 = d[0];
+            const T b1 = d[1];
+            const T c0 = du[0];
+
+            const T rhs0 = B[ldb * gid + 0];
+            const T rhs1 = B[ldb * gid + 1];
+
+            // det = b0 * b1 - a1 * c0
+            const T det = static_cast<T>(1) / rocsparse::fma(b0, b1, -a1 * c0);
+
+            B[ldb * gid + 0] = (rocsparse::fma(b1, rhs0, -c0 * rhs1)) * det;
+            B[ldb * gid + 1] = (rocsparse::fma(rhs1, b0, -rhs0 * a1)) * det;
+        }
+    }
+
+    // Kernel to solve 3x3 tridiagonal systems using Thomas algorithm
+    // Each thread solves one system independently
+    //
+    // Matrix form:
+    // | b0  c0   0 |   | x0 |   | rhs0 |
+    // | a1  b1  c1 |   | x1 | = | rhs1 |
+    // |  0  a2  b2 |   | x2 |   | rhs2 |
+    template <uint32_t BLOCKSIZE, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void gtsv_nopivot_3x3_kernel(rocsparse_int n,
+                                     rocsparse_int ldb,
+                                     const T* __restrict__ dl,
+                                     const T* __restrict__ d,
+                                     const T* __restrict__ du,
+                                     T* __restrict__ B)
+    {
+        const int tid = hipThreadIdx_x;
+        const int bid = hipBlockIdx_x;
+        const int gid = BLOCKSIZE * bid + tid;
+
+        if(gid < n)
+        {
+            // Load matrix coefficients
+            const T a1 = dl[1];
+            const T a2 = dl[2];
+            const T b0 = d[0];
+            const T b1 = d[1];
+            const T b2 = d[2];
+            const T c0 = du[0];
+            const T c1 = du[1];
+
+            // Load RHS
+            const T rhs0 = B[ldb * gid + 0];
+            const T rhs1 = B[ldb * gid + 1];
+            const T rhs2 = B[ldb * gid + 2];
+
+            // Forward elimination with FMA
+            // First row
+            const T c0_prime = c0 / b0;
+            const T rhs0_prime = rhs0 / b0;
+
+            // Second row: denom1 = b1 - a1 * c0_prime
+            const T denom1 = rocsparse::fma(-a1, c0_prime, b1);
+            const T inv_denom1 = static_cast<T>(1) / denom1;
+            const T c1_prime = c1 * inv_denom1;
+            // rhs1_prime = (rhs1 - a1 * rhs0_prime) / denom1
+            const T rhs1_prime = rocsparse::fma(-a1, rhs0_prime, rhs1) * inv_denom1;
+
+            // Third row: denom2 = b2 - a2 * c1_prime
+            const T denom2 = rocsparse::fma(-a2, c1_prime, b2);
+            const T inv_denom2 = static_cast<T>(1) / denom2;
+            // rhs2_prime = (rhs2 - a2 * rhs1_prime) / denom2
+            const T rhs2_prime = rocsparse::fma(-a2, rhs1_prime, rhs2) * inv_denom2;
+
+            // Back substitution
+            const T x2 = rhs2_prime;
+            // x1 = rhs1_prime - c1_prime * x2
+            const T x1 = rocsparse::fma(-c1_prime, x2, rhs1_prime);
+            // x0 = rhs0_prime - c0_prime * x1
+            const T x0 = rocsparse::fma(-c0_prime, x1, rhs0_prime);
+
+            // Write solution
+            B[ldb * gid + 0] = x0;
+            B[ldb * gid + 1] = x1;
+            B[ldb * gid + 2] = x2;
+        }
+    }
+
+    // Kernel to solve 4x4 tridiagonal systems using Thomas algorithm
+    // Each thread solves one system independently
+    //
+    // Matrix form:
+    // | b0  c0   0   0 |   | x0 |   | rhs0 |
+    // | a1  b1  c1   0 |   | x1 | = | rhs1 |
+    // |  0  a2  b2  c2 |   | x2 |   | rhs2 |
+    // |  0   0  a3  b3 |   | x3 |   | rhs3 |
+    //
+    template <uint32_t BLOCKSIZE, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void gtsv_nopivot_4x4_kernel(rocsparse_int n,
+                                 rocsparse_int ldb,
+                                 const T* __restrict__ dl,
+                                 const T* __restrict__ d,
+                                 const T* __restrict__ du,
+                                 T* __restrict__ B)
+    {
+        const int tid = hipThreadIdx_x;
+        const int bid = hipBlockIdx_x;
+        const int gid = BLOCKSIZE * bid + tid;
+
+        if(gid < n)
+        {
+            // Load matrix coefficients (same for all RHS)
+            const T a1 = dl[1];
+            const T a2 = dl[2];
+            const T a3 = dl[3];
+            const T b0 = d[0];
+            const T b1 = d[1];
+            const T b2 = d[2];
+            const T b3 = d[3];
+            const T c0 = du[0];
+            const T c1 = du[1];
+            const T c2 = du[2];
+
+            // Load RHS for this thread
+            const T rhs0 = B[ldb * gid + 0];
+            const T rhs1 = B[ldb * gid + 1];
+            const T rhs2 = B[ldb * gid + 2];
+            const T rhs3 = B[ldb * gid + 3];
+
+            // Forward elimination (Thomas algorithm)
+            
+            // First row: normalize by b0
+            const T inv_b0 = static_cast<T>(1) / b0;
+            const T c0_prime = c0 * inv_b0;
+            const T rhs0_prime = rhs0 * inv_b0;
+
+            // Second row: eliminate a1
+            const T denom1 = rocsparse::fma(-a1, c0_prime, b1);
+            const T inv_denom1 = static_cast<T>(1) / denom1;
+            const T c1_prime = c1 * inv_denom1;
+            const T rhs1_prime = rocsparse::fma(-a1, rhs0_prime, rhs1) * inv_denom1;
+
+            // Third row: eliminate a2
+            const T denom2 = rocsparse::fma(-a2, c1_prime, b2);
+            const T inv_denom2 = static_cast<T>(1) / denom2;
+            const T c2_prime = c2 * inv_denom2;
+            const T rhs2_prime = rocsparse::fma(-a2, rhs1_prime, rhs2) * inv_denom2;
+
+            // Fourth row: eliminate a3
+            const T denom3 = rocsparse::fma(-a3, c2_prime, b3);
+            const T inv_denom3 = static_cast<T>(1) / denom3;
+            const T rhs3_prime = rocsparse::fma(-a3, rhs2_prime, rhs3) * inv_denom3;
+
+            // Back substitution
+            const T x3 = rhs3_prime;
+            const T x2 = rocsparse::fma(-c2_prime, x3, rhs2_prime);
+            const T x1 = rocsparse::fma(-c1_prime, x2, rhs1_prime);
+            const T x0 = rocsparse::fma(-c0_prime, x1, rhs0_prime);
+
+            // Write solution
+            B[ldb * gid + 0] = x0;
+            B[ldb * gid + 1] = x1;
+            B[ldb * gid + 2] = x2;
+            B[ldb * gid + 3] = x3;
+        }
+    }
+
+    // Parallel cyclic reduction algorithm using shared memory
+    template <uint32_t BLOCKSIZE, uint32_t M, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void gtsv_nopivot_pcr_pow2_shared_small_kernel(rocsparse_int n,
+                                                   rocsparse_int ldb,
+                                                   const T* __restrict__ dl,
+                                                   const T* __restrict__ d,
+                                                   const T* __restrict__ du,
+                                                   T* __restrict__ B)
+    {
+        const int bid = hipBlockIdx_x;
+        const int tid = hipThreadIdx_x;
+        const int lid = tid & (M - 1);
+        const int wid = tid / M;
+
+        int iter   = static_cast<int>(rocsparse::log2(M / 2));
+        int stride = 1;
+
+        // Parallel cyclic reduction shared memory
+        __shared__ T sa[M];
+        __shared__ T sb[M];
+        __shared__ T sc[M];
+        __shared__ T srhs[BLOCKSIZE];
+        __shared__ T sx[BLOCKSIZE];
+
+        // Fill parallel cyclic reduction shared memory
+        if(tid < M)
+        {
+            sa[tid]   = dl[tid];
+            sb[tid]   = d[tid];
+            sc[tid]   = du[tid];
+        }
+        srhs[M * wid + lid] = B[ldb * ((BLOCKSIZE / M) * bid + wid) + lid];
+
+        __syncthreads();
+
+        for(int j = 0; j < iter; j++)
+        {
+            int right = lid + stride;
+            if(right >= M)
+                right = M - 1;
+
+            int left = lid - stride;
+            if(left < 0)
+                left = 0;
+
+            T k1 = sa[lid] / sb[left];
+            T k2 = sc[lid] / sb[right];
+
+            T tb   = sb[lid] - sc[left] * k1 - sa[right] * k2;
+            T trhs = srhs[M * wid + lid] - srhs[M * wid + left] * k1 - srhs[M * wid + right] * k2;
+            T ta   = -sa[left] * k1;
+            T tc   = -sc[right] * k2;
+
+            __syncthreads();
+
+            sb[lid]   = tb;
+            srhs[M * wid + lid] = trhs;
+            sa[lid]   = ta;
+            sc[lid]   = tc;
+
+            stride <<= 1; //stride *= 2;
+
+            __syncthreads();
+        }
+
+        if(lid < M / 2)
+        {
+            // Solve 2x2 systems
+            int i = lid;
+            int j = lid + stride;
+            T det = rocsparse::fma(sb[j], sb[i], -sc[i] * sa[j]);
+            det   = static_cast<T>(1) / det;
+
+            sx[M * wid + i] = (rocsparse::fma(sb[j], srhs[M * wid + i], -sc[i] * srhs[M * wid + j])) * det;
+            sx[M * wid + j] = (rocsparse::fma(srhs[M * wid + j], sb[i], -srhs[M * wid + i] * sa[j])) * det;
+        }
+
+        __syncthreads();
+
+        B[ldb * ((BLOCKSIZE / M) * bid + wid) + lid] = sx[M * wid + lid];
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     // Combined Parallel cyclic reduction and cyclic reduction algorithm using shared memory
     template <uint32_t BLOCKSIZE, uint32_t PCR_SIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
@@ -754,7 +1061,6 @@ namespace rocsparse
             rocsparse_int right = tid + stride;
             if(right >= BLOCKSIZE)
                 right = BLOCKSIZE - 1;
-            ;
 
             rocsparse_int left = tid - stride;
             if(left < 0)
