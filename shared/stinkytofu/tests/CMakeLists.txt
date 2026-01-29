@@ -59,6 +59,7 @@ set(UNIT_LOGICAL_TEST_FILES
     unit/logical/LogicalModuleOwnershipTest.cpp
     unit/logical/LogicalOpcodeTest.cpp
     unit/logical/LogicalToAsmPipelineTest.cpp
+    unit/logical/LogicalToAsmMultiArchTest.cpp
     unit/logical/LogicalIntrinsicFlowTest.cpp
     unit/logical/LogicalPassManagerTest.cpp
 )
