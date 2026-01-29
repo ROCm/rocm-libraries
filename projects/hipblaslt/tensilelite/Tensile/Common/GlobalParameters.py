@@ -508,7 +508,6 @@ defaultBenchmarkCommonParameters = [
     # ahead of execution. False: no SGPR reserved; Stinky prefetch pass disabled for that kernel.
     {"SwInstructionPrefetch": [True]},
     {"ClusterDim": [[1, 1]]},
-    {"Multicast": [False]},
 ]
 
 # dictionary of defaults comprised of default option for each parameter
