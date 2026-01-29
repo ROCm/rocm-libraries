@@ -124,14 +124,14 @@ void testing_csrsv_bad_arg(const Arguments& arg)
 // This creates an integer matrix with diagonal dominance and computes the corresponding
 // right-hand side for a known solution vector.
 template <typename T>
-static void setup_integer_based_manufactured_solution(host_csr_matrix<T>&    hA,
-                                                      host_dense_matrix<T>&  hx,
-                                                      host_dense_matrix<T>&  hx_expected,
-                                                      const T&               alpha,
-                                                      rocsparse_fill_mode    uplo,
-                                                      rocsparse_diag_type    diag,
-                                                      rocsparse_index_base   base,
-                                                      rocsparse_int          M)
+static void setup_integer_based_manufactured_solution(host_csr_matrix<T>&   hA,
+                                                      host_dense_matrix<T>& hx,
+                                                      host_dense_matrix<T>& hx_expected,
+                                                      const T&              alpha,
+                                                      rocsparse_fill_mode   uplo,
+                                                      rocsparse_diag_type   diag,
+                                                      rocsparse_index_base  base,
+                                                      rocsparse_int         M)
 {
     // Initialize matrix values to random integers between 1 and 10
     for(rocsparse_int i = 0; i < hA.nnz; ++i)
@@ -316,7 +316,8 @@ void testing_csrsv(const Arguments& arg)
     // If integer_based_manufactured_solution is enabled, construct integer matrix and generate corresponding right-hand side
     if(arg.integer_based_manufactured_solution)
     {
-        setup_integer_based_manufactured_solution(hA, hx, hx_expected, *h_alpha, uplo, diag, base, M);
+        setup_integer_based_manufactured_solution(
+            hA, hx, hx_expected, *h_alpha, uplo, diag, base, M);
     }
     else
     {
