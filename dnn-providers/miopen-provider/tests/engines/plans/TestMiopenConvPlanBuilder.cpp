@@ -211,46 +211,52 @@ TEST_F(TestGpuMiopenConvPlanBuilder, BuildPlanCreatesValidPlanForSupportedGraph)
     }
 }
 
-TEST_F(TestGpuMiopenConvPlanBuilder, GetWorkspaceSizeRangeReturnsValidRangeForConvFwd)
+TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeFwd)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    WorkspaceSizeRange range;
-    EXPECT_NO_THROW(range = _planBuilder.getWorkspaceSizeRange(_handle, graph));
+    WorkspaceSizeRange range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
 
-    EXPECT_LE(range.min, range.max);
+    HipdnnEnginePluginExecutionContext ctx;
+    _planBuilder.buildPlan(_handle, graph, ctx);
 
-    size_t maxWorkspace = _planBuilder.getMaxWorkspaceSize(_handle, graph);
-    EXPECT_EQ(range.max, maxWorkspace);
+    size_t actualWorkspace = ctx.plan().getWorkspaceSize(_handle);
+
+    EXPECT_GE(actualWorkspace, range.min);
+    EXPECT_LE(actualWorkspace, range.max);
 }
 
-TEST_F(TestGpuMiopenConvPlanBuilder, GetWorkspaceSizeRangeReturnsValidRangeForConvBwd)
+TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeBwd)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    WorkspaceSizeRange range;
-    EXPECT_NO_THROW(range = _planBuilder.getWorkspaceSizeRange(_handle, graph));
+    WorkspaceSizeRange range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
 
-    EXPECT_LE(range.min, range.max);
+    HipdnnEnginePluginExecutionContext ctx;
+    _planBuilder.buildPlan(_handle, graph, ctx);
 
-    size_t maxWorkspace = _planBuilder.getMaxWorkspaceSize(_handle, graph);
-    EXPECT_EQ(range.max, maxWorkspace);
+    size_t actualWorkspace = ctx.plan().getWorkspaceSize(_handle);
+
+    EXPECT_GE(actualWorkspace, range.min);
+    EXPECT_LE(actualWorkspace, range.max);
 }
 
-TEST_F(TestGpuMiopenConvPlanBuilder, GetWorkspaceSizeRangeReturnsValidRangeForConvWrw)
+TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeWrw)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    WorkspaceSizeRange range;
-    EXPECT_NO_THROW(range = _planBuilder.getWorkspaceSizeRange(_handle, graph));
+    WorkspaceSizeRange range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
 
-    EXPECT_LE(range.min, range.max);
+    HipdnnEnginePluginExecutionContext ctx;
+    _planBuilder.buildPlan(_handle, graph, ctx);
 
-    size_t maxWorkspace = _planBuilder.getMaxWorkspaceSize(_handle, graph);
-    EXPECT_EQ(range.max, maxWorkspace);
+    size_t actualWorkspace = ctx.plan().getWorkspaceSize(_handle);
+
+    EXPECT_GE(actualWorkspace, range.min);
+    EXPECT_LE(actualWorkspace, range.max);
 }
 
 TEST_F(TestGpuMiopenConvPlanBuilder, WorkspaceSizeRespectsLimitFwd)
