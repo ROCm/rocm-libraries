@@ -92,6 +92,130 @@
 namespace
 {
 
+    // This struct exactly matches the one defined by AITER, see:
+    // https://github.com/newling/aiter/blob/b5a9d77e353175f08e87be5912dfd67fa4f3a467/csrc/py_itfs_cu/asm_gemm_a4w4.cu#L12
+    struct p3
+    {
+        uint32_t _p0, _p1, _p2;
+    };
+    struct p2
+    {
+        uint32_t _p0, _p1;
+    };
+    struct __attribute__((packed)) F4GemmKernelArgs
+    {
+        void*    ptr_D;
+        p2       _p0;
+        void*    ptr_C;
+        p2       _p1;
+        void*    ptr_A;
+        p2       _p2;
+        void*    ptr_B;
+        p2       _p3;
+        float    alpha;
+        p3       _p4;
+        float    beta;
+        p3       _p5;
+        uint32_t stride_D0;
+        p3       _p6;
+        uint32_t stride_D1;
+        p3       _p7;
+        uint32_t stride_C0;
+        p3       _p8;
+        uint32_t stride_C1;
+        p3       _p9;
+        uint32_t stride_A0;
+        p3       _p10;
+        uint32_t stride_A1;
+        p3       _p11;
+        uint32_t stride_B0;
+        p3       _p12;
+        uint32_t stride_B1;
+        p3       _p13;
+        uint32_t M;
+        p3       _p14;
+        uint32_t N;
+        p3       _p15;
+        uint32_t K;
+        p3       _p16;
+        void*    ptr_ScaleA;
+        p2       _p17;
+        void*    ptr_ScaleB;
+        p2       _p18;
+        uint32_t stride_ScaleA0;
+        p3       _p19;
+        uint32_t stride_ScaleA1;
+        p3       _p20;
+        uint32_t stride_ScaleB0;
+        p3       _p21;
+        uint32_t stride_ScaleB1;
+        p3       _p22;
+        int      log2_k_split;
+    };
+
+    void printKernelArgs(const F4GemmKernelArgs& args)
+    {
+
+        const unsigned char* bytes = reinterpret_cast<const unsigned char*>(&args);
+        size_t               size  = sizeof(args);
+
+        std::cout << "Offset | 00 01 02 03 04 05 06 07 | 08 09 0A 0B 0C 0D 0E 0F" << std::endl;
+        std::cout << "-------|-------------------------|-------------------------" << std::endl;
+
+        for(size_t i = 0; i < size; i += 16)
+        {
+            std::cout << std::setw(4) << std::setfill('0') << std::dec << i << "   | ";
+            for(size_t j = 0; j < 16; ++j)
+            {
+                if(i + j < size)
+                {
+                    std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)bytes[i + j]
+                              << " ";
+                }
+                else
+                {
+                    std::cout << "   ";
+                }
+                if(j == 7)
+                    std::cout << "| ";
+            }
+            std::cout << std::endl;
+        }
+        std::cout << "=======================================\n" << std::endl;
+
+        std::cout << "\n========== [DIRECT ASSEMBLY REPLICATION DATA] ==========" << std::endl;
+
+        std::cout << "\n--- KernelArgs Struct Content ---" << std::endl;
+        std::cout << std::hex;
+        std::cout << "ptr_D        : " << args.ptr_D << std::endl;
+        std::cout << "ptr_C        : " << args.ptr_C << std::endl;
+        std::cout << "ptr_A        : " << args.ptr_A << std::endl;
+        std::cout << "ptr_B        : " << args.ptr_B << std::endl;
+        std::cout << "ptr_ScaleA   : " << args.ptr_ScaleA << std::endl;
+        std::cout << "ptr_ScaleB   : " << args.ptr_ScaleB << std::endl;
+        std::cout << std::dec;
+        std::cout << "alpha        : " << args.alpha << std::endl;
+        std::cout << "beta         : " << args.beta << std::endl;
+        std::cout << "M            : " << args.M << std::endl;
+        std::cout << "N            : " << args.N << std::endl;
+        std::cout << "K            : " << args.K << std::endl;
+        std::cout << "\n[Strides]" << std::endl;
+        std::cout << "stride_D0 (Out)   : " << args.stride_D0 << std::endl;
+        std::cout << "stride_D1         : " << args.stride_D1 << std::endl;
+        std::cout << "stride_C0 (Bias)  : " << args.stride_C0 << std::endl;
+        std::cout << "stride_C1         : " << args.stride_C1 << std::endl;
+        std::cout << "stride_A0 (In A)  : " << args.stride_A0 << std::endl;
+        std::cout << "stride_A1         : " << args.stride_A1 << std::endl;
+        std::cout << "stride_B0 (In B)  : " << args.stride_B0 << std::endl;
+        std::cout << "stride_B1         : " << args.stride_B1 << std::endl;
+        std::cout << "stride_ScaleA0    : " << args.stride_ScaleA0 << std::endl;
+        std::cout << "stride_ScaleA1    : " << args.stride_ScaleA1 << std::endl;
+        std::cout << "stride_ScaleB0    : " << args.stride_ScaleB0 << std::endl;
+        std::cout << "stride_ScaleB1    : " << args.stride_ScaleB1 << std::endl;
+        std::cout << "========== [DIRECT ASSEMBLY DATA END] ==========\n" << std::endl;
+    }
+
+
     /**
       * @brief Singleton manager for direct assembly kernels.
       * Handles rule selection, module loading, and kernel launching.
@@ -220,6 +344,7 @@ namespace
                                       static_cast<int>(p.n),
                                       static_cast<int>(p.k)};
 
+
                          size_t argsSize = sizeof(args);
 
                          void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
@@ -243,8 +368,98 @@ namespace
                                                                 1,
                                                                 0, // Shared Mem
                                                                 p.stream, // Stream
-                                                                NULL,
+                                                                nullptr,
                                                                 config);
+
+                         if(err != hipSuccess)
+                         {
+                             std::cerr
+                                 << "[DirectAssembly] Launch failed: " << hipGetErrorString(err)
+                                 << std::endl;
+                             return false;
+                         }
+                         return true;
+                     }}};
+        }
+
+        // Rule: F4Gemm Custom (Matches AITER 256x256 Log)
+        static RegistryEntry entryF4Gemm()
+        {
+
+            // To enable the use of these assembly kernels, ensure that the following environment variables have been exported.
+            //
+            //  1) To look for an assembly kernel that matches the workload:
+            //  export HIPBLASLT_ENABLE_DIRECT_ASSEMBLY=1
+            //
+            //  2) The directory to look for the assembly kernel:
+            //  export HIPBLASLT_CUSTOM_ASM_DIR=/home/jnewling/workspace/aiter/hsa/gfx950/f4gemm
+            //
+            //  The assembly kernel can either be downloaded following the ticket:
+            //    https://amd-hub.atlassian.net/browse/AIROCROLL-1511
+            //    https://github.com/ROCm/aiter/blob/545afc9462ebdd59b296e2d48bb41fbdbb951a5c/csrc/py_itfs_cu/asm_gemm_a4w4.cu#L161
+            //
+            //  Or by generating them in AITER directly. See the branch
+            //  TODO(newling).
+            //
+
+            constexpr const static char* const coName
+                //  = "f4gemm_bf16_per1x32Fp4_noBpreShuffle_256x256.co";
+                = "f4gemm_bf16_per1x32Fp4_BpreShuffle_256x256.co";
+            //  = "f4gemm_bf16_per1x32Fp4_BpreShuffle_192x128.co";
+
+            const int macroTileM = 256;
+            const int macroTileN = 256;
+
+            constexpr const static char* const fName
+                // = "_ZN5aiter44f4gemm_bf16_per1x32Fp4_noBpreShuffle_256x256E";
+                // = "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_192x128E";
+                // = "_ZN5aiter44f4gemm_bf16_per1x32Fp4_BpreShuffle_256x256E";
+                // = "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_256x256E";
+                = "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_256x256E";
+            return {"F4Gemm_Custom_256x256",
+                    [](rocblaslt_handle, const RocblasltContractionProblem& p) -> bool {
+                        bool typesMatch = (p.a_type == HIP_R_4F_E2M1_EXT); // etc
+                        return typesMatch;
+                    },
+                    {getCoPath(coName),
+                     fName,
+                     [](hipFunction_t func, const RocblasltContractionProblem& p) -> bool {
+                         F4GemmKernelArgs args;
+                         std::memset(&args, 0, sizeof(args));
+
+                         args.ptr_D          = p.D;
+                         args.ptr_A          = const_cast<void*>(p.A);
+                         args.ptr_B          = const_cast<void*>(p.B);
+                         args.ptr_ScaleA     = const_cast<void*>(p.scaleA);
+                         args.ptr_ScaleB     = const_cast<void*>(p.scaleB);
+                         args.alpha          = *(static_cast<const float*>(p.alpha));
+                         args.beta           = *(static_cast<const float*>(p.beta));
+                         args.M              = static_cast<int>(p.m);
+                         args.N              = static_cast<int>(p.n);
+                         args.K              = static_cast<int>(p.k);
+                         args.log2_k_split   = 0;
+                         args.stride_C0      = p.col_stride_c;
+                         args.stride_A0      = p.col_stride_a;
+                         args.stride_B0      = p.col_stride_b;
+                         args.stride_ScaleA0 = p.col_stride_a / 32;
+                         args.stride_ScaleB0 = p.col_stride_b / 32;
+                         size_t argsSize     = sizeof(args);
+                         void*  config[]     = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
+                                                &args,
+                                                HIP_LAUNCH_PARAM_BUFFER_SIZE,
+                                                &argsSize,
+                                                HIP_LAUNCH_PARAM_END};
+
+                         printKernelArgs(args);
+
+                         // See the AITER logic in asm_gemm_a4w4.cu
+                         auto gdM = (macroTileM + args.M - 1) / macroTileM;
+                         auto gdN = (macroTileN + args.N - 1) / macroTileN;
+
+                         std::cout << "[DIRECT ASSEMBLY DEBUG] Launched with [" << gdN << ", "
+                                   << gdM << ", 1, 256, 1, 1]" << std::endl;
+                         hipError_t err = hipModuleLaunchKernel(
+                             func, gdN, gdM, 1, 256, 1, 1, 0, p.stream, nullptr, config);
 
                          if(err != hipSuccess)
                          {
@@ -259,11 +474,9 @@ namespace
 
         static const std::vector<RegistryEntry>& getRegistry()
         {
-            static std::vector<RegistryEntry> registry = {
-                // Register your rules here:
-                entrySimpleGemmPoC(),
-                // entryLargeProblem(),
-            };
+            static std::vector<RegistryEntry> registry = {// Register your rules here:
+                                                          entrySimpleGemmPoC(),
+                                                          entryF4Gemm()};
             return registry;
         }
 

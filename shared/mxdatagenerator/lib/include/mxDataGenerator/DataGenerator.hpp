@@ -354,13 +354,47 @@ namespace DGen
     template <typename DTYPE>
     std::vector<uint8_t> DataGenerator<DTYPE>::getDataBytes() const
     {
-        return DataGenerator::packArray(m_dataDesc, m_dataBytes);
+        auto dataBytes = DataGenerator::packArray(m_dataDesc, m_dataBytes);
+        std::cout << "[DIRECT ASSEMBLY DEBUG] return data bytes of size " << dataBytes.size() << std::endl;
+        // for(uint64_t i = 0; i < 200; ++i)
+        // {
+        //     std::cout << " " << int(dataBytes[i]);
+        //     if((i + 1) % 20 == 0)
+        //     {
+        //         std::cout << std::endl;
+        //     }
+        // }
+        // std::cout << std::endl;
+        //  for (auto x : dataBytes){
+        //    if (x != dataBytes[0]){
+        //      std::cout << "[DIRECT ASSEMBLY DEBUG] Different data!" << std::endl;
+        //      std::abort();
+        //    }
+        //  }
+        return dataBytes;
     }
 
     template <typename DTYPE>
     std::vector<uint8_t> DataGenerator<DTYPE>::getScaleBytes() const
     {
-        return DataGenerator::packArray(m_scaleDesc, m_scaleBytes);
+        auto scaleBytes = DataGenerator::packArray(m_scaleDesc, m_scaleBytes);
+        std::cout << "[DIRECT ASSEMBLY DEBUG] return scale bytes of size " << scaleBytes.size() << std::endl;
+        // for(uint64_t i = 0; i < 200; ++i)
+        // {
+        //     std::cout << " " << int(scaleBytes[i]);
+        //     if((i + 1) % 20 == 0)
+        //     {
+        //         std::cout << std::endl;
+        //     }
+        // }
+        // std::cout << std::endl;
+        //  for (auto x : scaleBytes){
+        //    if (x != scaleBytes[0]){
+        //      std::cout << "[DIRECT ASSEMBLY DEBUG] Different scale!" << std::endl;
+        //      std::abort();
+        //    }
+        //  }
+        return scaleBytes;
     }
 
     template <typename DTYPE>

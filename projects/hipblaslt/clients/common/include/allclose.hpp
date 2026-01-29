@@ -50,9 +50,10 @@
 template <typename T>
 bool allclose(size_t* N, T* a, T* b, double atol, double rtol, bool equal_nan = false)
 {
+
     for(size_t i = 0; i < *N; i++)
     {
-        //Returning ture immediately if 2 elements are identical.
+        //Returning true immediately if 2 elements are identical.
         //This also can handle inf == inf case
         if(a[i] == b[i])
             continue;
@@ -73,9 +74,9 @@ bool allclose(size_t* N, T* a, T* b, double atol, double rtol, bool equal_nan = 
 template <
     typename T,
     std::enable_if_t<!(std::is_same<T, hipblaslt_f8_fnuz>{} || std::is_same<T, hipblaslt_bf8_fnuz>{}
-                       || std::is_same<T, hipblaslt_f8>{} || std::is_same<T, hipblaslt_bf8>{}
-                       ),
-                     int> = 0>
+                       || std::is_same<T, hipblaslt_f8>{} || std::is_same<T, hipblaslt_bf8>{}),
+                     int>
+    = 0>
 bool allclose_check_general(char    allclose_type,
                             int64_t M,
                             int64_t N,
@@ -85,6 +86,7 @@ bool allclose_check_general(char    allclose_type,
                             double& hipblaslt_atol,
                             double& hipblaslt_rtol)
 {
+
     if(M * N == 0)
         return 0;
     size_t              size = N * (size_t)lda;
@@ -100,6 +102,39 @@ bool allclose_check_general(char    allclose_type,
             hGPU_double[idx] = double(hGPU[idx]);
         }
     }
+
+    auto dH = std::min<int>(20, N);
+    auto dW = std::min<int>(20, M);
+
+    auto print = [&](auto& X) {
+        std::cout << "[DIRECT ASSEMBLY DEBUG] Top left:\n";
+        for(int64_t i = 0; i < dH; i++)
+        {
+            for(int64_t j = 0; j < dW; j++)
+            {
+                size_t idx = j + i * (size_t)lda;
+                std::cout << X[idx] << " ";
+            }
+            std::cout << std::endl;
+        }
+
+        std::cout << "[DIRECT ASSEMBLY DEBUG] Bottom right:\n";
+        for(int64_t i = N - dH; i < N; i++)
+        {
+            for(int64_t j = M - dW; j < M; j++)
+            {
+                size_t idx = j + i * (size_t)lda;
+                std::cout << X[idx] << " ";
+            }
+            std::cout << std::endl;
+        }
+    };
+
+    std::cout << "\n\n[DIRECT ASSEMBLY DEBUG] CPU reference" << std::endl;
+    print(hCPU_double);
+
+    std::cout << "\n\n[DIRECT ASSEMBLY DEBUG] GPU observation" << std::endl;
+    print(hGPU_double);
 
     std::vector<double> atols{1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
     std::vector<double> rtols{1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
@@ -131,7 +166,8 @@ bool allclose_check_general(char    allclose_type,
 template <typename T,
           std::enable_if_t<(std::is_same<T, hipblaslt_f8_fnuz>{}
                             || std::is_same<T, hipblaslt_bf8_fnuz>{}),
-                           int> = 0>
+                           int>
+          = 0>
 bool allclose_check_general(char    allclose_type,
                             int64_t M,
                             int64_t N,
@@ -184,9 +220,10 @@ bool allclose_check_general(char    allclose_type,
     return true;
 }
 
-template <typename T,
-          std::enable_if_t<(std::is_same<T, hipblaslt_f8>{} || std::is_same<T, hipblaslt_bf8>{}),
-                           int> = 0>
+template <
+    typename T,
+    std::enable_if_t<(std::is_same<T, hipblaslt_f8>{} || std::is_same<T, hipblaslt_bf8>{}), int>
+    = 0>
 bool allclose_check_general(char    allclose_type,
                             int64_t M,
                             int64_t N,
@@ -239,10 +276,10 @@ bool allclose_check_general(char    allclose_type,
     return true;
 }
 // For BF16 and half, we convert the results to double first
-template <
-    typename T,
-    typename VEC,
-    std::enable_if_t<std::is_same<T, hipblasLtHalf>{} || std::is_same<T, hip_bfloat16>{}, int> = 0>
+template <typename T,
+          typename VEC,
+          std::enable_if_t<std::is_same<T, hipblasLtHalf>{} || std::is_same<T, hip_bfloat16>{}, int>
+          = 0>
 bool allclose_check_general(char    allclose_type,
                             int64_t M,
                             int64_t N,
@@ -316,6 +353,7 @@ bool allclose_check_general(char    allclose_type,
                             double& hipblaslt_atol,
                             double& hipblaslt_rtol)
 {
+
     if(M * N == 0)
         return 0;
 
@@ -373,6 +411,8 @@ bool allclose_check_general(char        allclose_type,
     switch(type)
     {
     case HIP_R_32F:
+    {
+
         return allclose_check_general<float>(allclose_type,
                                              M,
                                              N,
@@ -383,7 +423,9 @@ bool allclose_check_general(char        allclose_type,
                                              batch_count,
                                              hipblaslt_atol,
                                              hipblaslt_rtol);
+    }
     case HIP_R_64F:
+    {
         return allclose_check_general<double>(allclose_type,
                                               M,
                                               N,
@@ -394,7 +436,10 @@ bool allclose_check_general(char        allclose_type,
                                               batch_count,
                                               hipblaslt_atol,
                                               hipblaslt_rtol);
+    }
     case HIP_R_16F:
+    {
+
         return allclose_check_general<hipblasLtHalf>(allclose_type,
                                                      M,
                                                      N,
@@ -405,7 +450,12 @@ bool allclose_check_general(char        allclose_type,
                                                      batch_count,
                                                      hipblaslt_atol,
                                                      hipblaslt_rtol);
+    }
     case HIP_R_16BF:
+    {
+
+        std::cout << "[DIRECT ASSEMBLY DEBUG] allclose_check_general: HIP_R_16BF case."
+                  << std::endl;
         return allclose_check_general<hip_bfloat16>(allclose_type,
                                                     M,
                                                     N,
@@ -416,7 +466,9 @@ bool allclose_check_general(char        allclose_type,
                                                     batch_count,
                                                     hipblaslt_atol,
                                                     hipblaslt_rtol);
+    }
     case HIP_R_8F_E4M3_FNUZ:
+    {
         return allclose_check_general<hipblaslt_f8_fnuz>(allclose_type,
                                                          M,
                                                          N,
@@ -427,6 +479,7 @@ bool allclose_check_general(char        allclose_type,
                                                          batch_count,
                                                          hipblaslt_atol,
                                                          hipblaslt_rtol);
+    }
     case HIP_R_8F_E5M2_FNUZ:
         return allclose_check_general<hipblaslt_bf8_fnuz>(allclose_type,
                                                           M,
@@ -439,6 +492,7 @@ bool allclose_check_general(char        allclose_type,
                                                           hipblaslt_atol,
                                                           hipblaslt_rtol);
     case HIP_R_8F_E4M3:
+    {
         return allclose_check_general<hipblaslt_f8>(allclose_type,
                                                     M,
                                                     N,
@@ -449,7 +503,10 @@ bool allclose_check_general(char        allclose_type,
                                                     batch_count,
                                                     hipblaslt_atol,
                                                     hipblaslt_rtol);
+    }
     case HIP_R_8F_E5M2:
+    {
+
         return allclose_check_general<hipblaslt_bf8>(allclose_type,
                                                      M,
                                                      N,
@@ -460,7 +517,9 @@ bool allclose_check_general(char        allclose_type,
                                                      batch_count,
                                                      hipblaslt_atol,
                                                      hipblaslt_rtol);
+    }
     case HIP_R_32I:
+    {
         return allclose_check_general<int32_t>(allclose_type,
                                                M,
                                                N,
@@ -471,7 +530,9 @@ bool allclose_check_general(char        allclose_type,
                                                batch_count,
                                                hipblaslt_atol,
                                                hipblaslt_rtol);
+    }
     case HIP_R_8I:
+    {
         return allclose_check_general<hipblasLtInt8>(allclose_type,
                                                      M,
                                                      N,
@@ -482,6 +543,7 @@ bool allclose_check_general(char        allclose_type,
                                                      batch_count,
                                                      hipblaslt_atol,
                                                      hipblaslt_rtol);
+    }
     default:
         hipblaslt_cerr << "Error type in allclose_check_general" << std::endl;
         return false;

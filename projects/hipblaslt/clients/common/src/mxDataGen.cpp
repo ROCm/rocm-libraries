@@ -25,10 +25,9 @@
  *******************************************************************************/
 
 #include "mxDataGen.hpp"
+#include <cblas.h>
 #include <mxDataGenerator/DataGenerator.hpp>
 #include <mxDataGenerator/PreSwizzle.hpp>
-#include <cblas.h>
-
 
 template <typename DT>
 std::vector<uint8_t> unpackData(std::vector<uint8_t> const& dataBytes)
@@ -223,6 +222,20 @@ std::vector<float> generateData(T                           dgen,
                                 std::vector<size_t> const&  preSwizzleTile,
                                 std::vector<size_t> const&  preTile)
 {
+
+    using namespace DGen;
+
+    if(isMatrixA)
+    {
+        std::cout << "[DIRECT ASSEMBLY DEBUG] In generate data for A, customizing." << isMatrixA << std::endl;
+        opt.initMode = DataInitMode(Ones{});
+    }
+    else
+    {
+        std::cout << "[DIRECT ASSEMBLY DEBUG] In generate data for (not) A, customizing." << isMatrixA << std::endl;
+        opt.initMode = DataInitMode(Identity{});
+    }
+
     dgen.setSeed(seed);
     dgen.generate(sizes, strides, opt);
 
@@ -301,6 +314,7 @@ std::vector<float> generateData(T                           dgen,
  *
  * @return float values of generated MX type data
  */
+
 std::vector<float> generateMXInput(hipDataType                dataType,
                                    void*                      data,
                                    void*                      scale,
@@ -337,7 +351,6 @@ std::vector<float> generateMXInput(hipDataType                dataType,
     strides.push_back(stride);
 
     auto const elementsPerMXBlock = scaleBlockRowSize * scaleBlockColSize;
-
     if(dataType == HIP_R_8F_E5M2)
     {
         DGen::DataGenerator<DGen::ocp_e5m2_mxfp8> dgen;
@@ -404,6 +417,7 @@ std::vector<float> generateMXInput(hipDataType                dataType,
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_4F_E2M1_EXT)
     {
+        std::cout << "[CUSTOM ASSEMBLY DEBUG] Generating data for ocp_e2m1_mxfp4." << std::endl;
         DGen::DataGenerator<DGen::ocp_e2m1_mxfp4> dgen;
         return generateData<decltype(dgen), DGen::ocp_e2m1_mxfp4>(dgen,
                                                                   data,
