@@ -26,10 +26,14 @@ using SoftmaxTunableSolver =
 struct PerformanceConfigSoftmax : PerfConfigBase<PerformanceConfigSoftmax>
 {
     int local_size;
+    bool vectorized;
     bool initialized = false;
-    PerformanceConfigSoftmax(int _local_size) : local_size(_local_size) {}
-    PerformanceConfigSoftmax() : local_size(start_local_size) {}
-    PerformanceConfigSoftmax(bool) : local_size(start_local_size) {}
+    PerformanceConfigSoftmax(int _local_size, bool _vectorized)
+        : local_size(_local_size), vectorized(_vectorized)
+    {
+    }
+    PerformanceConfigSoftmax() : local_size(start_local_size), vectorized(start_vectorized) {}
+    PerformanceConfigSoftmax(bool) : local_size(start_local_size), vectorized(start_vectorized) {}
     void HeuristicInit(const miopen::softmax::ProblemDescription& problem);
     bool SetNextValue(const miopen::softmax::ProblemDescription& problem);
     bool IsValidValue() const;
@@ -40,6 +44,7 @@ struct PerformanceConfigSoftmax : PerfConfigBase<PerformanceConfigSoftmax>
     static void Visit(Self&& s, F f)
     {
         f(s.local_size, "local_size");
+        f(s.vectorized, "vectorized");
     }
     bool operator==(const PerformanceConfigSoftmax& other) const;
 
@@ -47,6 +52,8 @@ public:
     static constexpr auto default_local_size = 1024;
     static constexpr auto max_local_size     = 1024;
     static constexpr auto start_local_size   = 1;
+    static constexpr auto default_vectorized = false;
+    static constexpr auto start_vectorized   = false;
 };
 
 struct Softmax final : SoftmaxTunableSolver<PerformanceConfigSoftmax>

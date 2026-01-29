@@ -98,6 +98,7 @@ Softmax::GetDefaultPerformanceConfig(const ExecutionContext&,
     PerformanceConfigSoftmax config;
     config.HeuristicInit(problem);
     config.local_size = PerformanceConfigSoftmax::default_local_size;
+    config.vectorized = PerformanceConfigSoftmax::default_vectorized;
     MIOPEN_LOG_I(config.ToString());
     return config;
 }
@@ -173,6 +174,7 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
         {"NUM_BATCH", num_batch},
         {"BATCH_SIZE", batch_size},
         {"U_BATCH_SIZE", u_batch_size},
+        {"VECTORIZED", config.vectorized},
         {"IS_INPUT_CONTIGUOUS", problem.IsForward() && problem.GetXDesc().IsContiguous()},
         {"IS_OUTPUT_CONTIGUOUS", problem.GetYDesc().IsContiguous()},
         {"IS_DINPUT_CONTIGUOUS", !problem.IsForward() && problem.GetdXDesc().IsContiguous()},
@@ -225,8 +227,10 @@ void PerformanceConfigSoftmax::HeuristicInit(const miopen::softmax::ProblemDescr
     {
     case miopenHalf:
     case miopenFloat:
-    case miopenBFloat16: local_size = PerformanceConfigSoftmax::start_local_size; break;
-
+    case miopenBFloat16:
+        local_size = PerformanceConfigSoftmax::start_local_size;
+        vectorized = PerformanceConfigSoftmax::start_vectorized;
+        break;
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
@@ -248,11 +252,16 @@ bool PerformanceConfigSoftmax::SetNextValue(const miopen::softmax::ProblemDescri
     {
         HeuristicInit(problem);
     }
-    if(local_size <= 0)
+    if(local_size < start_local_size)
     {
-        MIOPEN_THROW(miopenStatusInvalidValue, "Local size zero or negative");
+        MIOPEN_THROW(miopenStatusInvalidValue, "Local size below valid value");
     }
     local_size *= 2;
+    if(vectorized == start_vectorized && local_size > max_local_size)
+    {
+        local_size = start_local_size;
+        vectorized = !start_vectorized;
+    }
     return local_size <= max_local_size;
 #endif
 }
