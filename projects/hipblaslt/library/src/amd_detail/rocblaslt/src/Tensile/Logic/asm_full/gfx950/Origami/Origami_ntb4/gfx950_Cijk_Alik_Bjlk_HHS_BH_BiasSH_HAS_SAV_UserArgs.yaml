@@ -18270,7 +18270,7 @@
     UnrollMajorLDSB: false
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: true
+    UseCustomMainLoopSchedule: 1
     UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
