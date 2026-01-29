@@ -8,7 +8,7 @@
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 
-namespace hipdnn_plugin_sdk
+namespace hipdnn_data_sdk::flatbuffer_utilities
 {
 
 class INodeWrapper
@@ -120,4 +120,12 @@ private:
 
     const hipdnn_data_sdk::data_objects::Node* _shallowNode = nullptr;
 };
-}
+
+} // namespace hipdnn_data_sdk::flatbuffer_utilities
+
+// Backward compatibility aliases
+namespace hipdnn_plugin_sdk
+{
+using INodeWrapper = hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper;
+using NodeWrapper  = hipdnn_data_sdk::flatbuffer_utilities::NodeWrapper;
+} // namespace hipdnn_plugin_sdk
