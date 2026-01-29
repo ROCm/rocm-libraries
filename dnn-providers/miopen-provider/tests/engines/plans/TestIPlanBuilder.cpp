@@ -8,7 +8,7 @@
 
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
-using namespace miopen_legacy_plugin;
+using namespace miopen_plugin;
 using namespace hipdnn_test_sdk::utilities;
 
 namespace

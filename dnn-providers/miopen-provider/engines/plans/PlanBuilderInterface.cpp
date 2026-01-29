@@ -3,7 +3,7 @@
 
 #include "PlanBuilderInterface.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 WorkspaceSizeRange IPlanBuilder::getWorkspaceSizeRange([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
@@ -18,4 +18,4 @@ size_t IPlanBuilder::getMaxWorkspaceSize([[maybe_unused]] const HipdnnEnginePlug
     return 0;
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

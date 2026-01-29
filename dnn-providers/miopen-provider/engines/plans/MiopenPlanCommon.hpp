@@ -9,7 +9,7 @@
 
 struct HipdnnEnginePluginExecutionContext;
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 hipdnn_data_sdk::utilities::ScopedResource<miopenSolution_t> find20Solution(
@@ -17,4 +17,4 @@ hipdnn_data_sdk::utilities::ScopedResource<miopenSolution_t> find20Solution(
     miopenProblem_t problem,
     const HipdnnEnginePluginExecutionContext& executionContext);
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

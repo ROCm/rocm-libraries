@@ -11,7 +11,7 @@
 #include "MiopenPlanCommon.hpp"
 #include "MiopenUtils.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 namespace {
@@ -136,4 +136,4 @@ hipdnn_data_sdk::utilities::ScopedResource<miopenSolution_t> find20Solution(
     return findBest20Solution(miopenHandle, problem, findOptions);
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin
