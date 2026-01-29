@@ -511,6 +511,7 @@ def cmake_build(Map conf=[:]){
 
     def pre_setup_cmd = """
             #!/bin/bash
+            cd projects/composablekernel
             ulimit -c unlimited
             rm -rf build
             mkdir build
