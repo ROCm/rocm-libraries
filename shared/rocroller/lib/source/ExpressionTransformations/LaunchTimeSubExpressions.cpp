@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -106,10 +106,6 @@ namespace rocRoller
 
                 if(!m_allowNewArgs)
                     return nullptr;
-
-                LaunchTimeExpressionVisitor sub(m_context, false);
-                auto                        ex2    = sub.call(expr);
-                auto                        myComp = complexity(ex2);
 
                 if(ignoreComplexity || !evalTimes[EvaluationTime::KernelExecute]
                    || complexity(expr) >= m_minComplexity)
