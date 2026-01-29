@@ -218,7 +218,6 @@ private:
     std::vector<Tgpu> sin;
     std::vector<Tgpu> y_dx;
     std::vector<Tref> y_dxhost;
-    std::vector<Tref> y_dxhost_par;
 };
 
 template <typename Tgpu, typename Tref>
@@ -293,12 +292,11 @@ int RoPEDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     sin_dev  = std::unique_ptr<GPUMem>(new GPUMem(ctx, sin_sz, sizeof(Tgpu)));
     y_dx_dev = std::unique_ptr<GPUMem>(new GPUMem(ctx, y_dx_sz, sizeof(Tgpu)));
 
-    x_dy         = std::vector<Tgpu>(x_dy_sz, Tgpu0val);
-    cos          = std::vector<Tgpu>(cos_sz, Tgpu0val);
-    sin          = std::vector<Tgpu>(sin_sz, Tgpu0val);
-    y_dx         = std::vector<Tgpu>(y_dx_sz, Tgpu0val);
-    y_dxhost     = std::vector<Tref>(y_dx_sz, Tref0ref);
-    y_dxhost_par = std::vector<Tref>(y_dx_sz, Tref0ref);
+    x_dy     = std::vector<Tgpu>(x_dy_sz, Tgpu0val);
+    cos      = std::vector<Tgpu>(cos_sz, Tgpu0val);
+    sin      = std::vector<Tgpu>(sin_sz, Tgpu0val);
+    y_dx     = std::vector<Tgpu>(y_dx_sz, Tgpu0val);
+    y_dxhost = std::vector<Tref>(y_dx_sz, Tref0ref);
 
     for(int i = 0; i < x_dy_sz; ++i)
     {
