@@ -80,10 +80,8 @@ void ArgumentModel_log_efficiency(hipblaslt_internal_ostream& name_line,
                                   const double                hipblaslt_gflops)
 {
     EfficiencyMonitor& efficiency_monitor = getEfficiencyMonitor();
-    if(!efficiency_monitor.enabled())
-        return;
 
-    if(getenv("HIPBLASLT_BENCH_EFF") == nullptr)
+    if(!efficiency_monitor.efficiencyReport())
         return;
 
     auto     device_string = efficiency_monitor.getDeviceString();
@@ -112,28 +110,28 @@ void ArgumentModel_log_performance(hipblaslt_internal_ostream& name_line,
     if(!efficiency_monitor.enabled())
         return;
 
-    if(getenv("HIPBLASLT_BENCH_EFF") != nullptr)
+    if(efficiency_monitor.efficiencyReport())
     {
-        name_line << ",total_gran";
-        val_line << "," << efficiency_monitor.getTotalGranularityValue();
+        name_line << ",num_cu";
+        val_line << "," << efficiency_monitor.getCUs();
 
         name_line << ",tiles_per_cu";
         val_line << "," << efficiency_monitor.getTilesPerCuValue();
-
-        name_line << ",num_cu's";
-        val_line << "," << efficiency_monitor.getCUs();
-
-        name_line << ",tile_0_granularity";
+        
+        name_line << ",tile0_gran";
         val_line << "," << efficiency_monitor.getTile0Granularity();
 
-        name_line << ",tile_1_granularity";
+        name_line << ",tile1_gran";
         val_line << "," << efficiency_monitor.getTile1Granularity();
-
+      
         name_line << ",cu_gran";
         val_line << "," << efficiency_monitor.getCuGranularity();
-
+        
         name_line << ",wave_gran";
         val_line << "," << efficiency_monitor.getWaveGranularity();
+
+        name_line << ",total_gran";
+        val_line << "," << efficiency_monitor.getTotalGranularityValue();
 
         name_line << ",mem_read_bytes";
         val_line << "," << efficiency_monitor.getMemReadBytes();

@@ -97,9 +97,9 @@ public:
         // append performance fields
         if(gflops != ArgumentLogging::NA_value)
         {
+            ArgumentModel_log_efficiency(name_line, val_line, arg, hipblaslt_gflops);
             name_line << ",hipblaslt-Gflops";
             val_line << "," << hipblaslt_gflops;
-            ArgumentModel_log_efficiency(name_line, val_line, arg, hipblaslt_gflops);
         }
 
         if(gbytes != ArgumentLogging::NA_value)
