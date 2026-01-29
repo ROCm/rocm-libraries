@@ -163,6 +163,13 @@ OutputType calculateConvWrwTolerance(double inputMin,
     // Total tolerance is the sum of accumulation error and cast error
     double totalTolerance = accumulatedTolerance + castTolerance;
 
+    // Check if totalTolerance exceeds the maximum representable value of OutputType
+    if(totalTolerance > getMax<OutputType>())
+    {
+        throw std::overflow_error(
+            "Calculated tolerance exceeds the maximum representable value of the output type.");
+    }
+
     return hipdnn_data_sdk::utilities::staticCast<OutputType>(totalTolerance);
 }
 

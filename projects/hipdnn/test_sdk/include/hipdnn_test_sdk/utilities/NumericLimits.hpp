@@ -49,4 +49,38 @@ constexpr double getEpsilon()
     }
 }
 
+/**
+ * @brief Returns the maximum finite value for a given floating-point type.
+ *
+ * @tparam T The floating-point type.
+ * @return The maximum finite value as a double.
+ */
+template <typename T>
+constexpr double getMax()
+{
+    if constexpr(std::is_same_v<T, half>)
+    {
+        // Max value for IEEE 754 half-precision (fp16):
+        // Sign: 1 bit, Exponent: 5 bits, Mantissa: 10 bits
+        // Max exponent value (E_max) = 15 (since 31 is reserved for Inf/NaN)
+        // Max value = 2^E_max * (1 + (2^10 - 1) / 2^10)
+        //           = 2^15 * (1 + 1023/1024)
+        //           = 32768 * (2047/1024)
+        //           = 32 * 2047
+        //           = 65504.0
+        return 65504.0;
+    }
+    else if constexpr(std::is_same_v<T, hip_bfloat16>)
+    {
+        // BFloat16 has same range as float
+        return static_cast<double>(std::numeric_limits<float>::max());
+    }
+    else
+    {
+        static_assert(std::numeric_limits<T>::is_specialized,
+                      "Type not supported and std::numeric_limits not specialized");
+        return static_cast<double>(std::numeric_limits<T>::max());
+    }
+}
+
 } // namespace hipdnn_test_sdk::utilities

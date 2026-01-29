@@ -321,3 +321,24 @@ TEST(TestCalculateConvWrwTolerance, ThrowsOnSingularity)
     EXPECT_THROW((calculateConvWrwTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, dims)),
                  std::overflow_error);
 }
+
+// Test that calculateConvWrwTolerance throws when tolerance exceeds OutputType max
+TEST(TestCalculateConvWrwTolerance, ThrowsOnOutputOverflow)
+{
+    // OutputType = half (max approx 65504)
+    // ComputeType = float
+    // We need tolerance > 65504.
+    // Let N=10.
+    // maxProduct = 1e10 (input 1e5 * dy 1e5)
+    // sumAbsProductBound = 1e11
+    // epsilon (float) approx 1.19e-7
+    // gamma approx 2 * 10 * 1.19e-7 approx 2.38e-6
+    // accumulatedTolerance approx 2.38e-6 * 1e11 approx 2.38e5 = 238,000
+    // 238,000 > 65,504 => Should throw.
+
+    std::vector<int64_t> dims = {10, 1, 1, 1};
+    double val = 1.0e5;
+
+    EXPECT_THROW((calculateConvWrwTolerance<half, float, float>(-val, val, -val, val, dims)),
+                 std::overflow_error);
+}
