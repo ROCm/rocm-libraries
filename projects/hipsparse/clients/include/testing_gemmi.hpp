@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_graph.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -48,8 +49,7 @@ void testing_gemmi_bad_arg(const Arguments& argus)
     T   alpha     = make_DataType<T>(0.6);
     T   beta      = make_DataType<T>(0.2);
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto dptr_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
     auto drow_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
@@ -286,8 +286,7 @@ void testing_gemmi(Arguments argus)
     T           h_beta   = make_DataType<T>(argus.beta);
     std::string filename = argus.filename;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     srand(12345ULL);
 
@@ -354,37 +353,37 @@ void testing_gemmi(Arguments argus)
 
         // pointer mode host
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-        CHECK_HIPSPARSE_ERROR(hipsparseXgemmi(handle,
-                                              M,
-                                              N,
-                                              K,
-                                              nnz,
-                                              &h_alpha,
-                                              dA,
-                                              lda,
-                                              dcsc_valB,
-                                              dcsc_col_ptrB,
-                                              dcsc_row_indB,
-                                              &h_beta,
-                                              dC_1,
-                                              ldc));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseXgemmi<T>(handle,
+                                                          M,
+                                                          N,
+                                                          K,
+                                                          nnz,
+                                                          &h_alpha,
+                                                          dA,
+                                                          lda,
+                                                          dcsc_valB,
+                                                          dcsc_col_ptrB,
+                                                          dcsc_row_indB,
+                                                          &h_beta,
+                                                          dC_1,
+                                                          ldc));
 
         // pointer mode device
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
-        CHECK_HIPSPARSE_ERROR(hipsparseXgemmi(handle,
-                                              M,
-                                              N,
-                                              K,
-                                              nnz,
-                                              d_alpha,
-                                              dA,
-                                              lda,
-                                              dcsc_valB,
-                                              dcsc_col_ptrB,
-                                              dcsc_row_indB,
-                                              d_beta,
-                                              dC_2,
-                                              ldc));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseXgemmi<T>(handle,
+                                                          M,
+                                                          N,
+                                                          K,
+                                                          nnz,
+                                                          d_alpha,
+                                                          dA,
+                                                          lda,
+                                                          dcsc_valB,
+                                                          dcsc_col_ptrB,
+                                                          dcsc_row_indB,
+                                                          d_beta,
+                                                          dC_2,
+                                                          ldc));
 
         // copy output from device to CPU
         CHECK_HIP_ERROR(hipMemcpy(hC_1.data(), dC_1, sizeof(T) * Cnnz, hipMemcpyDeviceToHost));
@@ -428,20 +427,20 @@ void testing_gemmi(Arguments argus)
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseXgemmi(handle,
-                                                  M,
-                                                  N,
-                                                  K,
-                                                  nnz,
-                                                  &h_alpha,
-                                                  dA,
-                                                  lda,
-                                                  dcsc_valB,
-                                                  dcsc_col_ptrB,
-                                                  dcsc_row_indB,
-                                                  &h_beta,
-                                                  dC_1,
-                                                  ldc));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseXgemmi<T>(handle,
+                                                              M,
+                                                              N,
+                                                              K,
+                                                              nnz,
+                                                              &h_alpha,
+                                                              dA,
+                                                              lda,
+                                                              dcsc_valB,
+                                                              dcsc_col_ptrB,
+                                                              dcsc_row_indB,
+                                                              &h_beta,
+                                                              dC_1,
+                                                              ldc));
         }
 
         double gpu_time_used = get_time_us();
@@ -449,20 +448,20 @@ void testing_gemmi(Arguments argus)
         // Performance run
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseXgemmi(handle,
-                                                  M,
-                                                  N,
-                                                  K,
-                                                  nnz,
-                                                  &h_alpha,
-                                                  dA,
-                                                  lda,
-                                                  dcsc_valB,
-                                                  dcsc_col_ptrB,
-                                                  dcsc_row_indB,
-                                                  &h_beta,
-                                                  dC_1,
-                                                  ldc));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseXgemmi<T>(handle,
+                                                              M,
+                                                              N,
+                                                              K,
+                                                              nnz,
+                                                              &h_alpha,
+                                                              dA,
+                                                              lda,
+                                                              dcsc_valB,
+                                                              dcsc_col_ptrB,
+                                                              dcsc_row_indB,
+                                                              &h_beta,
+                                                              dC_1,
+                                                              ldc));
         }
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;

@@ -123,6 +123,17 @@ TEST_CASE("Origami: hardware_arch_enum", "[origami]") {
   }
 }
 
+TEST_CASE("Origami: has_MALL", "[origami]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - MALL support check") {
+      auto hardware = make_hardware(gpu_arch);
+
+      // gfx942 and gfx950 have MALL support
+      if (gpu_arch == 942 || gpu_arch == 950) { REQUIRE(hardware.has_MALL() == true); }
+    }
+  }
+}
+
 TEST_CASE("Origami: best_grid_size", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - grid size selection") {
