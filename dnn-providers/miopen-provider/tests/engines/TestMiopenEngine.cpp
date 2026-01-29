@@ -174,9 +174,10 @@ TEST(TestMiopenEngine, GetDetailsContainsBenchmarkingKnob)
 {
     MiopenEngine engine(1);
     HipdnnEnginePluginHandle dummyHandle;
+    MockGraph mockGraph;
 
     hipdnnPluginConstData_t result;
-    engine.getDetails(dummyHandle, result);
+    engine.getDetails(dummyHandle, mockGraph, result);
 
     hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(result.ptr, result.size);
     ASSERT_EQ(engineDetails.knobCount(), 1u);
