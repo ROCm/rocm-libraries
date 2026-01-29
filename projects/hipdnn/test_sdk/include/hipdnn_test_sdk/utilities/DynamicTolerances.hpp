@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <stdexcept>
 #include <type_traits>
 #include <vector>
 
@@ -89,10 +90,19 @@ OutputType calculateConvWrwTolerance(double inputMin,
     {
         // High Precision: Linear bound (Classical)
         // Error <= gamma_2n * sum(|x_i * y_i|)
-        // gamma_n = n * u / (1 - n * u) approx n * u
+        // gamma_n = n * u / (1 - n * u)
         // We assume NO FMAs are used, so factor is 2n.
-        // gamma_2n approx 2 * n * u
-        double gamma = 2.0 * static_cast<double>(numberOfAccumulations) * epsilon;
+        // gamma_2n = 2 * n * u / (1 - 2 * n * u)
+        double nU = 2.0 * static_cast<double>(numberOfAccumulations) * epsilon;
+
+        if(nU >= 1.0)
+        {
+            throw std::overflow_error(
+                "Number of accumulations is too large for the given precision. "
+                "Error bound is undefined/infinite.");
+        }
+
+        double gamma = nU / (1.0 - nU);
         accumulatedTolerance = gamma * sumAbsProductBound;
     }
     else

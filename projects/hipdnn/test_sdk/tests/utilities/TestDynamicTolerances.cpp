@@ -63,10 +63,21 @@ std::vector<ConvWrwToleranceTestCase>
             // N=2. Accum = 2. Tol = 2 * 2^2 * 2^-23 = 8 * 2^-23
             {-1.0, 1.0, -1.0, 1.0, {2, 1, 1, 1}, 8.0 * std::pow(2.0, -23)},
             // N=10. Accum = 10. Tol = 2 * 10^2 * 2^-23 = 200 * 2^-23
-            {-1.0, 1.0, -1.0, 1.0, {10, 1, 1, 1}, 200.0 * std::pow(2.0, -23)},
+            // Exact gamma: (20 * 2^-23) / (1 - 20 * 2^-23) * 10
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             {10, 1, 1, 1},
+             (20.0 * std::pow(2.0, -23)) / (1.0 - 20.0 * std::pow(2.0, -23)) * 10.0},
             // Large values: range -1000, 1000. maxProduct = 10^6.
-            // N=10. Accum = 10. Tol = 200 * 10^6 * 2^-23
-            {-1000.0, 1000.0, -1000.0, 1000.0, {10, 1, 1, 1}, 200.0 * 1.0e6 * std::pow(2.0, -23)}};
+            // N=10. Accum = 10. Tol = gamma * 10^7
+            {-1000.0,
+             1000.0,
+             -1000.0,
+             1000.0,
+             {10, 1, 1, 1},
+             (20.0 * std::pow(2.0, -23)) / (1.0 - 20.0 * std::pow(2.0, -23)) * 1.0e7}};
 }
 
 // Float / Double / Float (Input casting error)
@@ -296,4 +307,17 @@ TEST(TestCalculateConvWrwTolerance, DetectsFailure)
 
     valid = validator->allClose(*baseline, *actualFailing);
     EXPECT_FALSE(valid) << "Validator should have failed";
+}
+
+// Test that calculateConvWrwTolerance throws when nU >= 1.0 (singularity)
+TEST(TestCalculateConvWrwTolerance, ThrowsOnSingularity)
+{
+    // For float, epsilon is 2^-23 approx 1.19e-7.
+    // nU = 2 * n * epsilon.
+    // We need nU >= 1.0 => n >= 1 / (2 * epsilon) = 2^22 = 4,194,304.
+    // Let's use 5,000,000.
+    std::vector<int64_t> dims = {5000000, 1, 1, 1};
+
+    EXPECT_THROW((calculateConvWrwTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, dims)),
+                 std::overflow_error);
 }
