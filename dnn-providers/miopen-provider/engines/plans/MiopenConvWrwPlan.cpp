@@ -72,7 +72,9 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle,
     : _params(std::move(params))
     , _benchmarkingEnabled(executionContext.benchmarkingEnabled())
 {
-    (void)_benchmarkingEnabled;
+    // Set tuning policy based on benchmarking flag - RAII ensures restoration
+    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _benchmarkingEnabled);
+
     // MIOpen Find 2.0 API
     miopenProblem_t problem;
     THROW_ON_MIOPEN_FAILURE(miopenCreateConvProblem(
