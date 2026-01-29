@@ -806,13 +806,13 @@ rocblas_trsv_device(rocblas_int    n,
  */
 inline bool should_use_big_batch_kernel(rocblas_int n, rocblas_int batch_count)
 {
-    // Threshold: use big batch kernel when batch_count >= 8*n
-    constexpr rocblas_int BIG_BATCH_TO_N_RATIO = 8;
+    // Threshold: use big batch kernel when batch_count > 16*n
+    constexpr rocblas_int BIG_BATCH_TO_N_RATIO = 16;
 
-    // Don't use big batch kernel for very large matrices (single matrix load sufficient)
-    constexpr rocblas_int MAX_N_FOR_BIG_BATCH = 512;
+    // Don't use big batch kernel for large matrices (matrix split creates sufficient work)
+    constexpr rocblas_int MAX_N_FOR_BIG_BATCH = 128;
 
-    return (n <= MAX_N_FOR_BIG_BATCH) && (batch_count >= BIG_BATCH_TO_N_RATIO * n);
+    return (n < MAX_N_FOR_BIG_BATCH) && (batch_count > BIG_BATCH_TO_N_RATIO * n);
 }
 
 template <rocblas_int DIM_X, typename T, typename TConstPtr, typename TPtr>

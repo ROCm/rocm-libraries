@@ -36,12 +36,9 @@
 // Block solve for lower triangular with z-dimension batching
 template <rocblas_int BLOCK_LDA, rocblas_int DIM_Z, bool UNIT, typename T>
 void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_lower_big_batch(const T* __restrict__ A,
-                                                                 T* xs,
+                                                                 T* xshared,
                                                                  T& val)
 {
-    // Shared memory per batch in z-dimension
-    // __shared__ T xs[DIM_Z];
-
     const int tz = threadIdx.z;
 
     // Iterate forwards through the diagonal block
@@ -52,7 +49,7 @@ void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_lower_big_batch(const T* __rest
         {
             if(!UNIT)
                 val *= A[i * BLOCK_LDA + i]; // Multiply by diagonal element
-            xs[tz] = val; // Store solved value in shared memory
+            xshared[tz] = val; // Store solved value in shared memory
         }
 
         __syncthreads();
@@ -60,7 +57,7 @@ void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_lower_big_batch(const T* __rest
         // Update future elements with solved one
         if(threadIdx.x > i && threadIdx.y == 0)
         {
-            val += A[i * BLOCK_LDA + threadIdx.x] * xs[tz];
+            val += A[i * BLOCK_LDA + threadIdx.x] * xshared[tz];
         }
 
         __syncthreads();
@@ -70,12 +67,9 @@ void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_lower_big_batch(const T* __rest
 // Block solve for upper triangular with z-dimension batching
 template <rocblas_int BLOCK_LDA, rocblas_int DIM_Z, bool UNIT, typename T>
 void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_upper_big_batch(const T* __restrict__ A,
-                                                                 T* xs,
+                                                                 T* xshared,
                                                                  T& val)
 {
-    // Shared memory per batch in z-dimension
-    // __shared__ T xs[DIM_Z];
-
     const int tz = threadIdx.z;
 
     // Iterate backwards through the diagonal block
@@ -86,7 +80,7 @@ void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_upper_big_batch(const T* __rest
         {
             if(!UNIT)
                 val *= A[i * BLOCK_LDA + i];
-            xs[tz] = val;
+            xshared[tz] = val;
         }
 
         __syncthreads();
@@ -94,7 +88,7 @@ void ROCBLAS_KERNEL_ILF rocblas_trsv_block_solve_upper_big_batch(const T* __rest
         // Update future elements with solved one
         if(threadIdx.x < i && threadIdx.y == 0)
         {
-            val += A[i * BLOCK_LDA + threadIdx.x] * xs[tz];
+            val += A[i * BLOCK_LDA + threadIdx.x] * xshared[tz];
         }
 
         __syncthreads();
@@ -230,6 +224,9 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
 
             if(!row_is_remainder)
             {
+                // commented out code for loop i < DIM_X allows juxtaposition of anisotropic tile sizes support in default kernel
+                // i.e. DIM_X != DIM_Y which we don't support here
+
                 //rocblas_int row = tx;
                 //for(rocblas_int i = 0; i < DIM_X; i += DIM_Y)
                 {
