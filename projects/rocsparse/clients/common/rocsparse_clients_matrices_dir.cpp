@@ -28,6 +28,22 @@
 #include <cstdio>
 #include <filesystem>
 
+// Helper to ensure trailing separator using std::filesystem (portable for Windows/Linux)
+static std::string ensure_trailing_separator(const std::string& path_str)
+{
+    namespace fs = std::filesystem;
+    if(path_str.empty())
+        return path_str;
+    fs::path p(path_str);
+    // Use make_preferred() to get platform-appropriate separators
+    std::string result = p.make_preferred().string();
+    if(!result.empty() && result.back() != fs::path::preferred_separator)
+    {
+        result += fs::path::preferred_separator;
+    }
+    return result;
+}
+
 //
 //
 //
@@ -44,14 +60,8 @@ private:
             rocsparse_clients_envariables::MATRICES_DIR);
         if(this->m_is_defined)
         {
-            this->m_path
-                = rocsparse_clients_envariables::get(rocsparse_clients_envariables::MATRICES_DIR);
-            // Ensure trailing slash for proper path concatenation
-            const size_t size = this->m_path.size();
-            if((size > 0) && (this->m_path[size - 1] != '/'))
-            {
-                this->m_path += "/";
-            }
+            this->m_path = ensure_trailing_separator(
+                rocsparse_clients_envariables::get(rocsparse_clients_envariables::MATRICES_DIR));
         }
 
         // Compute default path by checking possible relative locations
@@ -83,13 +93,7 @@ private:
                          "environment variable, or use the option --matrices-dir"
                       << std::endl;
             // Fall back to the old default path behavior to avoid breaking existing setups
-            this->m_default_path = exe_path.string();
-            const size_t size    = this->m_default_path.size();
-            if((size > 0) && (this->m_default_path[size - 1] != '/'))
-            {
-                this->m_default_path += "/";
-            }
-            this->m_default_path += "../matrices/";
+            this->m_default_path = (exe_path / ".." / "matrices" / "").make_preferred().string();
         }
     }
 
@@ -129,10 +133,7 @@ public:
     {
         clients_matrices_dir& self = instance();
         self.m_is_defined          = true;
-        self.m_path                = p;
-        const size_t size          = p.size();
-        if((size > 0) && (p[size - 1] != '/'))
-            self.m_path += "/";
+        self.m_path                = ensure_trailing_separator(p);
     }
 };
 
