@@ -31,18 +31,26 @@ if(BUILD_ADDRESS_SANITIZER)
 endif()
 
 # These settings are applied whether building with TheRock or standalone
-if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
+if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
 
     message(STATUS "Building with Address Sanitizer: ON")
 
     # Add compile definition for conditional compilation
     add_compile_definitions(ADDRESS_SANITIZER)
 
-    # Set environment variables for Address Sanitizer XNACK is required for Address Sanitizer on AMD
-    # GPUs ASAN_SYMBOLIZER_PATH is set to the LLVM symbolizer to make the output from leak detection
+    # Set environment variables for Address Sanitizer.
+    # HSA_XNACK is only required for device-side ASAN (not HOST_ASAN).
+    # ASAN_SYMBOLIZER_PATH is set to the LLVM symbolizer to make the output from leak detection
     # more readable.
-    set(TEST_ENVIRONMENT "ASAN_SYMBOLIZER_PATH=${CMAKE_SYMBOLIZER}" "HSA_XNACK=1"
-                         # "ASAN_OPTIONS=halt_on_error=1:abort_on_error=1"
-    )
+    if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
+        set(TEST_ENVIRONMENT "ASAN_SYMBOLIZER_PATH=${CMAKE_SYMBOLIZER}" "HSA_XNACK=1"
+                             # "ASAN_OPTIONS=halt_on_error=1:abort_on_error=1"
+        )
+    else()
+        # HOST_ASAN only needs the symbolizer, not HSA_XNACK
+        set(TEST_ENVIRONMENT "ASAN_SYMBOLIZER_PATH=${CMAKE_SYMBOLIZER}"
+                             # "ASAN_OPTIONS=halt_on_error=1:abort_on_error=1"
+        )
+    endif()
 
 endif()
