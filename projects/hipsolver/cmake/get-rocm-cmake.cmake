@@ -22,6 +22,7 @@ if(NOT ROCmCMakeBuildTools_FOUND)
       SOURCE_SUBDIR "DISABLE ADDING TO BUILD" # We don't really want to consume the build and test targets of ROCm CMake.
     )
     FetchContent_MakeAvailable(rocm-cmake)
-    find_package(ROCmCMakeBuildTools CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
+    list(APPEND CMAKE_MODULE_PATH "${rocm-cmake_SOURCE_DIR}/share/rocmcmakebuildtools/cmake")
+    find_package(ROCmCMakeBuildTools REQUIRED)
   endif()
 endif()
