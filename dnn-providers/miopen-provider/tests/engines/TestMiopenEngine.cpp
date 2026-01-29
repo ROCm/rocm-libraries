@@ -159,7 +159,15 @@ TEST(TestMiopenEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
 
 TEST(TestMiopenEngine, GetDetailsReturnsSerializedEngineDetails)
 {
+    auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+    EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(true));
+    EXPECT_CALL(*mockPlanBuilder, getWorkspaceSizeRange(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(WorkspaceSizeRange{0, 1024}));
+
     MiopenEngine engine(1);
+    engine.addPlanBuilder(std::move(mockPlanBuilder));
+
     HipdnnEnginePluginHandle dummyHandle;
     MockGraph mockGraph;
 
