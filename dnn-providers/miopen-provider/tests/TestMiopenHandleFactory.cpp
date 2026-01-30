@@ -10,7 +10,7 @@
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenHandleFactory.hpp"
 
-using namespace miopen_legacy_plugin;
+using namespace miopen_plugin;
 using namespace hipdnn_plugin_sdk;
 
 TEST(TestMiopenHandleFactory, ThrowsOnNullHandle)

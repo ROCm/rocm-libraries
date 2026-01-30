@@ -1505,6 +1505,7 @@ class Solution(collections.abc.Mapping):
     TLUA = state["ProblemType"]["TLUA"]
     TLUB = state["ProblemType"]["TLUB"]
     if (
+      not state["ProblemType"]["Sparse"] and
       state["EnableMatrixInstruction"] and not state["ExpandPointerSwap"] and
       state["DepthU"] == state["MatrixInstK"] and state["PrefetchGlobalRead"] and not state["1LDSBuffer"]
       and (state["MIWaveTile"][0] > 2  and state["MIWaveTile"][1] > 2)
@@ -3118,9 +3119,6 @@ class Solution(collections.abc.Mapping):
 
     # Sparse problem
     if state["ProblemType"]["Sparse"]:
-      if state["PrefetchGlobalRead"] and not state["ExpandPointerSwap"]:
-        reject(state, printRejectionReason, "Sparse A kernel only support PGR with EPS=1.")
-        return
       if state["EnableMatrixInstruction"] and state["MIArchVgpr"]:
         reject(state, printRejectionReason, "Sparse A kernel does not support MIArchVgpr yet.")
         return

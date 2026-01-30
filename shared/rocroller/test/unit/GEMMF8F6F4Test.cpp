@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -89,6 +89,11 @@ namespace GEMMTests
         {
             auto const& params = std::get<1>(inputParam);
 
+            auto const& typeA          = std::get<0>(params);
+            auto const& typeB          = std::get<1>(params);
+            auto const& waveK          = std::get<2>(params);
+            auto const& loadPathA      = std::get<3>(params);
+            auto const& loadPathB      = std::get<4>(params);
             auto const& scaleAMode     = std::get<5>(params);
             auto const& scaleBMode     = std::get<6>(params);
             auto const& loadScalePathA = std::get<7>(params);
