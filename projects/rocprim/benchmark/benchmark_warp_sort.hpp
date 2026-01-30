@@ -200,19 +200,12 @@ private:
                 ROCPRIM_NO_UNROLL
                 for(unsigned int trial = 0; trial < Trials; ++trial)
                 {
-                    hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_sort_by_key_kernel<Key,
-                                                                               Value,
-                                                                               BlockSize,
-                                                                               WarpSize,
-                                                                               ItemsPerThread>),
-                                       dim3(items / items_per_block),
-                                       dim3(BlockSize),
-                                       0,
-                                       stream,
-                                       d_input_key,
-                                       d_input_value,
-                                       d_output_key,
-                                       d_output_value);
+                    warp_sort_by_key_kernel<Key, Value, BlockSize, WarpSize, ItemsPerThread>
+                        <<<dim3(items / items_per_block), dim3(BlockSize), 0, stream>>>(
+                            d_input_key,
+                            d_input_value,
+                            d_output_key,
+                            d_output_value);
                 }
             });
     }
@@ -231,14 +224,10 @@ private:
                 ROCPRIM_NO_UNROLL
                 for(unsigned int trial = 0; trial < Trials; ++trial)
                 {
-                    hipLaunchKernelGGL(
-                        HIP_KERNEL_NAME(warp_sort_kernel<Key, BlockSize, WarpSize, ItemsPerThread>),
-                        dim3(items / items_per_block),
-                        dim3(BlockSize),
-                        0,
-                        stream,
-                        d_input_key,
-                        d_output_key);
+                    warp_sort_kernel<Key, BlockSize, WarpSize, ItemsPerThread>
+                        <<<dim3(items / items_per_block), dim3(BlockSize), 0, stream>>>(
+                            d_input_key,
+                            d_output_key);
                 }
             });
     }

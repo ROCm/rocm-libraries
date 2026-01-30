@@ -179,14 +179,10 @@ struct warp_scan_benchmark : public primbench::benchmark_interface
         state.run(
             [&]
             {
-                hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Subalgo, T, VirtualWaveSize, Trials>),
-                                   dim3(items / BlockSize),
-                                   dim3(BlockSize),
-                                   0,
-                                   stream,
-                                   d_input.get(),
-                                   d_output.get(),
-                                   input[0]);
+                kernel<Subalgo, T, VirtualWaveSize, Trials>
+                    <<<dim3(items / BlockSize), dim3(BlockSize), 0, stream>>>(d_input.get(),
+                                                                              d_output.get(),
+                                                                              input[0]);
             });
     }
 };

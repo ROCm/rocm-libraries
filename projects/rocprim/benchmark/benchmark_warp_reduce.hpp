@@ -98,13 +98,8 @@ inline auto execute_warp_reduce_kernel(
     T* input, T* output, Flag* /* flags */, size_t items, hipStream_t stream) ->
     typename std::enable_if<!Segmented>::type
 {
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_reduce_kernel<AllReduce, T, VirtualWaveSize, Trials>),
-                       dim3(items / BlockSize),
-                       dim3(BlockSize),
-                       0,
-                       stream,
-                       input,
-                       output);
+    warp_reduce_kernel<AllReduce, T, VirtualWaveSize, Trials>
+        <<<dim3(items / BlockSize), dim3(BlockSize), 0, stream>>>(input, output);
 }
 
 template<bool         AllReduce,
@@ -118,15 +113,8 @@ inline auto execute_warp_reduce_kernel(
     T* input, T* output, Flag* flags, size_t items, hipStream_t stream) ->
     typename std::enable_if<Segmented>::type
 {
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(segmented_warp_reduce_kernel<T, Flag, VirtualWaveSize, Trials>),
-        dim3(items / BlockSize),
-        dim3(BlockSize),
-        0,
-        stream,
-        input,
-        flags,
-        output);
+    segmented_warp_reduce_kernel<T, Flag, VirtualWaveSize, Trials>
+        <<<dim3(items / BlockSize), dim3(BlockSize), 0, stream>>>(input, flags, output);
 }
 
 template<bool AllReduce,

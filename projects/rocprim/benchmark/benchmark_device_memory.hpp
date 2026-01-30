@@ -379,15 +379,10 @@ struct device_memory_benchmark : public primbench::benchmark_interface
                 }
                 else
                 {
-                    hipLaunchKernelGGL(
-                        HIP_KERNEL_NAME(operation_kernel<T, BlockSize, ItemsPerThread, MemOp>),
-                        dim3(grid_size),
-                        dim3(BlockSize),
-                        0,
-                        stream,
-                        d_input.get(),
-                        d_output.get(),
-                        selected_operation);
+                    operation_kernel<T, BlockSize, ItemsPerThread, MemOp>
+                        <<<dim3(grid_size), dim3(BlockSize), 0, stream>>>(d_input.get(),
+                                                                          d_output.get(),
+                                                                          selected_operation);
                 }
             });
     }
