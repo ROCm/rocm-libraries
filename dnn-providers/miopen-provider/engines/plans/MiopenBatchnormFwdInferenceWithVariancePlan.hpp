@@ -4,7 +4,6 @@
 #pragma once
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
-
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 #include "MiopenActivationDescriptor.hpp"
