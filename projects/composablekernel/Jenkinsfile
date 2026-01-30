@@ -12,7 +12,7 @@ def show_node_info() {
     """
 }
 
-def composableKernelCheckout()
+def checkoutComposableKernel()
 {
     // checkout project
     checkout([
@@ -460,8 +460,8 @@ def get_docker_options(){
 }
 
 def build_client_examples(String arch){
-    def cmd = """ cd ../client_example && rm -rf build && mkdir build && cd build && \
-                cmake -DCMAKE_PREFIX_PATH="${env.WORKSPACE}/install;/opt/rocm" \
+    def cmd = """ echo "TEST" && ls -lh && cd ../client_example && rm -rf build && mkdir build && cd build && \
+                cmake -DCMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install;/opt/rocm" \
                 -DGPU_TARGETS="${arch}" \
                 -DCMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" \
                 -DCMAKE_HIP_COMPILER="${params.BUILD_COMPILER}" \
@@ -470,7 +470,7 @@ def build_client_examples(String arch){
 }
 
 def build_and_run_fmha(String arch){
-    def cmd = """ cmake -G Ninja -DCMAKE_PREFIX_PATH="${env.WORKSPACE}/install;/opt/rocm" \
+    def cmd = """ cmake -G Ninja -DCMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install;/opt/rocm" \
                 -DGPU_TARGETS="${arch}" \
                 -DCMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" \
                 -DCMAKE_HIP_COMPILER="${params.BUILD_COMPILER}" .. && \
@@ -626,6 +626,7 @@ def cmake_build(Map conf=[:]){
     dir("projects/composablekernel/build"){
         sh """
             echo "workspace dir:"
+            pwd
             ls -l
         """
         // Start sccache monitoring
@@ -743,7 +744,7 @@ def cmake_build(Map conf=[:]){
 
 def buildHipClangJob(Map conf=[:]){
         show_node_info()
-        composableKernelCheckout()
+        checkoutComposableKernel()
         def prefixpath = conf.get("prefixpath", "/opt/rocm")
         def dockerOpts = get_docker_options()
         def image
@@ -774,7 +775,7 @@ def buildHipClangJobAndReboot(Map conf=[:]){
 
 def Build_CK(Map conf=[:]){
         show_node_info()
-        checkout scm
+        checkoutComposableKernel()
         def prefixpath = conf.get("prefixpath", "/opt/rocm")
         def dockerOpts=get_docker_options()
         def image
@@ -808,8 +809,8 @@ def Build_CK(Map conf=[:]){
                     if ( params.RUN_INDUCTOR_TESTS && !params.BUILD_LEGACY_OS && arch == 1 ){
                             echo "Run inductor codegen tests"
                             sh """
-                                  python3 -m venv ${env.WORKSPACE}
-                                  . ${env.WORKSPACE}/bin/activate
+                                  python3 -m venv ${env.WORKSPACE}/projects/composablekernel
+                                  . ${env.WORKSPACE}/projects/composablekernel/bin/activate
                                   python3 -m pip install pytest build setuptools setuptools_scm
                                   python3 -m pip install .
                                   python3 -m pytest python/test/test_gen_instances.py
