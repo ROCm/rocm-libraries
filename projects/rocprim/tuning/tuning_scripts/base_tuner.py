@@ -232,7 +232,8 @@ class BaseTuner(ABC):
             TYPE_CONFIGS[key_type].size
             + (TYPE_CONFIGS[value_type].size if value_type else 0)
         )
-        return {"GB/s": lambda p: (total_bytes / (p["time"] * 1e6))}
+        # p["time"] is actually measured in bytes per second
+        return {"GB/s": lambda p: (p["time"] / 1e6)}
 
     def _run_default_config(
         self, tune_kernel_args: Dict, key_type: str, value_type: Optional[str] = None
