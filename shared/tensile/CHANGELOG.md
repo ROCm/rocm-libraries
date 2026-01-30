@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Enabled rocBLAS and Tensile for gfx103X
+- Enabled rocBLAS and Tensile for gfx1030
 
 ### Removed
 
