@@ -43,6 +43,7 @@ list(
     PREPEND
     HIPDNN_WARNING_COMPILE_OPTIONS
     -Werror # Treat all warnings as errors
+    -Wno-error=deprecated-declarations # Allow deprecated warnings without failing build
     -Wall # Enable most common warnings
     -Wextra # Enable additional warnings not covered by -Wall
     -Wpedantic # Enforce strict ISO C++ compliance
