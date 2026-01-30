@@ -78,6 +78,122 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 }
 
 template <typename GridwiseGemm,
+          typename ComputePtrOffsetOfStridedBatch,
+          bool HasMainKBlockLoop,
+          InMemoryDataOperationEnum CGlobalMemoryDataOperation,
+          index_t MinimumOccupancy = 1,
+          bool IsBScaled           = false,
+          TailNumber TailNum       = TailNumber::Full>
+__global__ void
+#if CK_USE_LAUNCH_BOUNDS
+__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
+#endif
+    kernel_batched_gemm_wmma_cshuffle_v3(
+        typename GridwiseGemm::Argument karg, // This works for now but it actually receives a
+                                              // DeviceBatchedGemm_Wmma_CShuffleV3::Argument
+                                              // argument through implicit conversion to base class!
+        const ComputePtrOffsetOfStridedBatch compute_ptr_offset_of_batch)
+{
+#if(defined(__gfx11__) || defined(__gfx12__))
+#if defined(__gfx11__)
+    // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
+    using c_data_type = remove_cvref_t<remove_pointer_t<decltype(karg.p_e_grid)>>;
+    if constexpr(!(CGlobalMemoryDataOperation == InMemoryDataOperationEnum::AtomicAdd &&
+                   (std::is_same_v<c_data_type, ck::half_t> ||
+                    std::is_same_v<c_data_type, ck::bhalf_t>)))
+    {
+#endif
+        // The normal approach to batching would be to increase the grid size by just stretching out
+        // the grid Z dimension (which is the outermost dimension), but this depends on lower level
+        // functions not directly using the Z dimension for other calculations. As it turns out, k
+        // batching does rely directly on blockIdx.Z through SplitKBatchOffset. Therefore, for now
+        // we will use the grid Y dimension for batching. This may be a bit fragile.
+        const index_t g_idx = amd_wave_read_first_lane(blockIdx.y);
+
+        const long_index_t a_batch_offset =
+            amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetAPtrOffset(g_idx));
+        const long_index_t b_batch_offset =
+            amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetBPtrOffset(g_idx));
+        const long_index_t c_batch_offset =
+            amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetCPtrOffset(g_idx));
+
+        using EpilogueType =
+            typename std::conditional<GridwiseGemm::IsBWaveTransferApplicable &&
+                                          GridwiseGemm::UseDirectStore,
+                                      typename GridwiseGemm::EpilogueDirectStore,
+                                      typename GridwiseGemm::EpilogueCShuffle>::type;
+
+        constexpr index_t LDS_size =
+            GridwiseGemm::template GetSharedMemoryNumberOfByte<EpilogueType>();
+
+        __shared__ char p_shared[LDS_size];
+
+        auto splitk_batch_offset = typename GridwiseGemm::SplitKBatchOffset(karg, blockIdx.z);
+
+        // shift A matrices pointer for splitk
+        typename GridwiseGemm::AsGridPointer p_as_grid_shift;
+        static_for<0, GridwiseGemm::NumATensor, 1>{}([&](auto i) {
+            using ADataType_ =
+                remove_cvref_t<tuple_element_t<i.value, typename GridwiseGemm::AsDataType_>>;
+            p_as_grid_shift(i) = static_cast<const ADataType_*>(karg.p_as_grid[i]) +
+                                 splitk_batch_offset.a_k_split_offset[i] + a_batch_offset;
+        });
+
+        // shift B matrices pointer for splitk
+        typename GridwiseGemm::BsGridPointer p_bs_grid_shift;
+        static_for<0, GridwiseGemm::NumBTensor, 1>{}([&](auto i) {
+            using BDataType_ =
+                remove_cvref_t<tuple_element_t<i.value, typename GridwiseGemm::BsDataType_>>;
+            p_bs_grid_shift(i) = static_cast<const BDataType_*>(karg.p_bs_grid[i]) +
+                                 splitk_batch_offset.b_k_split_offset[i] + b_batch_offset;
+        });
+
+        auto epilogue_args = EpilogueType{};
+
+        if constexpr(IsBScaled)
+        {
+            const long_index_t b_scale_batch_offset =
+                amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetScaleBPtrOffset(g_idx));
+
+            GridwiseGemm::template Run<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
+                p_as_grid_shift,
+                p_bs_grid_shift,
+                karg.p_ds_grid,
+                karg.p_e_grid + splitk_batch_offset.c_reduce_offset + c_batch_offset,
+                karg.p_a_scale_grid,
+                karg.p_b_scale_grid + b_scale_batch_offset +
+                    splitk_batch_offset.scale_b_k_split_offset,
+                p_shared,
+                karg,
+                karg.a_element_op,
+                karg.b_element_op,
+                karg.cde_element_op,
+                epilogue_args);
+        }
+        else
+        {
+            GridwiseGemm::template Run<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
+                p_as_grid_shift,
+                p_bs_grid_shift,
+                karg.p_ds_grid,
+                karg.p_e_grid + splitk_batch_offset.c_reduce_offset + c_batch_offset,
+                p_shared,
+                karg,
+                karg.a_element_op,
+                karg.b_element_op,
+                karg.cde_element_op,
+                epilogue_args);
+        }
+#if defined(__gfx11__)
+    }
+#endif
+#else
+    ignore = karg;
+    ignore = compute_ptr_offset_of_batch;
+#endif
+}
+
+template <typename GridwiseGemm,
           bool HasMainKBlockLoop,
           InMemoryDataOperationEnum EGlobalMemoryDataOperation,
           index_t MinimumOccupancy = 1,
@@ -246,23 +362,25 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
         WmmaSelector<ComputeTypeA, ComputeTypeB, AccDataType, MPerWmma, NPerWmma>::selected_wmma
             .wave_size;
 
-    // Limitations of the current implementation:
-    //  - no multiAB
-    //  - GemmSpecialization Default with transpose
-#ifdef __gfx12__
-    static constexpr bool IsAWaveTransferApplicable =
-        !ForceThreadTileTransfer && NumATensor == 1 && APackedSize == 1 &&
-        ((GemmSpec == tensor_operation::device::GemmSpecialization::Default &&
-          !is_same_v<ALayout, tensor_layout::gemm::RowMajor>) ||
-         is_same_v<ALayout, tensor_layout::gemm::RowMajor>) &&
-        BlkGemmPipelineVer == BlockGemmPipelineVersion::v1 && AK1Value == 8 && !IsBPreShuffled;
+    __host__ __device__ static constexpr bool AWaveTransferApplicable()
+    {
+        return !ForceThreadTileTransfer && APackedSize == 1 &&
+               ABlockTransferSrcScalarPerVector == 8 && ABlockTransferDstScalarPerVector_AK1 == 8 &&
+               BlkGemmPipelineVer == BlockGemmPipelineVersion::v1 && AK1Value == 8 &&
+               !IsBPreShuffled;
+    }
 
-    static constexpr bool IsBWaveTransferApplicable =
-        !ForceThreadTileTransfer && NumBTensor == 1 && BPackedSize == 1 &&
-        ((GemmSpec == tensor_operation::device::GemmSpecialization::Default &&
-          !is_same_v<BLayout, tensor_layout::gemm::ColumnMajor>) ||
-         is_same_v<BLayout, tensor_layout::gemm::ColumnMajor>) &&
-        BlkGemmPipelineVer == BlockGemmPipelineVersion::v1 && BK1Value == 8;
+    __host__ __device__ static constexpr bool BWaveTransferApplicable()
+    {
+        return !ForceThreadTileTransfer && BPackedSize == 1 &&
+               BBlockTransferSrcScalarPerVector == 8 && BBlockTransferDstScalarPerVector_BK1 == 8 &&
+               BlkGemmPipelineVer == BlockGemmPipelineVersion::v1 && BK1Value == 8;
+    }
+
+#ifdef __gfx12__
+    static constexpr bool IsAWaveTransferApplicable = AWaveTransferApplicable();
+
+    static constexpr bool IsBWaveTransferApplicable = BWaveTransferApplicable();
 
     static constexpr bool IsWaveTileInterleavedFitting =
         (NPerBlock / NPerWmma / NRepeat) * (KPerBlock / KPack) >= (BlockSize / WaveSize);
@@ -866,6 +984,55 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
         return de_grid_desc_mblock_mperblock_nblock_nperblock;
     }
 
+    // Conditions for Wave Transfer with transpose:
+    // - 16 bit type: K % 8 == 0 (4 subtiles of 8x8)
+    // - 8 bit type: K % 8 == 0 and M % 16 == 0 (2 subtiles of 8x16)
+    __host__ static constexpr bool CheckValidityAWaveTransfer(const index_t& M, const index_t& K)
+    {
+        if constexpr(AWaveTransferApplicable() &&
+                     !(is_same<tensor_layout::gemm::RowMajor, ALayout>::value))
+        {
+            if(!(K % ABlockTransferDstScalarPerVector_AK1 == 0))
+            {
+                return false;
+            }
+            bool pass = true;
+            static_for<0, NumATensor, 1>{}([&](auto i) {
+                using ADataType_ = remove_cvref_t<tuple_element_t<i.value, AsDataType>>;
+                pass &= !(sizeof(ADataType_) == 1 &&
+                          !(M % (2 * ABlockTransferSrcScalarPerVector) == 0));
+            });
+            return pass;
+        }
+        else
+        {
+            return true;
+        }
+    }
+
+    __host__ static constexpr bool CheckValidityBWaveTransfer(const index_t& N, const index_t& K)
+    {
+        if constexpr(BWaveTransferApplicable() &&
+                     !(is_same<tensor_layout::gemm::ColumnMajor, BLayout>::value))
+        {
+            if(!(K % BBlockTransferDstScalarPerVector_BK1 == 0))
+            {
+                return false;
+            }
+            bool pass = true;
+            static_for<0, NumBTensor, 1>{}([&](auto i) {
+                using BDataType_ = remove_cvref_t<tuple_element_t<i.value, BsDataType>>;
+                pass &= !(sizeof(BDataType_) == 1 &&
+                          !(N % (2 * BBlockTransferSrcScalarPerVector) == 0));
+            });
+            return pass;
+        }
+        else
+        {
+            return true;
+        }
+    }
+
     // block_id to matrix tile idx (m0, n0) mapping are controlled by {M01, N01}
     template <typename Argument>
     __host__ static constexpr bool CheckValidity(const Argument& karg,
@@ -1150,19 +1317,6 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
         }
     }
 
-    template <index_t numElements, typename Type>
-    __device__ __forceinline__ static auto get_first_element_workaround(Type& array)
-    {
-        if constexpr(numElements > 1)
-        {
-            return array;
-        }
-        else
-        {
-            return array[I0];
-        }
-    }
-
     // Note: arguments k_batch and k_id should be set if splitk is used
     // with implicit gemm (no pointer shift but shift using tensor descriptors)
     template <typename AGridDesc_AK0_M_K1,
@@ -1266,16 +1420,16 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
             ATransfer::GetKDimension(as_grid_desc_ak0_m_ak1[I0]) / (KPerBlock * k_batch));
 
         blockwise_gemm_pipeline.template Run<HasMainKBlockLoop, TailNum>(
-            get_first_element_workaround<NumATensor>(as_grid_desc_ak0_m_ak1),
+            ATransfer::template get_first_element_workaround<NumATensor>(as_grid_desc_ak0_m_ak1),
             a_block_desc_ak0_m_ak1,
             a_blockwise_copy,
-            get_first_element_workaround<NumATensor>(as_grid_buf),
+            ATransfer::template get_first_element_workaround<NumATensor>(as_grid_buf),
             a_block_buf,
             a_block_slice_copy_step,
-            get_first_element_workaround<NumBTensor>(bs_grid_desc_bk0_n_bk1),
+            BTransfer::template get_first_element_workaround<NumBTensor>(bs_grid_desc_bk0_n_bk1),
             b_block_desc_bk0_n_bk1,
             b_blockwise_copy,
-            get_first_element_workaround<NumBTensor>(bs_grid_buf),
+            BTransfer::template get_first_element_workaround<NumBTensor>(bs_grid_buf),
             b_block_buf,
             b_block_slice_copy_step,
             c_thread_buf,

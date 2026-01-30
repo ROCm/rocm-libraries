@@ -383,7 +383,7 @@ inline void PadBufferSize(size_t& sz, int datatype_sz)
 {
     printf("Usage: ./driver *base_arg* *other_args*\n");
     printf("Supported Base Arguments: conv[fp16|int8|bfp16], CBAInfer[fp16|bfp16], "
-           "CAInfer[fp16|bfp16], pool[fp16], lrn[fp16], activ[fp16], softmax[bfp16|fp16], "
+           "CAInfer[fp16|bfp16], pool[fp16|bfp16], lrn[fp16], activ[fp16], softmax[bfp16|fp16], "
            "bnorm[fp16|bfp16], rnn[fp16], rnn_seq[fp16], gemm[fp16], ctc, dropout[fp16], tensorop, "
            "reduce[fp16|fp64], layernorm[bfp16|fp16], groupnorm[bfp16|fp16], cat[bfp16|fp16], "
            "addlayernorm[bfp16|fp16], t5layernorm[bfp16|fp16], adam[fp16], ampadam, "
@@ -407,6 +407,7 @@ inline std::string ParseBaseArg(int argc, char* argv[])
     // List of valid base arguments
     static const std::vector<std::string> valid_args = {"conv",
                                                         "convfp16",
+                                                        "convfp32",
                                                         "convint8",
                                                         "convbfp16",
                                                         "CBAInfer",
@@ -417,6 +418,7 @@ inline std::string ParseBaseArg(int argc, char* argv[])
                                                         "CAInferbfp16",
                                                         "pool",
                                                         "poolfp16",
+                                                        "poolbfp16",
                                                         "lrn",
                                                         "lrnfp16",
                                                         "activ",
@@ -543,6 +545,8 @@ public:
     virtual int VerifyForward()                          = 0;
     virtual int RunBackwardGPU()                         = 0;
     virtual int VerifyBackward()                         = 0;
+
+    std::string name;
 
 protected:
     template <typename Tgpu>

@@ -96,6 +96,11 @@ TEST_CASE("ControlFlowRWTracer - Assign Read and Write", "[kernel-graph][utils]"
     CHECK(tileCRecords[0].control == assign);
     CHECK(tileCRecords[0].coordinate == tileC);
     CHECK(tileCRecords[0].rw == RW::WRITE);
+
+    auto assignRecords = tracer.opReadWrite(assign);
+    CHECK(assignRecords
+          == std::vector<KernelGraph::ControlFlowRWTracer::ReadWriteRecord>(
+              {{assign, tileA, RW::READ}, {assign, tileB, RW::READ}, {assign, tileC, RW::WRITE}}));
 }
 
 TEST_CASE("ControlFlowRWTracer - LoadTiled and StoreTiled", "[kernel-graph][utils]")

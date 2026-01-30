@@ -723,8 +723,14 @@ namespace rocRoller
                 for(auto const& c : m_graph->mapper.getConnections(tag))
                 {
                     auto srcTag = c.coordinate;
-                    auto reg    = m_context->registerTagManager()->getRegister(srcTag);
-                    srcs.push_back(std::move(reg));
+                    // Barriers that are connected to coordinates without allocated
+                    // register values are legal but do not require waits as they
+                    // are used to sync threads across loop iterations.
+                    if(m_context->registerTagManager()->hasRegister(srcTag))
+                    {
+                        auto reg = m_context->registerTagManager()->getRegister(srcTag);
+                        srcs.push_back(std::move(reg));
+                    }
                 }
 
                 co_yield m_context->mem()->barrier(srcs);
