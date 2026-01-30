@@ -108,6 +108,48 @@
         du,                                                           \
         B);
 
+#define LAUNCH_GTSV_NOPIVOT_5x5_THOMAS(BLOCKSIZE)            \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                     \
+        (rocsparse::gtsv_nopivot_5x5_kernel<BLOCKSIZE>), \
+        dim3((n - 1) / BLOCKSIZE + 1),                                            \
+        dim3(BLOCKSIZE),                                             \
+        0,                                                            \
+        handle->stream,                                               \
+        n,                                                            \
+        ldb,                                                          \
+        dl,                                                           \
+        d,                                                            \
+        du,                                                           \
+        B);
+
+#define LAUNCH_GTSV_NOPIVOT_6x6_THOMAS(BLOCKSIZE)            \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                     \
+        (rocsparse::gtsv_nopivot_6x6_kernel<BLOCKSIZE>), \
+        dim3((n - 1) / BLOCKSIZE + 1),                                            \
+        dim3(BLOCKSIZE),                                             \
+        0,                                                            \
+        handle->stream,                                               \
+        n,                                                            \
+        ldb,                                                          \
+        dl,                                                           \
+        d,                                                            \
+        du,                                                           \
+        B);
+
+#define LAUNCH_GTSV_NOPIVOT_7x7_THOMAS(BLOCKSIZE)            \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                     \
+        (rocsparse::gtsv_nopivot_7x7_kernel<BLOCKSIZE>), \
+        dim3((n - 1) / BLOCKSIZE + 1),                                            \
+        dim3(BLOCKSIZE),                                             \
+        0,                                                            \
+        handle->stream,                                               \
+        n,                                                            \
+        ldb,                                                          \
+        dl,                                                           \
+        d,                                                            \
+        du,                                                           \
+        B);
+
 #define LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED_SMALL(BLOCKSIZE, M)            \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                     \
         (rocsparse::gtsv_nopivot_pcr_pow2_shared_small_kernel<BLOCKSIZE, M>), \
@@ -252,19 +294,33 @@ namespace rocsparse
 
         rocsparse_host_assert(m <= 512, "This function is designed for m <= 512.");
 
-        if(m == 2)
+        if(m <= 7)
         {
-            LAUNCH_GTSV_NOPIVOT_2x2_CRAMERS_RULE(256);
-            return rocsparse_status_success;
-        }
-        else if(m == 3)
-        {
-            LAUNCH_GTSV_NOPIVOT_3x3_THOMAS(256);
-            return rocsparse_status_success;
-        }
-        else if(m == 4)
-        {
-            LAUNCH_GTSV_NOPIVOT_4x4_THOMAS(256);
+            if(m == 2)
+            {
+                LAUNCH_GTSV_NOPIVOT_2x2_CRAMERS_RULE(256);
+            }
+            else if(m == 3)
+            {
+                LAUNCH_GTSV_NOPIVOT_3x3_THOMAS(256);
+            }
+            else if(m == 4)
+            {
+                LAUNCH_GTSV_NOPIVOT_4x4_THOMAS(256);
+            }
+            else if(m == 5)
+            {
+                LAUNCH_GTSV_NOPIVOT_5x5_THOMAS(256);
+            }
+            else if(m == 6)
+            {
+                LAUNCH_GTSV_NOPIVOT_6x6_THOMAS(256);
+            }
+            else if(m == 7)
+            {
+                LAUNCH_GTSV_NOPIVOT_7x7_THOMAS(256);
+            }
+
             return rocsparse_status_success;
         }
 
@@ -273,8 +329,8 @@ namespace rocsparse
         {
             if(m == 8)
             {
-                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(8);
-                // LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED_SMALL(256, 8);
+                //LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(8);
+                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED_SMALL(256, 8);
             }
             else if(m == 16)
             {
@@ -306,11 +362,7 @@ namespace rocsparse
         }
         else
         {
-            if(m <= 8)
-            {
-                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(8);
-            }
-            else if(m <= 16)
+            if(m <= 16)
             {
                 LAUNCH_GTSV_NOPIVOT_PCR_SHARED(16);
             }
