@@ -132,11 +132,11 @@ inline std::optional<int> selectSwizzleTileMN(const WorkGroupTileSize&      work
                                               int                           workgroupSizeY,
                                               const std::vector<size_t>&    preSwizzleTileSize)
 {
-    // For pre-swizzled data, return tileMN from preSwizzleTileSize
-    if(preSwizzleTileSize.size() == 3)
-    {
-        return static_cast<int>(preSwizzleTileSize[0]);
-    }
+    // // For pre-swizzled data, return tileMN from preSwizzleTileSize
+    // if(preSwizzleTileSize.size() == 3)
+    // {
+    //     return static_cast<int>(preSwizzleTileSize[0]);
+    // }
 
     // Validate inputs
     if(mi.m <= 0 || mi.n <= 0 || workgroupSizeX <= 0 || workgroupSizeY <= 0)
@@ -159,9 +159,17 @@ inline std::optional<int> selectSwizzleTileMN(const WorkGroupTileSize&      work
     int numNTilesPerWave = workgroupTile.n / mi.n / numWavesY;
 
     // Possible swizzle tile MN values
-    // If workgroupTile.k < 256, swizzleTileMN must be 64
-    std::vector<int> possibleSwizzleTileMN
-        = (workgroupTile.k < 256) ? std::vector<int>{64} : std::vector<int>{32, 64};
+    std::vector<int> possibleSwizzleTileMN;
+    if(preSwizzleTileSize.size() == 3)
+    {
+        // For pre-swizzled data, use tileMN from preSwizzleTileSize
+        possibleSwizzleTileMN = {static_cast<int>(preSwizzleTileSize[0])};
+    }
+    else
+    {
+        // If workgroupTile.k < 256, swizzleTileMN must be 64
+        possibleSwizzleTileMN = (workgroupTile.k < 256) ? std::vector<int>{64} : std::vector<int>{32, 64};
+    }
     std::vector<int> validSwizzleTileMN;
 
     for(int swizzleTileMN : possibleSwizzleTileMN)
@@ -237,6 +245,10 @@ inline std::optional<int> selectSwizzleTileK(const WorkGroupTileSize&      workg
 
     // Possible swizzle tile K values
     std::vector<int> possibleSwizzleTileK = {4, 8, 16};
+    if (swizzleTileMN == 32)
+    {
+        possibleSwizzleTileK = {8};
+    }
     std::vector<int> validSwizzleTileK;
 
     for(int swizzleTileK : possibleSwizzleTileK)
