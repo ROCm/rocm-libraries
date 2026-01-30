@@ -230,8 +230,7 @@ TEST(TestMiopenEngine, GetDetailsOnlyUsesFirstPlanBuilderCustomKnobs)
     customKnobs2.push_back(knob2);
 
     // This should NOT be called because we break after first non-empty custom knobs
-    EXPECT_CALL(*mockPlanBuilder2, getCustomKnobs(::testing::_, ::testing::_))
-        .Times(0);
+    EXPECT_CALL(*mockPlanBuilder2, getCustomKnobs(::testing::_, ::testing::_)).Times(0);
 
     MiopenEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
@@ -269,9 +268,13 @@ TEST(TestMiopenEngine, InitializeExecutionContextInvokesFirstApplicablePlanBuild
     // Only the first plan builder is applicable
     EXPECT_CALL(*mockPlanBuilder1, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(true));
-    EXPECT_CALL(*mockPlanBuilder1, buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_)).Times(1);
+    EXPECT_CALL(*mockPlanBuilder1,
+                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(1);
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_)).Times(0);
-    EXPECT_CALL(*mockPlanBuilder2, buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(*mockPlanBuilder2,
+                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
 
     MiopenEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
@@ -488,10 +491,14 @@ TEST(TestMiopenEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
     // First plan builder not applicable, second is
     EXPECT_CALL(*mockPlanBuilder1, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(false));
-    EXPECT_CALL(*mockPlanBuilder1, buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(*mockPlanBuilder1,
+                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(true));
-    EXPECT_CALL(*mockPlanBuilder2, buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_)).Times(1);
+    EXPECT_CALL(*mockPlanBuilder2,
+                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(1);
 
     MiopenEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
@@ -513,10 +520,14 @@ TEST(TestMiopenEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoApplica
 
     EXPECT_CALL(*mockPlanBuilder1, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(false));
-    EXPECT_CALL(*mockPlanBuilder1, buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(*mockPlanBuilder1,
+                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(false));
-    EXPECT_CALL(*mockPlanBuilder2, buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(*mockPlanBuilder2,
+                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
 
     MiopenEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
