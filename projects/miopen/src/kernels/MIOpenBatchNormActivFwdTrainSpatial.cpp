@@ -100,10 +100,10 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccum
         __syncthreads();
 
         constexpr auto lcl_data_size =
-            mio_bn_config::use_amdgnc ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
+            mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
         __shared__ FpAccumType lcl_data_x[lcl_data_size];
         __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgnc)
+        if constexpr(mio_bn_config::use_amdgcn)
         {
             miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
                 reinterpret_cast<FpAccumType&>(mean),
@@ -243,8 +243,8 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
                 hwidx = k - (nidx * mio_bn_config::hw);
                 index = nidx * mio_bn_config::chw + chwid + hwidx;
                 read4 = *(reinterpret_cast<const fp_type4*>(in + index));
-                miopen::batchnorm::_accumulate4(mean, read4);
-                miopen::batchnorm::_accumulate_mad4(variance, read4, read4, variance);
+                _accumulate(mean, read4);
+                _accumulate_mad(variance, read4, read4);
             }
 
             if constexpr(rem4 > 0u)
@@ -256,8 +256,8 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
                 if(index + 3 < mio_bn_config::nchw)
                 {
                     read4 = *(reinterpret_cast<const fp_type4*>(in + index));
-                    miopen::batchnorm::_accumulate4(mean, read4);
-                    miopen::batchnorm::_accumulate_mad4(variance, read4, read4, variance);
+                    _accumulate(mean, read4);
+                    _accumulate_mad(variance, read4, read4);
                 }
             }
         }
@@ -294,10 +294,10 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
 
         // REDUCE MEAN AND VARIANCE -----------------------
         constexpr auto lcl_data_size =
-            mio_bn_config::use_amdgnc ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
+            mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
         __shared__ FpAccumType lcl_data_x[lcl_data_size];
         __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgnc)
+        if constexpr(mio_bn_config::use_amdgcn)
         {
             miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
                 reinterpret_cast<FpAccumType&>(mean),
@@ -460,7 +460,7 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<3, FpType, FpPrecType, FpAccum
         {
             static_unroll_count<unsigned int, 0, mio_bn_config::n, 1, 2>{[&](unsigned int n) {
                 unsigned int index = n * mio_bn_config::chw + cidx + lid;
-                auto xin           = miopen::batchnorm::cast<FpPrecType>(in[index]);
+                auto xin           = miopen::cast<FpPrecType>(in[index]);
                 if constexpr(NormPerN)
                 {
                     minibatch[n] = xin;
@@ -474,10 +474,10 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<3, FpType, FpPrecType, FpAccum
 
         // REDUCE MEAN AND VARIANCE -----------------------
         constexpr auto lcl_data_size =
-            mio_bn_config::use_amdgnc ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
+            mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
         __shared__ FpAccumType lcl_data_x[lcl_data_size];
         __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgnc)
+        if constexpr(mio_bn_config::use_amdgcn)
         {
             miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
                 reinterpret_cast<FpAccumType&>(mean),
@@ -526,10 +526,10 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<3, FpType, FpPrecType, FpAccum
                 bn_out = fma(pvscale, inhat, pvbias);
                 ActivationFunction<FpPrecType, 1>(*reinterpret_cast<FpPrecType(*)[1]>(&act_out),
                                                   *reinterpret_cast<FpPrecType(*)[1]>(&bn_out),
-                                                  miopen::batchnorm::cast<FpPrecType>(gamma),
-                                                  miopen::batchnorm::cast<FpPrecType>(beta),
-                                                  miopen::batchnorm::cast<FpPrecType>(alpha));
-                out[index] = miopen::batchnorm::cast<FpPrecType>(act_out);
+                                                  miopen::cast<FpPrecType>(gamma),
+                                                  miopen::cast<FpPrecType>(beta),
+                                                  miopen::cast<FpPrecType>(alpha));
+                out[index] = miopen::cast<FpPrecType>(act_out);
             }
         }
     }
@@ -592,9 +592,9 @@ extern "C" __global__ void __launch_bounds__(
     {
 #if(MIO_RUNNING_RESULT == 1)
         using StashUpdater = miopen::batchnorm::StashUpdater<fp_prec_c_type>;
-        StashUpdater updater(miopen::batchnorm::cast<fp_prec_c_type>(mean),
-                             miopen::batchnorm::cast<fp_prec_c_type>(variance),
-                             miopen::batchnorm::cast<fp_prec_c_type>(expAvgFactor));
+        StashUpdater updater(miopen::cast<fp_prec_c_type>(mean),
+                             miopen::cast<fp_prec_c_type>(variance),
+                             miopen::cast<fp_prec_c_type>(expAvgFactor));
 
         miopen::batchnorm::running_stash<fp_prec_c_type, fp_prec_c_type, StashUpdater>(
             runningMean, runningVariance, runningMean, runningVariance, updater, grpid);

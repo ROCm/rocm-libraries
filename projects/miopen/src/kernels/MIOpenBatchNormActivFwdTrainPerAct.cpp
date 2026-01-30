@@ -59,7 +59,7 @@ extern "C" __global__ void __launch_bounds__(mio_bn_config::launch_dim.grp0)
     for(unsigned int n = 0; n < mio_bn_config::n; ++n)
     {
         unsigned int index = mio_bn_config::chw * n + xgid;
-        fp_prec_type xin   = miopen::batchnorm::cast<fp_prec_type>(in[index]);
+        fp_prec_type xin   = miopen::cast<fp_prec_type>(in[index]);
         mean += xin;
         variance = fma(xin, xin, variance);
     }
@@ -88,14 +88,13 @@ extern "C" __global__ void __launch_bounds__(mio_bn_config::launch_dim.grp0)
     {
         // per (x-dims) channel load a block of data unsigned into LDS
         unsigned int index = mio_bn_config::chw * n + xgid;
-        fp_prec_type inhat =
-            (miopen::batchnorm::cast<fp_prec_type>(in[index]) - mean) * invVariance;
-        bn_out = fma(pvt_scale, inhat, pvt_bias);
+        fp_prec_type inhat = (miopen::cast<fp_prec_type>(in[index]) - mean) * invVariance;
+        bn_out             = fma(pvt_scale, inhat, pvt_bias);
         ActivationFunction<fp_prec_type, 1>(*reinterpret_cast<fp_prec_type(*)[1]>(&act_out),
                                             *reinterpret_cast<fp_prec_type(*)[1]>(&bn_out),
-                                            miopen::batchnorm::cast<fp_prec_type>(gamma),
-                                            miopen::batchnorm::cast<fp_prec_type>(beta),
-                                            miopen::batchnorm::cast<fp_prec_type>(alpha));
-        out[index] = miopen::batchnorm::cast<fp_type>(act_out);
+                                            miopen::cast<fp_prec_type>(gamma),
+                                            miopen::cast<fp_prec_type>(beta),
+                                            miopen::cast<fp_prec_type>(alpha));
+        out[index] = miopen::cast<fp_type>(act_out);
     }
 }
