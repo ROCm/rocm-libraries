@@ -39,11 +39,22 @@ extern "C" float {{algo_type}}_{{algo_name}}_wrapper(
     using benchmark_type = {{algo_type}}_{{algo_name}}_benchmark<key_type, value_type, config>;
     {% endblock %}
 
-    {% block benchmark_exec %}
-    char* args[] = { "ignore-first-arg", /* You can pass arguments to primbench CLI here! */ };
-    auto exec = primbench::executor(1, args, bytes_size, primbench::flags::none, 0);
-    exec.queue<benchmark_type>();
-    exec.run();
+    {% block primbench_settings %}
+    auto settings = primbench::settings();
+    settings.json_out = "/dev/null"
+    settings.bytes = bytes_size;
+    {% endblock %}
+
+    {% block primbench_args %}
+    char* args[] = { "benchmark-executable" /* primbench requires an executable name for exposing --help */ };
+    {% endblock %}
+    
+    {% block primbench_executor %}
+    auto executor = primbench::executor(1, args, settings);
+    {% endblock %}
+
+    executor.queue<benchmark_type>();
+    executor.run();
     return exec.get_last_bytes_per_second();
     {% endblock %}
 }
