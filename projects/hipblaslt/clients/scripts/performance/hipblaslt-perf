@@ -21,8 +21,24 @@
 """
 
 import sys
-import pathlib
 import os
+
+# Add the module path for hipblaslt performance modules
+# This script is installed in bin/, modules are in share/hipblaslt/performance/
+script_dir = os.path.dirname(os.path.realpath(__file__))
+# Go up one level from bin to the installation prefix
+install_prefix = os.path.dirname(script_dir)
+# Construct the path to the performance modules
+module_dir = os.path.join(install_prefix, 'share', 'hipblaslt', 'performance')
+# Add to Python path if it exists
+if os.path.exists(module_dir):
+    sys.path.insert(0, module_dir)
+else:
+    # Fallback: try to find modules in the same directory as the script
+    # This maintains backward compatibility for development environments
+    sys.path.insert(0, script_dir)
+
+import pathlib
 import argparse
 import logging
 import bench
