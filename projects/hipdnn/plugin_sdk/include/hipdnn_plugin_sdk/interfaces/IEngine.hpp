@@ -29,12 +29,8 @@ namespace hipdnn_plugin_sdk
  * - Calculating workspace requirements
  * - Creating executable plans via their plan builders
  *
- * @note Engines typically have the same lifecycle as the EngineManager that contains
- *       them. Implementations should be stateless or thread-safe.
- *
- * @note You probably don't want to have a massive number of engines in your plugin.
- *       The plugin is responsible for choosing its solution given a graph, and without
- *       sampling. The plan should be finalized and ready to go by execution time.
+ * @note Engines should be stateless. Any state required for execution should be stored on
+ *  an execution context.
  */
 class IEngine
 {
@@ -57,9 +53,6 @@ public:
      * @param opGraph The operation graph to check.
      * @return true if this engine can handle the graph, false otherwise.
      *
-     * @note Only a single plan builder should be applicable per engine for a given graph.
-     *       If multiple plan builders have overlapping graph support, it's up to the
-     *       plugin implementor to decide how to handle this selection.
      */
     virtual bool isApplicable(HipdnnEnginePluginHandle& handle, const IGraph& opGraph) const = 0;
 
