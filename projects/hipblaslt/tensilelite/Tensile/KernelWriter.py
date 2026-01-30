@@ -5115,9 +5115,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.defineSgpr("NumWorkGroups0", 1)
     self.defineSgpr("NumWorkGroups1", 1)
 
-    if kernel["BufferStore"] and (kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel'):
-      self.defineSgpr("WSDstart", 2, 2)
-
     # Calculate numSgpr preload
     self.states.preloadGuard = []
     self.states.numSgprPreload = 0
