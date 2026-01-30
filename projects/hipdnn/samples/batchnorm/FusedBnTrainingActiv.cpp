@@ -81,8 +81,6 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto [y, savedMean, savedInvVariance, nextRunningMean, nextRunningVariance]
         = graph->batchnorm(x, scale, bias, bnAttributes);
 
-    y->set_data_type(inputType);
-
     // Step 2: Pointwise ReLU Activation
     auto pwAttributes = graph::PointwiseAttributes();
     pwAttributes.set_name("activation_node");
