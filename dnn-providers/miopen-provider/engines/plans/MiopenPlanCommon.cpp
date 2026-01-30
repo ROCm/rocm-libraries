@@ -89,10 +89,14 @@ auto find20SolutionByWorkspaceSize(
               ? std::numeric_limits<size_t>::max()
               : 0;
 
+    HIPDNN_LOG_INFO("Finding solution by workspace size: Found {} solutions", numSolutions);
+
     for(auto& scopedSolution : scopedSolutions)
     {
         size_t wsSize;
         THROW_ON_MIOPEN_FAILURE(miopenGetSolutionWorkspaceSize(scopedSolution.get(), &wsSize));
+
+        HIPDNN_LOG_INFO("Solution: workspace_size={}", wsSize);
 
         if((debugMode == HipdnnEnginePluginExecutionContext::DebugMode::FORCE_MIN_WORKSPACE
             && wsSize <= selectedWorkspaceSize)
@@ -103,6 +107,8 @@ auto find20SolutionByWorkspaceSize(
             selectedWorkspaceSize = wsSize;
         }
     }
+
+    HIPDNN_LOG_INFO("Selected solution: workspace_size={}", selectedWorkspaceSize);
 
     return std::move(*selectedSolution);
 }
