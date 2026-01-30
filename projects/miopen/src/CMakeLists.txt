@@ -931,7 +931,6 @@ if(MIOPEN_USE_COMPOSABLEKERNEL)
     endif()
     if(GPU_TARGETS MATCHES "gfx950")
         target_compile_definitions(MIOpen PRIVATE CK_USE_GFX95)
-        message(STATUS "DEBUG: CK_USE_GFX95 is defined")
     endif()
 endif()
 
