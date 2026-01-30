@@ -1483,7 +1483,7 @@ def fp4_mt32x32x256_d2lds_mi16x16x128_st32x8_pf2x1():
         scheduler="Priority",
         schedulerCost="LinearWeightedSimple",
         matchMemoryAccess=True,
-        tailLoops=False,
+        tailLoops=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
