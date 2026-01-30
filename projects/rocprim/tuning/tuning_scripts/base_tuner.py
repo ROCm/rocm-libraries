@@ -293,7 +293,6 @@ class BaseTuner(ABC):
         tune_params: OrderedDict,
         key_type: str,
         value_type: Optional[str] = None,
-        output_file: bool = False,
     ) -> str:
         """Generate wrapper code using Jinja2 template inheritance."""
         template_dir = pathlib.Path("templates")
@@ -318,14 +317,6 @@ class BaseTuner(ABC):
         }
 
         content = template.render(**context)
-
-        if output_file:
-            base_name = f"device_{self.algo_name}_wrapper"
-            file_name = (
-                f"{base_name}_{value_type}.hpp" if value_type else f"{base_name}.hpp"
-            )
-            with open(file_name, "w") as f:
-                f.write(content)
 
         return content
 
