@@ -9,7 +9,8 @@
 #include "EngineManager.hpp"
 #include "engines/MiopenEngine.hpp"
 
-using namespace hipdnn_plugin_sdk;
+using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using hipdnn_plugin_sdk::HipdnnPluginException;
 
 namespace miopen_plugin
 {

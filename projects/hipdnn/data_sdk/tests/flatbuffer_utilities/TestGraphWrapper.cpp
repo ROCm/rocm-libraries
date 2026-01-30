@@ -9,7 +9,7 @@
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
-using namespace hipdnn_plugin_sdk;
+using namespace hipdnn_data_sdk::flatbuffer_utilities;
 using namespace hipdnn_data_sdk::data_objects;
 
 TEST(TestGraphWrapper, NullBufferIsInvalid)

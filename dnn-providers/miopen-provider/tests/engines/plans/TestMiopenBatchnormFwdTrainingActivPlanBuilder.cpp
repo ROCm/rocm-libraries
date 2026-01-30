@@ -15,7 +15,7 @@
 
 using namespace miopen_plugin;
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_plugin_sdk;
+using namespace hipdnn_data_sdk::flatbuffer_utilities;
 
 class TestMiopenBatchnormFwdTrainingActivPlanBuilder : public ::testing::Test
 {
