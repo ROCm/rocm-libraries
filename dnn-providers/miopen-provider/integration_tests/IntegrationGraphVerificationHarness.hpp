@@ -20,7 +20,7 @@
 
 #include <functional>
 
-namespace miopen_legacy_plugin::test_utilities
+namespace miopen_plugin::test_utilities
 {
 
 // NOLINTBEGIN (portability-template-virtual-member-function)
@@ -28,6 +28,9 @@ template <typename DataType, typename TestCaseType>
 class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<TestCaseType>
 {
 protected:
+    static constexpr float DEFAULT_MIN = -1.0f;
+    static constexpr float DEFAULT_MAX = 1.0f;
+
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
@@ -63,6 +66,7 @@ protected:
         }
     }
 
+<<<<<<< HEAD
 protected:
     /// Execute graph with knob settings (for smoke tests without CPU validation)
     void executeGraphWithKnobs(hipdnn_frontend::graph::Graph& graph,
@@ -118,6 +122,12 @@ protected:
 
         ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
     }
+=======
+    virtual void runGraphTest(DataType tolerance,
+                              const hipdnn_data_sdk::utilities::TensorLayout& layout
+                              = hipdnn_data_sdk::utilities::TensorLayout::NCHW)
+        = 0;
+>>>>>>> db038633764d77aeee1b09c5695819ff11cef6fb
 
     void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
     {
@@ -228,7 +238,7 @@ protected:
     {
         for(auto& tensorPair : bundle.tensors)
         {
-            bundle.randomizeTensor(tensorPair.first, -1.0f, 1.0f, seed);
+            bundle.randomizeTensor(tensorPair.first, DEFAULT_MIN, DEFAULT_MAX, seed);
         }
     }
 

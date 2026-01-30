@@ -35,7 +35,7 @@ The current implementation has several critical limitations:
 ### Current Implementation Issues
 
 ```cpp
-// MiopenLegacyPlugin.cpp (line 120)
+// MiopenPlugin.cpp (line 120)
 auto allEngineIds = std::vector<int64_t>({1});  // Hardcoded!
 
 // MiopenContainer.cpp (line 21)
