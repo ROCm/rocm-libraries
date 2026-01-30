@@ -289,7 +289,8 @@ __forceinline__ __device__ void ActivationFunction_Clipped_ReLU(T (&__restrict__
 {
     for(uint i = 0; i < N; ++i)
     {
-        res[i] = miopen::fmin(static_cast<T>(alpha), miopen::fmax(static_cast<T>(data[i]), 0));
+        res[i] = miopen::fmin(static_cast<T>(alpha),
+                              miopen::fmax(static_cast<T>(data[i]), static_cast<T>(0)));
     }
 }
 

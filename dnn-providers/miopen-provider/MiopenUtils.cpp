@@ -3,7 +3,7 @@
 
 #include "MiopenUtils.hpp"
 
-namespace miopen_legacy_plugin::miopen_utils
+namespace miopen_plugin::miopen_utils
 {
 
 hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
