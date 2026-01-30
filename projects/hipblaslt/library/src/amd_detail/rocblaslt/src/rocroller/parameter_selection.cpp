@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -96,8 +96,6 @@ std::pair<int, int> pickWorkgroupSize(std::shared_ptr<SolutionParameters> gemm)
         y = requiredY;
     }
 
-    // std::cout << "workgroupSize: " << x * gemm->wavefrontSize << " " << y << std::endl;
-
     return {x * gemm->wavefrontSize, y};
 }
 
@@ -136,8 +134,8 @@ std::shared_ptr<SolutionParameters>
     if(gemm->prefetchInFlight <= 1)
         gemm->prefetch = false;
 
-    // Check if the workgroup tile is 256 at K dimension
-    bool is256K = solutionIndexParameters.workgroupTile.k == 256;
+    // Check if the workgroup tile K dimension is 256
+    bool isWorkgroupTileK256 = solutionIndexParameters.workgroupTile.k == 256;
 
     // Swizzle Scale only support in certain situations
     // Swizzle Scale also runs out of registers with FP8
@@ -149,7 +147,7 @@ std::shared_ptr<SolutionParameters>
         gemm->loadPathAScale = SolutionParams::LoadPath::BufferToVGPR;
         gemm->loadPathBScale = SolutionParams::LoadPath::BufferToVGPR;
     }
-    else if(is256K)
+    else if(isWorkgroupTileK256)
     {
         // For 256x256x256 tile, use BufferToLDS for scale loading to reduce register pressure
         gemm->swizzleScale   = true;
