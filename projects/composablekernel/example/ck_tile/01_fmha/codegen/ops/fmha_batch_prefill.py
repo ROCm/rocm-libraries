@@ -36,7 +36,7 @@ DTYPE_BITS = {
 
 K0_MAX_SUBMAX_MAP = {32: 32, 64: 64, 96: 128, 128: 128, 256: 256}
 
-SUPPORTED_PAGE_SIZE = [128, 256, 1024]
+SUPPORTED_PAGE_SIZE = [1, 16, 1024]
 SUPPORTED_KV_MEMORY_LAYOUT = ["vectorized", "linear"]
 SUPPORTED_KV_LOOKUP_TABLE = ["vllm", "sglang"]
 KV_MEMORY_LAYOUT_ENUM_MAP = {
@@ -630,6 +630,7 @@ class KernelComponentFactory:
         if dtype in ["fp16", "bf16"]:
             return {
                 128 : [FmhaFwdTileSize(128, 128, 32, 128, 32,  128,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1)],
+                256 : [FmhaFwdTileSize(128, 128, 32, 256, 32,  256,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1)],
             }  # fmt: skip
         elif dtype in ["fp8bf16"]:
             return {
@@ -737,6 +738,8 @@ def get_fwd_blobs(
 
                 # Generate kernels for both page_size=16 and page_size=1024
                 for page_size in SUPPORTED_PAGE_SIZE:
+                    if page_size == 1 and pipeline.F_kv_memory_layout != "linear":
+                        continue
                     k = FmhaFwdKernel(
                         F_idx=0,
                         F_hdim=hdim,

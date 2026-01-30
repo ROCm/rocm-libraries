@@ -43,7 +43,7 @@ The following diagram demonstrates how frontend calls pass through the backend a
 ![Current System Overview](../images/current_system_overview.png)
 
 ### 3.1 Object Lifetimes
-For the plugin, there's a comment on `std::weak_ptr<MiopenContainer>` in [MiopenLegacyPlugin.cpp](../../../../dnn-providers/miopen-provider/MiopenLegacyPlugin.cpp) that describes why the weak_ptr / shared_ptr for the container exists.
+For the plugin, there's a comment on `std::weak_ptr<MiopenContainer>` in [MiopenPlugin.cpp](../../../../dnn-providers/miopen-provider/MiopenPlugin.cpp) that describes why the weak_ptr / shared_ptr for the container exists.
 
 To summarize, it's so that if the plugin is opened more than once, the container can be shared, but the container gets cleaned up if that last plugin ref drops off.
 
@@ -57,9 +57,9 @@ Due to this, the backend maintains a lifecycle for two types of objects (with co
 Shared library files aren't reloaded by `dlopen` calls from different threads, which means that multiple threads can be accessing the proposed objects below from multiple threads at the same time.  Given that, plugin containers, engine managers, and plan builders should either be stateless or use thread-safe objects with locking around any stored state.
 
 
-### MIOpen Plugin Architecture
+### MIOpen Provider Plugin Architecture
 
-The MIOpen Legacy Plugin serves as the kernel provider. It employs a modular C++ architecture, largely decoupled from the API layer.
+The MIOpen Provider Plugin serves as the kernel provider. It employs a modular C++ architecture, largely decoupled from the API layer.
 
 *   **Dependency Injection Container (`MiopenContainer`):**
     This is the root object that manages the lifecycle and dependencies of all other components. It initializes the `EngineManager` and ensures that all necessary services are correctly injected.

@@ -45,6 +45,7 @@
 #include <float.h>
 #include <memory>
 #include <numeric>
+#include <type_traits>
 #include <vector>
 
 template <typename T>
@@ -66,7 +67,7 @@ public:
         miopenCreateTensorDescriptor(&dOutputTensor);
 
         miopenCreatePoolingDescriptor(&poolDesc);
-        data_type = (sizeof(Tgpu) == 4) ? miopenFloat : miopenHalf;
+        InitDataType<Tgpu>();
     }
 
     int AddCmdLineArgs() override;
@@ -462,6 +463,12 @@ float16 RanGenInput()
     return prng::gen_canonical<T>();
 #endif
 }
+
+template <>
+bfloat16 RanGenInput()
+{
+    return prng::gen_canonical<bfloat16>();
+}
 } // namespace detail
 
 template <typename Tgpu, typename Tref, typename Index>
@@ -688,10 +695,11 @@ int PoolDriver_impl<Tgpu, Tref, Index>::RunBackwardGPU()
 template <typename Tgpu, typename Tref, typename Index>
 int PoolDriver_impl<Tgpu, Tref, Index>::VerifyForward()
 {
-    const Tref tolerance =          //
-        sizeof(Tgpu) == 8   ? 1e-6  // double
-        : sizeof(Tgpu) == 4 ? 1e-5  // float
-                            : 5e-3; // half
+    const Tref tolerance =                                              //
+        sizeof(Tgpu) == 8                     ? 1e-6                    // double
+        : sizeof(Tgpu) == 4                   ? 1e-5                    // float
+        : std::is_same<Tgpu, bfloat16>::value ? static_cast<Tref>(5e-2) // bfloat16
+                                              : 5e-3;                   // half
 
     pooling_math_stats stats;
     bool match = false;
@@ -748,8 +756,11 @@ int PoolDriver_impl<Tgpu, Tref, Index>::VerifyBackward()
 {
     float ulps_tolerance = 4;
     Tref diff_tolerance  = (sizeof(Tgpu) == 4 || sizeof(Tgpu) == 8) ? static_cast<Tref>(1e-6)
+                           : std::is_same<Tgpu, bfloat16>::value    ? static_cast<Tref>(5e-2)
                                                                     : static_cast<Tref>(5e-3);
-    double rms_tolerance = (sizeof(Tgpu) == 4 || sizeof(Tgpu) == 8) ? 1e-6 : 5e-3;
+    double rms_tolerance = (sizeof(Tgpu) == 4 || sizeof(Tgpu) == 8) ? 1e-6
+                           : std::is_same<Tgpu, bfloat16>::value    ? 5e-2
+                                                                    : 5e-3;
 
     pooling_math_stats stats;
     bool match = false;

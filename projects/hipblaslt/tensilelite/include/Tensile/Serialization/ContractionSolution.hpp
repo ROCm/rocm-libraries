@@ -128,6 +128,7 @@ namespace TensileLite
                 iot::mapRequired(io, "synchronizerSizePerWG", s.synchronizerSizePerWG);
                 iot::mapRequired(io, "nonTemporalA", s.nonTemporalA);
                 iot::mapRequired(io, "nonTemporalB", s.nonTemporalB);
+                iot::mapRequired(io, "customMainLoopScheduling", s.customMainLoopScheduling);
             }
 
             const static bool flow = false;

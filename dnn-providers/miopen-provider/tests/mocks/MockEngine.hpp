@@ -11,7 +11,7 @@
 
 #include "engines/EngineInterface.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class MockEngine : public IEngine
@@ -35,8 +35,9 @@ public:
                 initializeExecutionContext,
                 (const HipdnnEnginePluginHandle& handle,
                  const hipdnn_plugin_sdk::IGraph& opGraph,
+                 const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
                  HipdnnEnginePluginExecutionContext& executionContext),
                 (const, override));
 };
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

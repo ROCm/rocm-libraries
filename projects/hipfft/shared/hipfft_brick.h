@@ -107,8 +107,7 @@ static void set_bricks(const std::vector<size_t>& length,
         std::vector<size_t> brick_len(dim);
         for(size_t d = 0; d < dim; ++d)
             brick_len[d] = brick.field_upper[d] - brick.field_lower[d];
-        brick.min_size
-            = std::max(brick.min_size, compute_ptrdiff(brick_len, brick.brick_stride, 0, 0));
+        brick.min_size = std::max(brick.min_size, compute_ptrdiff(brick_len, brick.brick_stride));
     }
 }
 

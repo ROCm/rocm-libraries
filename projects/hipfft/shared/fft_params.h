@@ -2620,7 +2620,7 @@ static bool lexical_cast(const std::string& word, fft_params::fft_mp_lib& mp_lib
 }
 
 // This is used with CLI11 so that the user can type an integer on the
-// command line and we store into an enum varaible
+// command line and we store into an enum variable
 template <typename _Elem, typename _Traits>
 std::basic_istream<_Elem, _Traits>& operator>>(std::basic_istream<_Elem, _Traits>& stream,
                                                fft_array_type&                     atype)
@@ -4052,8 +4052,8 @@ void init_local_input(int                                       comm_rank,
         auto contiguous_dist   = params.compute_idist();
 
         std::vector<Tbuff> bufvec(1);
-        size_t brick_size_bytes = compute_ptrdiff(brick->length(), brick->stride, 0, 0) * elem_size
-                                  / (is_planar ? 2 : 1);
+        size_t             brick_size_bytes
+            = compute_ptrdiff(brick->length(), brick->stride) * elem_size / (is_planar ? 2 : 1);
         bufvec.back() = Tbuff::make_nonowned(input_ptrs[ptr_idx], brick_size_bytes);
         // grab a second pointer for planar
         if(is_planar)

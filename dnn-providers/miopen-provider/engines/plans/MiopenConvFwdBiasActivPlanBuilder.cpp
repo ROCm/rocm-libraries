@@ -10,7 +10,7 @@
 #include "MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlan.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 namespace
@@ -419,7 +419,7 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHan
                                       std::get<1>(nodeAttrs.value()),
                                       std::get<2>(nodeAttrs.value()),
                                       opGraph.getTensorMap());
-        ConvFwdBiasActivPlan plan(handle, std::move(params), true, false);
+        ConvFwdBiasActivPlan plan(handle, std::move(params), true, false, false);
         return true;
     }
     catch(const std::exception& e)
@@ -436,7 +436,7 @@ size_t MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSize(
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
 
     ConvFwdBiasActivParams params(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
-    ConvFwdBiasActivPlan plan(handle, std::move(params), false, true);
+    ConvFwdBiasActivPlan plan(handle, std::move(params), false, true, false);
     return plan.getWorkspaceSize(handle);
 }
 
@@ -449,8 +449,9 @@ void MiopenConvFwdBiasActivPlanBuilder::buildPlan(
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
 
     ConvFwdBiasActivParams params(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
-    auto plan = std::make_unique<ConvFwdBiasActivPlan>(handle, std::move(params));
+    auto plan = std::make_unique<ConvFwdBiasActivPlan>(
+        handle, std::move(params), true, true, executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

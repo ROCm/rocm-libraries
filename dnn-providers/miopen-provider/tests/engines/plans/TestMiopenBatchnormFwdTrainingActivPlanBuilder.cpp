@@ -13,7 +13,7 @@
 
 #include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
 
-using namespace miopen_legacy_plugin;
+using namespace miopen_plugin;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_plugin_sdk;
 
@@ -53,18 +53,6 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsTrueFo
     bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
 
     EXPECT_TRUE(applicable);
-}
-
-TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
-       IsApplicableReturnsFalseForGraphWithRunningStatistics)
-{
-    auto builder
-        = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(true, true);
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
-
-    EXPECT_FALSE(applicable);
 }
 
 TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,

@@ -31,6 +31,7 @@
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 
@@ -370,6 +371,38 @@ class hardware_t {
          }}};
   // clang-format on
 
+  /**
+   * @brief Map of main loop efficiency values by architecture and CMS kernel configuration.
+   *
+   */
+  static inline const std::unordered_map<architecture_t, std::unordered_map<CMS_kernel, double>>
+      CMS_MAP = {
+      {hardware_t::architecture_t::gfx950,
+        {
+          // BF16
+          // NT
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 160, 256, 64), 1. / 1.20},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 192, 256, 64), 1. / 1.10},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 208, 256, 64), 1. / 1.20},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 256, 160, 64), 1. / 1.20},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 256, 192, 64), 1. / 1.20},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 256, 256, 64), 1. / 1.15},
+          // NN
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::N, 160, 256, 64), 1. / 1.10},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::N, 208, 256, 64), 1. / 1.10},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::N, 256, 192, 64), 1. / 1.00},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::N, 256, 256, 64), 1. / 1.05},
+          // TN
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 160, 256, 64), 1. / 1.10},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 192, 256, 64), 1. / 1.05},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 256,  96, 64), 1. / 1.10},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 256, 192, 64), 1. / 1.10},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 256, 224, 64), 1. / 1.05},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 256, 256, 64), 1. / 1.05},
+        }
+      },
+    };
+
   architecture_t arch;  ///< GPU architecture type
   size_t N_CU;          ///< Number of Compute Units
   size_t lds_capacity;  ///< Capacity of Local Data Share (LDS) in bytes
@@ -476,6 +509,55 @@ class hardware_t {
    * @return size_t Instruction latency in cycles, or 0 if not found
    */
   size_t get_mi_latency(size_t MI_M, size_t MI_N, size_t MI_K, data_type_t mi_input_type) const;
+
+  /**
+   * @brief Get main loop efficiency for a given kernel configuration.
+   *
+   * @param transA Whether matrix A is transposed
+   * @param transB Whether matrix B is transposed
+   * @param MT_M Macro tile M dimension
+   * @param MT_N Macro tile N dimension
+   * @param MT_K Macro tile K dimension
+   * @param mi_input_type Input data type for the matrix instruction
+   * @return double Main loop efficiency value (1.0 if not found)
+   */
+  double get_adjusted_main_loop_efficiency(transpose_t transA,
+                                           transpose_t transB,
+                                           size_t MT_M,
+                                           size_t MT_N,
+                                           size_t MT_K,
+                                           data_type_t mi_input_type) const;
+
+  /**
+   * @brief Get valid matrix instruction dimensions for a given datatype.
+   *
+   * Returns a list of valid matrix instruction dimensions (M, N, K) for
+   * the specified datatype on the current hardware architecture. Multiple
+   * dimensions may be available for the same datatype.
+   *
+   * @param mi_input_type Input data type for the matrix instruction
+   * @return std::vector<dim3_t> List of valid dimensions for the datatype
+   */
+  std::vector<dim3_t> get_valid_matrix_instructions(data_type_t mi_input_type) const;
+
+  /**
+   * @brief Get recommended matrix instruction dimensions for a given datatype.
+   *
+   * Returns the single best matrix instruction dimension for the specified datatype
+   * based on throughput (M*N*K/latency). If multiple instructions are available,
+   * returns the one with the highest throughput.
+   *
+   * @param mi_input_type Input data type for the matrix instruction
+   * @return dim3_t Recommended dimension for the datatype. Returns {0,0,0} if not supported.
+   */
+  dim3_t get_recommended_matrix_instruction(data_type_t mi_input_type) const;
+
+  /**
+   * @brief Check if the architecture has MALL (Memory Attached Last Level).
+   *
+   * @return true if the architecture has MALL, false otherwise
+   */
+  bool has_MALL() const;
 
  private:
   /**

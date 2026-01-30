@@ -224,6 +224,9 @@ class GEMMSolution:
     storeLDS_D: bool = True
     betaInFma: bool = True
 
+    padLDS_A: tuple[int, int] = (0, 0)
+    padLDS_B: tuple[int, int] = (0, 0)
+
     scheduler: str = "Priority"
     schedulerCost: str = "LinearWeighted"
 
@@ -247,6 +250,7 @@ class GEMMSolution:
 
     architecture: GPUArchitectureTarget = GPUArchitectureTarget()
     matchMemoryAccess: bool = True
+    tailLoops: bool = True
 
     version: str = ""
 
