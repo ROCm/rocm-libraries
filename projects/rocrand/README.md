@@ -92,10 +92,11 @@ cd rocm-libraries/projects/rocrand; mkdir build; cd build
 #
 # The python interface do not work with static library.
 #
+# The package and install scripts require Make, but otherwise passing -GNinja is recommended for faster building.
 [CXX=hipcc] cmake -DBUILD_BENCHMARK=ON ../. -DCMAKE_PREFIX_PATH=/opt/rocm # or cmake-gui ../.
 
 # Build
-make -j4
+make -j4 # or `ninja`
 
 # Optionally, run tests if they're enabled
 ctest --output-on-failure

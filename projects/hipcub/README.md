@@ -82,12 +82,13 @@ mkdir build; cd build
 # Set C++ compiler to HIP-aware clang. You can do it by adding 'CXX=<path-to-compiler>'
 # before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the compiler.
 #
+# The package and install scripts require Make, but otherwise passing -GNinja is recommended for faster building.
 [CXX=hipcc] cmake ../. # or cmake-gui ../.
 # or to build benchmarks
 cmake -DBUILD_BENCHMARK=ON ../.
 
 # Build
-make -j4
+make -j4 # or `ninja`
 
 # Optionally, run tests if they're enabled.
 ctest --output-on-failure
