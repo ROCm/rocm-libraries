@@ -179,6 +179,9 @@ class ConfigParser(Generic[T]):
         """
         value_type = "empty_type" if not value_type else value_type
 
+        # It could very much be that the header parsing failed and
+        # self.configs is empty. In that case we cannot return
+        # a default config.
         if self.configs is None:
             return None
 
