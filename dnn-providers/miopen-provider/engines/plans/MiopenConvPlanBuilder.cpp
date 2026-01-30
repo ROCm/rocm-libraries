@@ -297,11 +297,10 @@ size_t MiopenConvPlanBuilder::getWorkspaceSize(const HipdnnEnginePluginHandle& h
     }
 }
 
-void MiopenConvPlanBuilder::buildPlan(
-    const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin_sdk::IGraph& opGraph,
-    [[maybe_unused]] const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
-    HipdnnEnginePluginExecutionContext& executionContext) const
+void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
+                                      const hipdnn_plugin_sdk::IGraph& opGraph,
+                                      const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
+                                      HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() != 1)
     {
@@ -310,6 +309,21 @@ void MiopenConvPlanBuilder::buildPlan(
             "Convolution plan builder supports only single node graphs. Graph has "
                 + std::to_string(opGraph.nodeCount()) + " nodes");
     }
+
+    // Read deterministic knob setting
+    bool deterministicEnabled = false;
+    if(engineConfig.isValid()
+       && engineConfig.hasKnobSetting(hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME))
+    {
+        const auto& knobSetting
+            = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME);
+        if(knobSetting.valueType() == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
+        {
+            auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
+            deterministicEnabled = (value != 0);
+        }
+    }
+    (void)deterministicEnabled; // Will be used in a follow-up PR
 
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
     const auto nodeName = nodeWrapper.name();

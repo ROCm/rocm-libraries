@@ -121,23 +121,6 @@ void MiopenEngine::initializeExecutionContext(
                     hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
             }
         }
-
-        if(engineConfig.hasKnobSetting(hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME))
-        {
-            const auto& knobSetting
-                = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME);
-            if(knobSetting.valueType() == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
-            {
-                auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
-                executionContext.setDeterministicEnabled(value != 0);
-            }
-            else
-            {
-                HIPDNN_LOG_WARN(
-                    "Deterministic knob setting value is not an integer. Type: {}",
-                    hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
-            }
-        }
     }
     else
     {
