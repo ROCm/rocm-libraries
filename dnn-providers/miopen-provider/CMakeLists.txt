@@ -122,17 +122,17 @@ add_library(
     engines/plans/MiopenConvFwdPlan.cpp
     engines/plans/MiopenConvPlanBuilder.cpp
     engines/plans/MiopenConvWrwPlan.cpp
+    engines/plans/MiopenPlanBuilderBase.cpp
     engines/plans/MiopenPlanCommon.cpp
-    engines/plans/PlanBuilderInterface.cpp
     EngineManager.cpp
     MiopenActivationDescriptor.cpp
-    MiopenHandleFactory.cpp
     MiopenContainer.cpp
     MiopenConvDescriptor.cpp
-    MiopenUtils.cpp
-    MiopenTensor.cpp
+    MiopenHandleFactory.cpp
     MiopenPlugin.cpp
     MiopenPluginPublic.cpp
+    MiopenTensor.cpp
+    MiopenUtils.cpp
 )
 target_compile_definitions(
     miopen_plugin_impl PRIVATE COMPONENT_NAME="miopen_plugin"

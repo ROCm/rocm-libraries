@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include "PlanBuilderInterface.hpp"
+#include "MiopenPlanBuilderBase.hpp"
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 namespace miopen_plugin
 {
 
-class MiopenConvPlanBuilder : public IPlanBuilder
+class MiopenConvPlanBuilder : public MiopenPlanBuilderBase
 {
 public:
     MiopenConvPlanBuilder() = default;

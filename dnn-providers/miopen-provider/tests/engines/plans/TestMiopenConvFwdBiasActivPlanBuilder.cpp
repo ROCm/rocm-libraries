@@ -608,8 +608,7 @@ TEST_P(TestGpuMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeRangeReturnsVal
 
     if(_isApplicable)
     {
-        WorkspaceSizeRange range;
-        EXPECT_NO_THROW(range = _planBuilder.getWorkspaceSizeRange(_handle, graph));
+        auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
 
         // For fusion operations, min == max since only one solution exists
         EXPECT_EQ(range.min, range.max);

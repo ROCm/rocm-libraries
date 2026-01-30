@@ -216,7 +216,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeFwd)
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    WorkspaceSizeRange range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
 
     HipdnnEnginePluginExecutionContext ctx;
     _planBuilder.buildPlan(_handle, graph, ctx);
@@ -232,7 +232,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeBwd)
     auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    WorkspaceSizeRange range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
 
     HipdnnEnginePluginExecutionContext ctx;
     _planBuilder.buildPlan(_handle, graph, ctx);
@@ -248,7 +248,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeWrw)
     auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    WorkspaceSizeRange range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
 
     HipdnnEnginePluginExecutionContext ctx;
     _planBuilder.buildPlan(_handle, graph, ctx);
@@ -267,7 +267,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, WorkspaceSizeRespectsMinLimitFwd)
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    WorkspaceSizeRange range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
     ASSERT_NE(range.min, range.max)
         << "No workspace size range available for testing";
 
@@ -295,7 +295,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, WorkspaceSizeRespectsMaxLimitFwd)
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    WorkspaceSizeRange range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
     ASSERT_NE(range.min, range.max)
         << "No workspace size range available for testing";
 
@@ -323,7 +323,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, WorkspaceSizeRespectsMinLimitBwd)
     auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    WorkspaceSizeRange range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
     ASSERT_NE(range.min, range.max)
         << "No workspace size range available for testing";
 
@@ -351,7 +351,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, WorkspaceSizeRespectsMaxLimitBwd)
     auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    WorkspaceSizeRange range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
     ASSERT_NE(range.min, range.max)
         << "No workspace size range available for testing";
 
@@ -379,7 +379,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, WorkspaceSizeRespectsMinLimitWrw)
     auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    WorkspaceSizeRange range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
     ASSERT_NE(range.min, range.max)
         << "No workspace size range available for testing";
 
@@ -407,7 +407,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, WorkspaceSizeRespectsMaxLimitWrw)
     auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    WorkspaceSizeRange range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
+    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
     ASSERT_NE(range.min, range.max)
         << "No workspace size range available for testing";
 

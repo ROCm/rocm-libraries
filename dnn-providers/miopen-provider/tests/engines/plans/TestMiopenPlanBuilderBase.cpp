@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 
 #include "HipdnnEnginePluginHandle.hpp"
-#include "engines/plans/PlanBuilderInterface.hpp"
+#include "engines/plans/MiopenPlanBuilderBase.hpp"
 
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
@@ -15,7 +15,7 @@ namespace
 {
 // Minimal concrete plan builder that doesn't override getMaxWorkspaceSize() or
 // getWorkspaceSizeRange() to test the default implementations
-class SimplePlanBuilder : public IPlanBuilder
+class SimplePlanBuilder : public MiopenPlanBuilderBase
 {
 public:
     bool isApplicable([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
@@ -33,14 +33,14 @@ public:
 
 } // namespace
 
-class TestIPlanBuilder : public ::testing::Test
+class TestMiopenPlanBuilderBase : public ::testing::Test
 {
 protected:
     SimplePlanBuilder _planBuilder;
     HipdnnEnginePluginHandle _dummyHandle;
 };
 
-TEST_F(TestIPlanBuilder, DefaultGetMaxWorkspaceSizeReturnsZero)
+TEST_F(TestMiopenPlanBuilderBase, DefaultGetMaxWorkspaceSizeReturnsZero)
 {
     MockGraph mockGraph;
 
@@ -49,7 +49,7 @@ TEST_F(TestIPlanBuilder, DefaultGetMaxWorkspaceSizeReturnsZero)
     EXPECT_EQ(workspaceSize, 0u);
 }
 
-TEST_F(TestIPlanBuilder, DefaultGetWorkspaceSizeRangeReturnsZero)
+TEST_F(TestMiopenPlanBuilderBase, DefaultGetWorkspaceSizeRangeReturnsZero)
 {
     MockGraph mockGraph;
 

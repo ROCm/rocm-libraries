@@ -1,0 +1,23 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#pragma once
+
+#include "PlanBuilderInterface.hpp"
+
+namespace miopen_plugin
+{
+
+class MiopenPlanBuilderBase : public IPlanBuilder
+{
+public:
+    ~MiopenPlanBuilderBase() override = default;
+
+    WorkspaceSizeRange getWorkspaceSizeRange(const HipdnnEnginePluginHandle& handle,
+                                              const hipdnn_plugin_sdk::IGraph& opGraph) const override;
+
+    size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
+                                const hipdnn_plugin_sdk::IGraph& opGraph) const override;
+};
+
+} // namespace miopen_plugin

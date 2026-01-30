@@ -131,8 +131,8 @@ bool isApplicableWrw(const HipdnnEnginePluginHandle& handle,
     return solutionCount != 0;
 }
 
-WorkspaceSizeRange getWorkspaceSizeRangeFwd(const HipdnnEnginePluginHandle& handle,
-                                            const hipdnn_plugin_sdk::IGraph& opGraph)
+IPlanBuilder::WorkspaceSizeRange getWorkspaceSizeRangeFwd(const HipdnnEnginePluginHandle& handle,
+                                                           const hipdnn_plugin_sdk::IGraph& opGraph)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
@@ -175,8 +175,8 @@ WorkspaceSizeRange getWorkspaceSizeRangeFwd(const HipdnnEnginePluginHandle& hand
     return {minWorkspace, maxWorkspace};
 }
 
-WorkspaceSizeRange getWorkspaceSizeRangeBwd(const HipdnnEnginePluginHandle& handle,
-                                            const hipdnn_plugin_sdk::IGraph& opGraph)
+IPlanBuilder::WorkspaceSizeRange getWorkspaceSizeRangeBwd(const HipdnnEnginePluginHandle& handle,
+                                                           const hipdnn_plugin_sdk::IGraph& opGraph)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
@@ -219,8 +219,8 @@ WorkspaceSizeRange getWorkspaceSizeRangeBwd(const HipdnnEnginePluginHandle& hand
     return {minWorkspace, maxWorkspace};
 }
 
-WorkspaceSizeRange getWorkspaceSizeRangeWrw(const HipdnnEnginePluginHandle& handle,
-                                            const hipdnn_plugin_sdk::IGraph& opGraph)
+IPlanBuilder::WorkspaceSizeRange getWorkspaceSizeRangeWrw(const HipdnnEnginePluginHandle& handle,
+                                                           const hipdnn_plugin_sdk::IGraph& opGraph)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
@@ -398,7 +398,7 @@ bool MiopenConvPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
     return ret;
 }
 
-WorkspaceSizeRange MiopenConvPlanBuilder::getWorkspaceSizeRange(
+IPlanBuilder::WorkspaceSizeRange MiopenConvPlanBuilder::getWorkspaceSizeRange(
     const HipdnnEnginePluginHandle& handle, const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
     if(opGraph.nodeCount() != 1)

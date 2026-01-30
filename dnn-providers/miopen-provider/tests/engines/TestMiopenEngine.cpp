@@ -163,7 +163,7 @@ TEST(TestMiopenEngine, GetDetailsReturnsSerializedEngineDetails)
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(true));
     EXPECT_CALL(*mockPlanBuilder, getWorkspaceSizeRange(::testing::_, ::testing::_))
-        .WillOnce(::testing::Return(WorkspaceSizeRange{0, 1024}));
+        .WillOnce(::testing::Return(IPlanBuilder::WorkspaceSizeRange{0, 1024}));
 
     MiopenEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
@@ -184,7 +184,7 @@ TEST(TestMiopenEngine, GetDetailsContainsBenchmarkingKnob)
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(true));
     EXPECT_CALL(*mockPlanBuilder, getWorkspaceSizeRange(::testing::_, ::testing::_))
-        .WillOnce(::testing::Return(WorkspaceSizeRange{0, 1024}));
+        .WillOnce(::testing::Return(IPlanBuilder::WorkspaceSizeRange{0, 1024}));
 
     MiopenEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
@@ -223,7 +223,7 @@ TEST(TestMiopenEngine, GetDetailsContainsWorkspaceSizeLimitKnob)
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(true));
     EXPECT_CALL(*mockPlanBuilder, getWorkspaceSizeRange(::testing::_, ::testing::_))
-        .WillOnce(::testing::Return(WorkspaceSizeRange{MIN_WORKSPACE, MAX_WORKSPACE}));
+        .WillOnce(::testing::Return(IPlanBuilder::WorkspaceSizeRange{MIN_WORKSPACE, MAX_WORKSPACE}));
 
     MiopenEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
