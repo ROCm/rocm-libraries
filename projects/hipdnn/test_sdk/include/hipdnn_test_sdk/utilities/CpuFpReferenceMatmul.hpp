@@ -77,10 +77,11 @@ public:
                       + (static_cast<ComputeDataType>(aVal) * static_cast<ComputeDataType>(bVal));
             }
 
-            c.setHostValue(detail::safeConvert<CDataType>(acc), indices);
+            c.setHostValue(hipdnn_test_sdk::detail::safeConvert<CDataType>(acc), indices);
         };
 
-        auto parallelFunc = detail::makeParallelTensorFunctor(matmulFunc, c.dims());
+        auto parallelFunc
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(matmulFunc, c.dims());
         parallelFunc(std::thread::hardware_concurrency());
 
         c.memory().markHostModified();

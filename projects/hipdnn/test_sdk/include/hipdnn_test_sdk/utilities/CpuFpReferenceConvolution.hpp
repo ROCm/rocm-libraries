@@ -161,7 +161,8 @@ public:
         std::vector<int64_t> parallelDims = {nGroups, nBatch, yChannelsPerGroup};
         parallelDims.insert(parallelDims.end(), ySpatialDims.begin(), ySpatialDims.end());
 
-        auto parallelFunc = detail::makeParallelTensorFunctor(convolutionFunc, parallelDims);
+        auto parallelFunc
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(convolutionFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
         y.memory().markHostModified();
@@ -294,7 +295,8 @@ public:
         std::vector<int64_t> parallelDims = {nGroups, nBatch, channelsPerGroup};
         parallelDims.insert(parallelDims.end(), xSpatialDims.begin(), xSpatialDims.end());
 
-        auto parallelFunc = detail::makeParallelTensorFunctor(convolutionFunc, parallelDims);
+        auto parallelFunc
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(convolutionFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
         gradX.memory().markHostModified();
@@ -415,7 +417,8 @@ public:
         std::vector<int64_t> parallelDims = {nGroups, yChannelsPerGroup, channelsPerGroup};
         parallelDims.insert(parallelDims.end(), kernelSpatialDims.begin(), kernelSpatialDims.end());
 
-        auto parallelFunc = detail::makeParallelTensorFunctor(convolutionFunc, parallelDims);
+        auto parallelFunc
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(convolutionFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
         gradW.memory().markHostModified();

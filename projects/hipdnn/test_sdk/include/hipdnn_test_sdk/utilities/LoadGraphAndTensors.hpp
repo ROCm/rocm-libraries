@@ -59,7 +59,7 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     tensorFromFileAndAttributes(const std::filesystem::path& filepath,
                                 const hipdnn_data_sdk::data_objects::TensorAttributes& attributes)
 {
-    auto tensor = detail::createTensorFromAttribute(attributes);
+    auto tensor = hipdnn_test_sdk::detail::createTensorFromAttribute(attributes);
     detail::fillTensorFromFile(*tensor, filepath);
 
     return tensor;

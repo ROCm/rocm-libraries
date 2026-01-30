@@ -42,10 +42,11 @@ public:
 
             // Apply operation and set output
             auto result = op(inputValue);
-            output.setHostValue(detail::safeConvert<OutputType>(result), indices);
+            output.setHostValue(hipdnn_test_sdk::detail::safeConvert<OutputType>(result), indices);
         };
 
-        auto parallelFunc = makeParallelTensorFunctor(func, broadcastShape);
+        auto parallelFunc
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(func, broadcastShape);
         parallelFunc();
     }
 
@@ -84,10 +85,11 @@ public:
 
             // Apply operation and set output
             auto result = op(input1Value, input2Value);
-            output.setHostValue(detail::safeConvert<OutputType>(result), indices);
+            output.setHostValue(hipdnn_test_sdk::detail::safeConvert<OutputType>(result), indices);
         };
 
-        auto parallelFunc = makeParallelTensorFunctor(func, broadcastShape);
+        auto parallelFunc
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(func, broadcastShape);
         parallelFunc();
     }
 

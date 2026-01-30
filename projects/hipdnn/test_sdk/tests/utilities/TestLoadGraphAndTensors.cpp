@@ -43,7 +43,8 @@ void writeVectorToFile(const std::filesystem::path& filename, const std::vector<
 TEST(TestFillTensorFromFile, Valid)
 {
     std::filesystem::path filename = "SimpleTensor0123.bin";
-    detail::ScopedExecute fileDeleter([filename]() { std::filesystem::remove(filename); });
+    hipdnn_test_sdk::detail::ScopedExecute fileDeleter(
+        [filename]() { std::filesystem::remove(filename); });
 
     std::vector<int> values{0, 1, 2, 3};
     writeVectorToFile(filename, values);

@@ -90,7 +90,8 @@ public:
             {
             }
         };
-        auto parallelFunc = makeParallelTensorFunctor(validateFunc, reference.dims());
+        auto parallelFunc
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(validateFunc, reference.dims());
         parallelFunc(std::thread::hardware_concurrency());
 
         return checkRmsError(
