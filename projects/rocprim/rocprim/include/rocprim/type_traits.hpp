@@ -633,6 +633,7 @@ struct radix_key_codec
             // Might have undefined behavior, kill negative zeros
             if constexpr(KillNegativeZeros)
             {
+                // TODO: Compilation fails with -D__HIP_NO_HALF_OPERATORS__=1. Blocked by same issue in imports.
                 bit_key = bit_key == bit_key_type{-0.0} ? bit_key_type{+0.0} : bit_key;
             }
             // Cast to integral type, so we can flip the two’s complement
