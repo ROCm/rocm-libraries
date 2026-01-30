@@ -1,9 +1,8 @@
 /*******************************************************************************
  *
- * MIT License
- *
- * Copyright (c) 2026 Advanced Micro Devices, Inc.
- *
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ * SPDX-License-Identifier: MIT
+ * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
@@ -38,12 +37,6 @@ struct verifier
     bool time{false};
     bool no_validate{false};
     bool rethrow{false};
-
-    template <class V, class... Ts>
-    auto run_cpu(bool retry, bool& miss, V& v, Ts&&... xs) -> std::future<decltype(v.cpu(xs...))>
-    {
-        return cpu_async(v, xs...);
-    }
 
     template <class CpuRange, class GpuRange, class Compare, class Report, class Fail>
     bool compare_and_report(
@@ -154,10 +147,8 @@ struct verifier
             auto&& h = get_handle();
             // Compute cpu
             std::future<decltype(v.cpu(xs...))> cpuf;
-            bool cache_miss = true;
-            if(not no_validate)
             {
-                cpuf = run_cpu(false, cache_miss, v, xs...);
+                cpuf = cpu_async(v, xs...);
             }
             // Compute gpu
             if(time)
@@ -166,7 +157,6 @@ struct verifier
                 {
                     v.gpu(xs...);
                 }
-
                 h.EnableProfiling();
                 h.ResetKernelTime();
             }
@@ -185,37 +175,11 @@ struct verifier
             }
 
             // Validate
-            if(!no_validate)
+            if(not no_validate)
             {
                 cpu         = cpuf.get();
                 auto report = verify_reporter();
-                bool retry  = true;
-                if(not cache_miss)
-                {
-                    retry             = false;
-                    auto report_retry = [&](bool pass,
-                                            std::vector<double> error,
-                                            const auto& out_cpu,
-                                            const auto& out_gpu,
-                                            auto fail) {
-                        if(not pass)
-                        {
-                            retry = true;
-                            return false;
-                        }
-                        return report(pass, error, out_cpu, out_gpu, fail);
-                    };
-                    compare_and_report(
-                        cpu, gpu, f, report_retry, [&](int mode) { v.fail(mode, xs...); });
-                    // cppcheck-suppress knownConditionTrueFalse
-                    if(retry)
-                    {
-                        std::cout << "Warning: verify cache failed, rerunning CPU." << std::endl;
-                        cpu = run_cpu(retry, cache_miss, v, xs...).get();
-                    }
-                }
-                if(retry)
-                    compare_and_report(cpu, gpu, f, report, [&](int mode) { v.fail(mode, xs...); });
+                compare_and_report(cpu, gpu, f, report, [&](int mode) { v.fail(mode, xs...); });
             }
 
             if(verbose or time)

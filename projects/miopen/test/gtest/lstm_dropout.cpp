@@ -1,8 +1,7 @@
 /*******************************************************************************
  *
- * MIT License
- *
- * Copyright (c) 2020 Advanced Micro Devices, Inc.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,79 +23,112 @@
  *
  *******************************************************************************/
 
-#include "rnn_util.hpp"
+#include "lstm_common.hpp"
 #include <hip/hip_runtime.h>
 #include <gtest/gtest_common.hpp>
 
-struct Parameters
+auto GetTestCases()
 {
-    int batchSize;
-    int seqLength;
-    int inVecLen;
-    int hiddenSize;
-    int numLayers;
-    int nohx;
-    int nodhy;
-    int nocx;
-    int nodcy;
-    int nohy;
-    int nodhx;
-    int nocy;
-    int nodcx;
-    int flatBatchFill;
-    int useDropout;
-    int inputMode;
-    int biasMode;
-    int dirMode;
-    int algoMode;
-    std::vector<int> batchSeq;
-};
+    int batchSize{17};
+    int seqLength{25};
+    int inVecLen{17};
+    int hiddenSize{67};
+    int numLayers{3};
+    int nohx{0};
+    int nodhy{0};
+    int nocx{0};
+    int nodcy{0};
+    int nohy{0};
+    int nodhx{0};
+    int nocy{0};
+    int nodcx{0};
+    int flatBatchFill{1};
+    int useDropout{1};
+    int usePadding{0};
+    int inputMode{0};
+    int biasMode{0};
+    int dirMode{0};
+    int algoMode{0};
+    std::vector<int> batchSeq = generate_batchSeq(batchSize, seqLength)[0];
 
-auto GetTestCases(miopenDataType_t dataType)
-{
-    Parameters params;
-    params.batchSize = 17;
-    params.seqLength = 25;
-    params.inVecLen = 17;
-    params.hiddenSize = 67;
-    params.numLayers = 3;
-    params.nohx = 0;
-    params.nodhy = 0;
-    params.nocx = 0;
-    params.nodcy = 0;
-    params.nohy = 0;
-    params.nodhx = 0;
-    params.nocy = 0;
-    params.nodcx = 0;
-    params.flatBatchFill = 1;
-    params.useDropout = 1;
-    params.inputMode = 0;
-    params.biasMode = 0;
-    params.dirMode = 0;
-    params.algoMode = 0;
-    params.batchSeq = generate_batchSeq(params.batchSize, params.seqLength)[0];
-    return params;
+    return std::make_tuple(batchSize,
+                           seqLength,
+                           inVecLen,
+                           hiddenSize,
+                           numLayers,
+                           nohx,
+                           nodhy,
+                           nocx,
+                           nodcy,
+                           nohy,
+                           nodhx,
+                           nocy,
+                           nodcx,
+                           flatBatchFill,
+                           useDropout,
+                           usePadding,
+                           inputMode,
+                           biasMode,
+                           dirMode,
+                           algoMode,
+                           batchSeq);
 }
 
 template <typename T>
-struct GPU_lstm_dropout_Test : public ::testing::TestWithParam<Parameters>
+struct GPU_lstm_dropout_Test : testing::TestWithParam<std::tuple<int,
+                                                                 int,
+                                                                 int,
+                                                                 int,
+                                                                 int,
+                                                                 int,
+                                                                 int,
+                                                                 int,
+                                                                 int,
+                                                                 int,
+                                                                 int,
+                                                                 int,
+                                                                 int,
+                                                                 int,
+                                                                 int,
+                                                                 int,
+                                                                 int,
+                                                                 int,
+                                                                 int,
+                                                                 int,
+                                                                 std::vector<int>>>
 {
     int device_count{0};
-    miopenHandle_t handle;
+    miopenDataType_t dataType{miopenFloat};
 
     void SetUp() override
     {
-        prng::reset_seed();
-        miopenCreate(&handle);
-        //if(hipGetDeviceCount(&device_count) != hipSuccess)
-        //    device_count = 0;
+        // if(hipGetDeviceCount(&device_count) != hipSuccess)
+        //     device_count = 0;
     }
-
-    void TearDown() override { miopenDestroy(handle); }
 
     void Run()
     {
-        auto params = GetParam();
+        auto [batchSize,
+              seqLength,
+              inVecLen,
+              hiddenSize,
+              numLayers,
+              nohx,
+              nodhy,
+              nocx,
+              nodcy,
+              nohy,
+              nodhx,
+              nocy,
+              nodcx,
+              flatBatchFill,
+              useDropout,
+              usePadding,
+              inputMode,
+              biasMode,
+              dirMode,
+              algoMode,
+              batchSeq] = GetParam();
     }
 };
 
@@ -111,4 +143,4 @@ TEST_P(GPU_lstm_dropout_FP32, FloatTest_lstm_dropout)
     Run();
 }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_lstm_dropout_FP32, testing::Values(GetTestCases(miopenFloat)));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_lstm_dropout_FP32, testing::Values(GetTestCases()));
