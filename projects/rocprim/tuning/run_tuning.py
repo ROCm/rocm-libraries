@@ -114,6 +114,7 @@ def run_tuning(
             try:
                 if hasattr(tuning_module, "Tuner"):
                     args: TunerArgs = tuning_module.Tuner._get_default_args()
+                    print(f"s: {strategy}")
                     args.update_with_kwargs(
                         algo_full_name=algo,
                         size=size,

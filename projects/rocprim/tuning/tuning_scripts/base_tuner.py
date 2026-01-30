@@ -98,7 +98,7 @@ class TunerArgs:
     """Maximum number of function evaluations for the tuning strategy
     """
 
-    strategy = "dual_annealing"
+    strategy: str = "dual_annealing"
     """Tuning strategy to use (e.g. "dual_annealing", "brute_force").
     """
 
@@ -120,7 +120,7 @@ class TunerArgs:
 
     def update_with_kwargs(self, **kwargs):
         for k, v in kwargs.items():
-            if k in self.__dict__.keys() and v:
+            if k in self.__dict__.keys() and not v is None:
                 self.__dict__[k] = v
 
 class BaseTuner(ABC):
