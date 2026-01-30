@@ -1710,7 +1710,7 @@ def _get_schedule_256x224x64_16bit(kernel, useLDSTr, TLDS):
     syncCode = []
     if isNT(kernel) and useLDSTr and TLDS == 0:
         optSchedule = {
-            'SYNC': [[-1,10,21,21,55,55,93,93]],
+            'SYNC': [[-1,10,21,21,55,55]],
             'GRIncA': [[0,1,2,3,4,5,6,7,8]],
             'LRA0': [[0,0,2,2,4,4,6,6,8,8,10,10,12,12,14,14],
                      [1,1,3,3,5,5,7,7,9,9,11,11,13,13,15,15]],
@@ -1738,12 +1738,12 @@ def _get_schedule_256x224x64_16bit(kernel, useLDSTr, TLDS):
         syncCode = [
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0"),
             SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment=""),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+            SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1, comment=""),
             SBarrier(comment=""),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
             SBarrier(comment=""),
-            SWaitCnt(dscnt=-1, vlcnt=15, vscnt=-1, comment="wait for previous set of global reads"),
-            SBarrier(comment="")
+            # SWaitCnt(dscnt=-1, vlcnt=15, vscnt=-1, comment="wait for previous set of global reads"),
+            # SBarrier(comment="")
         ]
         nglshift = nllshift = 15
     else:
