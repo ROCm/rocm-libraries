@@ -10,7 +10,7 @@
 #include "MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlan.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 namespace
@@ -454,4 +454,4 @@ void MiopenConvFwdBiasActivPlanBuilder::buildPlan(
     executionContext.setPlan(std::move(plan));
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

@@ -2,12 +2,14 @@
 // SPDX-License-Identifier:  MIT
 
 #include "MiopenUtils.hpp"
+#include "common/MiopenHandleFixture.hpp"
+
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
-using namespace miopen_legacy_plugin;
+using namespace miopen_plugin;
 using namespace miopen_utils;
 
 TEST(TestMiopenUtils, FindDeviceBufferReturnsCorrectBuffer)
@@ -389,4 +391,104 @@ TEST(TestMiopenUtils, MapPointwiseModeUnsupported)
 
     ASSERT_THROW(miopen_utils::mapPointwiseModeToMiopenActivation(*attr),
                  hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// =============================================================================
+// GPU-required tests for ScopedTuningPolicy
+// =============================================================================
+
+class TestGpuScopedTuningPolicy : public test_common::MiopenHandleFixture
+{
+};
+
+TEST_F(TestGpuScopedTuningPolicy, SetsSearchPolicyWhenBenchmarkingEnabled)
+{
+    {
+        ScopedTuningPolicy guard(_miopenHandle, true);
+
+        miopenTuningPolicy_t currentPolicy;
+        auto status = miopenGetTuningPolicy(_miopenHandle, &currentPolicy);
+        ASSERT_EQ(status, miopenStatusSuccess);
+        EXPECT_EQ(currentPolicy, miopenTuningPolicySearch);
+    }
+}
+
+TEST_F(TestGpuScopedTuningPolicy, SetsNonePolicyWhenBenchmarkingDisabled)
+{
+    {
+        ScopedTuningPolicy guard(_miopenHandle, false);
+
+        miopenTuningPolicy_t currentPolicy;
+        auto status = miopenGetTuningPolicy(_miopenHandle, &currentPolicy);
+        ASSERT_EQ(status, miopenStatusSuccess);
+        EXPECT_EQ(currentPolicy, miopenTuningPolicyNone);
+    }
+}
+
+TEST_F(TestGpuScopedTuningPolicy, RestoresOriginalPolicyOnDestruction)
+{
+    // Set a non-default policy first
+    auto preSetStatus = miopenSetTuningPolicy(_miopenHandle, miopenTuningPolicyDbUpdate);
+    ASSERT_EQ(preSetStatus, miopenStatusSuccess);
+
+    {
+        ScopedTuningPolicy guard(_miopenHandle, true);
+
+        // Verify it was changed during scope
+        miopenTuningPolicy_t duringPolicy;
+        miopenGetTuningPolicy(_miopenHandle, &duringPolicy);
+        EXPECT_EQ(duringPolicy, miopenTuningPolicySearch);
+    }
+
+    // Verify it was restored to original
+    miopenTuningPolicy_t afterPolicy;
+    auto status = miopenGetTuningPolicy(_miopenHandle, &afterPolicy);
+    ASSERT_EQ(status, miopenStatusSuccess);
+    EXPECT_EQ(afterPolicy, miopenTuningPolicyDbUpdate);
+}
+
+TEST_F(TestGpuScopedTuningPolicy, RestoresToNoneWhenOriginalWasNone)
+{
+    // Ensure policy starts as None
+    miopenSetTuningPolicy(_miopenHandle, miopenTuningPolicyNone);
+
+    {
+        ScopedTuningPolicy guard(_miopenHandle, true);
+    }
+
+    miopenTuningPolicy_t afterPolicy;
+    auto status = miopenGetTuningPolicy(_miopenHandle, &afterPolicy);
+    ASSERT_EQ(status, miopenStatusSuccess);
+    EXPECT_EQ(afterPolicy, miopenTuningPolicyNone);
+}
+
+TEST_F(TestGpuScopedTuningPolicy, NestedScopesRestoreCorrectly)
+{
+    miopenSetTuningPolicy(_miopenHandle, miopenTuningPolicyNone);
+
+    {
+        ScopedTuningPolicy outerGuard(_miopenHandle, true);
+
+        miopenTuningPolicy_t afterOuterSet;
+        miopenGetTuningPolicy(_miopenHandle, &afterOuterSet);
+        EXPECT_EQ(afterOuterSet, miopenTuningPolicySearch);
+
+        {
+            ScopedTuningPolicy innerGuard(_miopenHandle, false);
+
+            miopenTuningPolicy_t afterInnerSet;
+            miopenGetTuningPolicy(_miopenHandle, &afterInnerSet);
+            EXPECT_EQ(afterInnerSet, miopenTuningPolicyNone);
+        }
+
+        // After inner scope, should restore to Search (what outer set)
+        miopenTuningPolicy_t afterInnerDestroy;
+        miopenGetTuningPolicy(_miopenHandle, &afterInnerDestroy);
+        EXPECT_EQ(afterInnerDestroy, miopenTuningPolicySearch);
+    }
+
+    // After outer scope, should restore to None (original)
+    miopenTuningPolicy_t finalPolicy;
+    miopenGetTuningPolicy(_miopenHandle, &finalPolicy);
+    EXPECT_EQ(finalPolicy, miopenTuningPolicyNone);
 }

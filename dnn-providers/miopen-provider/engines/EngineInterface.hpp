@@ -10,7 +10,7 @@
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class IEngine
