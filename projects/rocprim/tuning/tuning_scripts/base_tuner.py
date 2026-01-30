@@ -424,15 +424,15 @@ class BaseTuner(ABC):
     def _get_compiler_options(self) -> List[str]:
         """Returns a list with all compiler options to pass to Kernel Tuner"""
         monorepo_dir = pathlib.Path('../../../..').resolve()
-        rocprim_dir = monorepo_dir.joinpath('projects/rocprim')
+        rocprim_dir = monorepo_dir / 'projects/rocprim'
         return [
             "-fPIC",
             "-std=c++17",
-            f"-I{rocprim_dir.joinpath('rocprim/include')}",
-            f"-I{rocprim_dir.joinpath('build/rocprim/include/rocprim')}",
-            f"-I{rocprim_dir.joinpath('build/release/rocprim/include/rocprim')}",
-            f"-I{rocprim_dir.joinpath('benchmark')}",
-            f"-I{monorepo_dir.joinpath('shared/primbench')}",
+            f"-I{rocprim_dir / 'rocprim/include'}",
+            f"-I{rocprim_dir / 'build/rocprim/include/rocprim'}",
+            f"-I{rocprim_dir / 'build/release/rocprim/include/rocprim'}",
+            f"-I{rocprim_dir / 'benchmark'}",
+            f"-I{monorepo_dir / 'shared/primbench'}",
             "-Wno-#pragma-messages",
             f"--offload-arch={self.arch_name}",
             "-lamd_smi",
