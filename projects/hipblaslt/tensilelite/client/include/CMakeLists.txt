@@ -1,8 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-target_sources(tensilelite-client
-    PRIVATE
+set(COMMON_CLIENT_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/TypedId.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MetaResultReporter.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitorListener.hpp"
@@ -30,3 +29,6 @@ target_sources(tensilelite-client
         "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitor.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CSVStackFile.hpp"
 )
+
+target_sources(tensilelite-client PRIVATE ${COMMON_CLIENT_SOURCES})
+target_sources(cpu-gemm-driver PRIVATE ${COMMON_CLIENT_SOURCES})

@@ -17,7 +17,7 @@ hipDNN is a graph-based deep learning library for AMD GPUs with a plugin-based a
 | **Frontend** (`frontend/`) | Header-only C++ | Backend, Data SDK | User-friendly wrapper around backend C API |
 | **Data SDK** (`data_sdk/`) | Header-only | Third-party deps | Shared data objects, Flatbuffer schemas, logging |
 | **Plugin SDK** (`plugin_sdk/`) | Header-only | Data SDK | Interfaces for plugin development |
-| **Plugins** (`plugins/`) | Shared libraries | Plugin SDK, Data SDK | Engine implementations (e.g., MIOpen Legacy) |
+| **Plugins** (`plugins/`) | Shared libraries | Plugin SDK, Data SDK | Engine implementations (e.g., MIOpen Plugin) |
 | **Test SDK** (`test_sdk/`) | Header-only | Data SDK | Shared test utilities |
 
 ---
@@ -55,8 +55,8 @@ ninja integration-check
 | `hipdnn_test_sdk_tests` | Test SDK unit tests | Test utility functions |
 | `public_hipdnn_backend_tests` | Backend API tests | Public C API black-box tests |
 | `public_hipdnn_frontend_tests` | Frontend integration tests | E2E frontend tests |
-| `miopen_legacy_plugin_tests` | MIOpen plugin unit tests | Plugin-specific tests |
-| `miopen_plugin_integration_test` | MIOpen integration tests | GPU-required E2E tests |
+| `miopen_plugin_tests` | MIOpen plugin unit tests | Plugin-specific tests |
+| `miopen_plugin_integration_tests` | MIOpen integration tests | GPU-required E2E tests |
 
 ### Running Specific Tests with `--gtest_filter`
 **Use `--gtest_filter` when iterating on specific functionality:**
