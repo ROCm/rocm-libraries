@@ -28,7 +28,6 @@
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
-#include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 
@@ -235,11 +234,6 @@ namespace TensileLite
             if(!library)
                 loadPlaceholderLibrary();
 
-            if(Debug::Instance().printPredicateEvaluation())
-            {
-                PredicateDebugger::printLibraryFileBanner(std::cout, filePrefix + suffix);
-            }
-
             auto solution = library->findBestSolution(problem, hardware, fitness);
 
             if(solution)
@@ -265,11 +259,6 @@ namespace TensileLite
                 loadPlaceholderLibrary();
             }
 
-            if(Debug::Instance().printPredicateEvaluation())
-            {
-                PredicateDebugger::printLibraryFileBanner(std::cout, filePrefix + suffix);
-            }
-
             auto solutions = library->findAllSolutions(problem, hardware, searchType);
 
             for(auto& solution : solutions)
@@ -291,11 +280,6 @@ namespace TensileLite
                 loadPlaceholderLibrary();
             }
 
-            if(Debug::Instance().printPredicateEvaluation())
-            {
-                PredicateDebugger::printLibraryFileBanner(std::cout, filePrefix + suffix);
-            }
-
             auto solutions = library->findAllSolutionsGroupedGemm(problems, hardware, searchType);
 
             for(auto& solution : solutions)
@@ -313,11 +297,6 @@ namespace TensileLite
             if(!library)
             {
                 loadPlaceholderLibrary();
-            }
-
-            if(Debug::Instance().printPredicateEvaluation())
-            {
-                PredicateDebugger::printLibraryFileBanner(std::cout, filePrefix + suffix);
             }
 
             auto solutions = library->findTopSolutions(problem, hardware, numSolutions);
@@ -345,11 +324,6 @@ namespace TensileLite
             if(!library)
             {
                 loadPlaceholderLibrary();
-            }
-
-            if(Debug::Instance().printPredicateEvaluation())
-            {
-                PredicateDebugger::printLibraryFileBanner(std::cout, filePrefix + suffix);
             }
 
             auto solutions = library->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);

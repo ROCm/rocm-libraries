@@ -1528,23 +1528,18 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool rv = (*this)(problem);
                     int16_t gsu = problem.getParams().gsu() != 0 ? problem.getParams().gsu() : value[2];
-                    std::ostringstream details;
                     if(gsu == -1)
                     {
-                        details << "auto gsu (bypassed)";
+                        bool rv = (*this)(problem);
+                        PredicateDebugger::printRow(stream, rv, this->type(), "auto gsu (bypassed)");
+                        return rv;
                     }
-                    else
-                    {
-                        gsu                 = gsu > 1 ? gsu : 1;
-                        int workgroupNumber = std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
-                                              * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1])
-                                              * gsu * problem.batchSize(0);
-                        details << "wg_num=" << workgroupNumber << " <= max=" << MAX_WORKGROUP_NUMBER;
-                    }
-                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
-                    return rv;
+                    gsu                 = gsu > 1 ? gsu : 1;
+                    int workgroupNumber = std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
+                                          * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1])
+                                          * gsu * problem.batchSize(0);
+                    return debugEvalCmp(problem, stream, "wg_num", workgroupNumber, "<=", "max", MAX_WORKGROUP_NUMBER);
                 }
             };
 
@@ -1616,20 +1611,15 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool rv = (*this)(problem);
                     size_t gsu = (problem.getParams().gsu() != 0 ? problem.getParams().gsu() : value[1]);
-                    std::ostringstream details;
                     if(gsu == static_cast<size_t>(-1))
                     {
-                        details << "auto gsu (bypassed)";
+                        bool rv = (*this)(problem);
+                        PredicateDebugger::printRow(stream, rv, this->type(), "auto gsu (bypassed)");
+                        return rv;
                     }
-                    else
-                    {
-                        size_t minK = (gsu == 1) ? 0 : gsu * value[0];
-                        details << "prob=" << problem.boundSize(0) << " >= sol=" << minK;
-                    }
-                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
-                    return rv;
+                    size_t minK = (gsu == 1) ? 0 : gsu * value[0];
+                    return debugEvalCmp(problem, stream, "prob", problem.boundSize(0), ">=", "sol", minK);
                 }
             };
 
@@ -1962,7 +1952,7 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-                    PredicateDebugger::printRow(stream, rv, this->type(), "");
+                    PredicateDebugger::printRow(stream, rv, this->type());
                     return rv;
                 }
             };
@@ -1992,8 +1982,7 @@ namespace TensileLite
                                        std::ostream&                 stream) const override
                 {
                     bool rv = (*this)(problem);
-                    std::ostringstream details;
-                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    PredicateDebugger::printRow(stream, rv, this->type());
                     return rv;
                 }
             };

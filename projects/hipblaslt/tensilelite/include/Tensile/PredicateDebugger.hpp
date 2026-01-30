@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <iomanip>
 #include <ostream>
 #include <string>
@@ -35,55 +36,32 @@
 namespace TensileLite
 {
 /**
- * @brief Helper class for tabulated predicate debug output
+ * @brief Helper class for tabulated predicate debug output.
  *
- * Provides consistent formatting for predicate evaluation results
- * in a clean, readable format.
- *
- * In simplified mode (TENSILE_DB=0x10), only failing predicates are shown
- * and empty tables are suppressed.
+ * In simplified mode (TENSILE_DB=0x10), only failing predicates are shown.
  * In verbose mode (TENSILE_DB=0x40010), all predicates are shown.
  */
 class PredicateDebugger
 {
- public:
+public:
     static constexpr int COL_PASS      = 6;
     static constexpr int COL_PREDICATE = 30;
     static constexpr int INDENT_SIZE   = 2;
 
-    // Simple indent tracking
-    static int& indent()
-    {
-        thread_local int level = 0;
-        return level;
-    }
+    static int& indent() { thread_local int level = 0; return level; }
     static void pushIndent() { indent()++; }
     static void popIndent() { if(indent() > 0) indent()--; }
     static void resetIndent() { indent() = 0; }
 
-    // Pending header state for lazy printing
-    static std::string& pendingTitle()
-    {
-        thread_local std::string title;
-        return title;
-    }
-    static bool& headerPrinted()
-    {
-        thread_local bool printed = false;
-        return printed;
-    }
+    static std::string& pendingTitle() { thread_local std::string t; return t; }
+    static bool& headerPrinted() { thread_local bool p = false; return p; }
+    static bool verbose() { return Debug::Instance().printPredicateEvaluationVerbose(); }
 
-    /**
-     * @brief Print a separator line
-     */
     static void printSeparator(std::ostream& stream)
     {
         stream << std::string(80, '-') << std::endl;
     }
 
-    /**
-     * @brief Print library file banner
-     */
     static void printLibraryFileBanner(std::ostream& stream, const std::string& filename)
     {
         stream << std::endl;
@@ -92,28 +70,51 @@ class PredicateDebugger
         stream << std::string(80, '=') << std::endl;
     }
 
-    /**
-     * @brief Queue a table header for lazy printing
-     *
-     * In simplified mode, the header is only printed when a failing predicate
-     * is encountered. In verbose mode, the header is printed immediately.
-     */
     static void printHeader(std::ostream& stream, const std::string& title)
     {
         resetIndent();
-        pendingTitle() = title;
+        pendingTitle()  = title;
         headerPrinted() = false;
-
-        // In verbose mode, print header immediately
-        if(Debug::Instance().printPredicateEvaluationVerbose())
-        {
+        if(verbose())
             flushHeader(stream);
-        }
     }
 
-    /**
-     * @brief Actually print the header (called internally)
-     */
+    static void printFooter(std::ostream& stream, bool result)
+    {
+        if(!verbose() && !headerPrinted() && result)
+        {
+            pendingTitle().clear();
+            return;
+        }
+        if(!headerPrinted() && !result)
+            flushHeader(stream);
+        if(headerPrinted())
+        {
+            printSeparator(stream);
+            stream << "Result: " << (result ? "MATCH" : "NO MATCH") << std::endl;
+            printSeparator(stream);
+            stream << std::endl;
+        }
+        pendingTitle().clear();
+        headerPrinted() = false;
+    }
+
+    static void printRow(std::ostream&      stream,
+                         bool               pass,
+                         const std::string& predicate,
+                         const std::string& details = "")
+    {
+        if(pass && !verbose())
+            return;
+        flushHeader(stream);
+        std::string passStr(pass ? "[OK]" : "[!!]");
+        std::string indentStr(indent() * INDENT_SIZE, ' ');
+        stream << std::left << std::setw(COL_PASS) << passStr << indentStr
+               << std::setw(std::max(0, COL_PREDICATE - static_cast<int>(indentStr.size())))
+               << predicate << details << std::endl;
+    }
+
+private:
     static void flushHeader(std::ostream& stream)
     {
         if(!headerPrinted() && !pendingTitle().empty())
@@ -124,73 +125,6 @@ class PredicateDebugger
             printSeparator(stream);
             headerPrinted() = true;
         }
-    }
-
-    /**
-     * @brief Print the table footer with overall result
-     *
-     * In simplified mode, only prints if the header was printed (i.e., there
-     * were failing predicates). In verbose mode, always prints.
-     */
-    static void printFooter(std::ostream& stream, bool result)
-    {
-        bool verbose = Debug::Instance().printPredicateEvaluationVerbose();
-
-        // In simplified mode, only print footer if header was printed
-        // (meaning there were failures to show) OR if the overall result failed
-        if(!verbose && !headerPrinted() && result)
-        {
-            // All passed, nothing was shown, skip footer too
-            pendingTitle().clear();
-            return;
-        }
-
-        // If we have a pending header (result failed but no individual failures shown),
-        // print a summary line
-        if(!headerPrinted() && !result)
-        {
-            flushHeader(stream);
-        }
-
-        if(headerPrinted())
-        {
-            printSeparator(stream);
-            stream << "Result: " << (result ? "MATCH" : "NO MATCH") << std::endl;
-            printSeparator(stream);
-            stream << std::endl;
-        }
-
-        pendingTitle().clear();
-        headerPrinted() = false;
-    }
-
-    /**
-     * @brief Print a single predicate row
-     *
-     * In simplified mode (default when TENSILE_DB=0x10), only failing predicates are shown.
-     * In verbose mode (TENSILE_DB=0x40010), all predicates are shown.
-     */
-    static void printRow(std::ostream&      stream,
-                         bool               pass,
-                         const std::string& predicate,
-                         const std::string& details)
-    {
-        bool verbose = Debug::Instance().printPredicateEvaluationVerbose();
-
-        // In simplified mode, skip printing passing predicates
-        if(pass && !verbose)
-            return;
-
-        // Ensure header is printed before first row
-        flushHeader(stream);
-
-        std::string passStr   = pass ? "[OK]" : "[!!]";
-        std::string indentStr = std::string(indent() * INDENT_SIZE, ' ');
-
-        stream << std::left << std::setw(COL_PASS) << passStr
-               << indentStr << std::setw(std::max(0, COL_PREDICATE - static_cast<int>(indentStr.size())))
-               << predicate
-               << details << std::endl;
     }
 };
 }  // namespace TensileLite

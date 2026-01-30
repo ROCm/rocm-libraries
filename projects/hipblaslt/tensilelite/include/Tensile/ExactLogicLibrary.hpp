@@ -415,7 +415,7 @@ namespace TensileLite
                     PredicateDebugger::printLibraryFileBanner(std::cout, libraryFileName);
                 }
 
-                PredicateDebugger::printHeader(std::cout, "Solution Type: " + value->type());
+                PredicateDebugger::printHeader(std::cout, "ExactLogic: Problem");
                 value->debugEval(problem, std::cout);
                 PredicateDebugger::printFooter(std::cout, rv);
             }
