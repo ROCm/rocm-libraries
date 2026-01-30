@@ -3,9 +3,6 @@
 
 #pragma once
 
-#include <memory>
-#include <vector>
-
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
@@ -36,8 +33,6 @@ public:
                    const hipdnn_plugin_sdk::IGraph& opGraph,
                    [[maybe_unused]] const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
                    HipdnnEnginePluginExecutionContext& executionContext) const override;
-
-    bool hasCustomKnobs() const override;
 
     std::vector<hipdnn_data_sdk::data_objects::KnobT>
         getCustomKnobs(const HipdnnEnginePluginHandle& handle,

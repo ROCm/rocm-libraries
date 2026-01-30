@@ -34,8 +34,6 @@ public:
                  HipdnnEnginePluginExecutionContext& executionContext),
                 (const, override));
 
-    MOCK_METHOD(bool, hasCustomKnobs, (), (const, override));
-
     MOCK_METHOD((std::vector<hipdnn_data_sdk::data_objects::KnobT>),
                 getCustomKnobs,
                 (const HipdnnEnginePluginHandle& handle, const hipdnn_plugin_sdk::IGraph& opGraph),

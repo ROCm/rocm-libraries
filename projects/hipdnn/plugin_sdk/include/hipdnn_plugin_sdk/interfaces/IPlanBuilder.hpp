@@ -77,16 +77,6 @@ public:
         = 0;
 
     /**
-     * @brief Checks if this plan builder has custom knobs.
-     *
-     * Custom knobs allow plan builders to expose configuration options
-     * that can be set by the user when creating an engine configuration.
-     *
-     * @return true if this plan builder has custom knobs, false otherwise.
-     */
-    virtual bool hasCustomKnobs() const = 0;
-
-    /**
      * @brief Gets the custom knobs for this plan builder.
      *
      * This method returns the knob definitions that this plan builder supports.
