@@ -303,7 +303,7 @@ class BaseTuner(ABC):
 
         # We first check if a specialized template exists, e.g.
         # 'device_merge_wrapper_template' if it doesn't exist, we 
-        # fallback to 'base_wrapper_template'.
+        # fall back to 'base_wrapper_template'.
         template_name = f"{self.algo_full_name}_wrapper_template"
         if not template_dir.joinpath(template_name).exists():
             template_name = "base_wrapper_template"
