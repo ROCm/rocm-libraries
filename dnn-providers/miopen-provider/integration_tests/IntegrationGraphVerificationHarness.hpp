@@ -312,4 +312,4 @@ private:
 
 // NOLINTEND (portability-template-virtual-member-function)
 
-} // namespace hipdnn_test_sdk::utilities
+} // namespace miopen_plugin::test_utilities
