@@ -7,7 +7,7 @@
 #include <memory>
 #include <vector>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class EngineManager;
