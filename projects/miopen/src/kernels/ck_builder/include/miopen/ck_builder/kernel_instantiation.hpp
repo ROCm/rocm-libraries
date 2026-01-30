@@ -20,7 +20,7 @@ template <auto KernelDescriptor, typename DeviceOp>
 constexpr void instantiate_kernel(std::vector<std::unique_ptr<DeviceOp>>& kernels)
 {
     using Builder = ckb::ConvBuilder<KernelDescriptor.signature, KernelDescriptor.algorithm>;
-    do_builder_checks<Builder>();
+    static_assert(is_valid_builder<Builder>, "The derived Builder is not valid");
 
     kernels.push_back(std::make_unique<typename Builder::Instance>());
 }

@@ -15,18 +15,14 @@ namespace ck_builder {
 namespace instance {
 
 template <typename Builder>
-constexpr void do_builder_checks()
-{
+concept is_valid_builder =
     // Verify that Builder is a class type
-    static_assert(std::is_class_v<Builder>, "Builder should be a class type");
+    std::is_class_v<Builder> &&
 
     // Verify that Builder::Instance exists and is the actual device kernel class
-    static_assert(std::is_class_v<typename Builder::Instance>,
-                  "Builder::Instance should be a class type");
+    std::is_class_v<typename Builder::Instance> &&
 
-    static_assert(ck_tile::reflect::HasInstanceTraits<typename Builder::Instance>);
-}
-
+    ck_tile::reflect::HasInstanceTraits<typename Builder::Instance>;
 } // namespace instance
 } // namespace ck_builder
 } // namespace conv
