@@ -1,8 +1,13 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#define DEBUG_WORKSPACE_LOGGING
+
 #include <limits>
 #include <vector>
+#ifdef DEBUG_WORKSPACE_LOGGING
+#include <iostream>
+#endif
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -89,14 +94,22 @@ auto find20SolutionByWorkspaceSize(
               ? std::numeric_limits<size_t>::max()
               : 0;
 
+#ifdef DEBUG_WORKSPACE_LOGGING
+    std::cerr << "Finding solution by workspace size: Found " << numSolutions << " solutions\n";
+#else
     HIPDNN_LOG_INFO("Finding solution by workspace size: Found {} solutions", numSolutions);
+#endif
 
     for(auto& scopedSolution : scopedSolutions)
     {
         size_t wsSize;
         THROW_ON_MIOPEN_FAILURE(miopenGetSolutionWorkspaceSize(scopedSolution.get(), &wsSize));
 
+#ifdef DEBUG_WORKSPACE_LOGGING
+        std::cerr << "Solution: workspace_size=" << wsSize << "\n";
+#else
         HIPDNN_LOG_INFO("Solution: workspace_size={}", wsSize);
+#endif
 
         if((debugMode == HipdnnEnginePluginExecutionContext::DebugMode::FORCE_MIN_WORKSPACE
             && wsSize <= selectedWorkspaceSize)
@@ -108,7 +121,11 @@ auto find20SolutionByWorkspaceSize(
         }
     }
 
+#ifdef DEBUG_WORKSPACE_LOGGING
+    std::cerr << "Selected solution: workspace_size=" << selectedWorkspaceSize << "\n";
+#else
     HIPDNN_LOG_INFO("Selected solution: workspace_size={}", selectedWorkspaceSize);
+#endif
 
     return std::move(*selectedSolution);
 }
