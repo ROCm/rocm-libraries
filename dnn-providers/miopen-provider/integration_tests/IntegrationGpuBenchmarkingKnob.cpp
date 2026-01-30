@@ -29,12 +29,6 @@ class IntegrationGpuBenchmarkingKnob
     : public miopen_legacy_plugin::test_utilities::
           IntegrationGraphVerificationHarness<float, OperationType>
 {
-protected:
-    void runGraphTest(float /*tolerance*/,
-                      const hipdnn_data_sdk::utilities::TensorLayout& /*layout*/) override
-    {
-        // Not used for benchmarking smoke tests
-    }
 };
 
 /// Single parameterized test that runs for all operations

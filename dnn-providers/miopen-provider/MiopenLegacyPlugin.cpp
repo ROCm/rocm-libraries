@@ -95,7 +95,7 @@ hipdnnPluginStatus_t hipdnnPluginSetLoggingCallbackImpl(hipdnnCallback_t callbac
 {
     return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
         throwIfNull(callback);
-        hipdnn::logging::initializeCallbackLogging(pluginName, callback);
+        hipdnn::logging::initializeCallbackLogging(COMPONENT_NAME, callback);
         LOG_API_SUCCESS(apiName, "", "");
     });
 }

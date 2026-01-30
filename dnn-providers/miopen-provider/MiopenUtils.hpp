@@ -75,6 +75,12 @@ public:
         {
             HIPDNN_LOG_ERROR("Failed to set tuning policy: {}", miopenGetErrorString(status));
         }
+        else
+        {
+            HIPDNN_LOG_INFO("Tuning policy set to {} (benchmarking={})",
+                           static_cast<int>(policy),
+                           benchmarkingEnabled);
+        }
     }
 
     /// @brief Destructor restores tuning policy to original value.
@@ -84,6 +90,10 @@ public:
         if(status != miopenStatusSuccess)
         {
             HIPDNN_LOG_ERROR("Failed to restore tuning policy: {}", miopenGetErrorString(status));
+        }
+        else
+        {
+            HIPDNN_LOG_INFO("Tuning policy restored to {}", static_cast<int>(_originalPolicy));
         }
     }
 
