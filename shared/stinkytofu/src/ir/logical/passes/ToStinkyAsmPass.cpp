@@ -28,12 +28,91 @@
 #include "isa/ArchHelper.hpp"
 #include "stinkytofu.hpp"
 #include "support/Casting.hpp"
+
+// For ArchHelper access
+using namespace stinkytofu;
 #include <string>
 #include <vector>
 
 namespace
 {
     using namespace stinkytofu;
+
+    /**
+     * @brief Generate mnemonic for MFMA instructions
+     *
+     * Follows rocisa mnemonic format from rocisa/include/instruction/mfma.hpp:preStr()
+     * CDNA (gfx942, gfx950): v_mfma_{accType}_{m}x{n}x{k}[_{blocks}b]_{instType}[_1k]
+     * RDNA (gfx1250): v_wmma_{accType}_{m}x{n}x{k}_{instType}[_1k]
+     */
+    std::string generateMFMAMnemonic(const std::string& accType,
+                                     int                m,
+                                     int                n,
+                                     int                k,
+                                     int                blocks,
+                                     const std::string& instType,
+                                     bool               mfma1k,
+                                     GfxArchID          arch)
+    {
+        std::string variantStr
+            = std::to_string(m) + "x" + std::to_string(n) + "x" + std::to_string(k);
+
+        // RDNA architectures (gfx12+) use v_wmma instead of v_mfma
+        const auto* archInfo = ArchHelper::getInstance().getArchInfo(arch);
+        bool        isRDNA   = (archInfo && archInfo->major >= 12);
+
+        if(isRDNA)
+        {
+            // RDNA: v_wmma_{accType}_{m}x{n}x{k}_{instType}[_1k]
+            std::string mfma1kSuffix = mfma1k ? "_1k" : "";
+            return "v_wmma_" + accType + "_" + variantStr + "_" + instType + mfma1kSuffix;
+        }
+        else
+        {
+            // CDNA: v_mfma_{accType}_{m}x{n}x{k}[_{blocks}b]_{instType}[_1k]
+            std::string blocksSuffix = (blocks > 1) ? std::to_string(blocks) + "b_" : "";
+            std::string mfma1kSuffix = mfma1k ? "_1k" : "";
+            return "v_mfma_" + accType + "_" + variantStr + "_" + blocksSuffix + instType
+                   + mfma1kSuffix;
+        }
+    }
+
+    /**
+     * @brief Generate mnemonic for SMFMA (Sparse MFMA) instructions
+     *
+     * All architectures use v_smfmac_{accType}_{m}x{n}x{k}_{instType} format
+     * Note: blocks parameter is NOT part of the mnemonic, it's an instruction modifier/operand
+     */
+    std::string generateSMFMAMnemonic(const std::string& accType,
+                                      int                m,
+                                      int                n,
+                                      int                k,
+                                      int                blocks,
+                                      const std::string& instType,
+                                      GfxArchID          arch)
+    {
+        std::string variantStr
+            = std::to_string(m) + "x" + std::to_string(n) + "x" + std::to_string(k);
+
+        // All architectures use v_smfmac format (blocks is not part of mnemonic)
+        return "v_smfmac_" + accType + "_" + variantStr + "_" + instType;
+    }
+
+    /**
+     * @brief Generate mnemonic for MXMFMA (Mixed-precision scaled WMMA) instructions
+     *
+     * Follows rocisa mnemonic format from rocisa/include/instruction/mfma.hpp:preStr()
+     * Format: v_wmma_scale[16]_f32_{m}x{n}x{k}_{instType}
+     * Note: Uses "v_wmma_scale" prefix, not "v_mxmfma"
+     */
+    std::string generateMXMFMAMnemonic(int m, int n, int k, int block, const std::string& instType)
+    {
+        std::string variantStr
+            = std::to_string(m) + "x" + std::to_string(n) + "x" + std::to_string(k);
+        std::string blockStr = (block == 16) ? "16" : "";
+
+        return "v_wmma_scale" + blockStr + "_f32_" + variantStr + "_" + instType;
+    }
 
     // Helper to create assembly instruction from IR
     StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch)
@@ -44,8 +123,53 @@ namespace
         uint16_t    isaOpcode = 0;
         std::string mnemonic;
 
-        // Auto-generated mappings from TableGen
-        if(false)
+        // ====================================================================
+        // Special Instructions: MFMA, SMFMA, MXMFMA
+        // ====================================================================
+        // Generate mnemonics dynamically from instruction metadata
+        if(irInst->getOpcode() == logical::MFMA)
+        {
+            const MFMAData* data = irInst->asMFMA();
+            if(!data)
+            {
+                STINKY_UNREACHABLE("MFMA instruction has no MFMAData");
+                return nullptr;
+            }
+            mnemonic = generateMFMAMnemonic(data->accType,
+                                            data->m,
+                                            data->n,
+                                            data->k,
+                                            data->blocks,
+                                            data->instType,
+                                            data->mfma1k,
+                                            arch);
+        }
+        else if(irInst->getOpcode() == logical::SMFMA)
+        {
+            const SMFMAData* data = irInst->asSMFMA();
+            if(!data)
+            {
+                STINKY_UNREACHABLE("SMFMA instruction has no SMFMAData");
+                return nullptr;
+            }
+            mnemonic = generateSMFMAMnemonic(
+                data->accType, data->m, data->n, data->k, data->blocks, data->instType, arch);
+        }
+        else if(irInst->getOpcode() == logical::MXMFMA)
+        {
+            const MXMFMAData* data = irInst->asMXMFMA();
+            if(!data)
+            {
+                STINKY_UNREACHABLE("MXMFMA instruction has no MXMFMAData");
+                return nullptr;
+            }
+            mnemonic
+                = generateMXMFMAMnemonic(data->m, data->n, data->k, data->block, data->instType);
+        }
+        // ====================================================================
+        // Regular instructions: Use auto-generated mappings
+        // ====================================================================
+        else if(false)
         {
             // Placeholder for generated code
         }

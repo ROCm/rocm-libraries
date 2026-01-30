@@ -694,7 +694,8 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures)
 
     // Special opcodes that can't be lowered through standard passes
     std::set<logical::Opcode> SKIP_LOWERING = {
-        logical::MFMA, logical::MXMFMA, logical::SMFMA, logical::Label, logical::IntrinsicCall,
+        logical::Label, logical::IntrinsicCall,
+        // MFMA, SMFMA, MXMFMA: Now supported via custom mnemonic generation in ToStinkyAsmPass
         // TensorLoadToLds: Now works via generic createAsmFromIR (gfx1250 only)
     };
 
@@ -935,3 +936,329 @@ TEST(LogicalToAsmComprehensive, Gfx1250SpecificInstructions)
         }
     }
 }
+
+// ==============================================================================
+// Shared Test Structures for Matrix Instructions
+// ==============================================================================
+
+// Structure: {instType, accType, m, n, k, blocks, mfma1k, expectedMnemonic}
+struct MfmaTestCase
+{
+    std::string instType;
+    std::string accType;
+    int         m;
+    int         n;
+    int         k;
+    int         blocks;
+    bool        mfma1k;
+    std::string expectedMnemonic;
+};
+
+// Test structure: {architecture, test cases, arch major, minor, stepping}
+struct ArchTest
+{
+    std::string                archName;
+    std::vector<MfmaTestCase>& testCases;
+    int                        major;
+    int                        minor;
+    int                        stepping;
+};
+
+// ==============================================================================
+// MFMA Instruction Tests - POC
+// ==============================================================================
+
+/**
+ * @brief Test MFMA instruction lowering across different architectures
+ *
+ * Tests MFMA instructions with various parameters (instType, accType, m, n, k, blocks)
+ * to verify they can be properly lowered to architecture-specific assembly.
+ *
+ * MFMA lowering now implemented in ToStinkyAsmPass:
+ *   - Reads MFMAData from LogicalInstruction
+ *   - Generates mnemonic: v_mfma_{accType}_{m}x{n}x{k}[_{blocks}b]_{instType}
+ *   - Creates StinkyInstruction with proper HwInstDesc
+ *
+ * Structure:
+ *   mfma_gfx942 = {
+ *       {instType, accType, m, n, k, blocks, mfma1k, expectedMnemonic},
+ *       ...
+ *   }
+ *
+ * Each test verifies:
+ *   1. MFMA instruction can be created with given parameters
+ *   2. Lowering to StinkyTofu IR succeeds
+ *   3. Generated mnemonic matches expected hardware instruction
+ */
+TEST(LogicalToAsmComprehensive, MfmaInstructionLowering)
+{
+    std::cout << "\n=== MFMA Instruction Lowering Test ===\n";
+
+    // gfx942 (CDNA3) MFMA instructions
+    std::vector<MfmaTestCase> mfma_gfx942 = {
+        {"f32", "f32", 16, 16, 4, 1, false, "v_mfma_f32_16x16x4_f32"},
+        {"bf16", "f32", 16, 16, 16, 1, false, "v_mfma_f32_16x16x16_bf16"},
+        {"f16", "f32", 16, 16, 16, 1, false, "v_mfma_f32_16x16x16_f16"},
+        {"f32", "f32", 32, 32, 2, 1, false, "v_mfma_f32_32x32x2_f32"},
+        {"bf16", "f32", 32, 32, 8, 1, false, "v_mfma_f32_32x32x8_bf16"},
+        {"f16", "f32", 32, 32, 8, 1, false, "v_mfma_f32_32x32x8_f16"},
+        {"f64", "f64", 16, 16, 4, 1, false, "v_mfma_f64_16x16x4_f64"},
+        {"i8", "i32", 16, 16, 32, 1, false, "v_mfma_i32_16x16x32_i8"},
+        {"i8", "i32", 32, 32, 16, 1, false, "v_mfma_i32_32x32x16_i8"},
+        // Test blocks suffix format: {blocks}b_ (e.g., _4b_)
+        {"f32", "f32", 16, 16, 1, 4, false, "v_mfma_f32_16x16x1_4b_f32"},
+        {"bf16", "f32", 16, 16, 4, 4, false, "v_mfma_f32_16x16x4_4b_bf16"},
+        {"i8", "i32", 32, 32, 4, 2, false, "v_mfma_i32_32x32x4_2b_i8"},
+    };
+
+    // gfx950 (CDNA4) MFMA instructions (supports additional formats)
+    std::vector<MfmaTestCase> mfma_gfx950 = {
+        {"f32", "f32", 16, 16, 4, 1, false, "v_mfma_f32_16x16x4_f32"},
+        {"bf16", "f32", 16, 16, 16, 1, false, "v_mfma_f32_16x16x16_bf16"},
+        {"f16", "f32", 16, 16, 16, 1, false, "v_mfma_f32_16x16x16_f16"},
+        {"fp8_fp8", "f32", 16, 16, 32, 1, false, "v_mfma_f32_16x16x32_fp8_fp8"},
+        {"bf8_bf8", "f32", 16, 16, 32, 1, false, "v_mfma_f32_16x16x32_bf8_bf8"},
+        {"f32", "f32", 32, 32, 2, 1, false, "v_mfma_f32_32x32x2_f32"},
+    };
+
+    // gfx1250 (RDNA4) - Uses WMMA (Wave Matrix Multiply Accumulate) instead of MFMA
+    // Reverse engineered from: v_wmma_f32_16x16x32_bf16
+    // Note: RDNA uses v_wmma prefix, CDNA uses v_mfma prefix for same functionality
+    std::vector<MfmaTestCase> mfma_gfx1250 = {
+        {"bf16", "f32", 16, 16, 32, 1, false, "v_wmma_f32_16x16x32_bf16"},
+    };
+
+    std::vector<ArchTest> archTests = {
+        {"gfx942", mfma_gfx942, 9, 4, 2},
+        {"gfx950", mfma_gfx950, 9, 5, 0},
+        {"gfx1250", mfma_gfx1250, 12, 5, 0},
+    };
+
+    for(const auto& archTest : archTests)
+    {
+        std::cout << "\n--- Testing " << archTest.archName << " ---\n";
+        int passedTests = 0;
+        int totalTests  = archTest.testCases.size();
+
+        for(const auto& testCase : archTest.testCases)
+        {
+            std::cout << "Testing MFMA " << testCase.instType << "_" << testCase.m << "x"
+                      << testCase.n << "x" << testCase.k << "...\n";
+
+            // Create fresh PassManager and function for each test
+            PassManager pm;
+            Function&   func = pm.getPassContext().getFunction();
+            BasicBlock* bb   = func.createBasicBlock("test");
+            func.setEntryBlock(bb);
+
+            // Configure architecture
+            GemmTileConfig config;
+            config.arch = {archTest.major, archTest.minor, archTest.stepping};
+            pm.setGemmTileConfig(config);
+
+            // Create MFMA instruction (will be lowered to v_mfma on CDNA, v_wmma on RDNA)
+            LogicalInstruction* mfmaInst = MFMA(testCase.instType,
+                                                testCase.accType,
+                                                testCase.m,
+                                                testCase.n,
+                                                testCase.k,
+                                                testCase.blocks,
+                                                testCase.mfma1k,
+                                                vgpr(0), // acc
+                                                vgpr(4), // a
+                                                vgpr(8)); // b
+
+            bb->getIR().push_back(static_cast<IRBase*>(mfmaInst));
+
+            // Run lowering passes
+            pm.addPass(createCompositeInstructionLoweringPass());
+            pm.addPass(createToStinkyAsmPass());
+            pm.run();
+
+            // Verify lowering result
+            bool        found          = false;
+            std::string actualMnemonic = "";
+
+            for(BasicBlock& block : func)
+            {
+                for(IRBase& ir : block.getIR())
+                {
+                    if(ir.getType() == IRBase::IRType::StinkyTofu)
+                    {
+                        auto* stinky = static_cast<StinkyInstruction*>(&ir);
+                        if(stinky->getHwInstDesc())
+                        {
+                            actualMnemonic = stinky->getHwInstDesc()->mnemonic;
+                            found          = true;
+
+                            // Verify mnemonic matches
+                            EXPECT_EQ(actualMnemonic, testCase.expectedMnemonic)
+                                << "MFMA " << testCase.instType << "_" << testCase.m << "x"
+                                << testCase.n << "x" << testCase.k << " on " << archTest.archName;
+
+                            if(actualMnemonic == testCase.expectedMnemonic)
+                            {
+                                passedTests++;
+                                std::cout << "  ? " << actualMnemonic << " - PASS\n";
+                            }
+                            else
+                            {
+                                std::cout << "  ? Expected: " << testCase.expectedMnemonic
+                                          << ", Got: " << actualMnemonic << " - FAIL\n";
+                            }
+                        }
+                    }
+                }
+            }
+
+            if(!found)
+            {
+                std::cout << "  ? MFMA lowering failed - no StinkyTofu IR generated\n";
+                FAIL() << "MFMA lowering failed for " << testCase.instType << "_" << testCase.m
+                       << "x" << testCase.n << "x" << testCase.k << " on " << archTest.archName;
+            }
+        }
+
+        std::cout << "\n"
+                  << archTest.archName << " Summary: " << passedTests << "/" << totalTests
+                  << " MFMA lowering tests passed\n";
+    }
+}
+
+// ==============================================================================
+// SMFMA (Sparse MFMA) Instruction Lowering Test
+// ==============================================================================
+
+TEST(LogicalToAsmComprehensive, SmfmaInstructionLowering)
+{
+    std::cout << "\n=== SMFMA (Sparse MFMA) Instruction Lowering Test ===\n";
+
+    // SMFMA test case structure (reuses MfmaTestCase)
+    // All architectures use v_smfmac_{accType}_{m}x{n}x{k}_{instType} format
+    // Note: blocks parameter is NOT part of mnemonic, handled as instruction modifier
+
+    std::vector<MfmaTestCase> smfma_gfx942 = {
+        {"bf16", "f32", 16, 16, 32, 1, false, "v_smfmac_f32_16x16x32_bf16"},
+        {"f16", "f32", 16, 16, 32, 1, false, "v_smfmac_f32_16x16x32_f16"},
+        {"fp8_fp8", "f32", 16, 16, 64, 1, false, "v_smfmac_f32_16x16x64_fp8_fp8"},
+        {"i8", "i32", 16, 16, 64, 1, false, "v_smfmac_i32_16x16x64_i8"},
+    };
+
+    std::vector<MfmaTestCase> smfma_gfx950 = {
+        {"bf16", "f32", 16, 16, 32, 1, false, "v_smfmac_f32_16x16x32_bf16"},
+        {"f16", "f32", 16, 16, 32, 1, false, "v_smfmac_f32_16x16x32_f16"},
+        {"fp8_fp8", "f32", 16, 16, 64, 1, false, "v_smfmac_f32_16x16x64_fp8_fp8"},
+    };
+
+    std::vector<MfmaTestCase> smfma_gfx1250 = {
+        // gfx1250 also uses v_smfmac (NOT v_swmmac)
+        {"bf16", "f32", 16, 16, 32, 1, false, "v_smfmac_f32_16x16x32_bf16"},
+        {"f16", "f32", 16, 16, 32, 1, false, "v_smfmac_f32_16x16x32_f16"},
+    };
+
+    std::vector<ArchTest> archTests = {
+        {"gfx942", smfma_gfx942, 9, 4, 2},
+        {"gfx950", smfma_gfx950, 9, 5, 0},
+        {"gfx1250", smfma_gfx1250, 12, 5, 0},
+    };
+
+    for(const auto& archTest : archTests)
+    {
+        std::cout << "\n--- Testing " << archTest.archName << " ---\n";
+        int passedTests = 0;
+        int totalTests  = archTest.testCases.size();
+
+        for(const auto& testCase : archTest.testCases)
+        {
+            std::cout << "Testing SMFMA " << testCase.instType << "_" << testCase.m << "x"
+                      << testCase.n << "x" << testCase.k << "...\n";
+
+            // Create fresh PassManager and function for each test
+            PassManager pm;
+            Function&   func = pm.getPassContext().getFunction();
+            BasicBlock* bb   = func.createBasicBlock("test");
+            func.setEntryBlock(bb);
+
+            // Configure architecture
+            GemmTileConfig config;
+            config.arch = {archTest.major, archTest.minor, archTest.stepping};
+            pm.setGemmTileConfig(config);
+
+            // Create SMFMA instruction (requires metadata register)
+            LogicalInstruction* smfmaInst = SMFMA(testCase.instType,
+                                                  testCase.accType,
+                                                  testCase.m,
+                                                  testCase.n,
+                                                  testCase.k,
+                                                  testCase.blocks,
+                                                  testCase.mfma1k,
+                                                  vgpr(0), // acc
+                                                  vgpr(4), // a
+                                                  vgpr(8), // b
+                                                  vgpr(12)); // metadata (required for sparse)
+
+            bb->getIR().push_back(static_cast<IRBase*>(smfmaInst));
+
+            // Run lowering passes
+            pm.addPass(createCompositeInstructionLoweringPass());
+            pm.addPass(createToStinkyAsmPass());
+            pm.run();
+
+            // Verify lowering result
+            bool        found          = false;
+            std::string actualMnemonic = "";
+
+            for(BasicBlock& block : func)
+            {
+                for(IRBase& ir : block.getIR())
+                {
+                    if(ir.getType() == IRBase::IRType::StinkyTofu)
+                    {
+                        auto* stinky = static_cast<StinkyInstruction*>(&ir);
+                        if(stinky->getHwInstDesc())
+                        {
+                            actualMnemonic = stinky->getHwInstDesc()->mnemonic;
+                            found          = true;
+
+                            // Verify mnemonic matches
+                            EXPECT_EQ(actualMnemonic, testCase.expectedMnemonic)
+                                << "SMFMA " << testCase.instType << "_" << testCase.m << "x"
+                                << testCase.n << "x" << testCase.k << " on " << archTest.archName;
+
+                            if(actualMnemonic == testCase.expectedMnemonic)
+                            {
+                                passedTests++;
+                                std::cout << "  ? " << actualMnemonic << " - PASS\n";
+                            }
+                            else
+                            {
+                                std::cout << "  ? Expected: " << testCase.expectedMnemonic
+                                          << ", Got: " << actualMnemonic << " - FAIL\n";
+                            }
+                        }
+                    }
+                }
+            }
+
+            if(!found)
+            {
+                std::cout << "  ? SMFMA lowering failed - no StinkyTofu IR generated\n";
+                FAIL() << "SMFMA lowering failed for " << testCase.instType << "_" << testCase.m
+                       << "x" << testCase.n << "x" << testCase.k << " on " << archTest.archName;
+            }
+        }
+
+        std::cout << "\n"
+                  << archTest.archName << " Summary: " << passedTests << "/" << totalTests
+                  << " SMFMA lowering tests passed\n";
+    }
+}
+
+// ==============================================================================
+// MXMFMA (Mixed-Precision Scaled Matrix) Instruction Lowering Test
+// ==============================================================================
+// NOTE: MXMFMA tests are commented out because v_wmma_scale instructions
+// are not yet defined in hardware ISA tables. The MXMFMA logical instruction
+// exists but requires hardware support to be properly tested.
+
+// TODO: Enable when v_wmma_scale instructions are added to hardware definitions
