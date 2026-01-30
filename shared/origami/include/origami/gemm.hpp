@@ -11,7 +11,8 @@
 namespace origami {
 
 /**
- * @brief calculate the work utilization which is the ratio of the useful problem volume to the total scheduled volume.
+ * @brief calculate the work utilization which is the ratio of the useful problem volume to the
+ * total scheduled volume.
  *
  * @param problem Problem description (M, N, K, etc.)
  * @param config Kernel configuration.
@@ -20,14 +21,17 @@ namespace origami {
 double calculate_work_utilization(const problem_t& problem, const config_t& config);
 
 /**
- * @brief calculate the output utilization which is the ratio of the useful problem volume to the total scheduled volume.
+ * @brief calculate the output utilization which is the ratio of the useful problem volume to the
+ * total scheduled volume.
  *
  * @param problem Problem description (M, N, K, etc.)
  * @param config Kernel configuration.
  * @param vector_elems elements in the vector.
  * @return double ratio of the useful problem volume to the total scheduled volume.
  */
-double calculate_output_utilization(const problem_t& problem, const config_t& config, size_t vector_elems);
+double calculate_output_utilization(const problem_t& problem,
+                                    const config_t& config,
+                                    size_t vector_elems);
 
 /**
  * @brief Computes the launch parameters for the kernel
@@ -37,14 +41,16 @@ double calculate_output_utilization(const problem_t& problem, const config_t& co
  * @param config Kernel configuration.
  * @param grid_selection Different algorithms to select the grid size for kernel execution.
  * @param max_cus maximum number of CU's
- * @return tuple<reduction_t, size_t, size_t, size_t, size_t> tuple(reduction_strategy, num_wgs, num_active_cus, num_timesteps, split_factor)
+ * @return tuple<reduction_t, size_t, size_t, size_t, size_t> tuple(reduction_strategy, num_wgs,
+ * num_active_cus, num_timesteps, split_factor)
  */
-std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameters(const problem_t& problem,
-                                                                                  const hardware_t& hardware,
-                                                                                  const config_t& config,
-                                                                                  grid_selection_t grid_selection,
-                                                                                  size_t max_cus);
-                                                                                
+std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameters(
+    const problem_t& problem,
+    const hardware_t& hardware,
+    const config_t& config,
+    grid_selection_t grid_selection,
+    size_t max_cus);
+
 /**
  * @brief Check if MT fits in LDS
  *
@@ -69,7 +75,8 @@ bool check_lds_capacity(const hardware_t& hardware,
 double compute_mem_bw_from_occupancy(const hardware_t& hardware, size_t num_active_cus);
 
 /**
- * @brief This function rounds the number of elements up to the smallest value whose total size (given the element bit-width) is an exact multiple of a 128-byte memory transaction.
+ * @brief This function rounds the number of elements up to the smallest value whose total size
+ * (given the element bit-width) is an exact multiple of a 128-byte memory transaction.
  *
  * @param elements Macro tile dimension
  * @param element_size_bits size in bits
@@ -128,23 +135,23 @@ std::pair<size_t, size_t> compute_mall_tiles(const problem_t& problem,
  */
 struct context_t {
   /// Grid dimensions.
-  size_t grid_m = 0;
-  size_t grid_n = 0;
+  size_t grid_m    = 0;
+  size_t grid_n    = 0;
   size_t num_tiles = 0;
 
   /// Launch parameters.
   reduction_t reduction_strategy = reduction_t::none;
-  size_t sk_grid = 0;
-  size_t splitting_factor = 1;
-  size_t num_wgs = 0;
-  size_t num_timesteps = 1;
+  size_t sk_grid                 = 0;
+  size_t splitting_factor        = 1;
+  size_t num_wgs                 = 0;
+  size_t num_timesteps           = 1;
 
   /// Hardware-derived values.
-  size_t active_cus = 0;
+  size_t active_cus     = 0;
   double mem_bw_limited = 0.0;
 
   /// Tile-derived values.
-  size_t tile_elements = 0;
+  size_t tile_elements     = 0;
   size_t output_tile_bytes = 0;
 
   /// Workgroup mapping parameters.
@@ -153,63 +160,64 @@ struct context_t {
   /// MALL and L2 Tiles
   size_t mall_tiles_m = 0;
   size_t mall_tiles_n = 0;
-  size_t l2_tiles_m = 0;
-  size_t l2_tiles_n = 0;
+  size_t l2_tiles_m   = 0;
+  size_t l2_tiles_n   = 0;
 
   /// Default constructor.
   context_t() = default;
-  
+
   /**
-  * @brief Constructor from config, problem, and hardware.
-  *
-  * @param problem Problem description (M, N, K, etc.)
-  * @param hardware Hardware characteristics (@see origami::hardware_t)
-  * @param config Kernel configuration.
-  */
-  context_t(const problem_t& problem, const hardware_t& hardware, const config_t& config)
-  {
+   * @brief Constructor from config, problem, and hardware.
+   *
+   * @param problem Problem description (M, N, K, etc.)
+   * @param hardware Hardware characteristics (@see origami::hardware_t)
+   * @param config Kernel configuration.
+   */
+  context_t(const problem_t& problem, const hardware_t& hardware, const config_t& config) {
     // Extract parameters
-    const size_t M = problem.size.m;
-    const size_t N = problem.size.n;
+    const size_t M     = problem.size.m;
+    const size_t N     = problem.size.n;
     const size_t batch = problem.batch;
 
     const size_t NUM_XCD = hardware.NUM_XCD;
-    const size_t N_CU = hardware.N_CU;
+    const size_t N_CU    = hardware.N_CU;
 
     const size_t MT_M = config.mt.m;
     const size_t MT_N = config.mt.n;
 
     // Grid dimensions
-    grid_m = math::safe_ceil_div(M, MT_M);
-    grid_n = math::safe_ceil_div(N, MT_N);
+    grid_m    = math::safe_ceil_div(M, MT_M);
+    grid_n    = math::safe_ceil_div(N, MT_N);
     num_tiles = grid_m * grid_n * batch;
 
     // Launch parameters
-    auto [reduction, wgs, cus, timesteps, split] = compute_launch_parameters(problem, hardware, config, config.grid_selection, N_CU);
+    auto [reduction, wgs, cus, timesteps, split] =
+        compute_launch_parameters(problem, hardware, config, config.grid_selection, N_CU);
     reduction_strategy = reduction;
-    num_wgs = wgs;
-    num_timesteps = timesteps;
-    splitting_factor = split;
+    num_wgs            = wgs;
+    num_timesteps      = timesteps;
+    splitting_factor   = split;
 
     // Hardware-derived values
-    active_cus = cus;
+    active_cus     = cus;
     mem_bw_limited = compute_mem_bw_from_occupancy(hardware, active_cus);
 
     // Tile-derived values
-    tile_elements = MT_M * MT_N;
+    tile_elements     = MT_M * MT_N;
     output_tile_bytes = tile_elements * data_type_to_bytes(problem.d_dtype);
 
     // Copy workgroup mapping from config
-    int defaultWGM =
-      batch > 1 ? 1 : static_cast<int>(std::ceil(std::sqrt(N_CU / NUM_XCD)));
-    wgm = workgroup_mapping_t{0, NUM_XCD, std::max(defaultWGM, 1)};
+    int defaultWGM = batch > 1 ? 1 : static_cast<int>(std::ceil(std::sqrt(N_CU / NUM_XCD)));
+    wgm            = workgroup_mapping_t{0, NUM_XCD, std::max(defaultWGM, 1)};
 
     // MALL and L2 Tiles
-    auto [mall_m, mall_n] = compute_mall_tiles(problem, hardware, config, grid_m, grid_n, active_cus, wgm.wgm);
+    auto [mall_m, mall_n] =
+        compute_mall_tiles(problem, hardware, config, grid_m, grid_n, active_cus, wgm.wgm);
     mall_tiles_m = mall_m;
     mall_tiles_n = mall_n;
 
-    auto [l2_m, l2_n] = compute_l2_tiles(problem, hardware, config, grid_m, grid_n, active_cus, splitting_factor, wgm.wgm);
+    auto [l2_m, l2_n] = compute_l2_tiles(
+        problem, hardware, config, grid_m, grid_n, active_cus, splitting_factor, wgm.wgm);
     l2_tiles_m = l2_m;
     l2_tiles_n = l2_n;
   }
@@ -269,10 +277,10 @@ size_t compute_number_matrix_instructions(dim3_t mt, dim3_t mi);
  * @param config Kernel configuration.
  * @return double Latency in cycles.
  */
- double compute_cvt_overhead_x1(const problem_t& problem,
-                                const hardware_t& hardware,
-                                const config_t& config);
-  
+double compute_cvt_overhead_x1(const problem_t& problem,
+                               const hardware_t& hardware,
+                               const config_t& config);
+
 /**
  * @brief Compute TF32_X3 conversion overhead.
  *
@@ -371,7 +379,7 @@ double compute_parallel_reduction_latency(const problem_t& problem,
  * @brief Computes the latency per K-complete macro-tile timestep.
  * A timestep is defined as the time it takes for one set of concurrent
  * K-complete output tiles to be computed on one or more CUs. Typically,
- * this is simply the time it takes for one CU to complete one K-complete 
+ * this is simply the time it takes for one CU to complete one K-complete
  * output tile.
  *
  * @param problem Problem description (M, N, K, etc.)

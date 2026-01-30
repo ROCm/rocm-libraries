@@ -89,20 +89,23 @@ double calculate_output_utilization(const problem_t& problem,
 }
 
 // Computes the launch parameters for the kernel
-std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameters(const problem_t& problem,
-                                                                const hardware_t& hardware,
-                                                                const config_t& config,
-                                                                grid_selection_t grid_selection,
-                                                                size_t max_cus) {
-  reduction_t reduction_strategy = streamk::select_reduction(problem, hardware, config, grid_selection);
-  auto config_with_reduction = config;
+std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameters(
+    const problem_t& problem,
+    const hardware_t& hardware,
+    const config_t& config,
+    grid_selection_t grid_selection,
+    size_t max_cus) {
+  reduction_t reduction_strategy =
+      streamk::select_reduction(problem, hardware, config, grid_selection);
+  auto config_with_reduction               = config;
   config_with_reduction.reduction_strategy = reduction_strategy;
-  size_t num_wgs = streamk::select_grid_size(problem, hardware, config_with_reduction, grid_selection, max_cus);
+  size_t num_wgs =
+      streamk::select_grid_size(problem, hardware, config_with_reduction, grid_selection, max_cus);
 
   // output variables
-  size_t num_MT_M = math::safe_ceil_div(problem.size.m, config.mt.m);
-  size_t num_MT_N = math::safe_ceil_div(problem.size.n, config.mt.n);
-  size_t num_mts = num_MT_M * num_MT_N;
+  size_t num_MT_M       = math::safe_ceil_div(problem.size.m, config.mt.m);
+  size_t num_MT_N       = math::safe_ceil_div(problem.size.n, config.mt.n);
+  size_t num_mts        = num_MT_M * num_MT_N;
   size_t num_active_cus = num_wgs < hardware.N_CU ? num_wgs : hardware.N_CU;
   // There are cases in which StreamK combines multiple output MTs and assigns to 1 WG.
   // That means, we artifically observe one full timesteps, but that is not what actually happens
@@ -110,11 +113,12 @@ std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameter
   // computations in Origami. With current implementation, it is hard to capture that
   // behaviour analytically. So for now, if the num_wgs is less than the num_mts, we calculate
   // num_timesteps based on the num_mts. Otherwise, we use num_wgs to compute num_timesteps.
-  size_t num_timesteps = num_wgs > num_mts ? math::safe_ceil_div(num_wgs, hardware.N_CU)
-                                    : math::safe_ceil_div(num_mts, hardware.N_CU);
-  size_t splitting_factor  = math::safe_ceil_div(num_wgs, num_mts);
-  
-  return std::make_tuple(reduction_strategy, num_wgs, num_active_cus, num_timesteps, splitting_factor);
+  size_t num_timesteps    = num_wgs > num_mts ? math::safe_ceil_div(num_wgs, hardware.N_CU)
+                                              : math::safe_ceil_div(num_mts, hardware.N_CU);
+  size_t splitting_factor = math::safe_ceil_div(num_wgs, num_mts);
+
+  return std::make_tuple(
+      reduction_strategy, num_wgs, num_active_cus, num_timesteps, splitting_factor);
 }
 
 // Check if MT fits in LDS
@@ -141,8 +145,8 @@ double compute_mem_bw_from_occupancy(const hardware_t& hardware, size_t num_acti
   if (num_active_cus > hardware.N_CU) return 1.0;
 
   const double bw_limited = std::get<0>(hardware.mem_bw_per_wg_coefficients) * CUs * CUs +
-        std::get<1>(hardware.mem_bw_per_wg_coefficients) * CUs +
-        std::get<2>(hardware.mem_bw_per_wg_coefficients);
+                            std::get<1>(hardware.mem_bw_per_wg_coefficients) * CUs +
+                            std::get<2>(hardware.mem_bw_per_wg_coefficients);
 
   return std::min(bw_limited, 1.0);
 }
@@ -150,7 +154,7 @@ double compute_mem_bw_from_occupancy(const hardware_t& hardware, size_t num_acti
 // Round elements to 128B
 size_t round_elements_to_128B(size_t elements, size_t element_size_bits) {
   auto round_up_mul = [](size_t x, size_t m) { return (x + m - 1) / m * m; };
-  
+
   const size_t transaction_bits = 128u * 8u;  // 1024
   const size_t g                = std::gcd(element_size_bits, transaction_bits);
   const size_t E_block          = transaction_bits / g;  // elements per 128B-aligned chunk
@@ -188,8 +192,8 @@ std::pair<size_t, size_t> compute_l2_tiles(const problem_t& problem,
   l2_tile_n = std::max(std::min(grid_n, l2_tile_n), static_cast<size_t>(1));
 
   // Calculate memory footprint in bytes.
-  const auto a_bytes = data_type_to_bytes(problem.a_dtype);
-  const auto b_bytes = data_type_to_bytes(problem.b_dtype);
+  const auto a_bytes       = data_type_to_bytes(problem.a_dtype);
+  const auto b_bytes       = data_type_to_bytes(problem.b_dtype);
   auto calculate_footprint = [&](auto tile_m, auto tile_n) {
     auto a_footprint = tile_m * config.mt.mk() * a_bytes;
     auto b_footprint = tile_n * config.mt.nk() * b_bytes;
@@ -556,15 +560,14 @@ double compute_memory_latency(const problem_t& problem,
   const size_t MT_K = config.mt.k;
 
   const size_t num_active_cus = context.active_cus;
-  const double bw_limited = context.mem_bw_limited;
+  const double bw_limited     = context.mem_bw_limited;
 
   // 1) Estimate L2 hit-rate
   double H_mem1 = estimate_l2_hit(problem, hardware, config, context);
 
   // Global cap on L2 hit-rate (prevents impossible cache residency claims)
   // (Assumes capacity is given in KiB, convert to bytes)
-  double H_mem1_global =
-      compute_l2_hit_rate_global(problem, hardware, config, context);
+  double H_mem1_global = compute_l2_hit_rate_global(problem, hardware, config, context);
 
   H_mem1 = std::min(H_mem1, H_mem1_global);
 
@@ -577,10 +580,10 @@ double compute_memory_latency(const problem_t& problem,
           : 0.0;  // MALL is not supported, so we emulate every read as a miss
 
   // 3) Total loads are loads from A and loads from B
-  size_t Ld_A_value = a_trans ?
-      MT_M * round_elements_to_128B(MT_K, a_bits) : round_elements_to_128B(MT_M, a_bits) * MT_K;
-  size_t Ld_B_value = b_trans ?
-      round_elements_to_128B(MT_N, b_bits) * MT_K : MT_N * round_elements_to_128B(MT_K, b_bits);
+  size_t Ld_A_value = a_trans ? MT_M * round_elements_to_128B(MT_K, a_bits)
+                              : round_elements_to_128B(MT_M, a_bits) * MT_K;
+  size_t Ld_B_value = b_trans ? round_elements_to_128B(MT_N, b_bits) * MT_K
+                              : MT_N * round_elements_to_128B(MT_K, b_bits);
   auto Ld_CU_bytes  = (Ld_A_value * a_bytes)    // A Bytes
                      + (Ld_B_value * b_bytes);  // B Bytes
 
@@ -668,168 +671,172 @@ double compute_epilogue_latency(const problem_t& problem,
   // Items 2, 3, 4 are conditionally executed based on the problem.
   // For instance, if Beta=0, we skip a bunch of operations.
   // We skip bias and activation functions if they are not present.
-  // Herein, we consider the simplest case for now: Alpha=1, Beta=0, and no bias/activation functions.
-  // Skipping items 2, 3, 4, and 5 for now.
+  // Herein, we consider the simplest case for now: Alpha=1, Beta=0, and no bias/activation
+  // functions. Skipping items 2, 3, 4, and 5 for now.
 
   // Extract parameters
   const size_t M = problem.size.m;
   const size_t N = problem.size.n;
 
-  const size_t MT_M = config.mt.m;
-  const size_t MT_N = config.mt.n;
+  const size_t MT_M    = config.mt.m;
+  const size_t MT_N    = config.mt.n;
   const size_t d_bytes = data_type_to_bytes(problem.d_dtype);
-  
+
   const reduction_t reduction_strategy = context.reduction_strategy;
-  const size_t num_active_cus = context.active_cus;
-  const size_t splitting_factor = context.splitting_factor;
-  const int grid_m = context.grid_m;
-  const int grid_n = context.grid_n;
-  const double mem_bw_occ_limited = context.mem_bw_limited;
+  const size_t num_active_cus          = context.active_cus;
+  const size_t splitting_factor        = context.splitting_factor;
+  const int grid_m                     = context.grid_m;
+  const int grid_n                     = context.grid_n;
+  const double mem_bw_occ_limited      = context.mem_bw_limited;
 
   // Constants
-  constexpr double cycles_per_acc_read = 8.0;
-  constexpr double acc_read_parallelism = 0.9;
-  constexpr double cycles_per_bounds_check = 6.0;
-  constexpr double scalar_store_penalty = 2.;
-  constexpr size_t threads_per_wave = 64;
-  constexpr size_t bytes_per_vectorized_store = 16; // buffer_store_dwordx4 = 16 bytes
-  constexpr size_t cache_line_bytes = 128;
-  constexpr double cycles_per_sync = 100.0;
-  
+  constexpr double cycles_per_acc_read        = 8.0;
+  constexpr double acc_read_parallelism       = 0.9;
+  constexpr double cycles_per_bounds_check    = 6.0;
+  constexpr double scalar_store_penalty       = 2.;
+  constexpr size_t threads_per_wave           = 64;
+  constexpr size_t bytes_per_vectorized_store = 16;  // buffer_store_dwordx4 = 16 bytes
+  constexpr size_t cache_line_bytes           = 128;
+  constexpr double cycles_per_sync            = 100.0;
+
   // Common setup
   const double cycles_per_second = hardware.compute_clock_ghz * 1e9;
-  const size_t total_mfmas = math::safe_ceil_div(MT_M, config.mi.m) * math::safe_ceil_div(MT_N, config.mi.n);
-  const size_t MT_M_rounded_128bytes = round_elements_to_128B(MT_M, datatype_to_bits(problem.a_dtype));
+  const size_t total_mfmas =
+      math::safe_ceil_div(MT_M, config.mi.m) * math::safe_ceil_div(MT_N, config.mi.n);
+  const size_t MT_M_rounded_128bytes =
+      round_elements_to_128B(MT_M, datatype_to_bits(problem.a_dtype));
   const size_t elements_per_vectorized_store = bytes_per_vectorized_store / d_bytes;
-  const size_t elements_per_cache_line = math::safe_ceil_div(cache_line_bytes, d_bytes);
-  const double alignment_penalty = (M % elements_per_cache_line != 0) ? 1.3 : 1.0;
-  
+  const size_t elements_per_cache_line       = math::safe_ceil_div(cache_line_bytes, d_bytes);
+  const double alignment_penalty             = (M % elements_per_cache_line != 0) ? 1.3 : 1.0;
+
   // Helper: Convert cycles to seconds
   auto cycles_to_time = [&](double cycles) { return cycles / cycles_per_second; };
 
   // Helper: compute reduction overhead for a given tile size
   auto compute_reduction_overhead = [&](size_t tile_m, size_t tile_n) -> double {
     if (splitting_factor <= 1 || config.reduction_strategy == reduction_t::parallel) return 0.0;
-    
+
     size_t tile_m_128bytes = round_elements_to_128B(tile_m, datatype_to_bits(problem.d_dtype));
-    size_t tile_elements = tile_m_128bytes * tile_n;
-    size_t n_partials = splitting_factor - 1;
-    
+    size_t tile_elements   = tile_m_128bytes * tile_n;
+    size_t n_partials      = splitting_factor - 1;
+
     // IN-KERNEL REDUCTION (spinlock, tree, atomic)
     // 1. Sync overhead: Finishing WG spins on flags
     double L_sync = cycles_to_time(n_partials * cycles_per_sync);
-    
+
     // 2. Partial READ: Load all partials from workspace
     double partial_read_bytes = n_partials * tile_elements * d_bytes;
-    double L_partial_read = partial_read_bytes / mem_bw_occ_limited;
-    
+    double L_partial_read     = partial_read_bytes / mem_bw_occ_limited;
+
     // 3. Accumulation: v_add_f32 for each element × each partial
     double L_accumulate = cycles_to_time(n_partials * tile_elements / threads_per_wave);
-    
+
     // 4. ACC write-back: Results written back to ACC
-    double L_acc_writeback = cycles_to_time(total_mfmas * cycles_per_acc_read * acc_read_parallelism);
-    
+    double L_acc_writeback =
+        cycles_to_time(total_mfmas * cycles_per_acc_read * acc_read_parallelism);
+
     return L_sync + L_partial_read + L_accumulate + L_acc_writeback;
   };
-  
+
   // Check if we have edge tiles
-  bool has_interior = (M / MT_M > 1 && N / MT_N > 1);
-  bool has_m_edge = (M % MT_M != 0);
-  bool has_n_edge = (N % MT_N != 0);
+  bool has_interior  = (M / MT_M > 1 && N / MT_N > 1);
+  bool has_m_edge    = (M % MT_M != 0);
+  bool has_n_edge    = (N % MT_N != 0);
   size_t m_remainder = has_m_edge ? (M % MT_M) : MT_M;
   size_t n_remainder = has_n_edge ? (N % MT_N) : MT_N;
-  
+
   // TYPE 1: Interior (NonEdge) - Full tile, no bounds checking
   double L_interior = 0.0;
   if (has_interior) {
     // ACC transfer overhead
-    size_t acc_reads = total_mfmas;
-    double L_acc_transfer = cycles_to_time(
-        acc_reads * cycles_per_acc_read * acc_read_parallelism);
-    
+    size_t acc_reads      = total_mfmas;
+    double L_acc_transfer = cycles_to_time(acc_reads * cycles_per_acc_read * acc_read_parallelism);
+
     // Bounds checking overhead: one check per store instruction
     double L_edge_check = 0.0;
 
     // Store bandwidth (full tile)
     size_t store_bytes = MT_M_rounded_128bytes * MT_N * d_bytes;
-    double L_store = static_cast<double>(store_bytes) * alignment_penalty / mem_bw_occ_limited;
-    
+    double L_store     = static_cast<double>(store_bytes) * alignment_penalty / mem_bw_occ_limited;
+
     // Reduction overhead for interior tile
     double L_reduce = compute_reduction_overhead(MT_M, MT_N);
 
     L_interior = L_acc_transfer + L_edge_check + L_store + L_reduce;
   }
-  
+
   // TYPE 2: N-Edge - Uses vectorized store path with bounds checking
   double L_n_edge = 0.0;
   if (has_n_edge) {
     // Same ACC reads as interior (with vectorized store)
-    size_t acc_reads = total_mfmas;
+    size_t acc_reads      = total_mfmas;
     double L_acc_transfer = cycles_to_time(acc_reads * cycles_per_acc_read * acc_read_parallelism);
-    
+
     // Bounds checking overhead: one check per store instruction
     size_t total_elements_n = MT_M * n_remainder;
-    size_t store_instructions = math::safe_ceil_div(total_elements_n, 
-                                        threads_per_wave * elements_per_vectorized_store);
+    size_t store_instructions =
+        math::safe_ceil_div(total_elements_n, threads_per_wave * elements_per_vectorized_store);
     double edge_check_cycles = store_instructions * cycles_per_bounds_check;
-    double L_edge_check = cycles_to_time(edge_check_cycles);
-    
+    double L_edge_check      = cycles_to_time(edge_check_cycles);
+
     // Store bandwidth (smaller tile)
     size_t store_bytes = MT_M * n_remainder * d_bytes;
-    double L_store = static_cast<double>(store_bytes) * alignment_penalty / mem_bw_occ_limited;
-    
+    double L_store     = static_cast<double>(store_bytes) * alignment_penalty / mem_bw_occ_limited;
+
     // Reduction overhead for N-edge tile
     double L_reduce = compute_reduction_overhead(MT_M, n_remainder);
-    
+
     L_n_edge = L_acc_transfer + L_edge_check + L_store + L_reduce;
   }
-  
+
   // TYPE 3: M-Edge - Uses scalar store path with bounds checking
   double L_m_edge = 0.0;
   if (has_m_edge) {
     // Scalar store path has 2× MORE ACC reads (multiple passes/batches)
-    size_t acc_reads = 2 * total_mfmas;
+    size_t acc_reads      = 2 * total_mfmas;
     double L_acc_transfer = cycles_to_time(acc_reads * cycles_per_acc_read * acc_read_parallelism);
-    
+
     // Per-element bounds checking (divided by threads_per_wave for SIMD parallelism)
-    size_t total_elements_m = m_remainder * MT_N;
+    size_t total_elements_m   = m_remainder * MT_N;
     double store_instructions = math::safe_ceil_div(total_elements_m, threads_per_wave);
-    double edge_check_cycles = store_instructions * cycles_per_bounds_check;
-    double L_edge_check = cycles_to_time(edge_check_cycles);
-    
+    double edge_check_cycles  = store_instructions * cycles_per_bounds_check;
+    double L_edge_check       = cycles_to_time(edge_check_cycles);
+
     // Store bandwidth (smaller tile, scalar stores are less efficient)
     size_t store_bytes = m_remainder * MT_N * d_bytes;
-    double L_store = static_cast<double>(store_bytes) * scalar_store_penalty * alignment_penalty / mem_bw_occ_limited;
-    
+    double L_store = static_cast<double>(store_bytes) * scalar_store_penalty * alignment_penalty /
+                     mem_bw_occ_limited;
+
     // Reduction overhead for M-edge tile
     double L_reduce = compute_reduction_overhead(m_remainder, MT_N);
-    
+
     L_m_edge = L_acc_transfer + L_edge_check + L_store + L_reduce;
   }
-  
+
   // TYPE 4: Corner - Both M and N edges
   double L_corner = 0.0;
   if (has_m_edge && has_n_edge) {
     // Scalar store path with 2× more ACC reads (same as M-edge)
-    size_t acc_reads = 2 * total_mfmas;
+    size_t acc_reads      = 2 * total_mfmas;
     double L_acc_transfer = cycles_to_time(acc_reads * cycles_per_acc_read * acc_read_parallelism);
-    
+
     // Per-element bounds checking (divided by threads_per_wave for SIMD parallelism)
     size_t total_elements_corner = m_remainder * n_remainder;
-    double store_instructions = math::safe_ceil_div(total_elements_corner, threads_per_wave);
-    double edge_check_cycles = store_instructions * cycles_per_bounds_check;
-    double L_edge_check = cycles_to_time(edge_check_cycles);
-    
+    double store_instructions    = math::safe_ceil_div(total_elements_corner, threads_per_wave);
+    double edge_check_cycles     = store_instructions * cycles_per_bounds_check;
+    double L_edge_check          = cycles_to_time(edge_check_cycles);
+
     // Store bandwidth (smallest tile, scalar stores)
     size_t store_bytes = m_remainder * n_remainder * d_bytes;
-    double L_store = static_cast<double>(store_bytes) * scalar_store_penalty * alignment_penalty / mem_bw_occ_limited;
-    
+    double L_store = static_cast<double>(store_bytes) * scalar_store_penalty * alignment_penalty /
+                     mem_bw_occ_limited;
+
     // Reduction overhead for corner tile
     double L_reduce = compute_reduction_overhead(m_remainder, n_remainder);
-    
+
     L_corner = L_acc_transfer + L_edge_check + L_store + L_reduce;
   }
-  
+
   // CRITICAL PATH: maximum of all tile types (including their reduction overhead)
   double L_epilogue = std::max({L_interior, L_n_edge, L_m_edge, L_corner});
 
@@ -860,10 +867,10 @@ double compute_tile_latency(const problem_t& problem,
   const auto a_bits  = datatype_to_bits(problem.a_dtype);
   const auto b_bits  = datatype_to_bits(problem.b_dtype);
   const auto d_bytes = data_type_to_bytes(problem.d_dtype);
-              
-  const size_t grid_m = context.grid_m;
-  const size_t grid_n = context.grid_n;
-  const size_t splitting_factor = context.splitting_factor;
+
+  const size_t grid_m             = context.grid_m;
+  const size_t grid_n             = context.grid_n;
+  const size_t splitting_factor   = context.splitting_factor;
   const size_t mem_bw_occ_limited = context.mem_bw_limited;
 
   // 1) Compute per-tile latencies
@@ -871,16 +878,15 @@ double compute_tile_latency(const problem_t& problem,
   double L_compute = compute_mt_compute_latency(problem, hardware, config);
 
   // 1-2) Compute latency for the memory
-  double L_mem =
-      compute_memory_latency(problem, hardware, config, context);
+  double L_mem = compute_memory_latency(problem, hardware, config, context);
 
   // 1-3) Adjust based on work utilization
   // TODO Does work utilization need to be 128-byte rounded for a cache line?
   // The effective latency per useful operation increases as utilization drops.
   // This penalty affects BOTH compute and memory bounds for the tile's core work.
-  double utilization        = calculate_work_utilization(problem, config);
+  double utilization            = calculate_work_utilization(problem, config);
   double effective_tile_penalty = (utilization > 1e-9) ? (1.0 / (utilization)) : 1.0;
-    
+
   // 2) Work-group setup & iteration latencies
   double L_WG_setup = 1;
 
@@ -892,7 +898,7 @@ double compute_tile_latency(const problem_t& problem,
       std::min(std::max(config.occupancy, static_cast<int>(1)),
                static_cast<int>(math::safe_ceil_div(grid_m * grid_n * batch * splitting_factor,
                                                     hardware.N_CU)));  // Number of WGs per CU.
-  L_prologue = L_prologue * pow(0.95, real_occupancy);  // Factor chosen empirically
+  L_prologue = L_prologue * pow(0.95, real_occupancy);                 // Factor chosen empirically
   L_prologue *= effective_tile_penalty;
 
   // 4) MainLoop
@@ -909,15 +915,16 @@ double compute_tile_latency(const problem_t& problem,
   // 4-1) Look up main_loop_efficiency from hardware map
   double main_loop_efficiency = 1.0;
   if (config.custom_mainloop_scheduling) {
-    main_loop_efficiency = hardware.get_adjusted_main_loop_efficiency(problem.a_transpose, 
-                                                                      problem.b_transpose, 
-                                                                      config.mt.m, 
-                                                                      config.mt.n, 
-                                                                      config.mt.k, 
+    main_loop_efficiency = hardware.get_adjusted_main_loop_efficiency(problem.a_transpose,
+                                                                      problem.b_transpose,
+                                                                      config.mt.m,
+                                                                      config.mt.n,
+                                                                      config.mt.k,
                                                                       problem.mi_dtype);
   }
   // 4-2) Single-tile latency (apply penalty after finding the bottleneck)
-  double L_tile_single = (std::max(L_compute, L_mem) * main_loop_efficiency * effective_tile_penalty) + L_cvt;
+  double L_tile_single =
+      (std::max(L_compute, L_mem) * main_loop_efficiency * effective_tile_penalty) + L_cvt;
   // 4-3) Number of K-iterations
   const long k_per_split = static_cast<long>(math::safe_ceil_div(K, splitting_factor));
   long num_iter =
@@ -925,7 +932,7 @@ double compute_tile_latency(const problem_t& problem,
                static_cast<long>(1));
   // 4-4) Main loop latency
   double L_main_loop = L_tile_single * static_cast<double>(num_iter);
-  
+
   // 5) Epilogue: writes from all active CUs with limited bandwidth
   double L_epilogue = compute_epilogue_latency(problem, hardware, config, context);
 
@@ -970,50 +977,51 @@ double compute_parallel_reduction_latency(const problem_t& problem,
   const size_t MT_M = config.mt.m;
   const size_t MT_N = config.mt.n;
 
-  const size_t M = problem.size.m;
-  const size_t N = problem.size.n;
+  const size_t M     = problem.size.m;
+  const size_t N     = problem.size.n;
   const auto a_bytes = data_type_to_bytes(problem.a_dtype);
   const auto b_bytes = data_type_to_bytes(problem.b_dtype);
   const auto d_bytes = data_type_to_bytes(problem.d_dtype);
 
-  const size_t grid_m = context.grid_m;
-  const size_t grid_n = context.grid_n;
-  const size_t tile_elements = context.tile_elements;
-  const size_t splitting_factor = context.splitting_factor;
+  const size_t grid_m                  = context.grid_m;
+  const size_t grid_n                  = context.grid_n;
+  const size_t tile_elements           = context.tile_elements;
+  const size_t splitting_factor        = context.splitting_factor;
   const reduction_t reduction_strategy = context.reduction_strategy;
 
-  if (splitting_factor == 1 || reduction_strategy != reduction_t::parallel)
-    return 0.0;
+  if (splitting_factor == 1 || reduction_strategy != reduction_t::parallel) return 0.0;
 
   // Constants
-  constexpr size_t threads_per_wave = 64;
+  constexpr size_t threads_per_wave              = 64;
   constexpr double kernel_launch_overhead_cycles = 10000;
-  const double cycles_per_second = hardware.compute_clock_ghz * 1e9;
+  const double cycles_per_second                 = hardware.compute_clock_ghz * 1e9;
 
   // Common setup
   const size_t num_tiles = grid_m * grid_n * splitting_factor;
-  const size_t tile_elements_128bytes = round_elements_to_128B(MT_M, datatype_to_bits(problem.d_dtype)) * MT_N;
+  const size_t tile_elements_128bytes =
+      round_elements_to_128B(MT_M, datatype_to_bits(problem.d_dtype)) * MT_N;
 
   // Launch overhead
   double L_launch = kernel_launch_overhead_cycles / cycles_per_second;
 
   // Reduction kernel has num_tiles WGs (1 WG per output tile)
   size_t reduction_active_cus = std::min(num_tiles, static_cast<size_t>(hardware.N_CU));
-  double mem_bw = compute_mem_bw_from_occupancy(hardware, reduction_active_cus);
-  double mem_bw_limited = hardware.mem3_perf_ratio * mem_bw;
+  double mem_bw               = compute_mem_bw_from_occupancy(hardware, reduction_active_cus);
+  double mem_bw_limited       = hardware.mem3_perf_ratio * mem_bw;
 
   // READ: splitting_factor partials per tile
   double read_bytes_per_tile = splitting_factor * tile_elements_128bytes * d_bytes;
-  double L_read = read_bytes_per_tile / mem_bw_limited;
+  double L_read              = read_bytes_per_tile / mem_bw_limited;
 
   // COMPUTE: log2(splitting_factor) reduction steps
-  size_t reduction_steps = static_cast<size_t>(std::ceil(std::log2(static_cast<double>(splitting_factor))));
+  size_t reduction_steps =
+      static_cast<size_t>(std::ceil(std::log2(static_cast<double>(splitting_factor))));
   double adds_per_tile_cycles = tile_elements * reduction_steps / threads_per_wave;
-  double L_compute = adds_per_tile_cycles / cycles_per_second;
+  double L_compute            = adds_per_tile_cycles / cycles_per_second;
 
   // WRITE: 1 output tile (output dtype)
   double write_bytes_per_tile = tile_elements_128bytes * d_bytes;
-  double L_write = write_bytes_per_tile / mem_bw_limited;
+  double L_write              = write_bytes_per_tile / mem_bw_limited;
 
   double L_total = L_launch + L_read + L_compute + L_write;
 
@@ -1078,7 +1086,7 @@ double compute_total_latency(const problem_t& problem,
 
   // 0. Setup
   context_t context(problem, hardware, config);
-  
+
   // 1. Compute latency of a timestep
   double L_timestep = compute_timestep_latency(problem, hardware, config, context);
 
