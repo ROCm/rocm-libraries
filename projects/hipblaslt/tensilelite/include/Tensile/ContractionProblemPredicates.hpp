@@ -2574,7 +2574,7 @@ namespace TensileLite
                     }
                     details << "]";
                     if(problem.useBias())
-                        details << ", prob_src=" << static_cast<int>(problem.biasSrc());
+                        details << ", bias_src=" << static_cast<int>(problem.biasSrc());
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
