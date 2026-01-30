@@ -157,10 +157,6 @@ private:
 // Use hipdnn_data_sdk::flatbuffer_utilities::<TypeName> instead.
 namespace hipdnn_plugin_sdk
 {
-using IEngineDetails
-    [[deprecated("Use hipdnn_data_sdk::flatbuffer_utilities::IEngineDetails instead")]]
-    = hipdnn_data_sdk::flatbuffer_utilities::IEngineDetails;
-using EngineDetailsWrapper
-    [[deprecated("Use hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper instead")]]
-    = hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper;
+using IEngineDetails = hipdnn_data_sdk::flatbuffer_utilities::IEngineDetails;
+using EngineDetailsWrapper = hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper;
 } // namespace hipdnn_plugin_sdk

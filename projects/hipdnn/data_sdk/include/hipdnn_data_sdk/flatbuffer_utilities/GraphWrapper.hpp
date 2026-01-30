@@ -196,8 +196,6 @@ private:
 // Use hipdnn_data_sdk::flatbuffer_utilities::<TypeName> instead.
 namespace hipdnn_plugin_sdk
 {
-using IGraph [[deprecated("Use hipdnn_data_sdk::flatbuffer_utilities::IGraph instead")]]
-= hipdnn_data_sdk::flatbuffer_utilities::IGraph;
-using GraphWrapper [[deprecated("Use hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper instead")]]
-= hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper;
+using IGraph = hipdnn_data_sdk::flatbuffer_utilities::IGraph;
+using GraphWrapper = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper;
 } // namespace hipdnn_plugin_sdk

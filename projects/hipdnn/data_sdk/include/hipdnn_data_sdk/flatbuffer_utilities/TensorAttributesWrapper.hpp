@@ -166,10 +166,6 @@ private:
 // Use hipdnn_data_sdk::flatbuffer_utilities::<TypeName> instead.
 namespace hipdnn_plugin_sdk
 {
-using ITensorAttributesWrapper
-    [[deprecated("Use hipdnn_data_sdk::flatbuffer_utilities::ITensorAttributesWrapper instead")]]
-    = hipdnn_data_sdk::flatbuffer_utilities::ITensorAttributesWrapper;
-using TensorAttributesWrapper
-    [[deprecated("Use hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper instead")]]
-    = hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper;
+using ITensorAttributesWrapper = hipdnn_data_sdk::flatbuffer_utilities::ITensorAttributesWrapper;
+using TensorAttributesWrapper = hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper;
 } // namespace hipdnn_plugin_sdk
