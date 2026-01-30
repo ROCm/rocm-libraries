@@ -96,7 +96,7 @@ class warp_sort_stable
 
     // Select shuffle backend if requested, otherwise fallback to merge_path type
     // (the fallback type is technically unused due to if constexpr, but must be valid).
-    using shuffle_impl = std::conditional_t<
+    using chosen_impl = std::conditional_t<
         Algorithm == warp_sort_stable_algorithm::shuffle,
         detail::warp_sort_shuffle_stable<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>,
         merge_path_impl>;
@@ -114,14 +114,7 @@ public:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_key, BinaryFunction compare_function = BinaryFunction())
     {
-        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
-        {
-            shuffle_impl().sort(thread_key, compare_function);
-        }
-        else
-        {
-            merge_path_impl().sort(thread_key, compare_function);
-        }
+        chosen_impl().sort(thread_key, compare_function);
     }
 
     /// \brief Stable sort for Key only with storage (Per-thread single value).
@@ -131,14 +124,7 @@ public:
               storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction())
     {
-        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
-        {
-            shuffle_impl().sort(thread_key, compare_function);
-        }
-        else
-        {
-            merge_path_impl().sort(thread_key, storage, compare_function);
-        }
+        chosen_impl().sort(thread_key, compare_function);
     }
 
     /// \brief Stable sort for Key Array (Per-thread array).
@@ -147,14 +133,7 @@ public:
     void sort(Key (&thread_keys)[ItemsPerThread],
               BinaryFunction compare_function = BinaryFunction())
     {
-        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
-        {
-            shuffle_impl().sort(thread_keys, compare_function);
-        }
-        else
-        {
-            merge_path_impl().sort(thread_keys, compare_function);
-        }
+        chosen_impl().sort(thread_keys, compare_function);
     }
 
     /// \brief Stable sort for Key Array with storage (Per-thread array).
@@ -164,14 +143,7 @@ public:
               storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction())
     {
-        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
-        {
-            shuffle_impl().sort(thread_keys, compare_function);
-        }
-        else
-        {
-            merge_path_impl().sort(thread_keys, storage, compare_function);
-        }
+        chosen_impl().sort(thread_keys, compare_function);
     }
 
     /// \brief Stable sort for Key Array with storage and valid input size.
@@ -197,14 +169,7 @@ public:
               Value&         thread_value,
               BinaryFunction compare_function = BinaryFunction())
     {
-        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
-        {
-            shuffle_impl().sort(thread_key, thread_value, compare_function);
-        }
-        else
-        {
-            merge_path_impl().sort(thread_key, thread_value, compare_function);
-        }
+        chosen_impl().sort(thread_key, thread_value, compare_function);
     }
 
     /// \brief Stable sort for Key-Value pair with storage (Per-thread single value).
@@ -215,14 +180,7 @@ public:
               storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction())
     {
-        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
-        {
-            shuffle_impl().sort(thread_key, thread_value, compare_function);
-        }
-        else
-        {
-            merge_path_impl().sort(thread_key, thread_value, storage, compare_function);
-        }
+        chosen_impl().sort(thread_key, thread_value, compare_function);
     }
 
     /// \brief Stable sort for Key-Value pair with storage and valid input size (Per-thread single value).
@@ -247,14 +205,7 @@ public:
               Value (&thread_values)[ItemsPerThread],
               BinaryFunction compare_function = BinaryFunction())
     {
-        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
-        {
-            shuffle_impl().sort(thread_keys, thread_values, compare_function);
-        }
-        else
-        {
-            merge_path_impl().sort(thread_keys, thread_values, compare_function);
-        }
+        chosen_impl().sort(thread_keys, thread_values, compare_function);
     }
 
     /// \brief Stable sort for Key-Value Arrays with storage (Per-thread array).
@@ -265,14 +216,7 @@ public:
               storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction())
     {
-        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
-        {
-            shuffle_impl().sort(thread_keys, thread_values, compare_function);
-        }
-        else
-        {
-            merge_path_impl().sort(thread_keys, thread_values, storage, compare_function);
-        }
+        chosen_impl().sort(thread_keys, thread_values, compare_function);
     }
 
     /// \brief Stable sort for Key-Value Arrays with storage and valid input size.
