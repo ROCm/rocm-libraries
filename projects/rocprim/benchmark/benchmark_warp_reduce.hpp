@@ -87,36 +87,6 @@ void segmented_warp_reduce_kernel(const T* d_input, Flag* d_flags, T* d_output)
     }
 }
 
-template<bool         AllReduce,
-         bool         Segmented,
-         unsigned int VirtualWaveSize,
-         unsigned int BlockSize,
-         unsigned int Trials,
-         typename T,
-         typename Flag>
-inline auto execute_warp_reduce_kernel(
-    T* input, T* output, Flag* /* flags */, size_t items, hipStream_t stream) ->
-    typename std::enable_if<!Segmented>::type
-{
-    warp_reduce_kernel<AllReduce, T, VirtualWaveSize, Trials>
-        <<<dim3(items / BlockSize), dim3(BlockSize), 0, stream>>>(input, output);
-}
-
-template<bool         AllReduce,
-         bool         Segmented,
-         unsigned int VirtualWaveSize,
-         unsigned int BlockSize,
-         unsigned int Trials,
-         typename T,
-         typename Flag>
-inline auto execute_warp_reduce_kernel(
-    T* input, T* output, Flag* flags, size_t items, hipStream_t stream) ->
-    typename std::enable_if<Segmented>::type
-{
-    segmented_warp_reduce_kernel<T, Flag, VirtualWaveSize, Trials>
-        <<<dim3(items / BlockSize), dim3(BlockSize), 0, stream>>>(input, flags, output);
-}
-
 template<bool AllReduce,
          bool Segmented,
          typename T,
@@ -165,15 +135,21 @@ struct warp_reduce_benchmark : public primbench::benchmark_interface
         state.run(
             [&]
             {
-                execute_warp_reduce_kernel<AllReduce,
-                                           Segmented,
-                                           VirtualWaveSize,
-                                           BlockSize,
-                                           Trials>(d_input.get(),
-                                                   d_output.get(),
-                                                   d_flags.get(),
-                                                   items,
-                                                   stream);
+                if constexpr(Segmented)
+                {
+
+                    segmented_warp_reduce_kernel<T, flag_type, VirtualWaveSize, Trials>
+                        <<<dim3(items / BlockSize), dim3(BlockSize), 0, stream>>>(d_input.get(),
+                                                                                  d_flags.get(),
+                                                                                  d_output.get());
+                }
+                else
+                {
+
+                    warp_reduce_kernel<AllReduce, T, VirtualWaveSize, Trials>
+                        <<<dim3(items / BlockSize), dim3(BlockSize), 0, stream>>>(d_input.get(),
+                                                                                  d_output.get());
+                }
             });
     }
 };
