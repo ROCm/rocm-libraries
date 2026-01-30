@@ -103,39 +103,23 @@ struct XdlAlgorithm
 
 static_assert(ckb::factory::FwdXdlAlgorithm<XdlAlgorithm>);
 
+struct TensorDescriptor
+{
+    struct Config
+    {
+        ckb::TensorLayout layout;
+        ckb::DataType data_type;
+        ckb::DataType compute_type;
+    } config;
+};
+
 struct XdlSignature
 {
     int spatial_dim;
     ckb::ConvDirection direction;
-    struct InputTensorDescriptor
-    {
-        struct Config
-        {
-            ckb::TensorLayout layout;
-            ckb::DataType data_type;
-            ckb::DataType compute_type;
-        } config;
-    } input;
-
-    struct WeightTensorDescriptor
-    {
-        struct Config
-        {
-            ckb::TensorLayout layout;
-            ckb::DataType data_type;
-            ckb::DataType compute_type;
-        } config;
-    } weight;
-
-    struct OutputTensorDescriptor
-    {
-        struct Config
-        {
-            ckb::TensorLayout layout;
-            ckb::DataType data_type;
-            ckb::DataType compute_type;
-        } config;
-    } output;
+    TensorDescriptor input;
+    TensorDescriptor weight;
+    TensorDescriptor output;
     ckb::DataType data_type;
     ckb::DataType accumulation_data_type;
 };
@@ -209,71 +193,118 @@ constexpr XdlInstance make_xdl_instance_from_old_params(
     // 49. Groups to merge
     std::size_t num_conv_groups_to_merge = 1)
 {
+    // Our project auto-formatting makes this initializer hard to read
+    // clang-format off
     return XdlInstance{
-        .signature = {.spatial_dim            = spatial_dim,
-                      .direction              = ckb::ConvDirection::FORWARD,
-                      .input                  = {.config = {.layout       = input_layout,
-                                           .data_type    = input_data_type,
-                                           .compute_type = input_compute_type}},
-                      .weight                 = {.config = {.layout       = weight_layout,
-                                            .data_type    = weight_data_type,
-                                            .compute_type = weight_compute_type}},
-                      .output                 = {.config =
-                                     {
-                                         .layout       = output_layout,
-                                         .data_type    = output_data_type,
-                                         .compute_type = output_data_type // Output compute type
-                                                                          // same as data type
-                                     }},
-                      .data_type              = input_data_type,
-                      .accumulation_data_type = acc_data_type},
-        .algorithm =
-            {.thread_block  = {.block_size = block_size,
-                              .tile_size  = {.m = m_per_block, .n = n_per_block, .k = k_per_block}},
-             .gridwise_gemm = {.ak1 = ak1,
-                               .bk1 = bk1,
-                               .xdl_params{.m_per_xdl      = m_per_xdl,
-                                           .n_per_xdl      = n_per_xdl,
-                                           .m_xdl_per_wave = m_xdl_per_wave,
-                                           .n_xdl_per_wave = n_xdl_per_wave}},
-             .transfer =
-                 {.a = {.block_transfer = {.k0  = a_thread_cluster_lengths[0],
-                                           .m_n = a_thread_cluster_lengths[1],
-                                           .k1  = a_thread_cluster_lengths[2]},
-                        .lds_transfer   = {.src_vector_dim = a_block_transfer_src_vector_dim,
-                                         .src_scalar_per_vector =
-                                             a_block_transfer_src_scalar_per_vector,
-                                         .lds_dst_scalar_per_vector =
-                                             a_block_transfer_dst_scalar_per_vector_k1,
-                                         .is_direct_load = false,
-                                         .lds_padding    = a_block_lds_extra_m},
-                        .thread_cluster_arrange_order = {.order = a_thread_cluster_arrange_order},
-                        .src_access_order = {.order = a_block_transfer_src_access_order}},
-                  .b = {.block_transfer = {.k0  = b_thread_cluster_lengths[0],
-                                           .m_n = b_thread_cluster_lengths[1],
-                                           .k1  = b_thread_cluster_lengths[2]},
-                        .lds_transfer   = {.src_vector_dim = b_block_transfer_src_vector_dim,
-                                         .src_scalar_per_vector =
-                                             b_block_transfer_src_scalar_per_vector,
-                                         .lds_dst_scalar_per_vector =
-                                             b_block_transfer_dst_scalar_per_vector_k1,
-                                         .is_direct_load = false,
-                                         .lds_padding    = b_block_lds_extra_n},
-                        .thread_cluster_arrange_order = {.order = b_thread_cluster_arrange_order},
-                        .src_access_order = {.order = b_block_transfer_src_access_order}},
-                  .c = {.thread_cluster_dims = {.m_block        = c_thread_cluster_lengths[0],
-                                                .m_wave_per_xdl = c_thread_cluster_lengths[1],
-                                                .n_block        = c_thread_cluster_lengths[2],
-                                                .n_wave_per_xdl = c_thread_cluster_lengths[3]},
-                        .epilogue            = {.m_xdl_per_wave_per_shuffle =
-                                         c_shuffle_m_xdl_per_wave_per_shuffle,
-                                     .n_per_wave_per_shuffle = c_shuffle_n_xdl_per_wave_per_shuffle,
-                                     .scalar_per_vector = c_block_transfer_scalar_per_vector}}},
-             .fwd_specialization         = conv_fwd_specialization,
-             .gemm_specialization        = gemm_specialization,
-             .num_gemm_k_prefetch_stages = num_gemm_k_prefetch_stage,
-             .num_conv_groups_to_merge   = num_conv_groups_to_merge,
-             .loop_scheduler             = loop_scheduler}};
+        .signature = {
+            .spatial_dim            = spatial_dim,
+            .direction              = ckb::ConvDirection::FORWARD,
+            .input                  = {
+                .config = {
+                    .layout       = input_layout,
+                    .data_type    = input_data_type,
+                    .compute_type = input_compute_type
+                }
+            },
+            .weight = {
+                .config = {
+                    .layout       = weight_layout,
+                    .data_type    = weight_data_type,
+                    .compute_type = weight_compute_type
+                }
+            },
+            .output = {
+                .config = {
+                    .layout       = output_layout,
+                    .data_type    = output_data_type,
+                    .compute_type = output_data_type // Output compute type same as data type
+                }
+            },
+            .data_type              = input_data_type,
+            .accumulation_data_type = acc_data_type
+        },
+        .algorithm = {
+            .thread_block = {
+                .block_size = block_size,
+                .tile_size  = {
+                    .m = m_per_block,
+                    .n = n_per_block,
+                    .k = k_per_block
+                }
+            },
+            .gridwise_gemm = {
+                .ak1        = ak1,
+                .bk1        = bk1,
+                .xdl_params = {
+                    .m_per_xdl      = m_per_xdl,
+                    .n_per_xdl      = n_per_xdl,
+                    .m_xdl_per_wave = m_xdl_per_wave,
+                    .n_xdl_per_wave = n_xdl_per_wave
+                }
+            },
+            .transfer = {
+                .a = {
+                    .block_transfer = {
+                        .k0  = a_thread_cluster_lengths[0],
+                        .m_n = a_thread_cluster_lengths[1],
+                        .k1  = a_thread_cluster_lengths[2]
+                    },
+                    .lds_transfer = {
+                        .src_vector_dim            = a_block_transfer_src_vector_dim,
+                        .src_scalar_per_vector     = a_block_transfer_src_scalar_per_vector,
+                        .lds_dst_scalar_per_vector = a_block_transfer_dst_scalar_per_vector_k1,
+                        .is_direct_load            = false,
+                        .lds_padding               = a_block_lds_extra_m
+                    },
+                    .thread_cluster_arrange_order = {
+                        .order = a_thread_cluster_arrange_order
+                    },
+                    .src_access_order = {
+                        .order = a_block_transfer_src_access_order
+                    }
+                },
+                .b = {
+                    .block_transfer = {
+                        .k0  = b_thread_cluster_lengths[0],
+                        .m_n = b_thread_cluster_lengths[1],
+                        .k1  = b_thread_cluster_lengths[2]
+                    },
+                    .lds_transfer = {
+                        .src_vector_dim            = b_block_transfer_src_vector_dim,
+                        .src_scalar_per_vector     = b_block_transfer_src_scalar_per_vector,
+                        .lds_dst_scalar_per_vector = b_block_transfer_dst_scalar_per_vector_k1,
+                        .is_direct_load            = false,
+                        .lds_padding               = b_block_lds_extra_n
+                    },
+                    .thread_cluster_arrange_order = {
+                        .order = b_thread_cluster_arrange_order
+                    },
+                    .src_access_order = {
+                        .order = b_block_transfer_src_access_order
+                    }
+                },
+                .c = {
+                    .thread_cluster_dims = {
+                        .m_block        = c_thread_cluster_lengths[0],
+                        .m_wave_per_xdl = c_thread_cluster_lengths[1],
+                        .n_block        = c_thread_cluster_lengths[2],
+                        .n_wave_per_xdl = c_thread_cluster_lengths[3]
+                    },
+                    .epilogue = {
+                        .m_xdl_per_wave_per_shuffle = c_shuffle_m_xdl_per_wave_per_shuffle,
+                        .n_per_wave_per_shuffle     = c_shuffle_n_xdl_per_wave_per_shuffle,
+                        .scalar_per_vector          = c_block_transfer_scalar_per_vector
+                    }
+                }
+            },
+            .fwd_specialization         = conv_fwd_specialization,
+            .gemm_specialization        = gemm_specialization,
+            .num_gemm_k_prefetch_stages = num_gemm_k_prefetch_stage,
+            .num_conv_groups_to_merge   = num_conv_groups_to_merge,
+            .loop_scheduler             = loop_scheduler
+        }
+    };
+    // clang-format on
 }
 } // namespace instance
 } // namespace ck_builder
