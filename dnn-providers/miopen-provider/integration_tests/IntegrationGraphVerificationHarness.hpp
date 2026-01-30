@@ -66,7 +66,6 @@ protected:
         }
     }
 
-<<<<<<< HEAD
 protected:
     /// Execute graph with knob settings (for smoke tests without CPU validation)
     void executeGraphWithKnobs(hipdnn_frontend::graph::Graph& graph,
@@ -122,12 +121,6 @@ protected:
 
         ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
     }
-=======
-    virtual void runGraphTest(DataType tolerance,
-                              const hipdnn_data_sdk::utilities::TensorLayout& layout
-                              = hipdnn_data_sdk::utilities::TensorLayout::NCHW)
-        = 0;
->>>>>>> db038633764d77aeee1b09c5695819ff11cef6fb
 
     void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
     {
