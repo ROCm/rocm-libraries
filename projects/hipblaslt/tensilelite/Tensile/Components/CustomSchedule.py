@@ -345,12 +345,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
             else:
                 return ret
 
-        needIfMacro = False
-        ToSched = dict()
-        for k, stream in InstStreams.items():
-            ToSched[k] = scheduleInst(stream[0], stream[1])
-            if len(ToSched[k]) > 1:
-                needIfMacro = True
+        ToSched = {k: scheduleInst(stream[0], stream[1]) for k, stream in InstStreams.items()}
 
         def nllvmcntHandling(inst, shift0, shift1):
             if isinstance(inst, SWaitCnt) and (inst.vlcnt != -1 or (inst.dscnt != -1 and opt1.nllZeroDscnt)):
@@ -376,66 +371,48 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
             else:
                 macro.add(inst)
 
-        def scheduleInst1(instList, macroGuard=""):
-            if len(instList) == 1:
-                if instList[0] != None:
-                    for inst in instList[0].flatitems():
-                        if isinstance(inst, SWaitCnt):
-                            nllvmcntHandling(inst, opt1.nglshift, opt1.nllshift)
-                        else:
-                            if macroGuard != "":
-                                macro.add(ValueIf(macroGuard))
-                            macro.add(inst)
-                            if macroGuard != "":
-                                macro.add(ValueEndif(comment="EndIf %s"%(macroGuard)))
+        def get_macro_guard(key):
+            """Determine the macro guard for a given instruction key."""
+            if key in ['GRIncA', 'GRIncB']:
+                return "\\useGRInc == 1"
+            elif key in ['GRA', 'GRB', 'LWSA', 'LWSB']:
+                return "\\useGR == 1"
+            elif key in ['LRA%u' % lastIter, 'LRB%u' % lastIter, 'LRSA', 'LRSB']:
+                return "\\usePLR == 1"
+            elif key in ['LCC']:
+                return "\\useLoop == 1"
+            return ""
 
-        for k,ts in ToSched.items():
-            if k in ['GRIncA', 'GRIncB']: # check for global read inc
-                scheduleInst1(ts, "\\useGRInc == 1")
-            elif k in ['GRA', 'GRB', 'LWSA', 'LWSB']: # check for global reads
-                scheduleInst1(ts, "\\useGR == 1")
-            elif k in ['LRA%u'%lastIter, 'LRB%u'%lastIter, 'LRSA', 'LRSB']: # check for next prefetch
-                scheduleInst1(ts, "\\usePLR == 1")
-            elif k in ['LCC']: # check for next prefetch
-                scheduleInst1(ts, "\\useLoop == 1")
-            else:
-                scheduleInst1(ts)
-
-        if needIfMacro:
-            for codepath in range(numCodePath):
-                if codepath == 0:
-                    macro.add(ValueIf("\\ID == %u"%codepath))
-                else:
-                    macro.add(ValueElseIf("\\ID == %u\n"%codepath))
-
-                def scheduleInst2(instList, macroGuard=""):
-                    if len(instList) == numCodePath:
-                        if instList[codepath] != None:
-                            for inst in instList[codepath].flatitems():
-                                if isinstance(inst, SWaitCnt):
-                                    nllvmcntHandling(inst, opt1.nglshift, opt1.nllshift)
-                                else:
-                                    if macroGuard != "":
-                                        macro.add(ValueIf(macroGuard))
-                                    macro.add(inst)
-                                    if macroGuard != "":
-                                        macro.add(ValueEndif(comment="EndIf %s"%(macroGuard)))
-
-                for k,ts in ToSched.items():
-                    if k in ['GRIncA', 'GRIncB']: # check for global read inc
-                        scheduleInst2(ts, "\\useGRInc == 1\n")
-                    elif k in ['GRA', 'GRB', 'LWSA', 'LWSB']: # check for global reads
-                        scheduleInst2(ts, "\\useGR == 1\n")
-                    elif k in ['LRA%u'%lastIter, 'LRB%u'%lastIter, 'LRSA', 'LRSB']: # check for next prefetch
-                        scheduleInst2(ts, "\\usePLR == 1\n")
-                    elif k in ['LCC']: # check for next prefetch
-                        scheduleInst2(ts, "\\useLoop == 1\n")
+        def emit_instructions(instModule, macroGuard: str):
+            """Emit instructions from a module with optional macro guard."""
+            if instModule is not None:
+                for inst in instModule.flatitems():
+                    if isinstance(inst, SWaitCnt):
+                        nllvmcntHandling(inst, opt1.nglshift, opt1.nllshift)
                     else:
-                        scheduleInst2(ts)
+                        if macroGuard:
+                            macro.add(ValueIf(macroGuard))
+                        macro.add(inst)
+                        if macroGuard:
+                            macro.add(ValueEndif(comment="EndIf %s" % macroGuard))
 
-                if codepath == numCodePath - 1:
-                    macro.add(ValueEndif(comment="EndIf \\ID checks"))
+        for k, ts in ToSched.items():
+            macroGuard = get_macro_guard(k)
 
+            if len(ts) == 1:
+                emit_instructions(ts[0], macroGuard)
+            elif len(ts) == numCodePath:
+                # Multi codepath - emit inside ID conditionals
+                for codepath in range(numCodePath):
+                    if codepath == 0:
+                        macro.add(ValueIf("\\ID == %u" % codepath))
+                    else:
+                        macro.add(ValueElseIf("\\ID == %u" % codepath))
+                    emit_instructions(ts[codepath], macroGuard)
+                macro.add(ValueEndif(comment="EndIf \\ID checks"))
+            else:
+                raise ValueError(f"Invalid number of instructions for {k}: {len(ts)}")
+ 
     module.add(macro)
     return module, numCodePath
 
