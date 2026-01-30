@@ -150,7 +150,7 @@ static auto MakeNamedParameterValues(const std::string& name, T... values)
     return testing::Values(NamedParameter<T>{name, values}...);
 }
 
-// Variadic template function that creates a GTest ValueArray of 'NamedContainer' each one with the
+// Template function that creates a GTest ValueArray of 'NamedContainer' each one with the
 // name and value supplied. An optional separator for each value in each containers can be supplied.
 // The result can be directly fed to the GTest instantiated test suite.
 //
@@ -184,6 +184,22 @@ static auto MakeNamedParameterCollectionValues(const std::string& name,
     return testing::ValuesIn(v);
 }
 
+// Template function that creates a GTest ValueArray of 'NamedParameter' each one with the
+// name and value supplied.
+// The result can be directly fed to the GTest instantiated test suite.
+//
+// Example:
+//
+//      std::set<int> values = ...
+//
+//      testing::Combine(
+//          MakeNamedParameterCollectionValues<int>("TestValues", values),
+//          MakeNamedParameterValues<int>("TestInteger", 1, 2, 3)
+//      );
+//
+// The 'values' collection of int's is turned into a collection of
+// NamedParameter<int>, and then fed into 'testing::Combine()'.
+//
 template <typename T>
 requires NotContainer<T> && Printable<T> && std::is_move_constructible_v<T>
 static auto MakeNamedParameterCollectionValues(const std::string& name,
