@@ -1403,6 +1403,9 @@ class Solution(collections.abc.Mapping):
     state["UseGeneralizedNLCOneA"] = state["DirectToLdsA"]
     state["UseGeneralizedNLCOneB"] = state["DirectToLdsB"]
 
+    state["UseGeneralizedNLCOneMXSA"] = False
+    state["UseGeneralizedNLCOneMXSB"] = False
+
     state["LocalWriteUseSgprA"] = False
     state["LocalWriteUseSgprB"] = False
     state["StoreSwapAddr"] = False
