@@ -46,3 +46,20 @@ macro(hipdnn_generate_version_header COMPONENT_NAME)
         @ONLY
     )
 endmacro()
+
+# Capture the directory where this file resides
+set(HIPDNN_CMAKE_UTILS_DIR "${CMAKE_CURRENT_LIST_DIR}")
+
+# Macro to read data_sdk version for minimum requirement
+macro(hipdnn_get_data_sdk_version OUTPUT_VAR)
+    # Determine path to data_sdk/version.json relative to this file location
+    # This makes it resilient to where the macro is called from
+    set(_data_sdk_version_file "${HIPDNN_CMAKE_UTILS_DIR}/../data_sdk/version.json")
+
+    if(EXISTS "${_data_sdk_version_file}")
+        file(READ "${_data_sdk_version_file}" _data_sdk_version_json)
+        string(JSON ${OUTPUT_VAR} GET ${_data_sdk_version_json} "hipdnn_data_sdk_version")
+    else()
+        message(FATAL_ERROR "Could not find data_sdk version file at ${_data_sdk_version_file}")
+    endif()
+endmacro()

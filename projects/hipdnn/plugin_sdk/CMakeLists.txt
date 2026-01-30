@@ -7,8 +7,7 @@ include(CMakePackageConfigHelpers)
 hipdnn_setup_version(hipdnn_plugin_sdk)
 
 # Read data_sdk version for minimum requirement
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../data_sdk/version.json" _data_sdk_version_json)
-string(JSON HIPDNN_PLUGIN_SDK_DATA_SDK_MIN_VERSION GET ${_data_sdk_version_json} "hipdnn_data_sdk_version")
+hipdnn_get_data_sdk_version(HIPDNN_PLUGIN_SDK_DATA_SDK_MIN_VERSION)
 
 set(HIP_DNN_PLUGIN_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
