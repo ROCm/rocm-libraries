@@ -56,6 +56,8 @@ enum class TestReference
     naiveGPU     = 0, /*!< Naive GPU implementation as reference. */
     optimizedCPU = 1, /*!< Optimized CPU implementation as reference. */
     naiveCPU     = 2, /*!< Naive CPU implementation as reference. */
+    robustGPU    = 3, /*!< Robust GPU implementation as reference. */
+    robustCPU    = 4, /*!< Robust CPU implementation as reference. */
 };
 
 /*! @enum class AfterTestFailure
@@ -77,7 +79,7 @@ constexpr bool IsValidUUT(UnitUnderTest uut)
 
 constexpr bool IsValidREF(TestReference ref)
 {
-    return (ref >= TestReference::naiveGPU && ref <= TestReference::naiveCPU);
+    return (ref >= TestReference::naiveGPU && ref <= TestReference::robustCPU);
 }
 
 constexpr bool CheckReferenceChoice(UnitUnderTest uut, TestReference ref)
@@ -100,14 +102,15 @@ static TestReference GetNextREF(TestReference ref)
 {
     if(!IsValidREF(ref))
     {
-        MIOPEN_THROW("Invalid reference parameter in getNextREF() call");
+        MIOPEN_THROW("Invalid reference parameter in GetNextREF() call");
     }
 
     switch(ref)
     {
     case TestReference::naiveGPU: return TestReference::optimizedCPU;
     case TestReference::optimizedCPU: return TestReference::naiveCPU;
-    default: return TestReference::naiveCPU;
+    case TestReference::naiveCPU: return TestReference::robustGPU;
+    default: return TestReference::robustCPU;
     }
 }
 
@@ -123,6 +126,8 @@ static std::string GetREFName(TestReference ref)
     case TestReference::naiveGPU: return "naive GPU";
     case TestReference::optimizedCPU: return "optimized CPU";
     case TestReference::naiveCPU: return "naive CPU";
+    case TestReference::robustGPU: return "robust GPU";
+    case TestReference::robustCPU: return "robust CPU";
     default: return "Unknown";
     }
 }
@@ -146,8 +151,8 @@ class AdaptiveTest
 {
 private:
     /**
-     * Run numberOfRunsAfterFailure times with selected configuration, do not change the reference,
-     * after runs extract some statistical information
+     * Run number_of_runs_after_failure times with selected configuration, do not change the
+     * reference, after runs extract some statistical information
      */
     void AnalyzeAfterTestFailure()
     {
@@ -187,7 +192,7 @@ private:
     {
         std::cout << "Test failed against " << GetREFName(current_REF) << " reference."
                   << std::endl;
-        if(current_REF != TestReference::naiveCPU)
+        if(current_REF != TestReference::robustCPU)
         {
             std::cout << "Moving on to more trusted reference implementations." << std::endl;
         }
@@ -199,7 +204,7 @@ private:
         }
 
         /*
-        if(currentREF == TestReference::naiveGPU)
+        if(current_REF == TestReference::naiveGPU)
         {
             // TODO: in future implementations, this will probably mean that all data is on GPU
             // therefore copy to cpu is needed.
@@ -210,7 +215,6 @@ private:
         {
             current_REF = GetNextREF(current_REF);
 
-            // Do we need to re-run UUT?
             auto ret = RunREF();
 
             if(ret == miopenStatusNotImplemented)
@@ -350,11 +354,11 @@ protected:
      * Since there is an option to choose between different implementations that will be UUT/REF, we
      * need to use single pointer/reference to UUT/REF data, these methods are for that.
      *
-     * setREFData is called after every execution of the reference implementation, it is not
+     * SetREFData is called after every execution of the reference implementation, it is not
      * constexpr as the reference can be changed throughout the test execution (when ATF ==
      * AfterTestFailure::moveOn)
      *
-     * setUUTData is called once at the start of the test, it is constexpr because the UUT is set at
+     * SetUUTData is called once at the start of the test, it is constexpr because the UUT is set at
      * the beginning and cannot be changed throughout the test texecution
      */
     virtual void SetREFData()           = 0;
