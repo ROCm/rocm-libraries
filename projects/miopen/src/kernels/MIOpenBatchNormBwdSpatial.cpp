@@ -889,6 +889,9 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<3, FpType, FpPrecType, FpAccumType>
                 {
                     dyvalue = cast<FpPrecType>(dy_in[index]);
                     xhat    = (cast<FpPrecType>(x_in[index]) - mean) * invVariance;
+
+                    dyvalue = bwd_activation_op<FpPrecType, mio_config::neuron_op>(
+                        dyvalue, xhat, pscale, pbias, alpha, beta);
                 }
 
                 dx_out[index] = cast<FpType>(batchBwdNormalization(
