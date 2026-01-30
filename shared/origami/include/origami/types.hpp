@@ -328,8 +328,10 @@ struct runtime_options {
  * work-group mapping (WGM), and cache-control hints.
  */
 struct config_t {
-  /// Macro tile and matrix-instruction shape.
+  /// Macro tile shape.
   dim3_t mt{0, 0, 0};
+
+  /// Matrix-instruction.
   dim3_t mi{0, 0, 0};
 
   /// Custom mainloop scheduling flag
@@ -359,11 +361,9 @@ struct config_t {
 
   /// Target backend for kernel execution.
   target_t target = target_t::tensilelite;
+
   /// Grid selection algorithm.
   grid_selection_t grid_selection = grid_selection_t::k_split_aware;
-
-  /// CMS kernel flag
-  bool cms_kernel = false;
 
   constexpr bool operator==(const config_t& o) const noexcept {
     return mt == o.mt && 

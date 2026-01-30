@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <utility>
 #include <vector>
 #include "origami/hardware.hpp"
 #include "origami/types.hpp"
@@ -29,22 +30,34 @@ double calculate_work_utilization(const problem_t& problem, const config_t& conf
 double calculate_output_utilization(const problem_t& problem, const config_t& config, size_t vector_elems);
 
 /**
- * @brief Computes the number of active compute units if there is only one wave and it is partial, Otherwise, returns hardware.N_CU
+ * @brief Computes the launch parameters for the kernel
  *
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
  * @param grid_selection Different algorithms to select the grid size for kernel execution.
  * @param max_cus maximum number of CU's
- * @param split split
- * @return tuple<size_t, size_t, size_t, size_t> tuple(num_wgs, num_active_cus, numWaves, splitFactor)
+ * @return tuple<reduction_t, size_t, size_t, size_t, size_t> tuple(reduction_strategy, num_wgs, num_active_cus, num_timesteps, split_factor)
  */
-std::tuple<size_t, size_t, size_t, size_t> compute_cu_occupancy(const problem_t& problem,
-                                                                const hardware_t& hardware,
-                                                                const config_t& config,
-                                                                grid_selection_t grid_selection,
-                                                                size_t max_cus,
-                                                                size_t split);
+std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameters(const problem_t& problem,
+                                                                                  const hardware_t& hardware,
+                                                                                  const config_t& config,
+                                                                                  grid_selection_t grid_selection,
+                                                                                  size_t max_cus);
+                                                                                
+/**
+ * @brief Check if MT fits in LDS
+ *
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param mt Macro tile dimensions
+ * @param a_dtype Data type of operand A
+ * @param b_dtype Data type of operand B
+ * @return bool True if MT fits in LDS, false otherwise
+ */
+bool check_lds_capacity(const hardware_t& hardware,
+                        const dim3_t& mt,
+                        const data_type_t a_dtype,
+                        const data_type_t b_dtype);
 
 /**
  * @brief Compute limited achievable memory bandwidth based on active CUs
@@ -65,18 +78,156 @@ double compute_mem_bw_from_occupancy(const hardware_t& hardware, size_t num_acti
 size_t round_elements_to_128B(size_t elements, size_t element_size_bits);
 
 /**
+ * @brief Compute L2 tile dimensions based on cache capacity and concurrency.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param grid_m Number of workgroups in M dimension.
+ * @param grid_n Number of workgroups in N dimension.
+ * @param num_active_cus Number of active compute units.
+ * @param splitting_factor K-split factor.
+ * @param wgm_value Workgroup mapping value.
+ * @return std::pair<size_t, size_t> L2 tile dimensions (tile_m, tile_n).
+ */
+std::pair<size_t, size_t> compute_l2_tiles(const problem_t& problem,
+                                           const hardware_t& hardware,
+                                           const config_t& config,
+                                           size_t grid_m,
+                                           size_t grid_n,
+                                           size_t num_active_cus,
+                                           size_t splitting_factor,
+                                           size_t wgm_value);
+
+/**
+ * @brief Compute MALL tile dimensions based on concurrency.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param grid_m Number of workgroups in M dimension.
+ * @param grid_n Number of workgroups in N dimension.
+ * @param num_active_cus Number of active compute units.
+ * @param wgm_value Workgroup mapping value.
+ * @return std::pair<size_t, size_t> MALL tile dimensions (tile_m, tile_n).
+ */
+std::pair<size_t, size_t> compute_mall_tiles(const problem_t& problem,
+                                             const hardware_t& hardware,
+                                             const config_t& config,
+                                             size_t grid_m,
+                                             size_t grid_n,
+                                             size_t num_active_cus,
+                                             size_t wgm_value);
+
+/**
+ * @brief Context for kernel execution.
+ *
+ * Holds derived/computed values for a GEMM kernel execution.
+ * This struct bundles grid dimensions, occupancy info, and other
+ * values computed from problem, config, and hardware.
+ */
+struct context_t {
+  /// Grid dimensions.
+  size_t grid_m = 0;
+  size_t grid_n = 0;
+  size_t num_tiles = 0;
+
+  /// Launch parameters.
+  reduction_t reduction_strategy = reduction_t::none;
+  size_t sk_grid = 0;
+  size_t splitting_factor = 1;
+  size_t num_wgs = 0;
+  size_t num_timesteps = 1;
+
+  /// Hardware-derived values.
+  size_t active_cus = 0;
+  double mem_bw_limited = 0.0;
+
+  /// Tile-derived values.
+  size_t tile_elements = 0;
+  size_t output_tile_bytes = 0;
+
+  /// Workgroup mapping parameters.
+  workgroup_mapping_t wgm{0, 8, 1};
+
+  /// MALL and L2 Tiles
+  size_t mall_tiles_m = 0;
+  size_t mall_tiles_n = 0;
+  size_t l2_tiles_m = 0;
+  size_t l2_tiles_n = 0;
+
+  /// Default constructor.
+  context_t() = default;
+  
+  /**
+  * @brief Constructor from config, problem, and hardware.
+  *
+  * @param problem Problem description (M, N, K, etc.)
+  * @param hardware Hardware characteristics (@see origami::hardware_t)
+  * @param config Kernel configuration.
+  */
+  context_t(const problem_t& problem, const hardware_t& hardware, const config_t& config)
+  {
+    // Extract parameters
+    const size_t M = problem.size.m;
+    const size_t N = problem.size.n;
+    const size_t batch = problem.batch;
+
+    const size_t NUM_XCD = hardware.NUM_XCD;
+    const size_t N_CU = hardware.N_CU;
+
+    const size_t MT_M = config.mt.m;
+    const size_t MT_N = config.mt.n;
+
+    // Grid dimensions
+    grid_m = math::safe_ceil_div(M, MT_M);
+    grid_n = math::safe_ceil_div(N, MT_N);
+    num_tiles = grid_m * grid_n * batch;
+
+    // Launch parameters
+    auto [reduction, wgs, cus, timesteps, split] = compute_launch_parameters(problem, hardware, config, config.grid_selection, N_CU);
+    reduction_strategy = reduction;
+    num_wgs = wgs;
+    num_timesteps = timesteps;
+    splitting_factor = split;
+
+    // Hardware-derived values
+    active_cus = cus;
+    mem_bw_limited = compute_mem_bw_from_occupancy(hardware, active_cus);
+
+    // Tile-derived values
+    tile_elements = MT_M * MT_N;
+    output_tile_bytes = tile_elements * data_type_to_bytes(problem.d_dtype);
+
+    // Copy workgroup mapping from config
+    int defaultWGM =
+      batch > 1 ? 1 : static_cast<int>(std::ceil(std::sqrt(N_CU / NUM_XCD)));
+    wgm = workgroup_mapping_t{0, NUM_XCD, std::max(defaultWGM, 1)};
+
+    // MALL and L2 Tiles
+    auto [mall_m, mall_n] = compute_mall_tiles(problem, hardware, config, grid_m, grid_n, active_cus, wgm.wgm);
+    mall_tiles_m = mall_m;
+    mall_tiles_n = mall_n;
+
+    auto [l2_m, l2_n] = compute_l2_tiles(problem, hardware, config, grid_m, grid_n, active_cus, splitting_factor, wgm.wgm);
+    l2_tiles_m = l2_m;
+    l2_tiles_n = l2_n;
+  }
+};
+
+/**
  * @brief L2 hit rate from a global (problem-wide) perspective using the refactored API.
  *        Computes in BYTES to correctly handle differing A/B dtypes.
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
- * @param l2_capacity_bytes l2 capacity in bytes
+ * @param context Execution context with derived parameters.
  * @return double
  */
 double compute_l2_hit_rate_global(const problem_t& problem,
                                   const hardware_t& hardware,
                                   const config_t& config,
-                                  size_t l2_capacity_bytes);
+                                  const context_t& context);
 
 /**
  * @brief Compute arithmetic intensity.
@@ -111,7 +262,19 @@ double emulated_tf32_arithmetic_intensity(double m, double n, double k, double b
 size_t compute_number_matrix_instructions(dim3_t mt, dim3_t mi);
 
 /**
- * @brief Compute TF32 conversion overhead.
+ * @brief Compute TF32_X1 conversion overhead.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @return double Latency in cycles.
+ */
+ double compute_cvt_overhead_x1(const problem_t& problem,
+                                const hardware_t& hardware,
+                                const config_t& config);
+  
+/**
+ * @brief Compute TF32_X3 conversion overhead.
  *
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
@@ -119,8 +282,8 @@ size_t compute_number_matrix_instructions(dim3_t mt, dim3_t mi);
  * @return double Latency in cycles.
  */
 double compute_cvt_overhead(const problem_t& problem,
-                                          const hardware_t& hardware,
-                                          const config_t& config);
+                            const hardware_t& hardware,
+                            const config_t& config);
 /**
  * @brief Compute the latency to process a single macro-tile for the given problem and hardware.
  *
@@ -134,32 +297,19 @@ size_t compute_mt_compute_latency(const problem_t& problem,
                                   const config_t& config);
 
 /**
- * @brief Check if MT fits in LDS
- *
- * @param hardware Hardware characteristics (@see origami::hardware_t)
- * @param mt Macro tile dimensions
- * @param a_dtype Data type of operand A
- * @param b_dtype Data type of operand B
- * @return bool True if MT fits in LDS, false otherwise
- */
-bool check_lds_capacity(const hardware_t& hardware,
-                        dim3_t mt,
-                        data_type_t a_dtype,
-                        data_type_t b_dtype);
-/**
  * @brief A linear-estimation method for estimating L2-hitrate.
  *
  * @todo Parameterize this based on the space-filling curve algos.
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
- * @param splitting_factor
+ * @param context Execution context with derived parameters.
  * @return double Predicted L2-hitrate.
  */
 double estimate_l2_hit(const problem_t& problem,
                        const hardware_t& hardware,
                        const config_t& config,
-                       std::size_t splitting_factor);
+                       const context_t& context);
 
 /**
  * @brief Estimate the MALL-hitrate (last-level cache.)
@@ -167,15 +317,13 @@ double estimate_l2_hit(const problem_t& problem,
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
- * @param num_active_cus
- * @param splitting_factor
+ * @param context Execution context with derived parameters.
  * @return double Predicted MALL-hitrate.
  */
 double estimate_mall_hit(const problem_t& problem,
                          const hardware_t& hardware,
                          const config_t& config,
-                         std::size_t num_active_cus,
-                         std::size_t splitting_factor);
+                         const context_t& context);
 
 /**
  * @brief Determine the memory latency per MT_M x MT_N x MT_K Macro Tile (L_MT).
@@ -183,15 +331,13 @@ double estimate_mall_hit(const problem_t& problem,
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
- * @param num_active_cus
- * @param splitting_factor
+ * @param context Execution context with derived parameters.
  * @return double Latency in cycles.
  */
 double compute_memory_latency(const problem_t& problem,
                               const hardware_t& hardware,
                               const config_t& config,
-                              std::size_t num_active_cus,
-                              std::size_t splitting_factor);
+                              const context_t& context);
 
 /**
  * @brief Computes the latency to compute a K-COMPLETE tile.
@@ -199,15 +345,27 @@ double compute_memory_latency(const problem_t& problem,
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
- * @param num_active_cus
- * @param splitting_factor
+ * @param context Execution context with derived parameters.
  * @return double Latency in cycles.
  */
 double compute_tile_latency(const problem_t& problem,
                             const hardware_t& hardware,
                             const config_t& config,
-                            std::size_t num_active_cus,
-                            std::size_t splitting_factor);
+                            const context_t& context);
+
+/**
+ * @brief Compute the latency for the parallel reduction kernel
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param context Execution context with derived parameters.
+ * @return double Latency in cycles.
+ */
+double compute_parallel_reduction_latency(const problem_t& problem,
+                                          const hardware_t& hardware,
+                                          const config_t& config,
+                                          const context_t& context);
 
 /**
  * @brief Computes the latency per K-complete macro-tile timestep.
@@ -219,15 +377,13 @@ double compute_tile_latency(const problem_t& problem,
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
- * @param num_active_cus
- * @param splitting_factor
+ * @param context Execution context with derived parameters.
  * @return double Latency in cycles.
  */
 double compute_timestep_latency(const problem_t& problem,
                                 const hardware_t& hardware,
                                 const config_t& config,
-                                std::size_t num_active_cus,
-                                std::size_t splitting_factor);
+                                const context_t& context);
 
 /**
  * @brief Compute the total latency of a gemm based on the latency of one timestep multiplied by the
