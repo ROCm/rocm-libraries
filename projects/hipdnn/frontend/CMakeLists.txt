@@ -3,6 +3,10 @@
 
 include(CMakePackageConfigHelpers)
 
+# Read data_sdk version for minimum requirement
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../data_sdk/version.json" _data_sdk_version_json)
+string(JSON HIPDNN_FRONTEND_DATA_SDK_MIN_VERSION GET ${_data_sdk_version_json} "hipdnn_data_sdk_version")
+
 set(HIP_DNN_FRONTEND_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 add_subdirectory(tests)
