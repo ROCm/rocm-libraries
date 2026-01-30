@@ -364,8 +364,8 @@ namespace stinkytofu
 #ifndef NDEBUG
             if(it == map.end())
             {
-                std::cerr << "Error: No ISA opcode found for mnemonic " << mnemonic
-                          << " in arch gfx" << std::to_string((int)arch) << "\n";
+                std::cerr << "Error: No ISA opcode found for mnemonic " << mnemonic << " in arch "
+                          << getArchName(arch) << "\n";
                 return GFX::INVALID;
             }
 #endif

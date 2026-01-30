@@ -996,29 +996,90 @@ TEST(LogicalToAsmComprehensive, MfmaInstructionLowering)
 
     // gfx942 (CDNA3) MFMA instructions
     std::vector<MfmaTestCase> mfma_gfx942 = {
+        // 16x16 variants
         {"f32", "f32", 16, 16, 4, 1, false, "v_mfma_f32_16x16x4_f32"},
         {"bf16", "f32", 16, 16, 16, 1, false, "v_mfma_f32_16x16x16_bf16"},
         {"f16", "f32", 16, 16, 16, 1, false, "v_mfma_f32_16x16x16_f16"},
+        {"xf32", "f32", 16, 16, 8, 1, false, "v_mfma_f32_16x16x8_xf32"},
+        {"i8", "i32", 16, 16, 32, 1, false, "v_mfma_i32_16x16x32_i8"},
+        // fp8/bf8 variants (16x16)
+        {"fp8_fp8", "f32", 16, 16, 32, 1, false, "v_mfma_f32_16x16x32_fp8_fp8"},
+        {"bf8_bf8", "f32", 16, 16, 32, 1, false, "v_mfma_f32_16x16x32_bf8_bf8"},
+        {"fp8_bf8", "f32", 16, 16, 32, 1, false, "v_mfma_f32_16x16x32_fp8_bf8"},
+        {"bf8_fp8", "f32", 16, 16, 32, 1, false, "v_mfma_f32_16x16x32_bf8_fp8"},
+        // 32x32 variants
         {"f32", "f32", 32, 32, 2, 1, false, "v_mfma_f32_32x32x2_f32"},
         {"bf16", "f32", 32, 32, 8, 1, false, "v_mfma_f32_32x32x8_bf16"},
         {"f16", "f32", 32, 32, 8, 1, false, "v_mfma_f32_32x32x8_f16"},
-        {"f64", "f64", 16, 16, 4, 1, false, "v_mfma_f64_16x16x4_f64"},
-        {"i8", "i32", 16, 16, 32, 1, false, "v_mfma_i32_16x16x32_i8"},
+        {"xf32", "f32", 32, 32, 4, 1, false, "v_mfma_f32_32x32x4_xf32"},
         {"i8", "i32", 32, 32, 16, 1, false, "v_mfma_i32_32x32x16_i8"},
+        // fp8/bf8 variants (32x32)
+        {"fp8_fp8", "f32", 32, 32, 16, 1, false, "v_mfma_f32_32x32x16_fp8_fp8"},
+        {"bf8_bf8", "f32", 32, 32, 16, 1, false, "v_mfma_f32_32x32x16_bf8_bf8"},
+        {"fp8_bf8", "f32", 32, 32, 16, 1, false, "v_mfma_f32_32x32x16_fp8_bf8"},
+        {"bf8_fp8", "f32", 32, 32, 16, 1, false, "v_mfma_f32_32x32x16_bf8_fp8"},
+        // 4x4 variants
+        {"f32", "f32", 4, 4, 1, 16, false, "v_mfma_f32_4x4x1_16b_f32"},
+        {"bf16", "f32", 4, 4, 4, 16, false, "v_mfma_f32_4x4x4_16b_bf16"},
+        {"f16", "f32", 4, 4, 4, 16, false, "v_mfma_f32_4x4x4_16b_f16"},
+        {"i8", "i32", 4, 4, 4, 16, false, "v_mfma_i32_4x4x4_16b_i8"},
+        // f64 variants
+        {"f64", "f64", 16, 16, 4, 1, false, "v_mfma_f64_16x16x4_f64"},
+        {"f64", "f64", 4, 4, 4, 4, false, "v_mfma_f64_4x4x4_4b_f64"},
         // Test blocks suffix format: {blocks}b_ (e.g., _4b_)
         {"f32", "f32", 16, 16, 1, 4, false, "v_mfma_f32_16x16x1_4b_f32"},
         {"bf16", "f32", 16, 16, 4, 4, false, "v_mfma_f32_16x16x4_4b_bf16"},
+        {"f16", "f32", 16, 16, 4, 4, false, "v_mfma_f32_16x16x4_4b_f16"},
+        {"f32", "f32", 32, 32, 1, 2, false, "v_mfma_f32_32x32x1_2b_f32"},
+        {"bf16", "f32", 32, 32, 4, 2, false, "v_mfma_f32_32x32x4_2b_bf16"},
+        {"f16", "f32", 32, 32, 4, 2, false, "v_mfma_f32_32x32x4_2b_f16"},
+        {"i8", "i32", 16, 16, 4, 4, false, "v_mfma_i32_16x16x4_4b_i8"},
         {"i8", "i32", 32, 32, 4, 2, false, "v_mfma_i32_32x32x4_2b_i8"},
     };
 
     // gfx950 (CDNA4) MFMA instructions (supports additional formats)
     std::vector<MfmaTestCase> mfma_gfx950 = {
+        // 16x16 variants
         {"f32", "f32", 16, 16, 4, 1, false, "v_mfma_f32_16x16x4_f32"},
         {"bf16", "f32", 16, 16, 16, 1, false, "v_mfma_f32_16x16x16_bf16"},
         {"f16", "f32", 16, 16, 16, 1, false, "v_mfma_f32_16x16x16_f16"},
+        {"i8", "i32", 16, 16, 32, 1, false, "v_mfma_i32_16x16x32_i8"},
+        // fp8/bf8 variants (16x16)
         {"fp8_fp8", "f32", 16, 16, 32, 1, false, "v_mfma_f32_16x16x32_fp8_fp8"},
         {"bf8_bf8", "f32", 16, 16, 32, 1, false, "v_mfma_f32_16x16x32_bf8_bf8"},
+        {"fp8_bf8", "f32", 16, 16, 32, 1, false, "v_mfma_f32_16x16x32_fp8_bf8"},
+        {"bf8_fp8", "f32", 16, 16, 32, 1, false, "v_mfma_f32_16x16x32_bf8_fp8"},
+        // f8f6f4 format (new in gfx950, 16x16)
+        {"f8f6f4", "f32", 16, 16, 128, 1, false, "v_mfma_f32_16x16x128_f8f6f4"},
+        // 32x32 variants
         {"f32", "f32", 32, 32, 2, 1, false, "v_mfma_f32_32x32x2_f32"},
+        {"bf16", "f32", 32, 32, 8, 1, false, "v_mfma_f32_32x32x8_bf16"},
+        {"f16", "f32", 32, 32, 8, 1, false, "v_mfma_f32_32x32x8_f16"},
+        {"i8", "i32", 32, 32, 16, 1, false, "v_mfma_i32_32x32x16_i8"},
+        // fp8/bf8 variants (32x32)
+        {"fp8_fp8", "f32", 32, 32, 16, 1, false, "v_mfma_f32_32x32x16_fp8_fp8"},
+        {"bf8_bf8", "f32", 32, 32, 16, 1, false, "v_mfma_f32_32x32x16_bf8_bf8"},
+        {"fp8_bf8", "f32", 32, 32, 16, 1, false, "v_mfma_f32_32x32x16_fp8_bf8"},
+        {"bf8_fp8", "f32", 32, 32, 16, 1, false, "v_mfma_f32_32x32x16_bf8_fp8"},
+        // f8f6f4 format (new in gfx950, 32x32)
+        {"f8f6f4", "f32", 32, 32, 64, 1, false, "v_mfma_f32_32x32x64_f8f6f4"},
+        // 4x4 variants
+        {"f32", "f32", 4, 4, 1, 16, false, "v_mfma_f32_4x4x1_16b_f32"},
+        {"bf16", "f32", 4, 4, 4, 16, false, "v_mfma_f32_4x4x4_16b_bf16"},
+        {"f16", "f32", 4, 4, 4, 16, false, "v_mfma_f32_4x4x4_16b_f16"},
+        {"i8", "i32", 4, 4, 4, 16, false, "v_mfma_i32_4x4x4_16b_i8"},
+        // f64 variants
+        {"f64", "f64", 16, 16, 4, 1, false, "v_mfma_f64_16x16x4_f64"},
+        {"f64", "f64", 4, 4, 4, 4, false, "v_mfma_f64_4x4x4_4b_f64"},
+        // blocks variants
+        {"f32", "f32", 16, 16, 1, 4, false, "v_mfma_f32_16x16x1_4b_f32"},
+        {"bf16", "f32", 16, 16, 4, 4, false, "v_mfma_f32_16x16x4_4b_bf16"},
+        {"f16", "f32", 16, 16, 4, 4, false, "v_mfma_f32_16x16x4_4b_f16"},
+        {"f32", "f32", 32, 32, 1, 2, false, "v_mfma_f32_32x32x1_2b_f32"},
+        {"bf16", "f32", 32, 32, 4, 2, false, "v_mfma_f32_32x32x4_2b_bf16"},
+        {"f16", "f32", 32, 32, 4, 2, false, "v_mfma_f32_32x32x4_2b_f16"},
+        {"i8", "i32", 16, 16, 4, 4, false, "v_mfma_i32_16x16x4_4b_i8"},
+        {"i8", "i32", 32, 32, 4, 2, false, "v_mfma_i32_32x32x4_2b_i8"},
     };
 
     // gfx1250 (RDNA4) - Uses WMMA (Wave Matrix Multiply Accumulate) instead of MFMA
@@ -1138,22 +1199,61 @@ TEST(LogicalToAsmComprehensive, SmfmaInstructionLowering)
     // Note: blocks parameter is NOT part of mnemonic, handled as instruction modifier
 
     std::vector<MfmaTestCase> smfma_gfx942 = {
+        // 16x16 variants
         {"bf16", "f32", 16, 16, 32, 1, false, "v_smfmac_f32_16x16x32_bf16"},
         {"f16", "f32", 16, 16, 32, 1, false, "v_smfmac_f32_16x16x32_f16"},
         {"fp8_fp8", "f32", 16, 16, 64, 1, false, "v_smfmac_f32_16x16x64_fp8_fp8"},
+        {"bf8_bf8", "f32", 16, 16, 64, 1, false, "v_smfmac_f32_16x16x64_bf8_bf8"},
+        {"fp8_bf8", "f32", 16, 16, 64, 1, false, "v_smfmac_f32_16x16x64_fp8_bf8"},
+        {"bf8_fp8", "f32", 16, 16, 64, 1, false, "v_smfmac_f32_16x16x64_bf8_fp8"},
         {"i8", "i32", 16, 16, 64, 1, false, "v_smfmac_i32_16x16x64_i8"},
+        // 32x32 variants
+        {"bf16", "f32", 32, 32, 16, 1, false, "v_smfmac_f32_32x32x16_bf16"},
+        {"f16", "f32", 32, 32, 16, 1, false, "v_smfmac_f32_32x32x16_f16"},
+        {"fp8_fp8", "f32", 32, 32, 32, 1, false, "v_smfmac_f32_32x32x32_fp8_fp8"},
+        {"bf8_bf8", "f32", 32, 32, 32, 1, false, "v_smfmac_f32_32x32x32_bf8_bf8"},
+        {"fp8_bf8", "f32", 32, 32, 32, 1, false, "v_smfmac_f32_32x32x32_fp8_bf8"},
+        {"bf8_fp8", "f32", 32, 32, 32, 1, false, "v_smfmac_f32_32x32x32_bf8_fp8"},
+        {"i8", "i32", 32, 32, 32, 1, false, "v_smfmac_i32_32x32x32_i8"},
     };
 
     std::vector<MfmaTestCase> smfma_gfx950 = {
+        // 16x16 variants
         {"bf16", "f32", 16, 16, 32, 1, false, "v_smfmac_f32_16x16x32_bf16"},
         {"f16", "f32", 16, 16, 32, 1, false, "v_smfmac_f32_16x16x32_f16"},
         {"fp8_fp8", "f32", 16, 16, 64, 1, false, "v_smfmac_f32_16x16x64_fp8_fp8"},
+        {"bf8_bf8", "f32", 16, 16, 64, 1, false, "v_smfmac_f32_16x16x64_bf8_bf8"},
+        {"fp8_bf8", "f32", 16, 16, 64, 1, false, "v_smfmac_f32_16x16x64_fp8_bf8"},
+        {"bf8_fp8", "f32", 16, 16, 64, 1, false, "v_smfmac_f32_16x16x64_bf8_fp8"},
+        {"i8", "i32", 16, 16, 64, 1, false, "v_smfmac_i32_16x16x64_i8"},
+        // 32x32 variants
+        {"bf16", "f32", 32, 32, 16, 1, false, "v_smfmac_f32_32x32x16_bf16"},
+        {"f16", "f32", 32, 32, 16, 1, false, "v_smfmac_f32_32x32x16_f16"},
+        {"fp8_fp8", "f32", 32, 32, 32, 1, false, "v_smfmac_f32_32x32x32_fp8_fp8"},
+        {"bf8_bf8", "f32", 32, 32, 32, 1, false, "v_smfmac_f32_32x32x32_bf8_bf8"},
+        {"fp8_bf8", "f32", 32, 32, 32, 1, false, "v_smfmac_f32_32x32x32_fp8_bf8"},
+        {"bf8_fp8", "f32", 32, 32, 32, 1, false, "v_smfmac_f32_32x32x32_bf8_fp8"},
+        {"i8", "i32", 32, 32, 32, 1, false, "v_smfmac_i32_32x32x32_i8"},
     };
 
     std::vector<MfmaTestCase> smfma_gfx1250 = {
         // gfx1250 also uses v_smfmac (NOT v_swmmac)
+        // 16x16 variants
         {"bf16", "f32", 16, 16, 32, 1, false, "v_smfmac_f32_16x16x32_bf16"},
         {"f16", "f32", 16, 16, 32, 1, false, "v_smfmac_f32_16x16x32_f16"},
+        {"fp8_fp8", "f32", 16, 16, 64, 1, false, "v_smfmac_f32_16x16x64_fp8_fp8"},
+        {"bf8_bf8", "f32", 16, 16, 64, 1, false, "v_smfmac_f32_16x16x64_bf8_bf8"},
+        {"fp8_bf8", "f32", 16, 16, 64, 1, false, "v_smfmac_f32_16x16x64_fp8_bf8"},
+        {"bf8_fp8", "f32", 16, 16, 64, 1, false, "v_smfmac_f32_16x16x64_bf8_fp8"},
+        {"i8", "i32", 16, 16, 64, 1, false, "v_smfmac_i32_16x16x64_i8"},
+        // 32x32 variants
+        {"bf16", "f32", 32, 32, 16, 1, false, "v_smfmac_f32_32x32x16_bf16"},
+        {"f16", "f32", 32, 32, 16, 1, false, "v_smfmac_f32_32x32x16_f16"},
+        {"fp8_fp8", "f32", 32, 32, 32, 1, false, "v_smfmac_f32_32x32x32_fp8_fp8"},
+        {"bf8_bf8", "f32", 32, 32, 32, 1, false, "v_smfmac_f32_32x32x32_bf8_bf8"},
+        {"fp8_bf8", "f32", 32, 32, 32, 1, false, "v_smfmac_f32_32x32x32_fp8_bf8"},
+        {"bf8_fp8", "f32", 32, 32, 32, 1, false, "v_smfmac_f32_32x32x32_bf8_fp8"},
+        {"i8", "i32", 32, 32, 32, 1, false, "v_smfmac_i32_32x32x32_i8"},
     };
 
     std::vector<ArchTest> archTests = {

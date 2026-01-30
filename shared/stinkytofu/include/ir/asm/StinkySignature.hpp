@@ -321,18 +321,38 @@ namespace stinkytofu
         std::array<int, 3> isaVersion;
         int                wavefrontSize;
 
+        // Optimization config fields
+        std::array<int, 2> threadTile             = {0, 0};
+        std::array<int, 2> subGroup               = {0, 0};
+        int                vectorWidthA           = 0;
+        int                vectorWidthB           = 0;
+        int                globalReadVectorWidthA = 0;
+        int                globalReadVectorWidthB = 0;
+        bool               directToLdsA           = false;
+        bool               directToLdsB           = false;
+        int                useSgprForGRO          = 0;
+
         SignatureKernelDescriptor(const std::string&        name,
                                   const std::array<int, 3>& isaVersion,
                                   int                       groupSegSize,
                                   const std::array<int, 3>& sgprWorkGroup,
                                   int                       vgprWorkItem,
-                                  int                       wavefrontSize    = 64,
+                                  int                       wavefrontSize   = 64,
                                   int                       totalVgprs      = 0,
                                   int                       totalAgprs      = 0,
                                   int                       totalSgprs      = 0,
                                   bool                      preloadKernArgs = false);
 
         void setGprs(int totalVgprs, int totalAgprs, int totalSgprs);
+        void setOptimizationConfig(const std::array<int, 2>& tt,
+                                   const std::array<int, 2>& sg,
+                                   int                       vwA,
+                                   int                       vwB,
+                                   int                       glvwA,
+                                   int                       glvwB,
+                                   bool                      d2lA,
+                                   bool                      d2lB,
+                                   int                       useSgprForGRO);
         int  getNextFreeVgpr() const
         {
             return totalVgprs;
@@ -401,6 +421,15 @@ namespace stinkytofu
                       bool                      preloadKernArgs = false);
 
         void setGprs(int totalVgprs, int totalAgprs, int totalSgprs);
+        void setOptimizationConfig(const std::array<int, 2>& tt,
+                                   const std::array<int, 2>& sg,
+                                   int                       vwA,
+                                   int                       vwB,
+                                   int                       glvwA,
+                                   int                       glvwB,
+                                   bool                      d2lA,
+                                   bool                      d2lB,
+                                   int                       useSgprForGRO);
         void addArg(const std::string& name,
                     SignatureValueKind kind,
                     const std::string& type,
@@ -422,12 +451,14 @@ namespace stinkytofu
 
         std::string toString() const;
 
+        // Public utility methods for formatting
+        static std::string block3Line(const std::string& text);
+
     private:
         std::string              descriptionTopic;
         std::vector<std::string> descriptionList;
 
         static std::string block(const std::string& text);
-        static std::string block3Line(const std::string& text);
         static std::string slash(const std::string& text);
     };
 

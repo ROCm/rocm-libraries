@@ -123,13 +123,7 @@ namespace stinkytofu
 
     void defineGfx1250Insts(GpuArch& registry)
     {
-        // STEP 1: Set default costs (REQUIRED!)
-        // Note: Gfx1250 (RDNA4) uses 1,1 unlike CDNA which uses 4,4
-        registry.setDefaultCosts(GFX1250_DEFAULT_CYCLE, GFX1250_DEFAULT_LATENCY);
-
-        /*
-         * Begin Import gfx942 instructions
-         */
+        // Begin Import gfx942 instructions
 
         // ============================================
         // Scalar instructions (SOP1 / SOP2 / Scalar ALU)
@@ -219,7 +213,7 @@ namespace stinkytofu
                 "s_setpc_b64",
                 "s_setprio",
                 "s_setreg_b32",
-                "s_setreg_imm32_b32",
+                "s_setreg_IMM32_b32",
                 "s_sleep",
                 "s_swappc_b64",
             })
@@ -252,8 +246,9 @@ namespace stinkytofu
             DEF_T(CommutativeVALU, "v_fma_" + std::string(ty));
 
         // nc: no carry in, no carry out.
-        for(std::string suffix : {"_i32", "_co_u32", "c_co_u32", "3_u32"})
+        for(std::string suffix : {"_co_u32", "c_co_u32", "3_u32"})
             DEF_T(CommutativeVALU, "v_add" + suffix);
+        DEF_T(CommutativeVALU, "v_add_nc_i32");
         DEF_T(CommutativeVALU, "v_add_nc_u32");
 
         for(std::string suffix : {"lo_u32", "hi_i32", "hi_u32", "i32_i24", "u32_u24"})
@@ -334,34 +329,57 @@ namespace stinkytofu
         // amd-instinct-mi300-cdna3-instruction-set-architecture.pdf
         // Table 25. VALU Instruction Set
         // ============================================
-        for(std::string cmp : {"v_cmp", "v_cmpx"})
-            for(auto ty : {"i16", "i32", "i64", "u16", "u32", "u64"})
-                for(auto fn : {"f", "lt", "eq", "le", "gt", "lg", "ge", "ne", "t"})
-                    DEF_T(VCmp, cmp + "_" + fn + "_" + ty);
+        for(auto ty : {"i16", "i32", "i64", "u16", "u32", "u64"})
+            for(auto fn : {"f", "lt", "eq", "le", "gt", "lg", "ge", "ne", "t"})
+                DEF_T(VCmp, std::string("v_cmp_") + fn + "_" + ty);
 
-        for(std::string cmp : {"v_cmp", "v_cmpx"})
-            for(auto ty : {"f16", "f32", "f64"})
-                for(auto fn : {"f",
-                               "lt",
-                               "eq",
-                               "le",
-                               "gt",
-                               "lg",
-                               "ge",
-                               "t",
-                               "o",
-                               "u",
-                               "nge",
-                               "nlg",
-                               "ngt",
-                               "nle",
-                               "neq",
-                               "nlt"})
-                    DEF_T(VCmp, cmp + "_" + fn + "_" + ty);
+        for(auto ty : {"i16", "i32", "i64", "u16", "u32", "u64"})
+            for(auto fn : {"f", "lt", "eq", "le", "gt", "lg", "ge", "ne", "t"})
+                DEF_T(VCmpX, std::string("v_cmpx_") + fn + "_" + ty);
 
-        for(std::string cmp : {"v_cmp", "v_cmpx"})
-            for(auto ty : {"f16", "f32", "f64"})
-                DEF_T(VCmp, cmp + "_class_" + ty);
+        for(auto ty : {"f16", "f32", "f64"})
+            for(auto fn : {"f",
+                           "lt",
+                           "eq",
+                           "le",
+                           "gt",
+                           "lg",
+                           "ge",
+                           "t",
+                           "o",
+                           "u",
+                           "nge",
+                           "nlg",
+                           "ngt",
+                           "nle",
+                           "neq",
+                           "nlt"})
+                DEF_T(VCmp, std::string("v_cmp_") + fn + "_" + ty);
+
+        for(auto ty : {"f16", "f32", "f64"})
+            for(auto fn : {"f",
+                           "lt",
+                           "eq",
+                           "le",
+                           "gt",
+                           "lg",
+                           "ge",
+                           "t",
+                           "o",
+                           "u",
+                           "nge",
+                           "nlg",
+                           "ngt",
+                           "nle",
+                           "neq",
+                           "nlt"})
+                DEF_T(VCmpX, std::string("v_cmpx_") + fn + "_" + ty);
+
+        for(auto ty : {"f16", "f32", "f64"})
+            DEF_T(VCmp, std::string("v_cmp_class_") + ty);
+
+        for(auto ty : {"f16", "f32", "f64"})
+            DEF_T(VCmpX, std::string("v_cmpx_class_") + ty);
 
         // ============================================
         // VCvt: vector convert family
@@ -424,28 +442,23 @@ namespace stinkytofu
                               "sshort",
                               "ubyte_d16",
                               "ubyte_d16_hi",
+                              "d16_u8",
+                              "d16_hi_u8",
                               "sbyte_d16",
                               "sbyte_d16_hi",
-                              "short_d16",
-                              "short_d16_hi"})
+                              "d16_b16",
+                              "d16_hi_b16"})
         {
             DEF_T(MUBUFLoad, "buffer_load_" + ty);
         }
 
-        for(std::string ty : {"dword",
-                              "dwordx2",
-                              "dwordx3",
-                              "dwordx4",
-                              "byte",
-                              "byte_d16_hi",
-                              "short",
-                              "short_d16_hi"})
+        for(std::string ty : {"d16_hi_b8", "d16_hi_b16"})
         {
             DEF_T(MUBUFStore, "buffer_store_" + ty);
         }
 
         // New byte-based naming (gfx12 preferred)
-        for(std::string ty : {"b32", "b64", "b96", "b128"})
+        for(std::string ty : {"b8", "b16", "b32", "b64", "b96", "b128"})
         {
             DEF_T(MUBUFLoad, "buffer_load_" + ty);
             DEF_T(MUBUFStore, "buffer_store_" + ty);
@@ -610,14 +623,10 @@ namespace stinkytofu
         DEF_T(VALU, "v_accvgpr_read_b32");
         DEF_T(VALU, "v_accvgpr_write_b32");
 
-        /*
-         * End Import gfx942 instructions
-         */
+        // End Import gfx942 instructions
 
-        /*
-         * Begin Import gfx950 instructions
-         */
-
+        // Begin Import gfx950 instructions
+        //
         // gfx950 removes xf32 variants of v_mfma.
         for(auto removed : {"v_mfma_f32_16x16x8_xf32", "v_mfma_f32_32x32x4_xf32"})
             registry.erase(removed);
@@ -628,6 +637,9 @@ namespace stinkytofu
 
         //    v_cvt_pk_bf16_f32
         DEF_T(VCvt, "v_cvt_pk_bf16_f32");
+
+        //    v_cvt_pk_f16_f32
+        DEF_T(VCvt, "v_cvt_pk_f16_f32");
 
         // 2) "scale" fp8/bf8 variants
         //    v_cvt_scalef32_f16_fp8
@@ -691,9 +703,7 @@ namespace stinkytofu
         for(auto s : mfma950)
             GEN_MFMA(registry, s, false);
 
-        /*
-         * End Import gfx950 instructions
-         */
+        // End Import gfx950 instructions
 
         // Set wavefront size for gfx1250
         registry.setWaveFrontSize(32);
@@ -735,6 +745,8 @@ namespace stinkytofu
         // ============================================
         DEF_T(VALU, "v_fma_mix_f32");
         DEF_T(VTrans, "v_rsq_iflag_f32");
+        DEF_T(VALU, "v_pk_add_f32");
+        DEF_T(VALU, "v_pk_mul_f32");
 
         // Vector control/sync instructions
         DEF_T(HasSideEffectInst, "v_nop");
@@ -769,33 +781,187 @@ namespace stinkytofu
         // ============================================
         // DS: LDS access
         // ============================================
-        for(std::string ty : {"b32", "b64", "b96", "b128", "u8", "i8", "u16", "i16"})
+        for(std::string ty : {"b32", "b64", "b96", "b128", "b192", "u8", "i8", "u16", "i16"})
             DEF_T(DSRead, "ds_load_" + ty);
 
-        for(std::string ty : {"b8", "b16", "b32", "b64", "b96", "b128"})
+        for(std::string suf : {"tr16_b128", "tr4_b64", "tr6_b96", "tr8_b64"})
+            DEF_T(DSRead, "ds_load_" + suf);
+
+        for(std::string ty : {"b8", "b16", "b32", "b64", "b96", "b192", "b128"})
             DEF_T(DSWrite, "ds_store_" + ty);
+
+        for(std::string ty : {"b8_d16_hi", "b16_d16_hi"})
+            DEF_T(DSWrite, "ds_store_" + ty);
+
+        DEF_T(DSWrite, "ds_bpermute_b32");
 
         // ============================================
         // WMMA / SWMMA (matrix instructions)
         // ============================================
         const MatInstDesc wmma1250[] = {
+            // 16x16x16 variants
+            // V_WMMA_BF16_16X16X16_BF16
+            {16, 16, 16, 1, "bf16", "bf16"},
+            // V_WMMA_F16_16X16X16_F16
+            {16, 16, 16, 1, "f16", "f16"},
+            // V_WMMA_F32_16X16X16_BF16
+            {16, 16, 16, 1, "f32", "bf16"},
+            // V_WMMA_F32_16X16X16_BF8_BF8
+            {16, 16, 16, 1, "f32", "bf8_bf8"},
+            // V_WMMA_F32_16X16X16_BF8_FP8
+            {16, 16, 16, 1, "f32", "bf8_fp8"},
+            // V_WMMA_F32_16X16X16_F16
+            {16, 16, 16, 1, "f32", "f16"},
+            // V_WMMA_F32_16X16X16_FP8_BF8
+            {16, 16, 16, 1, "f32", "fp8_bf8"},
+            // V_WMMA_F32_16X16X16_FP8_FP8
+            {16, 16, 16, 1, "f32", "fp8_fp8"},
+            // V_WMMA_I32_16X16X16_IU4
+            {16, 16, 16, 1, "i32", "iu4"},
+            // V_WMMA_I32_16X16X16_IU8
+            {16, 16, 16, 1, "i32", "iu8"},
+
+            // 16x16x32 variants
+            // V_WMMA_BF16_16X16X32_BF16
+            {16, 16, 32, 1, "bf16", "bf16"},
+            // V_WMMA_BF16F32_16X16X32_BF16 (BF16 output with F32 accumulation)
+            {16, 16, 32, 1, "bf16f32", "bf16"},
+            // V_WMMA_F16_16X16X32_F16
+            {16, 16, 32, 1, "f16", "f16"},
             // V_WMMA_F32_16X16X32_BF16
             {16, 16, 32, 1, "f32", "bf16"},
+            // V_WMMA_F32_16X16X32_F16
+            {16, 16, 32, 1, "f32", "f16"},
+            // V_WMMA_I32_16X16X32_IU4
+            {16, 16, 32, 1, "i32", "iu4"},
+
+            // 16x16x64 variants
+            // V_WMMA_F16_16X16X64_BF8_BF8
+            {16, 16, 64, 1, "f16", "bf8_bf8"},
+            // V_WMMA_F16_16X16X64_BF8_FP8
+            {16, 16, 64, 1, "f16", "bf8_fp8"},
+            // V_WMMA_F16_16X16X64_FP8_BF8
+            {16, 16, 64, 1, "f16", "fp8_bf8"},
+            // V_WMMA_F16_16X16X64_FP8_FP8
+            {16, 16, 64, 1, "f16", "fp8_fp8"},
+            // V_WMMA_F32_16X16X64_BF8_BF8
+            {16, 16, 64, 1, "f32", "bf8_bf8"},
+            // V_WMMA_F32_16X16X64_BF8_FP8
+            {16, 16, 64, 1, "f32", "bf8_fp8"},
+            // V_WMMA_F32_16X16X64_FP8_BF8
+            {16, 16, 64, 1, "f32", "fp8_bf8"},
+            // V_WMMA_F32_16X16X64_FP8_FP8
+            {16, 16, 64, 1, "f32", "fp8_fp8"},
+            // V_WMMA_I32_16X16X64_IU8
+            {16, 16, 64, 1, "i32", "iu8"},
+
+            // 16x16x128 variant
+            // V_WMMA_F32_16X16X128_F8F6F4
+            {16, 16, 128, 1, "f32", "f8f6f4"},
+
+            // 16x16x4 variant
+            // V_WMMA_F32_16X16X4_F32
+            {16, 16, 4, 1, "f32", "f32"},
         };
 
         for(auto s : wmma1250)
             GEN_WMMA(registry, s, false);
 
-        // STEP 2: Register instruction-specific costs (exceptions from defaults)
+        const MatInstDesc swmma1250[] = {
+            // 16x16x32 variants
+            // V_SWMMAC_BF16_16X16X32_BF16
+            {16, 16, 32, 1, "bf16", "bf16"},
+            // V_SWMMAC_F16_16X16X32_F16
+            {16, 16, 32, 1, "f16", "f16"},
+            // V_SWMMAC_F32_16X16X32_BF16
+            {16, 16, 32, 1, "f32", "bf16"},
+            // V_SWMMAC_F32_16X16X32_BF8_BF8
+            {16, 16, 32, 1, "f32", "bf8_bf8"},
+            // V_SWMMAC_F32_16X16X32_BF8_FP8
+            {16, 16, 32, 1, "f32", "bf8_fp8"},
+            // V_SWMMAC_F32_16X16X32_F16
+            {16, 16, 32, 1, "f32", "f16"},
+            // V_SWMMAC_F32_16X16X32_FP8_BF8
+            {16, 16, 32, 1, "f32", "fp8_bf8"},
+            // V_SWMMAC_F32_16X16X32_FP8_FP8
+            {16, 16, 32, 1, "f32", "fp8_fp8"},
+            // V_SWMMAC_I32_16X16X32_IU4
+            {16, 16, 32, 1, "i32", "iu4"},
+            // V_SWMMAC_I32_16X16X32_IU8
+            {16, 16, 32, 1, "i32", "iu8"},
+
+            // 16x16x64 variants
+            // V_SWMMAC_BF16_16X16X64_BF16
+            {16, 16, 64, 1, "bf16", "bf16"},
+            // V_SWMMAC_BF16F32_16X16X64_BF16 (BF16 output with F32 accumulation)
+            {16, 16, 64, 1, "bf16f32", "bf16"},
+            // V_SWMMAC_F16_16X16X64_F16
+            {16, 16, 64, 1, "f16", "f16"},
+            // V_SWMMAC_F32_16X16X64_BF16
+            {16, 16, 64, 1, "f32", "bf16"},
+            // V_SWMMAC_F32_16X16X64_F16
+            {16, 16, 64, 1, "f32", "f16"},
+            // V_SWMMAC_I32_16X16X64_IU4
+            {16, 16, 64, 1, "i32", "iu4"},
+
+            // 16x16x128 variants
+            // V_SWMMAC_F16_16X16X128_BF8_BF8
+            {16, 16, 128, 1, "f16", "bf8_bf8"},
+            // V_SWMMAC_F16_16X16X128_BF8_FP8
+            {16, 16, 128, 1, "f16", "bf8_fp8"},
+            // V_SWMMAC_F16_16X16X128_FP8_BF8
+            {16, 16, 128, 1, "f16", "fp8_bf8"},
+            // V_SWMMAC_F16_16X16X128_FP8_FP8
+            {16, 16, 128, 1, "f16", "fp8_fp8"},
+            // V_SWMMAC_F32_16X16X128_BF8_BF8
+            {16, 16, 128, 1, "f32", "bf8_bf8"},
+            // V_SWMMAC_F32_16X16X128_BF8_FP8
+            {16, 16, 128, 1, "f32", "bf8_fp8"},
+            // V_SWMMAC_F32_16X16X128_FP8_BF8
+            {16, 16, 128, 1, "f32", "fp8_bf8"},
+            // V_SWMMAC_F32_16X16X128_FP8_FP8
+            {16, 16, 128, 1, "f32", "fp8_fp8"},
+            // V_SWMMAC_I32_16X16X128_IU8
+            {16, 16, 128, 1, "i32", "iu8"},
+        };
+
+        for(auto s : swmma1250)
+            GEN_WMMA(registry, s, true);
+
+        // ============================================
+        // MXWMMA (MX microscaling WMMA instructions)
+        // ============================================
+        const MatInstDesc mxwmma1250[] = {
+            // V_WMMA_SCALE_F32_16X16X128_F8F6F4 and V_WMMA_SCALE16_F32_16X16X128_F8F6F4
+            {16, 16, 128, 1, "f32", "f8f6f4"},
+            // V_WMMA_SCALE_F32_32X16X128_F4 and V_WMMA_SCALE16_F32_32X16X128_F4
+            {32, 16, 128, 1, "f32", "f4"},
+        };
+
+        // Generate both block=32 and block=16 variants for each MXWMMA instruction
+        for(auto s : mxwmma1250)
+        {
+            GEN_MXWMMA(registry, s, 32); // V_WMMA_SCALE_*
+            GEN_MXWMMA(registry, s, 16); // V_WMMA_SCALE16_*
+        }
+
+        // ============================================
+        // Set instruction costs
+        // ============================================
+
+        // Set default costs (REQUIRED!)
+        // Note: Gfx1250 (RDNA4) uses 1,1 unlike CDNA which uses 4,4
+        registry.setDefaultCosts(GFX1250_DEFAULT_CYCLE, GFX1250_DEFAULT_LATENCY);
+
+        // Register instruction-specific costs (exceptions from defaults)
         for(const auto& cost : GFX1250_COSTS)
         {
             registry.setInstructionCost(cost.opcode, cost.cycle, cost.latency);
         }
 
-        // STEP 3: Apply costs with strict validation
+        // Apply costs with strict validation
         if(!registry.applyInstructionCosts())
         {
-            // Fatal error - build will stop
             std::cerr << "FATAL: Failed to apply instruction costs for Gfx1250\n";
             return;
         }
@@ -881,19 +1047,22 @@ namespace stinkytofu
             {"VCvtF32toI32", "v_cvt_i32_f32"},
             {"VCvtFP8toF32", "v_cvt_f32_fp8"},
             {"VCvtBF8toF32", "v_cvt_f32_bf8"},
+            {"PVCvtBF16toFP32", "v_cvt_f32_bf16"},
             {"VCvtPkFP8toF32", "v_cvt_pk_f32_fp8"},
             {"VCvtPkBF8toF32", "v_cvt_pk_f32_bf8"},
             {"VCvtPkF32toFP8", "v_cvt_pk_fp8_f32"},
             {"VCvtPkF32toBF8", "v_cvt_pk_bf8_f32"},
             {"VCvtSRF32toFP8", "v_cvt_sr_fp8_f32"},
             {"VCvtSRF32toBF8", "v_cvt_sr_bf8_f32"},
+            {"VCvtPkF32toBF16", "v_cvt_pk_bf16_f32"},
+            {"VCvtPkF32toF16", "v_cvt_pk_f16_f32"},
 
             /* mem.hpp */
             {"BufferLoadU8", "buffer_load_ubyte"},
-            {"BufferLoadD16HIU8", "buffer_load_ubyte_d16_hi"},
-            {"BufferLoadD16U8", "buffer_load_ubyte_d16"},
-            {"BufferLoadD16HIB16", "buffer_load_short_d16_hi"},
-            {"BufferLoadD16B16", "buffer_load_short_d16"},
+            {"BufferLoadD16HIU8", "buffer_load_d16_hi_u8"},
+            {"BufferLoadD16U8", "buffer_load_d16_u8"},
+            {"BufferLoadD16HIB16", "buffer_load_d16_hi_b16"},
+            {"BufferLoadD16B16", "buffer_load_d16_b16"},
             {"BufferLoadB32", "buffer_load_b32"},
             {"BufferLoadB64", "buffer_load_b64"},
             {"BufferLoadB96", "buffer_load_b96"},
@@ -906,10 +1075,10 @@ namespace stinkytofu
             {"FlatLoadB64", "flat_load_b64"},
             {"FlatLoadB128", "flat_load_b128"},
             {"TensorLoadToLds", "tensor_load_to_lds"},
-            {"BufferStoreB8", "buffer_store_byte"},
-            {"BufferStoreD16HIU8", "buffer_store_byte_d16_hi"},
-            {"BufferStoreD16HIB16", "buffer_store_short_d16_hi"},
-            {"BufferStoreB16", "buffer_store_short"},
+            {"BufferStoreB8", "buffer_store_b8"},
+            {"BufferStoreD16HIU8", "buffer_store_d16_hi_b8"},
+            {"BufferStoreD16HIB16", "buffer_store_d16_hi_b16"},
+            {"BufferStoreB16", "buffer_store_b16"},
             {"BufferStoreB32", "buffer_store_b32"},
             {"BufferStoreB64", "buffer_store_b64"},
             {"BufferStoreB128", "buffer_store_b128"},
@@ -926,11 +1095,14 @@ namespace stinkytofu
             {"DSLoadB32", "ds_load_b32"},
             {"DSLoadB64", "ds_load_b64"},
             {"DSLoadB128", "ds_load_b128"},
+            {"DSLoadB192", "ds_load_b192"},
             {"DSStoreB8", "ds_store_b8"},
             {"DSStoreB16", "ds_store_b16"},
             {"DSStoreB32", "ds_store_b32"},
             {"DSStoreB64", "ds_store_b64"},
+            {"DSStoreB96", "ds_store_b96"},
             {"DSStoreB128", "ds_store_b128"},
+            {"DSStoreB192", "ds_store_b192"},
             {"SAtomicDec", "s_atomic_dec"},
             {"SLoadB32", "s_load_b32"},
             {"SLoadB64", "s_load_b64"},
@@ -940,6 +1112,13 @@ namespace stinkytofu
             {"SStoreB32", "s_store_b32"},
             {"SStoreB64", "s_store_b64"},
             {"SStoreB128", "s_store_b128"},
+            {"DSLoadB128TrB16", "ds_load_tr16_b128"},
+            {"DSLoadB64TrB4", "ds_load_tr4_b64"},
+            {"DSLoadB96TrB6", "ds_load_tr6_b96"},
+            {"DSLoadB64TrB8", "ds_load_tr8_b64"},
+            {"DSBPermuteB32", "ds_bpermute_b32"},
+            {"DSStoreB8HID16", "ds_store_b8_d16_hi"},
+            {"DSStoreD16HIB16", "ds_store_b16_d16_hi"},
 
             /* common.hpp */
             {"SAbsI32", "s_abs_i32"},
@@ -975,7 +1154,7 @@ namespace stinkytofu
             {"SLShiftLeft2AddU32", "s_lshl2_add_u32"},
             {"SLShiftLeft3AddU32", "s_lshl3_add_u32"},
             {"SLShiftLeft4AddU32", "s_lshl4_add_u32"},
-            {"SSetMask", "s_set_mask"},
+            {"SSetMask", "s_mov_b32"},
             {"SMovB32", "s_mov_b32"},
             {"SMovB64", "s_mov_b64"},
             {"SCMovB32", "s_cmov_b32"},
@@ -996,18 +1175,23 @@ namespace stinkytofu
             {"SSleep", "s_sleep"},
             {"SGetRegB32", "s_getreg_b32"},
             {"SSetRegB32", "s_setreg_b32"},
-            {"SSetRegIMM32B32", "s_setreg_imm32_b32"},
+            {"SSetRegIMM32B32", "s_setreg_IMM32_b32"},
             {"SWaitCnt", "s_waitcnt"},
             {"SWaitTensorcnt", "s_wait_tensorcnt"},
             {"SDelayAlu", "s_delay_alu"},
             {"VAddF16", "v_add_f16"},
             {"VAddF32", "v_add_f32"},
             {"VAddF64", "v_add_f64"},
-            {"VAddI32", "v_add_i32"},
+            {"VAddI32", "v_add_nc_i32"},
             {"VAddU32", "v_add_nc_u32"},
+            {"VAdd3U32", "v_add3_u32"},
             {"VAddCOU32", "v_add_co_u32"},
             {"VAddCCOU32", "v_add_co_ci_u32"},
             {"VNop", "v_nop"},
+            {"VAddPKF32", "v_pk_add_f32"},
+            {"_VAddPKF32", "v_pk_add_f32"},
+            {"VMulPKF32", "v_pk_mul_f32"},
+            {"_VMulPKF32", "v_pk_mul_f32"},
 
             {"VMulF16", "v_mul_f16"},
             {"VMulF32", "v_mul_f32"},
@@ -1062,10 +1246,14 @@ namespace stinkytofu
             {"VLShiftRightB64", "v_lshrrev_b64"},
             {"VAShiftRightI32", "v_ashrrev_i32"},
             {"VLShiftLeftOrB32", "v_lshl_or_b32"},
+            {"_VLShiftLeftOrB32", "v_lshl_or_b32"},
             {"VAddLShiftLeftU32", "v_add_lshl_u32"},
+            {"_VAddLShiftLeftU32", "v_add_lshl_u32"},
             {"VLShiftLeftAddU32", "v_lshl_add_u32"},
+            {"_VLShiftLeftAddU32", "v_lshl_add_u32"},
             {"VMovB32", "v_mov_b32"},
             {"VMovB64", "v_mov_b64"},
+            {"_VMovB64", "v_mov_b64"},
             {"VSwapB32", "v_swap_b32"},
             {"VBfeI32", "v_bfe_i32"},
             {"VBfeU32", "v_bfe_u32"},
@@ -1084,13 +1272,14 @@ namespace stinkytofu
     void setGfx1250ConversionMap(GpuArch& registry)
     {
         std::unordered_map<std::string, std::string> conversion = {
-            {"_SWaitCnt", "lowerRocisaWaitCnt" /* todo */},
-            {"_SWaitCntVscnt", "" /* todo */},
-            {"_SWaitStorecnt", "" /* todo */},
+            {"_SWaitCnt", "lowerRocisaWaitCnt"},
+            {"_SWaitCntVscnt", "lowerRocisaWaitCnt"},
+            {"_SWaitStorecnt", "lowerRocisaStoreWaitCnt"},
             {"_SWaitLoadcnt", "lowerRocisaWaitCnt"},
-            {"_SWaitKMcnt", "" /* todo */},
+            {"_SWaitKMcnt", "lowerRocisaWaitCnt"},
             {"_SWaitDscnt", "lowerRocisaWaitCnt"},
             {"SWaitTensorcnt", "lowerRocisaWaitTensorcnt"},
+            {"SWaitAlu", "lowerRocisaWaitAlu"},
 
             // {"VMulPKF32", "v_pk_mul_f32" /* todo */},
             // {"VAddPKF32", "v_pk_add_f32" /* todo */},
@@ -1100,7 +1289,8 @@ namespace stinkytofu
 
             /* mfma.hpp */
             {"MFMAInstruction", "lowerRocisaMFMA"},
-            {"SMFMAInstruction", "lowerRocisaSMFMA"},
+            {"SMFMAInstruction", "lowerRocisaMFMA"},
+            {"MXMFMAInstruction", "lowerRocisaMFMA"},
         };
 
         registry.setRocisaConversionMap(std::move(conversion));

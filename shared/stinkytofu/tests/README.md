@@ -6,13 +6,13 @@ This directory contains all tests for the StinkyTofu library.
 
 ```
 tests/
-├── CMakeLists.txt           # Test build configuration
-├── StinkyTofuTestMain.cpp   # Main test entry point (GTest runner)
-└── unit/                    # Unit tests
-    ├── ConfigurableWaitCntPassTest.cpp
-    ├── IntrusiveListTest.cpp
-    ├── PassManagerTest.cpp
-    └── StinkyAsmEmitterTest.cpp
++-- CMakeLists.txt           # Test build configuration
++-- StinkyTofuTestMain.cpp   # Main test entry point (GTest runner)
++-- unit/                    # Unit tests
+    +-- ConfigurableWaitCntPassTest.cpp
+    +-- IntrusiveListTest.cpp
+    +-- PassManagerTest.cpp
+    +-- StinkyAsmEmitterTest.cpp
 ```
 
 ## Building Tests
@@ -107,7 +107,7 @@ Unit tests verify individual components in isolation:
    ```cpp
    #include <gtest/gtest.h>
    #include "stinkytofu.hpp"
-   
+
    TEST(MyNewTest, BasicTest) {
        // Your test code
        EXPECT_EQ(1, 1);
@@ -172,8 +172,8 @@ target_link_libraries(integration_tests PUBLIC ${TEST_LINK_LIBS})
 target_include_directories(integration_tests PRIVATE ${TEST_INCLUDE_DIRS})
 add_dependencies(integration_tests tablegen_generated)
 
-gtest_discover_tests(integration_tests 
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} 
+gtest_discover_tests(integration_tests
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     TIMEOUT 60
     PROPERTIES LABELS "integration_tests"
 )
@@ -187,4 +187,55 @@ This ensures:
 2. Labels are correctly applied per test type
 3. `make tests` builds all test executables
 4. Tests can be filtered by type using labels
+
+## Python Tests
+
+Python tests use pytest and are automatically integrated into CTest when `STINKYTOFU_BUILD_PYTHON=ON`.
+
+### Running Python Tests via CTest
+
+```bash
+# Build with Python support
+cmake -DSTINKYTOFU_BUILD_PYTHON=ON ..
+make
+
+# Run all Python tests (fast: ~0.8s for 23 tests)
+ctest -L python
+
+# Run specific test file
+ctest -R python.test_ir_basic
+
+# Show output on failure
+ctest -L python --output-on-failure
+
+# Verbose mode (shows all output)
+ctest -L python -V
+```
+
+### Running Individual Tests Directly with Pytest
+
+For debugging specific test cases, use pytest directly with proper PYTHONPATH:
+
+```bash
+# Set PYTHONPATH to find the built Python module
+export PYTHONPATH=<build_dir>/lib
+
+# Run one specific test
+pytest python_module/tests/test_ir_basic.py::TestMemoryManagement::test_module_destruction -v
+
+# Run all tests in a class
+pytest python_module/tests/test_ir_basic.py::TestMemoryManagement -v
+
+# Run tests matching a pattern
+pytest python_module/tests/test_ir_basic.py -k "memory" -v
+
+# Enable print statements and debugger
+pytest python_module/tests/test_ir_basic.py::test_name -v -s --pdb
+```
+
+### Python Test Organization
+
+- Each `test_*.py` file = one CTest entry
+- Tests are in `python_module/tests/`
+- CTest suppresses output by default (use `--output-on-failure` or `-V` to see details)
 

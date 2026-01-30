@@ -51,12 +51,14 @@ from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion
+from .Common.GlobalParameters import globalParameters
 from Tensile.SolutionStructs.Naming import getKernelNameMin
 from Tensile.Toolchain.Component import Assembler
 
 import math
 import abc
 import sys
+import os
 import collections
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -5145,34 +5147,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     moduleKernelBody.addBody(module)
     self.checkResources(kernel, moduleKernelBody) # check resource available or not
 
-    # Initialize stModule as None (will be set for supported architectures)
-    stModule = None
-
-    # List of architectures that support StinkyTofu optimization
-    # Can be extended to support more architectures as needed
-    stinkyTofuSupportedArchs = [
-      (12, 5, 0),  # gfx1250
-      # Add more architectures here as needed
-      # (12, 5, 1),  # Example: gfx1251
-    ]
-
-    # Run StinkyTofu conversion for supported architectures
-    if self.states.version in stinkyTofuSupportedArchs:
-      import rocisa
-
-      print("="*80)
-      print(f"StinkyTofu: Converting kernel to stinkytofu IR for gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}...")
-
-      # Convert rocisa module to stinkytofu with signature
-      # Returns a KernelBody wrapper that includes signature and instruction module
-      # - runOptimizationPipeline() optimizes the instruction body
-      # - emitAssembly() outputs complete kernel: signature + optimized instructions
-      stModule = rocisa.toStinkyTofuModule(module, self.states.version, "kernel_name",
-                                           signature=fs, wavefrontSize=kernel["WavefrontSize"])
-
-      # Run optimizations on the instruction body
-      stModule.runOptimizationPipeline()
-
     # Tensile instruction pass, temporarily disable due to build time.
     # Kernels with epilog especially with activation is too long (50000~ lines).
     # Need to refactor global write elements.
@@ -5205,19 +5179,94 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.states.stinkyOpt:
       ripo.stinkyOpt = True
 
-    passResult = rocIsaPass(moduleKernelBody, ripo, stModule)
+    passResult = rocIsaPass(moduleKernelBody, ripo)
     kernel["MathClocksUnrolledLoop"] = passResult.cycles
 
+    # Initialize stModule as None (will be set for supported architectures)
+    stModule = None
+
+    # List of architectures that support StinkyTofu optimization
+    # Can be extended to support more architectures as needed
+    stinkyTofuSupportedArchs = [
+      (12, 5, 0),  # gfx1250
+      # Add more architectures here as needed
+      # (12, 5, 1),  # Example: gfx1251
+    ]
+
+    # Run StinkyTofu conversion for supported architectures
+    if globalParameters["UseStinkyTofu"] and self.states.version in stinkyTofuSupportedArchs:
+      import rocisa
+
+      print("="*80)
+      print(f"StinkyTofu: Converting kernel to stinkytofu IR for gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}...")
+
+      # Convert rocisa module to stinkytofu with signature
+      # Returns a KernelBody wrapper that includes signature and instruction module
+      # - runOptimizationPipeline() optimizes the instruction body
+      # - emitAssembly() outputs complete kernel: signature + optimized instructions
+      stModule = rocisa.toStinkyTofuModule(moduleKernelBody.body, self.states.version, "kernel_name",
+                                           signature=fs,
+                                           wavefrontSize=kernel["WavefrontSize"],
+                                           tt=[kernel["ThreadTile0"], kernel["ThreadTile1"]],
+                                           sg=[kernel["SubGroup0"], kernel["SubGroup1"]],
+                                           vwA=kernel["VectorWidthA"],
+                                           vwB=kernel["VectorWidthB"],
+                                           glvwA=kernel["GlobalReadVectorWidthA"],
+                                           glvwB=kernel["GlobalReadVectorWidthB"],
+                                           d2lA=bool(kernel["DirectToLdsA"]),
+                                           d2lB=bool(kernel["DirectToLdsB"]),
+                                           useSgprForGRO=kernel["_UseSgprForGRO"])
+
+      # Run optimizations on the instruction body
+      stModule.runOptimizationPipeline()
 
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
 
-    # For supported architectures with StinkyTofu, use stModule.emitAssembly()
-    # which includes signature + optimized instructions
-    # For other architectures, use the original moduleKernelBody
-    if stModule is not None:
-      return (error, stModule.emitAssembly())
+    # Check if StinkyTofu assembly output should be used
+    if globalParameters["UseStinkyTofu"] and stModule is not None:
+      st_asm = stModule.emitAssembly()
+      if os.environ.get("ENABLE_DEBUG_STINKYTOFU_ASM") is not None:
+        # Find the next available sequential number starting from 0
+        os.makedirs("cmpasm/orig", exist_ok=True)
+        os.makedirs("cmpasm/st", exist_ok=True)
+
+        # Atomically find and create files to avoid race condition
+        file_id = 0
+        while True:
+          fd_orig = None
+          fd_st = None
+          try:
+            # Attempt to exclusively create both files (atomic operation)
+            # This ensures no other process can claim this file_id
+            fd_orig = os.open(f"cmpasm/orig/{file_id}.s", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            fd_st = os.open(f"cmpasm/st/{file_id}.s", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+
+            # Write content and close file descriptors
+            os.write(fd_orig, str(moduleKernelBody).encode('utf-8'))
+            os.write(fd_st, st_asm.encode('utf-8'))
+            os.close(fd_orig)
+            os.close(fd_st)
+            break
+          except FileExistsError:
+            # File already exists, cleanup and try next ID
+            if fd_orig is not None:
+              os.close(fd_orig)
+              os.remove(f"cmpasm/orig/{file_id}.s")
+            file_id += 1
+          except OSError as e:
+            # Handle other errors (permissions, etc.)
+            if fd_orig is not None:
+              os.close(fd_orig)
+              os.remove(f"cmpasm/orig/{file_id}.s")
+            if fd_st is not None:
+              os.close(fd_st)
+            raise RuntimeError(f"Failed to create debug file {file_id}.s: {e}")
+
+      print(f"Using StinkyTofu Assembly")
+      return (error, st_asm)
     else:
+      print(f"Using Original Rocisa Assembly")
       return (error, str(moduleKernelBody))
 
   ##############################################################################

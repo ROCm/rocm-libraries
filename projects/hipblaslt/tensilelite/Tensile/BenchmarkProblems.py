@@ -524,6 +524,8 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
         # run benchmarking client
         if buildOnly:
             print1("# Build-only mode: skipping benchmark.")
+        if globalParameters["GenerateSourcesAndExit"]:
+            print1("# GenerateSourcesAndExit is True; skipping client execution.")
         elif not os.path.exists(resultsFileName) or globalParameters["ForceRedoBenchmarkProblems"]:
             libraryLogicPath = None
             forBenchmark = True
@@ -626,7 +628,8 @@ def main(
                             .format(totalTestFails, "(ERROR)" if totalTestFails else "(PASS)", \
                             globalParameters["ConfigPath"]) )
 
-                    # copy data
+                # copy data (skip if GenerateSourcesAndExit since client wasn't run)
+                if not globalParameters["GenerateSourcesAndExit"]:
                     resultsFileBase = resultsFileBaseFinal
                     resultsFileName = resultsFileBase + ".csv"
                     solutionsFileName = resultsFileBase + ".yaml"

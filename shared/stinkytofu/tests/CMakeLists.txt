@@ -129,7 +129,7 @@ if(STINKYTOFU_BUILD_PYTHON)
                 # Extract test file name without path and extension
                 get_filename_component(TEST_NAME ${PYTEST_FILE} NAME_WE)
 
-                # Add individual test
+                # Add test (CTest suppresses output by default, shows on failure)
                 add_test(
                     NAME python.${TEST_NAME}
                     COMMAND ${Python_EXECUTABLE} -m pytest
@@ -147,9 +147,10 @@ if(STINKYTOFU_BUILD_PYTHON)
             endforeach()
 
             list(LENGTH PYTEST_FILES PYTEST_FILE_COUNT)
-            message(STATUS "  - Registered ${PYTEST_FILE_COUNT} Python test files as individual CTest entries")
-            message(STATUS "  - Run Python tests with: ctest -L python")
-            message(STATUS "  - Run specific test with: ctest -R python.test_ir_basic")
+            message(STATUS "  - Registered ${PYTEST_FILE_COUNT} Python test files")
+            message(STATUS "  - Run all: ctest -L python")
+            message(STATUS "  - Run one: ctest -R python.test_ir_basic")
+            message(STATUS "  - Debug: pytest python_module/tests/test_ir_basic.py::TestClass::test_func -v")
         else()
             message(WARNING "pytest not found - Python tests will not be added to CTest")
             message(STATUS "  - Install pytest with: pip3 install pytest")

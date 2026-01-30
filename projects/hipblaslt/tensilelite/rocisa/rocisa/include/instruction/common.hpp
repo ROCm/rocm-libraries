@@ -1835,7 +1835,13 @@ namespace rocisa
         std::string toString() const override
         {
             int maxVscnt = getAsmCaps()["MaxVscnt"];
-            return formatWithComment("s_waitcnt_vscnt null " + std::to_string(std::min(vscnt, maxVscnt)));
+            return formatWithComment("s_waitcnt_vscnt null "
+                                     + std::to_string(std::min(vscnt, maxVscnt)));
+        }
+
+        int getVscnt() const
+        {
+            return vscnt;
         }
 
     private:
@@ -1881,7 +1887,13 @@ namespace rocisa
             std::string kStr;
             setMsb(kStr, {}, nullptr);
             int maxStorecnt = getAsmCaps()["MaxStorecnt"];
-            return formatWithComment("s_wait_storecnt " + std::to_string(std::min(storecnt, maxStorecnt)));
+            return formatWithComment("s_wait_storecnt "
+                                     + std::to_string(std::min(storecnt, maxStorecnt)));
+        }
+
+        int getStorecnt() const
+        {
+            return storecnt;
         }
 
     private:
@@ -1927,7 +1939,13 @@ namespace rocisa
             std::string kStr;
             setMsb(kStr, {}, nullptr);
             int maxLoadcnt = getAsmCaps()["MaxLoadcnt"];
-            return formatWithComment("s_wait_loadcnt " + std::to_string(std::min(loadcnt, maxLoadcnt)));
+            return formatWithComment("s_wait_loadcnt "
+                                     + std::to_string(std::min(loadcnt, maxLoadcnt)));
+        }
+
+        int getLoadcnt() const
+        {
+            return loadcnt;
         }
 
     private:
@@ -1966,6 +1984,11 @@ namespace rocisa
         std::vector<InstructionInput> getSrcParams() const override
         {
             return {kmcnt};
+        }
+
+        int getKmcnt() const
+        {
+            return kmcnt;
         }
 
         std::string toString() const override
@@ -2020,6 +2043,11 @@ namespace rocisa
             setMsb(kStr, {}, nullptr);
             int maxDscnt = getAsmCaps()["MaxDscnt"];
             return formatWithComment("s_wait_dscnt " + std::to_string(std::min(dscnt, maxDscnt)));
+        }
+
+        int getDscnt() const
+        {
+            return dscnt;
         }
 
     private:
@@ -2121,7 +2149,9 @@ namespace rocisa
 
             if(getAsmCaps()["SeparateVscnt"])
             {
-                int lgkmcnt = (dscnt != -1 || kmcnt != -1)? (dscnt != -1 ? dscnt : 0) + (kmcnt != -1 ? kmcnt : 0) : -1;
+                int lgkmcnt = (dscnt != -1 || kmcnt != -1)
+                                  ? (dscnt != -1 ? dscnt : 0) + (kmcnt != -1 ? kmcnt : 0)
+                                  : -1;
                 int vmcnt   = vlcnt; // With SeparateVscnt, vmcnt only counts load instructions
                 if(vlcnt != -1 || lgkmcnt != -1)
                 {
@@ -2153,8 +2183,12 @@ namespace rocisa
             }
             else
             {
-                int lgkmcnt = (dscnt != -1 || kmcnt != -1)? (dscnt != -1 ? dscnt : 0) + (kmcnt != -1 ? kmcnt : 0) : -1;
-                int vmcnt   = (vscnt != -1 || vlcnt != -1)? (vscnt != -1 ? vscnt : 0) + (vlcnt != -1 ? vlcnt : 0) : -1;
+                int lgkmcnt = (dscnt != -1 || kmcnt != -1)
+                                  ? (dscnt != -1 ? dscnt : 0) + (kmcnt != -1 ? kmcnt : 0)
+                                  : -1;
+                int vmcnt   = (vscnt != -1 || vlcnt != -1)
+                                  ? (vscnt != -1 ? vscnt : 0) + (vlcnt != -1 ? vlcnt : 0)
+                                  : -1;
                 if(vmcnt != -1 || lgkmcnt != -1)
                 {
                     instructions.push_back(std::make_shared<_SWaitCnt>(lgkmcnt, vmcnt, comment));
@@ -2275,7 +2309,8 @@ namespace rocisa
 
         std::vector<InstructionInput> getSrcParams() const override
         {
-            return {va_vdst, va_sdst, va_ssrc, hold_cnt, vm_vsrc, va_vcc, sa_sdst};
+            // ignore va_vdst..sa_sdst since they are not operands in s_wait_alu instruction.
+            return {};
         }
 
         std::string toString() const override
@@ -2303,6 +2338,41 @@ namespace rocisa
                 return "";
 
             return formatWithComment(instStr + result);
+        }
+
+        int getVaVdst() const
+        {
+            return va_vdst;
+        }
+
+        int getVaSdst() const
+        {
+            return va_sdst;
+        }
+
+        int getVaSsrc() const
+        {
+            return va_ssrc;
+        }
+
+        int getHoldCnt() const
+        {
+            return hold_cnt;
+        }
+
+        int getVmVsrc() const
+        {
+            return vm_vsrc;
+        }
+
+        int getVaVcc() const
+        {
+            return va_vcc;
+        }
+
+        int getSaSdst() const
+        {
+            return sa_sdst;
         }
 
     private:
@@ -2371,16 +2441,6 @@ namespace rocisa
 
         std::vector<InstructionInput> getParams() const override
         {
-            return getSrcParams();
-        }
-
-        std::vector<InstructionInput> getDstParams() const override
-        {
-            return {};
-        }
-
-        std::vector<InstructionInput> getSrcParams() const override
-        {
             if(hasInstID1())
             {
                 return {static_cast<int>(instid0type),
@@ -2391,6 +2451,17 @@ namespace rocisa
             }
 
             return {static_cast<int>(instid0type), instid0cnt};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // s_delay_alu use a single immediate 16-bit encoded value.
+            return {};
         }
 
         std::string toString() const override
@@ -5002,9 +5073,9 @@ namespace rocisa
     struct VSwapB32 : public CommonInstruction
     {
         VSwapB32(const std::shared_ptr<Container>&   dst,
-                const InstructionInput&             src,
-                const std::optional<SDWAModifiers>& sdwa    = std::nullopt,
-                const std::string&                  comment = "")
+                 const InstructionInput&             src,
+                 const std::optional<SDWAModifiers>& sdwa    = std::nullopt,
+                 const std::string&                  comment = "")
             : CommonInstruction(
                 InstType::INST_B32, dst, {src}, std::nullopt, sdwa, std::nullopt, comment)
         {

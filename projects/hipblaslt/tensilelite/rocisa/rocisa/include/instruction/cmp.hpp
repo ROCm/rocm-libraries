@@ -160,11 +160,11 @@ namespace rocisa
                 std::string kStr2;
                 if(kernel().wavefront == 64)
                 {
-                    kStr2 = "s_mov_b64 exec " + dstStr;
+                    kStr2 = "s_mov_b64 exec, " + dstStr;
                 }
                 else
                 {
-                    kStr2 = "s_mov_b32 exec_lo " + dstStr;
+                    kStr2 = "s_mov_b32 exec_lo, " + dstStr;
                 }
                 kStr2 = formatWithComment(kStr2);
                 kStr += kStr2;

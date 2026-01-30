@@ -31,7 +31,10 @@
 #include "instruction/branch.hpp"
 #include "instruction/cmp.hpp"
 #include "instruction/common.hpp"
+#include "instruction/cvt.hpp"
 #include "instruction/mem.hpp"
+#include "instruction/mfma.hpp"
+#include "ir/asm/LegalizationUtils.hpp"
 #include "ir/asm/StinkyAsmDirectives.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/asm/StinkyAsmModule.hpp"
@@ -39,6 +42,11 @@
 #include "ir/rocisa/AllHwMappings.hpp"
 #include "isa/ArchHelper.hpp"
 #include "stinkytofu.hpp"
+
+#include <cassert>
+#include <ranges>
+#include <regex>
+#include <string_view>
 
 namespace nb = nanobind;
 
@@ -50,8 +58,6 @@ namespace stinkytofu
     std::shared_ptr<SignatureBase> toStinkySignature(const rocisa::SignatureBase& rocisaSig,
                                                      const std::array<int, 3>&    isaVersion,
                                                      int wavefrontSize = 64);
-    std::shared_ptr<KernelBody>    toStinkyKernelBody(const rocisa::KernelBody& rocisaKernel,
-                                                      const std::array<int, 3>& isaVersion);
 } // namespace stinkytofu
 
 namespace
@@ -59,9 +65,7 @@ namespace
     using namespace rocisa;
     using namespace stinkytofu;
 
-    /**
-     * @brief Check if an instruction reads the SCC register
-     */
+    /// Check if an instruction reads the SCC register
     bool doesReadSCC(const Instruction* inst)
     {
         if(dynamic_cast<const SCSelectB32*>(inst))
@@ -71,9 +75,7 @@ namespace
         return false;
     }
 
-    /**
-     * @brief Check if an instruction writes the SCC register
-     */
+    /// Check if an instruction writes the SCC register
     bool doesWriteSCC(const Instruction* inst)
     {
         if(dynamic_cast<const SCmpEQI32*>(inst) || dynamic_cast<const SCmpEQU32*>(inst)
@@ -114,245 +116,108 @@ namespace
         return stinkytofu::SMEMModifiers(rocMod.glc, rocMod.nv, rocMod.offset);
     }
 
-    bool getVgprMsbSetValue(const rocisa::Instruction& inst, int& setVal)
+    stinkytofu::SDelayAluData convertSDelayAluData(const rocisa::SDelayAlu* delayAluInst)
     {
-        int  msbSrc[3] = {0, 0, 0};
-        int  msbDst    = 0;
-        bool hasVgpr   = false;
-
-        const auto srcs = inst.getSrcParams();
-        for(size_t i = 0; i < srcs.size() && i < 3; ++i)
-        {
-            if(auto pptr = std::get_if<std::shared_ptr<rocisa::Container>>(&srcs[i]))
+        // Convert DelayALUType to SDelayAluData::InstType
+        auto convertType = [](rocisa::DelayALUType type) -> SDelayAluData::InstType {
+            switch(type)
             {
-                if(*pptr == nullptr)
-                    continue;
-                auto gpr = dynamic_cast<rocisa::RegisterContainer*>(pptr->get());
-                if(gpr && gpr->regType == "v")
-                {
-                    msbSrc[i] = gpr->msb;
-                    hasVgpr   = true;
-                }
+            case rocisa::DelayALUType::VALU:
+                return SDelayAluData::InstType::VALU;
+            case rocisa::DelayALUType::SALU:
+                return SDelayAluData::InstType::SALU;
+            case rocisa::DelayALUType::TRANS:
+                return SDelayAluData::InstType::TRANS;
+            default:
+                return SDelayAluData::InstType::NO_DEP;
             }
+        };
+
+        auto params = delayAluInst->getParams();
+
+        assert(params.size() >= 2 && "s_delay_alu should have at least 2 parameters");
+
+        int instid0TypeInt = std::get<int>(params[0]);
+        int instid0Cnt     = std::get<int>(params[1]);
+
+        SDelayAluData::InstType instid0Type
+            = convertType(static_cast<rocisa::DelayALUType>(instid0TypeInt));
+
+        if(!delayAluInst->hasInstID1())
+        {
+            // Single dependency: {instid0type, instid0cnt}
+            assert(params.size() == 2 && "s_delay_alu single dependency should have 2 parameters");
+            return SDelayAluData(instid0Type, static_cast<int8_t>(instid0Cnt));
         }
 
-        const auto dsts = inst.getDstParams();
-        for(const auto& dst : dsts)
-        {
-            if(auto pptr = std::get_if<std::shared_ptr<rocisa::Container>>(&dst))
-            {
-                if(*pptr == nullptr)
-                    continue;
-                auto gpr = dynamic_cast<rocisa::RegisterContainer*>(pptr->get());
-                if(gpr && gpr->regType == "v")
-                {
-                    msbDst  = gpr->msb;
-                    hasVgpr = true;
-                    break;
-                }
-            }
-        }
+        // Dual dependency: {instid0type, instid0cnt, instskipCnt, instid1type, instid1cnt}
+        assert(params.size() == 5 && "s_delay_alu has 5 parameters");
 
-        setVal = msbSrc[0] + (msbSrc[1] << 2) + (msbSrc[2] << 4) + (msbDst << 6);
-        return hasVgpr;
+        int instskipCnt    = std::get<int>(params[2]);
+        int instid1TypeInt = std::get<int>(params[3]);
+        int instid1Cnt     = std::get<int>(params[4]);
+
+        SDelayAluData::InstType instid1Type
+            = convertType(static_cast<rocisa::DelayALUType>(instid1TypeInt));
+
+        return SDelayAluData(instid0Type,
+                             static_cast<int8_t>(instid0Cnt),
+                             static_cast<int8_t>(instskipCnt),
+                             instid1Type,
+                             static_cast<int8_t>(instid1Cnt));
     }
 
-    /**
-     * @brief Handle VGPR MSB setting if needed
-     * @return The new MSB value that was set, or -1 if no change
-     */
-    int handleVgprMsbSetting(const rocisa::Instruction& inst,
-                             int                        currentVgprMsb,
-                             StinkyInstIRBuilder&       irBuilder,
-                             IRList&                    insts,
-                             GfxArchID                  archId)
+    stinkytofu::VOP3PModifiers convertVOP3PModifiers(const rocisa::VOP3PModifiers& rocMod)
     {
-        int setVal = 0;
-        if(getVgprMsbSetValue(inst, setVal) && setVal != currentVgprMsb)
-        {
-            const HwInstDesc* desc = getMCIDByUOp(GFX::s_set_vgpr_msb, archId);
-            assert(desc != nullptr && "s_set_vgpr_msb is not supported on this architecture");
-            StinkyInstruction* msbInst = irBuilder.createStinkyInstBefore(insts.end(), desc);
-            msbInst->addSrcReg(StinkyRegister(setVal));
-            return setVal;
-        }
-        return currentVgprMsb;
+        return stinkytofu::VOP3PModifiers(rocMod.op_sel, rocMod.op_sel_hi, rocMod.byte_sel);
     }
 
-    /**
-     * @brief Post-process IRList to expand VNop instructions into multiple individual v_nop instructions
-     *
-     * In rocisa, VNop(count=N) represents N separate v_nop instructions.
-     * This function expands a single VNop instruction with count > 1 into multiple individual v_nop instructions.
-     */
-    void expandNopInstructions(IRList& insts, StinkyInstIRBuilder& irBuilder, GfxArchID archId)
+    Legalized legalizeInstruction(StinkyInstruction*                inst,
+                                  rocisa::Instruction*              rocisaInst,
+                                  StinkyInstIRBuilder&              irBuilder,
+                                  GfxArchID                         archId,
+                                  const std::map<std::string, int>& asmCaps)
     {
-        // Expand VNop instructions in place with a single pass
-        for(auto it = insts.begin(); it != insts.end(); ++it)
+        if(isBranch(*inst))
         {
-            StinkyInstruction* inst = dyn_cast<StinkyInstruction>(&*it);
-            if(!inst)
-                continue;
-
-            // Check for v_nop using unified opcode
-            if(inst->getUnifiedOpcode() != GFX::v_nop)
-                continue;
-
-            const auto& srcRegs = inst->getSrcRegs();
-            if(srcRegs.empty() || srcRegs[0].dataType != StinkyRegister::Type::LiteralInt)
-                continue;
-
-            int count = srcRegs[0].literalInt;
-            if(count <= 1)
-                continue;
-
-            // Found a v_nop with count > 1, expand it in place
-            const HwInstDesc* desc = inst->getHwInstDesc();
-
-            // Get comment if present
-            const CommentData* comment    = inst->getModifier<CommentData>();
-            std::string        commentStr = comment ? comment->comment : "";
-
-            // Create 'count' separate nop instructions before the original
-            for(int i = 0; i < count; ++i)
-            {
-                StinkyInstruction* newInst = irBuilder.createStinkyInstBefore(it, desc);
-
-                // v_nop has no operands - just add comment
-                if(!commentStr.empty())
-                {
-                    newInst->addModifier<CommentData>(CommentData{commentStr});
-                }
-            }
-
-            --it; // Move back so iterator points to the last expanded nop
-
-            // Remove the original nop instruction and adjust iterator
-            irBuilder.erase(inst);
+            // Handle branch instructions
+            rocisa::BranchInstruction* branchInst
+                = dynamic_cast<rocisa::BranchInstruction*>(rocisaInst);
+            assert(branchInst != nullptr && "This should be a rocisa Branch.");
+            inst->addModifier<LabelData>(
+                LabelData{Modifier::Type::LABEL_NAME, branchInst->labelName});
+            return {nullptr, nullptr};
         }
+
+        if(inst->is(InstFlag::IF_VCmpX))
+        {
+            return legalizeVCmpX(inst, irBuilder, archId, asmCaps);
+        }
+
+        switch(inst->getUnifiedOpcode())
+        {
+        case GFX::v_nop:
+            return legalizeVNop(inst, irBuilder, archId);
+
+        case GFX::ds_load_b192:
+            return legalizeDSLoadB192(inst, irBuilder, archId);
+
+        case GFX::ds_store_b192:
+            return legalizeDSStoreB192(inst, irBuilder, archId);
+
+        case GFX::s_waitcnt:
+            return legalizeWaitCnt(inst, irBuilder, archId);
+
+        case GFX::s_barrier:
+            return legalizeBarrier(inst, irBuilder, archId);
+
+        default:
+            break;
+        }
+        return {nullptr, nullptr};
     }
 
-    /**
-     * @brief Post-process IRList to lower VCmpX instructions on architectures that need it
-     *
-     * On gfx10+ (RDNA) architectures, v_cmpx instructions don't directly write to SGPR.
-     * We need to convert: v_cmpx_* exec_lo, src0, src1
-     * Into: v_cmp_* vcc_lo, src0, src1
-     *       s_mov_b32 exec_lo, vcc_lo
-     */
-    void lowerVCmpXInstructions(IRList& insts, StinkyInstIRBuilder& irBuilder, GfxArchID archId)
-    {
-        // Check if this architecture needs VCmpX lowering
-        const std::map<std::string, int> asmCaps = rocisa::rocIsa::getInstance().getAsmCaps();
-        auto                             it      = asmCaps.find("CMPXWritesSGPR");
-        bool                             cmpxWritesSGPR = (it != asmCaps.end() && it->second);
-
-        if(cmpxWritesSGPR)
-        {
-            // No lowering needed on this architecture
-            return;
-        }
-
-        // Get wavefront size to determine if we use vcc/exec or vcc_lo/exec_lo
-        int wavefrontSize = rocisa::rocIsa::getInstance().getKernel().wavefront;
-
-        // Iterate through instructions and lower v_cmpx to v_cmp + s_mov
-        for(auto it = insts.begin(); it != insts.end(); ++it)
-        {
-            StinkyInstruction* inst = dyn_cast<StinkyInstruction>(&*it);
-            if(!inst)
-                continue;
-
-            const HwInstDesc* desc = inst->getHwInstDesc();
-            assert(desc != nullptr
-                   && "Instruction descriptor is not supported on this architecture");
-            assert(desc->mnemonic != nullptr && "Missing mnemonic in instruction descriptor");
-
-            std::string mnemonic(desc->mnemonic);
-            size_t      pos = mnemonic.find("_cmpx_");
-            if(pos == std::string::npos)
-                continue;
-
-            // This is a v_cmpx instruction that needs lowering
-            // Check if destination is EXEC
-            const auto& destRegs = inst->getDestRegs();
-            if(destRegs.empty())
-                continue;
-
-            const StinkyRegister& destReg = destRegs[0];
-            bool                  isExecDest
-                = (destReg.reg.type == RegType::EXEC || destReg.reg.type == RegType::EXEC_LO);
-
-            if(!isExecDest)
-                continue;
-
-            // Replace v_cmpx with v_cmp
-            mnemonic.replace(pos, 6, "_cmp_");
-
-            uint16_t          cmpOpcode = getMnemonicToIsaOpcode(mnemonic, archId);
-            const HwInstDesc* cmpDesc   = getMCIDByIsaOp(cmpOpcode, archId);
-
-            assert(cmpDesc != nullptr && "v_cmp_* is not supported on this architecture");
-
-            // Create new v_cmp instruction
-            StinkyInstruction* cmpInst = irBuilder.createStinkyInstBefore(it, cmpDesc);
-
-            // Replace EXEC destination with VCC
-            StinkyRegister vccReg;
-            if(wavefrontSize == 32)
-            {
-                vccReg = StinkyRegister(RegType::VCC_LO, 0, 1);
-            }
-            else
-            {
-                vccReg = StinkyRegister(RegType::VCC, 0, 1);
-            }
-            cmpInst->addDestReg(vccReg);
-
-            // Copy source registers
-            for(const auto& srcReg : inst->getSrcRegs())
-            {
-                cmpInst->addSrcReg(srcReg);
-            }
-
-            // Copy modifiers (comment, etc.)
-            if(const CommentData* comment = inst->getModifier<CommentData>())
-            {
-                cmpInst->addModifier<CommentData>(*comment);
-            }
-
-            // Create s_mov exec, vcc instruction
-            const HwInstDesc* movDesc;
-            StinkyRegister    execReg;
-            if(wavefrontSize == 32)
-            {
-                movDesc = getMCIDByUOp(GFX::s_mov_b32, archId);
-                execReg = StinkyRegister(RegType::EXEC_LO, 0, 1);
-            }
-            else
-            {
-                movDesc = getMCIDByUOp(GFX::s_mov_b64, archId);
-                execReg = StinkyRegister(RegType::EXEC, 0, 1);
-            }
-
-            assert(movDesc != nullptr
-                   && "s_mov_b32 or s_mov_b64 is not supported on this architecture");
-
-            StinkyInstruction* movInst = irBuilder.createStinkyInstBefore(it, movDesc);
-            movInst->addDestReg(execReg);
-            movInst->addSrcReg(vccReg);
-
-            // Adjust iterator to the new cmp instruction.
-            ++it;
-
-            // Remove the original v_cmpx instruction using builder
-            irBuilder.erase(inst);
-        }
-    }
-
-    /**
-     * @brief Create StinkyInstruction from rocisa instruction
-     */
+    /// Create StinkyInstruction from rocisa instruction
     StinkyInstruction* createStinkyInstructionFromRocisa(rocisa::Instruction& inst,
                                                          std::type_index      rocisaTy,
                                                          StinkyInstIRBuilder& irBuilder,
@@ -391,15 +256,19 @@ namespace
         return stinkyInst;
     }
 
-    /**
-     * @brief Add source and destination registers to StinkyInstruction
-     */
+    /// Add source and destination registers to StinkyInstruction
     void addRegistersToInstruction(StinkyInstruction*                stinkyInst,
                                    const rocisa::Instruction*        inst,
                                    const std::map<std::string, int>& asmCaps,
                                    GfxArchID                         archId)
     {
-        std::set<StinkyRegister> uniqueSrcRegs, uniqueDstRegs;
+        // Skip adding registers for SDelayAlu - it uses SDelayAluData modifier instead
+        if(dynamic_cast<const rocisa::SDelayAlu*>(inst))
+        {
+            return;
+        }
+
+        std::set<StinkyRegister> uniqueDstRegs;
 
         // Add destination registers
         for(const InstructionInput& dst : inst->getDstParams())
@@ -417,26 +286,27 @@ namespace
         // Add source registers
         std::vector<InstructionInput> srcParams = inst->getSrcParams();
 
-        // Adjust source parameters for VLShiftLeftAddU32 instructions
-        if(typeid(*inst) == typeid(rocisa::VLShiftLeftAddU32)
-           || typeid(*inst) == typeid(rocisa::_VLShiftLeftAddU32))
+        // Adjust source parameters for VLShiftLeftAddU32 CompositeInstruction
+        // VLShiftLeftAddU32 stores parameters as: {src0, src1, shift}
+        // _VLShiftLeftAddU32 stores parameters as: {src0, shift, src1}
+        // Assembly format is: v_lshl_add_u32 dst, src0, shift, src1
+        if(typeid(*inst) == typeid(rocisa::VLShiftLeftAddU32))
         {
             auto it         = asmCaps.find("HasAddLshl");
             bool hasAddLshl = (it != asmCaps.end() && it->second);
             if(hasAddLshl)
             {
-                // rocisa CompositeInstruction order is src0, src1, shift;
-                // HasAddLshl expects src0, shift, src1
+                // VLShiftLeftAddU32 order is src0, src1, shift
+                // Need to swap to get: src0, shift, src1
                 std::swap(srcParams[1], srcParams[2]);
             }
         }
 
-        for(const InstructionInput& src : srcParams)
+        for(size_t i = 0; i < srcParams.size(); ++i)
         {
-            StinkyRegister reg = stinkytofu::toStinkyRegister(src);
-            if(reg.isValid() && uniqueSrcRegs.find(reg) == uniqueSrcRegs.end())
+            StinkyRegister reg = stinkytofu::toStinkyRegister(srcParams[i]);
+            if(reg.isValid())
             {
-                uniqueSrcRegs.insert(reg);
                 stinkyInst->addSrcReg(reg);
             }
         }
@@ -453,12 +323,213 @@ namespace
         }
     }
 
-    /**
-     * @brief Add modifiers to StinkyInstruction (DS, FLAT, MUBUF, SMEM, WaitCnt)
-     */
-    void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Instruction* inst)
+    /// Helper to extract neg_lo/neg_hi modifiers from instruction string
+    ///
+    /// Searches for patterns like:
+    ///   neg_lo:[x,x] or neg_lo:[x,x,x]
+    ///   neg_hi:[x,x] or neg_hi:[x,x,x]
+    /// where x is a digit
+    ///
+    /// \param instString The instruction string to search
+    /// \return Tuple of (negStr, has_neg_lo, has_neg_hi)
+    std::tuple<std::string, bool, bool> extractNegModifiers(const std::string& instString)
     {
-        // Macro to reduce boilerplate for memory modifier handling
+        std::string negStr   = "";
+        bool        hasNegLo = false;
+        bool        hasNegHi = false;
+
+        // Helper to extract a neg modifier pattern
+        auto extractPattern = [&](const std::string& pattern, bool& hasPattern) {
+            size_t pos = instString.find(pattern);
+            if(pos != std::string::npos)
+            {
+                size_t endPos = instString.find(']', pos);
+                if(endPos != std::string::npos)
+                {
+                    if(!negStr.empty())
+                        negStr += " ";
+                    negStr += instString.substr(pos, endPos - pos + 1);
+                    hasPattern = true;
+                }
+            }
+        };
+
+        extractPattern("neg_lo:", hasNegLo);
+        extractPattern("neg_hi:", hasNegHi);
+
+        return std::make_tuple(negStr, hasNegLo, hasNegHi);
+    }
+
+    /// Helper to handle MXMFMA instruction modifiers
+    void handleMXMFMAModifiers(StinkyInstruction*               stinkyInst,
+                               const rocisa::MXMFMAInstruction* mxmfmaInst,
+                               const std::string&               instString)
+    {
+        // Extract matrix format and scale format patterns from the instruction string
+        // Follows the pattern: matrix_a_fmt:xxx matrix_b_fmt:yyy [matrix_a_scale_fmt:z] [matrix_b_scale_fmt:w]
+        // or just scale formats: matrix_a_scale_fmt:z [matrix_b_scale_fmt:w]
+        std::regex  inputPermuteRegex("matrix_a_fmt:[^ ]+ matrix_b_fmt:[^ ]+"
+                                      "( matrix_a_scale_fmt:[^ ]+)?( matrix_b_scale_fmt:[^ ]+)?"
+                                      "|matrix_a_scale_fmt:[^ ]+( matrix_b_scale_fmt:[^ ]+)?");
+        std::smatch match;
+        std::string inputPermuteStr = "";
+        if(std::regex_search(instString, match, inputPermuteRegex))
+        {
+            inputPermuteStr = match[0].str();
+        }
+
+        // MXMFMA does not support neg_lo/neg_hi modifiers
+
+        // Create and add MFMA modifiers with MXMFMA-specific fields
+        MFMAModifiers mfmaModifiers(inputPermuteStr,
+                                    "" /* negStr */,
+                                    mxmfmaInst->reuseA,
+                                    mxmfmaInst->reuseB,
+                                    static_cast<int>(mxmfmaInst->instType),
+                                    static_cast<int>(mxmfmaInst->mxScaleAType),
+                                    static_cast<int>(mxmfmaInst->mxScaleBType),
+                                    false /* hasNegLo */,
+                                    false /* hasNegHi */);
+        stinkyInst->addModifier<MFMAModifiers>(mfmaModifiers);
+    }
+
+    /// Helper to handle MFMA instruction modifiers
+    void handleMFMAModifiers(StinkyInstruction*             stinkyInst,
+                             const rocisa::MFMAInstruction* mfmaInst,
+                             const std::string&             instString)
+    {
+        // extract inputPermute string patterns like "matrix_a_fmt:xxxxx matrix_b_fmt:yyyyy"
+        std::regex  inputPermuteRegex("matrix_a_fmt:([^ ]+) matrix_b_fmt:([^ ]+)");
+        std::smatch match;
+        std::string inputPermuteStr = "";
+        if(std::regex_search(instString, match, inputPermuteRegex))
+        {
+            inputPermuteStr = match[0].str();
+        }
+
+        // Extract neg_lo/neg_hi modifiers
+        auto [negStr, hasNegLo, hasNegHi] = extractNegModifiers(instString);
+
+        // Only set reuseA and reuseB if the instruction type is not f8f6f4
+        bool reuseA = mfmaInst->typeConvert(mfmaInst->instType) != "f8f6f4" && mfmaInst->reuseA;
+        bool reuseB = mfmaInst->typeConvert(mfmaInst->instType) != "f8f6f4" && mfmaInst->reuseB;
+        MFMAModifiers mfmaModifiers(inputPermuteStr, negStr, reuseA, reuseB, hasNegLo, hasNegHi);
+        stinkyInst->addModifier<MFMAModifiers>(mfmaModifiers);
+    }
+
+    /// Helper to handle SMFMA instruction modifiers
+    void handleSMFMAModifiers(StinkyInstruction*              stinkyInst,
+                              const rocisa::SMFMAInstruction* smfmaInst,
+                              const std::string&              instString)
+    {
+        // Extract neg_lo/neg_hi modifiers
+        auto [negStr, hasNegLo, hasNegHi] = extractNegModifiers(instString);
+
+        MFMAModifiers mfmaModifiers("" /* inputPermuteStr */,
+                                    negStr,
+                                    false /* reuseA */,
+                                    false /* reuseB */,
+                                    hasNegLo,
+                                    hasNegHi);
+        stinkyInst->addModifier<MFMAModifiers>(mfmaModifiers);
+    }
+
+    /// Helper to handle SWaitCnt instruction modifiers
+    void handleSWaitCntModifiers(StinkyInstruction* stinkyInst, const rocisa::SWaitCnt* waitCntInst)
+    {
+        SWaitCntData waitCntData(
+            waitCntInst->vlcnt, waitCntInst->vscnt, -1, waitCntInst->dscnt, waitCntInst->kmcnt);
+        stinkyInst->addModifier<SWaitCntData>(waitCntData);
+    }
+
+    /// Helper to handle _SWaitDscnt instruction modifiers
+    void handleSWaitDscntModifiers(StinkyInstruction*                stinkyInst,
+                                   const rocisa::_SWaitDscnt*        waitCntInst,
+                                   const std::map<std::string, int>& asmCaps)
+    {
+        auto it       = asmCaps.find("MaxDscnt");
+        int  maxDscnt = it != asmCaps.end() ? it->second : waitCntInst->getDscnt();
+        int  dscnt    = std::min(waitCntInst->getDscnt(), maxDscnt);
+        if(auto sWaitCntData = stinkyInst->getModifier<SWaitCntData>())
+        {
+            sWaitCntData->dscnt = dscnt;
+        }
+        else
+        {
+            SWaitCntData waitCntData;
+            waitCntData.dscnt = dscnt;
+            stinkyInst->addModifier<SWaitCntData>(waitCntData);
+        }
+    }
+
+    /// Helper to handle _SWaitLoadcnt instruction modifiers
+    void handleSWaitLoadcntModifiers(StinkyInstruction*                stinkyInst,
+                                     const rocisa::_SWaitLoadcnt*      waitLoadcntInst,
+                                     const std::map<std::string, int>& asmCaps)
+    {
+        auto it         = asmCaps.find("MaxLoadcnt");
+        int  maxLoadcnt = it != asmCaps.end() ? it->second : waitLoadcntInst->getLoadcnt();
+        int  loadcnt    = std::min(waitLoadcntInst->getLoadcnt(), maxLoadcnt);
+        if(auto sWaitCntData = stinkyInst->getModifier<SWaitCntData>())
+        {
+            sWaitCntData->vlcnt = loadcnt;
+        }
+        else
+        {
+            SWaitCntData waitCntData;
+            waitCntData.vlcnt = loadcnt;
+            stinkyInst->addModifier<SWaitCntData>(waitCntData);
+        }
+    }
+
+    /// Helper to handle VCvt instruction True16 modifiers
+    void handleVCvtTrue16Modifiers(StinkyInstruction*             stinkyInst,
+                                   const rocisa::VCvtInstruction* vcvtInst)
+    {
+        if(vcvtInst->true16.empty())
+        {
+            return;
+        }
+
+        // Convert rocisa::True16Modifiers to stinkytofu True16Modifiers
+        // rocisa uses indices: DST=0, DST1=1, SRC0=2, SRC1=3, ...
+        stinkytofu::HighBitSel              dst0 = stinkytofu::HighBitSel::NONE;
+        stinkytofu::HighBitSel              dst1 = stinkytofu::HighBitSel::NONE;
+        std::vector<stinkytofu::HighBitSel> srcs;
+
+        for(size_t i = 0; i < vcvtInst->true16.size(); ++i)
+        {
+            stinkytofu::HighBitSel highBit = static_cast<stinkytofu::HighBitSel>(
+                static_cast<int>(vcvtInst->true16[i].high_bit));
+
+            if(i == 0) // DST
+            {
+                dst0 = highBit;
+            }
+            else if(i == 1) // DST1
+            {
+                dst1 = highBit;
+            }
+            else // SRC0, SRC1, ...
+            {
+                srcs.push_back(highBit);
+            }
+        }
+
+        // Assert that source count is within the 2-bit encoding limit (max 6 sources)
+        assert(srcs.size() <= 6
+               && "True16Modifiers: source count must be <= 6 for uint16_t 2-bit encoding");
+
+        stinkyInst->addModifier<stinkytofu::True16Modifiers>(
+            stinkytofu::True16Modifiers(dst0, dst1, srcs));
+    }
+
+    /// Add modifiers to StinkyInstruction (DS, FLAT, MUBUF, SMEM, WaitCnt, DelayAlu)
+    void addModifiersToInstruction(StinkyInstruction*                stinkyInst,
+                                   const rocisa::Instruction*        inst,
+                                   const std::string&                instString,
+                                   const std::map<std::string, int>& asmCaps)
+    {
 #define TRY_ADD_MOD(RocisaInstType, modField, StinkyModType, converter)                 \
     if(auto typed = dynamic_cast<const RocisaInstType*>(inst))                          \
     {                                                                                   \
@@ -466,30 +537,47 @@ namespace
         {                                                                               \
             stinkyInst->addModifier<StinkyModType>(converter(typed->modField.value())); \
         }                                                                               \
-    }                                                                                   \
-    else
+    }
 
-        // Chain all memory instruction types
+#define HANDLE_INST_TYPE(RocisaInstType, handlerCall)              \
+    if(auto typedInst = dynamic_cast<const RocisaInstType*>(inst)) \
+    {                                                              \
+        handlerCall;                                               \
+    }
+
+        // clang-format off
+        // Chain all memory instruction types (mutually exclusive)
         TRY_ADD_MOD(DSLoadInstruction, ds, stinkytofu::DSModifiers, convertDSModifiers)
-        TRY_ADD_MOD(DSStoreInstruction, ds, stinkytofu::DSModifiers, convertDSModifiers)
-        TRY_ADD_MOD(FLATReadInstruction, flat, stinkytofu::FLATModifiers, convertFLATModifiers)
-        TRY_ADD_MOD(FLATStoreInstruction, flat, stinkytofu::FLATModifiers, convertFLATModifiers)
-        TRY_ADD_MOD(MUBUFReadInstruction, mubuf, stinkytofu::MUBUFModifiers, convertMUBUFModifiers)
-        TRY_ADD_MOD(MUBUFStoreInstruction, mubuf, stinkytofu::MUBUFModifiers, convertMUBUFModifiers)
-        TRY_ADD_MOD(SMemLoadInstruction, smem, stinkytofu::SMEMModifiers, convertSMEMModifiers)
-        TRY_ADD_MOD(SMemStoreInstruction, smem, stinkytofu::SMEMModifiers, convertSMEMModifiers)
-        TRY_ADD_MOD(SMemAtomicDecInstruction, smem, stinkytofu::SMEMModifiers, convertSMEMModifiers)
+        else TRY_ADD_MOD(DSStoreInstruction, ds, stinkytofu::DSModifiers, convertDSModifiers)
+        else TRY_ADD_MOD(FLATReadInstruction, flat, stinkytofu::FLATModifiers,convertFLATModifiers)
+        else TRY_ADD_MOD(FLATStoreInstruction, flat, stinkytofu::FLATModifiers, convertFLATModifiers)
+        else TRY_ADD_MOD(MUBUFReadInstruction, mubuf, stinkytofu::MUBUFModifiers, convertMUBUFModifiers)
+        else TRY_ADD_MOD(MUBUFStoreInstruction, mubuf, stinkytofu::MUBUFModifiers, convertMUBUFModifiers)
+        else TRY_ADD_MOD(SMemLoadInstruction, smem, stinkytofu::SMEMModifiers, convertSMEMModifiers)
+        else TRY_ADD_MOD(SMemStoreInstruction, smem, stinkytofu::SMEMModifiers, convertSMEMModifiers)
+        else TRY_ADD_MOD(SMemAtomicDecInstruction, smem, stinkytofu::SMEMModifiers, convertSMEMModifiers)
+        else
         {
+            // No memory modifier matched
+            TRY_ADD_MOD(CommonInstruction, vop3, stinkytofu::VOP3PModifiers, convertVOP3PModifiers)
+
+            // VOP/SOP instructions - these can overlap with CommonInstruction base class
+            HANDLE_INST_TYPE(rocisa::MXMFMAInstruction, handleMXMFMAModifiers(stinkyInst, typedInst, instString))
+            else HANDLE_INST_TYPE(rocisa::MFMAInstruction, handleMFMAModifiers(stinkyInst, typedInst, instString))
+            else HANDLE_INST_TYPE(rocisa::SMFMAInstruction, handleSMFMAModifiers(stinkyInst, typedInst, instString))
+            else HANDLE_INST_TYPE(rocisa::VCvtInstruction, handleVCvtTrue16Modifiers(stinkyInst, typedInst))
+
+            // Control/Synchronization instructions, separate from VOP/SOP
+            else HANDLE_INST_TYPE(rocisa::SDelayAlu,
+                                stinkyInst->addModifier<SDelayAluData>(convertSDelayAluData(typedInst)))
+            else HANDLE_INST_TYPE(rocisa::SWaitCnt, handleSWaitCntModifiers(stinkyInst, typedInst))
+            else HANDLE_INST_TYPE(rocisa::_SWaitDscnt, handleSWaitDscntModifiers(stinkyInst, typedInst, asmCaps))
+            else HANDLE_INST_TYPE(rocisa::_SWaitLoadcnt, handleSWaitLoadcntModifiers(stinkyInst, typedInst, asmCaps))
         }
-        // WaitCnt (special case - different structure, no optional field)
-        if(auto waitCntInst = dynamic_cast<const rocisa::SWaitCnt*>(inst))
-        {
-            SWaitCntData waitCntData(
-                waitCntInst->vlcnt, waitCntInst->vscnt, -1, waitCntInst->dscnt, waitCntInst->kmcnt);
-            stinkyInst->addModifier<SWaitCntData>(waitCntData);
-        }
+        // clang-format on
 
 #undef TRY_ADD_MOD
+#undef HANDLE_INST_TYPE
 
         // Always add comment if present
         if(!inst->comment.empty())
@@ -498,20 +586,187 @@ namespace
         }
     }
 
+    inline std::string_view trimString(std::string_view sv)
+    {
+        const auto begin = sv.find_first_not_of(" \t\f\v\r\n");
+        if(begin == std::string_view::npos)
+            return {};
+        const auto end = sv.find_last_not_of(" \t\f\v\r\n");
+        return sv.substr(begin, end - begin + 1);
+    }
+
+    inline std::vector<std::string> splitLinesToStrings(std::string_view text)
+    {
+        std::vector<std::string> out;
+
+        // views::split('\n') splits by LF. We'll drop a trailing '\r' (CRLF) per line.
+        for(auto&& rng : text | std::views::split('\n'))
+        {
+            // Materialize the subrange into a string_view without allocation
+            std::string_view line(&*rng.begin(),
+                                  static_cast<std::size_t>(std::ranges::distance(rng)));
+
+            if(!line.empty() && line.back() == '\r')
+                line.remove_suffix(1); // handle CRLF
+
+            line = trimString(line);
+            if(line.empty())
+                continue;
+
+            // Store as owning string
+            out.emplace_back(line);
+        }
+        return out;
+    }
+
+    /// Create a StinkyRegister from a string
+    ///
+    /// \param regStr The string representation of the register
+    /// \return The StinkyRegister
+    StinkyRegister createStinkyRegisterFromStr(const std::string& regStr)
+    {
+        // TODO: handle more register types. Currently only support v[start:end] and v[N]
+        std::regex  srcRegex1("v\\[([^:]+):([^:]+)\\]");
+        std::regex  srcRegex2("v\\[([^:]+)\\]");
+        std::smatch srcMatch;
+
+        StinkyRegister vReg("v", -1, 1);
+        std::string    startIdxStr = "";
+        if(std::regex_search(regStr, srcMatch, srcRegex1))
+        {
+            startIdxStr  = srcMatch[1].str();
+            vReg.reg.num = std::stoi(srcMatch[2].str().substr(startIdxStr.length())) + 1;
+        }
+        else if(std::regex_search(regStr, srcMatch, srcRegex2))
+        {
+            startIdxStr  = srcMatch[1].str();
+            vReg.reg.num = 1;
+        }
+
+        // match minus number from startIdxStr
+        size_t minusPos = startIdxStr.find('-');
+        if(minusPos != std::string::npos)
+        {
+            vReg.reg.offset = static_cast<int16_t>(std::stoi(startIdxStr.substr(minusPos)));
+            vReg.setSymbolicName(startIdxStr.substr(0, minusPos));
+        }
+        else
+        {
+            vReg.setSymbolicName(startIdxStr);
+        }
+
+        return vReg;
+    }
+
+    /// Try to capture s_set_vgpr_msb instruction from the instruction string
+    ///
+    /// \param instString The instruction string
+    /// \param irBuilder The IR builder
+    /// \param insts The instruction list
+    /// \param archId The architecture ID
+    ///
+    /// \return True if the s_set_vgpr_msb instruction is captured, false otherwise
+    bool tryCaptureVgprMsb(const std::string&   instString,
+                           StinkyInstIRBuilder& irBuilder,
+                           IRList&              insts,
+                           GfxArchID            archId)
+    {
+        std::smatch match;
+        if(std::regex_search(instString, match, std::regex("s_set_vgpr_msb ([0-9]+)")))
+        {
+            int msbValue = std::stoi(match[1].str());
+
+            const HwInstDesc* desc = getMCIDByUOp(GFX::s_set_vgpr_msb, archId);
+            assert(desc != nullptr && "s_set_vgpr_msb is not supported on this architecture");
+            StinkyInstruction* msbInst = irBuilder.createStinkyInstBefore(insts.end(), desc);
+            msbInst->addSrcReg(StinkyRegister(msbValue));
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /// Handle ds_load_b192 and ds_store_b192 instructions
+    ///
+    /// TODO: This function is a temporary solution, we should use legalizeDSLoadB192 and legalizeDSStoreB192 instead.
+    ///
+    /// \return True if the instruction is a ds_load_b192 or ds_store_b192 instruction and it is handled, false otherwise
+    bool handleDSLDSTb192Instructions(rocisa::Instruction* inst,
+                                      const std::string&   instString,
+                                      StinkyInstIRBuilder& irBuilder,
+                                      IRList&              insts,
+                                      GfxArchID            archId)
+    {
+        // DSLoadB192 is composite of 2 instructions: ds_load_b128 and ds_load_b64
+        if(dynamic_cast<DSLoadB192*>(inst) || dynamic_cast<DSStoreB192*>(inst))
+        {
+            auto lines = splitLinesToStrings(instString);
+            if(lines.size() > 1)
+            {
+                for(const auto& line : lines)
+                {
+                    if(tryCaptureVgprMsb(line, irBuilder, insts, archId))
+                    {
+                        continue;
+                    }
+
+                    std::regex  mnemonicRegex("([a-zA-Z0-9_]+) ([^ ]+), ([^ ]+)");
+                    std::smatch match;
+                    if(std::regex_search(line, match, mnemonicRegex))
+                    {
+                        std::string mnemonic = match[1].str();
+                        std::string dstStr   = match[2].str();
+                        std::string srcStr   = match[3].str();
+
+                        StinkyRegister dstReg = createStinkyRegisterFromStr(dstStr);
+                        StinkyRegister srcReg = createStinkyRegisterFromStr(srcStr);
+
+                        auto              opcode = getMnemonicToIsaOpcode(mnemonic, archId);
+                        const HwInstDesc* desc   = getMCIDByIsaOp(opcode, archId);
+                        assert(desc != nullptr && "is not supported on this architecture");
+                        StinkyInstruction* newStinkyInst
+                            = irBuilder.createStinkyInstBefore(insts.end(), desc);
+                        newStinkyInst->addDestReg(dstReg);
+                        newStinkyInst->addSrcReg(srcReg);
+
+                        // match offset:xxx modifier string
+                        std::string modifierStr;
+                        std::smatch offsetMatch;
+                        if(std::regex_search(line, offsetMatch, std::regex("offset:([0-9]+)")))
+                        {
+                            stinkytofu::DSModifiers dsModifiers;
+                            dsModifiers.offset = std::stoi(offsetMatch[1].str());
+                            newStinkyInst->addModifier<stinkytofu::DSModifiers>(dsModifiers);
+                        }
+
+                        // Always add comment if present
+                        if(!inst->comment.empty())
+                        {
+                            newStinkyInst->addModifier<stinkytofu::CommentData>(
+                                stinkytofu::CommentData{inst->comment});
+                        }
+                    }
+                }
+                return true;
+            }
+        }
+
+        return false;
+    }
+
 } // anonymous namespace
 
 namespace stinkytofu
 {
-    /**
-     * @brief Convert a rocisa::Container to StinkyRegister
-     *
-     * This function takes a rocisa::Container pointer and converts it to a
-     * StinkyRegister. It handles RegisterContainer types by extracting the
-     * register type, index, and number of registers.
-     *
-     * @param container Pointer to rocisa::Container to convert
-     * @return StinkyRegister representing the container, or invalid register if conversion fails
-     */
+    /// Convert a rocisa::Container to StinkyRegister
+    ///
+    /// This function takes a rocisa::Container pointer and converts it to a
+    /// StinkyRegister. It handles RegisterContainer types by extracting the
+    /// register type, index, and number of registers.
+    ///
+    /// \param container Pointer to rocisa::Container to convert
+    /// \return StinkyRegister representing the container, or invalid register if conversion fails
     StinkyRegister toStinkyRegister(const rocisa::Container* container)
     {
         if(const rocisa::RegisterContainer* regCont
@@ -519,7 +774,12 @@ namespace stinkytofu
         {
             // Convert string regType to RegType enum
             RegType        regType = stringToRegType(regCont->regType);
-            StinkyRegister reg{regType, regCont->regIdx, regCont->regNum};
+            StinkyRegister reg{regType,
+                               static_cast<uint32_t>(regCont->regIdx),
+                               static_cast<uint16_t>(regCont->regNum)};
+
+            // TODO: This is a hack to set the offset of the register for use case such as msb, etc.
+            reg.reg.offset = static_cast<int16_t>(-256 * regCont->msb);
 
             // Capture symbolic register name if available
             // In rocisa, the symbolic name includes the type prefix and all offsets
@@ -553,18 +813,16 @@ namespace stinkytofu
         return StinkyRegister{};
     }
 
-    /**
-     * @brief Convert a rocisa::InstructionInput to StinkyRegister
-     *
-     * This overload handles InstructionInput variants which can contain:
-     * - shared_ptr<Container> (converted via RegisterContainer)
-     * - int literals
-     * - double literals
-     * - string literals
-     *
-     * @param input The InstructionInput variant to convert
-     * @return StinkyRegister representing the input value
-     */
+    /// Convert a rocisa::InstructionInput to StinkyRegister
+    ///
+    /// This overload handles InstructionInput variants which can contain:
+    /// - shared_ptr<Container> (converted via RegisterContainer)
+    /// - int literals
+    /// - double literals
+    /// - string literals
+    ///
+    /// \param input The InstructionInput variant to convert
+    /// \return StinkyRegister representing the input value
     StinkyRegister toStinkyRegister(const InstructionInput& input)
     {
         if(auto pptr = std::get_if<std::shared_ptr<rocisa::Container>>(&input))
@@ -631,11 +889,16 @@ namespace stinkytofu
 
         for(auto itemShared : module.flatitems())
         {
-            rocisa::Item* item = itemShared.get();
+            rocisa::Item*     item       = itemShared.get();
+            const std::string itemString = item->toString();
 
-            // Skip text blocks
+            // Handle text blocks
             if(rocisa::TextBlock* textBlock = dynamic_cast<rocisa::TextBlock*>(item))
             {
+                AsmDirective* directive = new AsmDirective();
+                directive->kind         = AsmDirectiveKind::TEXTBLOCK;
+                directive->value        = textBlock->text;
+                insts.insert(insts.end(), directive);
                 continue;
             }
 
@@ -664,10 +927,10 @@ namespace stinkytofu
                 directive->symbol       = valueSet->name;
 
                 // get the last value after the last comma
-                size_t pos = valueSet->toString().rfind(',');
+                size_t pos = itemString.rfind(',');
                 if(pos != std::string::npos)
                 {
-                    directive->value = valueSet->toString().substr(pos + 1);
+                    directive->value = itemString.substr(pos + 1);
                     directive->value.erase(0, directive->value.find_first_not_of(" \t\n\r"));
                     directive->value.erase(directive->value.find_last_not_of(" \t\n\r") + 1);
                 }
@@ -683,7 +946,31 @@ namespace stinkytofu
                 directive->kind         = AsmDirectiveKind::MACRO;
                 directive->name         = ".macro";
                 directive->symbol       = macro->name;
-                directive->value        = macro->toString();
+                directive->value        = itemString;
+                insts.insert(insts.end(), directive);
+                continue;
+            }
+
+            // Handle ValueIf directives
+            if(rocisa::ValueIf* valueIf = dynamic_cast<rocisa::ValueIf*>(item))
+            {
+                AsmDirective* directive = new AsmDirective();
+                directive->kind         = AsmDirectiveKind::IF;
+                directive->name         = ".if";
+                directive->symbol       = std::to_string(valueIf->value);
+                directive->value        = itemString;
+                insts.insert(insts.end(), directive);
+                continue;
+            }
+
+            // Handle ValueEndif directives
+            if(rocisa::ValueEndif* valueEndif = dynamic_cast<rocisa::ValueEndif*>(item))
+            {
+                AsmDirective* directive = new AsmDirective();
+                directive->kind         = AsmDirectiveKind::ENDIF;
+                directive->name         = ".endif";
+                directive->comment      = valueEndif->comment;
+                directive->value        = itemString;
                 insts.insert(insts.end(), directive);
                 continue;
             }
@@ -693,46 +980,44 @@ namespace stinkytofu
             if(inst == nullptr)
             {
                 // TODO: Remove this once we have a better way to handle non-instruction items
-                std::cout << "Skipping non-instruction item: " << item->toString() << std::endl;
+                std::cout << "Skipping non-instruction item: " << itemString << std::endl;
                 continue;
             }
             assert(dynamic_cast<rocisa::SSetVgprMsb*>(inst) == nullptr
                    && "SSetVgprMsb should not be created directly in TensileLite");
 
-            // Handle VGPR MSB setting if needed
-            currentVgprMsb = handleVgprMsbSetting(*inst, currentVgprMsb, irBuilder, insts, archId);
+            // Handle ds_load_b192 and ds_store_b192 instructions, also capture s_set_vgpr_msb
+            // TODO: This is a temporary solution, we should use legalizeDSLoadB192 and legalizeDSStoreB192 instead.
+            if(handleDSLDSTb192Instructions(inst, itemString, irBuilder, insts, archId))
+            {
+                continue;
+            }
+
+            // try to capture s_set_vgpr_msb instruction from the instruction string
+            tryCaptureVgprMsb(itemString, irBuilder, insts, archId);
 
             // Create StinkyInstruction from rocisa instruction
             std::type_index    rocisaTy = std::type_index(typeid(*inst));
             StinkyInstruction* stinkyInst
                 = createStinkyInstructionFromRocisa(*inst, rocisaTy, irBuilder, insts, archId);
 
-            if(stinkyInst == nullptr)
-            {
-                continue;
-            }
+            assert(stinkyInst != nullptr
+                   && "Failed to create StinkyInstruction from rocisa instruction");
 
             // Add registers (sources and destinations) to the instruction
             addRegistersToInstruction(stinkyInst, inst, asmCaps, archId);
 
             // Add modifiers (DS, FLAT, MUBUF, SMEM, WaitCnt, comments)
-            addModifiersToInstruction(stinkyInst, inst);
+            addModifiersToInstruction(stinkyInst, inst, itemString, asmCaps);
 
-            // Handle branch instructions
-            if(rocisa::BranchInstruction* branchInst
-               = dynamic_cast<rocisa::BranchInstruction*>(inst))
-            {
-                stinkyInst->addModifier<LabelData>(
-                    LabelData{Modifier::Type::LABEL_NAME, branchInst->labelName});
-            }
+            // Legalize instructions
+            auto [firstLegalizedInst, lastLegalizedInst]
+                = legalizeInstruction(stinkyInst, inst, irBuilder, archId, asmCaps);
+
+            // Don't use stinkyInst if it was replaced by legalization
+            if(firstLegalizedInst != nullptr)
+                stinkyInst = nullptr;
         }
-
-        // Post-process: Expand VNop instructions with count > 1 into multiple v_nop instructions
-        expandNopInstructions(insts, irBuilder, archId);
-
-        // Post-process: Lower VCmpX instructions on architectures that need it
-        // This converts v_cmpx instructions into v_cmp + s_mov exec
-        lowerVCmpXInstructions(insts, irBuilder, archId);
 
         // Iterate through the instructions in the IRList and add them to the module
         for(IRBase& ir : insts)
@@ -743,9 +1028,7 @@ namespace stinkytofu
         return std::make_shared<StinkyAsmModule>(std::move(stinkyAsmModule));
     }
 
-    /**
-     * @brief Convert rocisa::SignatureValueKind to stinkytofu::SignatureValueKind
-     */
+    /// Convert rocisa::SignatureValueKind to stinkytofu::SignatureValueKind
     SignatureValueKind convertSignatureValueKind(rocisa::SignatureValueKind kind)
     {
         switch(kind)
@@ -759,9 +1042,7 @@ namespace stinkytofu
         }
     }
 
-    /**
-     * @brief Convert rocisa::SignatureBase to stinkytofu::SignatureBase
-     */
+    /// Convert rocisa::SignatureBase to stinkytofu::SignatureBase
     std::shared_ptr<SignatureBase> toStinkySignature(const rocisa::SignatureBase& rocisaSig,
                                                      const std::array<int, 3>&    isaVersion,
                                                      int                          wavefrontSize)
@@ -798,53 +1079,20 @@ namespace stinkytofu
                               arg.addrSpaceQual);
         }
 
-        // Note: Descriptions (descriptionTopic, descriptionList) are private in rocisa::SignatureBase
-        // and cannot be directly accessed. They would need to be made public or accessed via getters
-        // if description conversion is needed.
+        // Note: Optimization config (ThreadTile, SubGroup, VectorWidth, etc.) is now passed
+        // directly from Python via toStinkyTofuModule's parameters and set via setOptimizationConfig()
 
         return stinkySig;
     }
 
-    /**
-     * @brief Convert rocisa::KernelBody to stinkytofu::KernelBody
-     */
-    std::shared_ptr<KernelBody> toStinkyKernelBody(const rocisa::KernelBody& rocisaKernel,
-                                                   const std::array<int, 3>& isaVersion)
-    {
-        auto stinkyKernel = std::make_shared<KernelBody>(rocisaKernel.name);
-
-        // Convert signature if present
-        if(rocisaKernel.signature)
-        {
-            auto stinkySig = toStinkySignature(*rocisaKernel.signature, isaVersion);
-            stinkyKernel->addSignature(stinkySig);
-        }
-
-        // Convert body if present
-        if(rocisaKernel.body)
-        {
-            auto stinkyModule
-                = toStinkyTofuModule(*rocisaKernel.body, isaVersion, rocisaKernel.name);
-            stinkyKernel->addBody(stinkyModule);
-        }
-
-        // Set GPR counts
-        stinkyKernel->setGprs(
-            rocisaKernel.totalVgprs, rocisaKernel.totalAgprs, rocisaKernel.totalSgprs);
-
-        return stinkyKernel;
-    }
-
 } // namespace stinkytofu
 
-/**
- * @brief Initialize StinkyTofu Python bindings
- *
- * This function binds the rocisa to StinkyTofu utilities to Python, allowing
- * Python code to convert rocisa to StinkyTofu IR.
- *
- * @param m The nanobind module to add bindings to
- */
+/// Initialize StinkyTofu Python bindings
+///
+/// This function binds the rocisa to StinkyTofu utilities to Python, allowing
+/// Python code to convert rocisa to StinkyTofu IR.
+///
+/// \param m The nanobind module to add bindings to
 void init_stinkytofu(nb::module_ m)
 {
     // Bind toStinkyRegister for Container pointer
@@ -924,7 +1172,16 @@ void init_stinkytofu(nb::module_ m)
            nb::object                   arch_obj,
            const std::string&           moduleName,
            const rocisa::SignatureBase& signature,
-           int                          wavefrontSize) {
+           int                          wavefrontSize,
+           nb::object                   tt_obj,
+           nb::object                   sg_obj,
+           int                          vwA,
+           int                          vwB,
+           int                          glvwA,
+           int                          glvwB,
+           bool                         d2lA,
+           bool                         d2lB,
+           int                          useSgprForGRO) {
             // Convert Python sequence (tuple or list) to std::array
             if(!nb::isinstance<nb::sequence>(arch_obj))
             {
@@ -942,11 +1199,33 @@ void init_stinkytofu(nb::module_ m)
             std::array<int, 3> archArray = {
                 nb::cast<int>(arch_seq[0]), nb::cast<int>(arch_seq[1]), nb::cast<int>(arch_seq[2])};
 
+            // Convert tt and sg sequences to arrays
+            std::array<int, 2> tt = {0, 0};
+            std::array<int, 2> sg = {0, 0};
+
+            if(nb::isinstance<nb::sequence>(tt_obj))
+            {
+                auto tt_seq = nb::cast<nb::sequence>(tt_obj);
+                assert(nb::len(tt_seq) == 2 && "ThreadTile must have exactly 2 elements");
+                tt = {nb::cast<int>(tt_seq[0]), nb::cast<int>(tt_seq[1])};
+            }
+
+            if(nb::isinstance<nb::sequence>(sg_obj))
+            {
+                auto sg_seq = nb::cast<nb::sequence>(sg_obj);
+                assert(nb::len(sg_seq) == 2 && "SubGroup must have exactly 2 elements");
+                sg = {nb::cast<int>(sg_seq[0]), nb::cast<int>(sg_seq[1])};
+            }
+
             // Convert module to StinkyAsmModule
             auto stinkyModule = stinkytofu::toStinkyTofuModule(module, archArray, moduleName);
 
             // Convert signature to StinkyTofu format, using the wavefrontSize passed from Python
             auto stinkySig = stinkytofu::toStinkySignature(signature, archArray, wavefrontSize);
+
+            // Set optimization config
+            stinkySig->setOptimizationConfig(
+                tt, sg, vwA, vwB, glvwA, glvwB, d2lA, d2lB, useSgprForGRO);
 
             // Create and return wrapper with both
             return std::make_shared<StinkyAsmModuleWithSignature>(stinkyModule, stinkySig);
@@ -956,6 +1235,15 @@ void init_stinkytofu(nb::module_ m)
         nb::arg("moduleName") = "",
         nb::arg("signature"),
         nb::arg("wavefrontSize") = 64,
+        nb::arg("tt")            = nb::make_tuple(0, 0),
+        nb::arg("sg")            = nb::make_tuple(0, 0),
+        nb::arg("vwA")           = 0,
+        nb::arg("vwB")           = 0,
+        nb::arg("glvwA")         = 0,
+        nb::arg("glvwB")         = 0,
+        nb::arg("d2lA")          = false,
+        nb::arg("d2lB")          = false,
+        nb::arg("useSgprForGRO") = 0,
         "Convert a rocisa.Module to a StinkyTofu StinkyAsmModule with signature support. "
         "The returned object's emitAssembly() will include both signature and instructions.");
 }

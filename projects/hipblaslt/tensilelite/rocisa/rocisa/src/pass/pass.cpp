@@ -32,9 +32,7 @@ namespace nb = nanobind;
 
 namespace rocisa
 {
-    rocIsaPassResult rocIsaPass(std::shared_ptr<KernelBody>&                  kernel,
-                                const rocIsaPassOption&                       option,
-                                std::shared_ptr<stinkytofu::StinkyAsmModule>& stModule)
+    rocIsaPassResult rocIsaPass(std::shared_ptr<KernelBody>& kernel, const rocIsaPassOption& option)
     {
         rocIsaPassResult result;
         if(option.removeDupFunc)
@@ -122,9 +120,6 @@ namespace rocisa
                         // Add StinkyAsm-to-Rocisa conversion pass after the built-in pipeline
                         config.addPassAfter(stinkytofu::createStinkyAsmToRocisaPass());
 
-                        // Add WaitCnt legalization pass to lower s_waitcnt to gfx1250 wait instructions
-                        config.addPassAfter(stinkytofu::createWaitCntLegalizationPass());
-
                         // Built-in pipeline includes (in order):
                         // Phase 1: CFGBuilderPass
                         // Phase 2: StinkyDAGSchedulerPass, ScheduleLastLRsPass
@@ -188,37 +183,7 @@ void init_pass(nb::module_ m)
     m_pass.def("getActFuncBranchModuleName",
                &rocisa::getActFuncBranchModuleName,
                "getActFuncBranchModuleName.");
-
-    // Bind rocIsaPass with lambda wrapper to handle optional stModule parameter
-    m_pass.def(
-        "rocIsaPass",
-        [](std::shared_ptr<rocisa::KernelBody>& kernel,
-           const rocisa::rocIsaPassOption&      option,
-           nb::object                           stModuleObj = nb::none()) {
-            std::shared_ptr<stinkytofu::StinkyAsmModule> stModulePtr;
-
-            // If stModuleObj is not None, extract the underlying StinkyAsmModule
-            if(!stModuleObj.is_none())
-            {
-                // The Python object (StinkyAsmModuleWithSignature) has getModule() method
-                try
-                {
-                    auto getModuleMethod = stModuleObj.attr("getModule");
-                    stModulePtr
-                        = nb::cast<std::shared_ptr<stinkytofu::StinkyAsmModule>>(getModuleMethod());
-                }
-                catch(...)
-                {
-                    // If extraction fails, leave stModulePtr as nullptr
-                }
-            }
-
-            return rocisa::rocIsaPass(kernel, option, stModulePtr);
-        },
-        nb::arg("kernel"),
-        nb::arg("option"),
-        nb::arg("stModule") = nb::none(),
-        "rocIsaPass with optional StinkyAsmModule parameter.");
+    m_pass.def("rocIsaPass", &rocisa::rocIsaPass, "rocIsaPass.");
 
     nb::class_<rocisa::rocIsaPassOption>(m_pass, "rocIsaPassOption")
         .def(nb::init<>())

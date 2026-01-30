@@ -309,6 +309,7 @@ SHARED_FOLDER_PATH = os.path.normpath(os.path.join(os.path.dirname(os.path.abspa
 globalParameters["SharedFolderPath"] = SHARED_FOLDER_PATH  # Path to the stinkytofu root directory
 
 globalParameters["RocProfCounter"] = None # No rocprof counter
+globalParameters["UseStinkyTofu"] = True  # Enable StinkyTofu IR conversion for supported architectures
 
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...

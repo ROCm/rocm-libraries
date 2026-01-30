@@ -46,6 +46,7 @@ MACRO(IF_WaitTensorCnt)
 MACRO(IF_VALU)
 MACRO(IF_SALU)
 MACRO(IF_Transcendental)
+MACRO(IF_VCmpX)
 
 // Instructions that have side effects but not belongs to any of the
 // following categories:
@@ -55,6 +56,7 @@ MACRO(IF_MFMA)
 MACRO(IF_SMFMA)
 MACRO(IF_WMMA)
 MACRO(IF_SWMMA)
+MACRO(IF_MXWMMA)
 
 // Arithmetic properties
 MACRO(IF_Commutative)
