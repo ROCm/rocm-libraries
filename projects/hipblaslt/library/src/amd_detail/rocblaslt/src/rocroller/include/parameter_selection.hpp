@@ -160,6 +160,11 @@ inline std::optional<int> selectSwizzleTileMN(const WorkGroupTileSize&      work
     int numMTilesPerWave = workgroupTile.m / mi.m / numWavesX;
     int numNTilesPerWave = workgroupTile.n / mi.n / numWavesY;
 
+    if (numMTilesPerWave <= 0 || numNTilesPerWave <= 0)
+    {
+        return std::nullopt;
+    }
+
     // Possible swizzle tile MN values
     std::vector<int> possibleSwizzleTileMN;
     if(preSwizzleTileSize.size() == 3)

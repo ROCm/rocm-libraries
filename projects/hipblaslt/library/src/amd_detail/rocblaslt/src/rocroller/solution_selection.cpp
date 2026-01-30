@@ -73,6 +73,11 @@ std::vector<origami::config_t> generateTileList(bool hasPreSwizzle, bool hasPreT
             wgtk = 32;
         }
 
+        if (hasPreSwizzle && hasPreTile)
+        {
+            wgtk = 256;
+        }
+
         int unroll = preferredUnrolling(typeA, typeB, wgt, hasPreSwizzle, hasPreTile);
 
         origami::config_t origami_config = {
@@ -183,6 +188,8 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     auto prediction_result
         = origami::rank_configs(origami_problem, analytical_hardware, origami_config_list);
 
+    // std::cout << "prediction_result.size(): " << prediction_result.size() << std::endl;
+
     for(auto const& result : prediction_result)
     {
         auto              mt_m = static_cast<int>(result.config.mt.m);
@@ -216,11 +223,23 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                    || !std::has_single_bit(static_cast<uint>(wgt.n))))
                 continue;
 
-            // Pre-swizzled scald data requires the wgt.m >= 128 and wgt.n >= 128 to be able to turn on SwizzleScale
-            if(kernelType.scaleTypeA.preSwizzleTile.size() == 3 && (wgt.m < 128))
-                continue;
-            if(kernelType.scaleTypeB.preSwizzleTile.size() == 3 && (wgt.n < 128))
-                continue;
+            // // Pre-swizzled scald data requires the wgt.m >= 128 and wgt.n >= 128 to be able to turn on SwizzleScale
+            // if(kernelType.scaleTypeA.preSwizzleTile.size() == 3 && (wgt.m < 128))
+            //     continue;
+            // if(kernelType.scaleTypeB.preSwizzleTile.size() == 3 && (wgt.n < 128))
+            //     continue;
+            
+            // check if this size is valid for pre-swizzled data
+            if (hasPreSwizzle)
+            {
+                if (wgt.m % 32 != 0 || wgt.n % 32 != 0)
+                    continue;
+            }
+            // std::cout << "valid wgt for pre-swizzled data" << std::endl;
+            // std::cout << "wgt: " << wgt.m << " " << wgt.n << " " << wgt.k << std::endl;
+            // std::cout << "unrollAmount: " << unrollAmount << std::endl;
+
+
             // wgt.k has to be at least 256 when scale data is pre-swizzled
             if(kernelType.scaleTypeA.preSwizzleTile.size() == 3
                && kernelType.scaleTypeB.preSwizzleTile.size() == 3 && wgt.k < 256)
