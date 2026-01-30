@@ -25,6 +25,7 @@
 
 #include <cmath>
 #include <iomanip>
+#include <sstream>
 #include <stdexcept>
 
 namespace stinkytofu
@@ -408,11 +409,33 @@ namespace stinkytofu
         this->totalSgprs   = totalSgprs;
     }
 
+    void SignatureKernelDescriptor::setOptimizationConfig(const std::array<int, 2>& tt,
+                                                          const std::array<int, 2>& sg,
+                                                          int                       vwA,
+                                                          int                       vwB,
+                                                          int                       glvwA,
+                                                          int                       glvwB,
+                                                          bool                      d2lA,
+                                                          bool                      d2lB,
+                                                          int                       useSgprForGRO)
+    {
+        this->threadTile             = tt;
+        this->subGroup               = sg;
+        this->vectorWidthA           = vwA;
+        this->vectorWidthB           = vwB;
+        this->globalReadVectorWidthA = glvwA;
+        this->globalReadVectorWidthB = glvwB;
+        this->directToLdsA           = d2lA;
+        this->directToLdsB           = d2lB;
+        this->useSgprForGRO          = useSgprForGRO;
+    }
+
     std::string SignatureKernelDescriptor::toString() const
     {
         std::string kdIndent = "  ";
         std::string kStr;
 
+        kStr += SignatureBase::block3Line("Begin Kernel");
         kStr += ".amdgcn_target \"amdgcn-amd-amdhsa--" + isaVersionToGfx(isaVersion) + "\"\n";
         kStr += ".text\n";
         kStr += ".protected " + kernelName + "\n";
@@ -472,6 +495,22 @@ namespace stinkytofu
 
         kStr += ".end_amdhsa_kernel\n";
         kStr += ".text\n";
+        kStr += "/* Num VGPR   =" + std::to_string(originalTotalVgprs) + " */\n";
+        kStr += "/* Num AccVGPR=" + std::to_string(totalAgprs) + " */\n";
+        kStr += "/* Num SGPR   =" + std::to_string(totalSgprs) + " */\n";
+
+        kStr += SignatureBase::block3Line("Optimizations and Config:");
+        kStr += "/* ThreadTile= " + std::to_string(threadTile[0]) + " x "
+                + std::to_string(threadTile[1]) + " */\n";
+        kStr += "/* SubGroup= " + std::to_string(subGroup[0]) + " x " + std::to_string(subGroup[1])
+                + " */\n";
+        kStr += "/* VectorWidthA=" + std::to_string(vectorWidthA) + " */\n";
+        kStr += "/* VectorWidthB=" + std::to_string(vectorWidthB) + " */\n";
+        kStr += "/* GlobalReadVectorWidthA=" + std::to_string(globalReadVectorWidthA)
+                + ", GlobalReadVectorWidthB=" + std::to_string(globalReadVectorWidthB) + " */\n";
+        kStr += "/* DirectToLdsA=" + std::string(directToLdsA ? "True" : "False") + " */\n";
+        kStr += "/* DirectToLdsB=" + std::string(directToLdsB ? "True" : "False") + " */\n";
+        kStr += "/* UseSgprForGRO=" + std::string(useSgprForGRO ? "True" : "False") + " */\n";
 
         return kStr;
     }
@@ -640,6 +679,20 @@ namespace stinkytofu
         descriptionTopic = "";
     }
 
+    void SignatureBase::setOptimizationConfig(const std::array<int, 2>& tt,
+                                              const std::array<int, 2>& sg,
+                                              int                       vwA,
+                                              int                       vwB,
+                                              int                       glvwA,
+                                              int                       glvwB,
+                                              bool                      d2lA,
+                                              bool                      d2lB,
+                                              int                       useSgprForGRO)
+    {
+        kernelDescriptor.setOptimizationConfig(
+            tt, sg, vwA, vwB, glvwA, glvwB, d2lA, d2lB, useSgprForGRO);
+    }
+
     std::string SignatureBase::toString() const
     {
         std::string kStr;
@@ -666,8 +719,16 @@ namespace stinkytofu
 
     std::string SignatureBase::block3Line(const std::string& text)
     {
-        std::string stars(text.length() + 4, '*');
-        return "/*" + stars + "*/\n/* " + text + " */\n/*" + stars + "*/\n";
+        std::ostringstream oss;
+        oss << "\n/******************************************/\n";
+        std::istringstream iss(text);
+        std::string        line;
+        while(std::getline(iss, line))
+        {
+            oss << "/* " << std::setw(38) << std::left << line << " */\n";
+        }
+        oss << "/******************************************/\n";
+        return oss.str();
     }
 
     std::string SignatureBase::slash(const std::string& text)

@@ -391,34 +391,57 @@ namespace stinkytofu
         // amd-instinct-mi300-cdna3-instruction-set-architecture.pdf
         // Table 25. VALU Instruction Set
         // ============================================
-        for(std::string cmp : {"v_cmp", "v_cmpx"})
-            for(auto ty : {"i16", "i32", "i64", "u16", "u32", "u64"})
-                for(auto fn : {"f", "lt", "eq", "le", "gt", "lg", "ge", "ne", "t"})
-                    DEF_T(VCmp, cmp + "_" + fn + "_" + ty);
+        for(auto ty : {"i16", "i32", "i64", "u16", "u32", "u64"})
+            for(auto fn : {"f", "lt", "eq", "le", "gt", "lg", "ge", "ne", "t"})
+                DEF_T(VCmp, std::string("v_cmp_") + fn + "_" + ty);
 
-        for(std::string cmp : {"v_cmp", "v_cmpx"})
-            for(auto ty : {"f16", "f32", "f64"})
-                for(auto fn : {"f",
-                               "lt",
-                               "eq",
-                               "le",
-                               "gt",
-                               "lg",
-                               "ge",
-                               "t",
-                               "o",
-                               "u",
-                               "nge",
-                               "nlg",
-                               "ngt",
-                               "nle",
-                               "neq",
-                               "nlt"})
-                    DEF_T(VCmp, cmp + "_" + fn + "_" + ty);
+        for(auto ty : {"i16", "i32", "i64", "u16", "u32", "u64"})
+            for(auto fn : {"f", "lt", "eq", "le", "gt", "lg", "ge", "ne", "t"})
+                DEF_T(VCmpX, std::string("v_cmpx_") + fn + "_" + ty);
 
-        for(std::string cmp : {"v_cmp", "v_cmpx"})
-            for(auto ty : {"f16", "f32", "f64"})
-                DEF_T(VCmp, cmp + "_class_" + ty);
+        for(auto ty : {"f16", "f32", "f64"})
+            for(auto fn : {"f",
+                           "lt",
+                           "eq",
+                           "le",
+                           "gt",
+                           "lg",
+                           "ge",
+                           "t",
+                           "o",
+                           "u",
+                           "nge",
+                           "nlg",
+                           "ngt",
+                           "nle",
+                           "neq",
+                           "nlt"})
+                DEF_T(VCmp, std::string("v_cmp_") + fn + "_" + ty);
+
+        for(auto ty : {"f16", "f32", "f64"})
+            for(auto fn : {"f",
+                           "lt",
+                           "eq",
+                           "le",
+                           "gt",
+                           "lg",
+                           "ge",
+                           "t",
+                           "o",
+                           "u",
+                           "nge",
+                           "nlg",
+                           "ngt",
+                           "nle",
+                           "neq",
+                           "nlt"})
+                DEF_T(VCmpX, std::string("v_cmpx_") + fn + "_" + ty);
+
+        for(auto ty : {"f16", "f32", "f64"})
+            DEF_T(VCmp, std::string("v_cmp_class_") + ty);
+
+        for(auto ty : {"f16", "f32", "f64"})
+            DEF_T(VCmpX, std::string("v_cmpx_class_") + ty);
 
         // ============================================
         // VCvt: vector convert family
@@ -976,7 +999,7 @@ namespace stinkytofu
 
             /* mfma.hpp */
             {"MFMAInstruction", "lowerRocisaMFMA"},
-            {"SMFMAInstruction", "lowerRocisaSMFMA"},
+            {"SMFMAInstruction", "lowerRocisaMFMA"},
         };
 
         registry.setRocisaConversionMap(std::move(conversion));

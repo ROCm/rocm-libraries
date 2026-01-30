@@ -31,7 +31,7 @@ namespace stinkytofu
 {
     /**
      * @brief Assembly directive kinds (low-level IR)
-     * 
+     *
      * These are REAL assembly directives that appear in assembly output.
      * Similar to how StinkyInstruction has an opcode kind.
      */
@@ -59,15 +59,16 @@ namespace stinkytofu
         ASCIZ, // .asciz "string"
         GLOBAL, // .global symbol
         LOCAL, // .local symbol
-        EQU // .equ name, value
+        EQU, // .equ name, value
+        TEXTBLOCK // Raw text block (comments)
     };
 
     /**
      * @brief Assembly directive struct (low-level IR)
-     * 
+     *
      * Similar to StinkyInstruction - a simple struct with data.
      * No virtual functions, no class hierarchy.
-     * 
+     *
      * Factory functions in StinkyTofu.cpp create these.
      * Emitter handles emission based on kind.
      */

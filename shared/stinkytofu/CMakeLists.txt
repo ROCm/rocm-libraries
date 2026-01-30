@@ -76,7 +76,7 @@ set(STINKYTOFU_SOURCE_FILES
     ir/asm/DeadCodeEliminationPass.cpp
     ir/asm/RedundantMovEliminationPass.cpp
     ir/asm/DelayAluInsertionPass.cpp
-    ir/asm/WaitCntLegalizationPass.cpp
+    ir/asm/LegalizationUtils.cpp
     ir/asm/OptimizationPipeline.cpp
     ir/asm/ScheduleLastLRsPass.cpp
     ir/asm/StinkyDAGSchedulerPass.cpp

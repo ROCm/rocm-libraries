@@ -87,7 +87,7 @@ NB_MODULE(_stinkytofu, m)
     // However, users typically don't construct Register directly - they use helper functions.
     nb::class_<StinkyRegister>(m, "Register")
         .def(nb::init<>(), "Create a null register")
-        .def(nb::init<const std::string&, int, int>(),
+        .def(nb::init<const std::string&, uint32_t, uint16_t>(),
              nb::arg("type"),
              nb::arg("index"),
              nb::arg("count") = 1,

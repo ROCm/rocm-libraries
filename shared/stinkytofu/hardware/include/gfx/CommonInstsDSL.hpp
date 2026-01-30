@@ -259,6 +259,33 @@ namespace stinkytofu
         }
     };
 
+    struct MXWMMA : GfxInstDef
+    {
+        int M = 0, N = 0, K = 0, B = 0;
+        int block = 32; // block size: 16 or 32
+
+        std::string outTy, inTy;
+
+        MXWMMA(int                m,
+               int                n,
+               int                k,
+               int                b,
+               const std::string& outT,
+               const std::string& inT,
+               int                blk = 32)
+            : M(m)
+            , N(n)
+            , K(k)
+            , B(b)
+            , outTy(outT)
+            , inTy(inT)
+            , block(blk)
+        {
+            hwInstDesc.flags.set(IF_MXWMMA);
+            hwInstDesc.flags.set(IF_WMMA); // Also set WMMA flag for compatibility
+        }
+    };
+
     // The following instruction types are placeholders for future use.
     struct SALU : GfxInstDef
     {
@@ -300,6 +327,14 @@ namespace stinkytofu
 
     struct VCmp : GfxInstDef
     {
+    };
+
+    struct VCmpX : VCmp
+    {
+        VCmpX()
+        {
+            hwInstDesc.flags.set(IF_VCmpX);
+        }
     };
 
     struct VCvt : GfxInstDef
@@ -363,7 +398,7 @@ namespace stinkytofu
         if(!sparse)
             wmmaName = "v_wmma_";
         else
-            wmmaName = "v_swmma_";
+            wmmaName = "v_swmmac_";
 
         wmmaName = wmmaName + s.outTy + "_" + std::to_string(s.M) + "x" + std::to_string(s.N) + "x"
                    + std::to_string(s.K) + +"_" + s.inTy;
@@ -376,8 +411,27 @@ namespace stinkytofu
         return wmmaInst;
     }
 
+    inline MXWMMA* genMxWmmaImpl(
+        GpuArch& registry, const MatInstDesc& s, int block, const char* file, size_t line)
+    {
+        std::string mxwmmaName = "v_wmma_scale";
+        if(block == 16)
+            mxwmmaName += "16";
+
+        mxwmmaName = mxwmmaName + "_" + s.outTy + "_" + std::to_string(s.M) + "x"
+                     + std::to_string(s.N) + "x" + std::to_string(s.K) + "_" + s.inTy;
+
+        MXWMMA* mxwmmaInst = defT<MXWMMA>(
+            mxwmmaName, registry, file, line, s.M, s.N, s.K, s.B, s.outTy, s.inTy, block);
+
+        // Costs set by applyInstructionCosts() from architecture-specific cost tables
+
+        return mxwmmaInst;
+    }
+
 // Macro wrapper to capture __FILE__ and __LINE__ from call site
 #define GEN_MFMA(registry, desc, sparse) genMfmaImpl(registry, desc, sparse, __FILE__, __LINE__)
 #define GEN_WMMA(registry, desc, sparse) genWmmaImpl(registry, desc, sparse, __FILE__, __LINE__)
+#define GEN_MXWMMA(registry, desc, block) genMxWmmaImpl(registry, desc, block, __FILE__, __LINE__)
 
 } // namespace stinkytofu

@@ -75,10 +75,6 @@ namespace stinkytofu
     // architectures to handle ALU instruction dependencies. Only runs on gfx11xx.
     std::unique_ptr<Pass> createDelayAluInsertionPass();
 
-    // WaitCntLegalizationPass lowers deprecated s_waitcnt instructions into
-    // architecture-specific wait instructions for gfx1250. Only runs on gfx1250.
-    std::unique_ptr<Pass> createWaitCntLegalizationPass();
-
     // The following passes are used for translation between rocisa and
     // stinkytofu. They are specific to tensilelite rocisa and are therefore not
     // included in the stinkytofu library.

@@ -24,7 +24,6 @@
 #include <cassert>
 #include <unordered_map>
 
-//#include "code.hpp"
 #include "instruction/branch.hpp"
 #include "instruction/cmp.hpp"
 #include "instruction/common.hpp"
@@ -41,26 +40,8 @@ namespace
     using namespace stinkytofu;
 
     std::vector<StinkyInstruction*>
-        lowerRocisaSMFMA(rocisa::Instruction& inst, StinkyInstIRBuilder& irBuilder, IRList& insts)
-    {
-        rocisa::SMFMAInstruction* smfmaInst = dynamic_cast<rocisa::SMFMAInstruction*>(&inst);
-        assert(smfmaInst != nullptr && "Internal error: SMFMAInstruction expected");
-
-        std::string mnemonic = inst.preStr();
-        uint16_t    opcode   = getMnemonicToIsaOpcode(mnemonic, irBuilder.arch);
-
-        StinkyInstruction* stinkyInst
-            = irBuilder.createStinkyInstBefore(insts.end(), getMCIDByIsaOp(opcode, irBuilder.arch));
-
-        return {stinkyInst};
-    }
-
-    std::vector<StinkyInstruction*>
         lowerRocisaMFMA(rocisa::Instruction& inst, StinkyInstIRBuilder& irBuilder, IRList& insts)
     {
-        rocisa::MFMAInstruction* mfmaInst = dynamic_cast<rocisa::MFMAInstruction*>(&inst);
-        assert(mfmaInst != nullptr && "Internal error: MFMAInstruction expected");
-
         std::string mnemonic = inst.preStr();
         uint16_t    opcode   = getMnemonicToIsaOpcode(mnemonic, irBuilder.arch);
 
@@ -81,18 +62,22 @@ namespace
         }
         else if(rocisa::_SWaitLoadcnt* waitCntInst = dynamic_cast<rocisa::_SWaitLoadcnt*>(&inst))
         {
-            if(const int* dlcnt = std::get_if<int>(&waitCntInst->getParams().front()))
-            {
-                waitCntData.dlcnt = *dlcnt;
-            }
+            waitCntData.vlcnt = waitCntInst->getLoadcnt();
         }
         else if(const rocisa::_SWaitDscnt* waitCntInst
                 = dynamic_cast<const rocisa::_SWaitDscnt*>(&inst))
         {
-            if(const int* dscnt = std::get_if<int>(&waitCntInst->getParams().front()))
-            {
-                waitCntData.dscnt = *dscnt;
-            }
+            waitCntData.dscnt = waitCntInst->getDscnt();
+        }
+        else if(const rocisa::_SWaitKMcnt* waitCntInst
+                = dynamic_cast<const rocisa::_SWaitKMcnt*>(&inst))
+        {
+            waitCntData.kmcnt = waitCntInst->getKmcnt();
+        }
+        else if(const rocisa::_SWaitCntVscnt* waitCntInst
+                = dynamic_cast<const rocisa::_SWaitCntVscnt*>(&inst))
+        {
+            waitCntData.vscnt = waitCntInst->getVscnt();
         }
         else
         {
@@ -128,6 +113,55 @@ namespace
             insts.end(), getMCIDByUOp(GFX::s_wait_tensorcnt, irBuilder.arch));
 
         stinkyInst->addModifier<SWaitTensorCntData>(waitTensorCntData);
+
+        return {stinkyInst};
+    }
+
+    std::vector<StinkyInstruction*> lowerRocisaStoreWaitCnt(rocisa::Instruction& inst,
+                                                            StinkyInstIRBuilder& irBuilder,
+                                                            IRList&              insts)
+    {
+        SWaitStoreCntData waitStoreCntData;
+        if(rocisa::_SWaitStorecnt* waitStoreCntInst = dynamic_cast<rocisa::_SWaitStorecnt*>(&inst))
+        {
+            if(const int* storecnt = std::get_if<int>(&waitStoreCntInst->getSrcParams().front()))
+            {
+                waitStoreCntData.storecnt = *storecnt;
+            }
+        }
+        else
+        {
+            assert(false && "Internal error: WaitStoreCntInstruction expected");
+        }
+
+        StinkyInstruction* stinkyInst = irBuilder.createStinkyInstBefore(
+            insts.end(), getMCIDByUOp(GFX::s_wait_storecnt, irBuilder.arch));
+
+        stinkyInst->addModifier<SWaitStoreCntData>(waitStoreCntData);
+
+        return {stinkyInst};
+    }
+
+    // implement lowerRocisaWaitAlu
+    std::vector<StinkyInstruction*>
+        lowerRocisaWaitAlu(rocisa::Instruction& inst, StinkyInstIRBuilder& irBuilder, IRList& insts)
+    {
+        rocisa::SWaitAlu* waitAluInst = dynamic_cast<rocisa::SWaitAlu*>(&inst);
+
+        assert(waitAluInst != nullptr && "Internal error: WaitAluInstruction expected");
+
+        SWaitAluData waitAluData(waitAluInst->getVaVdst(),
+                                 waitAluInst->getVaSdst(),
+                                 waitAluInst->getVaSsrc(),
+                                 waitAluInst->getHoldCnt(),
+                                 waitAluInst->getVmVsrc(),
+                                 waitAluInst->getVaVcc(),
+                                 waitAluInst->getSaSdst());
+
+        StinkyInstruction* stinkyInst = irBuilder.createStinkyInstBefore(
+            insts.end(), getMCIDByUOp(GFX::s_wait_alu, irBuilder.arch));
+
+        stinkyInst->addModifier<SWaitAluData>(waitAluData);
 
         return {stinkyInst};
     }

@@ -23,6 +23,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -54,8 +55,11 @@ namespace stinkytofu
             VCC,
             SWAITCNT_DATA,
             SWAITTENSORCNT_DATA,
+            SWAITSTORECNT_DATA,
             SDELAYALU_DATA,
+            SWAITALU_DATA,
             LABEL_NAME,
+            MFMA_DATA,
             COMMENT,
         };
 
@@ -279,19 +283,117 @@ namespace stinkytofu
 
     struct True16Modifiers : public Modifier
     {
-        True16Modifiers(HighBitSel high_bit = HighBitSel::NONE)
+        // Default constructor with explicit destination and source modifiers
+        True16Modifiers(HighBitSel                     dst0 = HighBitSel::NONE,
+                        HighBitSel                     dst1 = HighBitSel::NONE,
+                        const std::vector<HighBitSel>& srcs = {})
             : Modifier(Type::TRUE16)
-            , high_bit(high_bit)
+            , encoded_(0)
+            , srcCount_(0)
         {
+            setDst0(dst0);
+            setDst1(dst1);
+            setSrcs(srcs);
         }
 
-        True16Modifiers(int high_bit_int)
-            : Modifier(Type::TRUE16)
-            , high_bit(static_cast<HighBitSel>(high_bit_int))
+        // Getters
+        HighBitSel getDst0() const
         {
+            return decode(0);
+        }
+        HighBitSel getDst1() const
+        {
+            return decode(1);
+        }
+        HighBitSel getSrc(size_t index) const
+        {
+            return (index < srcCount_) ? decode(2 + index) : HighBitSel::NONE;
+        }
+        size_t getSrcCount() const
+        {
+            return srcCount_;
         }
 
-        HighBitSel high_bit;
+        // Setters
+        void setDst0(HighBitSel val)
+        {
+            encode(0, val);
+        }
+        void setDst1(HighBitSel val)
+        {
+            encode(1, val);
+        }
+        void setSrcs(const std::vector<HighBitSel>& srcs)
+        {
+            srcCount_ = srcs.size();
+            for(size_t i = 0; i < srcs.size(); ++i)
+            {
+                encode(2 + i, srcs[i]);
+            }
+        }
+
+    private:
+        // Encoding: 2 bits per operand
+        // Bits [0-1]:   dst0
+        // Bits [2-3]:   dst1
+        // Bits [4-5]:   src0
+        // Bits [6-7]:   src1
+        // Bits [8-9]:   src2
+        // Bits [10-11]: src3
+        // Bits [12-13]: src4
+        // Bits [14-15]: src5
+        // Maximum 2 dsts + 6 srcs = 8 operands * 2 bits = 16 bits (fits in uint16_t)
+        uint16_t encoded_;
+        uint8_t  srcCount_; // Number of source operands (0-6)
+
+        // Encode HighBitSel to 2-bit value
+        static uint8_t encodeValue(HighBitSel val)
+        {
+            switch(val)
+            {
+            case HighBitSel::NONE:
+                return 0;
+            case HighBitSel::LOW:
+                return 1;
+            case HighBitSel::HIGH:
+                return 2;
+            default:
+                return 0;
+            }
+        }
+
+        // Decode 2-bit value to HighBitSel
+        static HighBitSel decodeValue(uint8_t val)
+        {
+            switch(val & 0x3)
+            {
+            case 0:
+                return HighBitSel::NONE;
+            case 1:
+                return HighBitSel::LOW;
+            case 2:
+                return HighBitSel::HIGH;
+            default:
+                return HighBitSel::NONE;
+            }
+        }
+
+        // Encode value at operand index (0=dst0, 1=dst1, 2=src0, ...)
+        void encode(size_t index, HighBitSel val)
+        {
+            uint16_t bits      = encodeValue(val);
+            size_t   bitOffset = index * 2;
+            encoded_ &= ~(uint16_t(0x3) << bitOffset); // Clear existing bits
+            encoded_ |= (bits << bitOffset); // Set new bits
+        }
+
+        // Decode value at operand index
+        HighBitSel decode(size_t index) const
+        {
+            size_t   bitOffset = index * 2;
+            uint16_t bits      = (encoded_ >> bitOffset) & 0x3;
+            return decodeValue(static_cast<uint8_t>(bits));
+        }
     };
 
     struct EXEC : public Modifier
@@ -378,8 +480,20 @@ namespace stinkytofu
         int8_t tlcnt;
     };
 
+    struct SWaitStoreCntData : public Modifier
+    {
+        SWaitStoreCntData(int8_t storecnt = -1)
+            : Modifier(Type::SWAITSTORECNT_DATA)
+            , storecnt(storecnt)
+        {
+        }
+
+        int8_t storecnt;
+    };
+
     /// Delay ALU instruction data for RDNA3/RDNA4 (gfx11xx/gfx12xx)
     /// Specifies dependencies between ALU instructions
+    /// Encoding: SIMM16[3:0] = InstID0, SIMM16[6:4] = InstSkip, SIMM16[10:7] = InstID1
     struct SDelayAluData : public Modifier
     {
         enum class InstType : uint8_t
@@ -390,19 +504,234 @@ namespace stinkytofu
             NO_DEP ///< No dependency
         };
 
-        // Simple constructor for common case (single dependency)
+        // Constructor for single dependency (instid0 only)
         SDelayAluData(InstType type, int8_t distance = 0)
             : Modifier(Type::SDELAYALU_DATA)
-            , type(type)
-            , distance(distance)
+            , instid0Type(type)
+            , instid0Distance(distance)
+            , hasInstId1(false)
+            , instSkip(0)
+            , instid1Type(InstType::NO_DEP)
+            , instid1Distance(0)
         {
         }
 
-        InstType type; ///< Instruction type (VALU/SALU/TRANS/NO_DEP)
-        int8_t   distance; ///< Dependency distance (1-4 for VALU, 1 for SALU, 1-3 for TRANS)
+        // Constructor for dual dependency (instid0 and instid1)
+        SDelayAluData(
+            InstType id0Type, int8_t id0Distance, int8_t skip, InstType id1Type, int8_t id1Distance)
+            : Modifier(Type::SDELAYALU_DATA)
+            , instid0Type(id0Type)
+            , instid0Distance(id0Distance)
+            , hasInstId1(true)
+            , instSkip(skip)
+            , instid1Type(id1Type)
+            , instid1Distance(id1Distance)
+        {
+        }
 
-        // TODO: Add support for dual dependencies (instid1) if needed in the future
-        // For now, we only support single dependency which covers 99% of cases
+        // Primary dependency
+        InstType instid0Type; ///< InstID0 type (VALU/SALU/TRANS/NO_DEP)
+        int8_t   instid0Distance; ///< InstID0 dependency distance
+
+        // Optional secondary dependency
+        bool     hasInstId1; ///< Whether InstID1 is present
+        int8_t   instSkip; ///< Number of instructions to skip (0-7)
+        InstType instid1Type; ///< InstID1 type (VALU/SALU/TRANS/NO_DEP)
+        int8_t   instid1Distance; ///< InstID1 dependency distance
+
+        // Legacy accessors for backward compatibility
+        InstType type() const
+        {
+            return instid0Type;
+        }
+        int8_t distance() const
+        {
+            return instid0Distance;
+        }
+    };
+
+    // SWaitAlu instruction data
+    struct SWaitAluData : public Modifier
+    {
+        struct HwValue
+        {
+            uint16_t sa_sdst : 1; // Bit 0
+            uint16_t va_vcc : 1; // Bit 1
+            uint16_t vm_vsrc : 3; // Bits 4-2
+            uint16_t reserved : 2; // Bits 6-5
+            uint16_t hold_cnt : 1; // Bit 7
+            uint16_t va_ssrc : 1; // Bit 8
+            uint16_t va_sdst : 3; // Bits 11-9
+            uint16_t va_vdst : 4; // Bits 15-12
+
+            HwValue& operator=(HwValue const& other)
+            {
+                sa_sdst  = other.sa_sdst;
+                va_vcc   = other.va_vcc;
+                vm_vsrc  = other.vm_vsrc;
+                reserved = other.reserved;
+                hold_cnt = other.hold_cnt;
+                va_ssrc  = other.va_ssrc;
+                va_sdst  = other.va_sdst;
+                va_vdst  = other.va_vdst;
+                return *this;
+            }
+        };
+
+        // Field enumeration
+        enum Field : uint8_t
+        {
+            VA_VDST     = 0,
+            VA_SDST     = 1,
+            VA_SSRC     = 2,
+            HOLD_CNT    = 3,
+            VM_VSRC     = 4,
+            VA_VCC      = 5,
+            SA_SDST     = 6,
+            FIELD_COUNT = 7
+        };
+
+        // Constructor from separate fields
+        SWaitAluData(int va_vdst_val,
+                     int va_sdst_val,
+                     int va_ssrc_val,
+                     int hold_cnt_val,
+                     int vm_vsrc_val,
+                     int va_vcc_val,
+                     int sa_sdst_val)
+            : Modifier(Type::SWAITALU_DATA)
+        {
+            auto [packed, mask] = encodeWithMask(va_vdst_val,
+                                                 va_sdst_val,
+                                                 va_ssrc_val,
+                                                 hold_cnt_val,
+                                                 vm_vsrc_val,
+                                                 va_vcc_val,
+                                                 sa_sdst_val);
+
+            fieldsValue = packed;
+            validFields = mask;
+        }
+
+        // Static utility function to encode separate fields into hw format with validity mask
+        static std::pair<HwValue, uint8_t> encodeWithMask(int va_vdst,
+                                                          int va_sdst,
+                                                          int va_ssrc,
+                                                          int hold_cnt,
+                                                          int vm_vsrc,
+                                                          int va_vcc,
+                                                          int sa_sdst)
+        {
+            HwValue hwVal = {};
+            uint8_t mask  = 0;
+
+#define SET_FIELD(val, field, bitmask, fieldEnum) \
+    if((val) != -1)                               \
+    {                                             \
+        hwVal.field = (val) & (bitmask);          \
+        mask |= (1 << (fieldEnum));               \
+    }
+
+            SET_FIELD(va_vdst, va_vdst, 0xF, VA_VDST)
+            SET_FIELD(va_sdst, va_sdst, 0x7, VA_SDST)
+            SET_FIELD(va_ssrc, va_ssrc, 0x1, VA_SSRC)
+            SET_FIELD(hold_cnt, hold_cnt, 0x1, HOLD_CNT)
+            SET_FIELD(vm_vsrc, vm_vsrc, 0x7, VM_VSRC)
+            SET_FIELD(va_vcc, va_vcc, 0x1, VA_VCC)
+            SET_FIELD(sa_sdst, sa_sdst, 0x1, SA_SDST)
+
+#undef SET_FIELD
+
+            return {hwVal, mask};
+        }
+
+        // Unified field accessor - always returns the raw value
+        unsigned getField(Field field) const
+        {
+            switch(field)
+            {
+            // clang-format off
+            case VA_VDST: return fieldsValue.va_vdst;
+            case VA_SDST: return fieldsValue.va_sdst;
+            case VA_SSRC: return fieldsValue.va_ssrc;
+            case HOLD_CNT: return fieldsValue.hold_cnt;
+            case VM_VSRC: return fieldsValue.vm_vsrc;
+            case VA_VCC: return fieldsValue.va_vcc;
+            case SA_SDST: return fieldsValue.sa_sdst;
+            default: return 0; // clang-format on
+            }
+        }
+
+        // Unified validity checker - check if field is used/set
+        bool hasField(Field field) const
+        {
+            return validFields & (1 << field);
+        }
+
+    private:
+        HwValue fieldsValue;
+        uint8_t validFields; // Bitmask indicating which fields are valid (not -1)
+    };
+
+    // MFMA modifiers
+    struct MFMAModifiers : public Modifier
+    {
+        MFMAModifiers(const std::string& inputPermute = "",
+                      const std::string& negStr       = "",
+                      bool               reuseA       = false,
+                      bool               reuseB       = false,
+                      bool               neg_lo       = false,
+                      bool               neg_hi       = false)
+            : Modifier(Type::MFMA_DATA)
+            , inputPermute(inputPermute)
+            , negStr(negStr)
+            , reuseA(reuseA)
+            , reuseB(reuseB)
+            , neg_lo(neg_lo)
+            , neg_hi(neg_hi)
+            , isMXMFMA(false)
+            , mxInstType(0)
+            , mxScaleAType(0)
+            , mxScaleBType(0)
+        {
+        }
+
+        // Constructor for MXMFMA instructions
+        MFMAModifiers(const std::string& inputPermute,
+                      const std::string& negStr,
+                      bool               reuseA,
+                      bool               reuseB,
+                      int                mxInstType,
+                      int                mxScaleAType,
+                      int                mxScaleBType,
+                      bool               neg_lo = false,
+                      bool               neg_hi = false)
+            : Modifier(Type::MFMA_DATA)
+            , inputPermute(inputPermute)
+            , negStr(negStr)
+            , reuseA(reuseA)
+            , reuseB(reuseB)
+            , neg_lo(neg_lo)
+            , neg_hi(neg_hi)
+            , isMXMFMA(true)
+            , mxInstType(mxInstType)
+            , mxScaleAType(mxScaleAType)
+            , mxScaleBType(mxScaleBType)
+        {
+        }
+
+        std::string inputPermute;
+        std::string negStr;
+        bool        reuseA;
+        bool        reuseB;
+        bool        neg_lo; // Indicates if neg_lo modifier is present
+        bool        neg_hi; // Indicates if neg_hi modifier is present
+
+        // MXMFMA-specific fields
+        bool isMXMFMA; // Flag to indicate if this is a MXMFMA modifier
+        int  mxInstType; // MXMFMA instruction type (rocisa::InstType)
+        int  mxScaleAType; // Scale type for matrix A (rocisa::InstType)
+        int  mxScaleBType; // Scale type for matrix B (rocisa::InstType)
     };
 
     struct CommentData : public Modifier
@@ -433,9 +762,12 @@ namespace stinkytofu
     template<> constexpr Modifier::Type getModifierType<VCC>() { return Modifier::Type::VCC; }
     template<> constexpr Modifier::Type getModifierType<SWaitCntData>() { return Modifier::Type::SWAITCNT_DATA; }
     template<> constexpr Modifier::Type getModifierType<SWaitTensorCntData>() { return Modifier::Type::SWAITTENSORCNT_DATA; }
+    template<> constexpr Modifier::Type getModifierType<SWaitStoreCntData>() { return Modifier::Type::SWAITSTORECNT_DATA; }
     template<> constexpr Modifier::Type getModifierType<SDelayAluData>() { return Modifier::Type::SDELAYALU_DATA; }
     template<> constexpr Modifier::Type getModifierType<LabelData>() { return Modifier::Type::LABEL_NAME; }
+    template<> constexpr Modifier::Type getModifierType<MFMAModifiers>() { return Modifier::Type::MFMA_DATA; }
     template<> constexpr Modifier::Type getModifierType<CommentData>() { return Modifier::Type::COMMENT; }
+    template<> constexpr Modifier::Type getModifierType<SWaitAluData>() { return Modifier::Type::SWAITALU_DATA; }
     // clang-format on
 
 } // namespace stinkytofu

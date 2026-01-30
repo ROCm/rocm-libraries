@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -134,22 +135,27 @@ namespace stinkytofu
         union
         {
             // For Register type
+            // registers = [idx : idx + num)
             struct
             {
-                RegType  type;
-                unsigned idx;
-                unsigned num;
+                RegType type;
+
+                // index of the first register in the range
+                uint32_t idx;
+                // number of consecutive registers
+                uint16_t num;
+
+                // offset of the register for use case such as msb, etc.
+                int16_t offset;
+
                 // Virtual register flag for template-based code generation
                 // Only meaningful when dataType == Type::Register
                 // When true, this register needs offset remapping before use
-                bool isVirtual;
+                uint32_t isVirtual : 1;
             } reg;
 
-            // For LiteralInt type
-            int literalInt;
-
-            // For LiteralDouble type
-            double literalDouble;
+            int32_t literalInt;
+            double  literalDouble;
         };
 
         // For LiteralString type - kept separate as std::string is non-trivial
@@ -215,19 +221,19 @@ namespace stinkytofu
             return !(*this == other);
         }
 
-        StinkyRegister(RegType type, int regIdx, int regNum)
+        StinkyRegister(RegType type, uint32_t regIdx, uint16_t regNum, int16_t offset = 0)
             : dataType(Type::Register)
-            , reg{type, static_cast<unsigned>(regIdx), static_cast<unsigned>(regNum), false}
+            , reg{type, regIdx, regNum, offset, false}
         {
         }
 
         // Constructor accepting string for backward compatibility
-        StinkyRegister(const std::string& typeStr, int regIdx, int regNum)
+        StinkyRegister(const std::string& typeStr,
+                       uint32_t           regIdx,
+                       uint16_t           regNum,
+                       int16_t            offset = 0)
             : dataType(Type::Register)
-            , reg{stringToRegType(typeStr),
-                  static_cast<unsigned>(regIdx),
-                  static_cast<unsigned>(regNum),
-                  false}
+            , reg{stringToRegType(typeStr), regIdx, regNum, offset, false}
         {
         }
 
@@ -251,7 +257,7 @@ namespace stinkytofu
 
         StinkyRegister()
             : dataType(Type::Invalid)
-            , reg{RegType::UNKNOWN, 0, 0, false}
+            , reg{RegType::UNKNOWN, 0, 0, 0, false}
         {
         }
 
@@ -431,8 +437,8 @@ namespace stinkytofu
             if(dataType == Type::Register)
             {
                 h ^= std::hash<int>{}(static_cast<int>(reg.type)) << 1;
-                h ^= std::hash<unsigned>{}(reg.idx) << 2;
-                h ^= std::hash<unsigned>{}(reg.num) << 3;
+                h ^= std::hash<uint32_t>{}(reg.idx) << 2;
+                h ^= std::hash<uint16_t>{}(reg.num) << 3;
             }
             else if(dataType == Type::LiteralInt)
             {
@@ -599,6 +605,11 @@ namespace stinkytofu
             return nullptr;
         }
 
+        const std::vector<std::unique_ptr<Modifier>>& getModifiers() const
+        {
+            return modifiers;
+        }
+
         void dump(std::ostream& out) const override
         {
             dump(out, true);
@@ -756,9 +767,21 @@ namespace stinkytofu
                     cloned->modifiers.push_back(std::make_unique<SWaitTensorCntData>(
                         *static_cast<SWaitTensorCntData*>(mod.get())));
                     break;
+                case Modifier::Type::SWAITSTORECNT_DATA:
+                    cloned->modifiers.push_back(std::make_unique<SWaitStoreCntData>(
+                        *static_cast<SWaitStoreCntData*>(mod.get())));
+                    break;
                 case Modifier::Type::SDELAYALU_DATA:
                     cloned->modifiers.push_back(
                         std::make_unique<SDelayAluData>(*static_cast<SDelayAluData*>(mod.get())));
+                    break;
+                case Modifier::Type::SWAITALU_DATA:
+                    cloned->modifiers.push_back(
+                        std::make_unique<SWaitAluData>(*static_cast<SWaitAluData*>(mod.get())));
+                    break;
+                case Modifier::Type::MFMA_DATA:
+                    cloned->modifiers.push_back(
+                        std::make_unique<MFMAModifiers>(*static_cast<MFMAModifiers*>(mod.get())));
                     break;
                 case Modifier::Type::LABEL_NAME:
                     cloned->modifiers.push_back(
@@ -1074,6 +1097,11 @@ namespace stinkytofu
     inline bool isSWMMA(const StinkyInstruction& inst)
     {
         return inst.is(InstFlag::IF_SWMMA);
+    }
+
+    inline bool isMXWMMA(const StinkyInstruction& inst)
+    {
+        return inst.is(InstFlag::IF_MXWMMA);
     }
 
     inline bool isHasSideEffect(const StinkyInstruction& inst)

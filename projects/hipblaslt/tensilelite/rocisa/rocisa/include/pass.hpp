@@ -68,9 +68,8 @@ namespace rocisa
     std::string getActFuncBranchModuleName();
 
     // rocIsaPass with optional StinkyAsmModule parameter (for gfx1250)
-    rocIsaPassResult rocIsaPass(std::shared_ptr<KernelBody>&                  kernel,
-                                const rocIsaPassOption&                       option,
-                                std::shared_ptr<stinkytofu::StinkyAsmModule>& stModule);
+    rocIsaPassResult rocIsaPass(std::shared_ptr<KernelBody>& kernel,
+                                const rocIsaPassOption&      option);
 
     // Internal use only
     struct Graph

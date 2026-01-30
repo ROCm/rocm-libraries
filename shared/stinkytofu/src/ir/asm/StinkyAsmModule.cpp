@@ -147,15 +147,7 @@ namespace stinkytofu
         config.NumGRB = 0;
         passCtx.setGemmTileConfig(config);
 
-        // Create and run WaitCntLegalizationPass
-        auto pass = createWaitCntLegalizationPass();
-        pass->run(*pImpl->function, passCtx);
-
-        // dump the function
-        // std::cout << "After WaitCntLegalizationPass:" << std::endl;
-        // pImpl->function->dump(std::cerr);
-
-        // std::cout << "============================================\n\n";
+        // Do nothing for now
     }
 
     IRList& StinkyAsmModule::getIRList()

@@ -22,12 +22,33 @@
  * ************************************************************************ */
 
 #include "ir/asm/StinkyAsmEmitter.hpp"
+#include "ir/asm/StinkyAsmDirectives.hpp"
+#include "ir/asm/StinkyAsmIR.hpp"
+#include "ir/asm/StinkyAsmPrinter.hpp"
 
 #include <iomanip>
 #include <limits>
+#include <sstream>
 
 namespace stinkytofu
 {
+    // Forward declarations of static helper functions
+    static void
+        emitRegister(std::ostream& os, const StinkyRegister& reg, const AsmEmitterOptions& options);
+    static void emitMnemonic(std::ostream& os, const StinkyInstruction& inst);
+    static void emitOperands(std::ostream&            os,
+                             const StinkyInstruction& inst,
+                             const AsmEmitterOptions& options);
+    static bool emitCustomOperands(std::ostream& os, const StinkyInstruction& inst);
+    static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& inst);
+    static void emitCycleComment(std::ostream&            os,
+                                 const StinkyInstruction& inst,
+                                 int                      currentColumn,
+                                 const AsmEmitterOptions& options);
+    static void emitDirective(std::ostream&            os,
+                              const AsmDirective&      directive,
+                              const AsmEmitterOptions& options);
+
     // Helper function to check if a register is a pseudo register
     // Pseudo registers (BARRIER, DS_WRITE, TENSOR_LOAD, etc.) are used internally
     // for dependency tracking but should not appear in assembly output
@@ -51,7 +72,8 @@ namespace stinkytofu
         return reg.reg.type == RegType::SCC;
     }
 
-    void StinkyAsmEmitter::emitRegister(std::ostream& os, const StinkyRegister& reg)
+    static void
+        emitRegister(std::ostream& os, const StinkyRegister& reg, const AsmEmitterOptions& options)
     {
         switch(reg.dataType)
         {
@@ -73,6 +95,12 @@ namespace stinkytofu
                 break;
             }
 
+            std::string offsetStr = "";
+            if(reg.reg.offset != 0)
+            {
+                offsetStr = std::to_string(reg.reg.offset);
+            }
+
             if(reg.reg.num > 1)
             {
                 // Register range
@@ -80,13 +108,14 @@ namespace stinkytofu
                 {
                     // Symbolic format: v[vgprG2LA+0:vgprG2LA+0+3]
                     // The symbolicName already includes offsets (e.g., "vgprG2LA+0")
-                    os << "[" << symbolicName << ":" << symbolicName << "+" << (reg.reg.num - 1)
-                       << "]";
+                    os << "[" << symbolicName << offsetStr << ":" << symbolicName << offsetStr
+                       << "+" << (reg.reg.num - 1) << "]";
                 }
                 else
                 {
                     // Numeric format: v[46:49]
-                    os << "[" << reg.reg.idx << ":" << (reg.reg.idx + reg.reg.num - 1) << "]";
+                    os << "[" << reg.reg.idx << offsetStr << ":" << (reg.reg.idx + reg.reg.num - 1)
+                       << offsetStr << "]";
                 }
             }
             else
@@ -96,12 +125,19 @@ namespace stinkytofu
                 {
                     // Symbolic format: v[vgprLocalWriteAddrA+0]
                     // The symbolicName already includes offsets
-                    os << "[" << symbolicName << "]";
+                    os << "[" << symbolicName << offsetStr << "]";
                 }
                 else
                 {
-                    // Numeric format: v10
-                    os << reg.reg.idx;
+                    if(offsetStr.empty())
+                    {
+                        // Numeric format: v10
+                        os << reg.reg.idx;
+                    }
+                    else
+                    {
+                        os << "[" << reg.reg.idx << offsetStr << "]";
+                    }
                 }
             }
             break;
@@ -140,7 +176,7 @@ namespace stinkytofu
         }
     }
 
-    void StinkyAsmEmitter::emitMnemonic(std::ostream& os, const StinkyInstruction& inst)
+    static void emitMnemonic(std::ostream& os, const StinkyInstruction& inst)
     {
         // Get mnemonic from the hardware instruction descriptor
         const HwInstDesc* desc = inst.getHwInstDesc();
@@ -154,11 +190,17 @@ namespace stinkytofu
         }
     }
 
-    void StinkyAsmEmitter::emitOperands(std::ostream& os, const StinkyInstruction& inst)
+    static void emitOperands(std::ostream&            os,
+                             const StinkyInstruction& inst,
+                             const AsmEmitterOptions& options)
     {
         bool firstOperand = true;
 
+        // Check if instruction has True16 modifiers
+        const True16Modifiers* true16Mod = inst.getModifier<True16Modifiers>();
+
         // Emit destination registers (skip pseudo and implicit registers)
+        size_t destIndex = 0;
         for(const auto& dest : inst.getDestRegs())
         {
             // Skip pseudo registers and implicit registers
@@ -169,8 +211,25 @@ namespace stinkytofu
             {
                 os << ", ";
             }
-            emitRegister(os, dest);
+            emitRegister(os, dest, options);
+
+            // Append True16 modifier (.h or .l) if present for this destination operand
+            if(true16Mod)
+            {
+                HighBitSel highBit = HighBitSel::NONE;
+                if(destIndex == 0)
+                    highBit = true16Mod->getDst0();
+                else if(destIndex == 1)
+                    highBit = true16Mod->getDst1();
+
+                if(highBit == HighBitSel::HIGH)
+                    os << ".h";
+                else if(highBit == HighBitSel::LOW)
+                    os << ".l";
+            }
+
             firstOperand = false;
+            destIndex++;
         }
 
         // Check if instruction has VOP3 modifiers
@@ -243,7 +302,7 @@ namespace stinkytofu
             {
                 // Both neg and abs: -abs(v10) or neg(abs(v10))
                 os << "-abs(";
-                emitRegister(os, srcRegs[i]);
+                emitRegister(os, srcRegs[i], options);
                 os << ")";
             }
             else if(needsNeg)
@@ -251,124 +310,94 @@ namespace stinkytofu
                 // Only negation: -v10 or neg(v10)
                 // Use short form "-" before register (LLVM syntax allows this)
                 os << "-";
-                emitRegister(os, srcRegs[i]);
+                emitRegister(os, srcRegs[i], options);
             }
             else if(needsAbs)
             {
                 // Only absolute value: abs(v10) or |v10|
                 os << "abs(";
-                emitRegister(os, srcRegs[i]);
+                emitRegister(os, srcRegs[i], options);
                 os << ")";
             }
             else
             {
                 // No modifiers
-                emitRegister(os, srcRegs[i]);
+                emitRegister(os, srcRegs[i], options);
+            }
+
+            // Append True16 modifier (.h or .l) if present for this source operand
+            if(true16Mod && nonSkippedIndex < true16Mod->getSrcCount())
+            {
+                HighBitSel highBit = true16Mod->getSrc(nonSkippedIndex);
+                if(highBit == HighBitSel::HIGH)
+                    os << ".h";
+                else if(highBit == HighBitSel::LOW)
+                    os << ".l";
             }
 
             firstOperand = false;
             nonSkippedIndex++;
         }
+
+        // Check if instruction has VOP3P modifiers
+        if(const VOP3PModifiers* vop3pMod = inst.getModifier<VOP3PModifiers>())
+        {
+            os << *vop3pMod;
+        }
     }
 
-    void StinkyAsmEmitter::emitMemoryModifiers(std::ostream& os, const StinkyInstruction& inst)
+    static bool emitCustomOperands(std::ostream& os, const StinkyInstruction& inst)
     {
-        // Emit DS modifiers
-        const DSModifiers* dsMod = inst.getModifier<DSModifiers>();
-        if(dsMod)
+        switch(inst.getUnifiedOpcode())
         {
-            if(dsMod->na == 1)
-            {
-                os << " offset:" << dsMod->offset;
-            }
-            else if(dsMod->na == 2)
-            {
-                os << " offset0:" << dsMod->offset0 << " offset1:" << dsMod->offset1;
-            }
-            if(dsMod->gds)
-            {
-                os << " gds";
-            }
-            return;
+        case GFX::s_delay_alu:
+        {
+            const SDelayAluData* delayAluData = inst.getModifier<SDelayAluData>();
+            assert(delayAluData != nullptr && "Internal error: SDelayAluData expected");
+            os << " " << *delayAluData;
+            return true;
         }
 
-        // Emit FLAT modifiers
-        const FLATModifiers* flatMod = inst.getModifier<FLATModifiers>();
-        if(flatMod)
+        case GFX::s_wait_alu:
         {
-            if(flatMod->offset12 != 0)
-            {
-                os << " offset:" << flatMod->offset12;
-            }
-            if(flatMod->glc)
-            {
-                os << " glc";
-            }
-            if(flatMod->slc)
-            {
-                os << " slc";
-            }
-            if(flatMod->lds)
-            {
-                os << " lds";
-            }
-            return;
+            const SWaitAluData* waitAluData = inst.getModifier<SWaitAluData>();
+            assert(waitAluData != nullptr && "Internal error: SWaitAluData expected");
+            os << *waitAluData;
+            return true;
         }
 
-        // Emit MUBUF modifiers
-        const MUBUFModifiers* mubufMod = inst.getModifier<MUBUFModifiers>();
-        if(mubufMod)
-        {
-            if(mubufMod->offen)
-            {
-                os << " offen offset:" << mubufMod->offset12;
-            }
-            if(mubufMod->glc || mubufMod->slc || mubufMod->lds)
-            {
-                os << ",";
-            }
-            if(mubufMod->glc)
-            {
-                os << " glc";
-            }
-            if(mubufMod->slc)
-            {
-                os << " slc";
-            }
-            if(mubufMod->nt)
-            {
-                os << " nt";
-            }
-            if(mubufMod->lds)
-            {
-                os << " lds";
-            }
-            return;
-        }
-
-        // Emit SMEM modifiers
-        const SMEMModifiers* smemMod = inst.getModifier<SMEMModifiers>();
-        if(smemMod)
-        {
-            if(smemMod->offset != 0)
-            {
-                os << " offset:" << smemMod->offset;
-            }
-            if(smemMod->glc)
-            {
-                os << " glc";
-            }
-            if(smemMod->nv)
-            {
-                os << " nv";
-            }
-            return;
+        default:
+            return false;
         }
     }
 
-    void StinkyAsmEmitter::emitCycleComment(std::ostream&            os,
-                                            const StinkyInstruction& inst,
-                                            int                      currentColumn)
+    static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& inst)
+    {
+#define EMIT_TRAILING_MODIFIER(TYPE_ENUM, CLASS_PREFIX)                \
+    case Modifier::Type::TYPE_ENUM:                                    \
+        os << *static_cast<const CLASS_PREFIX##Modifiers*>(mod.get()); \
+        break
+
+        for(const auto& mod : inst.getModifiers())
+        {
+            switch(mod->getType())
+            {
+                EMIT_TRAILING_MODIFIER(DS, DS);
+                EMIT_TRAILING_MODIFIER(FLAT, FLAT);
+                EMIT_TRAILING_MODIFIER(MUBUF, MUBUF);
+                EMIT_TRAILING_MODIFIER(SMEM, SMEM);
+                EMIT_TRAILING_MODIFIER(MFMA_DATA, MFMA);
+            default:
+                break;
+            }
+        }
+#undef EMIT_TRAILING_MODIFIER
+    }
+
+    static void emitCycleComment(std::ostream&            os,
+                                 const StinkyInstruction& inst,
+                                 int                      currentColumn,
+                                 const AsmEmitterOptions& options)
     {
         bool needsComment = false;
 
@@ -431,7 +460,9 @@ namespace stinkytofu
         }
     }
 
-    void StinkyAsmEmitter::emit(std::ostream& os, const AsmDirective& directive)
+    static void emitDirective(std::ostream&            os,
+                              const AsmDirective&      directive,
+                              const AsmEmitterOptions& options)
     {
         std::ostringstream dirStream;
         if(directive.kind == AsmDirectiveKind::SET)
@@ -446,6 +477,17 @@ namespace stinkytofu
         {
             dirStream << directive.value;
         }
+        else if(directive.kind == AsmDirectiveKind::TEXTBLOCK)
+        {
+            // Output raw text as-is (no newline added since text may already have it)
+            os << directive.value;
+            return;
+        }
+        else if(directive.kind == AsmDirectiveKind::IF || directive.kind == AsmDirectiveKind::ENDIF)
+        {
+            os << directive.value;
+            return;
+        }
 
         if(!dirStream.str().empty())
         {
@@ -453,7 +495,11 @@ namespace stinkytofu
             {
                 dirStream << " // " << directive.comment;
             }
-            os << dirStream.str() << "\n";
+
+            os << dirStream.str();
+
+            if(directive.kind == AsmDirectiveKind::SET)
+                os << "\n";
         }
     }
 
@@ -494,15 +540,19 @@ namespace stinkytofu
         // Emit mnemonic
         emitMnemonic(instrStream, inst);
 
-        // Emit operands if any
-        if(!inst.getDestRegs().empty() || !inst.getSrcRegs().empty())
+        if(emitCustomOperands(instrStream, inst))
         {
+            // Emit custom operands for special instructions, or regular operands if not custom
+        }
+        else if(!inst.getDestRegs().empty() || !inst.getSrcRegs().empty())
+        {
+            // Emit regular operands if any
             instrStream << " ";
-            emitOperands(instrStream, inst);
+            emitOperands(instrStream, inst, options);
         }
 
-        // Emit memory modifiers (DS, FLAT, MUBUF, SMEM)
-        emitMemoryModifiers(instrStream, inst);
+        // Emit trailing modifiers (memory, s_wait_alu, MFMA)
+        emitTrailingModifiers(instrStream, inst);
 
         // Get the instruction string and its length for comment alignment
         std::string instrStr      = instrStream.str();
@@ -512,7 +562,7 @@ namespace stinkytofu
         os << instrStr;
 
         // Emit cycle information and/or user comments with alignment
-        emitCycleComment(os, inst, currentColumn);
+        emitCycleComment(os, inst, currentColumn, options);
 
         os << "\n";
     }
@@ -536,11 +586,7 @@ namespace stinkytofu
             const AsmDirective* directive = dyn_cast<AsmDirective>(it.getNodePtr());
             if(directive)
             {
-                emit(os, *directive);
-                if(options.emitBlankLines)
-                {
-                    os << "\n";
-                }
+                emitDirective(os, *directive, options);
             }
         }
     }
@@ -556,13 +602,6 @@ namespace stinkytofu
     {
         std::ostringstream oss;
         emit(oss, irlist);
-        return oss.str();
-    }
-
-    std::string StinkyAsmEmitter::emit(const AsmDirective& directive)
-    {
-        std::ostringstream oss;
-        emit(oss, directive);
         return oss.str();
     }
 

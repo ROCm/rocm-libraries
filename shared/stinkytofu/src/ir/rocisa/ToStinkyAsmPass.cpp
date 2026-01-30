@@ -114,7 +114,9 @@ namespace
         {
             // Convert string regType to RegType enum
             RegType        regType = stringToRegType(regCont->regType);
-            StinkyRegister reg{regType, regCont->regIdx, regCont->regNum};
+            StinkyRegister reg{regType,
+                               static_cast<uint32_t>(regCont->regIdx),
+                               static_cast<uint16_t>(regCont->regNum)};
 
             // Capture symbolic register name if available
             // In rocisa, the symbolic name includes the type prefix and all offsets
@@ -139,7 +141,9 @@ namespace
             {
                 // Convert string regType to RegType enum
                 RegType        regType = stringToRegType(regContainer->regType);
-                StinkyRegister reg{regType, regContainer->regIdx, regContainer->regNum};
+                StinkyRegister reg{regType,
+                                   static_cast<uint32_t>(regContainer->regIdx),
+                                   static_cast<uint16_t>(regContainer->regNum)};
 
                 // Capture symbolic register name if available
                 // In rocisa, the symbolic name includes the type prefix and all offsets
