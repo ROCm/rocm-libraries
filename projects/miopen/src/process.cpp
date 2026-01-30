@@ -54,11 +54,6 @@ public:
             MIOPEN_THROW("Capturing output not defined for Windows.");
         }
 
-        if(!additionalEnvironmentVariables.empty())
-        {
-            MIOPEN_THROW("Overriding environment variables not defined for Windows.");
-        }
-
         std::string cmd{path.string()};
         if(!args.empty())
             cmd += " " + std::string{args};
@@ -70,13 +65,56 @@ public:
         if(cmd.size() < BUFFER_CAPACITY)
             cmd.resize(BUFFER_CAPACITY, '\0');
 
+        // Section below builds custom env block. The reason for it is that
+        // without it some gtests may result in throwing exception due to missing implementation
+        // for additionalEnvironmentVariables when it's not empty for example:
+        // in perfdb, sqlite, sqlite_perfdb tests we have to disable sharding with env variables
+        // GTEST_TOTAL_SHARDS/GTEST_SHARD_INDEX otherwise, during work of the spawned child
+        // process (which is in its essence is a same test binary execution) sharding is applied to
+        // it as well, making it to skip necessary executions for which it was called
+        // while parent is waiting for the child to finish. Thus, we need to pass additional
+        // env variables to disable gtest sharding for child processes
+        // Block below - is the standard way to build such env block using Windows API.
+        // Format: "KEY=VALUE\0KEY=VALUE\0\0" (double null terminated).
+        std::string envBlock;
+        LPVOID lpEnvironment = nullptr;
+
+        if(!additionalEnvironmentVariables.empty())
+        {
+            auto envStrings = GetEnvironmentStringsA();
+            if(envStrings != nullptr)
+            {
+                std::map<std::string, std::string> envMap;
+                for(auto p = envStrings; *p != '\0'; p += strlen(p) + 1)
+                {
+                    std::string entry(p);
+                    auto pos = entry.find('=');
+                    if(pos != std::string::npos && pos > 0)
+                        envMap[entry.substr(0, pos)] = entry.substr(pos + 1);
+                }
+                FreeEnvironmentStringsA(envStrings);
+
+                for(const auto& [key, value] : additionalEnvironmentVariables)
+                    envMap[key] = value;
+
+                for(const auto& [key, value] : envMap)
+                {
+                    envBlock += key + "=" + value;
+                    envBlock.push_back('\0');
+                }
+                envBlock.push_back('\0');
+
+                lpEnvironment = envBlock.data();
+            }
+        }
+
         if(CreateProcess(path.string().c_str(),
                          cmd.data(),
                          nullptr,
                          nullptr,
                          FALSE,
                          0,
-                         nullptr,
+                         lpEnvironment,
                          cwd.empty() ? nullptr : cwd.data(),
                          &info,
                          &processInfo) == FALSE)
