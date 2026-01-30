@@ -23,6 +23,7 @@
 static const char* pluginName = "miopen_plugin";
 static const char* pluginVersion = "1.0.0";
 
+using namespace hipdnn_data_sdk::flatbuffer_utilities;
 using namespace hipdnn_plugin_sdk;
 using namespace miopen_plugin;
 
@@ -214,8 +215,7 @@ hipdnnPluginStatus_t
         throwIfNull(numEngines);
 
         auto& engineManager = handle->getEngineManager();
-        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
-                                                                           opGraph->size);
+        GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);
 
         auto applicableEngines = engineManager.getApplicableEngineIds(*handle, opGraphWrapper);
 
@@ -257,8 +257,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetEngineDetailsImpl(hipdnnEnginePluginHa
         throwIfNull(engineDetails);
 
         auto& engineManager = handle->getEngineManager();
-        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
-                                                                           opGraph->size);
+        GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);
 
         engineManager.getEngineDetails(*handle, opGraphWrapper, engineId, *engineDetails);
 
@@ -305,10 +304,8 @@ hipdnnPluginStatus_t
 
         auto& engineManager = handle->getEngineManager();
 
-        hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
-            engineConfig->ptr, engineConfig->size);
-        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
-                                                                           opGraph->size);
+        EngineConfigWrapper engineConfigWrapper(engineConfig->ptr, engineConfig->size);
+        GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);
         *workspaceSize = engineManager.getWorkspaceSize(
             *handle, engineConfigWrapper.engineId(), opGraphWrapper);
 
@@ -334,10 +331,8 @@ hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContextImpl(
         throwIfNull(opGraph);
         throwIfNull(executionContext);
 
-        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
-                                                                           opGraph->size);
-        hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfigWrapper(
-            engineConfig->ptr, engineConfig->size);
+        GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);
+        EngineConfigWrapper engineConfigWrapper(engineConfig->ptr, engineConfig->size);
 
         auto& engineManager = handle->getEngineManager();
 
