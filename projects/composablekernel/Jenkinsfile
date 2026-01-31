@@ -626,11 +626,6 @@ def cmake_build(Map conf=[:]){
     echo cmd
 
     dir("projects/composablekernel/build"){
-        sh """
-            echo "workspace dir:"
-            pwd
-            ls -l
-        """
         // Start sccache monitoring
         if(check_host() && params.USE_SCCACHE && "${env.CK_SCCACHE}" != "null" && "${invocation_tag}" != "") {
             sh """
