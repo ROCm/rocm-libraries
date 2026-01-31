@@ -91,24 +91,33 @@ def main():
         print(f"# Category: {category_name}")
         print(f'# Description: {category_info.get("description", "")}')
 
-        # Build pattern string with positive patterns first
-        pattern_string = ""
+        # Build positive pattern string
+        positive_string = ""
         for pattern in patterns:
-            pattern_string = pattern_string + ":" + pattern
+            positive_string = positive_string + ":" + pattern
+        positive_string = positive_string[1:]  # Remove leading colon
 
-        # Add negative patterns for exclusions (like gpu_excludes)
-        for excluded_pattern in exclude:
-            pattern_string = pattern_string + ":-" + excluded_pattern
+        # Build negative pattern string for exclusions
+        exclude_string = ""
+        if exclude:
+            for excluded_pattern in exclude:
+                exclude_string = exclude_string + ":" + excluded_pattern
+            exclude_string = exclude_string[1:]  # Remove leading colon
 
-        # Store pattern string (without quotes) and other data for GPU exclusion processing
-        pattern_string_raw = pattern_string[1:]  # Remove leading colon
+        # Store positive and exclude strings separately for GPU exclusion processing
         category_data[category_name] = {
-            "pattern_string": pattern_string_raw,  # Pre-built pattern with exclusions
+            "positive_string": positive_string,
+            "exclude_string": exclude_string,
             "labels": labels[:],  # Make a copy
             "timeout": timeout,
         }
 
-        pattern_string = '"' + pattern_string_raw + '"'
+        # Build complete pattern string for this category test
+        if exclude_string:
+            pattern_string = positive_string + "-" + exclude_string
+        else:
+            pattern_string = positive_string
+        pattern_string = '"' + pattern_string + '"'
 
         label_string = ""
         for label in labels:
@@ -251,21 +260,29 @@ def main():
                 seen.add(pattern)
                 unique_patterns.append(pattern)
 
-        # Build GPU exclusion pattern string (for negative filter)
+        # Build GPU exclusion pattern string - format: pattern1:pattern2
         gpu_exclude_string = ""
         for pattern in unique_patterns:
-            gpu_exclude_string = gpu_exclude_string + ":-" + pattern
+            gpu_exclude_string = gpu_exclude_string + ":" + pattern
+        gpu_exclude_string = gpu_exclude_string[1:]  # Remove leading colon
 
         # Create one test for each applicable category
         for category_name in all_applicable_categories:
             cat_data = category_data[category_name]
-            # Already includes category exclusions
-            cat_pattern_string = cat_data["pattern_string"]
+            positive_string = cat_data["positive_string"]
+            cat_exclude_string = cat_data["exclude_string"]
             cat_labels = cat_data["labels"]
             timeout = cat_data["timeout"]
 
-            # Build combined pattern string: category_pattern_string + gpu_exclusion_patterns
-            pattern_string = cat_pattern_string + gpu_exclude_string
+            # Build combined pattern string: positive - category_excludes:gpu_excludes
+            # Combine all negative patterns
+            combined_exclude_string = ""
+            if cat_exclude_string:
+                combined_exclude_string = cat_exclude_string + ":" + gpu_exclude_string
+            else:
+                combined_exclude_string = gpu_exclude_string
+
+            pattern_string = positive_string + "-" + combined_exclude_string
             pattern_string = '"' + pattern_string + '"'
 
             # Build label string: category_labels + ex_gpu_<arch> label
