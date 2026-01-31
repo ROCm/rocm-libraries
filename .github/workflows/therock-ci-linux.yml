@@ -207,7 +207,7 @@ jobs:
           echo "$ERROR_LOG" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-      - name: Notify Microsoft Teams 2
+      - name: MIOpen Notify Microsoft Teams
         if: ${{ contains(inputs.project_to_test, 'miopen') && failure() }}
         run: |
           RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
@@ -225,7 +225,7 @@ jobs:
             -d @- <<EOF
           {
             "title": "MIOpen GitHub CI Notification",
-            "text": "❌ Linux Build failure on branch: ${GITHUB_REF} \n${PR_INFO} \n**Issue Type:** ${ISSUE_SUMMARY}\n\n**Error Context:**\n\`\`\`\n${ERROR_SNIPPET}\n\`\`\`\n\n[View Full Run](${RUN_URL})"
+            "text": "❌ **Linux Build failure**  \n**Branch:** ${GITHUB_REF} \n${PR_INFO} \n**Issue Type:** ${ISSUE_SUMMARY}\n\n**Error Context:**\n\`\`\`\n${ERROR_SNIPPET}\n\`\`\`\n\n[View Full Run](${RUN_URL})"
           }
           EOF
 
