@@ -69,13 +69,21 @@ INSTANTIATE_TEST_SUITE_P(
     ,
     IntegrationGraphKnobsApi,
     ::testing::Values(
+        KnobQueryTestCase{"KnobsPluginHasFiveKnobs",
+                          hipdnn_tests::plugin_constants::engineId<KnobsPlugin>(),
+                          5,
+                          {"test.int_knob",
+                           "test.float_knob",
+                           "test.string_knob",
+                           "test.deprecated_knob",
+                           "test.shared.deterministic"}},
         KnobQueryTestCase{
-            "KnobsPluginHasFourKnobs",
-            hipdnn_tests::plugin_constants::engineId<KnobsPlugin>(),
-            4,
-            {"test.int_knob", "test.float_knob", "test.string_knob", "test.deprecated_knob"}},
+            "GoodPluginHasNoKnobs", hipdnn_tests::plugin_constants::engineId<GoodPlugin>(), 0, {}},
         KnobQueryTestCase{
-            "GoodPluginHasNoKnobs", hipdnn_tests::plugin_constants::engineId<GoodPlugin>(), 0, {}}),
+            "KnobsPluginEngineBHasThreeKnobs",
+            hipdnn_tests::plugin_constants::engineId<KnobsPluginEngineB>(),
+            3,
+            {"test.engine_b.block_size", "test.engine_b.algorithm", "test.shared.deterministic"}}),
     [](const ::testing::TestParamInfo<KnobQueryTestCase>& info) { return info.param.description; });
 
 TEST_P(IntegrationGraphKnobsApi, QueryKnobsFromEngine)
