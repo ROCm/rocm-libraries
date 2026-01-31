@@ -180,8 +180,8 @@ jobs:
             ERROR_LOG="Error details not found in logs. Check the GitHub Actions run for full output."
           fi
 
-          # Truncate if too long (max ~500 chars for Teams message)
-          ERROR_LOG=$(echo "$ERROR_LOG" | head -c 500)
+          # Format as 5 lines instead of truncating to 500 chars
+          ERROR_LOG=$(echo "$ERROR_LOG" | head -n 5)
 
           # Save to environment file for next step
           echo "ERROR_CONTEXT<<EOF" >> $GITHUB_ENV
