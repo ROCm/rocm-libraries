@@ -90,19 +90,25 @@ def main():
         timeout = timeouts.get(category_name, 300)
         print(f"# Category: {category_name}")
         print(f'# Description: {category_info.get("description", "")}')
-        patterns[:] = [x for x in patterns if x not in exclude]
 
-        # Store original patterns for GPU exclusion processing
+        # Build pattern string with positive patterns first
+        pattern_string = ""
+        for pattern in patterns:
+            pattern_string = pattern_string + ":" + pattern
+
+        # Add negative patterns for exclusions (like gpu_excludes)
+        for excluded_pattern in exclude:
+            pattern_string = pattern_string + ":-" + excluded_pattern
+
+        # Store pattern string (without quotes) and other data for GPU exclusion processing
+        pattern_string_raw = pattern_string[1:]  # Remove leading colon
         category_data[category_name] = {
-            "patterns": patterns[:],  # Make a copy
+            "pattern_string": pattern_string_raw,  # Pre-built pattern with exclusions
             "labels": labels[:],  # Make a copy
             "timeout": timeout,
         }
 
-        pattern_string = ""
-        for pattern in patterns:
-            pattern_string = pattern_string + ":" + pattern
-        pattern_string = '"' + pattern_string[1:] + '"'
+        pattern_string = '"' + pattern_string_raw + '"'
 
         label_string = ""
         for label in labels:
@@ -253,17 +259,14 @@ def main():
         # Create one test for each applicable category
         for category_name in all_applicable_categories:
             cat_data = category_data[category_name]
-            cat_patterns = cat_data["patterns"]
+            # Already includes category exclusions
+            cat_pattern_string = cat_data["pattern_string"]
             cat_labels = cat_data["labels"]
             timeout = cat_data["timeout"]
 
-            # Build combined pattern string: category_patterns:-gpu_exclusion_patterns
-            pattern_string = ""
-            for pattern in cat_patterns:
-                pattern_string = pattern_string + ":" + pattern
-            # Append GPU exclusion patterns
-            pattern_string = pattern_string + gpu_exclude_string
-            pattern_string = '"' + pattern_string[1:] + '"'
+            # Build combined pattern string: category_pattern_string + gpu_exclusion_patterns
+            pattern_string = cat_pattern_string + gpu_exclude_string
+            pattern_string = '"' + pattern_string + '"'
 
             # Build label string: category_labels + ex_gpu_<arch> label
             combined_labels = cat_labels + [ex_gpu_label]
