@@ -212,9 +212,10 @@ jobs:
         run: |
           RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
           PR_INFO=""
           if [ -n "$PR_TITLE" ]; then
-            PR_INFO="\n**PR:** $PR_TITLE\n"
+            PR_INFO="\n**PR #${PR_NUMBER}:** $PR_TITLE\n"
           fi
           ISSUE_SUMMARY="${ISSUE_TYPE:-Build Failure}"
           # Replace actual newlines with \n for JSON formatting
@@ -225,7 +226,7 @@ jobs:
             -d @- <<EOF
           {
             "title": "MIOpen GitHub CI Notification",
-            "text": "**❌Linux Build Failure** \n\n**Branch:** ${GITHUB_REF}\n${PR_INFO}\n**Issue Type:** ${ISSUE_SUMMARY}\n\n**Error Context:**\n\`\`\`\n${ERROR_SNIPPET}\n\`\`\`\n\n[View Full Run](${RUN_URL})"
+            "text": "❌ **Linux Build Failure**\n\n**Branch:** ${GITHUB_REF}\n${PR_INFO}\n**Issue Type:** ${ISSUE_SUMMARY}\n\n**Error Context:**\n\`\`\`\n${ERROR_SNIPPET}\n\`\`\`\n\n[View Full Run](${RUN_URL})"
           }
           EOF
 
