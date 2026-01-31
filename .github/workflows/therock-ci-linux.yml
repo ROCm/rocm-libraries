@@ -192,30 +192,16 @@ jobs:
         if: ${{ contains(inputs.project_to_test, 'miopen') && failure() }}
         run: |
           RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-
-          # Format error context with proper line breaks for Teams
           ERROR_SNIPPET="${ERROR_CONTEXT:-No error context available}"
 
-          # Create the message with proper formatting
-          MESSAGE="❌ MIOpen Linux Build Failure
-
-          **Repository:** ${GITHUB_REPOSITORY}
-          **Branch:** ${GITHUB_REF}
-          **Job:** ${GITHUB_JOB}
-          **Commit:** ${GITHUB_SHA}
-
-          **Error Context:**
-          \`\`\`
-          ${ERROR_SNIPPET}
-          \`\`\`
-
-          [View Full Run](${RUN_URL})"
-
-          # Send to Teams with proper JSON escaping
-          jq -n --arg msg "$MESSAGE" '{text: $msg}' | \
-            curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
-              -H 'Content-Type: application/json' \
-              -d @-
+          curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
+            -H 'Content-Type: application/json' \
+            -d @- <<EOF
+          {
+            "title": "MIOpen GitHub CI Notification",
+            "text": "❌ Linux Build failure on branch: ${GITHUB_REF}\n\n**Error Context:**\n\`\`\`\n${ERROR_SNIPPET}\n\`\`\`\n\n[View Full Run](${RUN_URL})"
+          }
+          EOF
 
   therock-test-linux:
     name: Test (${{ inputs.amdgpu_families }})
