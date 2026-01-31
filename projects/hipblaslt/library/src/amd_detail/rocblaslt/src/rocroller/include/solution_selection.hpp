@@ -167,11 +167,8 @@ constexpr int preferredUnrolling(rocRoller::DataType typeA,
     if(typeA == rocRoller::DataType::FP4 && typeB == rocRoller::DataType::FP4 && wgt.m > 32
        && wgt.n > 32)
     {
-        // When hasPreSwizzle and hasPreTile are true, use unroll=2 for 256x256x256 tile, otherwise 4 for 256x256x128 tile
-        // When isOrigamiConfig=true, check for origami K (256*2=512)
-        // When isOrigamiConfig=false, check for original K (256)
-        int targetK = isOrigamiConfig ? 512 : 256;
-        if(wgt.m == 256 && wgt.n == 256 && wgt.k == targetK && hasPreSwizzle && hasPreTile)
+        // When hasPreSwizzle and hasPreTile are true, use unroll=2
+        if(hasPreSwizzle && hasPreTile)
             return 2;
         return 4;
     }
