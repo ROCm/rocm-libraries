@@ -39,28 +39,6 @@ jobs:
         run: |
           git config --global core.longpaths true
 
-      - name: Dummy Failure Step (Testing)
-        if: ${{ contains(inputs.project_to_test, 'miopen') }}
-        run: |
-          # Create fake log directory and error log for testing
-          mkdir -p "${{ env.BUILD_DIR }}/logs"
-
-          # Write fake error messages to a log file
-          cat > "${{ env.BUILD_DIR }}/logs/build_error.log" <<'ERRORLOG'
-          [INFO] Building project...
-          [INFO] Compiling source files...
-          [ERROR] compilation failed: unresolved external symbol __imp_ComputeKernel
-          In file: src/rocm_kernel.cpp:256
-          Symbol '__imp_ComputeKernel' not found in library
-          Fatal error: LINK returned exit code 1120
-          [INFO] Build process terminated
-          ERRORLOG
-
-          # Simulate a failed build step
-          echo "ERROR: Build failed with exit code 1"
-          echo "FATAL: Compilation errors detected"
-          exit 1
-
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
