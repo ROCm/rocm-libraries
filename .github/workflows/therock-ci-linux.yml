@@ -225,7 +225,7 @@ jobs:
             -d @- <<EOF
           {
             "title": "MIOpen GitHub CI Notification",
-            "text": "❌ **Linux Build Failure**\n\n**Branch:** ${GITHUB_REF}${PR_INFO}\n**Issue Type:** ${ISSUE_SUMMARY}\n\n**Error Context:**\n\`\`\`\n${ERROR_SNIPPET}\n\`\`\`\n\n[View Full Run](${RUN_URL})"
+            "text": "❌ **Linux Build Failure**\n\n**Branch:** ${GITHUB_REF}\n${PR_INFO}\n**Issue Type:** ${ISSUE_SUMMARY}\n\n**Error Context:**\n\`\`\`\n${ERROR_SNIPPET}\n\`\`\`\n\n[View Full Run](${RUN_URL})"
           }
           EOF
 
