@@ -192,7 +192,8 @@ jobs:
         if: ${{ contains(inputs.project_to_test, 'miopen') && failure() }}
         run: |
           RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          ERROR_SNIPPET="${ERROR_CONTEXT:-No error context available}"
+          # Replace actual newlines with \n for JSON formatting
+          ERROR_SNIPPET=$(echo "${ERROR_CONTEXT:-No error context available}" | sed ':a;N;$!ba;s/\n/\\n/g')
 
           curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
             -H 'Content-Type: application/json' \
