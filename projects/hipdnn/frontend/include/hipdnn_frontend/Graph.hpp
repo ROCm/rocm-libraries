@@ -16,6 +16,7 @@
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/backend/BackendWrapper.hpp>
+#include <hipdnn_frontend/backend/CreateBackendDescriptor.hpp>
 #include <hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
 #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
@@ -37,26 +38,19 @@
 
 namespace hipdnn_frontend::graph
 {
-// When an error occurs, get the backend error string and append it to the error_message.
-#define HIPDNN_RETURN_ON_BACKEND_FAILURE(backend_status, error_message)                     \
-    do                                                                                      \
-    {                                                                                       \
-        if((backend_status) != HIPDNN_STATUS_SUCCESS)                                       \
-        {                                                                                   \
-            std::array<char, 1024> backend_err_msg{};                                       \
-            hipdnn_frontend::hipdnnBackend()->getLastErrorString(backend_err_msg.data(),    \
-                                                                 backend_err_msg.size());   \
-            std::string full_error_msg                                                      \
-                = std::string(error_message) + " Backend error: " + backend_err_msg.data(); \
-            return Error(ErrorCode::HIPDNN_BACKEND_ERROR, full_error_msg);                  \
-        }                                                                                   \
-    } while(0)
+
+namespace detail
+{
+Error getEngineConfigs(std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>>& engineConfigs,
+                       std::vector<int64_t>& engineIds,
+                       hipdnnBackendDescriptor_t engineHeuristicDesc,
+                       bool getAll);
+}
 
 class Graph : public INode
 {
 private:
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _graphDesc;
-    std::unique_ptr<ScopedHipdnnBackendDescriptor> _engineHeuristicDesc;
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _engineConfigDesc;
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _executionPlanDesc;
 
@@ -77,140 +71,12 @@ private:
         return tensor;
     }
 
-    Error initializeHeuristicDescriptor(std::vector<HeuristicMode> const& modes)
-    {
-        _engineHeuristicDesc
-            = std::make_unique<ScopedHipdnnBackendDescriptor>(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR);
-
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            hipdnnBackend()->backendSetAttribute(_engineHeuristicDesc->get(),
-                                                 HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
-                                                 HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                 1,
-                                                 &_graphDesc->get()),
-            "Failed to set operation graph on the engine heuristic descriptor.");
-
-        // TODO
-        // Currently we only handle the first mode in the vector.  Once we add heuristics we will need
-        // to handle using all modes that are passed in.  We currently only have 1 mode so there
-        // is only 1 possibility.
-        std::vector<hipdnnBackendHeurMode_t> backendModes;
-        backendModes.reserve(modes.size());
-        for(const auto& mode : modes)
-        {
-            backendModes.push_back(toBackendType(mode));
-        }
-
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            hipdnnBackend()->backendSetAttribute(_engineHeuristicDesc->get(),
-                                                 HIPDNN_ATTR_ENGINEHEUR_MODE,
-                                                 HIPDNN_TYPE_HEUR_MODE,
-                                                 1,
-                                                 backendModes.data()),
-            "Failed to set mode on the engine heuristic descriptor.");
-
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            hipdnnBackend()->backendFinalize(_engineHeuristicDesc->get()),
-            "Failed to finalize engine heuristic descriptor");
-
-        return {ErrorCode::OK, ""};
-    }
-
-    Error
-        getEngineConfigs(std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>>& engineConfigs,
-                         std::vector<int64_t>& engineIds,
-                         bool getAll)
-    {
-        int64_t availableEngineCount = 0;
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            hipdnnBackend()->backendGetAttribute(_engineHeuristicDesc->get(),
-                                                 HIPDNN_ATTR_ENGINEHEUR_RESULTS,
-                                                 HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                 0,
-                                                 &availableEngineCount,
-                                                 nullptr),
-            "Failed to get attribue from the engine heuristic descriptor.");
-
-        if(availableEngineCount == 0)
-        {
-            return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                    "No engine configurations available for the graph."};
-        }
-
-        // Get only top hit if preferred engine id isn't set.
-        // Otherwise get all available engine configs to search for preferred id.
-        int64_t requiredCount = getAll ? availableEngineCount : 1;
-        std::vector<hipdnnBackendDescriptor_t> engineConfigsShallow;
-        for(size_t i = 0; i < static_cast<size_t>(requiredCount); ++i)
-        {
-            auto engineCfgDesc = std::make_unique<ScopedHipdnnBackendDescriptor>(
-                HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
-
-            if(engineCfgDesc == nullptr || !engineCfgDesc->valid())
-            {
-                return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                        "Failed to create engine configuration descriptor."};
-            }
-            engineConfigs.push_back(std::move(engineCfgDesc));
-            engineConfigsShallow.push_back(engineConfigs.back()->get());
-        }
-
-        int64_t count = 0;
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            hipdnnBackend()->backendGetAttribute(_engineHeuristicDesc->get(),
-                                                 HIPDNN_ATTR_ENGINEHEUR_RESULTS,
-                                                 HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                 static_cast<int64_t>(engineConfigsShallow.size()),
-                                                 &count,
-                                                 engineConfigsShallow.data()),
-            "Failed to get engine configurations from the heuristic descriptor.");
-
-        if(count == 0)
-        {
-            return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                    "No engine configurations retrieved from the heuristic desc."};
-        }
-
-        // Finalize and get ids for engine configs
-        engineIds.resize(static_cast<size_t>(count), -1);
-        for(size_t i = 0; i < static_cast<size_t>(count); ++i)
-        {
-            auto engineConfigDesc = engineConfigsShallow[i];
-            HIPDNN_RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineConfigDesc),
-                                             "Failed to finalize engine config descriptor");
-
-            hipdnnBackendDescriptor_t engineDesc = nullptr;
-            HIPDNN_RETURN_ON_BACKEND_FAILURE(
-                hipdnnBackend()->backendGetAttribute(engineConfigDesc,
-                                                     HIPDNN_ATTR_ENGINECFG_ENGINE,
-                                                     HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                     1,
-                                                     nullptr,
-                                                     &engineDesc),
-                "Failed to get engine from engine configuration descriptor.");
-
-            // Clean-up engineDesc once we no longer need it within this scope.
-            ScopedHipdnnBackendDescriptor scopedEngineDesc(engineDesc);
-
-            HIPDNN_RETURN_ON_BACKEND_FAILURE(
-                hipdnnBackend()->backendGetAttribute(engineDesc,
-                                                     HIPDNN_ATTR_ENGINE_GLOBAL_INDEX,
-                                                     HIPDNN_TYPE_INT64,
-                                                     1,
-                                                     nullptr,
-                                                     &engineIds[i]),
-                "Failed to get engine id from engine descriptor.");
-        }
-
-        return {ErrorCode::OK, ""};
-    }
-
-    Error initializeEngineConfig()
+    Error initializeEngineConfig(hipdnnBackendDescriptor_t engineHeuristicDesc)
     {
         std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>> engineConfigs;
         std::vector<int64_t> engineIds;
-        Error status = getEngineConfigs(engineConfigs, engineIds, _preferredEngineId.has_value());
-        HIPDNN_CHECK_ERROR(status);
+        HIPDNN_CHECK_ERROR(detail::getEngineConfigs(
+            engineConfigs, engineIds, engineHeuristicDesc, _preferredEngineId.has_value()));
 
         // Select engine config based on preferred ID or use first available
         size_t selectedIndex = 0;
@@ -245,10 +111,10 @@ private:
 
     Error initializeEngineConfig(int64_t engineId)
     {
-        ScopedHipdnnBackendDescriptor engineDesc(HIPDNN_BACKEND_ENGINE_DESCRIPTOR);
+        ScopedHipdnnBackendDescriptor engineDesc;
 
-        HIPDNN_CHECK_ERROR(
-            detail::createEngineDescriptorForGraph(engineDesc.get(), engineId, _graphDesc->get()));
+        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineDescriptorForGraph(
+            engineDesc, _graphDesc->get(), engineId));
 
         auto engineConfigDesc
             = std::make_unique<ScopedHipdnnBackendDescriptor>(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
@@ -832,10 +698,10 @@ public:
                     "for engine."};
         }
 
-        ScopedHipdnnBackendDescriptor engineDesc(HIPDNN_BACKEND_ENGINE_DESCRIPTOR);
+        ScopedHipdnnBackendDescriptor engineDesc;
 
-        HIPDNN_CHECK_ERROR(
-            detail::createEngineDescriptorForGraph(engineDesc.get(), engineId, _graphDesc->get()));
+        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineDescriptorForGraph(
+            engineDesc, _graphDesc->get(), engineId));
 
         HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::getKnobsForEngine(knobs, engineDesc.get()));
 
@@ -847,8 +713,7 @@ public:
                                      std::unordered_map<KnobType_t, Knob>& knobs) const
     {
         std::vector<Knob> knobVector;
-        Error status = get_knobs_for_engine(engineId, knobVector);
-        HIPDNN_CHECK_ERROR(status);
+        HIPDNN_CHECK_ERROR(get_knobs_for_engine(engineId, knobVector));
 
         for(auto& knob : knobVector)
         {
@@ -863,13 +728,14 @@ public:
     Error get_ranked_engine_ids(std::vector<int64_t>& rankedEngineIds,
                                 const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
     {
-        Error status = initializeHeuristicDescriptor(modes);
-        HIPDNN_CHECK_ERROR(status);
+        ScopedHipdnnBackendDescriptor engineHeuristicDesc;
+        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
+            engineHeuristicDesc, _graphDesc->get(), modes));
 
         std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>> engineConfigs;
         std::vector<int64_t> engineIds;
-        status = getEngineConfigs(engineConfigs, rankedEngineIds, true);
-        HIPDNN_CHECK_ERROR(status);
+        HIPDNN_CHECK_ERROR(detail::getEngineConfigs(
+            engineConfigs, rankedEngineIds, engineHeuristicDesc.get(), true));
 
         return {ErrorCode::OK, ""};
     }
@@ -887,11 +753,11 @@ public:
                     "execution plan."};
         }
 
-        Error status = initializeHeuristicDescriptor(modes);
-        HIPDNN_CHECK_ERROR(status);
+        ScopedHipdnnBackendDescriptor engineHeuristicDesc;
+        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
+            engineHeuristicDesc, _graphDesc->get(), modes));
 
-        status = initializeEngineConfig();
-        HIPDNN_CHECK_ERROR(status);
+        HIPDNN_CHECK_ERROR(initializeEngineConfig(engineHeuristicDesc.get()));
 
         _executionPlanDesc = std::make_unique<ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
@@ -935,11 +801,9 @@ public:
         }
 
         std::unordered_map<KnobType_t, Knob> existingKnobs;
-        Error status = get_knob_lookup_for_engine(engineId, existingKnobs);
-        HIPDNN_CHECK_ERROR(status);
+        HIPDNN_CHECK_ERROR(get_knob_lookup_for_engine(engineId, existingKnobs));
 
-        status = initializeEngineConfig(engineId);
-        HIPDNN_CHECK_ERROR(status);
+        HIPDNN_CHECK_ERROR(initializeEngineConfig(engineId));
 
         std::vector<KnobSetting> validatedSettings;
         for(auto& setting : settings)
@@ -961,8 +825,7 @@ public:
                 HIPDNN_FE_LOG_WARN("Knob {} has been marked as deprecated.", knob.knobId());
             }
 
-            status = knob.validate(setting);
-            HIPDNN_CHECK_ERROR(status);
+            HIPDNN_CHECK_ERROR(knob.validate(setting));
 
             validatedSettings.emplace_back(setting);
         }
@@ -1732,5 +1595,98 @@ public:
         return newTensor;
     }
 };
+
+namespace detail
+{
+inline Error
+    getEngineConfigs(std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>>& engineConfigs,
+                     std::vector<int64_t>& engineIds,
+                     hipdnnBackendDescriptor_t engineHeuristicDesc,
+                     bool getAll)
+{
+    int64_t availableEngineCount = 0;
+    HIPDNN_RETURN_ON_BACKEND_FAILURE(
+        hipdnnBackend()->backendGetAttribute(engineHeuristicDesc,
+                                             HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                             0,
+                                             &availableEngineCount,
+                                             nullptr),
+        "Failed to get attribue from the engine heuristic descriptor.");
+
+    if(availableEngineCount == 0)
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "No engine configurations available for the graph."};
+    }
+
+    // Get only top hit if preferred engine id isn't set.
+    // Otherwise get all available engine configs to search for preferred id.
+    int64_t requiredCount = getAll ? availableEngineCount : 1;
+    std::vector<hipdnnBackendDescriptor_t> engineConfigsShallow;
+    for(size_t i = 0; i < static_cast<size_t>(requiredCount); ++i)
+    {
+        auto engineCfgDesc
+            = std::make_unique<ScopedHipdnnBackendDescriptor>(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
+
+        if(engineCfgDesc == nullptr || !engineCfgDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Failed to create engine configuration descriptor."};
+        }
+        engineConfigs.push_back(std::move(engineCfgDesc));
+        engineConfigsShallow.push_back(engineConfigs.back()->get());
+    }
+
+    int64_t count = 0;
+    HIPDNN_RETURN_ON_BACKEND_FAILURE(
+        hipdnnBackend()->backendGetAttribute(engineHeuristicDesc,
+                                             HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                             static_cast<int64_t>(engineConfigsShallow.size()),
+                                             &count,
+                                             engineConfigsShallow.data()),
+        "Failed to get engine configurations from the heuristic descriptor.");
+
+    if(count == 0)
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "No engine configurations retrieved from the heuristic desc."};
+    }
+
+    // Finalize and get ids for engine configs
+    engineIds.resize(static_cast<size_t>(count), -1);
+    for(size_t i = 0; i < static_cast<size_t>(count); ++i)
+    {
+        auto engineConfigDesc = engineConfigsShallow[i];
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineConfigDesc),
+                                         "Failed to finalize engine config descriptor");
+
+        hipdnnBackendDescriptor_t engineDesc = nullptr;
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendGetAttribute(engineConfigDesc,
+                                                 HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                                 HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                 1,
+                                                 nullptr,
+                                                 &engineDesc),
+            "Failed to get engine from engine configuration descriptor.");
+
+        // Clean-up engineDesc once we no longer need it within this scope.
+        ScopedHipdnnBackendDescriptor scopedEngineDesc(engineDesc);
+
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendGetAttribute(engineDesc,
+                                                 HIPDNN_ATTR_ENGINE_GLOBAL_INDEX,
+                                                 HIPDNN_TYPE_INT64,
+                                                 1,
+                                                 nullptr,
+                                                 &engineIds[i]),
+            "Failed to get engine id from engine descriptor.");
+    }
+
+    return {ErrorCode::OK, ""};
+}
+}
 
 } // namespace hipdnn_frontend::graph
