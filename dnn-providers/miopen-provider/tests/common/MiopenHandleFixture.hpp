@@ -7,7 +7,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
 
-namespace miopen_legacy_plugin::test_common
+namespace test_common
 {
 
 /// @brief Base test fixture that creates and destroys a raw MIOpen handle.
