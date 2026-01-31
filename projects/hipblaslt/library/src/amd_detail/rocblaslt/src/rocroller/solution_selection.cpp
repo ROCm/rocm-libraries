@@ -268,7 +268,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                 || kernelType.typeB == rocRoller::DataType::FP8
                 || kernelType.typeB == rocRoller::DataType::BF8)
                && wgt.m + wgt.n > 256);
-            if(numTiles < analytical_hardware.N_CU && !isF6 && !isLargeF8)
+            if(numTiles < analytical_hardware.N_CU && !isF6 && !isLargeF8 && !is256Tile)
             {
                 params.back().streamK = true;
             }
