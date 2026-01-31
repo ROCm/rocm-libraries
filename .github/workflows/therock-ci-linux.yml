@@ -57,45 +57,6 @@ jobs:
           echo "FATAL: Compilation errors detected"
           exit 1
 
-      - name: Extract Error Context Test
-        if: ${{ contains(inputs.project_to_test, 'miopen') }} # && failure() }}
-        run: |
-          ERROR_LOG=""
-
-          # Search for errors in build logs
-          if [ -d "TheRock/build/logs" ]; then
-            # Look for common error patterns with context
-            ERROR_LOG=$(grep -riE "(error|failed|fatal|exception)" TheRock/build/logs/ -A 3 -B 2 --max-count=5 2>/dev/null || echo "")
-          fi
-
-          # If no errors in log files, try to capture from recent step output
-          if [ -z "$ERROR_LOG" ]; then
-            ERROR_LOG="Error details not found in logs. Check the GitHub Actions run for full output."
-          fi
-
-          # Truncate if too long (max ~500 chars for Teams message)
-          ERROR_LOG=$(echo "$ERROR_LOG" | head -c 500)
-
-          # Save to environment file for next step
-          echo "ERROR_CONTEXT<<EOF" >> $GITHUB_ENV
-          echo "$ERROR_LOG" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-
-      - name: Notify Microsoft Teams Test
-        if: ${{ contains(inputs.project_to_test, 'miopen') }}
-        run: |
-          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          ERROR_SNIPPET="${ERROR_CONTEXT:-No error context available}"
-
-          curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
-            -H 'Content-Type: application/json' \
-            -d @- <<EOF
-          {
-            "title": "MIOpen GitHub CI Notification",
-            "text": "❌ Linux Build failure on branch: ${GITHUB_REF}\n\n**Error Context:**\n\`\`\`\n${ERROR_SNIPPET}\n\`\`\`\n\n[View Full Run](${RUN_URL})"
-          }
-          EOF
-
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
@@ -231,16 +192,30 @@ jobs:
         if: ${{ contains(inputs.project_to_test, 'miopen') && failure() }}
         run: |
           RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          # Format error context with proper line breaks for Teams
           ERROR_SNIPPET="${ERROR_CONTEXT:-No error context available}"
 
-          curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
-            -H 'Content-Type: application/json' \
-            -d @- <<EOF
-          {
-            "title": "MIOpen GitHub CI Notification",
-            "text": "❌ Linux Build failure on branch: ${GITHUB_REF}\n\n**Error Context:**\n\`\`\`\n${ERROR_SNIPPET}\n\`\`\`\n\n[View Full Run](${RUN_URL})"
-          }
-          EOF
+          # Create the message with proper formatting
+          MESSAGE="❌ MIOpen Linux Build Failure
+
+          **Repository:** ${GITHUB_REPOSITORY}
+          **Branch:** ${GITHUB_REF}
+          **Job:** ${GITHUB_JOB}
+          **Commit:** ${GITHUB_SHA}
+
+          **Error Context:**
+          \`\`\`
+          ${ERROR_SNIPPET}
+          \`\`\`
+
+          [View Full Run](${RUN_URL})"
+
+          # Send to Teams with proper JSON escaping
+          jq -n --arg msg "$MESSAGE" '{text: $msg}' | \
+            curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
+              -H 'Content-Type: application/json' \
+              -d @-
 
   therock-test-linux:
     name: Test (${{ inputs.amdgpu_families }})
