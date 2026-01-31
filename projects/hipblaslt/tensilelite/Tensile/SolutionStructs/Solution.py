@@ -415,6 +415,7 @@ class Solution(collections.abc.Mapping):
     state["UsePLRPack"] = False
     state["SwapGlobalReadOrder"] = False
     state["MfmaInitCVgprs"] = False
+    state["UseMFMAF32XEmulation"] = False
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
