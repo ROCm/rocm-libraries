@@ -168,11 +168,29 @@ jobs:
         if: ${{ contains(inputs.project_to_test, 'miopen') && failure() }}
         run: |
           ERROR_LOG=""
+          ISSUE_TYPE="Build Failure"
 
           # Search for errors in build logs
           if [ -d "TheRock/build/logs" ]; then
             # Look for common error patterns with context
             ERROR_LOG=$(grep -riE "(error|failed|fatal|exception)" TheRock/build/logs/ -A 3 -B 2 --max-count=5 2>/dev/null || echo "")
+
+            # Categorize the issue type based on error patterns
+            if echo "$ERROR_LOG" | grep -qiE "(test.*fail|failed.*test|assertion|gtest)"; then
+              ISSUE_TYPE="Test Failure"
+            elif echo "$ERROR_LOG" | grep -qiE "(docker|container|image)"; then
+              ISSUE_TYPE="Docker Issue"
+            elif echo "$ERROR_LOG" | grep -qiE "(compil|undefined reference|unresolved external|linker|link.*error)"; then
+              ISSUE_TYPE="Compilation Issue"
+            elif echo "$ERROR_LOG" | grep -qiE "(cmake|configuration)"; then
+              ISSUE_TYPE="Configuration Issue"
+            elif echo "$ERROR_LOG" | grep -qiE "(timeout|timed out)"; then
+              ISSUE_TYPE="Timeout"
+            elif echo "$ERROR_LOG" | grep -qiE "(permission|access denied)"; then
+              ISSUE_TYPE="Permission Issue"
+            elif echo "$ERROR_LOG" | grep -qiE "(out of memory|oom|memory)"; then
+              ISSUE_TYPE="Memory Issue"
+            fi
           fi
 
           # If no errors in log files, try to capture from recent step output
@@ -184,6 +202,7 @@ jobs:
           ERROR_LOG=$(echo "$ERROR_LOG" | head -n 5)
 
           # Save to environment file for next step
+          echo "ISSUE_TYPE=$ISSUE_TYPE" >> $GITHUB_ENV
           echo "ERROR_CONTEXT<<EOF" >> $GITHUB_ENV
           echo "$ERROR_LOG" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
@@ -197,6 +216,7 @@ jobs:
           if [ -n "$PR_TITLE" ]; then
             PR_INFO="\n*PR:* $PR_TITLE\n"
           fi
+          ISSUE_SUMMARY="${ISSUE_TYPE:-Build Failure}"
           # Replace actual newlines with \n for JSON formatting
           ERROR_SNIPPET=$(echo "${ERROR_CONTEXT:-No error context available}" | sed ':a;N;$!ba;s/\n/\\n/g')
 
@@ -205,7 +225,7 @@ jobs:
             -d @- <<EOF
           {
             "title": "MIOpen GitHub CI Notification",
-            "text": "❌ Linux Build failure on branch: ${GITHUB_REF} \n${PR_INFO} \n**Error Context:**\n\`\`\`\n${ERROR_SNIPPET}\n\`\`\`\n\n[View Full Run](${RUN_URL})"
+            "text": "❌ Linux Build failure on branch: ${GITHUB_REF} \n${PR_INFO} \n**Issue Type:** ${ISSUE_SUMMARY}\n\n**Error Context:**\n\`\`\`\n${ERROR_SNIPPET}\n\`\`\`\n\n[View Full Run](${RUN_URL})"
           }
           EOF
 
