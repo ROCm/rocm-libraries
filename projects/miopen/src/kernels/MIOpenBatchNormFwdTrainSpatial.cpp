@@ -1092,13 +1092,13 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
     {
 #if(MIO_RUNNING_RESULT == 1)
         using StashUpdater = miopen::batchnorm::StashUpdater<fp_accum_c_type>;
-        StashUpdater updater(static_cast<fp_accum_c_type>(mean),
-                             static_cast<fp_accum_c_type>(variance),
-                             static_cast<fp_accum_c_type>(expAvgFactor));
+        StashUpdater updater(miopen::cast<fp_accum_c_type>(mean),
+                             miopen::cast<fp_accum_c_type>(variance),
+                             miopen::cast<fp_accum_c_type>(expAvgFactor));
 
         miopen::batchnorm::running_stash<fp_accum_c_type, fp_prec_c_type, StashUpdater>(
-            (mio_bn_config::fp_prec_c_type*)prevResultRunningMean,
-            (mio_bn_config::fp_prec_c_type*)prevResultRunningVariance,
+            (const mio_bn_config::fp_prec_c_type*)prevResultRunningMean,
+            (const mio_bn_config::fp_prec_c_type*)prevResultRunningVariance,
             (mio_bn_config::fp_prec_c_type*)nextResultRunningMean,
             (mio_bn_config::fp_prec_c_type*)nextResultRunningVariance,
             updater,
