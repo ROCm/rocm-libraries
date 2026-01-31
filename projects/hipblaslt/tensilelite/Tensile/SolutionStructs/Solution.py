@@ -1410,12 +1410,6 @@ class Solution(collections.abc.Mapping):
       state["ForceUnrollSubIter"] = False
       state["numSubTiles"] = 1
 
-    # aVW adjustment for F32XEmu + TLU + SubIter
-    def VWAdjustForF32XEmu(TLU, miwt, vw):
-      if TLU and state["numSubTiles"] > 1 and miwt == vw and vw > 1:
-        # use half value for VW
-        vw //= 2
-      return vw
     if state["VectorWidthA"] == -1:
       if state["EnableMatrixInstruction"]:
         regPerElem = state["ProblemType"]["DataType"].numRegisters()
@@ -1467,11 +1461,8 @@ class Solution(collections.abc.Mapping):
         # So far, continue with VectorWidthA //=2
         state["VectorWidthB"] //= 2
 
-      state["VectorWidthB"] = VWAdjustForF32XEmu(TLUB, state["MIWaveTile"][1], state["VectorWidthB"])
-
     if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
       state["VectorWidthMetadata"] = state["VectorWidthA"] if state["ProblemType"]["Sparse"] == 1 else state["VectorWidthB"]
-
 
     # if state["EnableMatrixInstruction"] and not state["SourceSwap"] and (state["VectorWidthA"] > 1 or state["VectorWidthB"] > 1):
     #   reject(state, printRejectionReason, "not implement VectorWidth without SourceSwap")
