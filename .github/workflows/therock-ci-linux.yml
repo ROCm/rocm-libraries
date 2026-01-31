@@ -195,7 +195,7 @@ jobs:
           PR_TITLE="${{ github.event.pull_request.title }}"
           PR_INFO=""
           if [ -n "$PR_TITLE" ]; then
-            PR_INFO="**PR:** $PR_TITLE\n"
+            PR_INFO="\n*PR:* $PR_TITLE\n"
           fi
           # Replace actual newlines with \n for JSON formatting
           ERROR_SNIPPET=$(echo "${ERROR_CONTEXT:-No error context available}" | sed ':a;N;$!ba;s/\n/\\n/g')
@@ -205,7 +205,7 @@ jobs:
             -d @- <<EOF
           {
             "title": "MIOpen GitHub CI Notification",
-            "text": "❌ Linux Build failure on branch: ${GITHUB_REF}\n${PR_INFO}\n**Error Context:**\n\`\`\`\n${ERROR_SNIPPET}\n\`\`\`\n\n[View Full Run](${RUN_URL})"
+            "text": "❌ Linux Build failure on branch: ${GITHUB_REF} \n${PR_INFO} \n**Error Context:**\n\`\`\`\n${ERROR_SNIPPET}\n\`\`\`\n\n[View Full Run](${RUN_URL})"
           }
           EOF
 
