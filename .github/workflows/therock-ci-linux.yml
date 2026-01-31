@@ -35,11 +35,30 @@ jobs:
       TEATIME_FORCE_INTERACTIVE: 0
       AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
     steps:
-      - name: "Checking out repository for rocm-libraries"
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907 # v5.0.0
+      - name: Dummy Failure Step (Testing)
+        if: ${{ contains(inputs.project_to_test, 'miopen') }}
+        run: |
+          # Create fake log directory and error log for testing
+          mkdir -p TheRock/build/logs
+
+          # Write fake error messages to a log file
+          cat > TheRock/build/logs/build_error.log <<'ERRORLOG'
+          [INFO] Building project...
+          [INFO] Compiling source files...
+          [ERROR] compilation failed: undefined reference to 'missing_function'
+          In file: src/compute_kernel.cpp:142
+          Symbol 'missing_function' not found in library
+          Fatal error: linker returned exit code 1
+          [INFO] Build process terminated
+          ERRORLOG
+
+          # Simulate a failed build step
+          echo "ERROR: Build failed with exit code 1"
+          echo "FATAL: Compilation errors detected"
+          exit 1
 
       - name: Extract Error Context Test
-        if: ${{ contains(inputs.project_to_test, 'miopen') }}
+        if: ${{ contains(inputs.project_to_test, 'miopen') }} # && failure() }}
         run: |
           ERROR_LOG=""
 
@@ -76,7 +95,7 @@ jobs:
             "text": "❌ Linux Build failure on branch: ${GITHUB_REF}\n\n**Error Context:**\n\`\`\`\n${ERROR_SNIPPET}\n\`\`\`\n\n[View Full Run](${RUN_URL})"
           }
           EOF
- 
+
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
