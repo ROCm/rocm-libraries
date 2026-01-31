@@ -3,7 +3,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,7 @@ namespace hiptensor
     using CkPassThrough       = ck::tensor_operation::element_wise::PassThrough;
     using CkHiptensorUnaryOp  = ck::tensor_operation::element_wise::HiptensorUnaryOp;
     using CkHiptensorBinaryOp = ck::tensor_operation::element_wise::HiptensorBinaryOp;
+    using CkBilinearUnary     = ck::tensor_operation::element_wise::BilinearUnary;
     using CkUnaryCombinedOp
         = ck::tensor_operation::element_wise::UnaryCombinedOp<CkHiptensorUnaryOp, CkScale>;
     using CkPermutationUnaryCombinedOp
@@ -55,4 +56,3 @@ namespace hiptensor
                                                                          CkUnaryCombinedOp,
                                                                          CkUnaryCombinedOp>;
 }
-
