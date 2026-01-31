@@ -869,3 +869,136 @@ class TestLRNeededByMFMA:
                              force_unroll_sub_iter, use_f32x_emulation=True)
                              for lr_idx in range(len(expected_indices))]
             assert actual_indices == expected_indices, f"{lr_name}: expected {expected_indices}, got {actual_indices}"
+
+    def test_mfma_reorder_requires_min_across_consumers_bf16(self):
+        """
+        Test that exposes the bug where MFMA reorder causes a later logical consumer
+        to execute before the first logical consumer.
+        
+        LR data is consumed by multiple MFMAs (one per tile in the opposite dimension).
+        Before the fix, the code assumed that the first mfma before the reorder would still be the first mfma after the reorder. 
+        With complex reordering, a different consumer can execute first.
+        
+        This test uses a reorder that swaps columns in the second half:
+        - Column 0 ↔ Column 3
+        - Column 1 ↔ Column 2
+        
+        Second half layout (column-major) before reorder:
+        | 16 20 24 28 |
+        | 17 21 25 29 |
+        | 18 22 26 30 |
+        | 19 23 27 31 |
+        
+        After column swap reorder:
+        | 28 24 20 16 |
+        | 29 25 21 17 |
+        | 30 26 22 18 |
+        | 31 27 23 19 |
+        
+        For LRA0 (A tile 0 in second half):
+        - Logical consumers: 16, 20, 24, 28 (entire row 0)
+        - After reorder: 28, 24, 20, 16
+        - Correct answer: min(28, 24, 20, 16) = 16
+        - Bug (checking only first consumer): mfma_reorder[16] = 28
+        """
+        n_tiles_a, n_tiles_b = 4, 4
+        n_local_reads_a, n_local_reads_b = 4, 4
+        num_vmfma = 2 * n_tiles_a * n_tiles_b
+
+        force_unroll_sub_iter = False
+        
+        # Column swap reorder for second half: col 0↔3, col 1↔2
+        # First half unchanged, second half has columns swapped
+        mfma_reorder = list(range(16)) + [28, 29, 30, 31, 24, 25, 26, 27, 20, 21, 22, 23, 16, 17, 18, 19]
+
+        expected_results = {
+            # LRA0: A tiles in second half, consumed by MFMAs in each row
+            # For A tile i, consumers are at columns 0,1,2,3 -> after reorder, column 3 executes first
+            "LRA0": [16, 17, 18, 19],  # min across all B tiles after reorder
+            # LRB0: B tiles in second half, consumed by MFMAs in each column
+            # For B tile j, consumers are at rows 0,1,2,3 (same column) -> reorder within column
+            "LRB0": [28, 24, 20, 16],  # min across all A tiles after reorder
+            # LRA1/LRB1: first half of next iteration (unchanged by this reorder)
+            "LRA1": [32, 33, 34, 35],
+            "LRB1": [32, 36, 40, 44],
+        }
+
+        for lr_name, expected_indices in expected_results.items():
+            actual_indices = [
+                lr_needed_by_mfma(lr_name, lr_idx, num_vmfma, mfma_reorder, n_tiles_a, n_tiles_b,
+                                  n_local_reads_a, n_local_reads_b, force_unroll_sub_iter, use_f32x_emulation=False)
+                for lr_idx in range(len(expected_indices))
+            ]
+            assert actual_indices == expected_indices, f"{lr_name}: expected {expected_indices}, got {actual_indices}"
+
+    def test_mfma_reorder_requires_min_across_consumers_force_unroll_bf16(self):
+        """
+        Test that exposes the bug with ForceUnrollSubIter enabled.
+        
+        ForceUnrollSubIter layout before reorder:
+        |  0  2 |  8 10 |
+        |  1  3 |  9 11 |
+        |-------|-------|
+        |  4  6 | 12 14 |
+        |  5  7 | 13 15 |
+
+        After reorder:
+        |  3  1 |  11 9 |
+        |  2  0 |  10 8 |
+        |-------|-------|
+        |  7  5 |  15 13 |
+        |  6  4 |  14 12 |
+        
+        This test uses a reorder that reverses execution within each quadrant,
+        so the "first" consumer in each quadrant executes last.
+        
+        For LRA0 (A tile 2 = second half of rows, lr_idx=0):
+        - Consumers: (2,0), (2,1), (2,2), (2,3) in original coords
+        - After ForceUnrollSubIter: 4, 6, 12, 14
+        - After reorder (reverse in quadrant): 5, 7, 15, 13
+        - Correct answer: min(5, 7, 15, 13) = 5
+        - Bug (checking only first consumer): mfma_reorder[4] = 5
+        
+        Note: In this particular test, the bug doesn't manifest for LRA0 idx=0
+        because the first consumer happens to still be the minimum after reorder.
+        But it does manifest for other cases where the reorder moves a non-first
+        consumer to an earlier execution slot.
+        """
+        n_tiles_a, n_tiles_b = 4, 4
+        n_local_reads_a, n_local_reads_b = 4, 4
+        num_vmfma = n_tiles_a * n_tiles_b
+
+        force_unroll_sub_iter = True
+        
+        # Reorder that reverses within each quadrant
+        # Quadrant 0: [0,1,2,3] -> [3,2,1,0]
+        # Quadrant 1: [4,5,6,7] -> [7,6,5,4]
+        # Quadrant 2: [8,9,10,11] -> [11,10,9,8]
+        # Quadrant 3: [12,13,14,15] -> [15,14,13,12]
+        mfma_reorder = [3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12]
+
+        expected_results = {
+            # LRA0: A tiles 2-3 (second half)
+            # A tile 2: col-major (2,0),(2,1),(2,2),(2,3) = 2,6,10,14 -> ForceUnroll 4,6,12,14 -> reorder 7,5,15,13 -> min=5
+            # A tile 3: col-major (3,0),(3,1),(3,2),(3,3) = 3,7,11,15 -> ForceUnroll 5,7,13,15 -> reorder 6,4,14,12 -> min=4
+            "LRA0": [5, 5, 4, 4],
+            # LRB0: B tiles 2-3 (second half)
+            # B tile 2: col-major (0,2),(1,2),(2,2),(3,2) = 8,9,10,11 -> ForceUnroll 8,9,12,13 -> reorder 11,10,15,14 -> min=10
+            # B tile 3: col-major (0,3),(1,3),(2,3),(3,3) = 12,13,14,15 -> ForceUnroll 10,11,14,15 -> reorder 9,8,13,12 -> min=8
+            "LRB0": [10, 10, 8, 8],
+            # LRA3/LRB3: first half for next iteration (computed, then + num_vmfma)
+            # A tile 0: col-major (0,0),(0,1),(0,2),(0,3) = 0,4,8,12 -> ForceUnroll 0,2,8,10 -> reorder 3,1,11,9 -> min=1 -> +16=17
+            # A tile 1: col-major (1,0),(1,1),(1,2),(1,3) = 1,5,9,13 -> ForceUnroll 1,3,9,11 -> reorder 2,0,10,8 -> min=0 -> +16=16
+            "LRA3": [17, 17, 16, 16],
+            # B tile 0: col-major (0,0),(1,0),(2,0),(3,0) = 0,1,2,3 -> ForceUnroll 0,1,4,5 -> reorder 3,2,7,6 -> min=2 -> +16=18
+            # B tile 1: col-major (0,1),(1,1),(2,1),(3,1) = 4,5,6,7 -> ForceUnroll 2,3,6,7 -> reorder 1,0,5,4 -> min=0 -> +16=16
+            "LRB3": [18, 18, 16, 16],
+        }
+
+        for lr_name, expected_indices in expected_results.items():
+            actual_indices = [
+                lr_needed_by_mfma(lr_name, lr_idx, num_vmfma, mfma_reorder, n_tiles_a, n_tiles_b,
+                                  n_local_reads_a, n_local_reads_b, force_unroll_sub_iter, use_f32x_emulation=False)
+                for lr_idx in range(len(expected_indices))
+            ]
+            assert actual_indices == expected_indices, f"{lr_name}: expected {expected_indices}, got {actual_indices}"

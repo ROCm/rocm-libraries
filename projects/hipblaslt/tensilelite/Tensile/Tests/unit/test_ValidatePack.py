@@ -24,9 +24,10 @@
 ################################################################################
 
 from typing import Any, Optional
-from rocisa.instruction import SWaitCnt, SNop
+from rocisa.instruction import SWaitCnt, SNop, SBarrier
 
-from Tensile.Components.CMSValidator import verify_packs_start_and_end_at_correct_indices
+from Tensile.Components.CMSValidator import verify_packs_start_and_end_at_correct_indices, isValid
+from Tensile.Components.CustomSchedule import ScheduleInfo
 from cms_validation_base import CMSValidationTestBase
 
 class TestValidatePackBF16(CMSValidationTestBase):
@@ -536,14 +537,14 @@ class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
     """
     Only tests with UsePLRPack since performance is better.
     Use MFMA reorder to swap Q2 and Q3.
-
-    | 0 |  6 |     | 0 |  3 |
-    | 1 |  7 |     | 1 |  4 |
-    | 2 |  8 |     | 2 |  5 |
-    ----------     ----------
-    | 3 |  9 |  -> | 6 |  9 |
-    | 4 | 10 |     | 7 | 10 |
-    | 5 | 11 |     | 8 | 11 |
+    
+    With MIWaveTileA=4, MIWaveTileB=4, TF32 (3 MFMAs per tile), we have 48 MFMAs:
+    - Q1 (indices 0-11): first quarter
+    - Q2 (indices 12-23): second quarter
+    - Q3 (indices 24-35): third quarter
+    - Q4 (indices 36-47): fourth quarter
+    
+    MFMA reorder swaps Q2 and Q3 (indices 12-23 execute at 24-35 positions and vice versa).
     """
     def setUp(self, kernel_updates: Optional[dict[str, Any]] = None) -> None:
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
@@ -552,6 +553,8 @@ class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
         kernel_updates["UseDirect32XEmulation"] = True
         kernel_updates["ForceUnrollSubIter"] = True
         kernel_updates["DepthU"] = 32
+        kernel_updates["MIWaveTileA"] = 4  # Need >= 4 for n_tiles_quarter >= 1
+        kernel_updates["MIWaveTileB"] = 4  # Need >= 4 for n_tiles_quarter >= 1
         super().setUp(kernel_updates)
 
         self.q1s = 0
@@ -566,7 +569,8 @@ class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
         self.q4s = self.q3e + 1
         self.q4e = self.num_vmfma - 1
 
-        self.mfma_reorder = [0, 1, 2, 6, 7, 8, 3, 4, 5, 9, 10, 11]
+        # MFMA reorder: swap Q2 (indices 12-23) and Q3 (indices 24-35)
+        self.mfma_reorder = list(range(12)) + list(range(24, 36)) + list(range(12, 24)) + list(range(36, 48))
     
     def validation_function(self, sched, kernel_dict, codePathIdx):
         return verify_packs_start_and_end_at_correct_indices(sched, kernel_dict, codePathIdx)
@@ -575,22 +579,22 @@ class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
         """
         Simple passing case.
         """
-        assert self.num_vmfma == 12
+        assert self.num_vmfma == 48
 
         optSchedule = {
             "SYNC": [[self.q1s+1, self.q2s+1, self.q3s+1, self.q4s+1]],
 
-            "LRA0": [[self.q2s] * 2],
-            "PackA0": [[self.q2e] * 24],
+            "LRA0": [[self.q2s] * 4],
+            "PackA0": [[self.q2e] * 48],
 
-            "LRB0": [[self.q1s] * 2],
-            "PackB0": [[self.q1e] * 24],
+            "LRB0": [[self.q1s] * 4],
+            "PackB0": [[self.q1e] * 48],
             
-            "LRB3": [[self.q3s] * 2],
-            "PackB3": [[self.q3e] * 24],
+            "LRB3": [[self.q3s] * 4],
+            "PackB3": [[self.q3e] * 48],
 
-            "LRA3": [[self.q4s] * 2],
-            "PackA3": [[self.q4e] * 24],
+            "LRA3": [[self.q4s] * 4],
+            "PackA3": [[self.q4e] * 48],
         }
 
         syncCode = [
@@ -606,19 +610,19 @@ class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
         """
         Failing case where PackB0 are issued too early (before LRB0s are complete).
         """
-        assert self.num_vmfma == 12
+        assert self.num_vmfma == 48
 
         optSchedule = {
             "SYNC": [[self.q1e]],
-            "LRA0": [[self.q1s] * 2],
-            "LRB0": [[self.q1s] * 2],
-            "PackB0": [[self.q1s+1] * 24],
+            "LRA0": [[self.q1s] * 4],
+            "LRB0": [[self.q1s] * 4],
+            "PackB0": [[self.q1s+1] * 48],
         }
 
         syncCode = [
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s")
         ]
-        self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackB0 @ idx=1 issued too early, must be issued after idx=2 (because of LRB0 issued @ idx=0).", mfmaReorder=self.mfma_reorder)
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackB0 @ idx=1 issued too early, must be issued after idx=11 (because of LRB0 issued @ idx=0).", mfmaReorder=self.mfma_reorder)
 
 class TestValidatePackTF32CrossPackInterleaving(CMSValidationTestBase):
     """
@@ -1159,3 +1163,262 @@ class TestValidatePackTF32MFMA4x4x4(CMSValidationTestBase):
         ]
 
         self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=12 has too little gap between it and MFMA @ idx=13. Expected at least 2 quad-cycles but only 1 passed.", snopCode=snopCode)
+
+class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
+    """
+    Tests for TF32 4x4 MFMA validation with multiple tiles (multiple groups of 10 packs).
+    This tests that the tile-based offset is correctly calculated for each group.
+    
+    With MIWaveTileA=4, there are 4 A tiles, each requiring 10 pack instructions (40 total PackA0).
+    Each tile's packs should be needed by different MFMAs:
+    - Tile 0 (packs 0-9): needed by MFMAs at base_offset + 0
+    - Tile 1 (packs 10-19): needed by MFMAs at base_offset + 3
+    - Tile 2 (packs 20-29): needed by MFMAs at base_offset + 6
+    - Tile 3 (packs 30-39): needed by MFMAs at base_offset + 9
+    """
+    def setUp(self, kernel_updates: Optional[dict[str, Any]] = None) -> None:
+        kernel_updates = kernel_updates.copy() if kernel_updates else {}
+        kernel_updates["UsePLRPack"] = True
+        kernel_updates["UseF32XEmulation"] = True
+        kernel_updates["UseMFMAF32XEmulation"] = True
+        kernel_updates["UseDirect32XEmulation"] = True
+        kernel_updates["ForceUnrollSubIter"] = True
+        kernel_updates["DepthU"] = 32
+        kernel_updates["MIWaveTileA"] = 4
+        kernel_updates["MIWaveTileB"] = 2
+        super().setUp(kernel_updates)
+
+        # With 4 A tiles, 2 B tiles, 3 MFMAs per tile = 24 vmfmas
+        self.q1s = 0
+        self.q1e = self.num_vmfma // 4 - 1  # 5
+
+        self.q2s = self.q1e + 1  # 6
+        self.q2e = self.num_vmfma // 2 - 1  # 11
+
+        self.q3s = self.q2e + 1  # 12
+        self.q3e = self.num_vmfma // 4 * 3 - 1  # 17
+
+        self.q4s = self.q3e + 1  # 18
+        self.q4e = self.num_vmfma - 1  # 23
+    
+    def validation_function(self, sched, kernel_dict, codePathIdx):
+        return verify_packs_start_and_end_at_correct_indices(sched, kernel_dict, codePathIdx)
+    
+    def _make_valid_pack_group(self, base_idx: int) -> list[int]:
+        """
+        Creates a valid group of 10 packs with proper spacing for 4x4 MFMA TF32.
+        Pack 5 (second 4x4 MFMA) needs 5 quad-cycles before Pack 6 (first CVT1).
+        """
+        return (
+            [base_idx] * 4 +      # CVT0 (packs 0-3)
+            [base_idx] * 2 +      # 4x4 MFMAs (packs 4-5)
+            [base_idx + 2] * 4    # CVT1 (packs 6-9) - needs +2 MFMA indices for 5 quad-cycle gap
+        )
+    
+    def test_passing_multiple_tiles_different_timings(self):
+        """
+        Passing case where 4 groups of 10 packs are scheduled at different times
+        appropriate for their respective tiles.
+        
+        - Tile 0 packs (0-9): needed by MFMAs 6-8 (q2s, q2s+1, q2s+2)
+        - Tile 1 packs (10-19): needed by MFMAs 9-11 (q2s+3, q2s+4, q2s+5)
+        - Tile 2 packs (20-29): needed by MFMAs 6-8 (for B tile 1)
+        - Tile 3 packs (30-39): needed by MFMAs 9-11 (for B tile 1)
+        
+        All packs are scheduled early in Q1 with proper spacing.
+        """
+        assert self.num_vmfma == 24
+
+        # Each tile's packs have proper 5 quad-cycle gap for 4x4 MFMA
+        packA0_schedule = (
+            self._make_valid_pack_group(self.q1s+2) +  # Tile 0: base at 2, CVT1 at 4
+            self._make_valid_pack_group(self.q1s+2) +  # Tile 1
+            self._make_valid_pack_group(self.q1s+2) +  # Tile 2
+            self._make_valid_pack_group(self.q1s+2)    # Tile 3
+        )
+
+        optSchedule = {
+            "SYNC": [[self.q1s+1, self.q2s+1]],
+
+            "LRA0": [[self.q1s] * 4],  # 4 LRs for 4 tiles
+            "PackA0": [packA0_schedule],
+
+            "LRB0": [[self.q2s] * 2],
+            "PackB0": [self._make_valid_pack_group(self.q2s+2) + self._make_valid_pack_group(self.q2s+2)],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s"),
+        ]
+
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+
+    def test_passing_tile1_packs_after_tile0_deadline(self):
+        """
+        Passing case that exercises the tile-based offset calculation.
+        
+        Tile 0 packs (0-9) are needed by MFMAs starting at q2s (index 6).
+        Tile 1 packs (10-19) are needed by MFMAs starting at q2s+3 (index 9).
+        
+        We schedule tile 1's CVT0 packs at index 6, which would be INVALID if they
+        were incorrectly assigned to tile 0's needed_by (index 6) since 6 >= 6, but
+        is VALID because they should be assigned to tile 1's needed_by (index 9).
+        
+        This test specifically validates that the tile offset is correctly applied:
+        - Without the fix, pack 10-13 (tile 1's CVT0) at index 6 would be checked
+          against tile 0's needed_by (MFMA 6), failing with "too late" since 6 >= 6
+        - With the fix, pack 10-13 is correctly checked against tile 1's needed_by
+          (MFMA 9), which passes since 6 < 9
+        
+        CVT1 needed_by for tile 1 is MFMA at index 10 (base=6 + tile_offset=3 + pack_offset=1).
+        We place CVT1 at index 8 (base 6 + 2) which is before MFMA 10.
+        """
+        assert self.num_vmfma == 24
+
+        # Tile 0: schedule at index 2 (valid, well before needed_by at 6)
+        # Tile 1: base at 6 (CVT0/4x4 at 6, CVT1 at 8)
+        #   - CVT0 at 6 would fail if checked against tile 0's needed_by (MFMA 6)
+        #   - CVT0 at 6 passes when correctly checked against tile 1's needed_by (MFMA 9)
+        #   - CVT1 at 8 is before tile 1's CVT1 needed_by (MFMA 10)
+        packA0_schedule = (
+            self._make_valid_pack_group(self.q1s+2) +  # Tile 0: base at 2, CVT1 at 4, before needed_by at 6
+            self._make_valid_pack_group(self.q2s) +    # Tile 1: base at 6, CVT1 at 8, before needed_by at 9/10
+            self._make_valid_pack_group(self.q1s+2) +  # Tile 2
+            self._make_valid_pack_group(self.q1s+2)    # Tile 3
+        )
+
+        optSchedule = {
+            "SYNC": [[self.q1s+1, self.q2s+1]],
+
+            "LRA0": [[self.q1s] * 4],
+            "PackA0": [packA0_schedule],
+
+            "LRB0": [[self.q2s] * 2],
+            "PackB0": [self._make_valid_pack_group(self.q2s+2) + self._make_valid_pack_group(self.q2s+2)],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s"),
+        ]
+
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, None)
+
+    def test_failing_tile1_packs_actually_too_late(self):
+        """
+        Failing case where tile 1's packs are scheduled too late for tile 1's actual deadline.
+        
+        Tile 1 packs (10-19) are needed by MFMAs starting at q2s+3 (index 9).
+        We schedule tile 1's CVT0 packs at index 9, which is AT the needed_by index,
+        meaning they're too late (must be strictly before).
+        """
+        assert self.num_vmfma == 24
+
+        # Tile 1: CVT0 at index 9 - exactly at the needed_by, which is too late
+        packA0_schedule = (
+            self._make_valid_pack_group(self.q1s+2) +  # Tile 0: valid
+            [self.q2s+3] * 4 + [self.q2s+3] * 2 + [self.q2s+5] * 4 +  # Tile 1: CVT0 at 9 (too late!)
+            self._make_valid_pack_group(self.q1s+2) +  # Tile 2
+            self._make_valid_pack_group(self.q1s+2)    # Tile 3
+        )
+
+        optSchedule = {
+            "SYNC": [[self.q1s+1, self.q2s+1]],
+
+            "LRA0": [[self.q1s] * 4],
+            "PackA0": [packA0_schedule],
+
+            "LRB0": [[self.q2s] * 2],
+            "PackB0": [self._make_valid_pack_group(self.q2s+2) + self._make_valid_pack_group(self.q2s+2)],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0s"),
+        ]
+
+        # Tile 1's CVT0 at index 9 is too late - needed by MFMA at index 9
+        self.validate(optSchedule, syncCode, 1, 2, 2, 0, "PackA0 @ idx=9 issued too late, must be issued before MFMA @ idx=9.")
+
+    def test_broken_pack_schedule_with_mfma_reorder(self):
+        """
+        Test that the validator detects pack scheduling bugs (read-before-write hazards)
+        with complex MFMA reordering.
+        
+        Broken PackA0 schedule (packs at idx 27-30, MFMA needs them at idx 26) should fail.
+        This is a real-world 128x256x32 TF32 NT configuration with MFMA reordering.
+        """
+        # Minimal kernel config for 128x256x32 TF32 NT validation
+        kernel = {
+            "UseF32XEmulation": True, "UseDirect32XEmulation": True, "UseMFMAF32XEmulation": True,
+            "ForceUnrollSubIter": True, "DirectToLds": True, "SwapGlobalReadOrder": False,
+            "UsePLRPack": True, "MIWaveTileA": 4, "MIWaveTileB": 8, "Use64bShadowLimit": 1,
+        }
+
+        # Hardcoded schedule from _get_schedule_128x256x32_TF32 NT case
+        # with broken PackA0: packs at indices 27-30, but MFMA at index 26 needs their results
+        schedule_info = ScheduleInfo(
+            numCodePaths=2,
+            numMfma=96,
+            optSchedule={
+
+                # BROKEN PackA0: indices 27-30 instead of 24-26, causing read-before-write
+                "PackA0": [[
+                    20, 20, 21, 21, 
+                    23, 23, 
+                    28, 28, 28, 28,
+
+                    27, 27, 27, 27,
+                    28, 28, 
+                    30, 30, 30, 30]],
+
+                "SYNC": [[1, 1, 3, 49, 78]],
+                "GRIncA": [[0]*9],
+                "GRIncB": [[0]*9],
+                "LRA0": [[0]*16],
+                "LRB0": [[0]*32],
+                "LRA3": [[77]*16],
+                "LRB3": [[48]*32],
+                "LCC": [[0]*9],
+                "LWSA": [[0]],
+                "LWSB": [[0]],
+                "LWRA": [[0]],
+                "LWRA": [[0]],
+                "GRA": [[2]*8],
+                "GRB": [[2]*8],
+                "PackB0": [[42, 42, 42, 43, 48, 48, 49, 49, 49, 50, 43, 43, 44, 44, 48, 48, 50, 50, 50, 51, 45, 45, 46, 46, 48, 48, 51, 51, 52, 52, 46, 47, 47, 47, 48, 48, 52, 53, 53, 53]],
+                "PackB3": [[67, 67, 68, 68, 75, 75, 76, 76, 77, 77, 69, 69, 70, 70, 75, 75, 78, 78, 86, 86, 71, 71, 72, 72, 75, 75, 87, 87, 88, 88, 73, 73, 74, 74, 75, 75, 89, 89, 90, 90]],
+                "PackA3": [[89, 89, 90, 90, 92, 92, 93, 93, 93, 94, 90, 91, 91, 91, 92, 92, 94, 94, 95, 95]],
+            },
+            syncCode=[
+                SWaitCnt(dscnt=0),
+                SBarrier(comment=""),
+                SWaitCnt(vlcnt=0),
+                SWaitCnt(dscnt=0),
+                SWaitCnt(dscnt=0),
+            ],
+            nglshift=12,
+            nllshift=12,
+            mfmaReorder=[
+                 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 
+                24, 32, 25, 36, 44, 37, 26, 33, 27, 38, 45, 39, 28, 34, 29, 40, 46, 41, 30, 35, 31, 42, 47, 43,
+                48, 56, 64, 49, 57, 65, 50, 58, 66, 51, 59, 67, 52, 60, 68, 53, 61, 69, 54, 62, 70, 55, 63, 71,
+                72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95],
+        )
+
+        valid, message = isValid(schedule_info, {"kernel": kernel})
+        assert valid  # Schedule previously failed, now passes.
+
+        # Check it fails where it's expected to.
+        schedule_info.optSchedule["PackA0"] = [[
+            20, 20, 21, 21, 
+            23, 23, 
+            28, 28, 28, 28,
+
+            37, 37, 37, 37,
+            40, 40, 
+            41, 41, 41, 41]]
+        valid, message = isValid(schedule_info, {"kernel": kernel})
+        assert not valid
+        assert message == "Code path 0: PackA0 @ idx=37 issued too late, must be issued before MFMA @ idx=36."
