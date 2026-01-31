@@ -39,6 +39,28 @@ jobs:
         run: |
           git config --global core.longpaths true
 
+      - name: Dummy Failure Step (Testing)
+        if: ${{ contains(inputs.project_to_test, 'miopen') }}
+        run: |
+          # Create fake log directory and error log for testing
+          mkdir -p "${{ env.BUILD_DIR }}/logs"
+
+          # Write fake error messages to a log file
+          cat > "${{ env.BUILD_DIR }}/logs/build_error.log" <<'ERRORLOG'
+          [INFO] Building project...
+          [INFO] Compiling source files...
+          [ERROR] compilation failed: unresolved external symbol __imp_ComputeKernel
+          In file: src/rocm_kernel.cpp:256
+          Symbol '__imp_ComputeKernel' not found in library
+          Fatal error: LINK returned exit code 1120
+          [INFO] Build process terminated
+          ERRORLOG
+
+          # Simulate a failed build step
+          echo "ERROR: Build failed with exit code 1"
+          echo "FATAL: Compilation errors detected"
+          exit 1
+
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
@@ -164,14 +186,84 @@ jobs:
             --build-dir ${{ env.BUILD_DIR }} \
             --upload
 
+      - name: MIOpen Notify Microsoft Teams
+        if: ${{ contains(inputs.project_to_test, 'miopen') }} # && failure()
+        run: |
+          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}#${GITHUB_JOB}"
+          MESSAGE="❌ MIOpen GitHub Actions CI Failure: \n
+            Repository: ${GITHUB_REPOSITORY} \n
+            Job: ${GITHUB_JOB} \n
+            Commit: ${GITHUB_SHA} \n
+            Run Link:
+
+            ${RUN_URL}
+            "
+           curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" -H 'Content-Type: application/json' \
+              -d "{\"text\": \"${MESSAGE}\"}"
+      - name: Extract Error Context
+        if: ${{ contains(inputs.project_to_test, 'miopen') && failure() }}
+        run: |
+          ERROR_LOG=""
+          ISSUE_TYPE="Build Failure"
+
+          # Search for errors in build logs
+          if [ -d "${{ env.BUILD_DIR }}/logs" ]; then
+            # Look for common error patterns with context
+            ERROR_LOG=$(grep -riE "(error|failed|fatal|exception)" "${{ env.BUILD_DIR }}/logs/" -A 3 -B 2 --max-count=5 2>/dev/null || echo "")
+
+            # Categorize the issue type based on error patterns
+            if echo "$ERROR_LOG" | grep -qiE "(test.*fail|failed.*test|assertion|gtest)"; then
+              ISSUE_TYPE="Test Failure"
+            elif echo "$ERROR_LOG" | grep -qiE "(docker|container|image)"; then
+              ISSUE_TYPE="Docker Issue"
+            elif echo "$ERROR_LOG" | grep -qiE "(compil|undefined reference|unresolved external|linker|link.*error)"; then
+              ISSUE_TYPE="Compilation Issue"
+            elif echo "$ERROR_LOG" | grep -qiE "(cmake|configuration)"; then
+              ISSUE_TYPE="Configuration Issue"
+            elif echo "$ERROR_LOG" | grep -qiE "(timeout|timed out)"; then
+              ISSUE_TYPE="Timeout"
+            elif echo "$ERROR_LOG" | grep -qiE "(permission|access denied)"; then
+              ISSUE_TYPE="Permission Issue"
+            elif echo "$ERROR_LOG" | grep -qiE "(out of memory|oom|memory)"; then
+              ISSUE_TYPE="Memory Issue"
+            fi
+          fi
+
+          # If no errors in log files, try to capture from recent step output
+          if [ -z "$ERROR_LOG" ]; then
+            ERROR_LOG="Error details not found in logs. Check the GitHub Actions run for full output."
+          fi
+
+          # Format as 5 lines instead of truncating to 500 chars
+          ERROR_LOG=$(echo "$ERROR_LOG" | head -n 5)
+
+          # Save to environment file for next step
+          echo "ISSUE_TYPE=$ISSUE_TYPE" >> $GITHUB_ENV
+          echo "ERROR_CONTEXT<<EOF" >> $GITHUB_ENV
+          echo "$ERROR_LOG" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
       - name: Notify Microsoft Teams
         if: ${{ contains(inputs.project_to_test, 'miopen') && failure() }}
         run: |
-          curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" -H 'Content-Type: application/json' \
-               -d '{
-                     "title": "MIOpen GitHub CI Notification",
-                     "text": "❌ Windows Build failure on branch: '${GITHUB_REF}'"
-                   }'
+          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_INFO=""
+          if [ -n "$PR_TITLE" ]; then
+            PR_INFO="\n**PR:** $PR_TITLE\n"
+          fi
+          ISSUE_SUMMARY="${ISSUE_TYPE:-Build Failure}"
+          # Replace actual newlines with \n for JSON formatting
+          ERROR_SNIPPET=$(echo "${ERROR_CONTEXT:-No error context available}" | sed ':a;N;$!ba;s/\n/\\n/g')
+
+          curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
+            -H 'Content-Type: application/json' \
+            -d @- <<EOF
+          {
+            "title": "MIOpen GitHub CI Notification",
+            "text": "❌ Windows Build Failure ❌\n\n**Branch:** ${GITHUB_REF}\n${PR_INFO}\n**Issue Type:** ${ISSUE_SUMMARY}\n\n**Error Context:**\n\`\`\`\n${ERROR_SNIPPET}\n\`\`\`\n\n[View Full Run](${RUN_URL})"
+          }
+          EOF
 
   therock-test-windows:
     name: Test (${{ inputs.amdgpu_families }})
