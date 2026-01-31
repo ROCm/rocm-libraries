@@ -198,7 +198,7 @@ jobs:
             ERROR_LOG="Error details not found in logs. Check the GitHub Actions run for full output."
           fi
 
-          # Format as 5 lines instead of truncating to 500 chars
+          # Format as 5 lines
           ERROR_LOG=$(echo "$ERROR_LOG" | head -n 5)
 
           # Save to environment file for next step
@@ -214,7 +214,7 @@ jobs:
           PR_TITLE="${{ github.event.pull_request.title }}"
           PR_INFO=""
           if [ -n "$PR_TITLE" ]; then
-            PR_INFO="\n*PR:* $PR_TITLE\n"
+            PR_INFO="\n**PR:** $PR_TITLE\n"
           fi
           ISSUE_SUMMARY="${ISSUE_TYPE:-Build Failure}"
           # Replace actual newlines with \n for JSON formatting
