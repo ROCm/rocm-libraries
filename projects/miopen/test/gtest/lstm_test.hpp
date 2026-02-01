@@ -35,7 +35,7 @@ struct Verifier
     bool rethrow{false};
     bool no_validate{false};
     double tolerance{80.0};
- 
+
     template <class CpuRange, class GpuRange, class Compare, class Report, class Fail>
     bool compare_and_report(
         const CpuRange& out_cpu, const GpuRange& out_gpu, Compare compare, Report report, Fail fail)
