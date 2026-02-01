@@ -164,20 +164,6 @@ jobs:
             --build-dir ${{ env.BUILD_DIR }} \
             --upload
 
-      - name: MIOpen Notify Microsoft Teams
-        if: ${{ contains(inputs.project_to_test, 'miopen') }} # && failure()
-        run: |
-          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}#${GITHUB_JOB}"
-          MESSAGE="❌ MIOpen GitHub Actions CI Failure: \n
-            Repository: ${GITHUB_REPOSITORY} \n
-            Job: ${GITHUB_JOB} \n
-            Commit: ${GITHUB_SHA} \n
-            Run Link:
-
-            ${RUN_URL}
-            "
-           curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" -H 'Content-Type: application/json' \
-              -d "{\"text\": \"${MESSAGE}\"}"
       - name: Extract Error Context
         if: ${{ contains(inputs.project_to_test, 'miopen') && failure() }}
         run: |
