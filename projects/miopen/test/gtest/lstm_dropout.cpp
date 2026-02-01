@@ -23,7 +23,7 @@
  *
  *******************************************************************************/
 
-#include "lstm_common.hpp"
+#include "lstm_test.hpp"
 #include <hip/hip_runtime.h>
 #include <gtest/gtest_common.hpp>
 
@@ -34,17 +34,9 @@ auto GetTestCases()
     int inVecLen{17};
     int hiddenSize{67};
     int numLayers{3};
-    int nohx{0};
-    int nodhy{0};
-    int nocx{0};
-    int nodcy{0};
-    int nohy{0};
-    int nodhx{0};
-    int nocy{0};
-    int nodcx{0};
-    int flatBatchFill{1};
     int useDropout{1};
     int usePadding{0};
+    int flatBatchFill{1};
     int inputMode{0};
     int biasMode{0};
     int dirMode{0};
@@ -56,17 +48,9 @@ auto GetTestCases()
                            inVecLen,
                            hiddenSize,
                            numLayers,
-                           nohx,
-                           nodhy,
-                           nocx,
-                           nodcy,
-                           nohy,
-                           nodhx,
-                           nocy,
-                           nodcx,
-                           flatBatchFill,
                            useDropout,
                            usePadding,
+                           flatBatchFill,
                            inputMode,
                            biasMode,
                            dirMode,
@@ -75,60 +59,14 @@ auto GetTestCases()
 }
 
 template <typename T>
-struct GPU_lstm_dropout_Test : testing::TestWithParam<std::tuple<int,
-                                                                 int,
-                                                                 int,
-                                                                 int,
-                                                                 int,
-                                                                 int,
-                                                                 int,
-                                                                 int,
-                                                                 int,
-                                                                 int,
-                                                                 int,
-                                                                 int,
-                                                                 int,
-                                                                 int,
-                                                                 int,
-                                                                 int,
-                                                                 int,
-                                                                 int,
-                                                                 int,
-                                                                 int,
-                                                                 std::vector<int>>>
+struct GPU_lstm_dropout_Test : testing::TestWithParam<decltype(GetTestCases())>, LSTM_test<T>
 {
     int device_count{0};
-    miopenDataType_t dataType{miopenFloat};
 
     void SetUp() override
     {
-        // if(hipGetDeviceCount(&device_count) != hipSuccess)
-        //     device_count = 0;
-    }
-
-    void Run()
-    {
-        auto [batchSize,
-              seqLength,
-              inVecLen,
-              hiddenSize,
-              numLayers,
-              nohx,
-              nodhy,
-              nocx,
-              nodcy,
-              nohy,
-              nodhx,
-              nocy,
-              nodcx,
-              flatBatchFill,
-              useDropout,
-              usePadding,
-              inputMode,
-              biasMode,
-              dirMode,
-              algoMode,
-              batchSeq] = GetParam();
+        if(hipGetDeviceCount(&device_count) != hipSuccess)
+            device_count = 0;
     }
 };
 
@@ -136,11 +74,40 @@ using GPU_lstm_dropout_FP32 = GPU_lstm_dropout_Test<float>;
 
 TEST_P(GPU_lstm_dropout_FP32, FloatTest_lstm_dropout)
 {
-    /*if(device_count == 0)
+    if(device_count == 0)
     {
         GTEST_SKIP() << "No HIP devices available for testing";
-    }*/
-    Run();
+    }
+
+    auto [batchSize,
+          seqLength,
+          inVecLen,
+          hiddenSize,
+          numLayers,
+          useDropout,
+          usePadding,
+          flatBatchFill,
+          inputMode,
+          biasMode,
+          dirMode,
+          algoMode,
+          batchSeq] = GetParam();
+
+    this->batchSize     = batchSize;
+    this->seqLength     = seqLength;
+    this->inVecLen      = inVecLen;
+    this->hiddenSize    = hiddenSize;
+    this->numLayers     = numLayers;
+    this->useDropout    = useDropout;
+    this->usePadding    = usePadding;
+    this->flatBatchFill = flatBatchFill;
+    this->inputMode     = inputMode;
+    this->biasMode      = biasMode;
+    this->dirMode       = dirMode;
+    this->algoMode      = algoMode;
+    this->batchSeq      = batchSeq;
+
+    RunTest();
 }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_lstm_dropout_FP32, testing::Values(GetTestCases()));
