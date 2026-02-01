@@ -1526,19 +1526,16 @@ namespace TensileLite
             }
             else
             {   
-                kernelArgs<T_Debug, false>( 1,
-                                            0,
-                                            rv.args,
-                                            getNumWorkGroups(rv),
-                                            &hardware,
-                                            problem.getParams(),
-                                            autoWGM,
-                                            autoWGMXCC,
-                                            autoWGMXCCCHUNK,
-                                            autoStaggerUMapping,
-                                            autoStaggerU,
-                                            autoStaggerUStrideShift,
-                                            autoGsuVal);
+                kernelArgs<T_Debug, false>(1,
+                                           0,
+                                           rv.args,
+                                           getNumWorkGroups(rv),
+                                           &hardware,
+                                           problem.getParams(),
+                                           autoWGM,
+                                           autoWGMXCC,
+                                           AutoWGMXCCCHUNK,
+                                           autoGsuVal);
             }            
         }
         singleCallArgs<T_Debug, true>(
