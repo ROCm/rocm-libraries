@@ -424,7 +424,6 @@ class Solution(collections.abc.Mapping):
 
     state["UsePLRPack"] = False
     state["MfmaInitCVgprs"] = False
-    state["UseMFMAF32XEmulation"] = False
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
@@ -1427,15 +1426,15 @@ class Solution(collections.abc.Mapping):
     # VW adjustment for F32XEmu + TLU + SubIter
     # -> this logic does not work. Reject the kernel so far.
     if state["UseF32XEmulation"]:
-      if TLUA and state["numSubTiles"] > 1 and state["MIWaveTile"][0] % (state["VectorWidthA"] * 2) != 0:
+      if TLUA and state["numSubTiles"] > 1 and state["MIWaveTile"][0] % (state["VectorWidthA"] * state["numSubTiles"]) != 0:
         # reject(state, printRejectionReason, "F32XEmulation + SubTiles requires MIWaveTile[0](%u) is multiple of VectorWidthA(%u) * 2"%(state["MIWaveTile"][0], state["VectorWidthA"]))
         # return
         # Many existing kernels are rejected with this condition.
-        # So far, continue with VectorWidthA //=2
-        state["VectorWidthA"] //= 2
+        # So far, continue with VectorWidthA //=state["numSubTiles"]
+        state["VectorWidthA"] //= state["numSubTiles"]
         if state["SourceSwap"] and state["StoreVectorWidth"] > state["VectorWidthA"]:
           # need to adjust StoreVectorWidth in SourceSwap case
-          state["StoreVectorWidth"] //= 2
+          state["StoreVectorWidth"] //= state["numSubTiles"]
 
     if state["VectorWidthB"] == -1:
       if state["EnableMatrixInstruction"]:
@@ -1454,12 +1453,12 @@ class Solution(collections.abc.Mapping):
     # VW adjustment for F32XEmu + TLU + SubIter
     # -> this logic does not work. Reject the kernel so far.
     if state["UseF32XEmulation"]:
-      if TLUB and state["numSubTiles"] > 1 and state["MIWaveTile"][1] % (state["VectorWidthB"] * 2) != 0:
+      if TLUB and state["numSubTiles"] > 1 and state["MIWaveTile"][1] % (state["VectorWidthB"] * state["numSubTiles"]) != 0:
         # reject(state, printRejectionReason, "F32XEmulation + SubTiles requires MIWaveTile[1](%u) is multiple of VectorWidthB(%u) * 2"%(state["MIWaveTile"][1],state["VectorWidthB"]))
         # return
         # Many existing kernels are rejected with this condition.
-        # So far, continue with VectorWidthA //=2
-        state["VectorWidthB"] //= 2
+        # So far, continue with VectorWidthB //=state["numSubTiles"]
+        state["VectorWidthB"] //= state["numSubTiles"]
 
     if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
       state["VectorWidthMetadata"] = state["VectorWidthA"] if state["ProblemType"]["Sparse"] == 1 else state["VectorWidthB"]

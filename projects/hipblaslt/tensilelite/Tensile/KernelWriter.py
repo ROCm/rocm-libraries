@@ -308,7 +308,6 @@ class StateValues:
   numLDSBlk: int                         = 0
   IncLdsBufSwitch: bool                  = False
   oneBufferScheduling: bool              = False
-  scheduleCvtBEveryMiwtIter: bool        = False
 
   # Epilogue states
   preloadScaleA = False
@@ -581,10 +580,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # packItemsConditional: pack src items into dst items until numPack or searchString is found
   # returns number of items packed
   ##############################################################################
-  def _packItemsConditional(numPack, srcPackItems, dstPackItems, searchStrings, searchStringsExact=[]):
+  def _packItemsConditional(numPack, srcPackItems, dstPackItems, searchStrings):
     numPacked = 0
-    localItem = []
-    exactMatch = len(searchStringsExact) > 0
     final = False
     finalStr = "pack final end"
     if numPack == 0:
@@ -592,33 +589,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
     for n in range(numPack):
       if srcPackItems:
         item = srcPackItems.pop(0)
-        localItem.append(item)
+        dstPackItems.append(item)
         numPacked += 1
         itemStr = str(item.comment)
-        firstMatched = False
         for string in searchStrings:
           if string in itemStr:
-            firstMatched = True
             final = finalStr in itemStr
-            if exactMatch:
-              # exactMatch case, check another set of strings in searchStringsExact
-              # If itemStr includes exact string, return the result
-              for stringExact in searchStringsExact:
-                if stringExact in itemStr:
-                  dstPackItems += localItem
-                  return numPacked, final
-            else:
-              dstPackItems += localItem
-              return numPacked, final
-        if firstMatched and exactMatch:
-          # first matched, but exact did not match
-          # reset localItem and continue 
-          localItem = []
-          numPacked = 0
-    if exactMatch:
-      # exactMatch search and not found case, not proceed num
-      return 0, False
-    dstPackItems += localItem
+            return numPacked, final
     return numPacked, final
 
   ##############################################################################
@@ -973,6 +950,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       packItemsA = []
       packItemsB = []
       packItemsM = []
+      scheduleTF32Emu = kernel["UseF32XEmulation"]
       for iui in range(kernel["InnerUnroll"]):
         packINtems = [ [] for j in range(max(self.states.numReadsIterCoalescedA,self.states.numReadsIterCoalescedB,self.states.numReadsIterCoalescedMetadata)) ]
         packINtemsA = packINtems
@@ -1025,7 +1003,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
               for n in range(instPerPackB):
                 packINtemsB[j].append(packBItems.pop(0))
 
-        scheduleTF32Emu = kernel["UseF32XEmulation"]
         if scheduleTF32Emu:
           instPerPackA = 0
           instPerPackB = 0
@@ -1033,21 +1010,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # scheduleCvtBEveryMiwtIter case, put A0,B0 first, then put remaining A in the first MIWTA(*3) iteration.
           # Then, put remaining B at every MIWTA(*3) iteration
           # A0,B0,A1,A2,,,B1,B2,.
-          bFinalDone = False
-          while packAItems or (packItemsB and not bFinalDone):
+          while packAItems or packBItems:
             KernelWriter._packItemsConditional(instPerPackA, packAItems, packItems, ["__TF32_1", "__TF32_2"])
-            # for B
-            if self.states.scheduleCvtBEveryMiwtIter:
-              if not bFinalDone:
-                # scheduleCvtBEveryMiwtIter case, search 0 only here
-                search = ["__TF32_1_B", "__TF32_2_B"]
-                exactSearch = ["__TF32_1_B_0", "__TF32_2_B_0"]
-                _, bFinalDone = KernelWriter._packItemsConditional(instPerPackB, packBItems, packItems, search, searchStringsExact=exactSearch)
-            else:
-              KernelWriter._packItemsConditional(instPerPackB, packBItems, packItems, ["__TF32_1", "__TF32_2"])
-          # afte all A is done, put remaining B after A
-          while packBItems:
             KernelWriter._packItemsConditional(instPerPackB, packBItems, packItems, ["__TF32_1", "__TF32_2"])
+
         else:
           while packAItems:
             if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeA"].isAnyFloat8():
@@ -1206,8 +1172,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         return numLoops, newItemCounter
 
       itemCounter = 0
-      aFinalCount = 0 # for TF32 Emu
-      bFinalDone = False
+      finalCountA = 0
+      finalCountB = 0
       for i in range(numMfmaPerIter):
         mfmaIndex = iteration * numMfmaPerIter + i
         insertInst = countInstruction(iterCode)
@@ -1248,7 +1214,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 readLeftLREven = numReadsInst / (numMfmaPerIter - i)
             # if there are too many localreads, change strategy to even.
             readLeft = checkLocalReadFIFOFull(mfmaIndex, self.localReadThisLoopFIFO, localReadItemsThisLoop, readLeftLROPT, readLeftLREven)
-          elif kernel["EnableMatrixInstruction"] and self.do["OptimizeNumItersPLR0"]:
+          elif kernel["EnableMatrixInstruction"] and self.do["OptimizeNumItersPLR0"] and not scheduleTF32Emu:
             # if numItersPLR == 0, try to schedule local reads with instruction level prefetch.
             mfmas = getMFMAs(macIterCode)
             if i + 1 != numMfmaPerIter:
@@ -1459,7 +1425,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         ####
         # scheduled wait localReads
         ####
-        if self.states.numItersPLR == 0 and kernel["EnableMatrixInstruction"] and self.do["OptimizeNumItersPLR0"]:
+        if self.states.numItersPLR == 0 and kernel["EnableMatrixInstruction"] and self.do["OptimizeNumItersPLR0"] and not scheduleTF32Emu:
           dscnt = -1
           mfmas = getMFMAs(macIterCode)
           ## To support do["MAC"] is False
@@ -1498,13 +1464,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         _instPerPackB = 0
         _instPerPackM = 0
         instPackLast = []
-        packDone = False
-        if kernel["UseF32XEmulation"]:
-          if (i % (kernel["MIWaveTileA"] * 3)) == 0:
-            # initialize bFinalDone at beginning of every MIWTA iteration
-            bFinalDone = False
-          packDone = aFinalCount == kernel["MIWaveTileA"] and bFinalDone
-        if packItems and not packDone:
+        if packItems:
 
           # check the remain latency before mfma
           currentInsertInst = countInstruction(iterCode) - insertInst
@@ -1513,11 +1473,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # calculate the data index of this mfma used for A and B
           # if i // kernel["MIWaveTile"][0]==0, mfma will use new A (need to take iu into account)
           # if i % kernel["MIWaveTile"][0]==0, mfma will use new B
-          factor = 3 if kernel["UseF32XEmulation"] else 1
-          MIWTA_factor = kernel["MIWaveTileA"] * factor
-          _instPerPackA = instPerPackA if i//(MIWTA_factor+MIWTA_factor*kernel["MIWaveTileB"]*(i//(MIWTA_factor*kernel["MIWaveTileB"]))) == 0 else 0
+          _instPerPackA = instPerPackA if i//(kernel["MIWaveTileA"]+kernel["MIWaveTileA"]*kernel["MIWaveTileB"]*(i//(kernel["MIWaveTileA"]*kernel["MIWaveTileB"]))) == 0 else 0
           packAIdx += _instPerPackA
-          _instPerPackB = instPerPackB if i % (MIWTA_factor * factor) == 0 else 0
+          _instPerPackB = instPerPackB if i % kernel["MIWaveTileA"] == 0 else 0
           packBIdx += _instPerPackB
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             if kernel["ProblemType"]["Sparse"] == 2:
@@ -1543,15 +1501,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
             iterCode.addComment0("pack scheduling: packAIdx:%u, packBIdx:%u" %(packAIdx,packBIdx))
 
           if not schedulePackConsiderMetadata:
+              insertABcount = 0
+              final = False
               if kernel["UseF32XEmulation"]:
-                tmp = []
-                if aFinalCount < kernel["MIWaveTileA"]:
-                  num, aFinalDone = KernelWriter._packItemsConditional(instPerPackA, packItems, tmp, ["__TF32_1_A", "__TF32_2_A"])
-                  if aFinalDone:
-                    aFinalCount += 1
-                curPackIdx += num
-                for n in tmp:
-                  iterCode.add(n)
+                if finalCountA < kernel["MIWaveTileA"] // kernel["numSubTiles"]:
+                  tmp = []
+                  num, final = KernelWriter._packItemsConditional(instPerPackA, packItems, tmp, ["__TF32_1_A", "__TF32_2_A"])
+                  if num > 0:
+                    insertABcount += 1
+                  curPackIdx += num
+                  if final:
+                    finalCountA += 1
+                  for n in tmp:
+                    iterCode.add(n)
               else:
                 # we put 2 pack in each mfma
                 for j in range(instPerPackA):
@@ -1564,21 +1526,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
                     iterCode.add(packItems.pop(0))
                     curPackIdx += 1
               if kernel["UseF32XEmulation"]:
-                tmp = []
-                if not bFinalDone:
-                  if self.states.scheduleCvtBEveryMiwtIter:
-                    # scheduleCvtBEveryMiwtIter case, search only 1 final at once
-                    search = ["__TF32_1_B", "__TF32_2_B"]
-                    Bidx = i // (kernel["MIWaveTileA"] * 3)
-                    exactSearch = ["__TF32_1_B_%d"%Bidx, "__TF32_2_B_%d"%Bidx]
-                    num, bFinalDone = KernelWriter._packItemsConditional(instPerPackB, packItems, tmp, search, searchStringsExact=exactSearch)
+                if finalCountB < kernel["MIWaveTileB"] // kernel["numSubTiles"]:
+                  tmp = []
+                  num, final = KernelWriter._packItemsConditional(instPerPackB, packItems, tmp, ["__TF32_1_B", "__TF32_2_B"])
+                  if num > 0:
+                    insertABcount += 1
                     curPackIdx += num
-                  else:
-                    # not scheduleCvtBEveryMiwtIter case, ignore bFinalDone
-                    num, _ = KernelWriter._packItemsConditional(instPerPackB, packItems, tmp, ["__TF32_1_B", "__TF32_2_B"])
-                    curPackIdx += num
-                for n in tmp:
-                  iterCode.add(n)
+                    if final:
+                      finalCountB += 1
+                  for n in tmp:
+                    iterCode.add(n)
               else:
                 for j in range(instPerPackB):
                   if packItems:
@@ -1586,7 +1543,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                     curPackIdx += 1
               # since packed register need to wait 2 quad cycle to finish packing
               # we insert pack instruction if we can, or s_nop
-              while curPackIdx < numPack+2:
+              while curPackIdx < numPack+2 and not kernel["UseF32XEmulation"]:
                 if packItems:
                   iterCode.add(packItems.pop(0))
                   curPackIdx += 1
@@ -1597,8 +1554,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
               if kernel["UseF32XEmulation"]:
                 # HACK add dummy waits btween swap and mfmas. TODO: improve pack scheduling to avoid this
                 numDummy = 0 if kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16 else 1
-                for numd in range(numDummy):
-                  iterCode.add(SNop(waitState=0, comment="VALU packing writes to be consumed by matrix instruction (HACK)"))
+                if kernel["UseMFMAF32XEmulation"] and not final:
+                  # only one side remaining case, add dummy by 2 sicne we do not interleave PackA and PackB
+                  if insertABcount == 1:
+                    numDummy += 2
+                #for numd in range(numDummy):
+                iterCode.add(SNop(waitState=numDummy - 1, comment="VALU packing writes to be consumed by matrix instruction (HACK)"))
           else:
 
             desiredPack = instPerPackA + instPerPackB + ceil(instPerPackM)
@@ -5062,19 +5023,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     #         Wider local read case, we need TransposeCode=True
     #   False: Does not use interleave layout
     #         ider local read + index transpose case, this needs to be False
-    # scheduleCvtBEveryMiwtIter:
-    #   True: Schedule B conversion code at every MIWaveTileA * 3 MFMA index
-    #         By doing so, we need only 8 Treg (and no extra v_mov).
-    #         However, this causes an issue at TailLoop because no instruction scheduling for TailLoop
-    #         Not enabled it for now (TODO: enable)
-    #   False: No special scheduling/ Treg allocation for B
     self.states.a.useDirect32XEmulation = kernel["UseDirect32XEmulation"]
     self.states.b.useDirect32XEmulation = kernel["UseDirect32XEmulation"]
     self.states.a.TF32EmuUseTransposeCode = False
     self.states.b.TF32EmuUseTransposeCode = False
     self.states.a.TF32EmuInterleaveTreg = False
     self.states.b.TF32EmuInterleaveTreg = False
-    self.states.scheduleCvtBEveryMiwtIter = False
 
     def initTF32Emu(sAorB: ABMatrixInfo, lrvwTile):
       # number of Vreg for interleaveTreg. Half of ValuA or B. Need same block number as Valu
@@ -5118,10 +5072,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       return numV
 
     def checkVregOverflowTF32Emu(vgprIdx, numV):
-      # We need to consider 10 more vreg (Serial tmp)
+      # We need to consider 2 more vreg (Serial tmp)
       # Looks like we need more tmp vreg at tailloop
-      # set 10 as buffer (tentative)
-      bufferVregNum = 10
+      # So far, max 32 tmp vregs might be used.
+      # set 2 + 32 as buffer (tentative)
+      # MFMA case, need 2 more
+      bufferVregNum = 2 + 32
+      if kernel["UseMFMAF32XEmulation"]:
+        bufferVregNum += 2
       return vgprIdx + bufferVregNum + numV > self.states.regCaps["MaxVgpr"]
       #return True
 

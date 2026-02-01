@@ -734,13 +734,16 @@ class KernelWriterAssembly(KernelWriter):
             # Need to allocate actual Vreg only for bi == 0.
             # Reuse same location for T1,...
             ri2 = 0
-          moduleVgprMacroValu_T.add(RegSet("v", "vgprValu%s_T%u_I%u"%(tc, bi,iui), sAorB.startVgprCvt, ri2))
+          moduleVgprMacroValu_T.add(RegSet("v", "vgprValu%s_T%u_I%u"%(tc, bi,iui), "vgprValu%s_X0_I0_BASE"%tc, sAorB.startVgprCvt - sAorB.startVgprValu + ri2))
           ri += sAorB.numVgprValuPerBlock
     return moduleVgprMacroValu_T
 
   def macroAndSetF32XEmuTreg(self, kernel, tPA, tPB) -> Module:
     self.moduleVgprMacroValuA_T = self.macroAndSetF32XEmuTregSingle(kernel, self.states.a, tPA)
     self.moduleVgprMacroValuB_T = self.macroAndSetF32XEmuTregSingle(kernel, self.states.b, tPB)
+    # MFMA case
+    if kernel["UseMFMAF32XEmulation"]:
+      self.moduleVgprMacroValuB_T.add(RegSet("v", "IdentityMatrix", self.states.startVgprIdentityMatrix, 0))
 
   def macroAndSet(self, kernel, tPA, tPB) -> Module:
     module = Module("MacroNSet")
