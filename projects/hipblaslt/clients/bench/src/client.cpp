@@ -71,7 +71,7 @@ int run_bench_test(Arguments&         arg,
     arg.unit_check = 1;
 
     // enable timing check,otherwise no performance data collected
-    arg.timing = 1;
+    arg.timing = 0;
 
     // One stream and one thread (0 indicates to use default behavior)
     arg.streams = 0;
