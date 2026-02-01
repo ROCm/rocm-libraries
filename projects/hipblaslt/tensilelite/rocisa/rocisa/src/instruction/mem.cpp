@@ -290,6 +290,20 @@ void mem_inst(nb::module_ m_mem)
              nb::arg("soffset"),
              nb::arg("smem")    = std::nullopt,
              nb::arg("comment") = "")
+        
+            .def(nb::init<rocisa::InstType,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const std::shared_ptr<rocisa::Container>&,
+                      int&,
+                      std::optional<rocisa::SMEMModifiers>,
+                      const std::string&>(),
+             nb::arg("instType"),
+             nb::arg("dst"),
+             nb::arg("base"),
+             nb::arg("soffset") = 0,
+             nb::arg("smem")    = std::nullopt,
+             nb::arg("comment") = "")
+                          
         .def("getParams", &rocisa::SMemLoadInstruction::getParams)
         .def("__str__", &rocisa::SMemLoadInstruction::toString);
 

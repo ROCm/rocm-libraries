@@ -576,14 +576,23 @@ namespace TensileLite
                 idx++;
             }
         }
+        if(problem.batchMode() == 1)
+        {
+            std::cout<<"Resetting the autoGsuVal, autoWGM, autoWGMXCC\n";
+            gsu = autoGsuVal = 1;
+            autoWGM = 1;
+            autoWGMXCC = 8;
+        }
         bool singleWSD = false;
         if(sizeMapping.globalAccumulation == 1
            && (problemType.computeType != problemType.dType
                || problemType.activationType != ActivationType::None))
             singleWSD = true;
+        // Additional check for General Batched GEMM until GSU and StreamK are supported
+        // in General Batched GEMM
         if(gsu > 1 && sizeMapping.streamK == 0
            && ((singleWSD || sizeMapping.globalAccumulation == 2)
-               || (sizeMapping.globalAccumulation == 3)))
+               || (sizeMapping.globalAccumulation == 3)) && (problem.batchMode() != 1))
         {
             args.template append<void const*>("ws_d", (uint8_t*)inputs.ws + workspaceOffsetInByte);
             if(sizeMapping.globalAccumulation == 3)
@@ -658,7 +667,9 @@ namespace TensileLite
         bool gsuWSStride
             = gsu > 1 && sizeMapping.globalAccumulation != 3 && sizeMapping.streamK == 0;
         bool skWSStride = sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel;
-        if(gsuWSStride || skWSStride)
+        // Additional check for General Batched GEMM until GSU and StreamK are supported
+        // in General Batched GEMM
+        if((gsuWSStride || skWSStride) && problem.batchMode() != 1)
         {
             size_t wsStride = startStrideCD ? d.sizes()[0] : 1;
             for(size_t i = startStrideCD; i < d.dimensions(); i++)
@@ -722,8 +733,9 @@ namespace TensileLite
             if(problem.betaType() == rocisa::DataType::Half)
                 args.append("beta_2", inputs.beta, problem.betaType());
         }
-
-        if(sizeMapping.streamK != 0)
+        // Additional check for General Batched GEMM until GSU and StreamK are supported
+        // in General Batched GEMM
+        if(sizeMapping.streamK != 0 && problem.batchMode() != 1)
         {
             // SK doesn't care gsu
             if(gsu > 1)
@@ -1270,6 +1282,7 @@ namespace TensileLite
                                          size_t   autoStaggerUStrideShift,
                                          uint32_t autoGsuVal) const
     {
+        std::cout << "Argtype in KernelArgs : " << argType << std::endl;
         if constexpr(!Legacy)
         {
             gemmCount = gemmCount & 0x3FFFFFFF;
@@ -1435,6 +1448,9 @@ namespace TensileLite
 
         uint32_t autoGsuVal = calculateAutoGSU(problem, &hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
+        //Resetting gsu to 1 for General Batched GEMM until it is supported on the kernel side
+        if(problem.batchMode() == 1)
+            gsu = autoGsuVal = 1;
         if(gsu > 0)
             rv.numWorkGroups.y *= gsu;
 
@@ -1482,19 +1498,48 @@ namespace TensileLite
                           << ", StaggerU: " << autoStaggerU
                           << ", StaggerUStrideShift: " << autoStaggerUStrideShift << std::endl;
             }
-            kernelArgs<T_Debug, false>(1,
-                                       0,
-                                       rv.args,
-                                       getNumWorkGroups(rv),
-                                       &hardware,
-                                       problem.getParams(),
-                                       autoWGM,
-                                       autoWGMXCC,
-                                       autoWGMXCCCHUNK,
-                                       autoStaggerUMapping,
-                                       autoStaggerU,
-                                       autoStaggerUStrideShift,
-                                       autoGsuVal);
+            std::cout << "Generating universal kernel args for single call... >>>>>>>>>>>>>>>>>>>>>" << std::endl;
+            std::cout << "autoWGM: " << autoWGM << ", autoWGMXCC: " << autoWGMXCC << ", autoWGMXCCCHUNK: " << autoWGMXCCCHUNK
+                      << ", autoGSU: " << autoGsuVal << std::endl;
+            if(problem.batchMode() == 1)
+            {
+                // Setting the autoWGM=1, autoWGMXCC=8 and autoGsuVal=1 for General Batched GEMM until 
+                // Kernel Code Generator is enabled to handle the GSU and StreamK vairants for General Batched GEMM
+                autoWGM    = 1;
+                autoWGMXCC = 8;
+                autoGsuVal = 1;
+                std::cout << "Reset autoWGM: " << autoWGM << ", autoWGMXCC: " << autoWGMXCC
+                      << ", autoGSU: " << autoGsuVal << std::endl;                
+                kernelArgs<T_Debug, false>(1,
+                                        3,
+                                        rv.args,
+                                        getNumWorkGroups(rv),
+                                        &hardware,
+                                        problem.getParams(),
+                                        autoWGM,
+                                        autoWGMXCC,
+                                        autoWGMXCCCHUNK,
+                                        autoStaggerUMapping,
+                                        autoStaggerU,
+                                        autoStaggerUStrideShift,
+                                        autoGsuVal);                                           
+            }
+            else
+            {   
+                kernelArgs<T_Debug, false>( 1,
+                                            0,
+                                            rv.args,
+                                            getNumWorkGroups(rv),
+                                            &hardware,
+                                            problem.getParams(),
+                                            autoWGM,
+                                            autoWGMXCC,
+                                            autoWGMXCCCHUNK,
+                                            autoStaggerUMapping,
+                                            autoStaggerU,
+                                            autoStaggerUStrideShift,
+                                            autoGsuVal);
+            }            
         }
         singleCallArgs<T_Debug, true>(
             problem, inputs, 0, &hardware, problemNumGroupTiles, rv.numWorkGroups, rv.args, sk);
@@ -2762,6 +2807,9 @@ namespace TensileLite
 
         auto autoGsuVal = calculateAutoGSU(problem, &hardware);
         auto gsu        = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
+        //Resetting GSU to 1 for General Batched GEMM until we support this on Kernel side
+        if(problem.batchMode() == 1)
+            gsu = autoGsuVal = 1;
         if(gsu > 1 && sizeMapping.globalAccumulation != 2 && sizeMapping.globalAccumulation != 3)
         {
             if(debug)
@@ -2771,6 +2819,7 @@ namespace TensileLite
         }
 
         StreamKSettings sk;
+        std::cout<< "sizeMapping.streamK: "<< sizeMapping.streamK << std::endl;
         if(sizeMapping.streamK > 0)
         {
             sk.reduction         = getSKReduction(problem, hardware);

@@ -133,7 +133,8 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
                                                          hipStream_t            stream,
                                                          void*                  Synchronizer,
                                                          bool                   swizzleA,
-                                                         bool                   swizzleB)
+                                                         bool                   swizzleB,
+                                                         int32_t                batch_mode)
     : trans_a(trans_a)
     , trans_b(trans_b)
     , m(m)
@@ -197,6 +198,7 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , Synchronizer(Synchronizer)
     , swizzleA(swizzleA)
     , swizzleB(swizzleB)
+    , batch_mode(batch_mode)
 {
     if(this->bias_type == HIPBLASLT_DATATYPE_INVALID)
     {
@@ -1629,6 +1631,7 @@ namespace
 
         // set batch mode
         tensileProblem.setStridedBatched(prob.strided_batch);
+        tensileProblem.setBatchMode(prob.batch_mode);        
         tensileProblem.setGroupedGemm(prob.grouped_gemm);
         if(prob.grouped_gemm)
             tensileProblem.setUseDeviceUserArguments(true);
@@ -1869,6 +1872,7 @@ namespace
         // set batch mode
         tensileProblem.setStridedBatched(prob.strided_batch);
         tensileProblem.setGroupedGemm(prob.grouped_gemm);
+        tensileProblem.setBatchMode(prob.batch_mode);
         if(prob.grouped_gemm)
             tensileProblem.setUseDeviceUserArguments(true);
         else

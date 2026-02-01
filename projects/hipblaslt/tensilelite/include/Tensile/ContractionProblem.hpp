@@ -899,6 +899,16 @@ namespace TensileLite
             return m_stridedBatched;
         }
 
+        void setBatchMode(int32_t value)
+        {
+            batch_mode = value;
+        }
+
+        bool batchMode() const
+        {
+            return batch_mode;
+        }
+
         void setGroupedGemm(bool value)
         {
             m_groupedGemm = value;
@@ -1412,6 +1422,7 @@ namespace TensileLite
 
         std::string getOperationIdentifier() const;
         std::string getOperationDescription() const;
+        int batch_mode = 0;        
     };
 
     class ContractionProblemGroupedGemm : public ContractionProblem
