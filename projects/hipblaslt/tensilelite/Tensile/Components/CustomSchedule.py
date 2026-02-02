@@ -1697,64 +1697,6 @@ def _get_schedule_224x256x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 224, 64, 2, 1, True, 0, 0),
-    dtype_predicate=is16bit,
-    vector_widths=[8, 8, 8],
-    matrix_inst=[16, 16, 32, 1],
-    mfma_wave_group=[2, 2]
-)
-def _get_schedule_256x224x64_16bit(kernel, useLDSTr, TLDS):
-    kernel["MfmaInitCVgprs"] = True
-    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
-    optSchedule = dict()
-    syncCode = []
-    if isNT(kernel) and useLDSTr and TLDS == 0:
-        optSchedule = {
-            'SYNC': [[-1,10,21,21,55,55,60,60]],
-            'GRIncA': [[0,1,2,3,4,5,6,7,8]],
-            'LRA0': [[0,0,2,2,4,4,6,6,8,8,10,10,12,12,14,14],
-                     [1,1,3,3,5,5,7,7,9,9,11,11,13,13,15,15]],
-            
-            'GRIncB': [[9,10,11,12,13,14,15,16,17]],
-
-            'GRA': [[21,21, 26,26, 31,31, 36,36, 41,41, 46,46, 51,51, 56,56],
-                    [24,24, 29,29, 34,34, 39,39, 44,44, 49,49, 54,54, 59,59]],
-            'LRB0': [[21,21, 26,26, 31,31, 36,36, 41,41, 46,46, 51,51]],
-            
-            'GRB': [[61,61, 63,63, 65,65, 79,79, 90,90, 95,95, 100,100],
-                    [62,62, 64,64, 66,66, 80,80, 91,91, 96,96, 101,101]],
-
-            'LRA1': [[94,94,96,96,98,98,100,100,101,104,106,106,108,108,110,110],
-                     [95,95,97,97,99,99,102,102,103,103,105,105,107,107,109,109]],
-
-            'LRB1': [[61,61, 63,63, 65,65, 79,79, 90,90, 95,95, 100,100],
-                    [62,62, 64,64, 66,66, 80,80, 91,91, 96,96, 101,101]],
-
-            'LRSA': [[54]],
-            'LRSB': [[54]],
-            'LWSA': [[91]],
-            'LWSB': [[91]],
-            'LCC': [[111,111]],
-        }
-
-        syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0"),
-            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment=""),
-            SWaitCnt(dscnt=0, vlcnt=7, vscnt=-1, comment=""),
-            SBarrier(comment=""),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
-            SBarrier(comment=""),
-            SWaitCnt(dscnt=-1, vlcnt=8, vscnt=-1, comment="wait for previous set of global reads"),
-            SBarrier(comment="")
-        ]
-        nglshift = nllshift = 15
-    else:
-        return False, None
-    numMfma = 112
-    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    return True, opt1
-
-@RegisterSchedule(
     tile_config=TileConfig(192, 320, 64, 2, 1, True, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
@@ -1932,6 +1874,46 @@ def _get_schedule_256x224x64_16bit(kernel, useLDSTr, TLDS):
             SBarrier(comment=""),
             SWaitCnt(dscnt=-1, vlcnt=15, vscnt=-1, comment="Wait for previous set of GRBs"),
             SBarrier(comment=""),
+        ]
+        nglshift = nllshift = 15
+    elif isNT(kernel) and useLDSTr and TLDS == 0:
+        optSchedule = {
+            'SYNC': [[-1,10,21,21,55,55,60,60]],
+            'GRIncA': [[0,1,2,3,4,5,6,7,8]],
+            'LRA0': [[0,0,2,2,4,4,6,6,8,8,10,10,12,12,14,14],
+                     [1,1,3,3,5,5,7,7,9,9,11,11,13,13,15,15]],
+            
+            'GRIncB': [[9,10,11,12,13,14,15,16,17]],
+
+            'GRA': [[21,21, 26,26, 31,31, 36,36, 41,41, 46,46, 51,51, 56,56],
+                    [24,24, 29,29, 34,34, 39,39, 44,44, 49,49, 54,54, 59,59]],
+            'LRB0': [[21,21, 26,26, 31,31, 36,36, 41,41, 46,46, 51,51]],
+            
+            'GRB': [[61,61, 63,63, 65,65, 79,79, 90,90, 95,95, 100,100],
+                    [62,62, 64,64, 66,66, 80,80, 91,91, 96,96, 101,101]],
+
+            'LRA1': [[94,94,96,96,98,98,100,100,101,104,106,106,108,108,110,110],
+                     [95,95,97,97,99,99,102,102,103,103,105,105,107,107,109,109]],
+
+            'LRB1': [[61,61, 63,63, 65,65, 79,79, 90,90, 95,95, 100,100],
+                    [62,62, 64,64, 66,66, 80,80, 91,91, 96,96, 101,101]],
+
+            'LRSA': [[54]],
+            'LRSB': [[54]],
+            'LWSA': [[91]],
+            'LWSB': [[91]],
+            'LCC': [[111,111]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0"),
+            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for LR to complete"),
+            SWaitCnt(dscnt=0, vlcnt=7, vscnt=-1, comment="wait for previous set of global reads"),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=-1, vlcnt=8, vscnt=-1, comment="wait for previous set of global reads"),
+            SBarrier(comment="")
         ]
         nglshift = nllshift = 15
     else:
