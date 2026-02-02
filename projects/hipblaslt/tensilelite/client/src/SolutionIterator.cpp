@@ -330,7 +330,7 @@ namespace TensileLite
                 }
 
                 auto comp = [](const std::pair<int, double>& e1, const std::pair<int, double>& e2) { return e1.second < e2.second; };
-                std::sort(performance.begin(),performance.end(),comp);
+                std::stable_sort(performance.begin(),performance.end(),comp);
                 // TODO: This is the simple threshold method.
                 // May use the best perf * 1.x as threshold in the future.
                 size_t index    = std::min(performance.size() - 1, size_t(performance.size() * m_predictionThreshold));
@@ -353,13 +353,11 @@ namespace TensileLite
                     }
                     else if(performance[i].second <= threshhold)
                     {
-                        // std::cout<<"check performance "<<performance[i].second<<std::endl;
                         m_qSolutionIdx.push(performance[i]);
                     }
                     else
                     {
-                        // std::cout<<"too large performance "<<performance[i].second<<std::endl;
-                        // break;
+                        break;
                     }
                 }
                 m_currentSolutionIdx = m_qSolutionIdx.front().first;
@@ -367,8 +365,6 @@ namespace TensileLite
                 m_currentIdx = 0;
 
                 std::cout<<"predict performance is "<<performance[0].second<<" us, idx = "<<performance[0].first<<std::endl;
-                //std::cout<<"Threshold performance is "<<threshhold<<std::endl;
-                //std::cout<<"Solution number is "<<m_qSolutionIdx.size()<<std::endl;
             }
         }
 
@@ -539,19 +535,7 @@ namespace TensileLite
                 }
                 else
                 {
-                    if(m_numSolutions == -1)
-                    {
-                        if(m_solutions.size()==0)
-                        {
-                            // use all solutions from all libraries
-                            m_solutions.clear();
-                            std::set<std::shared_ptr<ContractionSolution>> sols;
-                            sols = m_library->findAllSolutions(*gemmProblem, *m_hardware, TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
-                            for(auto it=sols.begin(); it != sols.end(); it++)
-                                m_solutions.push_back(*it);
-                        }
-                    }
-                    else
+                    if(m_numSolutions != -1)
                     {
                         m_solutions
                             = m_library->findTopSolutions(*gemmProblem, *m_hardware, m_numSolutions);
@@ -596,7 +580,7 @@ namespace TensileLite
                 }
 
                 auto comp = [](const std::pair<int, double>& e1, const std::pair<int, double>& e2) { return e1.second < e2.second; };
-                std::sort(performance.begin(),performance.end(),comp);
+                std::stable_sort(performance.begin(),performance.end(),comp);
                 size_t index    = std::min(performance.size() - 1, size_t(performance.size() * m_predictionThreshold));
                 auto threshhold = performance[index].second;
                 // push content
