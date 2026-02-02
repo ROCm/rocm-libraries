@@ -166,14 +166,29 @@ jobs:
           echo "EOF" >> $GITHUB_ENV
 
       - name: MIOpen Notify Microsoft Teams
-        if: ${{ contains(fromJSON(inputs.component).job_name, 'miopen') && failure() }}
+        if: failure() # ${{ contains(fromJSON(inputs.component).job_name, 'miopen') && failure() }}
         run: |
+          # Function to escape JSON strings
+          json_escape() {
+            echo "$1" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed 's/\t/\\t/g' | sed ':a;N;$!ba;s/\n/\\n/g'
+          }
+
+          WEBHOOK_URL="${{ secrets.MIOPEN_CI_WEBHOOK_URL }}"
+
+          # Check if webhook URL is set
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "Warning: MIOPEN_CI_WEBHOOK_URL secret not set, skipping Teams notification"
+            exit 0
+          fi
+
           RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_TITLE_RAW="${{ github.event.pull_request.title }}"
           PR_NUMBER="${{ github.event.pull_request.number }}"
           PR_INFO=""
-          if [ -n "$PR_TITLE" ]; then
-            PR_INFO="\n**PR #${PR_NUMBER}:** $PR_TITLE\n"
+
+          if [ -n "$PR_TITLE_RAW" ]; then
+            PR_TITLE=$(json_escape "$PR_TITLE_RAW")
+            PR_INFO="\n**PR #${PR_NUMBER}:** ${PR_TITLE}\n"
           fi
 
           # Detect platform
@@ -184,18 +199,15 @@ jobs:
             PLATFORM_NAME="Windows"
           fi
 
-          ISSUE_SUMMARY="${ISSUE_TYPE:-Test Failure}"
-          # Replace actual newlines with \n for JSON formatting
-          ERROR_SNIPPET=$(echo "${ERROR_CONTEXT:-No error context available}" | sed ':a;N;$!ba;s/\n/\\n/g')
+          ISSUE_SUMMARY=$(json_escape "${ISSUE_TYPE:-Test Failure}")
+          BRANCH_REF=$(json_escape "${GITHUB_REF}")
 
-          curl -X POST "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
+          # Escape error context for JSON
+          ERROR_SNIPPET=$(json_escape "${ERROR_CONTEXT:-No error context available}")
+
+          curl -X POST "$WEBHOOK_URL" \
             -H 'Content-Type: application/json' \
-            -d @- <<EOF
-          {
-            "title": "MIOpen GitHub CI Notification",
-            "text": "❌ ${PLATFORM_NAME} Test Failure ❌\n\n**Branch:** ${GITHUB_REF}\n${PR_INFO}\n**Issue Type:** ${ISSUE_SUMMARY}\n\n**Error Context:**\n\`\`\`\n${ERROR_SNIPPET}\n\`\`\`\n\n[View Full Run](${RUN_URL})"
-          }
-          EOF
+            -d "{\"title\":\"MIOpen GitHub CI Notification\",\"text\":\"❌ ${PLATFORM_NAME} Test Failure ❌\n\n**Branch:** ${BRANCH_REF}\n${PR_INFO}\n**Issue Type:** ${ISSUE_SUMMARY}\n\n**Error Context:**\n\\\`\\\`\\\`\n${ERROR_SNIPPET}\n\\\`\\\`\\\`\n\n[View Full Run](${RUN_URL})\"}"
 
       # GitHub's 'Complete job' step is unaware of launched executables
       # and will fail to clean up orphan processes.
