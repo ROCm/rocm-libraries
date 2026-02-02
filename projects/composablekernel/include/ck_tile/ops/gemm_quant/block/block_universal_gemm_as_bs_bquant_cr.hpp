@@ -126,7 +126,7 @@ struct BQuantBlockUniversalGemmAsBsCr
 
     // BDataType gets converted from PkInt4 during loading
     using OverrideBDataType = std::conditional_t<
-        std::is_same_v<BDataType, pk_int4_t> &&
+        (std::is_same_v<BDataType, pk_int4_t> || std::is_same_v<BDataType, pk_fp4_t>) &&
             std::is_same_v<typename Traits::BLayout, tensor_layout::gemm::RowMajor>,
         ADataType,
         BDataType>;

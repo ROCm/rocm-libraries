@@ -863,8 +863,11 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
         const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
 
         const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {
-            constexpr bool has_hot_loop_v = has_hot_loop_.value;
-            constexpr auto tail_number_v  = tail_number_.value;
+            constexpr bool has_hot_loop_v  = has_hot_loop_.value;
+            constexpr auto tail_number_v   = tail_number_.value;
+            constexpr auto b_cast_policy_v = std::is_same_v<ADataType, BDataType>
+                                                 ? ck_tile::CastPolicy::BeforeLDSWrite
+                                                 : ck_tile::CastPolicy::AfterLDSRead;
 
             using PipelineProblem =
                 ck_tile::GemmBQuantPipelineProblem<ADataType,
@@ -877,7 +880,8 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
                                                    ComputeDataType,
                                                    ck_tile::GemmPipelineScheduler::Intrawave,
                                                    has_hot_loop_v,
-                                                   tail_number_v>;
+                                                   tail_number_v,
+                                                   b_cast_policy_v>;
 
             using GemmPipeline = std::conditional_t<
                 PreshuffleB == false,

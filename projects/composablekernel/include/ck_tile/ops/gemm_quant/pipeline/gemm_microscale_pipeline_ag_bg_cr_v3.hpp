@@ -92,6 +92,9 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
     static constexpr auto TailNum    = Problem::TailNum;
     static constexpr auto Scheduler  = Problem::Scheduler;
 
+    static constexpr auto is_a_load_tr_v = bool_constant<PipelineImplBase::is_a_load_tr>{};
+    static constexpr auto is_b_load_tr_v = bool_constant<PipelineImplBase::is_b_load_tr>{};
+
     using Base::PrefetchStages;
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
@@ -329,7 +332,6 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
             if constexpr(IsCastBeforeLDS)
             {
                 constexpr auto b_block = TileType::get_distributed_spans();
-                constexpr auto idx1_js = tile_distributed_index<0>{};
 
                 // Internally this is using V_CVT_SCALEF32_PK_BF16_FP4 or V_CVT_SCALEF32_PK_FP16_FP4
                 // on gfx950
@@ -348,10 +350,23 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
                     }
                 };
 
+                constexpr index_t BQuantGroupSizeIdx0 =
+                    std::is_same_v<BQLayout, tensor_layout::gemm::ColumnMajor>
+                        ? BQuantGroupSize::kN
+                        : BQuantGroupSize::kK;
+                constexpr index_t BQuantGroupSizeIdx1 =
+                    std::is_same_v<BQLayout, tensor_layout::gemm::ColumnMajor>
+                        ? BQuantGroupSize::kK
+                        : BQuantGroupSize::kN;
+
                 sweep_tile_span(b_block[number<0>{}], [&](auto idx0) {
                     sweep_tile_span(b_block[number<1>{}], [&](auto idx1) {
-                        constexpr auto i_j_idx       = make_tuple(idx0, idx1);
-                        constexpr auto i_j_idx_scale = make_tuple(idx0, idx1_js);
+                        constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                        constexpr auto idx0_s =
+                            tile_distributed_index<idx0.impl_.at(0) / BQuantGroupSizeIdx0>{};
+                        constexpr auto idx1_s =
+                            tile_distributed_index<idx1.impl_.at(0) / BQuantGroupSizeIdx1>{};
+                        constexpr auto i_j_idx_scale = make_tuple(idx0_s, idx1_s);
                         float scale                  = float(scale_tile[i_j_idx_scale]);
                         if constexpr(std::is_same_v<BDataType, ck_tile::pk_fp4_t>)
                         {
@@ -384,7 +399,7 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
                                           const TileType& block_tile,
                                           const ElementwiseFunc& element_func) const
         {
-            if constexpr(is_a_col_major)
+            if constexpr(is_a_col_major && !is_a_load_tr_v())
             {
                 auto a_shuffle_tmp = make_static_distributed_tensor<ADataType>(
                     Policy::template MakeShuffledARegTileDistribution<Problem>());
@@ -418,7 +433,7 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
                 }
             };
 
-            if constexpr(is_b_row_major)
+            if constexpr(is_b_row_major && !is_b_load_tr_v())
             {
                 auto b_shuffle_tmp = make_static_distributed_tensor<BLDSType>(
                     Policy::template MakeShuffledBRegTileDistribution<Problem>());
@@ -445,11 +460,13 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
             // It can apply the scale and cast if we scale after reading from LDS
             if constexpr(IsCastBeforeLDS)
             {
-                block_gemm.LocalPrefetch(a_lds_window, b_lds_window);
+                block_gemm.LocalPrefetch(
+                    a_lds_window, b_lds_window, is_a_load_tr_v, is_b_load_tr_v);
             }
             else
             {
-                block_gemm.LocalPrefetch(a_lds_window, b_lds_window, q_block_tile);
+                block_gemm.LocalPrefetch(
+                    a_lds_window, b_lds_window, q_block_tile, is_a_load_tr_v, is_b_load_tr_v);
             }
         }
 
@@ -482,9 +499,11 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
             constexpr bool is_bq_col_major =
                 std::is_same_v<BQLayout, tensor_layout::gemm::ColumnMajor>;
 
-            static_assert(is_bq_col_major, "Bq must be col major (row major not supported yet)");
-            static_assert(NPerBlockBQ == BQDramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
-                              KPerBlockBQ == BQDramBlockWindowTmp{}.get_window_lengths()[I1{}],
+            static_assert(is_bq_col_major
+                              ? (NPerBlockBQ == BQDramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
+                                 KPerBlockBQ == BQDramBlockWindowTmp{}.get_window_lengths()[I1{}])
+                              : (KPerBlockBQ == BQDramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
+                                 NPerBlockBQ == BQDramBlockWindowTmp{}.get_window_lengths()[I1{}]),
                           "Bq block window has incorrect lengths for defined BqLayout!");
 
             static_assert(is_a_col_major
@@ -548,15 +567,19 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
             ABlockTile a_block_tile;
             BBlockTile b_block_tile;
 
-            using ADramTileWindowStep = typename ADramBlockWindowTmp::BottomTensorIndex;
-            using BDramTileWindowStep = typename BDramBlockWindowTmp::BottomTensorIndex;
+            using ADramTileWindowStep  = typename ADramBlockWindowTmp::BottomTensorIndex;
+            using BDramTileWindowStep  = typename BDramBlockWindowTmp::BottomTensorIndex;
+            using BQDramTileWindowStep = typename BQDramBlockWindowTmp::BottomTensorIndex;
 
             constexpr ADramTileWindowStep a_dram_tile_window_step =
                 is_a_col_major ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
             constexpr BDramTileWindowStep b_dram_tile_window_step =
                 is_b_row_major ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
 
-            constexpr index_t b_scale_dram_tile_window_step = KPerBlock / BQuantGroupSize::kK;
+            constexpr BQDramTileWindowStep b_scale_dram_tile_window_step =
+                std::is_same_v<BQLayout, tensor_layout::gemm::ColumnMajor>
+                    ? make_array(0, KPerBlock / BQuantGroupSize::kK)
+                    : make_array(KPerBlock / BQuantGroupSize::kK, 0);
             // -----------------------------------------------------------------------------------------
             // Gemm pipeline start
 
@@ -569,7 +592,7 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
             // Vmem -> Vgpr 0 (Q matrix)
             // Scale and cast tile before writing to LDS (if IsCastBeforeLDS)
             bq_block_tile = load_tile(bq_copy_dram_window);
-            move_tile_window(bq_copy_dram_window, {0, b_scale_dram_tile_window_step});
+            move_tile_window(bq_copy_dram_window, b_scale_dram_tile_window_step);
             ScaleTile(b_block_tile, bdq_block_tile, bq_block_tile);
 
             // initialize C tile to zero
@@ -589,7 +612,7 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
             if constexpr(IsCastBeforeLDS)
             {
                 bq_block_tile = load_tile(bq_copy_dram_window);
-                move_tile_window(bq_copy_dram_window, {0, b_scale_dram_tile_window_step});
+                move_tile_window(bq_copy_dram_window, b_scale_dram_tile_window_step);
             }
             ScaleTile(b_block_tile, bdq_block_tile, bq_block_tile);
 
@@ -619,7 +642,7 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
                     // Vmem -> Vgpr (Q matrix)
                     // Scale and cast tile before writing to LDS (if IsCastBeforeLDS)
                     bq_block_tile = load_tile(bq_copy_dram_window);
-                    move_tile_window(bq_copy_dram_window, {0, b_scale_dram_tile_window_step});
+                    move_tile_window(bq_copy_dram_window, b_scale_dram_tile_window_step);
                     ScaleTile(b_block_tile, bdq_block_tile, bq_block_tile);
 
                     // Consume tile
@@ -653,7 +676,7 @@ struct MicroscaleGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<
                 if constexpr(!IsCastBeforeLDS)
                 {
                     bq_block_tile = load_tile(bq_copy_dram_window);
-                    move_tile_window(bq_copy_dram_window, {0, b_scale_dram_tile_window_step});
+                    move_tile_window(bq_copy_dram_window, b_scale_dram_tile_window_step);
                 }
 
                 // Consume second to last tile

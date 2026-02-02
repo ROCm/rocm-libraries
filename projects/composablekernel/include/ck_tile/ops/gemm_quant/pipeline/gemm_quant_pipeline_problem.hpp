@@ -79,9 +79,14 @@ struct GemmQuantPipelineProblemBase
     using AQLayout = remove_cvref_t<typename Traits::AQLayout>;
     using BQLayout = remove_cvref_t<typename Traits::BQLayout>;
 
-    static constexpr auto Scheduler   = Scheduler_;
-    static constexpr auto HasHotLoop  = HasHotLoop_;
-    static constexpr auto TailNum     = TailNum_;
+    static constexpr auto Scheduler  = Scheduler_;
+    static constexpr auto HasHotLoop = HasHotLoop_;
+    static constexpr auto TailNum    = TailNum_;
+
+    // Limitations
+    static_assert(!(BCastPolicy_ == CastPolicy::BeforeLDSWrite &&
+                    !std::is_same_v<BLayout, BQLayout>));
+
     static constexpr auto BCastPolicy = BCastPolicy_;
 
     static_assert(BlockGemmShape::kM % AQuantGroupSize::kM == 0);
