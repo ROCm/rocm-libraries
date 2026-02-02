@@ -210,13 +210,18 @@ void testing_spmv_csr(Arguments argus)
     // Redefine sparse matrix values
     hipsparseInit<T>(hval, hval.size(), 1);
 
-    std::vector<T> hx(n);
-    std::vector<T> hy_1(m);
-    std::vector<T> hy_2(m);
-    std::vector<T> hy_gold(m);
+    // For non-transpose: y(m) = alpha * A(m x n) * x(n) + beta * y(m)
+    // For transpose/conj-transpose: y(n) = alpha * A^T/A^H(n x m) * x(m) + beta * y(n)
+    J x_size = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? n : m;
+    J y_size = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : n;
 
-    hipsparseInit<T>(hx, 1, n);
-    hipsparseInit<T>(hy_1, 1, m);
+    std::vector<T> hx(x_size);
+    std::vector<T> hy_1(y_size);
+    std::vector<T> hy_2(y_size);
+    std::vector<T> hy_gold(y_size);
+
+    hipsparseInit<T>(hx, 1, x_size);
+    hipsparseInit<T>(hy_1, 1, y_size);
 
     // copy vector is easy in STL; hy_gold = hx: save a copy in hy_gold which will be output of CPU
     hy_2    = hy_1;
@@ -226,9 +231,9 @@ void testing_spmv_csr(Arguments argus)
     auto dptr_managed    = hipsparse_unique_ptr{device_malloc(sizeof(I) * (m + 1)), device_free};
     auto dcol_managed    = hipsparse_unique_ptr{device_malloc(sizeof(J) * nnz), device_free};
     auto dval_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz), device_free};
-    auto dx_managed      = hipsparse_unique_ptr{device_malloc(sizeof(T) * n), device_free};
-    auto dy_1_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * m), device_free};
-    auto dy_2_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * m), device_free};
+    auto dx_managed      = hipsparse_unique_ptr{device_malloc(sizeof(T) * x_size), device_free};
+    auto dy_1_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * y_size), device_free};
+    auto dy_2_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * y_size), device_free};
     auto d_alpha_managed = hipsparse_unique_ptr{device_malloc(sizeof(T)), device_free};
     auto d_beta_managed  = hipsparse_unique_ptr{device_malloc(sizeof(T)), device_free};
 
@@ -246,9 +251,9 @@ void testing_spmv_csr(Arguments argus)
         hipMemcpy(dptr, hcsr_row_ptr.data(), sizeof(I) * (m + 1), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dcol, hcol_ind.data(), sizeof(J) * nnz, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dval, hval.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dx, hx.data(), sizeof(T) * n, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dy_1, hy_1.data(), sizeof(T) * m, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dy_2, hy_2.data(), sizeof(T) * m, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dx, hx.data(), sizeof(T) * x_size, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dy_1, hy_1.data(), sizeof(T) * y_size, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dy_2, hy_2.data(), sizeof(T) * y_size, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_alpha, &h_alpha, sizeof(T), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
@@ -259,9 +264,9 @@ void testing_spmv_csr(Arguments argus)
 
     // Create dense vectors
     hipsparseDnVecDescr_t x, y1, y2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, n, dx, typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y1, m, dy_1, typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y2, m, dy_2, typeT));
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, x_size, dx, typeT));
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y1, y_size, dy_1, typeT));
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y2, y_size, dy_2, typeT));
 
     // Query SpMV buffer
     size_t bufferSize;
@@ -288,8 +293,8 @@ void testing_spmv_csr(Arguments argus)
             hipsparseSpMV(handle, transA, d_alpha, A, x, d_beta, y2, typeT, alg, buffer));
 
         // copy output from device to CPU
-        CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(T) * m, hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * m, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(T) * y_size, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * y_size, hipMemcpyDeviceToHost));
 
         // Query for warpSize
         hipDeviceProp_t prop;
@@ -332,43 +337,83 @@ void testing_spmv_csr(Arguments argus)
             return;
         }
 
-        for(J i = 0; i < m; ++i)
+        // CPU reference computation
+        if(transA == HIPSPARSE_OPERATION_NON_TRANSPOSE)
         {
-            std::vector<T> sum(WF_SIZE, make_DataType<T>(0.0));
-
-            for(I j = hcsr_row_ptr[i] - idx_base; j < hcsr_row_ptr[i + 1] - idx_base; j += WF_SIZE)
+            // y = alpha * A * x + beta * y
+            for(J i = 0; i < m; ++i)
             {
-                for(int k = 0; k < WF_SIZE; ++k)
+                std::vector<T> sum(WF_SIZE, make_DataType<T>(0.0));
+
+                for(I j = hcsr_row_ptr[i] - idx_base; j < hcsr_row_ptr[i + 1] - idx_base;
+                    j += WF_SIZE)
                 {
-                    if(j + k < hcsr_row_ptr[i + 1] - idx_base)
+                    for(int k = 0; k < WF_SIZE; ++k)
                     {
-                        sum[k] = testing_fma(testing_mult(h_alpha, hval[j + k]),
-                                             hx[hcol_ind[j + k] - idx_base],
-                                             sum[k]);
+                        if(j + k < hcsr_row_ptr[i + 1] - idx_base)
+                        {
+                            sum[k] = testing_fma(testing_mult(h_alpha, hval[j + k]),
+                                                 hx[hcol_ind[j + k] - idx_base],
+                                                 sum[k]);
+                        }
                     }
                 }
-            }
 
-            for(int j = 1; j < WF_SIZE; j <<= 1)
-            {
-                for(int k = 0; k < WF_SIZE - j; ++k)
+                for(int j = 1; j < WF_SIZE; j <<= 1)
                 {
-                    sum[k] = sum[k] + sum[k + j];
+                    for(int k = 0; k < WF_SIZE - j; ++k)
+                    {
+                        sum[k] = sum[k] + sum[k + j];
+                    }
+                }
+
+                if(h_beta == make_DataType<T>(0.0))
+                {
+                    hy_gold[i] = sum[0];
+                }
+                else
+                {
+                    hy_gold[i] = testing_fma(h_beta, hy_gold[i], sum[0]);
                 }
             }
+        }
+        else
+        {
+            // Transpose or Conjugate Transpose: y = alpha * A^T/A^H * x + beta * y
+            // For transpose, iterate over rows of A and accumulate to y[col]
+            bool conj = (transA == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE);
 
+            // First apply beta to y
             if(h_beta == make_DataType<T>(0.0))
             {
-                hy_gold[i] = sum[0];
+                for(J j = 0; j < n; ++j)
+                {
+                    hy_gold[j] = make_DataType<T>(0.0);
+                }
             }
             else
             {
-                hy_gold[i] = testing_fma(h_beta, hy_gold[i], sum[0]);
+                for(J j = 0; j < n; ++j)
+                {
+                    hy_gold[j] = testing_mult(h_beta, hy_gold[j]);
+                }
+            }
+
+            // Then accumulate alpha * A^T/A^H * x
+            for(J i = 0; i < m; ++i)
+            {
+                T xi = hx[i];
+                for(I j = hcsr_row_ptr[i] - idx_base; j < hcsr_row_ptr[i + 1] - idx_base; ++j)
+                {
+                    J col        = hcol_ind[j] - idx_base;
+                    T val        = conj ? testing_conj(hval[j]) : hval[j];
+                    hy_gold[col] = testing_fma(testing_mult(h_alpha, val), xi, hy_gold[col]);
+                }
             }
         }
 
-        unit_check_near(1, m, 1, hy_gold.data(), hy_1.data());
-        unit_check_near(1, m, 1, hy_gold.data(), hy_2.data());
+        unit_check_near(1, y_size, 1, hy_gold.data(), hy_1.data());
+        unit_check_near(1, y_size, 1, hy_gold.data(), hy_2.data());
     }
 
     if(argus.timing)

@@ -27,8 +27,10 @@
 #pragma once
 
 #include <cstddef>
+#include <sstream>
 #include <string>
 
+#include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Utils.hpp>
 
 namespace TensileLite
@@ -125,55 +127,32 @@ namespace TensileLite
             return rv;
         }
 
-        template<typename Tp, typename Tpv, typename Tc, typename Ts, typename Tsv, typename... T>
-        void debugEvalCmp(std::ostream& stream, Tp prob, Tpv prob_val, Tc cmp, Ts sol, Tsv sol_val, T... args) const
+        template <typename Tp, typename Tpv, typename Tc, typename Ts, typename Tsv, typename... T>
+        void debugEvalCmpBuildDetails(std::ostringstream& ss,
+                                      Tp                  prob,
+                                      Tpv                 prob_val,
+                                      Tc                  cmp,
+                                      Ts                  sol,
+                                      Tsv                 sol_val,
+                                      T... args) const
         {
-            if (cmp == "==")
+            ss << prob << "=" << prob_val << " " << cmp << " " << sol << "=" << sol_val;
+            if constexpr(sizeof...(args) >= 5)
             {
-                if (prob_val != sol_val)
-                    stream << "((" << prob << "=" << prob_val << ") != (" << sol << "=" << sol_val <<  ")), ";
+                ss << ", ";
+                debugEvalCmpBuildDetails(ss, args...);
             }
-            else if (cmp == ">")
-            {
-                if (prob_val <= sol_val)
-                    stream << "((" << prob << "=" << prob_val << ") <= (" << sol << "=" << sol_val <<  ")), ";
-            }
-            else if (cmp == "<")
-            {
-                if (prob_val >= sol_val)
-                    stream << "((" << prob << "=" << prob_val << ") >= (" << sol << "=" << sol_val <<  ")), ";
-            }
-            else if (cmp == ">=")
-            {
-                if (prob_val < sol_val)
-                    stream << "((" << prob << "=" << prob_val << ") < (" << sol << "=" << sol_val <<  ")), ";
-            }
-            else if (cmp == "<=")
-            {
-                if (prob_val > sol_val)
-                    stream << "((" << prob << "=" << prob_val << ") > (" << sol << "=" << sol_val <<  ")), ";
-            }
-            else if (cmp == "%")
-            {
-                if constexpr (std::is_same<Tpv, size_t>::value)
-                    if (prob_val % sol_val != 0)
-                        stream << "((" << prob << "=" << prob_val << ") % (" << sol << "=" << sol_val <<  ") != 0), ";
-            }
-            else
-            {
-                stream << "(invalid statement), ";
-            }
-            if constexpr (sizeof...(args) >= 5)
-                debugEvalCmp(stream, args...);
         }
 
-        template<typename... T>
+        /// Formats comparison-based predicate debug output via PredicateDebugger::printRow.
+        /// Usage: debugEvalCmp(obj, stream, "prob", val1, "==", "sol", val2, ...)
+        template <typename... T>
         Value debugEvalCmp(Object const& object, std::ostream& stream, T... args) const
         {
             Value rv = (*this)(object);
-            stream << rv << ": " << this->type() << " (";
-            debugEvalCmp(stream, args...);
-            stream << ")" << std::endl;
+            std::ostringstream details;
+            debugEvalCmpBuildDetails(details, args...);
+            PredicateDebugger::printRow(stream, rv, this->type(), details.str());
             return rv;
         }
     };
