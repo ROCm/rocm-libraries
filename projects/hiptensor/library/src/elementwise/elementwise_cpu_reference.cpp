@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,15 +29,15 @@
 #include "elementwise_cpu_reference_instances.hpp"
 
 hiptensorStatus_t hiptensorElementwisePermuteReference(const void*                       alpha,
-                                                const void*                       A,
-                                                const hiptensorTensorDescriptor_t descA,
-                                                const int32_t                     modeA[],
-                                                const hiptensorOperator_t         opA,
-                                                void*                             B,
-                                                const hiptensorTensorDescriptor_t descB,
-                                                const int32_t                     modeB[],
-                                                const hiptensorDataType_t         typeScalar,
-                                                const hipStream_t                 stream)
+                                                       const void*                       A,
+                                                       const hiptensorTensorDescriptor_t descA,
+                                                       const int32_t                     modeA[],
+                                                       const hiptensorOperator_t         opA,
+                                                       void*                             B,
+                                                       const hiptensorTensorDescriptor_t descB,
+                                                       const int32_t                     modeB[],
+                                                       const hiptensorDataType_t         typeScalar,
+                                                       const hipStream_t                 stream)
 {
     const int32_t dim       = descA->mLengths.size();
     auto&         instances = hiptensor::ElementwiseCpuReferenceInstances::instance();

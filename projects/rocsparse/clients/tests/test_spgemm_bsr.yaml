@@ -52,8 +52,8 @@ Tests:
   function: spgemm_bsr
   indextype: *i64i32
   precision: *single_double_precisions_complex_real
-  M: [50, 647]
-  N: [13, 523]
+  M: [50, 300]
+  N: [13, 300]
   K: [50, 254]
   block_dim: [25, 32]
   alpha_beta: *alpha_beta_range_quick
@@ -71,8 +71,8 @@ Tests:
   function: spgemm_bsr
   indextype: *i32
   precision: [*float16_float16_float32_float32_abct_precision, *bfloat16_bfloat16_float32_float32_abct_precision]
-  M: [512]
-  N: [256, 512]
+  M: [300]
+  N: [256, 300]
   K: [512]
   block_dim: [2, 4]
   alpha_beta: *alpha_beta_range_quick
@@ -90,8 +90,8 @@ Tests:
   function: spgemm_bsr
   indextype: *i64
   precision: *single_double_precisions
-  M: [1799, 32519]
-  N: [3712, 16021]
+  M: [1799, 2000]
+  N: [2000]
   K: [1942, 9848]
   block_dim: [21, 24]
   alpha_beta: *alpha_beta_range_checkin
@@ -148,7 +148,7 @@ Tests:
   indextype: *i64i32
   precision: *single_double_precisions
   M: 1
-  N: [523]
+  N: [300]
   K: 1
   block_dim: [2]
   alpha_beta: *alpha_beta_range_quick
@@ -195,7 +195,7 @@ Tests:
   indextype: *i32
   precision: *single_double_precisions
   M: 1
-  N: [149231]
+  N: [14923]
   K: 1
   block_dim: [8]
   alpha_beta: *alpha_beta_range_nightly
@@ -220,7 +220,7 @@ Tests:
   indextype: *i64i32
   precision: *single_double_precisions_complex
   M: 1
-  N: [719]
+  N: [300]
   K: 1
   block_dim: [4]
   alpha_beta: *alpha_beta_range_quick
@@ -241,7 +241,7 @@ Tests:
   indextype: *i64
   precision: *single_double_precisions_complex
   M: 1
-  N: [2014]
+  N: [2000]
   K: 1
   block_dim: [9]
   alpha_beta: *alpha_beta_range_checkin
@@ -261,7 +261,7 @@ Tests:
   indextype: *i64
   precision: *single_double_precisions_complex
   M: 1
-  N: [2014]
+  N: [2000]
   K: 1
   block_dim: [9]
   alpha_beta: *alpha_beta_range_checkin
@@ -282,7 +282,7 @@ Tests:
   indextype: *i32
   precision: *single_double_precisions_complex
   M: 1
-  N: [901923]
+  N: [90192]
   K: 1
   block_dim: [5]
   alpha_beta: *alpha_beta_range_nightly

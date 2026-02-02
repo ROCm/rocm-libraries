@@ -156,7 +156,7 @@ if(HIPBLASLT_ENABLE_LLVM)
 endif()
 
 if(HIPBLASLT_ENABLE_DEVICE)
-    if(NOT WIN32 AND (HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN"))
+    if(NOT WIN32 AND (HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN"))
         execute_process(
             COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.asan-x86_64.so
             OUTPUT_VARIABLE ASAN_LIB_PATH
@@ -220,11 +220,18 @@ if(HIPBLASLT_ENABLE_MSGPACK)
 endif()
 
 if(NOT ROCM_LIBS_SUPERBUILD)
-    # TODO: This is a temporary solution to prevent the installation of the origami license files.
-    block(SCOPE_FOR VARIABLES)
-        set(ORIGAMI_ENABLE_INSTALL OFF)
-        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
-    endblock()
+    # TODO: Temporarily disabled TheRock origami integration to allow TheRock CI to pass.
+    # Re-enable once origami is available in TheRock.
+    # if(HIPBLASLT_ENABLE_THEROCK)
+    #     find_package(origami REQUIRED)
+    if(FALSE)
+    else()
+        # TODO: This is a temporary solution to prevent the installation of the origami license files.
+        block(SCOPE_FOR VARIABLES)
+            set(ORIGAMI_ENABLE_INSTALL OFF)
+            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
+        endblock()
+    endif()
 endif()
 
 add_subdirectory(tensilelite)

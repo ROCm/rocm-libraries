@@ -7,6 +7,7 @@
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -16,12 +17,9 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
-using namespace miopen_legacy_plugin::test_utilities;
+using namespace hipdnn_test_sdk::utilities::conv;
+using namespace miopen_plugin::test_utilities;
 using namespace test_conv_common;
-
-// Workaround https://github.com/ROCm/rocm-libraries/issues/4010 by using 4e-1
-// for bfloat16 tolerance instead of conv::getToleranceWrw<hip_bfloat16>()
-#define WORKAROUND_GH_ISSUE_4010 4e-1_bf
 
 namespace
 {
@@ -30,6 +28,16 @@ template <typename DataType>
 class ConvBackwardWeights : public IntegrationGraphVerificationHarness<DataType, ConvTestCase>
 {
 protected:
+    void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
+                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
+                          unsigned int seed) override
+    {
+        for(auto& tensorPair : bundle.tensors)
+        {
+            bundle.randomizeTensor(tensorPair.first, _minVal, _maxVal, seed);
+        }
+    }
+
     void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
     {
         // Skipping until CK is working on Windows
@@ -67,9 +75,12 @@ protected:
         dwTensorAttr->set_dim(testCase.wDims);
         dwTensorAttr->set_stride(generateStrides(testCase.wDims, layout.strideOrder));
 
-        this->registerValidator(dwTensorAttr, tolerance);
+        this->registerValidator(dwTensorAttr, tolerance, 0.01f);
         this->verifyGraph(graphObj, testCase.seed);
     }
+
+    float _minVal = IntegrationGraphVerificationHarness<DataType, ConvTestCase>::DEFAULT_MIN;
+    float _maxVal = IntegrationGraphVerificationHarness<DataType, ConvTestCase>::DEFAULT_MAX;
 };
 
 using IntegrationGpuConvWrwDataNchwFp32 = ConvBackwardWeights<float>;
@@ -90,66 +101,170 @@ using IntegrationGpuConvWrwDataNdhwcBfp16 = ConvBackwardWeights<hip_bfloat16>;
 using IntegrationGpuConvWrwDataNhwcFp16 = ConvBackwardWeights<half>;
 using IntegrationGpuConvWrwDataNdhwcFp16 = ConvBackwardWeights<half>;
 
+template <typename DataType>
+class ConvBackwardWeightsLargeValues : public ConvBackwardWeights<DataType>
+{
+public:
+    ConvBackwardWeightsLargeValues()
+    {
+        this->_minVal = -10.0f;
+        this->_maxVal = 10.0f;
+    }
+};
+
+using IntegrationGpuConvWrwDataLargeValuesFp32 = ConvBackwardWeightsLargeValues<float>;
+
 } // namespace
+
+TEST_P(IntegrationGpuConvWrwDataLargeValuesFp32, Correctness)
+{
+    const auto& testCase = GetParam();
+    auto tolerance = calculateConvWrwTolerance<float, float, float>(static_cast<double>(_minVal),
+                                                                    static_cast<double>(_maxVal),
+                                                                    static_cast<double>(_minVal),
+                                                                    static_cast<double>(_maxVal),
+                                                                    testCase.yDims);
+    runGraphTest(tolerance, TensorLayout::NCHW);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvWrwDataLargeValuesFp32,
+                         testing::Values(getConvTestCases4D()[0]));
 
 TEST_P(IntegrationGpuConvWrwDataNchwFp32, Correctness)
 {
-    runGraphTest(conv::getToleranceWrw<float>(), TensorLayout::NCHW);
+    const auto& testCase = GetParam();
+    auto tolerance = calculateConvWrwTolerance<float, float, float>(static_cast<double>(_minVal),
+                                                                    static_cast<double>(_maxVal),
+                                                                    static_cast<double>(_minVal),
+                                                                    static_cast<double>(_maxVal),
+                                                                    testCase.yDims);
+    runGraphTest(tolerance, TensorLayout::NCHW);
 }
 
 TEST_P(IntegrationGpuConvWrwDataNcdhwFp32, Correctness)
 {
-    runGraphTest(conv::getToleranceWrw<float>(), TensorLayout::NCDHW);
+    const auto& testCase = GetParam();
+    auto tolerance = calculateConvWrwTolerance<float, float, float>(static_cast<double>(_minVal),
+                                                                    static_cast<double>(_maxVal),
+                                                                    static_cast<double>(_minVal),
+                                                                    static_cast<double>(_maxVal),
+                                                                    testCase.yDims);
+    runGraphTest(tolerance, TensorLayout::NCDHW);
 }
 
 TEST_P(IntegrationGpuConvWrwDataNchwBfp16, Correctness)
 {
-    runGraphTest(WORKAROUND_GH_ISSUE_4010, TensorLayout::NCHW);
+    const auto& testCase = GetParam();
+    auto tolerance
+        = calculateConvWrwTolerance<hip_bfloat16, hip_bfloat16, float>(static_cast<double>(_minVal),
+                                                                       static_cast<double>(_maxVal),
+                                                                       static_cast<double>(_minVal),
+                                                                       static_cast<double>(_maxVal),
+                                                                       testCase.yDims);
+    runGraphTest(tolerance, TensorLayout::NCHW);
 }
 
 TEST_P(IntegrationGpuConvWrwDataNcdhwBfp16, Correctness)
 {
-    runGraphTest(WORKAROUND_GH_ISSUE_4010, TensorLayout::NCDHW);
+    const auto& testCase = GetParam();
+    auto tolerance
+        = calculateConvWrwTolerance<hip_bfloat16, hip_bfloat16, float>(static_cast<double>(_minVal),
+                                                                       static_cast<double>(_maxVal),
+                                                                       static_cast<double>(_minVal),
+                                                                       static_cast<double>(_maxVal),
+                                                                       testCase.yDims);
+    runGraphTest(tolerance, TensorLayout::NCDHW);
 }
 
 TEST_P(IntegrationGpuConvWrwDataNchwFp16, Correctness)
 {
-    runGraphTest(conv::getToleranceWrw<half>(), TensorLayout::NCHW);
+    const auto& testCase = GetParam();
+    auto tolerance = calculateConvWrwTolerance<half, half, float>(static_cast<double>(_minVal),
+                                                                  static_cast<double>(_maxVal),
+                                                                  static_cast<double>(_minVal),
+                                                                  static_cast<double>(_maxVal),
+                                                                  testCase.yDims);
+    runGraphTest(tolerance, TensorLayout::NCHW);
 }
 
 TEST_P(IntegrationGpuConvWrwDataNcdhwFp16, Correctness)
 {
-    runGraphTest(conv::getToleranceWrw<half>(), TensorLayout::NCDHW);
+    const auto& testCase = GetParam();
+    auto tolerance = calculateConvWrwTolerance<half, half, float>(static_cast<double>(_minVal),
+                                                                  static_cast<double>(_maxVal),
+                                                                  static_cast<double>(_minVal),
+                                                                  static_cast<double>(_maxVal),
+                                                                  testCase.yDims);
+    runGraphTest(tolerance, TensorLayout::NCDHW);
 }
 
 TEST_P(IntegrationGpuConvWrwDataNhwcFp32, Correctness)
 {
-    runGraphTest(conv::getToleranceWrw<float>(), TensorLayout::NHWC);
+    const auto& testCase = GetParam();
+    auto tolerance = calculateConvWrwTolerance<float, float, float>(static_cast<double>(_minVal),
+                                                                    static_cast<double>(_maxVal),
+                                                                    static_cast<double>(_minVal),
+                                                                    static_cast<double>(_maxVal),
+                                                                    testCase.yDims);
+    runGraphTest(tolerance, TensorLayout::NHWC);
 }
 
 TEST_P(IntegrationGpuConvWrwDataNdhwcFp32, Correctness)
 {
-    runGraphTest(conv::getToleranceWrw<float>(), TensorLayout::NDHWC);
+    const auto& testCase = GetParam();
+    auto tolerance = calculateConvWrwTolerance<float, float, float>(static_cast<double>(_minVal),
+                                                                    static_cast<double>(_maxVal),
+                                                                    static_cast<double>(_minVal),
+                                                                    static_cast<double>(_maxVal),
+                                                                    testCase.yDims);
+    runGraphTest(tolerance, TensorLayout::NDHWC);
 }
 
 TEST_P(IntegrationGpuConvWrwDataNhwcBfp16, Correctness)
 {
-    runGraphTest(WORKAROUND_GH_ISSUE_4010, TensorLayout::NHWC);
+    const auto& testCase = GetParam();
+    auto tolerance
+        = calculateConvWrwTolerance<hip_bfloat16, hip_bfloat16, float>(static_cast<double>(_minVal),
+                                                                       static_cast<double>(_maxVal),
+                                                                       static_cast<double>(_minVal),
+                                                                       static_cast<double>(_maxVal),
+                                                                       testCase.yDims);
+    runGraphTest(tolerance, TensorLayout::NHWC);
 }
 
 TEST_P(IntegrationGpuConvWrwDataNdhwcBfp16, Correctness)
 {
-    runGraphTest(WORKAROUND_GH_ISSUE_4010, TensorLayout::NDHWC);
+    const auto& testCase = GetParam();
+    auto tolerance
+        = calculateConvWrwTolerance<hip_bfloat16, hip_bfloat16, float>(static_cast<double>(_minVal),
+                                                                       static_cast<double>(_maxVal),
+                                                                       static_cast<double>(_minVal),
+                                                                       static_cast<double>(_maxVal),
+                                                                       testCase.yDims);
+    runGraphTest(tolerance, TensorLayout::NDHWC);
 }
 
 TEST_P(IntegrationGpuConvWrwDataNhwcFp16, Correctness)
 {
-    runGraphTest(conv::getToleranceWrw<half>(), TensorLayout::NHWC);
+    const auto& testCase = GetParam();
+    auto tolerance = calculateConvWrwTolerance<half, half, float>(static_cast<double>(_minVal),
+                                                                  static_cast<double>(_maxVal),
+                                                                  static_cast<double>(_minVal),
+                                                                  static_cast<double>(_maxVal),
+                                                                  testCase.yDims);
+    runGraphTest(tolerance, TensorLayout::NHWC);
 }
 
 TEST_P(IntegrationGpuConvWrwDataNdhwcFp16, Correctness)
 {
-    runGraphTest(conv::getToleranceWrw<half>(), TensorLayout::NDHWC);
+    const auto& testCase = GetParam();
+    auto tolerance = calculateConvWrwTolerance<half, half, float>(static_cast<double>(_minVal),
+                                                                  static_cast<double>(_maxVal),
+                                                                  static_cast<double>(_minVal),
+                                                                  static_cast<double>(_maxVal),
+                                                                  testCase.yDims);
+    runGraphTest(tolerance, TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
