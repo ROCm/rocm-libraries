@@ -105,7 +105,7 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
         auto* out_ptr      = out_base + blockOffset;
 
         const auto getInput = [&](unsigned int i) {
-            return miopen::batchnorm::cast<fp_prec_type>(in_ptr[in_nstride * i + threadIdx.y]);
+            return miopen::cast<fp_prec_type>(in_ptr[in_nstride * i + threadIdx.y]);
         };
 
         const auto getIndex = [&](unsigned int i) {
@@ -114,13 +114,13 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
 
         for(unsigned int n = 0; n < MIO_BN_N; n++)
         {
-            mean += miopen::batchnorm::cast<fp_prec_type>(in_ptr[getIndex(n)]);
+            mean += miopen::cast<fp_prec_type>(in_ptr[getIndex(n)]);
         }
         mean *= invN;
 
         for(unsigned int n = 0; n < MIO_BN_N; n++)
         {
-            const fp_prec_type x = miopen::batchnorm::cast<fp_prec_type>(in_ptr[getIndex(n)]);
+            const fp_prec_type x = miopen::cast<fp_prec_type>(in_ptr[getIndex(n)]);
             const fp_prec_type d = x - mean;
             variance += d * d;
         }
@@ -152,10 +152,10 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
 
         for(unsigned int n = 0; n < MIO_BN_N; n++)
         {
-            const fp_prec_type x            = miopen::batchnorm::cast<fp_prec_type>(in_ptr[getIndex(n)]);
+            const fp_prec_type x            = miopen::cast<fp_prec_type>(in_ptr[getIndex(n)]);
             fp_prec_type inhat              = (x - mean) * invVariance;
             const fp_prec_type y_prec       = fma(pvt_scale, inhat, pvt_bias);
-            out_ptr[getIndex(n)] = miopen::batchnorm::cast<fp_type>(y_prec);
+            out_ptr[getIndex(n)] = miopen::cast<fp_type>(y_prec);
         }
     }
 }
