@@ -44,34 +44,69 @@ RUN apt-get update && apt-get install -y \
 # ============================================================================
 # Prebuilt stage - downloads and extracts dev env prebuilt binaries tarball
 #
-# Example build command for default tarball build (gfx94X, 7.0.0rc20250909):
-# docker build -f Dockerfile.ubuntu24 -t hipdnn:prebuilt .
-# This will download and install prebuilt binaries using therock-dist-linux-gfx94X-dcgpu-7.0.0rc20250909.tar.gz
+# Uses install_rocm_from_artifacts.py for downloading ROCm artifacts.
 #
-# Example build command to select tarball for asic family gfx950-dcgpu, build tag 7.0.0rc20250908:
-# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_ASIC=gfx950 --build-arg THEROCK_GIT_TAG=7.0.0rc20250908 -t hipdnn:fullbuild .
-# This will download and install prebuilt binaries using therock-dist-linux-gfx950-dcgpu-7.0.0rc20250908.tar.gz
+# Example: Default build (latest nightly for gfx94X-dcgpu):
+#   docker build -f Dockerfile.ubuntu24 -t hipdnn:prebuilt .
 #
-# Example build command to select tarball for asic family gfx950-all, build tag 7.9.0rc20251005:
-# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_PREBUILT_ID=gfx120X-all-7.9.0rc20251005 .
-# This will download and install prebuilt binaries using therock-dist-linux-gfx120X-all-7.9.0rc20251005.tar.gz
+# Example: Specific release version:
+#   docker build -f Dockerfile.ubuntu24 \
+#       --build-arg THEROCK_RELEASE=7.11.0a20260115 \
+#       -t hipdnn:prebuilt .
 #
-# Example build command to select tarball for asic family gfx950-all, build tag 7.9.0rc20251005:
-# docker build -f Dockerfile.ubuntu24 --build-arg THEROCK_TARBALL=therock-dist-linux-gfx120X-all-7.9.0rc20251005.tar.gz .
-# This will download and install prebuilt binaries using therock-dist-linux-gfx120X-all-7.9.0rc20251005.tar.gz
+# Example: Different ASIC family:
+#   docker build -f Dockerfile.ubuntu24 \
+#       --build-arg THEROCK_ASIC=gfx110X \
+#       --build-arg THEROCK_ASIC_VARIANT=all \
+#       -t hipdnn:prebuilt .
+#
+# Example: Full artifact group override:
+#   docker build -f Dockerfile.ubuntu24 \
+#       --build-arg THEROCK_ARTIFACT_GROUP=gfx120X-all \
+#       -t hipdnn:prebuilt .
 # ============================================================================
 FROM base AS install_therock_prebuilt
 
+# Build args for release selection
 ARG THEROCK_ASIC=gfx94X
-ARG THEROCK_GIT_TAG=7.0.0rc20250909
-ARG THEROCK_PREBUILT_ID=$THEROCK_ASIC-dcgpu-$THEROCK_GIT_TAG
-ARG THEROCK_TARBALL=therock-dist-linux-$THEROCK_PREBUILT_ID.tar.gz
+ARG THEROCK_ASIC_VARIANT=dcgpu
+ARG THEROCK_RELEASE=latest
+# Full artifact group (combines ASIC and variant)
+ARG THEROCK_ARTIFACT_GROUP=$THEROCK_ASIC-$THEROCK_ASIC_VARIANT
 
-RUN mkdir -p /opt/rocm
-WORKDIR /tmp
+# Clone TheRock for build tools (shallow clone, only need scripts)
+RUN git clone --depth 1 https://github.com/ROCm/TheRock.git /TheRock
 
-RUN wget --progress=dot:giga https://therock-nightly-tarball.s3.us-east-2.amazonaws.com/$THEROCK_TARBALL
-RUN tar -xf $THEROCK_TARBALL -C /opt/rocm --strip-components=1
+WORKDIR /TheRock
+
+# Setup Python environment
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install -r requirements.txt
+
+# Install ROCm from artifacts
+# The script extracts tarball to {output-dir}/rocm/, then we move to /opt/rocm
+# Note: Script deletes output-dir if exists, so we use a temp location
+# - If THEROCK_RELEASE=latest, uses --latest-release to fetch newest nightly
+# - Otherwise, uses --release to fetch specific version
+RUN if [ "$THEROCK_RELEASE" = "latest" ]; then \
+        echo "Installing latest nightly release for $THEROCK_ARTIFACT_GROUP"; \
+        python build_tools/install_rocm_from_artifacts.py \
+            --latest-release \
+            --artifact-group "$THEROCK_ARTIFACT_GROUP" \
+            --output-dir /tmp/therock-install; \
+    else \
+        echo "Installing release $THEROCK_RELEASE for $THEROCK_ARTIFACT_GROUP"; \
+        python build_tools/install_rocm_from_artifacts.py \
+            --release "$THEROCK_RELEASE" \
+            --artifact-group "$THEROCK_ARTIFACT_GROUP" \
+            --output-dir /tmp/therock-install; \
+    fi && \
+    mv /tmp/therock-install/rocm /opt/rocm && \
+    rm -rf /tmp/therock-install
+
+# Cleanup to reduce image size
+RUN rm -rf /TheRock /opt/venv
 
 # ============================================================================
 # Build from source stage - clones and builds TheRock
