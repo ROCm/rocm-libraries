@@ -51,18 +51,18 @@ RUN apt-get update && apt-get install -y \
 #
 # Example: Specific release version:
 #   docker build -f Dockerfile.ubuntu24 \
-#       --build-arg THEROCK_RELEASE=7.11.0a20260115 \
+#       --build-arg THEROCK_RELEASE=7.12.0a20260202 \
 #       -t hipdnn:prebuilt .
 #
 # Example: Different ASIC family:
 #   docker build -f Dockerfile.ubuntu24 \
-#       --build-arg THEROCK_ASIC=gfx110X \
-#       --build-arg THEROCK_ASIC_VARIANT=all \
+#       --build-arg THEROCK_ASIC=gfx90X \
+#       --build-arg THEROCK_ASIC_VARIANT=dcgpu \
 #       -t hipdnn:prebuilt .
 #
 # Example: Full artifact group override:
 #   docker build -f Dockerfile.ubuntu24 \
-#       --build-arg THEROCK_ARTIFACT_GROUP=gfx120X-all \
+#       --build-arg THEROCK_ARTIFACT_GROUP=gfx110X-all \
 #       -t hipdnn:prebuilt .
 # ============================================================================
 FROM base AS install_therock_prebuilt
@@ -105,7 +105,7 @@ RUN rm -rf /TheRock /venv
 # ============================================================================
 # Build from source stage - clones and builds TheRock
 #
-# Example build command for default source build (default branch, gfx90a):
+# Example build command for default source build (default branch, gfx94X):
 # docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild -t hipdnn:fullbuild .
 #
 # Example build command for overriding ASIC and git hash:
@@ -131,7 +131,7 @@ RUN rm -rf /TheRock /venv
 # ============================================================================
 FROM base AS install_therock_fullbuild
 
-ARG THEROCK_ASIC=gfx90a
+ARG THEROCK_ASIC=gfx94X
 ARG THEROCK_GIT_HASH=default
 ARG THEROCK_BUILD_MODE=Release
 ARG THEROCK_BUILD_PRESET=linux-release-package
