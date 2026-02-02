@@ -19,62 +19,70 @@ namespace ckb = ck_tile::builder;
 
 void print_instance_strings(std::vector<std::string>& instance_strings);
 
-template <typename DeviceOpA, typename DeviceOpB>
-void compare_instance_vectors(std::vector<std::unique_ptr<DeviceOpA>>& instancesA,
-                              std::vector<std::unique_ptr<DeviceOpB>>& instancesB)
+template <typename DeviceOpLegacy, typename DeviceOpCKBuilder>
+void compare_instance_vectors(std::vector<std::unique_ptr<DeviceOpLegacy>>& legacyInstances,
+                              std::vector<std::unique_ptr<DeviceOpCKBuilder>>& ckBuilderInstances)
 {
-    EXPECT_EQ(instancesA.size(), instancesB.size());
+    EXPECT_EQ(legacyInstances.size(), ckBuilderInstances.size());
 
     // Convert instances to string lists
-    std::vector<std::string> stringsA;
-    std::vector<std::string> stringsB;
+    std::vector<std::string> legacyInstanceStrings;
+    std::vector<std::string> ckBuilderInstanceStrings;
 
-    for(const auto& instance : instancesA)
+    for(const auto& instance : legacyInstances)
     {
-        stringsA.push_back(instance->GetInstanceString());
+        legacyInstanceStrings.push_back(instance->GetInstanceString());
     }
 
-    for(const auto& instance : instancesB)
+    for(const auto& instance : ckBuilderInstances)
     {
-        stringsB.push_back(instance->GetInstanceString());
+        ckBuilderInstanceStrings.push_back(instance->GetInstanceString());
     }
 
     // Sort for efficient set operations
-    std::sort(stringsA.begin(), stringsA.end());
-    std::sort(stringsB.begin(), stringsB.end());
+    std::sort(legacyInstanceStrings.begin(), legacyInstanceStrings.end());
+    std::sort(ckBuilderInstanceStrings.begin(), ckBuilderInstanceStrings.end());
 
-    // Strings only in A
-    std::vector<std::string> only_in_A;
-    std::set_difference(stringsA.begin(),
-                        stringsA.end(),
-                        stringsB.begin(),
-                        stringsB.end(),
-                        std::back_inserter(only_in_A));
+    // Find instances only in the legacy list
+    std::vector<std::string> onlyInLegacyInstances;
+    std::set_difference(legacyInstanceStrings.begin(),
+                        legacyInstanceStrings.end(),
+                        ckBuilderInstanceStrings.begin(),
+                        ckBuilderInstanceStrings.end(),
+                        std::back_inserter(onlyInLegacyInstances));
 
-    EXPECT_EQ(only_in_A.size(), 0);
+    EXPECT_EQ(onlyInLegacyInstances.size(), 0);
 
-    // Strings only in B
-    std::vector<std::string> only_in_B;
-    std::set_difference(stringsB.begin(),
-                        stringsB.end(),
-                        stringsA.begin(),
-                        stringsA.end(),
-                        std::back_inserter(only_in_B));
-
-    EXPECT_EQ(only_in_B.size(), 0);
-
-    if(only_in_B.size() > 0)
+    if(onlyInLegacyInstances.size() > 0)
     {
-        MIOPEN_LOG_E("There are " << only_in_B.size() << " kernels only in B");
-        print_instance_strings(only_in_B);
+        MIOPEN_LOG_E("There are " << onlyInLegacyInstances.size()
+                                  << " kernels only in legacy instance vector");
+        print_instance_strings(onlyInLegacyInstances);
+    }
+
+    // Find instances only in the CK builder list
+    std::vector<std::string> onlyInCKBuilderInstances;
+    std::set_difference(ckBuilderInstanceStrings.begin(),
+                        ckBuilderInstanceStrings.end(),
+                        legacyInstanceStrings.begin(),
+                        legacyInstanceStrings.end(),
+                        std::back_inserter(onlyInCKBuilderInstances));
+
+    EXPECT_EQ(onlyInCKBuilderInstances.size(), 0);
+
+    if(onlyInCKBuilderInstances.size() > 0)
+    {
+        MIOPEN_LOG_E("There are " << onlyInCKBuilderInstances.size()
+                                  << " kernels only in CK Builder instance vector");
+        print_instance_strings(onlyInCKBuilderInstances);
     }
 
     // Strings in both
     std::vector<std::string> in_both;
-    std::set_intersection(stringsA.begin(),
-                          stringsA.end(),
-                          stringsB.begin(),
-                          stringsB.end(),
+    std::set_intersection(legacyInstanceStrings.begin(),
+                          legacyInstanceStrings.end(),
+                          ckBuilderInstanceStrings.begin(),
+                          ckBuilderInstanceStrings.end(),
                           std::back_inserter(in_both));
 
     if(in_both.size() > 0)
