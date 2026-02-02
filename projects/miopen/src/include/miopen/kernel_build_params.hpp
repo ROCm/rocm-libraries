@@ -26,11 +26,12 @@
 #ifndef GUARD_MIOPEN_KERNEL_BUILD_PARAMETERS_HPP_
 #define GUARD_MIOPEN_KERNEL_BUILD_PARAMETERS_HPP_
 
-#include <algorithm>
-#include <cassert>
-#include <initializer_list>
-#include <string>
 #include <vector>
+#include <string>
+#include <cassert>
+#include <iterator>
+#include <algorithm>
+#include <initializer_list>
 
 #include <miopen/config.hpp>
 
