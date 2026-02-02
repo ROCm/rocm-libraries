@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,12 +35,12 @@ namespace hiptensor
 {
     struct ContractionSolutionParams
     {
-        ContractionSolutionParams()                                 = default;
-        virtual ~ContractionSolutionParams()                        = default;
-        ContractionSolutionParams(ContractionSolutionParams const&) = default;
-        ContractionSolutionParams(ContractionSolutionParams&&)      = default;
+        ContractionSolutionParams()                                            = default;
+        virtual ~ContractionSolutionParams()                                   = default;
+        ContractionSolutionParams(ContractionSolutionParams const&)            = default;
+        ContractionSolutionParams(ContractionSolutionParams&&)                 = default;
         ContractionSolutionParams& operator=(ContractionSolutionParams const&) = default;
-        ContractionSolutionParams& operator=(ContractionSolutionParams&&) = default;
+        ContractionSolutionParams& operator=(ContractionSolutionParams&&)      = default;
 
         // Map tensor dimensions
         virtual int32_t dimsM() const = 0;
@@ -63,4 +63,3 @@ namespace hiptensor
 } // namespace hiptensor
 
 #include "contraction_solution_params_impl.hpp"
-

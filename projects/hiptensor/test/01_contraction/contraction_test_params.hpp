@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -43,7 +43,7 @@ namespace hiptensor
         using DataTypesT = std::vector<hiptensorDataType_t>;
 
         using AlgorithmT    = hiptensorAlgo_t;
-        using OperatorT     = hiptensorOperator_t;
+        using OperatorT     = std::vector<hiptensorOperator_t>;
         using WorkSizePrefT = hiptensorWorksizePreference_t;
         using LogLevelT     = hiptensorLogLevel_t;
         using MemoryLayoutT = hiptensorMemoryLayout_t;
