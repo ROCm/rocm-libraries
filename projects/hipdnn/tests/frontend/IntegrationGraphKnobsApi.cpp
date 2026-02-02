@@ -146,10 +146,6 @@ TEST_P(IntegrationGraphKnobsApi, CreateExecutionPlanWithEmptyKnobs)
                                   << " should accept empty knob settings: " << result.get_message();
 }
 
-// ============================================================================
-// Non-Parameterized Integration Tests
-// ============================================================================
-
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithValidKnobs)
 {
     Graph graph = createAndBuildSimpleGraph();
