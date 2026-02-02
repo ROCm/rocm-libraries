@@ -10,7 +10,7 @@
 #include "plans/PlanBuilderInterface.hpp"
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class MiopenEngine : public IEngine
@@ -23,6 +23,7 @@ public:
     bool isApplicable(HipdnnEnginePluginHandle& handle,
                       const hipdnn_plugin_sdk::IGraph& opGraph) const override;
     void getDetails(HipdnnEnginePluginHandle& handle,
+                    const hipdnn_plugin_sdk::IGraph& opGraph,
                     hipdnnPluginConstData_t& detailsOut) const override;
     size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
                             const hipdnn_plugin_sdk::IGraph& opGraph) const override;

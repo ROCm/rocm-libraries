@@ -552,6 +552,13 @@ class hardware_t {
    */
   dim3_t get_recommended_matrix_instruction(data_type_t mi_input_type) const;
 
+  /**
+   * @brief Check if the architecture has MALL (Memory Attached Last Level).
+   *
+   * @return true if the architecture has MALL, false otherwise
+   */
+  bool has_MALL() const;
+
  private:
   /**
    * @brief Extract substring before the first colon character.

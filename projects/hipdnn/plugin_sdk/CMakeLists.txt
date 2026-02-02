@@ -3,9 +3,23 @@
 
 include(CMakePackageConfigHelpers)
 
+# Version handling
+hipdnn_setup_version(hipdnn_plugin_sdk)
+
+# Read data_sdk version for minimum requirement
+hipdnn_get_data_sdk_version(HIPDNN_PLUGIN_SDK_DATA_SDK_MIN_VERSION)
+
 set(HIP_DNN_PLUGIN_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 add_library(hipdnn_plugin_sdk INTERFACE)
+
+# Generate version header
+hipdnn_generate_version_header(hipdnn_plugin_sdk)
+
+# Add generated include directory for build interface
+target_include_directories(
+    hipdnn_plugin_sdk INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+)
 
 target_link_libraries(hipdnn_plugin_sdk INTERFACE hipdnn_data_sdk)
 
@@ -38,15 +52,31 @@ install(
     FILES_MATCHING
     PATTERN "*.hpp"
     PATTERN "*.h"
+    PATTERN "*.h.in" EXCLUDE
+)
+
+# Install generated version header
+install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_plugin_sdk/version.h"
+    DESTINATION ${HIP_DNN_PLUGIN_SDK_INSTALL_INCLUDE_DIR}/hipdnn_plugin_sdk
+    COMPONENT Development
 )
 
 install(EXPORT hipdnn_plugin_sdk_targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_plugin_sdk
         FILE hipdnn_plugin_sdkTargets.cmake COMPONENT Development
 )
 
+# Generate package version file for find_package version checking
+write_basic_package_version_file(
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_plugin_sdk/hipdnn_plugin_sdkConfigVersion.cmake"
+    VERSION ${HIPDNN_PLUGIN_SDK_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
 install(
     FILES
         "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_plugin_sdk/hipdnn_plugin_sdkConfig.cmake"
+        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_plugin_sdk/hipdnn_plugin_sdkConfigVersion.cmake"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_plugin_sdk
     COMPONENT Development
 )
