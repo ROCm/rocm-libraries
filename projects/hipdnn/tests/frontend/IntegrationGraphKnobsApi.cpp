@@ -3,6 +3,9 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_frontend.hpp>
+#include <spdlog/sinks/ostream_sink.h>
+#include <spdlog/spdlog.h>
+#include <sstream>
 #include <test_plugins/TestPluginConstants.hpp>
 
 using namespace hipdnn_frontend;
@@ -143,10 +146,6 @@ TEST_P(IntegrationGraphKnobsApi, CreateExecutionPlanWithEmptyKnobs)
                                   << " should accept empty knob settings: " << result.get_message();
 }
 
-// ============================================================================
-// Non-Parameterized Integration Tests
-// ============================================================================
-
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithValidKnobs)
 {
     // TODO: KNOWN ISSUE - initializeEngineConfig() finalizes the descriptor before
@@ -215,12 +214,51 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithUnsupportedKnob)
 
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithDeprecatedKnob)
 {
-    // TODO: Implement test for deprecated knob warning
-    // This test should:
-    // 1. Set test.deprecated_knob value
-    // 2. Verify plan creation succeeds
-    // 3. Verify warning is logged
-    GTEST_SKIP() << "Deprecated knob warning test not yet implemented";
+    // Initialize and verify the frontend logger is running with the right log level.
+    auto logger = spdlog::get(COMPONENT_NAME);
+    auto origLogLevel = logger ? logger->level() : spdlog::level::off;
+    // Mimic initializeFrontendLogging()
+    hipdnn::logging::initializeCallbackLogging(COMPONENT_NAME, hipdnnLoggingCallback_ext);
+    logger = spdlog::get(COMPONENT_NAME);
+    ASSERT_NE(logger, nullptr) << "Frontend logger should be initialized";
+    if(logger->level() == spdlog::level::off || logger->level() == spdlog::level::critical)
+    {
+        logger->set_level(spdlog::level::warn);
+    }
+    ASSERT_LE(logger->level(), spdlog::level::warn)
+        << "Logger level must be warn or lower to capture warnings";
+
+    // Use ostringstream to capture log output
+    std::ostringstream oss;
+    auto ostreamSink = std::make_shared<spdlog::sinks::ostream_sink_mt>(oss);
+    logger->sinks().push_back(ostreamSink);
+
+    // Run the test
+
+    Graph graph = createAndBuildSimpleGraph();
+
+    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    std::vector<KnobSetting> settings;
+    settings.emplace_back("test.deprecated_knob", static_cast<int64_t>(5));
+
+    auto result = graph.create_execution_plan_ext(engineId, settings);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+
+    logger->flush();
+    std::string captured = oss.str();
+
+    // Clean up
+    auto& sinks = logger->sinks();
+    sinks.erase(std::remove(sinks.begin(), sinks.end(), ostreamSink), sinks.end());
+    logger->set_level(origLogLevel);
+
+    // Verify the expected deprecation warning was logged
+    std::string expectedLog = "Knob test.deprecated_knob has been marked as deprecated.";
+    bool foundWarning = captured.find(expectedLog) != std::string::npos;
+    EXPECT_TRUE(foundWarning) << "Expected deprecation warning '" << expectedLog
+                              << "' was not found in logs:\n"
+                              << captured;
 }
 
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithSharedKnob)
