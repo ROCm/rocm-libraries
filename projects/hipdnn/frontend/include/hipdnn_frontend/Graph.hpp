@@ -768,22 +768,6 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    // Create execution plan with int64 knobs (compatibility method)
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    Error create_execution_plan(int64_t engineId,
-                                const std::unordered_map<KnobType_t, int64_t>& settings)
-    {
-        std::vector<KnobSetting> knobSettings;
-
-        knobSettings.reserve(settings.size());
-        for(const auto& [knobId, knobValue] : settings)
-        {
-            knobSettings.emplace_back(knobId, knobValue);
-        }
-
-        return create_execution_plan_ext(engineId, knobSettings);
-    }
-
     // Create execution plan with typed knob settings
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error create_execution_plan_ext(int64_t engineId, const std::vector<KnobSetting>& settings)
