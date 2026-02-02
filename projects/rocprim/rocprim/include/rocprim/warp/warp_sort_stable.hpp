@@ -91,6 +91,8 @@ template<class Key,
 class warp_sort_stable
 {
     // Always alias merge_path backend (needed for storage and fallback).
+    // Merge path is faster than bitonic shuffle sort on non-full waves, i.e. where
+    // 'input_size' is used.
     using merge_path_impl
         = detail::warp_sort_stable<Key, BlockSize, VirtualWaveSize, ItemsPerThread, Value>;
 
@@ -124,7 +126,15 @@ public:
               storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction())
     {
-        chosen_impl().sort(thread_key, compare_function);
+        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
+        {
+            (void)storage;
+            chosen_impl().sort(thread_key, compare_function);
+        }
+        else
+        {
+            chosen_impl().sort(thread_key, storage, compare_function);
+        }
     }
 
     /// \brief Stable sort for Key Array (Per-thread array).
@@ -143,7 +153,15 @@ public:
               storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction())
     {
-        chosen_impl().sort(thread_keys, compare_function);
+        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
+        {
+            (void)storage;
+            chosen_impl().sort(thread_keys, compare_function);
+        }
+        else
+        {
+            chosen_impl().sort(thread_keys, storage, compare_function);
+        }
     }
 
     /// \brief Stable sort for Key Array with storage and valid input size.
@@ -180,7 +198,15 @@ public:
               storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction())
     {
-        chosen_impl().sort(thread_key, thread_value, compare_function);
+        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
+        {
+            (void)storage;
+            chosen_impl().sort(thread_key, thread_value, compare_function);
+        }
+        else
+        {
+            chosen_impl().sort(thread_key, thread_value, storage, compare_function);
+        }
     }
 
     /// \brief Stable sort for Key-Value pair with storage and valid input size (Per-thread single value).
@@ -216,7 +242,15 @@ public:
               storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction())
     {
-        chosen_impl().sort(thread_keys, thread_values, compare_function);
+        if constexpr(Algorithm == warp_sort_stable_algorithm::shuffle)
+        {
+            (void)storage;
+            chosen_impl().sort(thread_keys, thread_values, compare_function);
+        }
+        else
+        {
+            chosen_impl().sort(thread_keys, thread_values, storage, compare_function);
+        }
     }
 
     /// \brief Stable sort for Key-Value Arrays with storage and valid input size.
