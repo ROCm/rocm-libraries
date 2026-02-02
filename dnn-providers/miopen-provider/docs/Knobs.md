@@ -15,7 +15,7 @@ Configuration knobs for the MIOpen legacy plugin.
 
 // Create execution plan with benchmarking enabled
 std::vector<hipdnn_frontend::KnobSetting> settings;
-settings.emplace_back("global.benchmarking", static_cast<int64_t>(1));
+settings.emplace_back("global.benchmarking", 1LL);
 graph.create_execution_plan_ext(engineId, settings);
 ```
 

@@ -37,7 +37,7 @@ TEST_P(IntegrationGpuBenchmarkingKnob, ExecutesSuccessfully)
     auto graph = FrontendGraphFactory::create(GetParam());
 
     std::vector<KnobSetting> knobSettings;
-    knobSettings.emplace_back(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, static_cast<int64_t>(1));
+    knobSettings.emplace_back(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1LL);
 
     executeGraphWithKnobs(graph, knobSettings);
 }
