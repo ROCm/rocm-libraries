@@ -102,7 +102,7 @@ rocsparse_status rocsparse::gell2csr_nnz(rocsparse_handle          handle,
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
-        // LCOV_EXCL_STOP
+            // LCOV_EXCL_STOP
         }
         // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -147,7 +147,7 @@ rocsparse_status rocsparse::gell2csr_nnz(rocsparse_handle          handle,
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
-        // LCOV_EXCL_STOP
+            // LCOV_EXCL_STOP
         }
         // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -159,7 +159,7 @@ rocsparse_status rocsparse::gell2csr_nnz(rocsparse_handle          handle,
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
-    // LCOV_EXCL_STOP
+        // LCOV_EXCL_STOP
     }
 }
 
@@ -237,7 +237,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
-            // LCOV_EXCL_STOP
+                // LCOV_EXCL_STOP
             }
             // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -260,7 +260,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
-            // LCOV_EXCL_STOP
+                // LCOV_EXCL_STOP
             }
             // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -271,7 +271,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
-        // LCOV_EXCL_STOP
+            // LCOV_EXCL_STOP
         }
         // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -299,7 +299,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
-            // LCOV_EXCL_STOP
+                // LCOV_EXCL_STOP
             }
             // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -322,7 +322,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
-            // LCOV_EXCL_STOP
+                // LCOV_EXCL_STOP
             }
             // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -333,7 +333,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
-        // LCOV_EXCL_STOP
+            // LCOV_EXCL_STOP
         }
         // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -361,7 +361,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
-            // LCOV_EXCL_STOP
+                // LCOV_EXCL_STOP
             }
             // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -384,7 +384,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
-            // LCOV_EXCL_STOP
+                // LCOV_EXCL_STOP
             }
             // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -395,7 +395,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
-        // LCOV_EXCL_STOP
+            // LCOV_EXCL_STOP
         }
         // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -423,7 +423,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
-            // LCOV_EXCL_STOP
+                // LCOV_EXCL_STOP
             }
             // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -446,7 +446,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
-            // LCOV_EXCL_STOP
+                // LCOV_EXCL_STOP
             }
             // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -457,7 +457,7 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
-        // LCOV_EXCL_STOP
+            // LCOV_EXCL_STOP
         }
         // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);

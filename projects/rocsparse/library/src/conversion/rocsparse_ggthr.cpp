@@ -104,7 +104,7 @@ rocsparse_status rocsparse::ggthr(rocsparse_handle     handle_,
 
     switch(perm_type)
     {
-    // LCOV_EXCL_START 
+    // LCOV_EXCL_START
     case rocsparse_indextype_u16:
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
