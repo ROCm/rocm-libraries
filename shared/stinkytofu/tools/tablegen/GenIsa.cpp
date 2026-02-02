@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -156,7 +156,8 @@ namespace
     //   HwInstDesc { isaOpcode, unifiedOpcode,
     //                issue, latency,
     //                mnemonic,
-    //                makeFlagSet({flags}) }, // defined at file:line
+    //                makeFlagSet({flags}),
+    //                {} }, // operandWidths initialized to empty, populated at runtime
     std::string hwInstDescToString(const GfxInstDef& inst, size_t maxMnemonicLen)
     {
         std::stringstream ss;
@@ -178,8 +179,14 @@ namespace
            << " " << std::left << std::setw(maxMnemonicLen + 3)
            << mnemonic
            // flags
-           << "makeFlagSet({" << inst.getFlagsStr() << "}) }," << " // " << inst.definedFile << ":"
-           << inst.definedLine << "\n";
+           << "makeFlagSet({" << inst.getFlagsStr() << "}), ";
+
+        // operandWidths - always emit empty span here
+        // Architecture-specific widths are set after table creation
+        ss << "{} ";
+
+        ss << "},"
+           << " // " << inst.definedFile << ":" << inst.definedLine << "\n";
         return ss.str();
     }
 
@@ -188,7 +195,9 @@ namespace
         EmitMacroGuard emitMacro(os, "GET_ISAINFO_HWINSTDESC_TABLE");
 
         os << "// MCIDTable: Machine Code Instruction Descriptor Table\n"
-           << "static constexpr HwInstDesc MCIDTable[] = {\n";
+           << "// Note: operandWidths are initialized empty here and populated by\n"
+           << "// architecture-specific code after table creation\n"
+           << "static HwInstDesc MCIDTable[] = {\n"; // Not constexpr anymore!
 
         for(auto& inst : insts)
             os << hwInstDescToString(*inst, fixedMnemonicLen);
