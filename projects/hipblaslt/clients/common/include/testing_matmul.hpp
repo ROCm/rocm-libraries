@@ -5435,7 +5435,7 @@ void testing_matmul_with_bias(const Arguments& arg,
     }
 
     //Freeing the device memory allocated for the General Batched GEMM Pointer Arrays
-/*    for(int i = 0; i < block_count; i++)
+    for(int i = 0; i < block_count; i++)
     {
         CHECK_HIP_ERROR(hipFree(dda[i]));
         CHECK_HIP_ERROR(hipFree(ddb[i]));
@@ -5446,7 +5446,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         CHECK_HIP_ERROR(hipFreeHost(hhc[i]));
         CHECK_HIP_ERROR(hipFreeHost(hhd[i]));
     }
-*/
+
     if(dWorkspace != nullptr)
         delete dWorkspace;
     if(userArgs != nullptr)
