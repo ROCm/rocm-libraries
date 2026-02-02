@@ -235,6 +235,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithDeprecatedKnob)
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
 
+    logger->flush();
     std::string captured = oss.str();
 
     // Clean up
