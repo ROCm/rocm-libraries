@@ -6925,9 +6925,12 @@ class KernelWriterAssembly(KernelWriter):
                     a_64_shift = Label(label=self.labels.getNameInc("a_64_Shift"), comment="")
                     a_32_shift = Label(label=self.labels.getNameInc("a_32_Shift"), comment="")
                     a_common = Label(label=self.labels.getNameInc("a_shift_end"), comment="")
-                    aStr1 = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a+1), min(2, vgprPerInput))
-                    aStr2 = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a+2), min(2, vgprPerInput))
-
+                    if kernel["UseF32XEmulation"]:
+                      aStr1 = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a+1), min(2, vgprPerInput))
+                      aStr2 = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a+2), min(2, vgprPerInput))
+                    else:
+                      aStr1 = vgpr(aStr_base + "+1", min(2, vgprPerInput))
+                      aStr2 = vgpr(aStr_base + "+2", min(2, vgprPerInput))
                     shiftK.add(SMovB32(dst=sgpr(tmpSgprX3), src=sgpr(tmpSgprX1), comment="sgpr used for minic shift 128 bit"))
                     shiftK.add(SCmpGeI32(src0=sgpr(tmpSgprX3), src1=64, comment="check offset > 63"))
                     shiftK.add(SCBranchSCC1(labelName=a_64_shift.getLabelName(), comment="jump when positive"))
@@ -7001,8 +7004,12 @@ class KernelWriterAssembly(KernelWriter):
                     b_64_shift = Label(label=self.labels.getNameInc("b_64_Shift"), comment="")
                     b_32_shift = Label(label=self.labels.getNameInc("b_32_Shift"), comment="")
                     b_common = Label(label=self.labels.getNameInc("b_shift_end"), comment="")
-                    bStr1 = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b+1), min(2, vgprPerInput))
-                    bStr2 = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b+2), min(2, vgprPerInput))
+                    if kernel["UseF32XEmulation"]:
+                      bStr1 = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b+1), min(2, vgprPerInput))
+                      bStr2 = vgpr(self.generateSrcStrForMFMAshiftK(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b+2), min(2, vgprPerInput))
+                    else:
+                      bStr1 = vgpr(bStr_base + "+1", min(2, vgprPerInput))
+                      bStr2 = vgpr(bStr_base + "+2", min(2, vgprPerInput))
                     shiftK.add(SMovB32(dst=sgpr(tmpSgprX3), src=sgpr(tmpSgprX1), comment="sgpr used for minic shift 128 bit"))
                     shiftK.add(SCmpGeI32(src0=sgpr(tmpSgprX3), src1=64, comment="check offset >63"))
                     shiftK.add(SCBranchSCC1(labelName=b_64_shift.getLabelName(), comment="jump when positive"))
