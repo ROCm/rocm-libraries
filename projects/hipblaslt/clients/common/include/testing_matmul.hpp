@@ -5441,6 +5441,19 @@ void testing_matmul_with_bias(const Arguments& arg,
         CHECK_HIP_ERROR(hipFree(it));
     }
 
+    //Freeing the device memory allocated for the General Batched GEMM Pointer Arrays
+    for(int i = 0; i < block_count; i++)
+    {
+        CHECK_HIP_ERROR(hipFree(dda[i]));
+        CHECK_HIP_ERROR(hipFree(ddb[i]));
+        CHECK_HIP_ERROR(hipFree(ddc[i]));
+        CHECK_HIP_ERROR(hipFree(ddd[i]));
+        CHECK_HIP_ERROR(hipFreeHost(hha[i]));
+        CHECK_HIP_ERROR(hipFreeHost(hhb[i]));
+        CHECK_HIP_ERROR(hipFreeHost(hhc[i]));
+        CHECK_HIP_ERROR(hipFreeHost(hhd[i]));
+    }
+
     if(dWorkspace != nullptr)
         delete dWorkspace;
     if(userArgs != nullptr)
