@@ -11,11 +11,14 @@ This guide shows you how to add a new instruction from bottom (Assembly IR) to t
 To add a new StinkyTofu assembly IR, you'll need to access the following files:
 
 ```bash
-CommonInstsDSL.cpp
-Flags.def
-Gfx1250.cpp
-RocisaHwInstMappings.hpp
+CommonInstsDSL.cpp                    # Common instruction structures
+Flags.def                             # Instruction flags
+hardware/src/gfx/Gfx1250.cpp          # Instruction definitions + costs
+src/hardware/Gfx1250ArchInfo.hpp      # Operand requirements (register width/type)
+RocisaHwInstMappings.hpp              # Rocisa mappings
 ```
+
+**Navigation Tip**: Each architecture file (Gfx1250.cpp, Gfx942.cpp, Gfx950.cpp) contains cross-reference comments at the top pointing to related metadata locations. Use these to quickly navigate between costs and requirements.
 
 Here we will add the instruction `s_wait_tensorcnt` step by step.
 
@@ -55,7 +58,14 @@ struct FloatAddInst : GfxInstDef
 
 ### Step 3. Add definition to the corresponding architecture
 
-`s_wait_tensorcnt` is a new feature in GFX1250. We'll add the definition to `Gfx1250.cpp`.
+`s_wait_tensorcnt` is a new feature in GFX1250. We'll add the definition to `hardware/src/gfx/Gfx1250.cpp`.
+
+**Quick Navigation**: Open `Gfx1250.cpp` and check the header comment at the top - it shows you where to find:
+- Instruction definitions (DEF_T calls) - typically lines 200-800
+- Instruction costs - see Step 6 below
+- Operand requirements - in `src/hardware/Gfx1250ArchInfo.hpp`
+
+Add the definition:
 
 ```c++
 DEF_T(WaitTensorCntInst, "s_wait_tensorcnt");
@@ -90,9 +100,16 @@ Add to `shared/stinkytofu/tools/tablegen/LogicalInstructionDefs.inc`:
  false},               // isCommutative
 ```
 
-### Step 6: Add Hardware Timing Info
+### Step 6: Add Hardware Metadata (Costs + Operand Requirements)
+
+#### 6a. Add Instruction Costs
 
 Add to the cost table in `hardware/src/gfx/Gfx1250.cpp`:
+
+**Navigation**: Open the file and read the header comment - it tells you:
+- Where costs are defined (GFX1250_COSTS[] array)
+- Where operand requirements are (src/hardware/Gfx1250ArchInfo.hpp)
+- Where definitions are (DEF_T calls)
 
 ```cpp
 constexpr InstructionCost GFX1250_COSTS[] = {
@@ -110,6 +127,39 @@ constexpr InstructionCost GFX1250_COSTS[] = {
 - If the instruction uses default costs, you don't need to add it to the table
 - For Gfx1250 (RDNA4), default is cycle=1, latency=1
 - For Gfx942/Gfx950 (CDNA), default is cycle=4, latency=4
+
+#### 6b. Add Operand Requirements (Optional)
+
+If your instruction has specific register width or type requirements (e.g., `tensor_load_to_lds` requires 4 SGPRs for src0, 8 SGPRs for src1), add them in `src/hardware/Gfx1250ArchInfo.hpp`:
+
+**Navigation**: The header comment at the top tells you where to find costs (hardware/src/gfx/Gfx1250.cpp).
+
+```cpp
+// In getMCIDTable() method:
+
+// 1. Define operand requirements (before the instRequirements table)
+static constexpr HwInstDesc::OperandWidth myInstructionReqs[] = {
+    {0, 4, false, RegType::S},  // src[0]: 4 SGPRs
+    {1, 8, false, RegType::S},  // src[1]: 8 SGPRs
+};
+
+// 2. Add to the instRequirements table
+static constexpr InstRequirement instRequirements[] = {
+    {"tensor_load_to_lds", tensorLoadToLdsReqs},
+    {"my_instruction", myInstructionReqs},  // Add your instruction
+};
+```
+
+**Operand Width Fields**:
+- `operandIndex`: 0-based operand index
+- `width`: Number of consecutive registers (4 = 4 registers)
+- `isDest`: `true` for destination operand, `false` for source
+- `expectedType`: Register type (`RegType::S` for SGPR, `RegType::V` for VGPR, `RegType::A` for AGPR)
+
+**When to Add Requirements**:
+- ? Instruction requires specific register counts (e.g., 4 or 8 consecutive registers)
+- ? Instruction requires specific register types (must be SGPR/VGPR/AGPR)
+- ? Instruction uses single registers with no constraints (verifier will skip these)
 
 ### Step 7: Run Tablegen
 
@@ -129,3 +179,35 @@ This auto-generates:
 - `RocisaGfx1250Mappings.inc` - Rocisa -> ASM opcode mappings
 
 The mnemonic mapping automatically enables Logical IR -> Assembly IR conversion.
+
+---
+
+## Quick Reference: Instruction Metadata Locations
+
+Each architecture has metadata split across 2 files for modularity:
+
+### Gfx1250 (RDNA4)
+
+| Metadata Type | Location | What to Modify |
+|---------------|----------|----------------|
+| **Costs** (cycle, latency) | `hardware/src/gfx/Gfx1250.cpp` | `GFX1250_COSTS[]` array |
+| **Definitions** (DEF_T) | `hardware/src/gfx/Gfx1250.cpp` | `DEF_T()` calls (lines ~200-800) |
+| **Operand Requirements** | `src/hardware/Gfx1250ArchInfo.hpp` | `getMCIDTable()` method |
+
+### Gfx942 (CDNA2/MI200) & Gfx950 (CDNA3/MI300)
+
+Same structure as Gfx1250:
+- `hardware/src/gfx/Gfx942.cpp` + `src/hardware/Gfx942ArchInfo.hpp`
+- `hardware/src/gfx/Gfx950.cpp` + `src/hardware/Gfx950ArchInfo.hpp`
+
+### Navigation Tips
+
+? **Each file has cross-reference comments at the top** pointing to related metadata locations.
+
+? **To modify an instruction**:
+1. Open the architecture's `.cpp` file (e.g., `Gfx1250.cpp`)
+2. Read the header comment - it tells you where to find costs, definitions, and requirements
+3. Update costs in the same file (scroll to `GFX*_COSTS[]`)
+4. Update requirements by opening the corresponding `ArchInfo.hpp` file
+
+? **All metadata for one architecture is just a Ctrl+Click away** - no hunting through dozens of files!

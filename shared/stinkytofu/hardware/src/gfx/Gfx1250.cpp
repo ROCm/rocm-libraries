@@ -31,6 +31,24 @@ namespace stinkytofu
 {
     namespace
     {
+        //=======================================================================
+        // INSTRUCTION METADATA FOR GFX1250
+        //=======================================================================
+        //
+        // This file contains:
+        //   1. Instruction COSTS (cycle, latency) - defined below
+        //   2. Instruction DEFINITIONS (DEF_T calls) - lines 200-800
+        //
+        // Related metadata in other files:
+        //   - Operand REQUIREMENTS (register width/type) -> src/hardware/Gfx1250ArchInfo.hpp
+        //
+        // To modify an instruction:
+        //   - Update costs: Scroll to GFX1250_COSTS[] array below
+        //   - Update requirements: Open src/hardware/Gfx1250ArchInfo.hpp
+        //   - Update definition: Scroll to DEF_T() calls (lines 200-800)
+        //
+        //=======================================================================
+
         // Instruction cost structure
         struct InstructionCost
         {
