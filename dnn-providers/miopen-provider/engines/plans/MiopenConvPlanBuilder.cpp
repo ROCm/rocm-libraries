@@ -299,10 +299,11 @@ size_t MiopenConvPlanBuilder::getWorkspaceSize(
     }
 }
 
-void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
-                                      const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                                      const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-                                      HipdnnEnginePluginExecutionContext& executionContext) const
+void MiopenConvPlanBuilder::buildPlan(
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() != 1)
     {
@@ -353,9 +354,9 @@ void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
     }
 }
 
-std::vector<hipdnn_data_sdk::data_objects::KnobT>
-    MiopenConvPlanBuilder::getCustomKnobs(const HipdnnEnginePluginHandle& handle,
-                                          const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenConvPlanBuilder::getCustomKnobs(
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     std::vector<hipdnn_data_sdk::data_objects::KnobT> knobs;
 

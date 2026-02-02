@@ -36,7 +36,8 @@ public:
 
     MOCK_METHOD((std::vector<hipdnn_data_sdk::data_objects::KnobT>),
                 getCustomKnobs,
-                (const HipdnnEnginePluginHandle& handle, const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph),
+                (const HipdnnEnginePluginHandle& handle,
+                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph),
                 (const, override));
 };
 
