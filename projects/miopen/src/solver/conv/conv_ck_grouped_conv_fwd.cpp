@@ -289,9 +289,6 @@ struct CKArgs
         Wo = ProblemInterpreter::GetOutputWidthWo(problem);
         Y  = ProblemInterpreter::GetFilterHeightY(problem);
         X  = ProblemInterpreter::GetFilterWidthX(problem);
-        Di = ProblemInterpreter::GetInputDepthDi(problem);
-        Do = ProblemInterpreter::GetOutputDepthDo(problem);
-        Z  = ProblemInterpreter::GetFilterDepthZ(problem);
 
         input_lengths = {G, N, C, Hi, Wi}; // input
         out_lens      = {G, N, K, Ho, Wo}; // output
@@ -348,13 +345,10 @@ struct CKArgs
     int K1;
     int Hi;
     int Wi;
-    int Di;
     int Ho;
     int Wo;
-    int Do;
     int Y;
     int X;
-    int Z;
     std::array<ck::index_t, 5> input_lengths;
     std::array<ck::index_t, 5> in_strides;
     std::array<ck::index_t, 5> out_lens;
