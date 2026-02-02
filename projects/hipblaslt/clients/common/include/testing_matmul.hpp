@@ -1037,15 +1037,11 @@ void check(hipStream_t                   stream,
             }
         }
         if(arg.unit_check)
-        {
-            hipblaslt_cout << "*******************************************************************"<< std::endl;
-            hipblaslt_cout << "Doing unit checks \n";
-            hipblaslt_cout << "*******************************************************************"<< std::endl;        
+        {     
             if(batchMode != 1)
             {                
                 if(tol[gemmIdx] != 0)
                 {
-                    hipblaslt_cout << "Doing near_check_general() \n";
                     near_check_general(M[gemmIdx],
                                     N[gemmIdx],
                                     ldd[gemmIdx],
@@ -1058,7 +1054,6 @@ void check(hipStream_t                   stream,
                 }
                 else
                 {
-                    hipblaslt_cout << "Doing unit_check_general() \n";
                     unit_check_general(M[gemmIdx],
                                     N[gemmIdx],
                                     ldd[gemmIdx],
@@ -1076,7 +1071,6 @@ void check(hipStream_t                   stream,
                 {
                     if(tol[gemmIdx] != 0)
                     {
-                        hipblaslt_cout << "Doing near_check_general() \n";
                         near_check_general(M[gemmIdx],
                                         N[gemmIdx],
                                         ldd[gemmIdx],
@@ -1089,7 +1083,6 @@ void check(hipStream_t                   stream,
                     }
                     else
                     {
-                        hipblaslt_cout << "Doing unit_check_general() \n";
                         unit_check_general(M[gemmIdx],
                                         N[gemmIdx],
                                         ldd[gemmIdx],
@@ -3592,7 +3585,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                 hipMemcpyHostToDevice));
         }
     }       
-
+/* Meant just for debuging pointer values
     if(batchMode == 1)
     {
         for(int32_t b = 0; b < block_count; b++)
@@ -3613,7 +3606,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         hipblaslt_cout<<"Pointer dB is >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"<<std::hex<<dB[0].buf()<<std::endl;
         hipblaslt_cout<<"Pointer dC is >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"<<std::hex<<dC[0].buf()<<std::endl;
         hipblaslt_cout<<"Pointer dD is >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"<<std::hex<<(*dDp)[0].buf()<<std::endl;
-    }
+    } */
     hipblaslt_ext::GemmType gemmType = do_grouped_gemm
                                            ? hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM
                                            : hipblaslt_ext::GemmType::HIPBLASLT_GEMM;
@@ -5442,7 +5435,7 @@ void testing_matmul_with_bias(const Arguments& arg,
     }
 
     //Freeing the device memory allocated for the General Batched GEMM Pointer Arrays
-    for(int i = 0; i < block_count; i++)
+/*    for(int i = 0; i < block_count; i++)
     {
         CHECK_HIP_ERROR(hipFree(dda[i]));
         CHECK_HIP_ERROR(hipFree(ddb[i]));
@@ -5453,7 +5446,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         CHECK_HIP_ERROR(hipFreeHost(hhc[i]));
         CHECK_HIP_ERROR(hipFreeHost(hhd[i]));
     }
-
+*/
     if(dWorkspace != nullptr)
         delete dWorkspace;
     if(userArgs != nullptr)

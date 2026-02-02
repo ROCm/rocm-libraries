@@ -1282,7 +1282,7 @@ namespace TensileLite
                                          size_t   autoStaggerUStrideShift,
                                          uint32_t autoGsuVal) const
     {
-        std::cout << "Argtype in KernelArgs : " << argType << std::endl;
+        //std::cout << "Argtype in KernelArgs : " << argType << std::endl;
         if constexpr(!Legacy)
         {
             gemmCount = gemmCount & 0x3FFFFFFF;
@@ -1498,9 +1498,9 @@ namespace TensileLite
                           << ", StaggerU: " << autoStaggerU
                           << ", StaggerUStrideShift: " << autoStaggerUStrideShift << std::endl;
             }
-            std::cout << "Generating universal kernel args for single call... >>>>>>>>>>>>>>>>>>>>>" << std::endl;
-            std::cout << "autoWGM: " << autoWGM << ", autoWGMXCC: " << autoWGMXCC << ", autoWGMXCCCHUNK: " << autoWGMXCCCHUNK
-                      << ", autoGSU: " << autoGsuVal << std::endl;
+            //std::cout << "Generating universal kernel args for single call... >>>>>>>>>>>>>>>>>>>>>" << std::endl;
+            //std::cout << "autoWGM: " << autoWGM << ", autoWGMXCC: " << autoWGMXCC << ", autoWGMXCCCHUNK: " << autoWGMXCCCHUNK
+            //          << ", autoGSU: " << autoGsuVal << std::endl;
             if(problem.batchMode() == 1)
             {
                 // Setting the autoWGM=1, autoWGMXCC=8 and autoGsuVal=1 for General Batched GEMM until 
@@ -1508,8 +1508,8 @@ namespace TensileLite
                 autoWGM    = 1;
                 autoWGMXCC = 8;
                 autoGsuVal = 1;
-                std::cout << "Reset autoWGM: " << autoWGM << ", autoWGMXCC: " << autoWGMXCC
-                      << ", autoGSU: " << autoGsuVal << std::endl;                
+                //std::cout << "Reset autoWGM: " << autoWGM << ", autoWGMXCC: " << autoWGMXCC
+                //      << ", autoGSU: " << autoGsuVal << std::endl;                
                 kernelArgs<T_Debug, false>(1,
                                         3,
                                         rv.args,
