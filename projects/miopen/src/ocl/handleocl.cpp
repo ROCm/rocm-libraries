@@ -37,6 +37,7 @@
 #include <miopen/ocldeviceinfo.hpp>
 #include <miopen/timer.hpp>
 #include <miopen/filesystem.hpp>
+#include <miopen/unique_path.hpp>
 
 #include <string>
 
@@ -412,7 +413,7 @@ Program Handle::LoadProgram(const std::string& program_name,
         miopen::SaveBinary(
             binary, this->GetTargetProperties(), this->GetMaxComputeUnits(), program_name, params);
 #else
-        auto path = miopen::GetCachePath(false) / fs::temp_directory_path();
+        auto path = miopen::GetCachePath(false) / miopen::unique_path();
         miopen::SaveProgramBinary(p, path.string());
         miopen::SaveBinary(path, this->GetTargetProperties(), program_name, params);
 #endif

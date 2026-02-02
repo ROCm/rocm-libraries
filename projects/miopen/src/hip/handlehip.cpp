@@ -38,6 +38,7 @@
 #include <miopen/stringutils.hpp>
 #include <miopen/target_properties.hpp>
 #include <miopen/timer.hpp>
+#include <miopen/unique_path.hpp>
 
 #if !MIOPEN_ENABLE_SQLITE_KERN_CACHE
 #include <miopen/write_file.hpp>
@@ -616,7 +617,7 @@ Program Handle::LoadProgram(const fs::path& program_name,
         // If cache is disabled we don't need to dump binary and move it there
         if(!miopen::IsCacheDisabled())
         {
-            auto path = miopen::GetCachePath(false) / fs::temp_directory_path();
+            const auto path = miopen::GetCachePath(false) / miopen::unique_path();
             if(p.IsCodeObjectInMemory())
                 miopen::WriteFile(p.GetCodeObjectBlob(), path);
             else

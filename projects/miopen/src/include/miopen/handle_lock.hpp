@@ -27,12 +27,11 @@
 #ifndef GUARD_MIOPEN_HANDLE_LOCK_HPP
 #define GUARD_MIOPEN_HANDLE_LOCK_HPP
 
-#include <boost/filesystem/operations.hpp>
-
 #include <miopen/config.h>
 #include <miopen/filesystem.hpp>
 #include <miopen/file_lock.hpp>
 #include <miopen/logger.hpp>
+#include <miopen/unique_path.hpp>
 
 #include <chrono>
 #include <fstream>
@@ -60,7 +59,7 @@ inline fs::path get_handle_lock_path(const char* name)
     const auto p = fs::current_path() / name;
     if(!fs::exists(p))
     {
-        auto tmp = fs::current_path() / fs::temp_directory_path();
+        const auto tmp = fs::current_path() / miopen::unique_path();
         std::ofstream{tmp}; // NOLINT(bugprone-unused-raii)
         fs::rename(tmp, p);
     }

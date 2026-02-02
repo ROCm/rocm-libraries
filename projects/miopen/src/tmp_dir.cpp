@@ -28,6 +28,7 @@
 #include <miopen/env.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/process.hpp>
+#include <miopen/unique_path.hpp>
 
 #include <thread>
 #include <string_view>
@@ -44,10 +45,7 @@ TmpDir::TmpDir(std::string_view prefix) : path{fs::temp_directory_path()}
 {
     std::string p{prefix.empty() ? "" : (prefix[0] == '-' ? "" : "-")};
 
-    std::mt19937 prng(std::random_device{}());
-    std::uniform_int_distribution<int> rand;
-    path /=
-        "miopen" + p.append(prefix) + "-" + (std::stringstream() << std::hex << rand(prng)).str();
+    path /= miopen::unique_path("miopen" + p.append(prefix) + "-%%%%-%%%%-%%%%-%%%%");
 
     fs::create_directories(path);
 }

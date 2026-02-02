@@ -43,6 +43,7 @@
 
 #include <miopen/filesystem.hpp>
 #include <miopen/load_file.hpp>
+#include <miopen/unique_path.hpp>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -207,7 +208,7 @@ Program Handle::LoadProgram(const fs::path& program_name,
                            program_name,
                            params);
 #else
-        auto path = miopen::GetCachePath(false) / fs::temp_directory_path();
+        const auto path = miopen::GetCachePath(false) / miopen::unique_path();
         if(p.IsCodeObjectInMemory())
             miopen::WriteFile(p.GetCodeObjectBlob(), path);
         else

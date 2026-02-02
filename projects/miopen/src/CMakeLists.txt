@@ -1084,6 +1084,16 @@ if(MIOPEN_USE_ROCTRACER)
     target_link_libraries(MIOpen PRIVATE ${rocTracer})
 endif()
 
+if (WIN32)
+    if (MIOPEN_FILESYSTEM_HAS_BCRYPT)
+        add_compile_definitions(MIOPEN_FILESYSTEM_HAS_BCRYPT)
+        target_link_libraries(MIOpen PRIVATE bcrypt)
+    else()
+        add_compile_definitions(MIOPEN_FILESYSTEM_DISABLE_BCRYPT)
+        target_link_libraries(MIOpen PRIVATE advapi32)
+    endif()
+endif()
+
 ############################################################
 # Installation
 set(MIOPEN_CXX_HEADER_PATH)
