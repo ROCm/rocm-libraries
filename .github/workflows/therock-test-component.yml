@@ -207,7 +207,7 @@ jobs:
 
           curl -X POST "$WEBHOOK_URL" \
             -H 'Content-Type: application/json' \
-            -d "{\"title\":\"MIOpen GitHub CI Notification\",\"text\":\"❌ ${PLATFORM_NAME} Test Failure ❌\n\n**Branch:** ${BRANCH_REF}\n${PR_INFO}\n**Issue Type:** ${ISSUE_SUMMARY}\n\n**Error Context:**\n\\\`\\\`\\\`\n${ERROR_SNIPPET}\n\\\`\\\`\\\`\n\n[View Full Run](${RUN_URL})\"}"
+            -d "{\"title\":\"MIOpen GitHub CI Notification\",\"text\":\"❌ ${PLATFORM_NAME} Test Failure ❌\n\n**Branch:** ${BRANCH_REF}\n${PR_INFO}\n**Issue Type:** ${ISSUE_SUMMARY}\n\n**Error Context:**\n\`\`\`\n${ERROR_SNIPPET}\n\`\`\`\n\n[View Full Run](${RUN_URL})\"}"
 
       # GitHub's 'Complete job' step is unaware of launched executables
       # and will fail to clean up orphan processes.
