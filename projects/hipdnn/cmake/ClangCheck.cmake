@@ -48,7 +48,7 @@ if(ENABLE_CLANG_FORMAT)
         check_format
         COMMAND find . ${CLANG_FORMAT_PRUNE} -regex ".*\\.\\(cpp\\|hpp\\|c\\|h\\)" -exec
                 ${CLANG_FORMAT_BINARY} --dry-run --Werror {} +
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         VERBATIM
         COMMENT "Checking code format"
     )
@@ -57,7 +57,7 @@ if(ENABLE_CLANG_FORMAT)
         format
         COMMAND find . ${CLANG_FORMAT_PRUNE} -regex ".*\\.\\(cpp\\|hpp\\|c\\|h\\)" -exec
                 ${CLANG_FORMAT_BINARY} --verbose -i {} +
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         VERBATIM
         COMMENT "Formatting code"
     )

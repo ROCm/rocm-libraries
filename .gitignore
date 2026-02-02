@@ -2,3 +2,10 @@ __pycache__
 
 # Build directories
 _build/
+build/
+
+#VsCode settings
+.vscode/
+
+# Cline Seetings
+.cline_storage/

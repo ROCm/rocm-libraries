@@ -33,8 +33,11 @@ set(SUPPORTED_COMPONENTS
     # projects
     hipblas-common
     hipblaslt
+    hipdnn
     rocprim
     rocrand
+    # dnn-providers
+    miopen-provider
 )
 
 set(UNSUPPORTED_COMPONENTS
@@ -128,6 +131,16 @@ if("hipblaslt" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     )
 endif()
 
+if("hipdnn" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    # Disable plugin builds - plugins are built as separate superbuild components
+    set(HIPDNN_BUILD_PLUGINS OFF)
+    add_subdirectory_with_message(
+        COMPONENT hipdnn
+        PREFIX_PATH projects
+        EXPECT_TARGET hipdnn_backend
+    )
+endif()
+
 if("rocprim" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     add_subdirectory_with_message(
         COMPONENT rocprim
@@ -141,6 +154,14 @@ if("rocrand" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         COMPONENT rocrand
         PREFIX_PATH projects
         EXPECT_TARGET rocrand
+    )
+endif()
+
+if("miopen-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT miopen-provider
+        PREFIX_PATH dnn-providers
+        EXPECT_TARGET miopen_plugin
     )
 endif()
 

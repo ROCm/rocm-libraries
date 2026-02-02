@@ -76,8 +76,15 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 
     find_package(hip REQUIRED)
-    find_package(hipdnn_data_sdk CONFIG REQUIRED)
-    find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+
+    # hipdnn SDK dependencies - use targets directly if available (superbuild),
+    # otherwise find installed packages (true standalone)
+    if(NOT TARGET hipdnn_data_sdk)
+        find_package(hipdnn_data_sdk CONFIG REQUIRED)
+    endif()
+    if(NOT TARGET hipdnn_plugin_sdk)
+        find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+    endif()
 
     # Setup testing dependencies & tests for standalone build
     include(Dependencies)
@@ -202,7 +209,13 @@ if(NOT HIPDNN_SKIP_TESTS)
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
 
-    if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
+    # Only finalize test targets for true standalone builds (not superbuild, not as hipdnn dependency)
+    # Check if we're a subproject by comparing source dirs
+    # TODO: Revisit this - miopen-provider tests won't be properly integrated into superbuild's
+    # ctest infrastructure. Need to either:
+    # 1. Have superbuild manage test finalization for all components, or
+    # 2. Use unique target names per component to avoid collisions
+    if(NOT BUILD_PLUGIN_AS_DEPENDENCY AND "${CMAKE_SOURCE_DIR}" STREQUAL "${PROJECT_SOURCE_DIR}")
         # Keep this after all build folders have been added so they have a chance to register their tests
         # using add_*_test_target()
         finalize_test_targets()

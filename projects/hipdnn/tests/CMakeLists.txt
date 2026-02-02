@@ -7,8 +7,8 @@ if(HIPDNN_SKIP_TESTS)
 endif()
 
 set(HIPDNN_TEST_INCLUDE_DIRS
-    ${CMAKE_SOURCE_DIR}/backend/tests/descriptors ${CMAKE_SOURCE_DIR}/tests/backend
-    ${CMAKE_SOURCE_DIR}/backend/src ${CMAKE_SOURCE_DIR}/tests
+    ${PROJECT_SOURCE_DIR}/backend/tests/descriptors ${PROJECT_SOURCE_DIR}/tests/backend
+    ${PROJECT_SOURCE_DIR}/backend/src ${PROJECT_SOURCE_DIR}/tests
     CACHE INTERNAL "Common test include directories"
 )
 

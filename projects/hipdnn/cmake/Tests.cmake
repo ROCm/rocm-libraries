@@ -55,10 +55,10 @@ function(_create_test_name_validation_target_internal)
         add_custom_command(
             OUTPUT ${CMAKE_BINARY_DIR}/test_names_validated
             COMMAND
-                ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/cmake/scripts/test_name_validator.py
+                ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/cmake/scripts/test_name_validator.py
                 --test-executables ${TEST_EXECUTABLES_FILE} --build-dir ${CMAKE_BINARY_DIR} --strict
             COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_BINARY_DIR}/test_names_validated
-            DEPENDS ${CMAKE_SOURCE_DIR}/cmake/scripts/test_name_validator.py ${CHECK_DEPENDS_GLOBAL}
+            DEPENDS ${PROJECT_SOURCE_DIR}/cmake/scripts/test_name_validator.py ${CHECK_DEPENDS_GLOBAL}
             COMMENT "Validating test names with --gtest_list_tests test collection"
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
             VERBATIM
