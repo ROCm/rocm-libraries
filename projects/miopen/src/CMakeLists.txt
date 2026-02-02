@@ -366,6 +366,22 @@ if(MIOPEN_ENABLE_SQLITE AND MIOPEN_ENABLE_SQLITE_KERN_CACHE)
 endif()
 
 if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+    include(${PROJECT_SOURCE_DIR}/cmake/CopyExternalHeader.cmake)
+    find_path(ROCRAND_INCLUDE_DIR "rocrand/rocrand_xorwow.h")
+    if(ROCRAND_INCLUDE_DIR)
+        message(STATUS "Found rocrand headers at: ${ROCRAND_INCLUDE_DIR}")
+        set(ROCRAND_XORWOW_INLINED_PATH ${PROJECT_BINARY_DIR}/kernels/rocrand_xorwow_inlined.h)
+        copy_external_header(
+            TARGET inline_rocrand_header
+            SOURCE_HEADER ${ROCRAND_INCLUDE_DIR}/rocrand/rocrand_xorwow.h
+            ROOT_INCLUDE_DIR ${ROCRAND_INCLUDE_DIR}
+            OUTPUT_PATH ${ROCRAND_XORWOW_INLINED_PATH}
+            COMMENT "Inlining rocrand_xorwow.h with all dependencies as C++ source"
+        )
+    else()
+        message(WARNING "rocrand headers not found - rocrand_xorwow.h will not be inlined")
+    endif()
+
     file(GLOB_RECURSE STATIC_COMPOSABLE_KERNEL_INCLUDE "kernels/static_composable_kernel/include/*/*.hpp")
     file(GLOB_RECURSE STATIC_COMPOSABLE_KERNEL_SOURCE "kernels/static_composable_kernel/src/*/*.cpp")
     file(GLOB_RECURSE COMPOSABLE_KERNEL_INCLUDE "legacy_composable_kernel/composable_kernel/include/*.hpp")
@@ -512,6 +528,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/miopen_limits.hpp
         kernels/miopen_math.hpp
         kernels/miopen_rocrand.hpp
+        ${ROCRAND_XORWOW_INLINED_PATH}
         kernels/miopen_type_traits.hpp
         kernels/miopen_utility.hpp
         kernels/miopen_warp_size.hpp
@@ -886,6 +903,11 @@ else()
     add_library( MIOpen
         ${MIOpen_Source}
         )
+endif()
+
+# Add dependency on inlined rocrand header if it was created
+if(TARGET inline_rocrand_header)
+    add_dependencies(MIOpen inline_rocrand_header)
 endif()
 
 rocm_set_soversion(MIOpen ${MIOpen_SOVERSION})
