@@ -54,13 +54,28 @@ struct Gfx1250ArchInfo : public ArchHelper::ArchInfo
 #define GET_ISAINFO_HWINSTDESC_TABLE
 #include "hardware/Gfx1250Isa.inc"
 
+        //=======================================================================
+        // INSTRUCTION METADATA FOR GFX1250
+        //=======================================================================
+        //
+        // Operand requirements (register width/type) are defined HERE
+        // Instruction costs (cycle/latency) -> hardware/src/gfx/Gfx1250.cpp
+        //
+        // To modify an instruction:
+        //   - Update requirements: Scroll down in THIS file
+        //   - Update costs: Open hardware/src/gfx/Gfx1250.cpp (GFX1250_COSTS[])
+        //   - Update definition: hardware/src/gfx/Gfx1250.cpp (DEF_T calls)
+        //
+        //=======================================================================
+
         // Initialize architecture-specific register requirements
         // This is done once when the table is first accessed
         static bool initialized = false;
         if(!initialized)
         {
-            // Define all instruction requirements in one place
-            // Format: {mnemonic, operand_requirements_array}
+            //-------------------------------------------------------------------
+            // Define instruction operand requirements (width + type)
+            //-------------------------------------------------------------------
 
             // tensor_load_to_lds: src[0]=4 SGPRs, src[1]=8 SGPRs
             static constexpr HwInstDesc::OperandWidth tensorLoadToLdsReqs[] = {
@@ -68,7 +83,17 @@ struct Gfx1250ArchInfo : public ArchHelper::ArchInfo
                 {1, 8, false, RegType::S}, // src[1]: 8 SGPRs
             };
 
-            // Table of all instructions with register requirements
+            // Add more instruction requirements here as needed:
+            // static constexpr HwInstDesc::OperandWidth vAddF32Reqs[] = {
+            //     {0, 1, true,  RegType::V},  // dest: 1 VGPR
+            //     {0, 1, false, RegType::V},  // src0: 1 VGPR
+            //     {1, 1, false, RegType::V},  // src1: 1 VGPR
+            // };
+
+            //-------------------------------------------------------------------
+            // Table of instructions with register requirements
+            //-------------------------------------------------------------------
+
             struct InstRequirement
             {
                 const char*                          mnemonic;
@@ -77,12 +102,13 @@ struct Gfx1250ArchInfo : public ArchHelper::ArchInfo
 
             static constexpr InstRequirement instRequirements[] = {
                 {"tensor_load_to_lds", tensorLoadToLdsReqs},
-                // Add more instructions here as needed:
-                // {"v_add_f32", vAddF32Reqs},
-                // {"s_mov_b32", sMovB32Reqs},
+                // Add more: {"v_add_f32", vAddF32Reqs},
             };
 
-            // Apply requirements to instructions
+            //-------------------------------------------------------------------
+            // Apply requirements to MCIDTable
+            //-------------------------------------------------------------------
+
             for(const auto& req : instRequirements)
             {
                 for(size_t i = 0; i < sizeof(MCIDTable) / sizeof(MCIDTable[0]); ++i)

@@ -31,6 +31,24 @@ namespace stinkytofu
 {
     namespace
     {
+        //=======================================================================
+        // INSTRUCTION METADATA FOR GFX950
+        //=======================================================================
+        //
+        // This file contains:
+        //   1. Instruction COSTS (cycle, latency) - defined below
+        //   2. Instruction DEFINITIONS (DEF_T calls) - lines 150-700
+        //
+        // Related metadata in other files:
+        //   - Operand REQUIREMENTS (register width/type) -> src/hardware/Gfx950ArchInfo.hpp
+        //
+        // To modify an instruction:
+        //   - Update costs: Scroll to GFX950_COSTS[] array below
+        //   - Update requirements: Open src/hardware/Gfx950ArchInfo.hpp
+        //   - Update definition: Scroll to DEF_T() calls (lines 150-700)
+        //
+        //=======================================================================
+
         // Instruction cost structure
         struct InstructionCost
         {

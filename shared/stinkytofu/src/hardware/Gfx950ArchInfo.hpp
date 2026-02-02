@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,24 @@
 
 #include "isa/ArchHelper.hpp"
 #include "isa/gfx/GfxIsa.hpp"
+
+//===============================================================================
+// INSTRUCTION METADATA FOR GFX950
+//===============================================================================
+//
+// This file contains:
+//   - Operand REQUIREMENTS (register width/type) - see getMCIDTable() below
+//
+// Related metadata in other files:
+//   - Instruction COSTS (cycle, latency) -> hardware/src/gfx/Gfx950.cpp
+//   - Instruction DEFINITIONS (DEF_T calls) -> hardware/src/gfx/Gfx950.cpp
+//
+// To modify an instruction:
+//   - Update requirements: Scroll to getMCIDTable() in THIS file
+//   - Update costs: Open hardware/src/gfx/Gfx950.cpp (GFX950_COSTS[])
+//   - Update definition: hardware/src/gfx/Gfx950.cpp (DEF_T calls)
+//
+//===============================================================================
 
 namespace
 {
@@ -52,6 +70,10 @@ struct Gfx950ArchInfo : public ArchHelper::ArchInfo
 // Implementation to return the MCID table for Gfx950
 #define GET_ISAINFO_HWINSTDESC_TABLE
 #include "hardware/Gfx950Isa.inc"
+
+        // Currently no operand requirements for Gfx950 instructions
+        // Add them here when needed (see Gfx1250ArchInfo.hpp for example)
+
         return MCIDTable;
     }
 
