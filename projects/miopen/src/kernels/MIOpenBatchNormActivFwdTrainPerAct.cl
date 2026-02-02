@@ -132,8 +132,8 @@ __kernel void MIOpenBatchNormActivFwdTrainPerActivation(
                                    FLOAT2FLOATPREC(alpha));
                 out[index] = FLOATPREC2FLOAT(act_out);
             } // end for(n)
-        }     // end if(inImgIndex)
-    }         // end for(img_offset) //image mini_batch is processed
+        } // end if(inImgIndex)
+    } // end for(img_offset) //image mini_batch is processed
 }
 
 // Restore warnings

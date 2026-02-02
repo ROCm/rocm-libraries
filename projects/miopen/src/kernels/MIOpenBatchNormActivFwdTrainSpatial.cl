@@ -530,7 +530,7 @@ MIOpenBatchNormActivFwdTrainSpatial(
     {
         __attribute__((opencl_unroll_hint(2))) for(unsigned int n = 0; n < MIO_BN_N; n++)
         {
-            index        = n * MIO_BN_CHW + cidx + lid;
+            index = n * MIO_BN_CHW + cidx + lid;
 #if(MIO_BN_N < MIO_BN_MAXN)
             minibatch[n] = FLOAT2FLOATPREC(*(in + index));
             mean += minibatch[n];
@@ -617,9 +617,9 @@ MIOpenBatchNormActivFwdTrainSpatial(
 
         for(unsigned int n = 0; n < MIO_BN_N; n++)
         { // apply normalization
-            index  = n * MIO_BN_CHW + cidx + lid;
+            index = n * MIO_BN_CHW + cidx + lid;
 #if(MIO_BN_N < MIO_BN_MAXN)
-            inhat  = (minibatch[n] - mean) * invVariance; // (in[index] - mean) * invVariance;
+            inhat = (minibatch[n] - mean) * invVariance; // (in[index] - mean) * invVariance;
 #else
             inhat = (FLOAT2FLOATPREC(*(in + index)) - mean) * invVariance;
 #endif
@@ -633,7 +633,7 @@ MIOpenBatchNormActivFwdTrainSpatial(
             out[index] = FLOATPREC2FLOAT(act_out);
 
         } // end for
-    }     // end if
+    } // end if
 
     if(lid == 0)
     {
