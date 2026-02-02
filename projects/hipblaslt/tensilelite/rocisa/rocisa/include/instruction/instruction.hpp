@@ -225,6 +225,12 @@ namespace rocisa
                     }
                 }
             }
+            if(!hasVgpr){
+                if(getVgprMsb() == -1)
+                    // Base layer WA: -2 means no-vgpr inst
+                    rocIsa::getInstance().setVgprMsb(-2);
+                return;
+            }
             int newVal = msbSrc[0] + (msbSrc[1] << 2) + (msbSrc[2] << 4) + (msbDst << 6);
             int oriVal = getVgprMsb();
             if(newVal != oriVal && !outputInlineAsm){
