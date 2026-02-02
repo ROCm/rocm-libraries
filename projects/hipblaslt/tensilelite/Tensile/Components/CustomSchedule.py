@@ -4279,7 +4279,7 @@ def _get_schedule_128x256x64_16bit(kernel, useLDSTr, TLDS):
         lra0 = [create_range(min_val = 1, num = 4, step = 2, repeat = 2),
                 create_range(min_val = 0, num = 4, step = 2, repeat = 2)]
 
-        GRIncA = [create_range(min_val = 0, num = 3, step = 2, repeat = 3),
+        GRIncA = [create_range(min_val = 2, num = 3, step = 2, repeat = 3),
                   create_range(min_val = 1, num = 3, step = 2, repeat = 3)]
 
         waitLRA0 = max(lra0[1])+5
@@ -4319,15 +4319,15 @@ def _get_schedule_128x256x64_16bit(kernel, useLDSTr, TLDS):
             'GRB': [grb],
             'GRIncA': [*GRIncA],
             'GRIncB': [GRIncB],
-            'LCC': [[numMfma-1,numMfma-1]],
+            'LCC': [[numMfma-2,numMfma-2]],
             'LRA0': [*lra0],
             'LRA1': [lra1],
             'LRB0': [lrb0],
             'LRB1': [lrb1],
             'LRSA': [[startGRB-1]],
             'LRSB': [[startGRB-1]],
-            'LWSA': [[numMfma-2]],
-            'LWSB': [[numMfma-2]],
+            'LWSA': [[numMfma-3]],
+            'LWSB': [[numMfma-3]],
             'SYNC': [syncTable[::2]],
         }
 
