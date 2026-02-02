@@ -3141,7 +3141,18 @@ namespace KernelGraphTest
         // The resulting transformers should be identical
         //
         for(auto op : kgraph1.control.getNodes())
-            EXPECT_EQ(transformers.at(op).getIndexes(), kgraph1.buildTransformer(op).getIndexes());
+        {
+            auto const& expected = transformers.at(op).getIndexes();
+            auto const& actual   = kgraph1.buildTransformer(op).getIndexes();
+
+            ASSERT_EQ(expected.size(), actual.size());
+            for(auto const& [dim, expr] : expected)
+            {
+                auto it = actual.find(dim);
+                ASSERT_NE(it, actual.end());
+                EXPECT_TRUE(Expression::identical(expr, it->second));
+            }
+        }
     }
 
     TEST_F(KernelGraphTest, RemoveSetCoordinate)

@@ -108,9 +108,12 @@ TEST(TestMiopenEngineManager, ReturnsEngineDetails)
     engineDetails.size = 200;
     auto mockEngine = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine, id()).WillRepeatedly(Return(1));
-    EXPECT_CALL(*mockEngine, getDetails(::testing::_, ::testing::_))
-        .WillOnce([&engineDetails](HipdnnEnginePluginHandle& handle, hipdnnPluginConstData_t& out) {
+    EXPECT_CALL(*mockEngine, getDetails(::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([&engineDetails](HipdnnEnginePluginHandle& handle,
+                                   const hipdnn_plugin_sdk::IGraph& graph,
+                                   hipdnnPluginConstData_t& out) {
             (void)handle;
+            (void)graph;
             out.ptr = engineDetails.ptr;
             out.size = engineDetails.size;
         });

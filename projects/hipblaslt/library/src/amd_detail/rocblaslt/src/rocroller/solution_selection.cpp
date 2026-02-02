@@ -204,7 +204,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                 || kernelType.typeA == rocRoller::DataType::BF8
                 || kernelType.typeB == rocRoller::DataType::FP8
                 || kernelType.typeB == rocRoller::DataType::BF8)
-               && wgt.m + wgt.n > 256)
+               && (wgt.m == 192 || wgt.n == 192))
                 continue;
 
             // 6bit datatypes only work with power of 2 tile sizes
@@ -255,7 +255,12 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                          || kernelType.typeA == rocRoller::DataType::BF6
                          || kernelType.typeB == rocRoller::DataType::FP6
                          || kernelType.typeB == rocRoller::DataType::BF6);
-            if(numTiles < analytical_hardware.N_CU && !isF6)
+            auto isLargeF8 = ((kernelType.typeA == rocRoller::DataType::FP8
+                || kernelType.typeA == rocRoller::DataType::BF8
+                || kernelType.typeB == rocRoller::DataType::FP8
+                || kernelType.typeB == rocRoller::DataType::BF8)
+               && wgt.m + wgt.n > 256);
+            if(numTiles < analytical_hardware.N_CU && !isF6 && !isLargeF8)
             {
                 params.back().streamK = true;
             }
