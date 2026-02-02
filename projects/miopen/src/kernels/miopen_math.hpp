@@ -217,10 +217,6 @@ __forceinline__ __device__ double fma(double a, double b, double c) { return ::f
 
 } // namespace detail
 
-//=============================================================================
-// 4-element vector overloads
-//=============================================================================
-
 template <typename FpVecType>
 __forceinline__ __device__ FpVecType exp(FpVecType x)
 {
