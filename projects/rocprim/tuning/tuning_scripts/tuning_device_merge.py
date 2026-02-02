@@ -26,10 +26,7 @@ import sys
 sys.path.append("../")
 
 from utils import TYPE_CONFIGS
-from tuning_scripts.base_tuner import BaseTuner, TunerArgs
-
-KEY_TYPES = ["rocprim::int128_t", "int64_t", "int", "short", "int8_t", "double", "float", "rocprim::half"]
-VALUE_TYPES = ["rocprim::int128_t", "int64_t", "int", "short", "int8_t"]
+from tuning_scripts.base_tuner import BaseTuner, TunerArgs, COMMON_VALUE_TYPES, COMMON_KEY_TYPES
 
 class Tuner(BaseTuner):
     def _get_default_args() -> TunerArgs:
@@ -87,9 +84,9 @@ class Tuner(BaseTuner):
 
     def tune_all(self) -> None:
         """Tune for all key type and value type combinations"""
-        for key_type in KEY_TYPES:
+        for key_type in COMMON_KEY_TYPES:
             self.tune_type(key_type)
-            for value_type in VALUE_TYPES:
+            for value_type in COMMON_VALUE_TYPES:
                 self.tune_type(key_type, value_type)
 
 if __name__ == "__main__":

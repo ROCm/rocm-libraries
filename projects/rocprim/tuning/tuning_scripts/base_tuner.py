@@ -84,6 +84,9 @@ Kernel Tuner documentation: https://kerneltuner.github.io/kernel_tuner/stable/co
 ROCm HIP Python Wrapper: https://rocm.docs.amd.com/projects/hip-python/en/latest/index.html
 """
 
+COMMON_KEY_TYPES = ["rocprim::int128_t", "int64_t", "int", "short", "int8_t", "double", "float", "rocprim::half"]
+COMMON_VALUE_TYPES = ["rocprim::int128_t", "int64_t", "int", "short", "int8_t"]
+
 @dataclass
 class TunerArgs:
     algo_full_name: Optional[str] = None
