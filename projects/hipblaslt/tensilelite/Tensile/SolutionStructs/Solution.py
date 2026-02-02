@@ -875,6 +875,9 @@ class Solution(collections.abc.Mapping):
     state["Multicast"] = False
     if state["ClusterDim"] != [1, 1]:
       state["Multicast"] = True
+    else:
+      if state["ClusterBarrier"] == True:
+        reject(state, "ClusterDim can't be [1, 1] if ClusterBarrier enabled.")
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
