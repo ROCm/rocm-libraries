@@ -179,6 +179,9 @@ namespace rocRoller
                     Parameters::Solution::LoadPath::BufferToLDSViaVGPR};
                 bool storeLDSD = true;
 
+                std::pair<int, int> padLDSA = {0, 0};
+                std::pair<int, int> padLDSB = {0, 0};
+
                 bool prefetch          = false;
                 int  prefetchInFlight  = 2;
                 int  prefetchLDSFactor = 0;
@@ -192,6 +195,8 @@ namespace rocRoller
                 std::string scheduler;
                 std::string schedulerCost;
                 bool        matchMemoryAccess;
+
+                bool tailLoops = true;
 
                 // TODO Use StreamKConfig
                 bool streamK               = false;
@@ -225,6 +230,11 @@ namespace rocRoller::Client::GEMMClient::CLI
 {
     constexpr bool PARSE_SUCCESS = true;
     constexpr bool PARSE_FAILURE = false;
+
+    /**
+     * @brief Parse an XxY pair.
+     */
+    bool ParseIntPair(const std::string& arg, std::pair<int, int>& x);
 
     /**
      * @brief Parse an MxNxK or MxNxKxB tuple from a string.

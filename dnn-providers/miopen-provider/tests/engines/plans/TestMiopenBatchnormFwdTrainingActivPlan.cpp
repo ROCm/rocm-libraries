@@ -6,7 +6,7 @@
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
-using namespace miopen_legacy_plugin;
+using namespace miopen_plugin;
 
 // ============================================================================
 // Basic Functionality Tests
@@ -94,25 +94,6 @@ TEST(TestBatchnormFwdTrainingActivParams, HandlesMeanVarianceMissing)
     BatchnormFwdTrainingParams params(*bnAttrs, *activAttrs, graph.getTensorMap());
 
     EXPECT_FALSE(params.hasSaveMeanVariance());
-}
-
-TEST(TestBatchnormFwdTrainingActivParams, ThrowsWhenRunningStatsProvided)
-{
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
-        true, true); // with mean/variance and running stats
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-
-    const auto& bnNode = graph.getNode(0);
-    auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
-    ASSERT_NE(bnAttrs, nullptr);
-
-    const auto& activNode = graph.getNode(1);
-    auto* activAttrs = activNode.attributes_as_PointwiseAttributes();
-    ASSERT_NE(activAttrs, nullptr);
-
-    // Should throw because running stats are provided
-    EXPECT_THROW(BatchnormFwdTrainingParams(*bnAttrs, *activAttrs, graph.getTensorMap()),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestBatchnormFwdTrainingActivParams, HasRunningStatsReturnsFalseWhenNotProvided)

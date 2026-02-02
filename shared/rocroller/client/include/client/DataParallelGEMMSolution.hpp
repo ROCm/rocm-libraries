@@ -293,6 +293,8 @@ namespace rocRoller
                 {
                     auto params = std::make_shared<CommandParameters>();
 
+                    params->tailLoops = solutionParams.tailLoops;
+
                     int wave_m = 0, wave_n = 0, wave_k = 0, wave_b = 0;
 
                     auto typeA = fromString<DataType>(solutionParams.types.typeA);
@@ -440,6 +442,20 @@ namespace rocRoller
 
                     auto memoryTypeA = GetMemoryType(solutionParams.loadPathA);
                     auto memoryTypeB = GetMemoryType(solutionParams.loadPathB);
+
+                    AssertFatal(solutionParams.padLDSA.first >= -1
+                                    && solutionParams.padLDSA.second >= -1,
+                                "Invalid LDS padding (A)",
+                                ShowValue(solutionParams.padLDSA.first),
+                                ShowValue(solutionParams.padLDSA.second));
+                    AssertFatal(solutionParams.padLDSB.first >= -1
+                                    && solutionParams.padLDSB.second >= -1,
+                                "Invalid LDS padding (B)",
+                                ShowValue(solutionParams.padLDSB.first),
+                                ShowValue(solutionParams.padLDSB.second));
+
+                    params->ldsPadding[LayoutType::MATRIX_A] = solutionParams.padLDSA;
+                    params->ldsPadding[LayoutType::MATRIX_B] = solutionParams.padLDSB;
 
                     auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macM, solutionParams.macK},

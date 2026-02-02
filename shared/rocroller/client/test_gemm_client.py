@@ -250,6 +250,8 @@ unroll_x: 0
 unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
 storeLDS_D: true
 prefetch: false
 prefetchInFlight: 0
@@ -276,10 +278,11 @@ types:
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: false
+matchMemoryAccess: true
+tailLoops: true
 streamK: false
 streamKTwoTile: false
 streamKTwoTileDPFirst: false
-matchMemoryAccess: true
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false
@@ -315,6 +318,8 @@ unroll_x: 0
 unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
 storeLDS_D: true
 prefetch: false
 prefetchInFlight: 0
@@ -324,6 +329,7 @@ betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeighted
 matchMemoryAccess: true
+tailLoops: true
 types:
   trans_A: N
   trans_B: N
@@ -379,6 +385,8 @@ unroll_x: 0
 unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
 storeLDS_D: true
 prefetch: false
 prefetchInFlight: 0
@@ -388,6 +396,7 @@ betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeighted
 matchMemoryAccess: true
+tailLoops: true
 types:
   trans_A: N
   trans_B: N
@@ -706,6 +715,19 @@ def test_gemm_options(tmp_path):
     )
     assert post["load_A"] == "BufferToLDS"
     assert post["load_B"] == "BufferToVGPR"
+
+    post = run_and_load_example_yaml(
+        [
+            gemm,
+            "example",
+            example,
+            "--arch=gfx950",
+            "--padLDS_A=22,33",
+            "--padLDS_B=44,55",
+        ]
+    )
+    assert post["padLDS_A"] == [22, 33]
+    assert post["padLDS_B"] == [44, 55]
 
     # setting mxlds options
     post = run_and_load_example_yaml(

@@ -11,7 +11,7 @@
 #include "PlanBuilderInterface.hpp" //temporary
 #include "PlanInterface.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class BatchnormFwdInferenceParams
@@ -59,7 +59,8 @@ private:
 class BatchnormFwdInferencePlan : public IPlan
 {
 public:
-    BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams);
+    BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams,
+                              bool benchmarkingEnabled = false);
 
     BatchnormFwdInferencePlan(const BatchnormFwdInferencePlan&) = delete;
     BatchnormFwdInferencePlan& operator=(const BatchnormFwdInferencePlan&) = delete;
@@ -76,6 +77,7 @@ public:
 
 private:
     BatchnormFwdInferenceParams _inferenceParams;
+    bool _benchmarkingEnabled;
 };
 
 }
