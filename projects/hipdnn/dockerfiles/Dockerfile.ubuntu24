@@ -83,9 +83,7 @@ RUN python3 -m venv /venv
 ENV PATH="/venv/bin:$PATH"
 RUN pip install -r requirements.txt
 
-# Install ROCm from artifacts
-# The script extracts tarball (which contains rocm/ directory) to output-dir
-# Result: {output-dir}/rocm/ -> /opt/rocm/
+# Install ROCm from artifacts directly to /opt/rocm
 # - If THEROCK_RELEASE=latest, uses --latest-release to fetch newest nightly
 # - Otherwise, uses --release to fetch specific version
 RUN if [ "$THEROCK_RELEASE" = "latest" ]; then \
@@ -93,13 +91,13 @@ RUN if [ "$THEROCK_RELEASE" = "latest" ]; then \
         python build_tools/install_rocm_from_artifacts.py \
             --latest-release \
             --artifact-group "$THEROCK_ARTIFACT_GROUP" \
-            --output-dir /opt; \
+            --output-dir /opt/rocm; \
     else \
         echo "Installing release $THEROCK_RELEASE for $THEROCK_ARTIFACT_GROUP"; \
         python build_tools/install_rocm_from_artifacts.py \
             --release "$THEROCK_RELEASE" \
             --artifact-group "$THEROCK_ARTIFACT_GROUP" \
-            --output-dir /opt; \
+            --output-dir /opt/rocm; \
     fi
 
 RUN rm -rf /TheRock /venv
