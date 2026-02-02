@@ -39,7 +39,8 @@ namespace rocRoller
         VariableType  variableType;
         DataDirection dataDirection = DataDirection::ReadOnly;
 
-        Expression::ExpressionPtr expression             = nullptr;
+        Expression::ExpressionPtr expression = nullptr;
+
         Expression::ExpressionPtr simplifiedExpr         = nullptr;
         Expression::ExpressionPtr restoredExpr           = nullptr;
         Expression::ExpressionPtr simplifiedRestoredExpr = nullptr;

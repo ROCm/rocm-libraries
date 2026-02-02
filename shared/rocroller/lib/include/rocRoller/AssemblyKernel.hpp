@@ -229,8 +229,7 @@ namespace rocRoller
         Register::ValuePtr                m_packedWorkitemIndex;
         std::array<Register::ValuePtr, 3> m_workitemIndex;
 
-        std::vector<AssemblyKernelArgument> m_arguments;
-
+        std::vector<AssemblyKernelArgument>     m_arguments;
         std::unordered_map<std::string, size_t> m_argumentNames;
         int                                     m_argumentSize = 0;
 

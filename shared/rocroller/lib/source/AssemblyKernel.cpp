@@ -294,15 +294,12 @@ namespace rocRoller
             if(equivalentToAny(arg.expression))
                 return true;
 
-            //auto simpleArg = simplify(arg.expression);
             if(arg.simplifiedExpr && equivalentToAny(arg.simplifiedExpr))
                 return true;
 
-            //auto restoredArg = restoreCommandArguments(arg.expression);
             if(arg.restoredExpr && equivalentToAny(arg.restoredExpr))
                 return true;
 
-            //auto restoredSimplifiedArg = simplify(restoredArg);
             if(arg.simplifiedRestoredExpr && equivalentToAny(arg.simplifiedRestoredExpr))
                 return true;
 
