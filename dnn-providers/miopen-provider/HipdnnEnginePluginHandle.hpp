@@ -33,8 +33,8 @@ public:
         return _stream;
     }
 
-    std::shared_ptr<miopen_legacy_plugin::MiopenContainer> miopenContainer;
-    miopen_legacy_plugin::EngineManager& getEngineManager()
+    std::shared_ptr<miopen_plugin::MiopenContainer> miopenContainer;
+    miopen_plugin::EngineManager& getEngineManager()
     {
         return miopenContainer->getEngineManager();
     }
