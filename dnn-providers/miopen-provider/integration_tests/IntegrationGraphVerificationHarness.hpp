@@ -30,6 +30,7 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
 protected:
     static constexpr float DEFAULT_MIN = -1.0f;
     static constexpr float DEFAULT_MAX = 1.0f;
+    static constexpr unsigned int DEFAULT_SMOKE_TEST_SEED = 42;
 
     void SetUp() override
     {
@@ -105,7 +106,7 @@ protected:
         // Initialize with zeros
         for(auto& tensorPair : gpuBundle.tensors)
         {
-            gpuBundle.randomizeTensor(tensorPair.first, 0.0f, 0.1f, 42);
+            gpuBundle.randomizeTensor(tensorPair.first, 0.0f, 0.1f, DEFAULT_SMOKE_TEST_SEED);
         }
 
         // Execute

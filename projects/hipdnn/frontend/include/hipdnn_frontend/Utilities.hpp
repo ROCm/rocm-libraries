@@ -36,33 +36,6 @@ namespace hipdnn_frontend
         }                                                                                   \
     } while(0)
 
-namespace detail
-{
-
-inline Error createEngineDescriptorForGraph(hipdnnBackendDescriptor_t engineDesc,
-                                            int64_t engineId,
-                                            hipdnnBackendDescriptor_t graphDesc)
-{
-    HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        hipdnnBackend()->backendSetAttribute(engineDesc,
-                                             HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
-                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                             1,
-                                             &graphDesc),
-        "Failed to set operation graph on the engine descriptor.");
-
-    HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        hipdnnBackend()->backendSetAttribute(
-            engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, &engineId),
-        "Failed to set engine id on the engine descriptor.");
-
-    HIPDNN_RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineDesc),
-                                     "Failed to finalize engine descriptor");
-
-    return {ErrorCode::OK, ""};
-}
-}
-
 namespace graph
 {
 // Find common shape from inputs.
