@@ -51,13 +51,14 @@ struct AdamTestCase
     {
         os << (tc.adamw ? "adam_w " : "adam ");
         os << "input:" << tc.input[0];
-        for(int i = 1; i < tc.input.size(); i++)
+        for(size_t i = 1; i < tc.input.size(); i++)
         {
             os << "x" << tc.input[i];
         }
         return os << " lr:" << tc.lr << " beta1:" << tc.beta1 << " beta2:" << tc.beta2
                   << " weight_decay:" << tc.weight_decay << " eps:" << tc.eps
-                  << " amsgrad:" << tc.amsgrad << " maximize:" << tc.maximize;
+                  << " amsgrad:" << std::boolalpha << tc.amsgrad << " maximize:" << tc.maximize
+                  << std::noboolalpha;
     }
 
     const std::vector<int>& GetInput() { return input; }
@@ -84,7 +85,10 @@ std::vector<AdamTestCase> AdamTestConfigs()
         {{128,1024,1,1}, 0.001, 0.9, 0.999, 0.005, 0.000001, false, false, false, false},
         {{192,192,3,3}, 0.001, 0.9, 0.999, 0.0005, 0.000001, false, false, false, false},
         {{255,640,1,1}, 0.001, 0.9, 0.999, 0.0005, 0.000001, false, false, false, false},
-        {{256,512,3,3}, 0.001, 0.9, 0.999, 0.005, 0.000001, false, false, false, false}};
+        {{256,512,3,3}, 0.001, 0.9, 0.999, 0.005, 0.000001, false, false, false, false},
+        {{256,512,8,8}, 0.001, 0.9, 0.999, 0.005, 0.000001, false, false, false, false}
+    
+    };
     // clang-format on
     std::vector<AdamTestCase> result;
     result.reserve(base_shape.size() * 16);
@@ -179,7 +183,7 @@ protected:
         }
     }
 
-    void RunTest()
+    void RunTest(bool multi_threaded)
     {
         const miopen::TensorDescriptor emptyDesc;
         auto&& handle = get_handle();
@@ -200,7 +204,8 @@ protected:
                          is_amp,
                          grad_scale[0],
                          found_inf[0],
-                         step_count);
+                         step_count,
+                         multi_threaded);
 
         for(uint32_t i = 1; i <= step_count; i++)
         {
