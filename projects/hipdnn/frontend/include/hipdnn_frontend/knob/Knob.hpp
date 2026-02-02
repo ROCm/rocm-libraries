@@ -81,9 +81,12 @@ public:
             auto fbConstraint = fbKnob->constraint_as_IntConstraint();
             if(fbConstraint != nullptr)
             {
-                std::unordered_set<int64_t> validValues
-                    = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdUnorderedSet(
-                        fbConstraint->valid_values());
+                std::unordered_set<int64_t> validValues;
+                if(fbConstraint->valid_values() != nullptr)
+                {
+                    validValues.insert(fbConstraint->valid_values()->begin(),
+                                       fbConstraint->valid_values()->end());
+                }
 
                 knob._constraint = std::make_unique<IntConstraint>(fbConstraint->min_value(),
                                                                    fbConstraint->max_value(),
@@ -107,9 +110,15 @@ public:
             auto fbConstraint = fbKnob->constraint_as_StringConstraint();
             if(fbConstraint != nullptr)
             {
-                std::unordered_set<std::string> validValues
-                    = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdUnorderedSet(
-                        fbConstraint->valid_values());
+                std::unordered_set<std::string> validValues;
+                if(fbConstraint->valid_values() != nullptr)
+                {
+                    std::transform(fbConstraint->valid_values()->begin(),
+                                   fbConstraint->valid_values()->end(),
+                                   std::inserter(validValues, validValues.end()),
+                                   [](const flatbuffers::String* str) { return str->str(); });
+                }
+
                 knob._constraint = std::make_unique<StringConstraint>(fbConstraint->max_length(),
                                                                       std::move(validValues));
             }

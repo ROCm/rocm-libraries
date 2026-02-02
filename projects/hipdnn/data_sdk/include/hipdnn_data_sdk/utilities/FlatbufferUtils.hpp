@@ -32,39 +32,6 @@ inline std::vector<T> convertFlatBufferVectorToStdVector(const flatbuffers::Vect
     return out;
 }
 
-template <typename T>
-inline std::unordered_set<T>
-    convertFlatBufferVectorToStdUnorderedSet(const flatbuffers::Vector<T>* in)
-{
-    std::unordered_set<T> out;
-
-    if(in != nullptr)
-    {
-        for(::flatbuffers::uoffset_t i = 0; i < in->size(); i++)
-        {
-            out.insert(in->Get(i));
-        }
-    }
-
-    return out;
-}
-
-inline std::unordered_set<std::string> convertFlatBufferVectorToStdUnorderedSet(
-    const flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>, flatbuffers::uoffset_t>* in)
-{
-    std::unordered_set<std::string> out;
-
-    if(in != nullptr)
-    {
-        for(::flatbuffers::uoffset_t i = 0; i < in->size(); i++)
-        {
-            out.insert(in->Get(i)->str());
-        }
-    }
-
-    return out;
-}
-
 template <typename TargetType>
 TargetType extractValueFromTensorValue(const data_objects::TensorAttributesT& tensorAttr,
                                        const char* paramName)
