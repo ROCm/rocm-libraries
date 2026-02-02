@@ -27,6 +27,8 @@
 #include <hip/hip_runtime.h>
 #include <gtest/gtest_common.hpp>
 
+namespace lstm_dropout {
+
 auto GetTestCases()
 {
     int batchSize{17};
@@ -58,8 +60,7 @@ auto GetTestCases()
                            batchSeq);
 }
 
-template <typename T>
-struct GPU_lstm_dropout_Test : testing::TestWithParam<decltype(GetTestCases())>, LSTM_test<T>
+struct GPU_Test_FP32 : testing::TestWithParam<decltype(GetTestCases())>, LSTM_test<float>
 {
     int device_count{0};
 
@@ -70,9 +71,11 @@ struct GPU_lstm_dropout_Test : testing::TestWithParam<decltype(GetTestCases())>,
     }
 };
 
-using GPU_lstm_dropout_FP32 = GPU_lstm_dropout_Test<float>;
+} // namespace lstm_dropout
 
-TEST_P(GPU_lstm_dropout_FP32, FloatTest_lstm_dropout)
+using namespace lstm_dropout;
+
+TEST_P(GPU_Test_FP32, FloatTest_lstm_dropout)
 {
     if(device_count == 0)
     {
@@ -110,4 +113,4 @@ TEST_P(GPU_lstm_dropout_FP32, FloatTest_lstm_dropout)
     RunTest();
 }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_lstm_dropout_FP32, testing::Values(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Test_FP32, testing::Values(GetTestCases()));
