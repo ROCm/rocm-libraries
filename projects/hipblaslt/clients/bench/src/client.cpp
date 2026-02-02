@@ -68,10 +68,10 @@ int run_bench_test(Arguments&         arg,
                    << std::setprecision(7); // Set precision to 7 digits
 
     // disable unit_check in client benchmark, it is only used in gtest unit test
-    arg.unit_check = 1;
+    arg.unit_check = 0;
 
     // enable timing check,otherwise no performance data collected
-    arg.timing = 0;
+    arg.timing = 1;
 
     // One stream and one thread (0 indicates to use default behavior)
     arg.streams = 0;

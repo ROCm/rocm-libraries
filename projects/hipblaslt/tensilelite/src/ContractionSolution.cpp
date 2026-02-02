@@ -2816,7 +2816,7 @@ namespace TensileLite
         }
 
         StreamKSettings sk;
-        std::cout<< "sizeMapping.streamK: "<< sizeMapping.streamK << std::endl;
+        //std::cout<< "sizeMapping.streamK: "<< sizeMapping.streamK << std::endl;
         if(sizeMapping.streamK > 0)
         {
             sk.reduction         = getSKReduction(problem, hardware);
