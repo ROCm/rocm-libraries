@@ -11,7 +11,7 @@
 
 using namespace hipdnn_plugin_sdk;
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 void EngineManager::addEngine(std::unique_ptr<IEngine> engine)
@@ -38,9 +38,8 @@ void EngineManager::getEngineDetails(HipdnnEnginePluginHandle& handle,
                                      int64_t engineId,
                                      hipdnnPluginConstData_t& engineDetailsOut)
 {
-    (void)opGraph; // Unused parameter
     auto& engine = getEngine(engineId);
-    engine.getDetails(handle, engineDetailsOut);
+    engine.getDetails(handle, opGraph, engineDetailsOut);
 }
 
 size_t EngineManager::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,

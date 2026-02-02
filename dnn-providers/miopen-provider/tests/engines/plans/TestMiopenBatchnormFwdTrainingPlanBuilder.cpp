@@ -8,10 +8,12 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
+#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
+
 #include "HipdnnEnginePluginHandle.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
 
-using namespace miopen_legacy_plugin;
+using namespace miopen_plugin;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_plugin_sdk;
 
@@ -405,8 +407,9 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, BuildPlanSetsPlanForValidSingl
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
+    MockEngineConfig mockEngineConfig;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -415,8 +418,9 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, BuildPlanSetsPlanForValidTwoNo
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
+    MockEngineConfig mockEngineConfig;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -451,8 +455,9 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, BuildPlanThrowsForUnsupportedN
 
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
+    MockEngineConfig mockEngineConfig;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx),
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
                  hipdnn_plugin_sdk::HipdnnPluginException);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
