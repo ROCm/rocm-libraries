@@ -1379,6 +1379,20 @@ class Solution(collections.abc.Mapping):
     if state["enableLDSTrB"] or state["enableGLTrB"]:
       state["VectorWidthB"] = 1
 
+    if state["ScheduleIterAlg"] == 2:
+      state["ExpandPointerSwap"] = 1
+      print2("\nSet SIA=2, force ExpandPointerSwap=1")
+
+    if state["ExpandPointerSwap"] == 1:
+      # Pointer swap only used if PGR==1 or (PGR>1 and double/double complex) - so set ExpandPointerSwap=0 here
+      # So far, EPS=1 and PGR>1 works only with double/double complex.
+      #if not (bufferLoad and state["PrefetchGlobalRead"] == 1):
+      if not (bufferLoad and ( state["PrefetchGlobalRead"] == 1 \
+              or (state["PrefetchGlobalRead"] > 1 and \
+                  (state["ProblemType"]["DataType"].isDouble() or state["ProblemType"]["DataType"].isDoubleComplex()))
+              or (state["ProblemType"]["Sparse"] and state["PrefetchGlobalRead"] > 0))):
+        state["ExpandPointerSwap"] = 0
+
     #################################################################
     # ForceUnrollSubIter requirements
     # - Needs PGR > 0, double buffer
@@ -1386,28 +1400,36 @@ class Solution(collections.abc.Mapping):
     # - TLU{A,B} cases only supported if using LdsTR or if VPerm not needed (size{A,B} >= 4)
     #
     # - Not supported for mixed precision cases currently
-    sizeDataTypeA = state["ProblemType"]["DataTypeA"].numBytes()
-    sizeDataTypeB = state["ProblemType"]["DataTypeB"].numBytes()
-    sizeDataType = state["ProblemType"]["DataType"].numBytes()
     TLUA = state["ProblemType"]["TLUA"]
     TLUB = state["ProblemType"]["TLUB"]
-    if (
-      not state["ProblemType"]["Sparse"] and
-      state["EnableMatrixInstruction"] and not state["ExpandPointerSwap"] and
-      state["DepthU"] == state["MatrixInstK"] and state["PrefetchGlobalRead"] and not state["1LDSBuffer"]
-      and (state["MIWaveTile"][0] > 2  and state["MIWaveTile"][1] > 2)
-      and (state["MIWaveTile"][0] % 2 == 0 and state["MIWaveTile"][1] % 2 == 0)
-      and (sizeDataTypeA == sizeDataType) and (sizeDataTypeB == sizeDataType)
-      and ((TLUA == False or state["enableLDSTrA"] or sizeDataTypeA >= 4) and (TLUB == False or state["enableLDSTrB"] or sizeDataTypeB >= 4) )
-    ):
-      state["ForceUnrollSubIter"] = True
-      state["numSubTiles"] = 2
-      state["PrefetchLocalRead"] = 0 if state["ClusterLocalRead"] == 0 else state["PrefetchLocalRead"]
-      # disable TailloopInNll
-      state["TailloopInNll"] = False
-    else:
-      state["ForceUnrollSubIter"] = False
-      state["numSubTiles"] = 1
+    def doSubIterSetting():
+      sizeDataTypeA = state["ProblemType"]["DataTypeA"].numBytes()
+      sizeDataTypeB = state["ProblemType"]["DataTypeB"].numBytes()
+      sizeDataType = state["ProblemType"]["DataType"].numBytes()
+      if (
+        not state["ProblemType"]["Sparse"] and
+        state["EnableMatrixInstruction"] and not state["ExpandPointerSwap"] and
+        state["DepthU"] == state["MatrixInstK"] and state["PrefetchGlobalRead"] and not state["1LDSBuffer"]
+        and (state["MIWaveTile"][0] > 2  and state["MIWaveTile"][1] > 2)
+        and (state["MIWaveTile"][0] % 2 == 0 and state["MIWaveTile"][1] % 2 == 0)
+        and (sizeDataTypeA == sizeDataType) and (sizeDataTypeB == sizeDataType)
+        and ((TLUA == False or state["enableLDSTrA"] or sizeDataTypeA >= 4) and (TLUB == False or state["enableLDSTrB"] or sizeDataTypeB >= 4) )
+      ):
+        state["ForceUnrollSubIter"] = True
+        state["numSubTiles"] = 2
+        state["PrefetchLocalRead"] = 0 if state["ClusterLocalRead"] == 0 else state["PrefetchLocalRead"]
+        # disable TailloopInNll
+        state["TailloopInNll"] = False
+      else:
+        state["ForceUnrollSubIter"] = False
+        state["numSubTiles"] = 1
+
+    isSubIterSettingDone = False
+    # UseF32XEmulation case, need to finish SubIter setting before VectorWidth
+    # Here, DepthU is not finalized but we need to finish VectorWidth adjustment before DepthU
+    if state["UseF32XEmulation"]:
+      doSubIterSetting()
+      isSubIterSettingDone = True
 
     if state["VectorWidthA"] == -1:
       if state["EnableMatrixInstruction"]:
@@ -1548,6 +1570,11 @@ class Solution(collections.abc.Mapping):
         break
     if "ValidDepthU" in state:
       del state["ValidDepthU"]
+
+    # non UseF32XEmulation case, SubIter setting after DepthU
+    if not isSubIterSettingDone:
+      doSubIterSetting()
+      isSubIterSettingDone = True
 
     # Check if CMS is available for this solution
     if state["UseCustomMainLoopSchedule"] in [-1, 1]:
@@ -2313,19 +2340,9 @@ class Solution(collections.abc.Mapping):
     if state["ScheduleIterAlg"] == 2:
       state["InnerUnroll"] = state["DepthU"] // state["MatrixInstK"]
       state["PrefetchLocalRead"] = 1
-      state["ExpandPointerSwap"] = 1
+      #state["ExpandPointerSwap"] = 1 # EPS is adjusted in advance
       state["1LDSBuffer"] = 1
-      print2("\nSet SIA=2, force PrefetchLocalRead=1, ExpandPointerSwap=1, 1LDSBuffer=1")
-
-    if state["ExpandPointerSwap"] == 1:
-      # Pointer swap only used if PGR==1 or (PGR>1 and double/double complex) - so set ExpandPointerSwap=0 here
-      # So far, EPS=1 and PGR>1 works only with double/double complex.
-      #if not (bufferLoad and state["PrefetchGlobalRead"] == 1):
-      if not (bufferLoad and ( state["PrefetchGlobalRead"] == 1 \
-              or (state["PrefetchGlobalRead"] > 1 and \
-                  (state["ProblemType"]["DataType"].isDouble() or state["ProblemType"]["DataType"].isDoubleComplex()))
-              or (state["ProblemType"]["Sparse"] and state["PrefetchGlobalRead"] > 0))):
-        state["ExpandPointerSwap"] = 0
+      print2("\nSet SIA=2, force PrefetchLocalRead=1, 1LDSBuffer=1")
 
     # Default GlobalStoreVectorWidth
     if state["StoreVectorWidth"] == -1:
