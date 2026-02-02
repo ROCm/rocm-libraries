@@ -2270,7 +2270,6 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
-    return False, None # TODO: re-enable this
     kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
     syncCode = []
@@ -2339,7 +2338,6 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
-    return False, None # TODO: re-enable this
     numMfma = 144
     kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
@@ -2674,7 +2672,6 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
-    return False, None # TODO: re-enable this
     # print('kernel', kernel)
     kernel["MfmaInitCVgprs"] = True
     numMfma = 144
@@ -2779,7 +2776,6 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
-    return False, None # TODO: re-enable this
     numMfma = 192
     kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
@@ -2920,7 +2916,6 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
-    return False, None # TODO: re-enable this
     kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
     syncCode = []
@@ -3009,7 +3004,6 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
-    return False, None # TODO: re-enable this
     kernel["MfmaInitCVgprs"] = True
 
     n_mfma = 96
@@ -3103,7 +3097,6 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_128x256x32_TF32(kernel, useLDSTr, TLDS):
-    return False, None # TODO: re-enable this
     numMfma = 96
     kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()

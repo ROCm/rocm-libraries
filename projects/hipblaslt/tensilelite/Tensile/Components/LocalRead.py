@@ -716,11 +716,11 @@ class LocalReadMFMA(LocalRead):
                                             # remove s_nop by scheduling mfma4x4 right after first 4 cvt for high
                                             # we will have mfma hi * hi + 4 final cvt A between mfma4x4 B and final conv B
                                             # (more instructions between mfma4x4 B and final conv A)
-                                            # however, we still need nop in tail loop case (A, B scheduling is not interleaved in tail loop)
+                                            # however, we still need nop in tail loop case (A, B scheduling is not interleaved in tail loop) and CMS
                                             # we still need s_nop in main loop, NGLL, NLL if number MIWaveTileA/B are different.
                                             # s_nop insertion is handled in makeSubIterSchedule for main loop and NGLL/NLL
                                             nopSrc = 0
-                                            if writer.states.inTailLoop:
+                                            if writer.states.inTailLoop or kernel["UsePLRPack"]:
                                                 nopSrc = 4
                                             if kernel["UseMFMAF32XEmulation"] and nopSrc:
                                                 # 5 wait states needed before the following CVT instructions

@@ -5072,6 +5072,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       return numV
 
     def checkVregOverflowTF32Emu(vgprIdx, numV):
+      # Do not allow adjustment for CMS
+      if kernel["UseCustomMainLoopSchedule"]:
+        return False
       # We need to consider 2 more vreg (Serial tmp)
       # Looks like we need more tmp vreg at tailloop
       # So far, max 32 tmp vregs might be used.
@@ -5081,7 +5084,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["UseMFMAF32XEmulation"]:
         bufferVregNum += 2
       return vgprIdx + bufferVregNum + numV > self.states.regCaps["MaxVgpr"]
-      #return True
 
     # initial TF32Emu setting
     numVgprsEmuA = initTF32Emu(self.states.a, self.states.lrvwTileA)
