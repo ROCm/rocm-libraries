@@ -82,7 +82,7 @@ jobs:
           python ./build_tools/print_driver_gpu_info.py
 
       - name: Dummy Test Failure (Testing)
-        if: ${{ contains(fromJSON(inputs.component).job_name, 'miopen') }}
+        # if: ${{ contains(fromJSON(inputs.component).job_name, 'miopen') }}
         run: |
           # Create test logs directory
           mkdir -p ./test_logs
