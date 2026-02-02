@@ -81,6 +81,38 @@ jobs:
         run: |
           python ./build_tools/print_driver_gpu_info.py
 
+      - name: Dummy Test Failure (Testing)
+        if: ${{ contains(fromJSON(inputs.component).job_name, 'miopen') }}
+        run: |
+          # Create test logs directory
+          mkdir -p ./test_logs
+
+          # Write fake test failure output to log file
+          cat > ./test_logs/test_output.log <<'TESTLOG'
+          [==========] Running 150 tests from 25 test suites.
+          [----------] Global test environment set-up.
+          [----------] 8 tests from Smoke/GPU_BNCKFWDTrainLarge2D
+          [ RUN      ] Smoke/GPU_BNCKFWDTrainLarge2D.Test/0
+          [       OK ] Smoke/GPU_BNCKFWDTrainLarge2D.Test/0 (1234 ms)
+          [ RUN      ] Smoke/GPU_BNCKFWDTrainLarge2D.Test/1
+          test/test_bn_bwd.cpp:142: Failure
+          Expected equality of these values:
+            expected_output
+            actual_output
+          Assertion failed: output mismatch detected
+          [  FAILED  ] Smoke/GPU_BNCKFWDTrainLarge2D.Test/1 (567 ms)
+          [----------] 8 tests from Smoke/GPU_BNCKFWDTrainLarge2D (8901 ms total)
+
+          [==========] 150 tests from 25 test suites ran. (123456 ms total)
+          [  PASSED  ] 149 tests.
+          [  FAILED  ] 1 test, listed below:
+          [  FAILED  ] Smoke/GPU_BNCKFWDTrainLarge2D.Test/1
+          TESTLOG
+
+          # Simulate a test failure
+          echo "ERROR: Tests failed"
+          exit 1
+
       - name: Test
         timeout-minutes: ${{ fromJSON(inputs.component).timeout_minutes }}
         env:
