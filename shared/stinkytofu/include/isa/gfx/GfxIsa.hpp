@@ -22,12 +22,16 @@
  * ************************************************************************ */
 
 #pragma once
+#include "support/Span.hpp"
 #include <bitset>
 #include <cassert>
 #include <cstdint>
 
 namespace stinkytofu
 {
+    // Forward declaration of RegType (defined in ir/asm/StinkyAsmIR.hpp)
+    enum class RegType;
+
     enum class GfxArchID : uint32_t
     {
 #define STINKYTOFU_ARCH(archName) archName,
@@ -94,6 +98,33 @@ namespace stinkytofu
         const char* mnemonic = nullptr;
 
         std::bitset<flagCapacity> flags;
+
+        /// @brief Register width and type requirement for an operand
+        ///
+        /// Specifies that a particular operand must use:
+        /// 1. A specific number of consecutive registers (width)
+        /// 2. A specific register type (V, S, A, etc.)
+        ///
+        /// Example: tensor_load_to_lds requires:
+        ///   - src[0]: 4 consecutive SGPRs (e.g., s[0:3])
+        ///   - src[1]: 8 consecutive SGPRs (e.g., s[4:11])
+        ///
+        /// Example: v_add_f32 requires:
+        ///   - dest[0]: 1 VGPR (e.g., v0)
+        ///   - src[0]: 1 VGPR (e.g., v1)
+        ///   - src[1]: 1 VGPR (e.g., v2)
+        struct OperandWidth
+        {
+            uint8_t operandIndex; ///< 0-based operand index
+            uint8_t width; ///< Expected register count (e.g., 4 = 4 consecutive regs)
+            bool    isDest; ///< true = destination operand, false = source operand
+            RegType expectedType; ///< Expected register type (RegType::UNKNOWN = any type allowed)
+        };
+
+        /// Register width requirements for this instruction's operands
+        /// nullptr if no width requirements (most instructions)
+        /// Points to static constexpr array in hardware definition files
+        span<const OperandWidth> operandWidths;
 
         bool has(InstFlag f) const
         {

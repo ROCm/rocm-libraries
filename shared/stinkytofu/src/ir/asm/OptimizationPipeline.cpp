@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include "ir/asm/OptimizationPipeline.hpp"
 #include "ErrorHandling.hpp"
+#include "ir/IRVerifierPass.hpp"
 #include "ir/asm/DeadCodeEliminationPass.hpp"
 #include "ir/asm/DefUseChain.hpp"
 #include "ir/asm/PeepholeOptimizationPass.hpp"
@@ -213,6 +214,14 @@ namespace stinkytofu
                                                                               : "Custom")
                       << std::endl;
         }
+
+        // ========== IR Verification (Built-in) ==========
+        // Verify IR integrity before running any passes
+        // This catches IR corruption early before it propagates through optimization
+        if(config.verbose)
+            std::cout << "\n  - Verifying IR integrity before optimization..." << std::endl;
+
+        passManager.addPass(createStinkyIRVerifierPass());
 
         // ========== Phase 0: Custom Passes (Before) ==========
         if(!config.beforeAnalysisPasses.empty() || !config.beforePasses.empty())

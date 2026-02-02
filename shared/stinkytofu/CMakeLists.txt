@@ -89,7 +89,9 @@ set(STINKYTOFU_SOURCE_FILES
     ir/asm/StinkyAsmModule.cpp
     ir/asm/IRLexer.cpp
     ir/asm/IRParser.cpp
+    ir/asm/IRValidator.cpp
     ir/asm/PatternParser.cpp
+    ir/IRVerifierPass.cpp
     hardware/ArchHelper.cpp
 )
 
