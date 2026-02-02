@@ -36,36 +36,36 @@ using hip_bfloat16 = bfloat16;
 using half         = half_float::half;
 #endif
 
-enum class BitOp {
-    Equal,  // sizeof(To) == sizeof(From) 
-    Widen,  // sizeof(To) >  sizeof(From) 
-    Narrow  // sizeof(To) <  sizeof(From) 
+enum class BitOp
+{
+    Equal, // sizeof(To) == sizeof(From)
+    Widen, // sizeof(To) >  sizeof(From)
+    Narrow // sizeof(To) <  sizeof(From)
 };
 
 template <class To, class From, BitOp Op>
 MIOPEN_HIP_HOST_DEVICE To bit_copy(const From& src)
 {
-    static_assert(std::is_trivially_copyable_v<From> &&
-                  std::is_trivially_copyable_v<To>,
+    static_assert(std::is_trivially_copyable_v<From> && std::is_trivially_copyable_v<To>,
                   "Requires trivially copyable types");
 
-    if constexpr (Op == BitOp::Equal) {
-        static_assert(sizeof(To) == sizeof(From),
-                      "BitOp::Equal requires equal sizes");
-        To dst; 
+    if constexpr(Op == BitOp::Equal)
+    {
+        static_assert(sizeof(To) == sizeof(From), "BitOp::Equal requires equal sizes");
+        To dst;
         __builtin_memcpy(&dst, &src, sizeof(To));
         return dst;
-
-    } else if constexpr (Op == BitOp::Widen) {
-        static_assert(sizeof(From) <= sizeof(To),
-                      "BitOp::Widen requires From <= To");
+    }
+    else if constexpr(Op == BitOp::Widen)
+    {
+        static_assert(sizeof(From) <= sizeof(To), "BitOp::Widen requires From <= To");
         To dst{}; // extra bytes are zeroed
         __builtin_memcpy(&dst, &src, sizeof(From));
         return dst;
-
-    } else { // BitOp::Narrow
-        static_assert(sizeof(From) >= sizeof(To),
-                      "BitOp::Narrow requires From >= To");
+    }
+    else
+    { // BitOp::Narrow
+        static_assert(sizeof(From) >= sizeof(To), "BitOp::Narrow requires From >= To");
         To dst; // only low sizeof(To) bytes are written
         __builtin_memcpy(&dst, &src, sizeof(To));
         return dst;
@@ -75,9 +75,9 @@ MIOPEN_HIP_HOST_DEVICE To bit_copy(const From& src)
 template <class To, class From>
 MIOPEN_HIP_HOST_DEVICE To miopen_bit_cast(const From& src)
 {
-    if constexpr (sizeof(To) == sizeof(From))
+    if constexpr(sizeof(To) == sizeof(From))
         return bit_copy<To, From, BitOp::Equal>(src);
-    else if constexpr (sizeof(To) > sizeof(From))
+    else if constexpr(sizeof(To) > sizeof(From))
         return bit_copy<To, From, BitOp::Widen>(src);
     else
         return bit_copy<To, From, BitOp::Narrow>(src);
