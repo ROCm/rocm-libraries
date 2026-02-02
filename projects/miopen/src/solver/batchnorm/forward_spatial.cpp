@@ -220,12 +220,12 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
 
     int variant       = -1;
     size_t vectorsize = 1;
-    size_t xlocalsize, xgridsize;
+    size_t xlocalsize = 1, xgridsize = 0;
     size_t ylocalsize = 1, ygridsize = 1;
     size_t zlocalsize = 1, zgridsize = 1;
-    unsigned int ldsgcn, ldsnogcn;
+    unsigned int ldsgcn = 0, ldsnogcn = 0;
     int stash_method = 0;
-    size_t nelements;
+    size_t nelements = 1;
 
     GetVariantFromKernelId(
         config.kernel_id, variant, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements);

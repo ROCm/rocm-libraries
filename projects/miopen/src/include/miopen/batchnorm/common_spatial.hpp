@@ -87,6 +87,8 @@ inline void GetSpatialMultipleConfig(const miopen::batchnorm::ProblemDescription
     {
         if(c % vectorsize != 0)
         {
+            xlocalsize = 1;
+            ylocalsize = 1;
             return;
         }
         GetLocalConfigNHWC(problem, vectorsize, xlocalsize, ylocalsize);
@@ -95,6 +97,8 @@ inline void GetSpatialMultipleConfig(const miopen::batchnorm::ProblemDescription
     {
         if(in_cstride % vectorsize != 0)
         {
+            xlocalsize = 1;
+            ylocalsize = 1;
             return;
         }
         xlocalsize = 1;
@@ -222,6 +226,10 @@ inline void GetVariantFromKernelId(const std::string& kernel_id,
     vectorsize = std::stoi(seglist[1]);
     if(variant != 2)
     {
+        xlocalsize = 1;
+        ylocalsize = 1;
+        zlocalsize = 1;
+        nelements  = 1;
         return;
     }
     xlocalsize = std::stoi(seglist[2]);
