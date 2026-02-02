@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,20 +23,18 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include "rnn_vanilla.hpp"
+#include "rnn_vanilla_common.hpp"
 
-int main(int argc, const char* argv[])
-{
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-    auto t_start = std::chrono::high_resolution_clock::now();
-#endif
-    test_drive<rnn_vanilla_driver>(argc, argv);
+using GPU_RNNVanillaDropout_FP32 = RNNVanillaCommon<float>;
 
-#if(MIO_RNN_TIME_EVERYTHING == 1)
-    auto t_end = std::chrono::high_resolution_clock::now();
+TEST_P(GPU_RNNVanillaDropout_FP32, FloatTest) { run(); }
 
-    std::cout << "Wall clock: RNN test pass time: "
-              << std::chrono::duration<double>(t_end - t_start).count() << " seconds." << std::endl;
-#endif
-    exit(0); // NOLINT (concurrency-mt-unsafe)
-}
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_RNNVanillaDropout_FP32, GenCases(false, true));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_RNNVanillaDropout_FP32, GenCases(true, true));
+
+using GPU_RNNVanillaDropout_FP16 = RNNVanillaCommon<half_float::half>;
+
+TEST_P(GPU_RNNVanillaDropout_FP16, FloatTest) { run(); }
+
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_RNNVanillaDropout_FP16, GenCases(false, true));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_RNNVanillaDropout_FP16, GenCases(true, true));

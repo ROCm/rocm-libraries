@@ -929,7 +929,7 @@ void BuildHip(const std::string& name,
 #endif
         opts.push_back("-D__HIP_PLATFORM_AMD__=1"); // Workaround?
         opts.push_back("-DHIP_PACKAGE_VERSION_FLAT=" + std::to_string(HIP_PACKAGE_VERSION_FLAT));
-        opts.push_back("-DMIOPEN_DONT_USE_HIP_RUNTIME_HEADERS");
+        opts.push_back("-DMIOPEN_HIP_RUNTIME_COMPILE");
 #if HIP_PACKAGE_VERSION_FLAT < 6001024000ULL && !defined(_WIN32)
         opts.push_back("-DWORKAROUND_DONT_USE_CUSTOM_LIMITS=1");
 #endif
