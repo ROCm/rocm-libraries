@@ -31,5 +31,4 @@ using KernelTypes = ::testing::Types<std::tuple<F16, F16, F32, F16, F16, Row, Ro
                                      std::tuple<BF16, I8, F32, BF16, BF16, Row, Row, Row, Row>>;
 
 TYPED_TEST_SUITE(TestGemmAdd, KernelTypes);
-TYPED_TEST(TestGemmAdd, Test_BF16FP16) { this->Run(); }
-TYPED_TEST(TestGemmAdd, Test_BF16FP16_INT8) { this->Run(); }
+TYPED_TEST(TestGemmAdd, Test_BF16FP16_FP16FP16_INT8) { this->Run(); }
