@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,11 +23,11 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-
 #pragma once
 
-#include "driver.hpp"
-#include "dropout_util.hpp"
+#include "gtest_common.hpp"
+#include "compare_helper.hpp"
+#include "../dropout_util.hpp"
 #include "get_handle.hpp"
 
 #include "random.hpp"
@@ -42,10 +42,91 @@
 //
 // Native rnn tensor format
 //
-#include "seq_tensor_holder.hpp"
-#include "rnn_util.hpp"
-#include "cpu_rnn.hpp"
+#include "../seq_tensor_holder.hpp"
+#include "../rnn_util.hpp"
+#include "../cpu_rnn.hpp"
 ///
+
+namespace {
+
+using RNNSeqApiParam = std::tuple<int,
+                                  int,
+                                  int,
+                                  int,
+                                  int,
+                                  int,
+                                  int,
+                                  int,
+                                  int,
+                                  int,
+                                  int,
+                                  int,
+                                  int,
+                                  std::vector<int>,
+                                  bool,
+                                  bool,
+                                  bool,
+                                  bool,
+                                  bool,
+                                  bool,
+                                  bool>;
+
+auto RNNSeqGenCases()
+{
+    return ::testing::Combine(::testing::ValuesIn({7}),
+                              ::testing::ValuesIn({13}),
+                              ::testing::ValuesIn({0, 1}),
+                              ::testing::ValuesIn({0, 1}),
+                              ::testing::ValuesIn({3}),
+                              ::testing::ValuesIn({0, 1}),
+                              ::testing::ValuesIn({1}),
+                              ::testing::ValuesIn({0, 1}),
+                              ::testing::ValuesIn({2}),
+                              ::testing::ValuesIn({2}),
+                              ::testing::ValuesIn({3}),
+                              ::testing::ValuesIn({6}),
+                              ::testing::ValuesIn({15}),
+                              ::testing::ValuesIn({std::vector<int>{1, 15, 14, 15, 14, 1},
+                                                   std::vector<int>{1, 0, 3, 4, 2, 0},
+                                                   std::vector<int>{1, 2, 3, 4},
+                                                   std::vector<int>{4, 3, 2, 1},
+                                                   std::vector<int>{4, 4, 4, 4},
+                                                   std::vector<int>{1}}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false, true}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false, true}),
+                              ::testing::ValuesIn({false, true}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}));
+}
+
+auto LstmMSGenCases()
+{
+    return ::testing::Combine(::testing::ValuesIn({1, 7}),
+                              ::testing::ValuesIn({13, 1}),
+                              ::testing::ValuesIn({0}),
+                              ::testing::ValuesIn({0}),
+                              ::testing::ValuesIn({3}),
+                              ::testing::ValuesIn({0}),
+                              ::testing::ValuesIn({0, 1}),
+                              ::testing::ValuesIn({0}),
+                              ::testing::ValuesIn({2}),
+                              ::testing::ValuesIn({0}),
+                              ::testing::ValuesIn({2}),
+                              ::testing::ValuesIn({1, 6}),
+                              ::testing::ValuesIn({38}),
+                              ::testing::ValuesIn({std::vector<int>{34, 3, 2, 1},
+                                                   std::vector<int>{1, 15, 34, 15, 34, 1},
+                                                   std::vector<int>{}}),
+                              ::testing::ValuesIn({false, true}),
+                              ::testing::ValuesIn({false, true}),
+                              ::testing::ValuesIn({false, true}),
+                              ::testing::ValuesIn({false, true}),
+                              ::testing::ValuesIn({false, true}),
+                              ::testing::ValuesIn({false}),
+                              ::testing::ValuesIn({false}));
+}
 
 template <class TensorT>
 miopen::Allocator::ManageDataPtr
@@ -143,82 +224,53 @@ struct verify_rnn_api_base
     size_t workspace_GPU_mem_size() {}
     size_t reservspace_GPU_mem_size() {}
 
-    void fail(int badtensor) const
+    void fail() const
     {
-        std::cout << "./bin/MIOpenDriver rnn_seq ";
+        std::stringstream ss{};
+        ss << "./bin/MIOpenDriver rnn_seq ";
 
-        std::cout << " -F 0 "
-                  << " -m ";
+        ss << " -F 0 "
+           << " -m ";
 
         switch(rnnDesc.rnnMode)
         {
-        case miopenRNNTANH: std::cout << " tanh "; break;
-        case miopenRNNRELU: std::cout << " relu "; break;
-        case miopenLSTM: std::cout << " lstm "; break;
-        case miopenGRU: std::cout << " gru "; break;
+        case miopenRNNTANH: ss << " tanh "; break;
+        case miopenRNNRELU: ss << " relu "; break;
+        case miopenLSTM: ss << " lstm "; break;
+        case miopenGRU: ss << " gru "; break;
         default: break;
         }
 
         auto& inLens = input.desc.GetLengths();
         auto& hLens  = xHiddenState.desc.GetLengths();
 
-        std::cout << " --batch_size " << inLens[0] << " --seq_len " << inLens[1] << " --in_vec "
-                  << inLens[2] << " --hid_h " << hLens[2] << " --num_layer " << rnnDesc.nLayers
-                  << " -r " << rnnDesc.dirMode << " -b " << rnnDesc.biasMode << " -p "
-                  << rnnDesc.inputMode << " -a " << rnnDesc.algoMode;
+        ss << " --batch_size " << inLens[0] << " --seq_len " << inLens[1] << " --in_vec "
+           << inLens[2] << " --hid_h " << hLens[2] << " --num_layer " << rnnDesc.nLayers << " -r "
+           << rnnDesc.dirMode << " -b " << rnnDesc.biasMode << " -p " << rnnDesc.inputMode << " -a "
+           << rnnDesc.algoMode;
 
         bool useDropout = !miopen::float_equal(miopen::deref(rnnDesc.dropoutDesc).dropout, 0);
 
-        std::cout << " --io_layout "
-                  << miopen::RNNDescriptor::getBaseLayoutFromDataTensor(input.desc)
-                  << " --use_dropout " << useDropout;
+        ss << " --io_layout " << miopen::RNNDescriptor::getBaseLayoutFromDataTensor(input.desc)
+           << " --use_dropout " << useDropout;
         if(useDropout)
-            std::cout << " --dropout " << miopen::deref(rnnDesc.dropoutDesc).dropout;
+            ss << " --dropout " << miopen::deref(rnnDesc.dropoutDesc).dropout;
 
         auto& samplesLen = input.desc.GetSequenceLengthsVector();
-        std::cout << " --seq_len_array ";
+        ss << " --seq_len_array ";
         for(int i = 0; i < inLens[0]; i++)
         {
             if(i < inLens[0] - 1)
             {
-                std::cout << samplesLen.at(i) << ",";
+                ss << samplesLen.at(i) << ",";
             }
             else
             {
-                std::cout << samplesLen.at(i);
+                ss << samplesLen.at(i);
             }
         }
-        std::cout << std::endl;
-
-        if(badtensor >= 0)
-        {
-            if(badtensor < 3)
-            {
-                std::cout << "FWD Train LSTM: " << std::endl;
-                switch(badtensor)
-                {
-                case(0): std::cout << "Output tensor report." << std::endl; break;
-                case(1): std::cout << "Hidden state tensor report." << std::endl; break;
-                case(2): std::cout << "Cell state tensor report." << std::endl; break;
-                default: break;
-                }
-            }
-            else if(badtensor < 6)
-            {
-                std::cout << "BWD Train LSTM: " << std::endl;
-                switch(badtensor)
-                {
-                case(3): std::cout << "Output tensor output report." << std::endl; break;
-                case(4): std::cout << "Hidden state tensor report." << std::endl; break;
-                case(5): std::cout << "Cell state tensor report." << std::endl; break;
-                default: break;
-                }
-            }
-            else if(badtensor == 6)
-            {
-                std::cout << "WRW Train LSTM " << std::endl;
-            }
-        }
+        ss << std::endl;
+        GTEST_FAIL() << ss.str();
     }
 };
 
@@ -1132,7 +1184,8 @@ struct verify_train_rnn : verify_rnn_api_base<T>
         // if(is_padded_verification)
         //{
         //    std::fill(output_seq.begin(), output_seq.end(), padding_symbol);
-        //    ChangeDataPadding(*packed_output, output_seq, batch_seq, batch_seq[0], out_vec, true);
+        //    ChangeDataPadding(*packed_output, output_seq, batch_seq, batch_seq[0], out_vec,
+        //    true);
         //}
 
         return result_tuple(std::move(fwd_y),
@@ -1189,10 +1242,10 @@ struct verify_train_rnn : verify_rnn_api_base<T>
         size_t reserveSpace_TCnt = (reserveSpaceByteSize + sizeof(T) - 1) / sizeof(T);
 
         std::vector<T> reserveSpace_fwd_out(reserveSpace_TCnt);
-        handle.ReadTo(
-            reserveSpace_fwd_out.data(),
-            reserveSpace_dev,
-            reserveSpaceByteSize); // std::copy(reserveSpace.begin(), reserveSpace.end(), RSVgpu);
+        handle.ReadTo(reserveSpace_fwd_out.data(),
+                      reserveSpace_dev,
+                      reserveSpaceByteSize); // std::copy(reserveSpace.begin(),
+                                             // reserveSpace.end(), RSVgpu);
 
         const auto fwd_y  = handle.Read<T>(y_dev, output.GetSize());
         const auto fwd_hy = readTFromGPUOrEmpty(handle, hy_dev, xHiddenState, nohy);
@@ -1440,40 +1493,36 @@ inline size_t get_RNN_params_byteSize(miopen::Handle& handle,
     return wei_bytes;
 }
 
-template <class T>
-struct rnn_seq_api_test_driver : test_driver
+template <typename T>
+struct RNNSeqApiCommon : public ::testing::TestWithParam<RNNSeqApiParam>
 {
-    std::vector<int> seqLenArray;
-    int seqLength{};
-    int inVecLen{};
-    int hiddenSize{};
-    int numLayers{};
-    int fwdMode{};
-    int inputMode{};
-    int biasMode{};
-    int dirMode{};
-    int rnnMode{};
-    int algoMode{};
-    int batchSize{};
-    int useDropout{};
-    int io_layout{};
+protected:
+    void SetUp() override
+    {
+        std::tie(inVecLen,
+                 hiddenSize,
+                 useDropout,
+                 fwdMode,
+                 numLayers,
+                 inputMode,
+                 biasMode,
+                 dirMode,
+                 rnnMode,
+                 algoMode,
+                 io_layout,
+                 batchSize,
+                 seqLength,
+                 seqLenArray,
+                 nohx,
+                 nocx,
+                 nohy,
+                 nocy,
+                 pytorchTensorDescriptorFormat,
+                 skip_backward_data,
+                 skip_backward_weights) = GetParam();
+    }
 
-    // Null pointer input
-    bool nohx{};
-    bool nocx{};
-    bool nohy{};
-    bool nocy{};
-
-    bool pytorchTensorDescriptorFormat{};
-
-    bool skip_backward_data{false};
-    bool skip_backward_weights{false};
-
-    bool inference_dropout_issue_notified{false};
-
-    rnn_seq_api_test_driver() {}
-
-    bool check_GPU_mem_limit(miopen::Handle& handle,
+    void check_GPU_mem_limit(miopen::Handle& handle,
                              miopen::RNNDescriptor& rnnDesc,
                              seqTensor<T>& input,
                              seqTensor<T>& output,
@@ -1505,16 +1554,11 @@ struct rnn_seq_api_test_driver : test_driver
                                sizeof(T);
 
         size_t device_mem = handle.GetGlobalMemorySize();
-
-        if(total_mem >= device_mem)
-        {
-            show_command();
-            std::cout << "Config requires " << total_mem
-                      << " Bytes to write all necessary tensors to GPU. GPU has " << device_mem
-                      << " Bytes of memory." << std::endl;
-            return false;
-        }
-        return true;
+        std::stringstream ss{};
+        ss << "Config requires " << total_mem
+           << " Bytes to write all necessary tensors to GPU. GPU has " << device_mem
+           << " Bytes of memory." << std::endl;
+        ASSERT_LT(total_mem, device_mem); // << ss.str();
     }
 
     void fill_buffers(seqTensor<T>& input,
@@ -1592,8 +1636,9 @@ struct rnn_seq_api_test_driver : test_driver
         if(io_layout == 1 && (!seqLenArray.empty()) &&
            (!std::is_sorted(seqLenArray.begin(), seqLenArray.end(), std::greater<>{})))
         {
-            MIOPEN_THROW("Incorrect input, seq_lens should not to increase with "
-                         "miopenRNNDataSeqMajorNotPadded layout\n");
+            GTEST_FAIL() << "Incorrect input, seq_lens should not to increase with "
+                            "miopenRNNDataSeqMajorNotPadded layout"
+                         << std::endl;
         }
 
         if(!seqLenArray.empty())
@@ -1602,12 +1647,9 @@ struct rnn_seq_api_test_driver : test_driver
             {
 
                 int padding_val = 0;
-                printf("sampl_lens size == %zu is smaller than time batch_size == %d, padding the "
-                       "rest "
-                       "of data with %d\n",
-                       seqLenArray.size(),
-                       batchSize,
-                       padding_val);
+                std::cout << "sampl_lens size == " << seqLenArray.size()
+                          << " is smaller than time batch_size == " << batchSize
+                          << ", padding the rest of data with " << padding_val << std::endl;
 
                 std::vector<int> new_seqLenArray(batchSize);
 
@@ -1620,14 +1662,91 @@ struct rnn_seq_api_test_driver : test_driver
             size_t seq_max_element = *std::max_element(seqLenArray.begin(), seqLenArray.end());
 
             if(seqLength < seq_max_element)
-                MIOPEN_THROW(
-                    "Incorrect input, seq_lens elements should be smaller or equal to seqLength\n");
+                GTEST_FAIL() << "Incorrect input, seq_lens elements should be smaller or equal "
+                                "to seqLength"
+                             << std::endl;
         }
         else
         {
-            printf("Empty batch sequence. Filling uniformly with max_seqLength:%d\n ", seqLength);
+            std::cout << "Empty batch sequence. Filling uniformly with max_seqLength: " << seqLength
+                      << std::endl;
             seqLenArray.resize(batchSize, seqLength);
         }
+    }
+
+    bool is_skip_comb()
+    {
+        if(!this->seqLenArray.empty())
+        {
+            if(this->seqLenArray.size() != this->batchSize)
+                return true;
+
+            bool is_seqLength_is_max_seq =
+                this->seqLength ==
+                *std::max_element(this->seqLenArray.begin(), this->seqLenArray.end());
+
+            if(!is_seqLength_is_max_seq)
+                return true;
+        }
+
+        return false;
+    }
+
+    bool is_correct_params()
+    {
+        if(this->useDropout == 1 && (this->hiddenSize == 1 || this->batchSize == 1))
+            return false;
+
+        if(this->inputMode == 1 && this->hiddenSize != this->inVecLen)
+            return false;
+
+        if((this->rnnMode != 2) && (!this->nocx || !this->nocy))
+            return false;
+
+        if(this->seqLenArray.size() > this->batchSize)
+            return false;
+
+        if(this->biasMode && this->nohx)
+            return false;
+
+        if(!this->seqLenArray.empty())
+        {
+            if(this->seqLength <
+               *std::max_element(this->seqLenArray.begin(), this->seqLenArray.end()))
+                return false;
+
+            if(this->io_layout == 1)
+            {
+                return std::is_sorted(
+                    this->seqLenArray.begin(), this->seqLenArray.end(), std::greater<int>());
+            }
+        }
+        return true;
+    }
+
+    bool is_dynamic_algo_skip_case()
+    {
+        if(this->algoMode != 2)
+            return false;
+
+        if(this->dirMode == 0 && this->rnnMode == miopenLSTM && this->useDropout == 0 &&
+           this->inputMode == miopenRNNlinear)
+            return false;
+        return true;
+    }
+
+    bool is_lstm_MS_skip()
+    {
+        // WA skip this test
+        if(this->nohx && this->biasMode == 1)
+            return true;
+
+        // WA for half verification at gfx90a.
+        if(miopen_type<T>{} == miopenHalf)
+            if(this->nohy && this->nocy)
+                return true;
+
+        return false;
     }
 
     void run()
@@ -1669,7 +1788,7 @@ struct rnn_seq_api_test_driver : test_driver
                                       miopenRNNMode_t(rnnMode),
                                       miopenRNNBiasMode_t(biasMode),
                                       miopenRNNAlgo_t(algoMode),
-                                      type);
+                                      miopen_type<T>{});
         }
         else
         {
@@ -1681,7 +1800,7 @@ struct rnn_seq_api_test_driver : test_driver
                                    miopenRNNMode_t(rnnMode),
                                    miopenRNNBiasMode_t(biasMode),
                                    miopenRNNAlgo_t(algoMode),
-                                   type);
+                                   miopen_type<T>{});
         }
 
         const auto inOut_layout   = rnn_data_layout(io_layout);
@@ -1716,6 +1835,7 @@ struct rnn_seq_api_test_driver : test_driver
 
         fill_buffers(input, dy, hx, cx, dhy, dcy, weights);
 
+        double tolerance = 0;
         // avoid BWD unexpected fails
         // https://github.com/ROCm/MIOpen/pull/2493#discussion_r1406959588
         if(inVecLen == 1 && hiddenSize == 13 && seqLength == 1 && batchSize == 1)
@@ -1729,34 +1849,68 @@ struct rnn_seq_api_test_driver : test_driver
 
         if(fwdMode == miopenRNNFWDMode_t::miopenRNNTraining)
         {
-            verify(verify_train_rnn<T>{rnnDesc,
-                                       input,
-                                       output,
-                                       dy,
-                                       hx,
-                                       cx,
-                                       dhy,
-                                       dcy,
-                                       weights,
-                                       nohx,
-                                       nocx,
-                                       nohy,
-                                       nocy,
-                                       skip_backward_data,
-                                       skip_backward_weights});
+            test_helpers::CompareResults(verify_train_rnn<T>{rnnDesc,
+                                                             input,
+                                                             output,
+                                                             dy,
+                                                             hx,
+                                                             cx,
+                                                             dhy,
+                                                             dcy,
+                                                             weights,
+                                                             nohx,
+                                                             nocx,
+                                                             nohy,
+                                                             nocy,
+                                                             skip_backward_data,
+                                                             skip_backward_weights},
+                                         tolerance);
         }
         else if(useDropout == 0)
         {
-            verify(verify_inference_rnn<T>{
-                rnnDesc, input, output, dy, hx, cx, dhy, dcy, weights, nohx, nocx, nohy, nocy});
+            test_helpers::CompareResults(
+                verify_inference_rnn<T>{
+                    rnnDesc, input, output, dy, hx, cx, dhy, dcy, weights, nohx, nocx, nohy, nocy},
+                tolerance);
         }
         else if(!inference_dropout_issue_notified)
         {
-            std::cerr << "Iteration " << this->iteration
-                      << " skipped due to issues with combining inference and dropout, future "
-                         "iterations like this will also be skipped"
-                      << std::endl;
+            std::cerr
+                << "Test case skipped due to issues with combining inference and dropout, future "
+                   "iterations like this will also be skipped"
+                << std::endl;
             inference_dropout_issue_notified = true;
         }
     }
+
+public:
+    std::vector<int> seqLenArray;
+    int seqLength{};
+    int inVecLen{};
+    int hiddenSize{};
+    int numLayers{};
+    int fwdMode{};
+    int inputMode{};
+    int biasMode{};
+    int dirMode{};
+    int rnnMode{};
+    int algoMode{};
+    int batchSize{};
+    int useDropout{};
+    int io_layout{};
+
+    // Null pointer input
+    bool nohx{};
+    bool nocx{};
+    bool nohy{};
+    bool nocy{};
+
+    bool pytorchTensorDescriptorFormat{};
+
+    bool skip_backward_data{false};
+    bool skip_backward_weights{false};
+
+    bool inference_dropout_issue_notified{false};
 };
+
+} // namespace

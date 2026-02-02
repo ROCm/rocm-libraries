@@ -4,8 +4,11 @@
 #pragma once
 
 #include <stdint.h>
+#include <vector>
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
@@ -30,7 +33,13 @@ public:
 
     virtual void buildPlan(const HipdnnEnginePluginHandle& handle,
                            const hipdnn_plugin_sdk::IGraph& opGraph,
+                           [[maybe_unused]] const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
                            HipdnnEnginePluginExecutionContext& executionContext) const
+        = 0;
+
+    virtual std::vector<hipdnn_data_sdk::data_objects::KnobT>
+        getCustomKnobs(const HipdnnEnginePluginHandle& handle,
+                       const hipdnn_plugin_sdk::IGraph& opGraph) const
         = 0;
 };
 }
