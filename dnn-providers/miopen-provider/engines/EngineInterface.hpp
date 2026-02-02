@@ -10,7 +10,7 @@
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class IEngine
@@ -24,6 +24,7 @@ public:
                               const hipdnn_plugin_sdk::IGraph& opGraph) const
         = 0;
     virtual void getDetails(HipdnnEnginePluginHandle& handle,
+                            const hipdnn_plugin_sdk::IGraph& opGraph,
                             hipdnnPluginConstData_t& detailsOut) const
         = 0;
 
