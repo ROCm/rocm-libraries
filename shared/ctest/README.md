@@ -33,8 +33,8 @@ Defines test organization:
 Python script that:
 - Parses YAML configuration files
 - Detects runtime environment (OS, GPU architecture)
-- Applies exclusion rules
-- Generates CMake test registration code
+- Builds gtest filter strings with positive and negative patterns
+- Generates CMake test registration code with proper exclusion syntax
 
 #### 3. **TestCategories.cmake** (Shared)
 CMake module providing:
@@ -54,7 +54,7 @@ flowchart TD
 
     E -->|read| F[test_categories.yaml]
     E -->|detect| G[OS & GPU Architecture]
-    E -->|apply| H[Exclusion Rules]
+    E -->|build| H[Filter Strings<br/>positive-negative]
     E -->|generate| I[CMake Code]
 
     I -->|write to| J[Generated CMake<br/>build/test_categories.cmake]
@@ -113,9 +113,17 @@ exclude_gpu:
 
 execution_settings:
   default_timeout: 300
+  timeout_multiplier: 1    # Multiplier for all timeouts (1, 1.5, 1.75, 2, etc.)
   category_timeouts:
     quick: 300
     standard: 1800
+```
+
+**Timeout Configuration:**
+- `default_timeout`: Base timeout for categories not explicitly listed (in seconds)
+- `timeout_multiplier`: Global multiplier applied to all timeouts (default: 1)
+  - Use values like `1.5`, `1.75`, `2` to extend timeouts where needed
+- `category_timeouts`: Timeouts for specific categories (before multiplier is applied)
 ```
 
 ### **GPU Exclusion with Hierarchical Matching**
@@ -136,7 +144,7 @@ GPU-specific exclusions use hierarchical pattern matching with wildcard 'X':
 **Generated Tests:**
 - For each GPU exclusion, separate tests are generated per applicable category
 - Test name format: `{target}-{category}-{gpu_arch}-exclude`
-- Uses gtest filter syntax: `{category_patterns}:-{gpu_exclusion_patterns}`
+- Uses gtest filter syntax: `{positive_patterns}-{category_excludes}:{gpu_exclusion_patterns}`
 
 **Usage Examples:**
 ```bash
@@ -152,12 +160,63 @@ ctest -L quick -LE ex_gpu
 
 ### **Category-Level Exclusions**
 
-Within each category, exclusions are applied in this order:
+Exclusions are applied using gtest's negative filter syntax (`positive_patterns-negative_patterns`):
+
+**How it works:**
+- All test patterns remain in the category definition
+- Excluded patterns are added as negative filters after a single `-` separator
+- Format: `pattern1:pattern2:pattern3-excluded1:excluded2:excluded3`
+- Gtest runs tests matching positive patterns but excludes those matching negative patterns
+
+**Exclusion order:**
 
 1. **Base exclusions** (`exclude`) - Applied to that category
-2. **OS-specific exclusions** (`exclude_windows`, `exclude_linux`) - Applied based on detected OS
-3. **GPU exclusions** from top-level `exclude_gpu` section - Always filtered from main category tests
+2. **OS-specific exclusions** (`exclude_windows`, `exclude_linux`) - Added based on detected OS at build time
+3. **GPU exclusions** (`exclude_gpu`) - Appended for GPU-specific test variants
 
+**Example filters:**
+- **Category test**: `*Fusion*:*Conv*-*DeepBench*:*Slow*`
+- **GPU exclusion test**: `*Fusion*:*Conv*-*DeepBench*:*Slow*:*gfx942*`
+
+This approach maintains all patterns in the YAML configuration while letting gtest handle the filtering at runtime.
+
+### **Implementation Details**
+
+The `parse_test_categories.py` script builds filter strings using the following approach:
+
+**1. Pattern String Storage**
+
+For each category, the script stores:
+```python
+# Read timeout settings
+base_timeout = timeouts.get(category_name, 300)
+timeout = int(base_timeout * timeout_multiplier)  # Apply global multiplier
+
+category_data[category_name] = {
+    "positive_string": "pattern1:pattern2:pattern3",  # All test patterns
+    "exclude_string": "neg1:neg2:neg3",               # Category + OS exclusions
+    "labels": ["quick", "standard"],
+    "timeout": timeout  # Final timeout after multiplier applied
+}
+```
+
+**2. Category Test Generation**
+```cmake
+# Filter format: positive_string-exclude_string
+add_test(
+  NAME miopen_gtest-standard-suite
+  COMMAND miopen_gtest --gtest_filter="*Fusion*:*Conv*-*DeepBench*:*Slow*"
+)
+```
+
+**3. GPU Exclusion Test Generation**
+```cmake
+# Filter format: positive_string-exclude_string:gpu_exclude_string
+add_test(
+  NAME miopen_gtest-standard-gfx1150-exclude
+  COMMAND miopen_gtest --gtest_filter="*Fusion*:*Conv*-*DeepBench*:*Slow*:*gfx942*"
+)
+```
 
 ## Integration Guide
 
@@ -198,10 +257,10 @@ cmake -DBUILD_TESTING=ON ..
 # Note: use -DMIOPEN_TEST_DISCRETE=OFF for miopen, the POC works on the monolithic miopen_gtest
 make
 
-# Run specific category on generic hardware (excludes all GPU-specific tests)
+# Run specific category on generic hardware
 ctest -L quick -LE ex_gpu
 
-# Run specific category on gfx1150 hardware (hierarchical matching)
+# Run specific category on gfx1150 hardware
 ctest -L quick -L ex_gpu_gfx1150
 
 # Run specific category on gfx950 hardware
@@ -215,7 +274,5 @@ ctest -N
 ```
 
 ## Integrations for miopen
-
-Projects currently using this architecture:
 
 - **miopen** - [test_categories.yaml](../../projects/miopen/test/gtest/test_categories.yaml) | [CMakeLists.txt](../../projects/miopen/test/gtest/CMakeLists.txt)
