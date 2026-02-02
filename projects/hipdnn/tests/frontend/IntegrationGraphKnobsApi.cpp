@@ -149,11 +149,6 @@ TEST_P(IntegrationGraphKnobsApi, CreateExecutionPlanWithEmptyKnobs)
 
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithValidKnobs)
 {
-    // TODO: KNOWN ISSUE - initializeEngineConfig() finalizes the descriptor before
-    // create_execution_plan_ext() can set knobs on it. This needs to be fixed in the
-    // Graph implementation to set knobs before finalization.
-    // For now, this test documents the expected behavior.
-
     Graph graph = createAndBuildSimpleGraph();
 
     int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
@@ -163,11 +158,6 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithValidKnobs)
     settings.emplace_back("test.string_knob", std::string("accurate"));
 
     auto result = graph.create_execution_plan_ext(engineId, settings);
-
-    GTEST_SKIP()
-        << "KNOWN ISSUE: initializeEngineConfig() finalizes descriptor before knobs can be set";
-
-    // Once the issue is fixed, these expectations should pass:
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -225,27 +215,24 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithDeprecatedKnob)
 
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithSharedKnob)
 {
-    Graph graph = createAndBuildSimpleGraph();
+    // Test shared knob works for both engines
+    Graph graphA = createAndBuildSimpleGraph();
 
     // Set shared knob for Engine A
     int64_t engineIdA = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     std::vector<KnobSetting> settingsA;
     settingsA.emplace_back("test.shared.deterministic", static_cast<int64_t>(1));
 
-    auto result = graph.create_execution_plan_ext(engineIdA, settingsA);
-
-    GTEST_SKIP()
-        << "KNOWN ISSUE: initializeEngineConfig() finalizes descriptor before knobs can be set";
-
-    // Once the issue is fixed, these expectations should pass:
+    auto result = graphA.create_execution_plan_ext(engineIdA, settingsA);
     EXPECT_TRUE(result.is_good()) << "Engine A should accept shared knob: " << result.get_message();
 
-    // Set same shared knob for Engine B
+    // Set same shared knob for Engine B (need new graph instance)
+    Graph graphB = createAndBuildSimpleGraph();
     int64_t engineIdB = hipdnn_tests::plugin_constants::engineId<KnobsPluginEngineB>();
     std::vector<KnobSetting> settingsB;
     settingsB.emplace_back("test.shared.deterministic", static_cast<int64_t>(1));
 
-    result = graph.create_execution_plan_ext(engineIdB, settingsB);
+    result = graphB.create_execution_plan_ext(engineIdB, settingsB);
     EXPECT_TRUE(result.is_good()) << "Engine B should accept shared knob: " << result.get_message();
 }
 

@@ -261,9 +261,6 @@ private:
                                                  &engineDesc.get()),
             "Failed to set engine on the engine config descriptor.");
 
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineConfigDesc->get()),
-                                         "Failed to finalize engine config descriptor");
-
         _engineConfigDesc = std::move(engineConfigDesc);
 
         return {ErrorCode::OK, ""};
@@ -999,6 +996,10 @@ public:
                                                  flatbufferDataArray.data()),
                                              "Failed to set knob settings on engine config.");
         }
+
+        // Finalize engine config after knobs have been set
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(_engineConfigDesc->get()),
+                                         "Failed to finalize engine config descriptor");
 
         return {ErrorCode::OK, ""};
     }
