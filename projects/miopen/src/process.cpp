@@ -27,6 +27,7 @@
 #include <miopen/errors.hpp>
 #include <miopen/process.hpp>
 #include <string_view>
+#include <vector>
 
 namespace miopen {
 
@@ -65,60 +66,51 @@ public:
         if(cmd.size() < BUFFER_CAPACITY)
             cmd.resize(BUFFER_CAPACITY, '\0');
 
-        // Section below builds custom env block. The reason for it is that
-        // without it some gtests may result in throwing exception due to missing implementation
-        // for additionalEnvironmentVariables when it's not empty for example:
-        // in perfdb, sqlite, sqlite_perfdb tests we have to disable sharding with env variables
-        // GTEST_TOTAL_SHARDS/GTEST_SHARD_INDEX otherwise, during work of the spawned child
-        // process (which is in its essence is a same test binary execution) sharding is applied to
-        // it as well, making it to skip necessary executions for which it was called
-        // while parent is waiting for the child to finish. Thus, we need to pass additional
-        // env variables to disable gtest sharding for child processes
-        // Block below - is the standard way to build such env block using Windows API.
-        // Format: "KEY=VALUE\0KEY=VALUE\0\0" (double null terminated).
-        std::string envBlock;
-        LPVOID lpEnvironment = nullptr;
+        // Temporarily set additional env vars in the parent process before CreateProcess
+        // then restore them after. This allows us to avoid building a custom env block (which can
+        // fail due to ANSI/Unicode issues or missing special entries like =C:=...)
+        // CreateProcess with lpEnvironment=nullptr inherits the parent's full environment, so we
+        // only need to set the additional/modified variables and then restore initial state.
+        std::vector<std::pair<std::string, std::string>> savedEnvVars;
 
         if(!additionalEnvironmentVariables.empty())
         {
-            auto envStrings = GetEnvironmentStringsA();
-            if(envStrings != nullptr)
+            for(const auto& [key, value] : additionalEnvironmentVariables)
             {
-                std::map<std::string, std::string> envMap;
-                for(auto p = envStrings; *p != '\0'; p += strlen(p) + 1)
-                {
-                    std::string entry(p);
-                    auto pos = entry.find('=');
-                    if(pos != std::string::npos && pos > 0)
-                        envMap[entry.substr(0, pos)] = entry.substr(pos + 1);
-                }
-                FreeEnvironmentStringsA(envStrings);
+                char buf[32768];
+                DWORD len = GetEnvironmentVariableA(key.c_str(), buf, sizeof(buf));
+                if(len > 0 && len < sizeof(buf))
+                    savedEnvVars.emplace_back(key, std::string(buf, len));
+                else
+                    savedEnvVars.emplace_back(key, std::string{});
 
-                for(const auto& [key, value] : additionalEnvironmentVariables)
-                    envMap[key] = value;
-
-                for(const auto& [key, value] : envMap)
-                {
-                    envBlock += key + "=" + value;
-                    envBlock.push_back('\0');
-                }
-                envBlock.push_back('\0');
-
-                lpEnvironment = envBlock.data();
+                SetEnvironmentVariableA(key.c_str(), value.c_str());
             }
         }
 
-        if(CreateProcess(path.string().c_str(),
-                         cmd.data(),
-                         nullptr,
-                         nullptr,
-                         FALSE,
-                         0,
-                         lpEnvironment,
-                         cwd.empty() ? nullptr : cwd.data(),
-                         &info,
-                         &processInfo) == FALSE)
-            MIOPEN_THROW("CreateProcess error: " + std::to_string(GetLastError()));
+        const auto createProcessResult = CreateProcessA(path.string().c_str(),
+                                                        cmd.data(),
+                                                        nullptr,
+                                                        nullptr,
+                                                        FALSE,
+                                                        0,
+                                                        nullptr,
+                                                        cwd.empty() ? nullptr : cwd.data(),
+                                                        &info,
+                                                        &processInfo);
+        const auto createProcessError  = GetLastError();
+
+        // Restore original environment regardless of CreateProcess outcome
+        for(const auto& [key, originalValue] : savedEnvVars)
+        {
+            if(originalValue.empty())
+                SetEnvironmentVariableA(key.c_str(), nullptr);
+            else
+                SetEnvironmentVariableA(key.c_str(), originalValue.c_str());
+        }
+
+        if(createProcessResult == FALSE)
+            MIOPEN_THROW("CreateProcess error: " + std::to_string(createProcessError));
     }
 
     int Wait()
