@@ -123,6 +123,9 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_csr]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_batched_csr
   category: quick
@@ -143,6 +146,9 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_csr]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_column]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 ##############################
 # Precheckin
@@ -264,6 +270,9 @@ Tests:
   orderC: [rocsparse_order_column]
   filename: [nos6,
              nos7]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_batched_csr_graph_test
   category: pre_checkin
@@ -435,6 +444,9 @@ Tests:
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_column]
   filename: [mc2depi]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_batched_csr_file
   category: nightly
