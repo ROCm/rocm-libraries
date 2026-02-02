@@ -121,7 +121,6 @@ def main():
             pattern_string = positive_string + "-" + exclude_string
         else:
             pattern_string = positive_string
-        pattern_string = '"' + pattern_string + '"'
 
         label_string = ""
         for label in labels:
@@ -287,7 +286,6 @@ def main():
                 combined_exclude_string = gpu_exclude_string
 
             pattern_string = positive_string + "-" + combined_exclude_string
-            pattern_string = '"' + pattern_string + '"'
 
             # Build label string: category_labels + ex_gpu_<arch> label
             combined_labels = cat_labels + [ex_gpu_label]
