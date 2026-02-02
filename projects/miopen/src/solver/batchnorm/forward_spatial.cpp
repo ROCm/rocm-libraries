@@ -220,7 +220,7 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
 
     int variant       = -1;
     size_t vectorsize = 1;
-    size_t xlocalsize = 1, xgridsize = 0;
+    size_t xlocalsize = 1, xgridsize = 1;
     size_t ylocalsize = 1, ygridsize = 1;
     size_t zlocalsize = 1, zgridsize = 1;
     unsigned int ldsgcn = 0, ldsnogcn = 0;
