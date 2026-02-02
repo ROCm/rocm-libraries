@@ -168,7 +168,7 @@ struct BatchnormFwdInferenceWithVarianceSignatureKey
 }
 
 template <>
-struct fmt::formatter<hipdnn_test_sdk::utilities::BatchnormFwdInferenceWithVarianceSignatureKey>
+struct fmt::formatter<hipdnn_test_sdk::detail::BatchnormFwdInferenceWithVarianceSignatureKey>
 {
     static constexpr auto parse(format_parse_context& ctx)
     {
@@ -176,9 +176,8 @@ struct fmt::formatter<hipdnn_test_sdk::utilities::BatchnormFwdInferenceWithVaria
     }
 
     template <typename FormatContext>
-    auto
-        format(const hipdnn_test_sdk::utilities::BatchnormFwdInferenceWithVarianceSignatureKey& key,
-               FormatContext& ctx) const
+    auto format(const hipdnn_test_sdk::detail::BatchnormFwdInferenceWithVarianceSignatureKey& key,
+                FormatContext& ctx) const
     {
         return fmt::format_to(
             ctx.out(),

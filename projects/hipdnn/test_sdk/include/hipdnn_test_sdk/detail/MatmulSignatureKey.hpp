@@ -140,7 +140,7 @@ struct MatmulSignatureKey
 } // namespace hipdnn_test_sdk::detail
 
 template <>
-struct fmt::formatter<hipdnn_test_sdk::utilities::MatmulSignatureKey>
+struct fmt::formatter<hipdnn_test_sdk::detail::MatmulSignatureKey>
 {
     static constexpr auto parse(format_parse_context& ctx)
     {
@@ -148,7 +148,7 @@ struct fmt::formatter<hipdnn_test_sdk::utilities::MatmulSignatureKey>
     }
 
     template <typename FormatContext>
-    auto format(const hipdnn_test_sdk::utilities::MatmulSignatureKey& key, FormatContext& ctx) const
+    auto format(const hipdnn_test_sdk::detail::MatmulSignatureKey& key, FormatContext& ctx) const
     {
         return fmt::format_to(ctx.out(),
                               "Matmul(a={}, b={}, c={}, compute={})",

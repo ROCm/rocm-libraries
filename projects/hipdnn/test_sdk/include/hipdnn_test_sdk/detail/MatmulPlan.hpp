@@ -49,7 +49,7 @@ public:
         auto shallowCTensor
             = createShallowTensor<CDataType>(_params.cTensor, variantPack.at(_params.cTensor.uid));
 
-        CpuFpReferenceMatmul::matmul<ADataType, BDataType, CDataType, ComputeDataType>(
+        utilities::CpuFpReferenceMatmul::matmul<ADataType, BDataType, CDataType, ComputeDataType>(
             *shallowATensor, *shallowBTensor, *shallowCTensor);
     }
 
@@ -64,10 +64,10 @@ template <hipdnn_data_sdk::data_objects::DataType ADataTypeEnum,
 class MatmulPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
-    using ADataType = DataTypeToNative<ADataTypeEnum>;
-    using BDataType = DataTypeToNative<BDataTypeEnum>;
-    using CDataType = DataTypeToNative<CDataTypeEnum>;
-    using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
+    using ADataType = utilities::DataTypeToNative<ADataTypeEnum>;
+    using BDataType = utilities::DataTypeToNative<BDataTypeEnum>;
+    using CDataType = utilities::DataTypeToNative<CDataTypeEnum>;
+    using ComputeDataType = utilities::DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_data_sdk::data_objects::Node& node,

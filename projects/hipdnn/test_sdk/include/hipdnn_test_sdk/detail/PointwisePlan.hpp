@@ -94,7 +94,7 @@ private:
 
         if(hipdnn_data_sdk::utilities::isUnaryPointwiseMode(_params.mode))
         {
-            CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
+            utilities::CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
                 _params.mode, *shallowOut0Tensor, *shallowIn0Tensor);
         }
         else if(hipdnn_data_sdk::utilities::isBinaryPointwiseMode(_params.mode))
@@ -107,8 +107,9 @@ private:
             auto shallowIn1Tensor = createShallowTensor<Input1Type>(
                 _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
 
-            CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::pointwiseCompute(
-                _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, *shallowIn1Tensor);
+            utilities::CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::
+                pointwiseCompute(
+                    _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, *shallowIn1Tensor);
         }
         else
         {
@@ -126,7 +127,7 @@ private:
 
         if(hipdnn_data_sdk::utilities::isUnaryPointwiseMode(_params.mode))
         {
-            CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
+            utilities::CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
                 _params.mode,
                 *shallowOut0Tensor,
                 *shallowIn0Tensor,
@@ -149,19 +150,20 @@ private:
             auto shallowIn1Tensor = createShallowTensor<Input1Type>(
                 _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
 
-            CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::pointwiseCompute(
-                _params.mode,
-                *shallowOut0Tensor,
-                *shallowIn0Tensor,
-                *shallowIn1Tensor,
-                static_cast<OutputType>(
-                    _params.reluLowerClip.has_value() ? _params.reluLowerClip.value() : 0.0f),
-                static_cast<OutputType>(_params.reluUpperClip.has_value()
-                                            ? _params.reluUpperClip.value()
-                                            : std::numeric_limits<float>::max()),
-                static_cast<OutputType>(_params.reluLowerClipSlope.has_value()
-                                            ? _params.reluLowerClipSlope.value()
-                                            : 0.0f));
+            utilities::CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::
+                pointwiseCompute(_params.mode,
+                                 *shallowOut0Tensor,
+                                 *shallowIn0Tensor,
+                                 *shallowIn1Tensor,
+                                 static_cast<OutputType>(_params.reluLowerClip.has_value()
+                                                             ? _params.reluLowerClip.value()
+                                                             : 0.0f),
+                                 static_cast<OutputType>(_params.reluUpperClip.has_value()
+                                                             ? _params.reluUpperClip.value()
+                                                             : std::numeric_limits<float>::max()),
+                                 static_cast<OutputType>(_params.reluLowerClipSlope.has_value()
+                                                             ? _params.reluLowerClipSlope.value()
+                                                             : 0.0f));
         }
         else
         {
@@ -179,10 +181,10 @@ template <hipdnn_data_sdk::data_objects::DataType Input0DataTypeEnum,
 class PointwisePlanBuilder : public IGraphNodePlanBuilder
 {
 public:
-    using Input0Type = DataTypeToNative<Input0DataTypeEnum>;
-    using Input1Type = DataTypeToNative<Input1DataTypeEnum>;
-    using ComputeType = DataTypeToNative<ComputeDataTypeEnum>;
-    using OutputType = DataTypeToNative<OutputDataTypeEnum>;
+    using Input0Type = utilities::DataTypeToNative<Input0DataTypeEnum>;
+    using Input1Type = utilities::DataTypeToNative<Input1DataTypeEnum>;
+    using ComputeType = utilities::DataTypeToNative<ComputeDataTypeEnum>;
+    using OutputType = utilities::DataTypeToNative<OutputDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_data_sdk::data_objects::Node& node,

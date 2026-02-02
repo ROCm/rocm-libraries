@@ -55,14 +55,14 @@ inline std::ostream& operator<<(std::ostream& os, hipdnnStatus_t status)
     return os << toString(status);
 }
 
+} // namespace hipdnn_frontend::detail
+
 template <>
 struct fmt::formatter<hipdnnStatus_t> : fmt::formatter<const char*>
 {
     template <typename FormatContext>
     auto format(hipdnnStatus_t status, FormatContext& ctx) const
     {
-        return fmt::formatter<const char*>::format(toString(status), ctx);
+        return fmt::formatter<const char*>::format(hipdnn_frontend::detail::toString(status), ctx);
     }
 };
-
-} // namespace hipdnn_frontend::detail

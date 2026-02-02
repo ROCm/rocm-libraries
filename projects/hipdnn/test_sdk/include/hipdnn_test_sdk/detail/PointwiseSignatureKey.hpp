@@ -304,7 +304,7 @@ private:
 }
 
 template <>
-struct fmt::formatter<hipdnn_test_sdk::utilities::PointwiseSignatureKey>
+struct fmt::formatter<hipdnn_test_sdk::detail::PointwiseSignatureKey>
 {
     static constexpr auto parse(format_parse_context& ctx)
     {
@@ -312,8 +312,7 @@ struct fmt::formatter<hipdnn_test_sdk::utilities::PointwiseSignatureKey>
     }
 
     template <typename FormatContext>
-    auto format(const hipdnn_test_sdk::utilities::PointwiseSignatureKey& key,
-                FormatContext& ctx) const
+    auto format(const hipdnn_test_sdk::detail::PointwiseSignatureKey& key, FormatContext& ctx) const
     {
         if(key.input1DataType != hipdnn_data_sdk::data_objects::DataType::UNSET)
         {

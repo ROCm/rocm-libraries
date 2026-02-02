@@ -139,15 +139,15 @@ protected:
         _graphObj.set_intermediate_data_type(param.defaultDataType);
         _graphObj.set_io_data_type(param.defaultDataType);
 
-        auto xTensorAttrObj
-            = graph::makeTensorAttributes("x",
-                                          param.dataTypes[TypeKey::X],
-                                          convTestCase.xDims,
-                                          generateStrides(convTestCase.xDims, layout.strideOrder));
+        auto xTensorAttrObj = hipdnn_frontend::makeTensorAttributes(
+            "x",
+            param.dataTypes[TypeKey::X],
+            convTestCase.xDims,
+            generateStrides(convTestCase.xDims, layout.strideOrder));
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xTensorAttrObj));
         xTensorAttr->set_is_virtual(isVirtual(TypeKey::X));
 
-        auto wTensorAttrObj = graph::makeTensorAttributes(
+        auto wTensorAttrObj = hipdnn_frontend::makeTensorAttributes(
             "w",
             param.dataTypes[TypeKey::W],
             convTestCase.wDims,
@@ -172,11 +172,11 @@ protected:
         {
             const auto biasDims = getDerivedShape(convTestCase.yDims);
 
-            auto biasTensorAttrObj
-                = graph::makeTensorAttributes("bias",
-                                              param.dataTypes[TypeKey::BIAS],
-                                              biasDims,
-                                              generateStrides(biasDims, layout.strideOrder));
+            auto biasTensorAttrObj = hipdnn_frontend::makeTensorAttributes(
+                "bias",
+                param.dataTypes[TypeKey::BIAS],
+                biasDims,
+                generateStrides(biasDims, layout.strideOrder));
             auto biasTensorAttr
                 = std::make_shared<graph::TensorAttributes>(std::move(biasTensorAttrObj));
             biasTensorAttr->set_is_virtual(isVirtual(TypeKey::BIAS));

@@ -40,12 +40,12 @@ protected:
     void SetUp() override
     {
         _mockBackend = std::make_shared<Mock_hipdnn_backend>();
-        IHipdnnBackend::setInstance(_mockBackend);
+        detail::IHipdnnBackend::setInstance(_mockBackend);
         _handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
     }
     void TearDown() override
     {
-        IHipdnnBackend::resetInstance();
+        detail::IHipdnnBackend::resetInstance();
         _mockBackend.reset();
     }
 

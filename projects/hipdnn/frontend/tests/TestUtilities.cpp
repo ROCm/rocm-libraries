@@ -11,6 +11,7 @@
 #include <vector>
 
 using namespace hipdnn_frontend;
+using namespace hipdnn_frontend::graph;
 using namespace hipdnn_frontend::detail;
 using namespace hipdnn_test_sdk::utilities;
 

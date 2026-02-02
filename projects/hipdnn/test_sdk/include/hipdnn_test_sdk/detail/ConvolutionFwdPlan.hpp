@@ -70,13 +70,13 @@ public:
         auto shallowYTensor = createShallowTensor<OutputDataType>(
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
-        CpuFpReferenceConvolution::fprop(*shallowXTensor,
-                                         *shallowWTensor,
-                                         *shallowYTensor,
-                                         _params.stride,
-                                         _params.dilation,
-                                         _params.prePadding,
-                                         _params.postPadding);
+        utilities::CpuFpReferenceConvolution::fprop(*shallowXTensor,
+                                                    *shallowWTensor,
+                                                    *shallowYTensor,
+                                                    _params.stride,
+                                                    _params.dilation,
+                                                    _params.prePadding,
+                                                    _params.postPadding);
     }
 
 private:
@@ -90,10 +90,10 @@ template <hipdnn_data_sdk::data_objects::DataType XDataTypeEnum,
 class ConvolutionFwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
-    using XDataType = DataTypeToNative<XDataTypeEnum>;
-    using WDataType = DataTypeToNative<WDataTypeEnum>;
-    using OutputDataType = DataTypeToNative<OutputDataTypeEnum>;
-    using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
+    using XDataType = utilities::DataTypeToNative<XDataTypeEnum>;
+    using WDataType = utilities::DataTypeToNative<WDataTypeEnum>;
+    using OutputDataType = utilities::DataTypeToNative<OutputDataTypeEnum>;
+    using ComputeDataType = utilities::DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_data_sdk::data_objects::Node& node,

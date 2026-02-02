@@ -16,6 +16,7 @@
 #include <hipdnn_test_sdk/utilities/pointwise/BinaryOperationFunctors.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
+using namespace hipdnn_test_sdk::detail;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace ::testing;
@@ -70,23 +71,23 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     int64_t uid = 1;
 
     // Create tensor attributes for all tensors
-    auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        "X", hipdnn_frontend::DataType::FLOAT, xTensor);
+    auto xAttr
+        = hipdnn_frontend::makeTensorAttributes("X", hipdnn_frontend::DataType::FLOAT, xTensor);
     xAttr.set_uid(uid++);
     auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
 
-    auto wAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        "W", hipdnn_frontend::DataType::FLOAT, wTensor);
+    auto wAttr
+        = hipdnn_frontend::makeTensorAttributes("W", hipdnn_frontend::DataType::FLOAT, wTensor);
     wAttr.set_uid(uid++);
     auto wTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(wAttr));
 
-    auto addConstantAttr = hipdnn_frontend::graph::makeTensorAttributes(
+    auto addConstantAttr = hipdnn_frontend::makeTensorAttributes(
         "AddConstant", hipdnn_frontend::DataType::FLOAT, addConstantTensor);
     addConstantAttr.set_uid(uid++);
     auto addConstantTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(addConstantAttr));
 
-    auto multiplyConstantAttr = hipdnn_frontend::graph::makeTensorAttributes(
+    auto multiplyConstantAttr = hipdnn_frontend::makeTensorAttributes(
         "MultiplyConstant", hipdnn_frontend::DataType::FLOAT, multiplyConstantTensor);
     multiplyConstantAttr.set_uid(uid++);
     auto multiplyConstantTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(

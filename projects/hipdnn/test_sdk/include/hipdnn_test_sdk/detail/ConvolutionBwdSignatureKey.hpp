@@ -130,7 +130,7 @@ struct ConvolutionBwdSignatureKey
 }
 
 template <>
-struct fmt::formatter<hipdnn_test_sdk::utilities::ConvolutionBwdSignatureKey>
+struct fmt::formatter<hipdnn_test_sdk::detail::ConvolutionBwdSignatureKey>
 {
     static constexpr auto parse(format_parse_context& ctx)
     {
@@ -138,7 +138,7 @@ struct fmt::formatter<hipdnn_test_sdk::utilities::ConvolutionBwdSignatureKey>
     }
 
     template <typename FormatContext>
-    auto format(const hipdnn_test_sdk::utilities::ConvolutionBwdSignatureKey& key,
+    auto format(const hipdnn_test_sdk::detail::ConvolutionBwdSignatureKey& key,
                 FormatContext& ctx) const
     {
         return fmt::format_to(ctx.out(),

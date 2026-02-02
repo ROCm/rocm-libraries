@@ -52,13 +52,13 @@ inline Error findCommonShape(const std::vector<std::vector<int64_t>>& inputShape
 
 // Helper to check if tensor dimensions are set (not null, has dimensions)
 // Returns true if dimensions are set by user, false if they will be inferred in infer_properties_node()
-inline bool areTensorDimensionsSet(const std::shared_ptr<TensorAttributes>& tensor)
+inline bool areTensorDimensionsSet(const std::shared_ptr<graph::TensorAttributes>& tensor)
 {
     return tensor && !tensor->get_dim().empty();
 }
 
 // Helper to get tensor name for error messages (uses tensor's name if set, otherwise fallback)
-inline std::string getTensorNameForError(const std::shared_ptr<TensorAttributes>& tensor,
+inline std::string getTensorNameForError(const std::shared_ptr<graph::TensorAttributes>& tensor,
                                          const std::string& fallbackName)
 {
     if(tensor && !tensor->get_name().empty())
@@ -73,7 +73,7 @@ inline std::string getTensorNameForError(const std::shared_ptr<TensorAttributes>
 // Spatial mode: scale has shape [1, C, 1, 1, ...] - batch and spatial dims are 1
 // Per-activation mode: scale has shape [1, C, H, W, ...] - spatial dims match input
 // Note: Scale/bias tensors always use channel-first convention (C at index 1)
-inline bool isBatchNormSpatialMode(const std::shared_ptr<TensorAttributes>& scale)
+inline bool isBatchNormSpatialMode(const std::shared_ptr<graph::TensorAttributes>& scale)
 {
     if(!scale || scale->get_dim().empty() || scale->get_dim().size() < 2)
     {
@@ -97,13 +97,12 @@ inline bool isBatchNormSpatialMode(const std::shared_ptr<TensorAttributes>& scal
 // Validates batch normalization training spatial dimension constraints
 // Uses tensor names if set, otherwise uses fallback names for error messages
 // Returns an Error indicating if the input tensor dimensions are valid for batch norm training
-inline Error
-    validateBatchNormTrainingSpatialDimensions(const std::shared_ptr<TensorAttributes>& x,
-                                               const std::shared_ptr<TensorAttributes>& scale,
-                                               const std::string& operation
-                                               = "Batch normalization training",
-                                               const std::string& xFallback = "Input tensor",
-                                               const std::string& scaleFallback = "Scale tensor")
+inline Error validateBatchNormTrainingSpatialDimensions(
+    const std::shared_ptr<graph::TensorAttributes>& x,
+    const std::shared_ptr<graph::TensorAttributes>& scale,
+    const std::string& operation = "Batch normalization training",
+    const std::string& xFallback = "Input tensor",
+    const std::string& scaleFallback = "Scale tensor")
 {
     if(!x)
     {
@@ -159,7 +158,7 @@ inline Error
 
 // Validates tensor has minimum required dimensions
 // Uses tensor's name if set, otherwise uses fallbackName for error messages
-inline Error validateMinimumTensorDimensions(const std::shared_ptr<TensorAttributes>& tensor,
+inline Error validateMinimumTensorDimensions(const std::shared_ptr<graph::TensorAttributes>& tensor,
                                              size_t minDims,
                                              const std::string& fallbackName = "Tensor")
 {
@@ -184,8 +183,8 @@ inline Error validateMinimumTensorDimensions(const std::shared_ptr<TensorAttribu
 // Validates two tensors have matching shapes
 // Uses tensor names if set, otherwise uses fallback names for error messages
 // NOTE: This function expects both tensors to have dimensions set - it will fail if not set
-inline Error validateTensorShapesMatch(const std::shared_ptr<TensorAttributes>& tensor1,
-                                       const std::shared_ptr<TensorAttributes>& tensor2,
+inline Error validateTensorShapesMatch(const std::shared_ptr<graph::TensorAttributes>& tensor1,
+                                       const std::shared_ptr<graph::TensorAttributes>& tensor2,
                                        const std::string& fallbackName1 = "Tensor1",
                                        const std::string& fallbackName2 = "Tensor2")
 {
@@ -233,8 +232,8 @@ inline Error validateTensorShapesMatch(const std::shared_ptr<TensorAttributes>& 
 // Uses tensor names if set, otherwise uses fallback names for error messages
 // Returns OK if tensor2 dimensions not yet set (will be inferred in infer_properties_node)
 // Use this for validating input vs output tensor consistency when output may not be set yet
-inline Error validateTensorShapesMatchIfSet(const std::shared_ptr<TensorAttributes>& tensor1,
-                                            const std::shared_ptr<TensorAttributes>& tensor2,
+inline Error validateTensorShapesMatchIfSet(const std::shared_ptr<graph::TensorAttributes>& tensor1,
+                                            const std::shared_ptr<graph::TensorAttributes>& tensor2,
                                             const std::string& fallbackName1 = "Tensor1",
                                             const std::string& fallbackName2 = "Tensor2")
 {
@@ -249,7 +248,7 @@ inline Error validateTensorShapesMatchIfSet(const std::shared_ptr<TensorAttribut
 // Validates tensor has channel-only shape [1, C, 1, 1, ...] for batch normalization parameters
 // Uses tensor's name if set, otherwise uses fallbackName for error messages
 // NOTE: This function expects tensor dimensions to be set - it will fail if not set
-inline Error validateChannelOnlyTensorShape(const std::shared_ptr<TensorAttributes>& tensor,
+inline Error validateChannelOnlyTensorShape(const std::shared_ptr<graph::TensorAttributes>& tensor,
                                             int64_t expectedChannels,
                                             const std::string& fallbackName = "Tensor")
 {
@@ -302,7 +301,7 @@ inline Error validateChannelOnlyTensorShape(const std::shared_ptr<TensorAttribut
 // Uses tensor's name if set, otherwise uses fallbackName for error messages
 // Returns OK if tensor dimensions not yet set (will be inferred in infer_properties_node)
 // Use this for optional output tensors that may not have dimensions set during pre_validate_node
-inline Error validateChannelOnlyShapeIfSet(const std::shared_ptr<TensorAttributes>& tensor,
+inline Error validateChannelOnlyShapeIfSet(const std::shared_ptr<graph::TensorAttributes>& tensor,
                                            int64_t expectedChannels,
                                            const std::string& fallbackName = "Tensor")
 {
@@ -318,7 +317,7 @@ inline Error validateChannelOnlyShapeIfSet(const std::shared_ptr<TensorAttribute
 // Validates scalar parameter tensor is properly configured
 // Uses param's name if set, otherwise uses fallbackName for error messages
 // Used for required scalar parameters (e.g., epsilon) that must have dimensions set
-inline Error validateScalarParameter(const std::shared_ptr<TensorAttributes>& param,
+inline Error validateScalarParameter(const std::shared_ptr<graph::TensorAttributes>& param,
                                      const std::string& fallbackName = "Parameter")
 {
     if(!param)

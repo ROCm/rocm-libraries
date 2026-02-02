@@ -42,7 +42,7 @@ class BatchnormBackwardActivation
 {
 protected:
     void initializeBundle([[maybe_unused]] const graph::Graph& graph,
-                          GraphTensorBundle& bundle,
+                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
         bundle.tensors.at(BatchnormActivationTensorIds::X_UID)
@@ -77,40 +77,35 @@ protected:
             .set_compute_data_type(fe::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto xAttr
-            = graph::makeTensorAttributes("x", dims, generateStrides(dims, layout.strideOrder));
+        auto xAttr = makeTensorAttributes("x", dims, generateStrides(dims, layout.strideOrder));
         xAttr.set_uid(BatchnormActivationTensorIds::X_UID);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
-        auto scaleAttr
-            = graph::makeTensorAttributes("scale",
-                                          intermediateDataType,
-                                          channelDims,
-                                          generateStrides(channelDims, layout.strideOrder));
+        auto scaleAttr = makeTensorAttributes("scale",
+                                              intermediateDataType,
+                                              channelDims,
+                                              generateStrides(channelDims, layout.strideOrder));
         scaleAttr.set_uid(BatchnormActivationTensorIds::SCALE_UID);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
-        auto biasAttr
-            = graph::makeTensorAttributes("bias",
-                                          intermediateDataType,
-                                          channelDims,
-                                          generateStrides(channelDims, layout.strideOrder));
+        auto biasAttr = makeTensorAttributes("bias",
+                                             intermediateDataType,
+                                             channelDims,
+                                             generateStrides(channelDims, layout.strideOrder));
         biasAttr.set_uid(BatchnormActivationTensorIds::BIAS_UID);
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
-        auto meanAttr
-            = graph::makeTensorAttributes("mean",
-                                          intermediateDataType,
-                                          channelDims,
-                                          generateStrides(channelDims, layout.strideOrder));
+        auto meanAttr = makeTensorAttributes("mean",
+                                             intermediateDataType,
+                                             channelDims,
+                                             generateStrides(channelDims, layout.strideOrder));
         meanAttr.set_uid(BatchnormActivationTensorIds::MEAN_UID);
         auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
 
-        auto invVarAttr
-            = graph::makeTensorAttributes("inv_variance",
-                                          intermediateDataType,
-                                          channelDims,
-                                          generateStrides(channelDims, layout.strideOrder));
+        auto invVarAttr = makeTensorAttributes("inv_variance",
+                                               intermediateDataType,
+                                               channelDims,
+                                               generateStrides(channelDims, layout.strideOrder));
         invVarAttr.set_uid(BatchnormActivationTensorIds::INV_VARIANCE_UID);
         auto invVarianceTensorAttr
             = std::make_shared<graph::TensorAttributes>(std::move(invVarAttr));
@@ -125,8 +120,7 @@ protected:
                                                 biasTensorAttr,
                                                 bnInfAttrs);
 
-        auto dyAttr
-            = graph::makeTensorAttributes("dy", dims, generateStrides(dims, layout.strideOrder));
+        auto dyAttr = makeTensorAttributes("dy", dims, generateStrides(dims, layout.strideOrder));
         dyAttr.set_uid(BatchnormActivationTensorIds::DY_UID);
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 

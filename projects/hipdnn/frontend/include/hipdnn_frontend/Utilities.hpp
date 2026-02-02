@@ -17,36 +17,39 @@ namespace hipdnn_frontend
 template <class T,
           class HostAlloc = hipdnn_data_sdk::utilities::HostAllocator<T>,
           class DeviceAlloc = hipdnn_data_sdk::utilities::DeviceAllocator<T>>
-inline TensorAttributes makeTensorAttributes(
+inline graph::TensorAttributes makeTensorAttributes(
     const std::string& name,
     DataType dataType,
     const hipdnn_data_sdk::utilities::Tensor<T, HostAlloc, DeviceAlloc>& tensor)
 {
-    return TensorAttributes()
+    return graph::TensorAttributes()
         .set_name(name)
         .set_data_type(dataType)
         .set_dim(tensor.dims())
         .set_stride(tensor.strides());
 }
 
-inline TensorAttributes makeTensorAttributes(const std::string& name,
-                                             DataType dataType,
-                                             const std::vector<int64_t>& dims,
-                                             const std::vector<int64_t>& strides)
+inline graph::TensorAttributes makeTensorAttributes(const std::string& name,
+                                                    DataType dataType,
+                                                    const std::vector<int64_t>& dims,
+                                                    const std::vector<int64_t>& strides)
 {
-    return TensorAttributes().set_name(name).set_data_type(dataType).set_dim(dims).set_stride(
-        strides);
+    return graph::TensorAttributes()
+        .set_name(name)
+        .set_data_type(dataType)
+        .set_dim(dims)
+        .set_stride(strides);
 }
 
-inline TensorAttributes makeTensorAttributes(const std::string& name,
-                                             const std::vector<int64_t>& dims,
-                                             const std::vector<int64_t>& strides)
+inline graph::TensorAttributes makeTensorAttributes(const std::string& name,
+                                                    const std::vector<int64_t>& dims,
+                                                    const std::vector<int64_t>& strides)
 {
-    return TensorAttributes().set_name(name).set_dim(dims).set_stride(strides);
+    return graph::TensorAttributes().set_name(name).set_dim(dims).set_stride(strides);
 }
 
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
-    createTensorFromAttribute(const TensorAttributes& attribute)
+    createTensorFromAttribute(const graph::TensorAttributes& attribute)
 {
     return hipdnn_data_sdk::utilities::createTensor(
         toSdkType(attribute.get_data_type()), attribute.get_dim(), attribute.get_stride());

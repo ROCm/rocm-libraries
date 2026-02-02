@@ -79,12 +79,12 @@ public:
         auto shallowInvVarianceTensor = createShallowTensor<MeanVarianceDataType>(
             _params.invVarianceTensor, variantPack.at(_params.invVarianceTensor.uid));
 
-        CpuFpReferenceBatchnorm::fwdInference(*shallowXTensor,
-                                              *shallowScaleTensor,
-                                              *shallowBiasTensor,
-                                              *shallowMeanTensor,
-                                              *shallowInvVarianceTensor,
-                                              *shallowYTensor);
+        utilities::CpuFpReferenceBatchnorm::fwdInference(*shallowXTensor,
+                                                         *shallowScaleTensor,
+                                                         *shallowBiasTensor,
+                                                         *shallowMeanTensor,
+                                                         *shallowInvVarianceTensor,
+                                                         *shallowYTensor);
     }
 
 private:
@@ -99,11 +99,11 @@ template <hipdnn_data_sdk::data_objects::DataType XDataTypeEnum,
 class BatchnormFwdInferencePlanBuilder : public IGraphNodePlanBuilder
 {
 public:
-    using XDataType = DataTypeToNative<XDataTypeEnum>;
-    using ScaleBiasDataType = DataTypeToNative<ScaleBiasDataTypeEnum>;
-    using MeanVarianceDataType = DataTypeToNative<MeanVarianceDataTypeEnum>;
-    using OutputDataType = DataTypeToNative<OutputDataTypeEnum>;
-    using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
+    using XDataType = utilities::DataTypeToNative<XDataTypeEnum>;
+    using ScaleBiasDataType = utilities::DataTypeToNative<ScaleBiasDataTypeEnum>;
+    using MeanVarianceDataType = utilities::DataTypeToNative<MeanVarianceDataTypeEnum>;
+    using OutputDataType = utilities::DataTypeToNative<OutputDataTypeEnum>;
+    using ComputeDataType = utilities::DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_data_sdk::data_objects::Node& node,

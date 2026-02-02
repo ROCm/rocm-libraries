@@ -86,13 +86,13 @@ public:
         double epsilonVal = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
             _params.epsilonTensor, "Epsilon");
 
-        CpuFpReferenceBatchnorm::fwdInferenceWithVariance(*shallowXTensor,
-                                                          *shallowScaleTensor,
-                                                          *shallowBiasTensor,
-                                                          *shallowMeanTensor,
-                                                          *shallowVarianceTensor,
-                                                          *shallowYTensor,
-                                                          epsilonVal);
+        utilities::CpuFpReferenceBatchnorm::fwdInferenceWithVariance(*shallowXTensor,
+                                                                     *shallowScaleTensor,
+                                                                     *shallowBiasTensor,
+                                                                     *shallowMeanTensor,
+                                                                     *shallowVarianceTensor,
+                                                                     *shallowYTensor,
+                                                                     epsilonVal);
     }
 
 private:
@@ -107,11 +107,11 @@ template <hipdnn_data_sdk::data_objects::DataType XDataTypeEnum,
 class BatchnormFwdInferenceWithVariancePlanBuilder : public IGraphNodePlanBuilder
 {
 public:
-    using XDataType = DataTypeToNative<XDataTypeEnum>;
-    using ScaleBiasDataType = DataTypeToNative<ScaleBiasDataTypeEnum>;
-    using MeanVarianceDataType = DataTypeToNative<MeanVarianceDataTypeEnum>;
-    using OutputDataType = DataTypeToNative<OutputDataTypeEnum>;
-    using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
+    using XDataType = utilities::DataTypeToNative<XDataTypeEnum>;
+    using ScaleBiasDataType = utilities::DataTypeToNative<ScaleBiasDataTypeEnum>;
+    using MeanVarianceDataType = utilities::DataTypeToNative<MeanVarianceDataTypeEnum>;
+    using OutputDataType = utilities::DataTypeToNative<OutputDataTypeEnum>;
+    using ComputeDataType = utilities::DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_data_sdk::data_objects::Node& node,

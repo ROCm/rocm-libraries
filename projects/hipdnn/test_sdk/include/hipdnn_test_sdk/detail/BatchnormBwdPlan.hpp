@@ -122,14 +122,14 @@ public:
                 variantPack.at(_params.invVarianceTensor.value().uid));
         }
 
-        CpuFpReferenceBatchnorm::backward(*shallowDyTensor,
-                                          *shallowXTensor,
-                                          *shallowScaleTensor,
-                                          *shallowDxTensor,
-                                          *shallowDscaleTensor,
-                                          *shallowDbiasTensor,
-                                          shallowMeanTensor.get(),
-                                          shallowInvVarianceTensor.get());
+        utilities::CpuFpReferenceBatchnorm::backward(*shallowDyTensor,
+                                                     *shallowXTensor,
+                                                     *shallowScaleTensor,
+                                                     *shallowDxTensor,
+                                                     *shallowDscaleTensor,
+                                                     *shallowDbiasTensor,
+                                                     shallowMeanTensor.get(),
+                                                     shallowInvVarianceTensor.get());
     }
 
 private:
@@ -145,12 +145,12 @@ template <hipdnn_data_sdk::data_objects::DataType DyDataTypeEnum,
 class BatchnormBwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
-    using DyDataType = DataTypeToNative<DyDataTypeEnum>;
-    using XDataType = DataTypeToNative<XDataTypeEnum>;
-    using ScaleBiasDataType = DataTypeToNative<ScaleBiasDataTypeEnum>;
-    using MeanVarianceDataType = DataTypeToNative<MeanVarianceDataTypeEnum>;
-    using OutputDataType = DataTypeToNative<OutputDataTypeEnum>;
-    using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
+    using DyDataType = utilities::DataTypeToNative<DyDataTypeEnum>;
+    using XDataType = utilities::DataTypeToNative<XDataTypeEnum>;
+    using ScaleBiasDataType = utilities::DataTypeToNative<ScaleBiasDataTypeEnum>;
+    using MeanVarianceDataType = utilities::DataTypeToNative<MeanVarianceDataTypeEnum>;
+    using OutputDataType = utilities::DataTypeToNative<OutputDataTypeEnum>;
+    using ComputeDataType = utilities::DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_data_sdk::data_objects::Node& node,

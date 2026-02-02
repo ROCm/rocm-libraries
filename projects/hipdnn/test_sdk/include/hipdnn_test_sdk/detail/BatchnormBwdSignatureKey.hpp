@@ -212,7 +212,7 @@ struct BatchnormBwdSignatureKey
 }
 
 template <>
-struct fmt::formatter<hipdnn_test_sdk::utilities::BatchnormBwdSignatureKey>
+struct fmt::formatter<hipdnn_test_sdk::detail::BatchnormBwdSignatureKey>
 {
     static constexpr auto parse(format_parse_context& ctx)
     {
@@ -220,7 +220,7 @@ struct fmt::formatter<hipdnn_test_sdk::utilities::BatchnormBwdSignatureKey>
     }
 
     template <typename FormatContext>
-    auto format(const hipdnn_test_sdk::utilities::BatchnormBwdSignatureKey& key,
+    auto format(const hipdnn_test_sdk::detail::BatchnormBwdSignatureKey& key,
                 FormatContext& ctx) const
     {
         return fmt::format_to(ctx.out(),
