@@ -24,6 +24,7 @@ public:
                               const hipdnn_plugin_sdk::IGraph& opGraph) const
         = 0;
     virtual void getDetails(HipdnnEnginePluginHandle& handle,
+                            const hipdnn_plugin_sdk::IGraph& opGraph,
                             hipdnnPluginConstData_t& detailsOut) const
         = 0;
 

@@ -40,6 +40,7 @@ bool MiopenEngine::isApplicable(HipdnnEnginePluginHandle& handle,
 }
 
 void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
+                              const hipdnn_plugin_sdk::IGraph& opGraph,
                               hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
@@ -49,6 +50,28 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
 
     std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobsVector;
     knobsVector.push_back(knob);
+
+    // Collect custom knobs from plan builders
+    for(const auto& planBuilder : _planBuilders)
+    {
+        auto customKnobs = planBuilder->getCustomKnobs(handle, opGraph);
+
+        if(customKnobs.empty())
+        {
+            continue;
+        }
+
+        for(const auto& knobT : customKnobs)
+        {
+            auto knobOffset = hipdnn_data_sdk::data_objects::Knob::Pack(builder, &knobT);
+            knobsVector.push_back(knobOffset);
+        }
+
+        // Only one plan builder should be applicable for a given graph and return custom knobs.
+        // Stop after finding the first one to avoid duplicates.
+        break;
+    }
+
     auto knobs = builder.CreateVector(knobsVector);
 
     auto engineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
@@ -108,7 +131,7 @@ void MiopenEngine::initializeExecutionContext(
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
-            planBuilder->buildPlan(handle, opGraph, executionContext);
+            planBuilder->buildPlan(handle, opGraph, engineConfig, executionContext);
             break;
         }
     }
