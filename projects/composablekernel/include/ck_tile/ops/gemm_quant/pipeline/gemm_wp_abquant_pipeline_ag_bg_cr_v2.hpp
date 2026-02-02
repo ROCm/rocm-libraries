@@ -417,8 +417,6 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
         block_sync_lds();
 
         // preload A00,A10 from lds
-        using ATypeToUse =
-            mixed_prec_compute_type_from_input_t<ADataType, BDataType, ComputeDataType>;
         using ATileType =
             decltype(make_static_distributed_tensor<BTypeToUse>(a_warp_tile_distribution));
         statically_indexed_array<ATileType, m_preload> a_warp_tensor;
@@ -426,7 +424,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
         static_for<0, m_preload, 1>{}([&](auto loadIter) {
             constexpr auto mIter = loadIter % MIterPerWarp;
             constexpr auto kIter = loadIter / MIterPerWarp;
-            load_and_convert_tile<ADataType, ATypeToUse, UnaryOpSize_>(
+            load_and_convert_tile<UnaryOpSize_>(
                 a_warp_tensor(loadIter), a_warp_windows_ping(number<mIter>{})(number<kIter>{}));
         });
         __builtin_amdgcn_sched_barrier(0);
@@ -476,7 +474,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
                 constexpr auto mIter = loadIter % MIterPerWarp;
                 constexpr auto kIter = loadIter / MIterPerWarp;
-                load_and_convert_tile<ADataType, ATypeToUse, UnaryOpSize_>(
+                load_and_convert_tile<UnaryOpSize_>(
                     a_warp_tensor(loadIter), a_warp_windows_pong(number<mIter>{})(number<kIter>{}));
             });
 
@@ -521,7 +519,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
                 constexpr auto mIter = loadIter % MIterPerWarp;
                 constexpr auto kIter = loadIter / MIterPerWarp;
-                load_and_convert_tile<ADataType, ATypeToUse, UnaryOpSize_>(
+                load_and_convert_tile<UnaryOpSize_>(
                     a_warp_tensor(loadIter), a_warp_windows_ping(number<mIter>{})(number<kIter>{}));
             });
             iCounter--;
@@ -561,7 +559,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
                 constexpr auto mIter = loadIter % MIterPerWarp;
                 constexpr auto kIter = loadIter / MIterPerWarp;
-                load_and_convert_tile<ADataType, ATypeToUse, UnaryOpSize_>(
+                load_and_convert_tile<UnaryOpSize_>(
                     a_warp_tensor(loadIter), a_warp_windows_pong(number<mIter>{})(number<kIter>{}));
             });
 
