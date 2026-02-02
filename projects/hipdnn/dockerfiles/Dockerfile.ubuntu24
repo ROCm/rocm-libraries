@@ -79,14 +79,13 @@ RUN git clone --depth 1 https://github.com/ROCm/TheRock.git /TheRock
 
 WORKDIR /TheRock
 
-# Setup Python environment
-RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+RUN python3 -m venv /venv
+ENV PATH="/venv/bin:$PATH"
 RUN pip install -r requirements.txt
 
 # Install ROCm from artifacts
-# The script extracts tarball to {output-dir}/rocm/, then we move to /opt/rocm
-# Note: Script deletes output-dir if exists, so we use a temp location
+# The script extracts tarball (which contains rocm/ directory) to output-dir
+# Result: {output-dir}/rocm/ -> /opt/rocm/
 # - If THEROCK_RELEASE=latest, uses --latest-release to fetch newest nightly
 # - Otherwise, uses --release to fetch specific version
 RUN if [ "$THEROCK_RELEASE" = "latest" ]; then \
@@ -94,19 +93,16 @@ RUN if [ "$THEROCK_RELEASE" = "latest" ]; then \
         python build_tools/install_rocm_from_artifacts.py \
             --latest-release \
             --artifact-group "$THEROCK_ARTIFACT_GROUP" \
-            --output-dir /tmp/therock-install; \
+            --output-dir /opt; \
     else \
         echo "Installing release $THEROCK_RELEASE for $THEROCK_ARTIFACT_GROUP"; \
         python build_tools/install_rocm_from_artifacts.py \
             --release "$THEROCK_RELEASE" \
             --artifact-group "$THEROCK_ARTIFACT_GROUP" \
-            --output-dir /tmp/therock-install; \
-    fi && \
-    mv /tmp/therock-install/rocm /opt/rocm && \
-    rm -rf /tmp/therock-install
+            --output-dir /opt; \
+    fi
 
-# Cleanup to reduce image size
-RUN rm -rf /TheRock /opt/venv
+RUN rm -rf /TheRock /venv
 
 # ============================================================================
 # Build from source stage - clones and builds TheRock
