@@ -249,11 +249,11 @@ TEST(TestMiopenEngine, GetDetailsOnlyUsesFirstPlanBuilderCustomKnobs)
 
     // Verify benchmarking knob is present
     const auto& benchmarkingKnob = engineDetails.getKnobByName("global.benchmarking");
-    EXPECT_EQ(benchmarkingKnob.knobIdStr(), "global.benchmarking");
+    EXPECT_EQ(benchmarkingKnob.knobId(), "global.benchmarking");
 
     // Verify first custom knob is present
     const auto& customKnob1 = engineDetails.getKnobByName("custom.knob1");
-    EXPECT_EQ(customKnob1.knobIdStr(), "custom.knob1");
+    EXPECT_EQ(customKnob1.knobId(), "custom.knob1");
     EXPECT_EQ(customKnob1.description(), "First custom knob");
 
     // Verify second custom knob is NOT present (would throw if we tried to access it)
