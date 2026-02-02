@@ -373,12 +373,16 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
     const auto in_c           = xDesc.GetLengths()[1];
     const auto wei_k          = dwDesc.GetLengths()[0];
 
-    const auto in_spatial =
+    const auto in_spatial_ =
         xDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
-    const auto wei_spatial =
+    const auto wei_spatial_ =
         dwDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
-    const auto out_spatial =
+    const auto out_spatial_ =
         dyDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
+
+    const auto in_spatial  = std::vector<std::size_t>(in_spatial_.begin(), in_spatial_.end());
+    const auto wei_spatial = std::vector<std::size_t>(wei_spatial_.begin(), wei_spatial_.end());
+    const auto out_spatial = std::vector<std::size_t>(out_spatial_.begin(), out_spatial_.end());
 
     const auto out_spatial_size = std::accumulate(
         out_spatial.begin(), out_spatial.end(), std::size_t(1), std::multiplies<std::size_t>());

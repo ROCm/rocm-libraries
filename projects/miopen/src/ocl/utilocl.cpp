@@ -11,9 +11,9 @@
 #include <cstdint>
 #include <span>
 
-constexpr size_t WG_SIZE            = 256;
-constexpr size_t MAX_ACTIVE_THREADS = static_cast<const size_t>(64 * 4 * 64);
-constexpr size_t MAX_LOCAL_MEM      = 65536;
+#define WG_SIZE (static_cast<size_t>(256))
+#define MAX_ACTIVE_THREADS (64 * 4 * 64)
+#define MAX_LOCAL_MEM 65536
 
 namespace miopen {
 

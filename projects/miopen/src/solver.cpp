@@ -30,8 +30,8 @@
 #include <miopen/any_solver.hpp>
 #include <miopen/timer.hpp>
 
+#include <algorithm>
 #include <ostream>
-#include <ranges>
 
 namespace miopen {
 namespace solver {
@@ -96,9 +96,10 @@ void PrecompileSolutions(const Handle& h,
 
 std::ostream& operator<<(std::ostream& os, const ConvSolution& s)
 {
-    auto strings =
-        s.construction_params | std::views::transform([](auto k) { return k.kernel_name; });
-    os << s.solver_id << ": " << JoinStrings(strings, "/");
+    std::transform(s.construction_params.begin(),
+                   s.construction_params.end(),
+                   std::ostream_iterator<std::string>(os, "/"),
+                   [](const auto& k) { return k.kernel_name; });
     return os;
 }
 

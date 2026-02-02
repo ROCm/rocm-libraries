@@ -8,6 +8,7 @@
 #include <miopen/miopen.h>
 
 #include <span>
+#include <vector>
 
 namespace miopen {
 
