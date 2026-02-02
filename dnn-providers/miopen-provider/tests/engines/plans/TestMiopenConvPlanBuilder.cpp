@@ -197,3 +197,25 @@ TEST_F(TestGpuMiopenConvPlanBuilder, BuildPlanCreatesValidPlanForSupportedGraph)
         EXPECT_TRUE(ctx.hasValidPlan());
     }
 }
+
+TEST_F(TestGpuMiopenConvPlanBuilder, GetCustomKnobsReturnsDeterministicKnob)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto knobs = _planBuilder.getCustomKnobs(_handle, graph);
+
+    // Should have at least one knob (deterministic)
+    ASSERT_FALSE(knobs.empty());
+
+    // Find the deterministic knob
+    auto it = std::find_if(knobs.begin(), knobs.end(), [](const auto& knob) {
+        return knob.knob_id == "global.deterministic";
+    });
+    ASSERT_NE(it, knobs.end());
+
+    // Verify the knob properties
+    EXPECT_EQ(it->description, "Enable deterministic mode");
+    EXPECT_EQ(it->default_value.type, hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+    EXPECT_EQ(it->constraint.type, hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint);
+}

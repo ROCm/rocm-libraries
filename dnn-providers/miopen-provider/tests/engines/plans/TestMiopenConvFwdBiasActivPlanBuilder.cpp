@@ -721,3 +721,100 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForUnsupportedGraph
                  hipdnn_plugin_sdk::HipdnnPluginException);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
+
+class TestGpuMiopenConvFwdBiasActivPlanBuilderKnobs : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+        ASSERT_EQ(miopenCreate(&_handle.miopenHandle), miopenStatusSuccess);
+    }
+
+    void TearDown() override
+    {
+        if(_handle.miopenHandle != nullptr)
+        {
+            EXPECT_EQ(miopenDestroy(_handle.miopenHandle), miopenStatusSuccess);
+        }
+    }
+
+    MiopenConvFwdBiasActivPlanBuilder _planBuilder;
+    HipdnnEnginePluginHandle _handle;
+};
+
+TEST_F(TestGpuMiopenConvFwdBiasActivPlanBuilderKnobs, GetCustomKnobsReturnsDeterministicKnob)
+{
+    // Re-enable in Windows once CK is supported
+    SKIP_IF_WINDOWS();
+
+    namespace graph = hipdnn_frontend::graph;
+
+    // Create a valid conv+activation graph
+    hipdnn_frontend::graph::Graph graphObj;
+    graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    graphObj.set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
+    graphObj.set_io_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    std::vector<int64_t> xDims = {2, 3, 4, 4};
+    std::vector<int64_t> wDims = {1, 3, 2, 2};
+    std::vector<int64_t> yDims = {2, 1, 3, 3};
+
+    auto xTensorAttrObj = graph::makeTensorAttributes(
+        "x", hipdnn_frontend::DataType::FLOAT, xDims, generateStrides(xDims, {3, 2, 1, 0}));
+    auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xTensorAttrObj));
+
+    auto wTensorAttrObj = graph::makeTensorAttributes(
+        "w", hipdnn_frontend::DataType::FLOAT, wDims, generateStrides(wDims, {3, 2, 1, 0}));
+    auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wTensorAttrObj));
+
+    graph::ConvFpropAttributes convAttrs;
+    convAttrs.set_pre_padding({0, 0});
+    convAttrs.set_post_padding({0, 0});
+    convAttrs.set_stride({1, 1});
+    convAttrs.set_dilation({1, 1});
+    convAttrs.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto yConvTensorAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
+    yConvTensorAttr->set_data_type(hipdnn_frontend::DataType::FLOAT);
+    yConvTensorAttr->set_dim(yDims);
+    yConvTensorAttr->set_stride(generateStrides(yDims, {3, 2, 1, 0}));
+    yConvTensorAttr->set_is_virtual(true);
+
+    graph::PointwiseAttributes activAttrs;
+    activAttrs.set_name("activation_forward");
+    activAttrs.set_mode(hipdnn_frontend::PointwiseMode::RELU_FWD);
+    activAttrs.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto yTensorAttr = graphObj.pointwise(yConvTensorAttr, activAttrs);
+    yTensorAttr->set_data_type(hipdnn_frontend::DataType::FLOAT);
+    yTensorAttr->set_dim(yDims);
+    yTensorAttr->set_stride(generateStrides(yDims, {3, 2, 1, 0}));
+    yTensorAttr->set_output(true);
+
+    auto status = graphObj.validate();
+    ASSERT_TRUE(status.is_good());
+
+    auto graphBuffer = graphObj.buildFlatbufferOperationGraph();
+    GraphWrapper wrapper(graphBuffer.data(), graphBuffer.size());
+
+    // Verify it's applicable
+    ASSERT_TRUE(_planBuilder.isApplicable(_handle, wrapper));
+
+    // Get custom knobs
+    auto knobs = _planBuilder.getCustomKnobs(_handle, wrapper);
+
+    // Should have at least one knob (deterministic)
+    ASSERT_FALSE(knobs.empty());
+
+    // Find the deterministic knob
+    auto it = std::find_if(knobs.begin(), knobs.end(), [](const auto& knob) {
+        return knob.knob_id == "global.deterministic";
+    });
+    ASSERT_NE(it, knobs.end());
+
+    // Verify the knob properties
+    EXPECT_EQ(it->description, "Enable deterministic mode");
+    EXPECT_EQ(it->default_value.type, hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+    EXPECT_EQ(it->constraint.type, hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint);
+}

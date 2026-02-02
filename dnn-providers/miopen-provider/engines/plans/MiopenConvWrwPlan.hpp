@@ -23,7 +23,8 @@ public:
     ConvWrwParams(
         const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes& attributes,
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-            tensorMap);
+            tensorMap,
+        bool deterministicEnabled = false);
 
     ConvWrwParams(const ConvWrwParams&) = delete;
     ConvWrwParams& operator=(const ConvWrwParams&) = delete;

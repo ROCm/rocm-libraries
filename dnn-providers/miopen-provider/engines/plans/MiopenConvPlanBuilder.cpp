@@ -189,11 +189,12 @@ size_t getWorkspaceSizeWrw(const HipdnnEnginePluginHandle& handle,
 
 void buildPlanFwd(const HipdnnEnginePluginHandle& handle,
                   const hipdnn_plugin_sdk::IGraph& opGraph,
-                  HipdnnEnginePluginExecutionContext& executionContext)
+                  HipdnnEnginePluginExecutionContext& executionContext,
+                  bool deterministicEnabled)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
-    ConvFwdParams params(attr, opGraph.getTensorMap());
+    ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
     auto plan = std::make_unique<ConvFwdPlan>(
         handle, std::move(params), executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
@@ -201,11 +202,12 @@ void buildPlanFwd(const HipdnnEnginePluginHandle& handle,
 
 void buildPlanBwd(const HipdnnEnginePluginHandle& handle,
                   const hipdnn_plugin_sdk::IGraph& opGraph,
-                  HipdnnEnginePluginExecutionContext& executionContext)
+                  HipdnnEnginePluginExecutionContext& executionContext,
+                  bool deterministicEnabled)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
-    ConvBwdParams params(attr, opGraph.getTensorMap());
+    ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
     auto plan = std::make_unique<ConvBwdPlan>(
         handle, std::move(params), executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
@@ -213,11 +215,12 @@ void buildPlanBwd(const HipdnnEnginePluginHandle& handle,
 
 void buildPlanWrw(const HipdnnEnginePluginHandle& handle,
                   const hipdnn_plugin_sdk::IGraph& opGraph,
-                  HipdnnEnginePluginExecutionContext& executionContext)
+                  HipdnnEnginePluginExecutionContext& executionContext,
+                  bool deterministicEnabled)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
-    ConvWrwParams params(attr, opGraph.getTensorMap());
+    ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
     auto plan = std::make_unique<ConvWrwPlan>(
         handle, std::move(params), executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
@@ -323,8 +326,6 @@ void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
             deterministicEnabled = (value != 0);
         }
     }
-    (void)deterministicEnabled; // Will be used in a follow-up PR
-
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
     const auto nodeName = nodeWrapper.name();
 
@@ -332,15 +333,15 @@ void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
     {
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
         HIPDNN_LOG_INFO("Building convolution fwd plan for node: {}", nodeName);
-        buildPlanFwd(handle, opGraph, executionContext);
+        buildPlanFwd(handle, opGraph, executionContext, deterministicEnabled);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
         HIPDNN_LOG_INFO("Building convolution bwd plan for node: {}", nodeName);
-        buildPlanBwd(handle, opGraph, executionContext);
+        buildPlanBwd(handle, opGraph, executionContext, deterministicEnabled);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
         HIPDNN_LOG_INFO("Building convolution wrw plan for node: {}", nodeName);
-        buildPlanWrw(handle, opGraph, executionContext);
+        buildPlanWrw(handle, opGraph, executionContext, deterministicEnabled);
         break;
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(

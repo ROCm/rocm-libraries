@@ -5,6 +5,7 @@
 #include <tuple>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "MiopenConvFwdBiasActivPlanBuilder.hpp"
@@ -443,23 +444,58 @@ size_t MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSize(
 void MiopenConvFwdBiasActivPlanBuilder::buildPlan(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_plugin_sdk::IGraph& opGraph,
-    [[maybe_unused]] const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
+    const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
 
-    ConvFwdBiasActivParams params(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
+    // Read deterministic knob setting
+    bool deterministicEnabled = false;
+    if(engineConfig.isValid()
+       && engineConfig.hasKnobSetting(hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME))
+    {
+        const auto& knobSetting
+            = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME);
+        if(knobSetting.valueType() == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
+        {
+            auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
+            deterministicEnabled = (value != 0);
+        }
+    }
+
+    ConvFwdBiasActivParams params(
+        convAttr, biasAttr, activAttr, opGraph.getTensorMap(), deterministicEnabled);
     auto plan = std::make_unique<ConvFwdBiasActivPlan>(
         handle, std::move(params), true, true, executionContext.benchmarkingEnabled());
     executionContext.setPlan(std::move(plan));
 }
 
 std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenConvFwdBiasActivPlanBuilder::getCustomKnobs(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    [[maybe_unused]] const hipdnn_plugin_sdk::IGraph& opGraph) const
+    const HipdnnEnginePluginHandle& handle, const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
-    return {};
+    std::vector<hipdnn_data_sdk::data_objects::KnobT> knobs;
+
+    if(isApplicable(handle, opGraph))
+    {
+        hipdnn_data_sdk::data_objects::KnobT knob;
+        knob.knob_id = hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME;
+        knob.description = "Enable deterministic mode";
+
+        hipdnn_data_sdk::data_objects::IntValueT defaultValue;
+        defaultValue.value = 0;
+        knob.default_value.Set(defaultValue);
+
+        hipdnn_data_sdk::data_objects::IntConstraintT constraint;
+        constraint.min_value = 0;
+        constraint.max_value = 1;
+        constraint.step = 1;
+        knob.constraint.Set(constraint);
+
+        knobs.push_back(std::move(knob));
+    }
+
+    return knobs;
 }
 
 } // namespace miopen_plugin
