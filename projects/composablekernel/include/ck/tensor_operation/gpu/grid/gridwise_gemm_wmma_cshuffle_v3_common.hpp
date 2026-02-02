@@ -1066,7 +1066,7 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
         return BlockwiseGemmPipe::BlockLoopTailNum(num_loop);
     }
 
-    template <typename EpilogueType>
+    template <typename Epilogue>
     __device__ static constexpr index_t GetSharedMemoryNumberOfByte()
     {
         // LDS allocation for A and B: be careful of alignment
@@ -1088,11 +1088,11 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
                                                max_lds_align)
                 : 0;
 
-        if constexpr(EpilogueType::IsLDSNeeded())
+        if constexpr(Epilogue::IsLDSNeeded())
         {
             // LDS allocation for C shuffle in LDS
             constexpr auto c_shuffle_block_desc_mshrepeat_mpershrepeat_nshrepeat_npershrepeat =
-                EpilogueType::
+                Epilogue::
                     GetCShuffleBlockDescriptor_MShRepeat_MPerShRepeat_NShRepeat_NPerShRepeat();
 
             constexpr auto c_block_size =
