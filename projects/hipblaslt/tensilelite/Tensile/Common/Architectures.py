@@ -143,6 +143,13 @@ ARCH_CU_COUNT_FALLBACKS = {
     "cu=304": None,
 }
 
+# Maps GFX architectures to their expected device IDs for use in warnings
+# This helps users know what chip IDs they should specify in logic files
+GFX_TO_EXPECTED_DEVICE_IDS = {
+    "gfx942": ["74a0", "74a1", "74a2", "74a3", "74a5", "74a9"],
+    "gfx950": ["75a0", "75a2", "75a3"],
+}
+
 
 def isaToGfx(arch: IsaVersion) -> str:
     """Converts an ISA version to a gfx architecture name.
@@ -331,9 +338,35 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
         gfx, cu = l2(f.readline())
         deviceIds = l3(f.readline())
 
+    # Check for placeholder/invalid device IDs and warn
+    placeholderIds = {"id=0000", "id=ffff", "id=0"}
+    hasOnlyPlaceholders = all(devId in placeholderIds for devId in deviceIds)
+    hasNoRegisteredIds = not any(devId in SUPPORTED_ARCH_DEVICE_IDS for devId in deviceIds)
+
+    if hasOnlyPlaceholders or hasNoRegisteredIds:
+        expectedIds = GFX_TO_EXPECTED_DEVICE_IDS.get(gfx, [])
+        if expectedIds:
+            print2(f"")
+            print2(f"********************************************************************************")
+            print2(f"* WARNING: Logic file has no valid chip IDs specified!")
+            print2(f"*")
+            print2(f"* File: {file}")
+            print2(f"* Architecture: {gfx}")
+            print2(f"* Found device IDs: {deviceIds}")
+            print2(f"*")
+            print2(f"* Expected device IDs for {gfx}: {', '.join(expectedIds)}")
+            print2(f"*")
+            print2(f"* This logic file will be used as a fallback for all {gfx} devices.")
+            print2(f"* For optimal kernel selection, specify explicit device IDs like:")
+            print2(f"*   - [Device {expectedIds[0]}]")
+            print2(f"********************************************************************************")
+            print2(f"")
+
     try:
         for id in deviceIds:
-            _verifyPredicate(id, gfx)
+            # Skip verification for placeholder IDs
+            if id not in placeholderIds:
+                _verifyPredicate(id, gfx)
     except ValueError as e:
         raise LogicFileError(f"Invalid device ID found while parsing {file}: {e}")
 

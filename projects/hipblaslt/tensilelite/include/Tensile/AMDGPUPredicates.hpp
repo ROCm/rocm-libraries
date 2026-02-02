@@ -30,11 +30,105 @@
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Predicates.hpp>
 
+#include <map>
+#include <set>
 #include <sstream>
 #include <vector>
 
 namespace TensileLite
 {
+    /**
+     * @brief Registry of known PCI Chip IDs and their fallback relationships.
+     *
+     * This mirrors the Python-side SUPPORTED_ARCH_DEVICE_IDS and ARCH_DEVICE_ID_FALLBACKS
+     * from Architectures.py to ensure consistency between build-time and runtime behavior.
+     *
+     * Device ID to GFX architecture mapping:
+     * - gfx942: 0x74a0, 0x74a1, 0x74a2, 0x74a3, 0x74a5, 0x74a9
+     * - gfx950: 0x75a0 (mi350), 0x75a2 (mi355), 0x75a3 (mi355)
+     */
+    namespace ChipIdRegistry
+    {
+        // Known/registered chip IDs mapped to their GFX architecture
+        inline const std::map<int, AMDGPU::Processor>& knownChipIds()
+        {
+            static const std::map<int, AMDGPU::Processor> ids = {
+                // gfx942 variants
+                {0x74a0, AMDGPU::Processor::gfx942},
+                {0x74a1, AMDGPU::Processor::gfx942},
+                {0x74a2, AMDGPU::Processor::gfx942},
+                {0x74a3, AMDGPU::Processor::gfx942},
+                {0x74a5, AMDGPU::Processor::gfx942},
+                {0x74a9, AMDGPU::Processor::gfx942},
+                // gfx950 variants
+                {0x75a0, AMDGPU::Processor::gfx950}, // mi350
+                {0x75a2, AMDGPU::Processor::gfx950}, // mi355
+                {0x75a3, AMDGPU::Processor::gfx950}, // mi355
+            };
+            return ids;
+        }
+
+        // Fallback relationships: chip ID -> fallback chip IDs to try
+        // This mirrors ARCH_DEVICE_ID_FALLBACKS from Python side
+        inline const std::map<int, std::vector<int>>& chipIdFallbacks()
+        {
+            static const std::map<int, std::vector<int>> fallbacks = {
+                // mi355 chip IDs fall back to mi350
+                {0x75a2, {0x75a0}},
+                {0x75a3, {0x75a0}},
+            };
+            return fallbacks;
+        }
+
+        // Check if a chip ID is registered/known
+        inline bool isKnownChipId(int chipId)
+        {
+            return knownChipIds().count(chipId) > 0;
+        }
+
+        // Get fallback chip IDs for a given chip ID (empty if none)
+        inline std::vector<int> getFallbackChipIds(int chipId)
+        {
+            auto it = chipIdFallbacks().find(chipId);
+            if(it != chipIdFallbacks().end())
+                return it->second;
+            return {};
+        }
+
+        // Check if gpuChipId can use a solution targeting solutionChipId
+        // Returns true if exact match OR if gpuChipId can fallback to solutionChipId
+        inline bool canUseSolution(int gpuChipId, int solutionChipId)
+        {
+            // Exact match
+            if(gpuChipId == solutionChipId)
+                return true;
+
+            // Check fallback
+            auto fallbacks = getFallbackChipIds(gpuChipId);
+            for(int fallbackId : fallbacks)
+            {
+                if(fallbackId == solutionChipId)
+                    return true;
+            }
+            return false;
+        }
+
+        // Check if this is a fallback match (not exact)
+        inline bool isFallbackMatch(int gpuChipId, int solutionChipId)
+        {
+            if(gpuChipId == solutionChipId)
+                return false;  // Exact match, not fallback
+
+            auto fallbacks = getFallbackChipIds(gpuChipId);
+            for(int fallbackId : fallbacks)
+            {
+                if(fallbackId == solutionChipId)
+                    return true;
+            }
+            return false;
+        }
+    } // namespace ChipIdRegistry
+
     namespace Predicates
     {
         /**
@@ -132,23 +226,49 @@ namespace TensileLite
 
                 virtual bool operator()(AMDGPU const& gpu) const override
                 {
-                    // Only matches if pciChipId is set and equals the value
-                    return gpu.pciChipId().has_value() && gpu.pciChipId().value() == value;
+                    // Must have a chip ID to match
+                    if(!gpu.pciChipId().has_value())
+                        return false;
+
+                    int gpuChipId = gpu.pciChipId().value();
+
+                    // Check exact match or fallback match
+                    return ChipIdRegistry::canUseSolution(gpuChipId, value);
+                }
+
+                // Check if this match is a fallback (not exact)
+                bool isFallbackMatch(AMDGPU const& gpu) const
+                {
+                    if(!gpu.pciChipId().has_value())
+                        return false;
+                    return ChipIdRegistry::isFallbackMatch(gpu.pciChipId().value(), value);
                 }
 
                 virtual bool debugEval(AMDGPU const& gpu,
                                        std::ostream& stream) const override
                 {
                     bool result = (*this)(gpu);
-                    stream << result << ": " << this->type() << " [" << gpu.deviceName << "]";
-                    stream << " gpu_pciChipId=";
+                    bool isFallback = isFallbackMatch(gpu);
+
+                    std::ostringstream details;
+                    details << "[" << gpu.deviceName << "] gpu=";
                     if(gpu.pciChipId().has_value())
                         stream << "0x" << std::hex << gpu.pciChipId().value() << std::dec;
                     else
-                        stream << "nullopt";
-                    stream << " == solution_pciChipId=0x" << std::hex << value << std::dec;
-                    stream << " processor=" << gpu.archName();
-                    stream << std::endl;
+                        details << "nullopt";
+                    details << " == sol=0x" << std::hex << value << std::dec;
+                    if(isFallback)
+                        details << " (FALLBACK)";
+
+                    PredicateDebugger::printRow(stream, result, this->type(), details.str());
+
+                    if(result && isFallback)
+                    {
+                        stream << "    [TENSILE FALLBACK] Using fallback kernel: device 0x"
+                               << std::hex << gpu.pciChipId().value()
+                               << " matched to solution for 0x" << value << std::dec << std::endl;
+                    }
+
                     return result;
                 }
             };

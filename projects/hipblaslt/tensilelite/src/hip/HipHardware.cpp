@@ -25,8 +25,11 @@
  *******************************************************************************/
 
 #include <Tensile/AMDGPU.hpp>
+#include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipUtils.hpp>
+
+#include <iostream>
 
 namespace TensileLite
 {
@@ -75,6 +78,24 @@ namespace TensileLite
             // This is distinct from prop.pciDeviceID which is the PCIe bus slot number
             int pciChipId = 0;
             HIP_CHECK_EXC(hipDeviceGetAttribute(&pciChipId, hipDeviceAttributePciChipId, deviceId));
+
+            // Warn if the chip ID is not registered in the known chip ID registry
+            if(!ChipIdRegistry::isKnownChipId(pciChipId))
+            {
+                std::cerr << "\n"
+                          << "********************************************************************************\n"
+                          << "* WARNING: Unregistered PCI Chip ID detected!\n"
+                          << "*\n"
+                          << "* Device: " << prop.name << "\n"
+                          << "* Chip ID: 0x" << std::hex << pciChipId << std::dec << "\n"
+                          << "* Architecture: " << prop.gcnArchName << "\n"
+                          << "*\n"
+                          << "* This chip ID is not registered in Tensile's ChipIdRegistry.\n"
+                          << "* Chip ID-specific kernel selection may not work correctly.\n"
+                          << "* Please update AMDGPUPredicates.hpp and Architectures.py to add this chip ID.\n"
+                          << "********************************************************************************\n"
+                          << std::endl;
+            }
 
             return std::make_shared<HipAMDGPU>(prop, std::make_optional(pciChipId));
         }
