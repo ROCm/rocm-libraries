@@ -231,10 +231,6 @@ class BaseTuner(ABC):
 
     def _get_metrics(self, key_type: str, value_type: Optional[str] = None) -> Dict:
         """Default metrics for performance measurement."""
-        total_bytes = self._get_problem_size(key_type, value_type) * (
-            TYPE_CONFIGS[key_type].size
-            + (TYPE_CONFIGS[value_type].size if value_type else 0)
-        )
         # p["time"] is actually measured in bytes per second
         return {"GB/s": lambda p: (p["time"] / 1e6)}
 
