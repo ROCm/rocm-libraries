@@ -91,8 +91,9 @@ test_categories:
 
     exclude_linux:
       # The following tests are added to show functionality
-      - "Smoke/GPU_BNOCLFWDTrainLarge2D_BFP16*"
       - "Smoke/GPU_BNOCLInferLarge2D_BFP16*"
+      - "Smoke/GPU_BNOCLFWDTrainLarge2D_BFP16*"
+
       
     test_files:
       - "gtest/smoke_*.cpp"
@@ -334,6 +335,7 @@ exclude_gpu:
 
 execution_settings:
   default_timeout: 300  # 5 minutes per test
+  timeout_multiplier: 1 # Multiplier for all timeouts (1, 1.5, 1.75, 2, etc.)
   category_timeouts:
     quick: 300          # 5 minutes 
     standard: 1800      # 30 minutes 

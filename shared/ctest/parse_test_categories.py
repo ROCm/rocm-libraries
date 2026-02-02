@@ -56,7 +56,9 @@ def main():
         print(f"# DEBUG: No install test file provided", file=sys.stderr)
 
     categories = config.get("test_categories", {})
-    timeouts = config.get("execution_settings", {}).get("category_timeouts", {})
+    execution_settings = config.get("execution_settings", {})
+    timeouts = execution_settings.get("category_timeouts", {})
+    timeout_multiplier = execution_settings.get("timeout_multiplier", 1)
     exclude_gpu_config = config.get("exclude_gpu", {})
 
     # Detect OS
@@ -65,6 +67,7 @@ def main():
 
     print("# Generated CMake code for test categories")
     print(f"# Detected OS: {platform.system()}")
+    print(f"# Timeout multiplier: {timeout_multiplier}")
 
     # Store category information for later use with GPU exclusions
     category_data = {}
@@ -87,7 +90,8 @@ def main():
             if exclude_linux:
                 exclude.extend(exclude_linux)
 
-        timeout = timeouts.get(category_name, 300)
+        base_timeout = timeouts.get(category_name, 300)
+        timeout = int(base_timeout * timeout_multiplier)
         print(f"# Category: {category_name}")
         print(f'# Description: {category_info.get("description", "")}')
 
