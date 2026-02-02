@@ -189,7 +189,7 @@ struct disabled
 struct DevDescription
 {
     std::string_view name;
-    unsigned cu_cnt; // CU for gfx9, WGP for gfx10, 11, ...
+    unsigned cu_cnt;         // CU for gfx9, WGP for gfx10, 11, ...
     unsigned wavefront_size; // Default wavefront size
 
     friend std::ostream& operator<<(std::ostream& os, const DevDescription& dd);
