@@ -293,7 +293,6 @@ int main(int argc, char* argv[])
     auto is_host_gen = (params.igen == fft_input_generator_host
                         || params.igen == fft_input_random_generator_host);
 
-
     if(!is_host_gen)
     {
         // Input data:

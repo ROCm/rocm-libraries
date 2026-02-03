@@ -751,14 +751,14 @@ public:
     // this factor
     double scale_factor = 1.0;
 
-    fft_params() {};
-    virtual ~fft_params() {};
+    fft_params(){};
+    virtual ~fft_params(){};
 
     // copying and moving
-    fft_params(const fft_params&)            = default;
+    fft_params(const fft_params&) = default;
     fft_params& operator=(const fft_params&) = default;
     fft_params(fft_params&&)                 = default;
-    fft_params& operator=(fft_params&&)      = default;
+    fft_params& operator=(fft_params&&) = default;
 
     virtual void setup() {}
     virtual void cleanup() {}
