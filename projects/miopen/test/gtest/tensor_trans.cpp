@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,22 +23,17 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include "test.hpp"
-#include <array>
-#include <iostream>
-#include <iterator>
-#include <limits>
-#include <memory>
-#include <miopen/convolution.hpp>
-#include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
+
 #include <miopen/util.hpp>
-#include <utility>
-#include <cstdlib>
-#include "driver.hpp"
+
 #include "get_handle.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
+#include "gtest_common.hpp"
+#include "test_parameter_name_generator.hpp"
+
+namespace {
+
+using TestCase =
+    std::tuple<NamedContainer<std::vector<int>>, NamedParameter<bool>, NamedParameter<int>>;
 
 template <class T>
 void tensor_trans(const tensor<T>& src,
@@ -176,8 +171,36 @@ struct verify_tensor_trans
     }
 };
 
+inline auto GenCases()
+{
+    static const std::vector<std::vector<int>> tensor_src{
+        {64, 64, 56, 56},   {64, 64, 56, 56},  {64, 256, 56, 56},  {64, 64, 55, 55},
+        {64, 64, 55, 55},   {64, 256, 55, 55}, {64, 128, 28, 28},  {64, 512, 28, 28},
+        {64, 256, 28, 28},  {64, 128, 28, 28}, {64, 256, 28, 28},  {64, 512, 28, 28},
+        {64, 640, 28, 28},  {64, 256, 28, 28}, {64, 1024, 14, 14}, {64, 256, 14, 14},
+        {64, 256, 14, 14},  {64, 512, 14, 14}, {64, 512, 14, 14},  {64, 1024, 14, 14},
+        {64, 1280, 14, 14}, {64, 512, 14, 14}, {64, 512, 7, 7},    {64, 512, 7, 7},
+        {64, 2048, 7, 7},   {64, 2560, 7, 7},  {64, 1024, 7, 7},   {64, 1024, 7, 7},
+        {64, 1024, 7, 7},   {64, 2048, 7, 7},  {128, 127, 28, 28}, {256, 255, 14, 14},
+        {512, 511, 7, 7},   {63, 63, 56, 56},  {127, 127, 28, 28}, {255, 255, 14, 14},
+        {511, 511, 7, 7},   {64, 63, 56, 28},  {128, 127, 28, 14}, {256, 255, 14, 7}};
+
+    return testing::Combine(
+        MakeNamedParameterCollectionValues<std::vector<int>>("src_lens", tensor_src, "x"),
+        MakeNamedParameterValues<bool>("forw", true, false),
+        MakeNamedParameterValues<int>("stride_h", 1, 2));
+}
+
+inline auto GetCases()
+{
+    static const auto cases = GenCases();
+    return cases;
+}
+
+} // namespace
+
 template <class T>
-struct tensor_vec_driver : test_driver
+struct tensor_vec_test : public testing::TestWithParam<TestCase>
 {
     tensor<T> src;
     tensor<T> dst;
@@ -188,33 +211,15 @@ struct tensor_vec_driver : test_driver
 
     std::vector<int> src_lens;
 
-    std::vector<std::vector<int>> get_tensor_src()
+    void SetUp() override
     {
-        return {{64, 64, 56, 56},   {64, 64, 56, 56},  {64, 256, 56, 56},  {64, 64, 55, 55},
-                {64, 64, 55, 55},   {64, 256, 55, 55}, {64, 128, 28, 28},  {64, 512, 28, 28},
-                {64, 256, 28, 28},  {64, 128, 28, 28}, {64, 256, 28, 28},  {64, 512, 28, 28},
-                {64, 640, 28, 28},  {64, 256, 28, 28}, {64, 1024, 14, 14}, {64, 256, 14, 14},
-                {64, 256, 14, 14},  {64, 512, 14, 14}, {64, 512, 14, 14},  {64, 1024, 14, 14},
-                {64, 1280, 14, 14}, {64, 512, 14, 14}, {64, 512, 7, 7},    {64, 512, 7, 7},
-                {64, 2048, 7, 7},   {64, 2560, 7, 7},  {64, 1024, 7, 7},   {64, 1024, 7, 7},
-                {64, 1024, 7, 7},   {64, 2048, 7, 7},  {128, 127, 28, 28}, {256, 255, 14, 14},
-                {512, 511, 7, 7},   {63, 63, 56, 56},  {127, 127, 28, 28}, {255, 255, 14, 14},
-                {511, 511, 7, 7},   {64, 63, 56, 28},  {128, 127, 28, 14}, {256, 255, 14, 7},
-                {64, 256, 15, 10}};
-    }
-
-    tensor_vec_driver()
-    {
-        disabled_cache = true;
-        add(src_lens, "srcLens", generate_data(get_tensor_src()));
-        add(forw, "forw", generate_data({true, false}));
-        add(stride_h, "stride", generate_data({1, 2}));
-
-        auto&& handle = get_handle();
+        prng::reset_seed();
+        std::tie(src_lens, forw, stride_h) = GetParam();
+        auto&& handle                      = get_handle();
         handle.EnableProfiling();
     }
 
-    void run()
+    void Run()
     {
         auto dst_lens = src_lens;
 
@@ -231,14 +236,57 @@ struct tensor_vec_driver : test_driver
             src_lens[3] = src_lens[3] / stride_w;
         }
 
-        uint64_t max_value = miopen_type<T>{} == miopenHalf   ? 5
-                             : miopen_type<T>{} == miopenInt8 ? 127
-                                                              : 17;
-        src                = tensor<T>{src_lens}.generate(tensor_elem_gen_integer{max_value});
-        dst                = tensor<T>{dst_lens}.generate(tensor_elem_gen_integer{max_value});
+        const uint64_t max_value = miopen_type<T>{} == miopenHalf   ? 5
+                                   : miopen_type<T>{} == miopenInt8 ? 127
+                                                                    : 17;
 
-        verify_equals(verify_tensor_trans<T>{src, dst, stride_h, stride_w, forw});
+        src = tensor<T>{src_lens}.generate(tensor_elem_gen_integer{max_value});
+        dst = tensor<T>{dst_lens}.generate(tensor_elem_gen_integer{max_value});
+
+        VerifyEquals(verify_tensor_trans<T>{src, dst, stride_h, stride_w, forw});
+    }
+
+private:
+    void VerifyEquals(auto&& v)
+    {
+        const auto cpu = v.cpu();
+        const auto gpu = v.gpu();
+        const auto idx = miopen::mismatch_idx(cpu, gpu, miopen::float_equal);
+
+        ASSERT_GE(idx, miopen::range_distance(cpu)) << (v.fail(), "");
     }
 };
 
-int main(int argc, const char* argv[]) { test_drive<tensor_vec_driver>(argc, argv); }
+struct TestNameGenerator
+{
+    std::string operator()(const auto& info)
+    {
+        const auto& [src_lens, forw, stride_h] = info.param;
+        std::stringstream ss;
+        std::string str;
+
+        ss << "src_lens_" << GetRangeAsString(src_lens(), "x") << "_forw_" << std::boolalpha
+           << forw() << std::noboolalpha << "_stride_h_" << stride_h() << "_test_id_" << info.index;
+
+        str = ss.str();
+
+        // Name format only supports letters, numbers and underscores.
+        std::transform(str.begin(), str.end(), str.begin(), [](char c) -> char {
+            return (c == '.') ? 'p' : (std::isalnum(c) ? c : '_');
+        });
+
+        return str;
+    }
+};
+
+using GPU_TensorTrans_I8   = tensor_vec_test<int8_t>;
+using GPU_TensorTrans_FP16 = tensor_vec_test<half_float::half>;
+using GPU_TensorTrans_FP32 = tensor_vec_test<float>;
+
+TEST_P(GPU_TensorTrans_I8, TestInt8) { this->Run(); }
+TEST_P(GPU_TensorTrans_FP16, TestFloat16) { this->Run(); }
+TEST_P(GPU_TensorTrans_FP32, TestFloat32) { this->Run(); }
+
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTrans_I8, GetCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTrans_FP16, GetCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTrans_FP32, GetCases(), TestNameGenerator{});
