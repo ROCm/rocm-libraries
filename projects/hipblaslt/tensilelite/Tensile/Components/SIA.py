@@ -553,9 +553,9 @@ def getSchedNumForIter0SIA3(writer, kernel, itemsGRToSched, itemsGRIncToSched, n
         endIndex = min(writer.states.lwEndMfmaIndex, writer.states.syncPlrMfmaIndex)
     if writer.states.IncLdsBufSwitch:
       # IncLdsBufSwitch case, we use s operation for local read swap and need to finish GR Inc before that
-      if writer.states.grEndMfmaIndex > writer.states.numMfmaPerIter - 1:
-          # adjust grEndMfmaIndex
-          writer.states.grEndMfmaIndex = writer.states.numMfmaPerIter - 1
+      if endIndex > writer.states.numMfmaPerIter - 1:
+          # adjust endIndex
+          endIndex = writer.states.numMfmaPerIter - 1
     if writer.states.grEndMfmaIndex > endIndex:
         schedNumForIter0 = numGlobalReadInsPerIter + (writer.states.grEndMfmaIndex - endIndex) * writer.states.numGlobalReadInsPerMfma
         writer.states.grEndMfmaIndex = endIndex
