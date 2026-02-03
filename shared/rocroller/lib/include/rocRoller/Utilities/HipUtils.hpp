@@ -40,6 +40,6 @@
             msg << "HIP failure at line " << __LINE__ << ": " << hipGetErrorString(e) \
                 << concatenate("", ##message) << std::endl;                           \
             Log::error(msg.str());                                                    \
-            AssertFatal(false, msg.str());                                            \
+            Throw<FatalError>(msg.str());                                             \
         }                                                                             \
     } while(0)

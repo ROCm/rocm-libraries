@@ -110,7 +110,7 @@ TEST(TestMiopenEngineManager, ReturnsEngineDetails)
     EXPECT_CALL(*mockEngine, id()).WillRepeatedly(Return(1));
     EXPECT_CALL(*mockEngine, getDetails(::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&engineDetails](HipdnnEnginePluginHandle& handle,
-                                   const hipdnn_plugin_sdk::IGraph& graph,
+                                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
                                    hipdnnPluginConstData_t& out) {
             (void)handle;
             (void)graph;
