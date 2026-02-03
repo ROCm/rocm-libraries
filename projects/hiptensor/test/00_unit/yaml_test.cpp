@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -84,7 +84,7 @@ int main(int argc, char* argv[])
     auto yee          = hiptensor::ContractionTestParams{};
     yee.mLogLevelMask = (hiptensorLogLevel_t)(HIPTENSOR_LOG_LEVEL_OFF);
     yee.mDataTypes    = {
-        // clang-format off
+           // clang-format off
                 {HIPTENSOR_R_32F, HIPTENSOR_R_32F, hiptensor::NONE_TYPE, HIPTENSOR_R_32F, HIPTENSOR_R_32F}, // scale F32
                 {HIPTENSOR_C_32F, HIPTENSOR_C_32F, hiptensor::NONE_TYPE, HIPTENSOR_C_32F, HIPTENSOR_C_32F}, // scale F32 Complex
                 {HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F}, // bilinear F32

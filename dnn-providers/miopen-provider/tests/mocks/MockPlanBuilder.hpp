@@ -9,7 +9,7 @@
 
 #include "engines/plans/PlanBuilderInterface.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class MockPlanBuilder : public IPlanBuilder
@@ -28,7 +28,13 @@ public:
                 buildPlan,
                 (const HipdnnEnginePluginHandle& handle,
                  const hipdnn_plugin_sdk::IGraph& opGraph,
+                 const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
                  HipdnnEnginePluginExecutionContext& executionContext),
+                (const, override));
+
+    MOCK_METHOD((std::vector<hipdnn_data_sdk::data_objects::KnobT>),
+                getCustomKnobs,
+                (const HipdnnEnginePluginHandle& handle, const hipdnn_plugin_sdk::IGraph& opGraph),
                 (const, override));
 };
 
