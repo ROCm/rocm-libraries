@@ -136,6 +136,8 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
                 // fields.
                 if(mp_lib != fft_params::fft_mp_lib_none)
                     continue;
+                if(p_dist.placement == fft_placement_inplace)
+                    continue;
                 input_grid[1] = brickCount;
                 break;
             case SLOW_OUT:
@@ -143,6 +145,8 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
                 // field, but multi-process transforms require both
                 // fields.
                 if(mp_lib != fft_params::fft_mp_lib_none)
+                    continue;
+                if(p_dist.placement == fft_placement_inplace)
                     continue;
                 output_grid[1] = brickCount;
                 break;
@@ -215,15 +219,7 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
             p_dist.distribute_field<fft_io::fft_io_in>(
                 gpusperrank, input_grid, mp_ranks, start_global_dev_id_input);
             p_dist.distribute_field<fft_io::fft_io_out>(
-                gpusperrank, input_grid, mp_ranks, start_global_dev_id_output);
-
-            // "placement" flag is meaningless if exactly one of
-            // input+output is a field.  So just add those cases if
-            // the flag is "out-of-place", since "in-place" is
-            // exactly the same test case.
-            if(p_dist.placement == fft_placement_inplace
-               && p_dist.ifields.empty() != p_dist.ofields.empty())
-                continue;
+                gpusperrank, output_grid, mp_ranks, start_global_dev_id_output);
 
             all_params.push_back(p_dist);
             // also test result scaling for multi-GPU plans
