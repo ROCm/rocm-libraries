@@ -29,7 +29,6 @@
 #ifndef BNORM_SPATIAL_ACTIVATION_FUNCTIONS_HPP
 #define BNORM_SPATIAL_ACTIVATION_FUNCTIONS_HPP
 
-#include "miopen_math.hpp"
 #include "configuration.hpp"
 #include "miopen_math.hpp"
 
