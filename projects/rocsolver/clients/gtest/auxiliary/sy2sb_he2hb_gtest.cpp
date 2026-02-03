@@ -37,9 +37,9 @@
 
  // each matrix_size_range is a {n, lda}
 
- // each blk_range is a {nb, k}
+ // each blk_range is a {kd, nb}
 
- // case when n = 0, k = 2, and b = 2 will also execute the bad arguments test
+ // case when n = 0, nb = 2, and b = 2 will also execute the bad arguments test
  // (null handle, null pointers and invalid values)
  // TODO: no checking arguments for now.
 
@@ -90,8 +90,8 @@ const vector<vector<int>> large_blk_range = {
 
      arg.set<rocblas_int>("n", size[0]);
      arg.set<rocblas_int>("lda", size[1]);
-     arg.set<rocblas_int>("nb", blk[0]);
-     arg.set<rocblas_int>("k", blk[1]);
+     arg.set<rocblas_int>("kd", blk[0]);
+     arg.set<rocblas_int>("nb", blk[1]);
 
      arg.timing = 0;
 
@@ -111,7 +111,7 @@ const vector<vector<int>> large_blk_range = {
      {
          Arguments arg = sy2sb_he2hb_setup_arguments(GetParam());
 
-        //  if(arg.peek<rocblas_int>("k") == 2 && arg.peek<rocblas_int>("n") == 0
+        //  if(arg.peek<rocblas_int>("nb") == 2 && arg.peek<rocblas_int>("n") == 0
         //     && arg.peek<rocblas_int>("b") == 2)
         //      testing_sy2sb_he2hb_bad_arg<T>();
 
