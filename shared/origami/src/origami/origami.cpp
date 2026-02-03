@@ -89,6 +89,8 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
         return workgroup_mapping_t{out_wgmxccchunk, out_wgmxcc, use_wgm ? static_cast<int>(numMT_N) : 1};
     else if(nta < 4 && ntb > 3)
         return workgroup_mapping_t{out_wgmxccchunk, out_wgmxcc, use_wgm ? -static_cast<int>(numMT_M) : 1};
+    else if(nta > 3 && ntb > 3)
+        return workgroup_mapping_t{0, numXCD, 1};
   }
 
   // -------------------
