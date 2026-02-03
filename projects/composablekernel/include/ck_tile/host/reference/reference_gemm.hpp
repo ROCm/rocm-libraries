@@ -8,6 +8,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/host_tensor.hpp"
+#include "ck_tile/host/device_prop.hpp"
 
 namespace ck_tile {
 
@@ -443,9 +444,10 @@ template <typename ADataType,
           typename BDataType,
           typename AccDataType,
           typename CDataType,
-          typename AElementOp   = ck_tile::identity,
-          typename BElementOp   = ck_tile::identity,
-          typename ACCElementOp = ck_tile::identity>
+          typename ComputeDataType = ADataType,
+          typename AElementOp      = ck_tile::identity,
+          typename BElementOp      = ck_tile::identity,
+          typename ACCElementOp    = ck_tile::identity>
 CK_TILE_HOST void reference_gemm(const HostTensor<ADataType>& a_m_k,
                                  const HostTensor<BDataType>& b_k_n,
                                  HostTensor<CDataType>& c_m_n,
@@ -456,6 +458,8 @@ CK_TILE_HOST void reference_gemm(const HostTensor<ADataType>& a_m_k,
     const std::size_t M = a_m_k.get_length(0);
     const std::size_t N = b_k_n.get_length(1);
     const std::size_t K = a_m_k.get_length(1);
+
+    static const std::string device_name = ck_tile::get_device_name();
 
     auto f_mn = [&](auto m, auto n) {
         AccDataType v_acc = 0;
@@ -490,7 +494,36 @@ CK_TILE_HOST void reference_gemm(const HostTensor<ADataType>& a_m_k,
             {
                 v_b = ck_tile::type_convert<AccDataType>(b_element_op(b_k_n(k, n)));
             }
-            v_acc += v_a * v_b;
+
+            if constexpr(std::is_same_v<ComputeDataType, tf32_t>)
+            {
+                if(device_name == "gfx950")
+                {
+                    // gfx950: use 3x bf16 emulation
+                    bf16_t v_a_bf16_big   = ck_tile::type_convert<bf16_t>(v_a);
+                    bf16_t v_a_bf16_small = ck_tile::type_convert<bf16_t>(
+                        v_a - type_convert<AccDataType>(v_a_bf16_big));
+                    bf16_t v_b_bf16_big   = ck_tile::type_convert<bf16_t>(v_b);
+                    bf16_t v_b_bf16_small = ck_tile::type_convert<bf16_t>(
+                        v_b - type_convert<AccDataType>(v_b_bf16_big));
+
+                    v_acc += ck_tile::type_convert<AccDataType>(v_a_bf16_big) *
+                                 ck_tile::type_convert<AccDataType>(v_b_bf16_small) +
+                             ck_tile::type_convert<AccDataType>(v_a_bf16_small) *
+                                 ck_tile::type_convert<AccDataType>(v_b_bf16_big) +
+                             ck_tile::type_convert<AccDataType>(v_a_bf16_big) *
+                                 ck_tile::type_convert<AccDataType>(v_b_bf16_big);
+                }
+                else
+                {
+                    // Other architectures: tf32 not supported or handled via fp32 fallback
+                    v_acc += v_a * v_b;
+                }
+            }
+            else
+            {
+                v_acc += v_a * v_b;
+            }
         }
 
         c_m_n(m, n) = ck_tile::type_convert<CDataType>(acc_element_op(v_acc));
@@ -747,7 +780,8 @@ template <typename ADataType,
           typename CDataType,
           typename LayoutA,
           typename LayoutB,
-          typename LayoutC>
+          typename LayoutC,
+          typename ComputeDataType = ADataType>
 __global__ void naive_gemm_kernel(ADataType* A,
                                   BDataType* B,
                                   CDataType* C,
@@ -819,7 +853,33 @@ __global__ void naive_gemm_kernel(ADataType* A,
             {
                 v_b = ck_tile::type_convert<AccDataType>(B[b_index]);
             }
-            acc += v_a * v_b;
+
+            if constexpr(std::is_same_v<ComputeDataType, tf32_t>)
+            {
+#ifdef CK_GFX950_SUPPORT
+                // gfx950: use 3x bf16 emulation
+                bf16_t v_a_bf16_big = ck_tile::type_convert<bf16_t>(v_a);
+                bf16_t v_a_bf16_small =
+                    ck_tile::type_convert<bf16_t>(v_a - type_convert<AccDataType>(v_a_bf16_big));
+                bf16_t v_b_bf16_big = ck_tile::type_convert<bf16_t>(v_b);
+                bf16_t v_b_bf16_small =
+                    ck_tile::type_convert<bf16_t>(v_b - type_convert<AccDataType>(v_b_bf16_big));
+
+                acc += ck_tile::type_convert<AccDataType>(v_a_bf16_big) *
+                           ck_tile::type_convert<AccDataType>(v_b_bf16_small) +
+                       ck_tile::type_convert<AccDataType>(v_a_bf16_small) *
+                           ck_tile::type_convert<AccDataType>(v_b_bf16_big) +
+                       ck_tile::type_convert<AccDataType>(v_a_bf16_big) *
+                           ck_tile::type_convert<AccDataType>(v_b_bf16_big);
+#else
+                // Other architectures: use fp32 fallback
+                acc += v_a * v_b;
+#endif
+            }
+            else
+            {
+                acc += v_a * v_b;
+            }
         }
 
         int c_index = (std::is_same_v<LayoutC, tensor_layout::gemm::RowMajor>)
@@ -835,7 +895,8 @@ template <typename ADataType,
           typename CDataType,
           typename LayoutA,
           typename LayoutB,
-          typename LayoutC>
+          typename LayoutC,
+          typename ComputeDataType = ADataType>
 __global__ void blockwise_gemm_kernel(ADataType* A,
                                       BDataType* B,
                                       CDataType* C,
@@ -932,7 +993,33 @@ __global__ void blockwise_gemm_kernel(ADataType* A,
             {
                 v_b = ck_tile::type_convert<AccDataType>(B[b_index]);
             }
-            acc_temp += v_a * v_b;
+
+            if constexpr(std::is_same_v<ComputeDataType, tf32_t>)
+            {
+#ifdef CK_GFX950_SUPPORT
+                // gfx950: use 3x bf16 emulation
+                bf16_t v_a_bf16_big = ck_tile::type_convert<bf16_t>(v_a);
+                bf16_t v_a_bf16_small =
+                    ck_tile::type_convert<bf16_t>(v_a - type_convert<AccDataType>(v_a_bf16_big));
+                bf16_t v_b_bf16_big = ck_tile::type_convert<bf16_t>(v_b);
+                bf16_t v_b_bf16_small =
+                    ck_tile::type_convert<bf16_t>(v_b - type_convert<AccDataType>(v_b_bf16_big));
+
+                acc_temp += ck_tile::type_convert<AccDataType>(v_a_bf16_big) *
+                                ck_tile::type_convert<AccDataType>(v_b_bf16_small) +
+                            ck_tile::type_convert<AccDataType>(v_a_bf16_small) *
+                                ck_tile::type_convert<AccDataType>(v_b_bf16_big) +
+                            ck_tile::type_convert<AccDataType>(v_a_bf16_big) *
+                                ck_tile::type_convert<AccDataType>(v_b_bf16_big);
+#else
+                // Other architectures: use fp32 fallback
+                acc_temp += v_a * v_b;
+#endif
+            }
+            else
+            {
+                acc_temp += v_a * v_b;
+            }
         }
         // final accumulation
         acc += acc_temp * scale_A * scale_B;
@@ -950,7 +1037,8 @@ template <typename ADataType,
           typename CDataType,
           typename LayoutA,
           typename LayoutB,
-          typename LayoutC>
+          typename LayoutC,
+          typename ComputeDataType = ADataType>
 void reference_gemm_gpu(ADataType* a_ptr,
                         BDataType* b_ptr,
                         CDataType* c_ptr,
@@ -965,9 +1053,15 @@ void reference_gemm_gpu(ADataType* a_ptr,
     int numThreadsPerBlock = 256; // Common choice for threads per block
     int numBlocks          = (totalElements + numThreadsPerBlock - 1) / numThreadsPerBlock;
 
-    naive_gemm_kernel<ADataType, BDataType, AccDataType, CDataType, LayoutA, LayoutB, LayoutC>
-        <<<numBlocks, numThreadsPerBlock>>>(
-            a_ptr, b_ptr, c_ptr, M, N, K, stride_a, stride_b, stride_c);
+    naive_gemm_kernel<ADataType,
+                      BDataType,
+                      AccDataType,
+                      CDataType,
+                      LayoutA,
+                      LayoutB,
+                      LayoutC,
+                      ComputeDataType><<<numBlocks, numThreadsPerBlock>>>(
+        a_ptr, b_ptr, c_ptr, M, N, K, stride_a, stride_b, stride_c);
 
     return;
 }
@@ -978,7 +1072,8 @@ template <typename ADataType,
           typename CDataType,
           typename LayoutA,
           typename LayoutB,
-          typename LayoutC>
+          typename LayoutC,
+          typename ComputeDataType = ADataType>
 void reference_blockwise_gemm_gpu(ADataType* a_ptr,
                                   BDataType* b_ptr,
                                   CDataType* c_ptr,
@@ -998,21 +1093,27 @@ void reference_blockwise_gemm_gpu(ADataType* a_ptr,
     int numThreadsPerBlock = 256; // Common choice for threads per block
     int numBlocks          = (totalElements + numThreadsPerBlock - 1) / numThreadsPerBlock;
 
-    blockwise_gemm_kernel<ADataType, BDataType, AccDataType, CDataType, LayoutA, LayoutB, LayoutC>
-        <<<numBlocks, numThreadsPerBlock>>>(a_ptr,
-                                            b_ptr,
-                                            c_ptr,
-                                            M,
-                                            N,
-                                            K,
-                                            stride_a,
-                                            stride_b,
-                                            stride_c,
-                                            scale_granularity_m,
-                                            scale_granularity_n,
-                                            scale_granularity_k,
-                                            scale_A_ptr,
-                                            scale_B_ptr);
+    blockwise_gemm_kernel<ADataType,
+                          BDataType,
+                          AccDataType,
+                          CDataType,
+                          LayoutA,
+                          LayoutB,
+                          LayoutC,
+                          ComputeDataType><<<numBlocks, numThreadsPerBlock>>>(a_ptr,
+                                                                              b_ptr,
+                                                                              c_ptr,
+                                                                              M,
+                                                                              N,
+                                                                              K,
+                                                                              stride_a,
+                                                                              stride_b,
+                                                                              stride_c,
+                                                                              scale_granularity_m,
+                                                                              scale_granularity_n,
+                                                                              scale_granularity_k,
+                                                                              scale_A_ptr,
+                                                                              scale_B_ptr);
 
     return;
 }
@@ -1023,7 +1124,8 @@ template <typename ADataType,
           typename CDataType,
           typename LayoutA,
           typename LayoutB,
-          typename LayoutC>
+          typename LayoutC,
+          typename ComputeDataType = ADataType>
 void reference_batched_gemm_gpu(ADataType* a_ptr,
                                 BDataType* b_ptr,
                                 CDataType* c_ptr,
@@ -1047,9 +1149,15 @@ void reference_batched_gemm_gpu(ADataType* a_ptr,
         ADataType* d_ATemp = a_ptr + batch_id * batch_stride_A;
         BDataType* d_BTemp = b_ptr + batch_id * batch_stride_B;
         CDataType* d_CTemp = c_ptr + batch_id * batch_stride_C;
-        naive_gemm_kernel<ADataType, BDataType, AccDataType, CDataType, LayoutA, LayoutB, LayoutC>
-            <<<numBlocks, numThreadsPerBlock>>>(
-                d_ATemp, d_BTemp, d_CTemp, M, N, K, stride_a, stride_b, stride_c);
+        naive_gemm_kernel<ADataType,
+                          BDataType,
+                          AccDataType,
+                          CDataType,
+                          LayoutA,
+                          LayoutB,
+                          LayoutC,
+                          ComputeDataType><<<numBlocks, numThreadsPerBlock>>>(
+            d_ATemp, d_BTemp, d_CTemp, M, N, K, stride_a, stride_b, stride_c);
     }
 
     return;

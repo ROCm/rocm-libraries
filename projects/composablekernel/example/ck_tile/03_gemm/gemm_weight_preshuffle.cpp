@@ -16,8 +16,9 @@
 
 template <typename GemmConfig,
           typename APrecType,
-          typename BPrecType = APrecType,
-          typename CPrecType = APrecType>
+          typename BPrecType       = APrecType,
+          typename CPrecType       = APrecType,
+          typename ComputeDataType = APrecType>
 int run_gemm_example_prec_type(std::string a_layout,
                                std::string b_layout,
                                ck_tile::ArgParser& arg_parser)
@@ -35,8 +36,15 @@ int run_gemm_example_prec_type(std::string a_layout,
 
     if(a_layout == "R" && b_layout == "C")
     {
-        return run_gemm_example_with_layouts<GemmConfig, Invoker, APrecType, BPrecType, CPrecType>(
-            arg_parser, Row{}, Col{}, Row{});
+        return run_gemm_example_with_layouts<GemmConfig,
+                                             Invoker,
+                                             APrecType,
+                                             BPrecType,
+                                             CPrecType,
+                                             Row,
+                                             Col,
+                                             Row,
+                                             ComputeDataType>(arg_parser, Row{}, Col{}, Row{});
     }
     else
     {
@@ -61,6 +69,17 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
         return run_gemm_example_prec_type<GemmConfig<ck_tile::half_t>, ck_tile::bf16_t>(
             a_layout, b_layout, arg_parser);
     }
+#ifdef CK_GFX950_SUPPORT
+    else if(data_type == "tf32")
+    {
+        // TF32 uses template-specialized GemmConfig with correct tile config
+        return run_gemm_example_prec_type<GemmConfig<ck_tile::tf32_t>,
+                                          float,
+                                          float,
+                                          float,
+                                          ck_tile::tf32_t>(a_layout, b_layout, arg_parser);
+    }
+#endif
     else if(data_type == "fp8")
     {
         return run_gemm_example_prec_type<GemmConfig<ck_tile::fp8_t>,

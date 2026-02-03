@@ -41,6 +41,22 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
         return run_gemm_example_prec_type<GemmConfig, Invoker, ck_tile::bf16_t>(
             a_layout, b_layout, arg_parser);
     }
+    else if(data_type == "fp32")
+    {
+        return run_gemm_example_prec_type<GemmConfig, Invoker, float>(
+            a_layout, b_layout, arg_parser);
+    }
+#ifdef CK_GFX950_SUPPORT
+    else if(data_type == "tf32")
+    {
+        return run_gemm_example_prec_type<GemmConfig,
+                                          Invoker,
+                                          float,
+                                          float,
+                                          float,
+                                          ck_tile::tf32_t>(a_layout, b_layout, arg_parser);
+    }
+#endif
     else if(data_type == "fp8")
     {
         return run_gemm_example_prec_type<GemmConfig,

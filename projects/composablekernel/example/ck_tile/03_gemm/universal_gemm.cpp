@@ -19,7 +19,8 @@ template <typename GemmConfig,
           typename CDataType = ADataType,
           typename ALayout,
           typename BLayout,
-          typename CLayout>
+          typename CLayout,
+          typename ComputeDataType = ADataType>
 int run_gemm_example_with_layouts_universal(ck_tile::ArgParser& arg_parser,
                                             const ALayout a_layout = ALayout{},
                                             const BLayout b_layout = BLayout{},
@@ -88,7 +89,8 @@ int run_gemm_example_with_layouts_universal(ck_tile::ArgParser& arg_parser,
                                                      BLayout,
                                                      ck_tile::tuple<>,
                                                      CLayout,
-                                                     ck_tile::element_wise::PassThrough>(
+                                                     ck_tile::element_wise::PassThrough,
+                                                     ComputeDataType>(
             args, ck_tile::stream_config{nullptr, false, 1});
 
         // Copy result from device for verification
@@ -113,15 +115,23 @@ int run_gemm_example_with_layouts_universal(ck_tile::ArgParser& arg_parser,
     }
 
     // Normal path - delegate to shared implementation
-    return run_gemm_example_with_layouts<GemmConfig, Invoker, ADataType, BDataType, CDataType>(
-        arg_parser, a_layout, b_layout, c_layout);
+    return run_gemm_example_with_layouts<GemmConfig,
+                                         Invoker,
+                                         ADataType,
+                                         BDataType,
+                                         CDataType,
+                                         ALayout,
+                                         BLayout,
+                                         CLayout,
+                                         ComputeDataType>(arg_parser, a_layout, b_layout, c_layout);
 }
 
 // Universal GEMM-specific prec_type dispatcher that uses the wrapper
 template <typename GemmConfig,
           typename APrecType,
-          typename BPrecType = APrecType,
-          typename CPrecType = APrecType>
+          typename BPrecType       = APrecType,
+          typename CPrecType       = APrecType,
+          typename ComputeDataType = APrecType>
 int run_gemm_example_prec_type_universal(std::string a_layout,
                                          std::string b_layout,
                                          ck_tile::ArgParser& arg_parser)
@@ -167,7 +177,11 @@ int run_gemm_example_prec_type_universal(std::string a_layout,
                 return run_gemm_example_with_layouts_universal<GemmConfig,
                                                                APrecType,
                                                                BPrecType,
-                                                               CPrecType>(
+                                                               CPrecType,
+                                                               decltype(a_layout_type),
+                                                               decltype(b_layout_type),
+                                                               Row,
+                                                               ComputeDataType>(
                     arg_parser, a_layout_type, b_layout_type, Row{});
             }
         },
@@ -192,6 +206,18 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
         return run_gemm_example_prec_type_universal<GemmConfig<ck_tile::bf16_t>, ck_tile::bf16_t>(
             a_layout, b_layout, arg_parser);
     }
+#ifdef CK_GFX950_SUPPORT
+    else if(data_type == "tf32")
+    {
+        // TF32 uses UniversalInvoker which dispatches to TF32-compatible pipeline internally
+        return run_gemm_example_prec_type_universal<GemmConfig<ck_tile::tf32_t>,
+                                                    float,
+                                                    float,
+                                                    float,
+                                                    ck_tile::tf32_t>(
+            a_layout, b_layout, arg_parser);
+    }
+#endif
     else if(data_type == "fp8")
     {
         return run_gemm_example_prec_type_universal<GemmConfig<ck_tile::fp8_t>,
