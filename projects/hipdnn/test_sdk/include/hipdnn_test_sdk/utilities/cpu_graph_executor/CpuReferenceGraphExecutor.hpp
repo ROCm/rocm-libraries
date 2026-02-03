@@ -28,7 +28,7 @@ public:
                  size_t size,
                  const std::unordered_map<int64_t, void*>& variantPack)
     {
-        auto graphWrap = hipdnn_plugin_sdk::GraphWrapper(graphBuffer, size);
+        auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(graphBuffer, size);
 
         std::vector<std::unique_ptr<IGraphNodePlanExecutor>> planExecutors;
 
@@ -72,7 +72,7 @@ private:
     }
 
     std::unique_ptr<IGraphNodePlanExecutor>
-        buildPlanForNode(const hipdnn_plugin_sdk::IGraph& graph,
+        buildPlanForNode(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
                          const hipdnn_data_sdk::data_objects::Node& node)
     {
         auto key = buildSignatureKey(node, graph.getTensorMap(), node.compute_data_type());

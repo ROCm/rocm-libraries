@@ -27,7 +27,6 @@ include: rocsparse_common.yaml
 
 Definitions:
   - &alpha_range_quick
-    - { alpha:   1.0, alphai:  1.0 }
     - { alpha:  -0.5, alphai: -0.5 }
 
   - &alpha_range_checkin
@@ -40,7 +39,6 @@ Definitions:
     - { alpha:   3.0, alphai:  1.5 }
 
   - &beta_range_quick
-    - { beta:   1.0, betai:  1.0 }
     - { beta:  -0.5, betai: -0.5 }
 
   - &beta_range_checkin
@@ -70,9 +68,9 @@ Tests:
   beta: [-99.0]
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_zero]
 
 - name: csrgemm_reuse_mult
@@ -83,38 +81,6 @@ Tests:
   N: [13, 300]
   K: [50, 254]
   alpha_alphai: *alpha_range_quick
-  beta: [-99.0]
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-
-- name: csrgemm_reuse_mult
-  category: pre_checkin
-  function: csrgemm_reuse
-  precision: *single_double_precisions_complex_real
-  M: [8, 1799]
-  N: [8, 2000]
-  K: [0, 1942, 9848]
-  alpha_alphai: *alpha_range_checkin
-  beta: [-99.0]
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero]
-  baseB: [rocsparse_index_base_zero]
-  baseC: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
-
-- name: csrgemm_reuse_mult
-  category: nightly
-  function: csrgemm_reuse
-  precision: *single_double_precisions_complex_real
-  M: [5000]
-  N: [2619, 2588]
-  K: [442, 42312, 743434]
-  alpha_alphai: *alpha_range_nightly
   beta: [-99.0]
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none]
@@ -134,15 +100,51 @@ Tests:
   beta: [-99.0]
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
+  filename: [nos1,
              nos2,
+             nos3,
              nos4,
+             nos5,
              nos6,
-             scircuit]
+             nos7]
+
+- name: csrgemm_reuse_mult_file
+  category: quick
+  function: csrgemm_reuse
+  precision: *single_double_precisions_complex
+  M: 1
+  N: [21, 300]
+  K: 1
+  alpha_alphai: *alpha_range_quick
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [qc2534,
+             mplate]
+
+- name: csrgemm_reuse_mult
+  category: pre_checkin
+  function: csrgemm_reuse
+  precision: *single_double_precisions_complex_real
+  M: [8, 1799]
+  N: [8, 2000]
+  K: [0, 1942, 9848]
+  alpha_alphai: *alpha_range_checkin
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
 
 - name: csrgemm_reuse_mult_file
   category: pre_checkin
@@ -161,10 +163,47 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [mc2depi,
              ASIC_320k,
+             scircuit,
+             mac_econ_fwd500,
              nos1,
              nos3,
              nos5,
              nos7]
+
+- name: csrgemm_reuse_mult_file
+  category: pre_checkin
+  function: csrgemm_reuse
+  precision: *single_double_precisions_complex
+  M: 1
+  N: [8, 2000]
+  K: 1
+  alpha_alphai: *alpha_range_checkin
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate,
+             Chevron2,
+             Chevron3]
+
+- name: csrgemm_reuse_mult
+  category: nightly
+  function: csrgemm_reuse
+  precision: *single_double_precisions_complex_real
+  M: [5000]
+  N: [2619, 2588]
+  K: [442, 42312, 743434]
+  alpha_alphai: *alpha_range_nightly
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
 
 - name: csrgemm_reuse_mult_file
   category: nightly
@@ -207,42 +246,6 @@ Tests:
              rma10]
 
 - name: csrgemm_reuse_mult_file
-  category: quick
-  function: csrgemm_reuse
-  precision: *single_double_precisions_complex
-  M: 1
-  N: [21, 300]
-  K: 1
-  alpha_alphai: *alpha_range_quick
-  beta: [-99.0]
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [qc2534,
-             Chevron2]
-
-- name: csrgemm_reuse_mult_file
-  category: pre_checkin
-  function: csrgemm_reuse
-  precision: *single_double_precisions_complex
-  M: 1
-  N: [8, 2000]
-  K: 1
-  alpha_alphai: *alpha_range_checkin
-  beta: [-99.0]
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero]
-  baseB: [rocsparse_index_base_zero]
-  baseC: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mplate,
-             Chevron3]
-
-- name: csrgemm_reuse_mult_file
   category: nightly
   function: csrgemm_reuse
   precision: *single_double_precisions_complex
@@ -269,8 +272,8 @@ Tests:
   K: 1
   alpha: [-99.0]
   beta_betai: *beta_range_quick
-  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseD: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
+  baseD: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_zero]
 
 - name: csrgemm_reuse_scale
@@ -282,9 +285,42 @@ Tests:
   K: 1
   alpha: [-99.0]
   beta_betai: *beta_range_quick
-  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseD: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
+
+- name: csrgemm_reuse_scale_file
+  category: quick
+  function: csrgemm_reuse
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha: [-99.0]
+  beta_betai: *beta_range_quick
+  baseC: [rocsparse_index_base_one]
+  baseD: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7]
+
+- name: csrgemm_reuse_scale_file
+  category: quick
+  function: csrgemm_reuse
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha: [-99.0]
+  beta_betai: *beta_range_quick
+  baseC: [rocsparse_index_base_one]
+  baseD: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [qc2534,
+             mplate]
 
 - name: csrgemm_reuse_scale
   category: pre_checkin
@@ -299,36 +335,6 @@ Tests:
   baseD: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
 
-- name: csrgemm_reuse_scale
-  category: nightly
-  function: csrgemm_reuse
-  precision: *single_double_precisions_complex_real
-  M: [5000]
-  N: [1516, 4208]
-  K: 1
-  alpha: [-99.0]
-  beta_betai: *beta_range_nightly
-  baseC: [rocsparse_index_base_zero]
-  baseD: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
-
-- name: csrgemm_reuse_scale_file
-  category: quick
-  function: csrgemm_reuse
-  precision: *single_double_precisions
-  M: 1
-  N: 1
-  alpha: [-99.0]
-  beta_betai: *beta_range_quick
-  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseD: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
-             nos2,
-             nos4,
-             nos6,
-             scircuit]
-
 - name: csrgemm_reuse_scale_file
   category: pre_checkin
   function: csrgemm_reuse
@@ -341,11 +347,38 @@ Tests:
   baseD: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [rma10,
+             ASIC_320k,
              mc2depi,
-             nos1,
-             nos3,
-             nos5,
-             nos7]
+             scircuit,
+             mac_econ_fwd500]
+
+- name: csrgemm_reuse_scale_file
+  category: pre_checkin
+  function: csrgemm_reuse
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha: [-99.0]
+  beta_betai: *beta_range_checkin
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate,
+             Chevron2,
+             Chevron3]
+
+- name: csrgemm_reuse_scale
+  category: nightly
+  function: csrgemm_reuse
+  precision: *single_double_precisions_complex_real
+  M: [5000]
+  N: [1516, 4208]
+  K: 1
+  alpha: [-99.0]
+  beta_betai: *beta_range_nightly
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
 
 - name: csrgemm_reuse_scale_file
   category: nightly
@@ -367,34 +400,6 @@ Tests:
              shipsec1]
 
 - name: csrgemm_reuse_scale_file
-  category: quick
-  function: csrgemm_reuse
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  alpha: [-99.0]
-  beta_betai: *beta_range_quick
-  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseD: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [qc2534,
-             Chevron2]
-
-- name: csrgemm_reuse_scale_file
-  category: pre_checkin
-  function: csrgemm_reuse
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  alpha: [-99.0]
-  beta_betai: *beta_range_checkin
-  baseC: [rocsparse_index_base_zero]
-  baseD: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mplate,
-             Chevron3]
-
-- name: csrgemm_reuse_scale_file
   category: nightly
   function: csrgemm_reuse
   precision: *single_double_precisions_complex
@@ -408,28 +413,96 @@ Tests:
   filename: [Chevron4]
 
 # C = alpha * A * B + beta * D
-- name: csrgemm_reuse_scale
+- name: csrgemm_reuse_mult_scale
   category: quick
   function: csrgemm_reuse
   precision: *single_double_precisions_complex_real
-  M: [300]
-  N: [300]
-  K: 1
+  M: [200]
+  N: [200]
+  K: [200]
   alpha_alphai: *alpha_range_quick
   beta_betai: *beta_range_quick
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
   baseC: [rocsparse_index_base_zero]
   baseD: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_zero]
 
-- name: csrgemm_reuse_scale
+- name: csrgemm_reuse_mult_scale
   category: quick
   function: csrgemm_reuse
   precision: *single_double_precisions_complex_real
-  M: [300]
-  N: [300]
-  K: 1
+  M: [400]
+  N: [400]
+  K: [400]
   alpha_alphai: *alpha_range_quick
   beta_betai: *beta_range_quick
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
   baseC: [rocsparse_index_base_zero]
   baseD: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
+
+- name: csrgemm_reuse_mult_scale_file
+  category: quick
+  function: csrgemm_reuse
+  precision: *single_double_precisions
+  M: 1
+  N: [18]
+  K: 1
+  alpha_alphai: *alpha_range_quick
+  beta_betai: *beta_range_quick
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7]
+
+- name: csrgemm_reuse_mult_scale_file
+  category: pre_checkin
+  function: csrgemm_reuse
+  precision: *single_double_precisions
+  M: 1
+  N: [155]
+  K: 1
+  alpha_alphai: *alpha_range_checkin
+  beta_betai: *beta_range_checkin
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [rma10,
+             ASIC_320k,
+             mc2depi,
+             scircuit,
+             mac_econ_fwd500]
+
+- name: csrgemm_reuse_mult_scale_file
+  category: nightly
+  function: csrgemm_reuse
+  precision: *double_only_precisions
+  M: 1
+  N: [66]
+  K: 1
+  alpha_alphai: *alpha_range_nightly
+  beta_betai: *beta_range_nightly
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
+  baseD: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [bibd_22_8,
+             bmwcra_1,
+             amazon0312,
+             Chebyshev4,
+             sme3Dc,
+             webbase-1M,
+             shipsec1]

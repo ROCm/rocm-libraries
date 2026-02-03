@@ -751,14 +751,14 @@ public:
     // this factor
     double scale_factor = 1.0;
 
-    fft_params(){};
-    virtual ~fft_params(){};
+    fft_params() {};
+    virtual ~fft_params() {};
 
     // copying and moving
-    fft_params(const fft_params&) = default;
+    fft_params(const fft_params&)            = default;
     fft_params& operator=(const fft_params&) = default;
     fft_params(fft_params&&)                 = default;
-    fft_params& operator=(fft_params&&) = default;
+    fft_params& operator=(fft_params&&)      = default;
 
     virtual void setup() {}
     virtual void cleanup() {}
@@ -4075,8 +4075,8 @@ void init_local_input(int                                       comm_rank,
         auto contiguous_dist   = params.compute_idist();
 
         std::vector<Tbuff> bufvec(1);
-        size_t brick_size_bytes = compute_ptrdiff(brick->length(), brick->stride, 0, 0) * elem_size
-                                  / (is_planar ? 2 : 1);
+        size_t             brick_size_bytes
+            = compute_ptrdiff(brick->length(), brick->stride) * elem_size / (is_planar ? 2 : 1);
         bufvec.back() = Tbuff::make_nonowned(input_ptrs[ptr_idx], brick_size_bytes);
         // grab a second pointer for planar
         if(is_planar)
