@@ -60,7 +60,7 @@ auto GetTestCases()
                            batchSeq);
 }
 
-struct GPU_Test_FP32 : testing::TestWithParam<decltype(GetTestCases())>, LSTM_test<float>
+struct GPU_Test_dropout_FP32 : testing::TestWithParam<decltype(GetTestCases())>, LSTM_test<float>
 {
     int device_count{0};
 
@@ -75,7 +75,7 @@ struct GPU_Test_FP32 : testing::TestWithParam<decltype(GetTestCases())>, LSTM_te
 
 using namespace lstm_dropout;
 
-TEST_P(GPU_Test_FP32, FloatTest_lstm_dropout)
+TEST_P(GPU_Test_dropout_FP32, FloatTest_lstm_dropout)
 {
     if(device_count == 0)
     {
@@ -113,4 +113,4 @@ TEST_P(GPU_Test_FP32, FloatTest_lstm_dropout)
     RunTest();
 }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Test_FP32, testing::Values(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Test_dropout_FP32, testing::Values(GetTestCases()));
