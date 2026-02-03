@@ -6,6 +6,7 @@
 #include "bfloat16_dev.hpp"
 #include "float_types.h"
 #include "vector_types.hpp"
+#include <type_traits>
 
 namespace miopen {
 namespace detail {
@@ -216,6 +217,10 @@ __forceinline__ __device__ double fmin(double x, double y) { return ::fmin(x, y)
 __forceinline__ __device__ double fma(double a, double b, double c) { return ::fma(a, b, c); }
 
 } // namespace detail
+
+//=============================================================================
+// 4-element vector overloads
+//=============================================================================
 
 template <typename FpVecType>
 __forceinline__ __device__ FpVecType exp(FpVecType x)
