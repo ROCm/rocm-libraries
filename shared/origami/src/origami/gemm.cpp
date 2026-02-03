@@ -61,7 +61,7 @@ double calculate_work_utilization(const problem_t& problem, const config_t& conf
 // Calculate output utilization
 double calculate_output_utilization(const problem_t& problem,
                                     const config_t& config,
-                                    size_t vector_elems = 1) {
+                                    size_t vector_elems) {
   const size_t M = problem.size.m;
   const size_t N = problem.size.n;
 

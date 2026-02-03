@@ -31,7 +31,7 @@ double calculate_work_utilization(const problem_t& problem, const config_t& conf
  */
 double calculate_output_utilization(const problem_t& problem,
                                     const config_t& config,
-                                    size_t vector_elems);
+                                    size_t vector_elems = 1);
 
 /**
  * @brief Computes the launch parameters for the kernel
@@ -348,6 +348,20 @@ double compute_memory_latency(const problem_t& problem,
                               const context_t& context);
 
 /**
+ * @brief Determine the epilogue latency of a single tile.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param context Execution context with derived parameters.
+ * @return double Latency in seconds.
+ */
+double compute_epilogue_latency(const problem_t& problem,
+                                const hardware_t& hardware,
+                                const config_t& config,
+                                const context_t& context);
+
+/**
  * @brief Computes the latency to compute a K-COMPLETE tile.
  *
  * @param problem Problem description (M, N, K, etc.)
@@ -360,20 +374,6 @@ double compute_tile_latency(const problem_t& problem,
                             const hardware_t& hardware,
                             const config_t& config,
                             const context_t& context);
-
-/**
- * @brief Compute the latency for the parallel reduction kernel
- *
- * @param problem Problem description (M, N, K, etc.)
- * @param hardware Hardware characteristics (@see origami::hardware_t)
- * @param config Kernel configuration.
- * @param context Execution context with derived parameters.
- * @return double Latency in cycles.
- */
-double compute_parallel_reduction_latency(const problem_t& problem,
-                                          const hardware_t& hardware,
-                                          const config_t& config,
-                                          const context_t& context);
 
 /**
  * @brief Computes the latency per K-complete macro-tile timestep.
@@ -392,6 +392,21 @@ double compute_timestep_latency(const problem_t& problem,
                                 const hardware_t& hardware,
                                 const config_t& config,
                                 const context_t& context);
+
+
+/**
+ * @brief Compute the latency for the parallel reduction kernel
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param context Execution context with derived parameters.
+ * @return double Latency in cycles.
+ */
+ double compute_parallel_reduction_latency(const problem_t& problem,
+                                           const hardware_t& hardware,
+                                           const config_t& config,
+                                           const context_t& context);
 
 /**
  * @brief Compute the total latency of a gemm based on the latency of one timestep multiplied by the

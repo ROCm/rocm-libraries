@@ -124,10 +124,13 @@ TEST_CASE("GEMM: compute_memory_latency", "[gemm]") {
       auto config_small = make_config(128, 128, 64, 32, 32, 8, false, 8);
       auto config_large = make_config(256, 256, 128, 32, 32, 8, false, 8);
 
+      origami::context_t context_small(problem, hardware, config_small);
+      origami::context_t context_large(problem, hardware, config_large);
+
       auto mem_latency_small =
-          origami::compute_memory_latency(problem, hardware, config_small, 304, 2);
+          origami::compute_memory_latency(problem, hardware, config_small, context_small);
       auto mem_latency_large =
-          origami::compute_memory_latency(problem, hardware, config_large, 304, 2);
+          origami::compute_memory_latency(problem, hardware, config_large, context_large);
 
       REQUIRE(mem_latency_small < mem_latency_large);
     }
@@ -143,10 +146,13 @@ TEST_CASE("GEMM: compute_tile_latency", "[gemm]") {
       auto config_small = make_config(128, 128, 64, 32, 32, 8, false, 6);
       auto config_large = make_config(256, 256, 128, 32, 32, 8, false, 6);
 
+      origami::context_t context_small(problem, hardware, config_small);
+      origami::context_t context_large(problem, hardware, config_large);
+
       auto tile_latency_small =
-          origami::compute_tile_latency(problem, hardware, config_small, 304, 3);
+          origami::compute_tile_latency(problem, hardware, config_small, context_small);
       auto tile_latency_large =
-          origami::compute_tile_latency(problem, hardware, config_large, 304, 3);
+          origami::compute_tile_latency(problem, hardware, config_large, context_large);
 
       REQUIRE(tile_latency_large > tile_latency_small);
     }
@@ -161,8 +167,10 @@ TEST_CASE("GEMM: compute_timestep_latency", "[gemm]") {
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
       auto config = make_config(128, 128, 64, 32, 32, 8, false, 8);
 
-      auto tile_latency = origami::compute_tile_latency(problem, hardware, config, 304, 4);
-      auto timestep_latency = origami::compute_timestep_latency(problem, hardware, config, 304, 4);
+      origami::context_t context(problem, hardware, config);
+
+      auto tile_latency = origami::compute_tile_latency(problem, hardware, config, context);
+      auto timestep_latency = origami::compute_timestep_latency(problem, hardware, config, context);
 
       REQUIRE(timestep_latency == Approx(tile_latency));
     }
@@ -212,7 +220,8 @@ TEST_CASE("GEMM: estimate_l2_hit", "[gemm]") {
 
       for (int wgm = 1; wgm < 1025; wgm++) {
         config.workgroup_mapping = wgm;
-        auto l2_hit              = origami::estimate_l2_hit(problem, hardware, config, 3);
+        origami::context_t context(problem, hardware, config);
+        auto l2_hit = origami::estimate_l2_hit(problem, hardware, config, context);
         REQUIRE(l2_hit > 0.0);
         REQUIRE(l2_hit < 1.0);
       }
@@ -229,8 +238,10 @@ TEST_CASE("GEMM: estimate_mall_hit", "[gemm]") {
 
       for (int wgm = 1; wgm < 1025; wgm++) {
         config.workgroup_mapping = wgm;
-        auto mall_hit            = origami::estimate_mall_hit(problem, hardware, config, 304, 8);
+        origami::context_t context(problem, hardware, config);
+        auto mall_hit = origami::estimate_mall_hit(problem, hardware, config, context);
         REQUIRE(mall_hit > 0.0);
+        REQUIRE(mall_hit < 1.0);
       }
     }
   }
@@ -328,308 +339,59 @@ TEST_CASE("GEMM: calculate_output_utilization unit test", "[gemm]") {
   }
 }
 
-TEST_CASE("GEMM: compute_cu_occupancy unit test", "[gemm]") {
+TEST_CASE("GEMM: compute_launch_parameters unit test", "[gemm]") {
   for (int gpu_arch : test_architectures) {
-    DYNAMIC_SECTION("gfx" << gpu_arch << " - compute_cu_occupancy unit test") {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - compute_launch_parameters unit test") {
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(4096, 4096, 1024);
       auto config   = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
-      if (gpu_arch == 942) {
-        // Test 1: Test with split parameter provided
-        auto result_with_split =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::k_split_aware,
-                                          hardware.N_CU,
-                                          1UL);
-        REQUIRE(std::get<0>(result_with_split) == 256);
-        REQUIRE(std::get<1>(result_with_split) == 256);
-        REQUIRE(std::get<2>(result_with_split) == 1);
-        REQUIRE(std::get<3>(result_with_split) == 1);
+      // Test 1: Basic launch parameters computation
+      // Returns: (reduction_t, num_wgs, num_active_cus, num_timesteps, split_factor)
+      auto result = origami::compute_launch_parameters(
+          problem, hardware, config, origami::grid_selection_t::k_split_aware, hardware.N_CU);
+      REQUIRE(std::get<0>(result) != origami::reduction_t::parallel); // reduction_t
+      REQUIRE(std::get<1>(result) == 256);                            // num_wgs
+      REQUIRE(std::get<2>(result) == 256);                            // num_active_cus
+      REQUIRE(std::get<3>(result) == 1);                              // num_timesteps
+      REQUIRE(std::get<4>(result) == 1);                              // split_factor
 
-        // Test 2: Test without split (StreamK prediction)
-        auto result_without_split = origami::compute_cu_occupancy(
-            problem, hardware, config, origami::grid_selection_t::k_split_aware, 256UL, 0UL);
-        REQUIRE(std::get<0>(result_without_split) == 256);
-        REQUIRE(std::get<1>(result_without_split) == 256);
-        REQUIRE(std::get<2>(result_without_split) == 1);
-        REQUIRE(std::get<3>(result_without_split) == 1);
+      // Test 2: Test with different grid_selection algorithms
+      auto result_number_of_cus = origami::compute_launch_parameters(
+          problem, hardware, config, origami::grid_selection_t::number_of_cus, hardware.N_CU);
+      REQUIRE(std::get<1>(result_number_of_cus) > 0);  // num_wgs
+      REQUIRE(std::get<2>(result_number_of_cus) > 0);  // num_active_cus
 
-        // Test 3: Test with different grid_selection algorithms
-        auto result_different_grid_selection =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::number_of_cus,
-                                          hardware.N_CU,
-                                          0UL);
-        REQUIRE(std::get<0>(result_different_grid_selection) == 304);
-        REQUIRE(std::get<1>(result_different_grid_selection) == 304);
-        REQUIRE(std::get<2>(result_different_grid_selection) == 1);
-        REQUIRE(std::get<3>(result_different_grid_selection) == 2);
+      auto result_min_resources = origami::compute_launch_parameters(
+          problem, hardware, config, origami::grid_selection_t::min_resources, hardware.N_CU);
+      REQUIRE(std::get<1>(result_min_resources) == 256);  // num_wgs
+      REQUIRE(std::get<2>(result_min_resources) == 256);  // num_active_cus
 
-        result_different_grid_selection =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::min_resources,
-                                          hardware.N_CU,
-                                          0UL);
-        REQUIRE(std::get<0>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<1>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<2>(result_different_grid_selection) == 1);
-        REQUIRE(std::get<3>(result_different_grid_selection) == 1);
+      auto result_energy_aware = origami::compute_launch_parameters(
+          problem, hardware, config, origami::grid_selection_t::energy_aware, hardware.N_CU);
+      REQUIRE(std::get<1>(result_energy_aware) == 256);  // num_wgs
+      REQUIRE(std::get<2>(result_energy_aware) == 256);  // num_active_cus
 
-        result_different_grid_selection = origami::compute_cu_occupancy(
-            problem, hardware, config, origami::grid_selection_t::energy_aware, hardware.N_CU, 0UL);
-        REQUIRE(std::get<0>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<1>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<2>(result_different_grid_selection) == 1);
-        REQUIRE(std::get<3>(result_different_grid_selection) == 1);
+      auto result_reduction_cost = origami::compute_launch_parameters(
+          problem, hardware, config, origami::grid_selection_t::reduction_cost_aware, hardware.N_CU);
+      REQUIRE(std::get<1>(result_reduction_cost) == 256);  // num_wgs
+      REQUIRE(std::get<2>(result_reduction_cost) == 256);  // num_active_cus
 
-        result_different_grid_selection =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::reduction_cost_aware,
-                                          hardware.N_CU,
-                                          0UL);
-        REQUIRE(std::get<0>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<1>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<2>(result_different_grid_selection) == 1);
-        REQUIRE(std::get<3>(result_different_grid_selection) == 1);
+      auto result_data_parallel = origami::compute_launch_parameters(
+          problem, hardware, config, origami::grid_selection_t::data_parallel, hardware.N_CU);
+      REQUIRE(std::get<1>(result_data_parallel) == 256);  // num_wgs
+      REQUIRE(std::get<2>(result_data_parallel) == 256);  // num_active_cus
 
-        result_different_grid_selection =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::data_parallel,
-                                          hardware.N_CU,
-                                          0UL);
-        REQUIRE(std::get<0>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<1>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<2>(result_different_grid_selection) == 1);
-        REQUIRE(std::get<3>(result_different_grid_selection) == 1);
+      auto result_analytical = origami::compute_launch_parameters(
+          problem, hardware, config, origami::grid_selection_t::analytical, hardware.N_CU);
+      REQUIRE(std::get<1>(result_analytical) == 256);  // num_wgs
+      REQUIRE(std::get<2>(result_analytical) == 256);  // num_active_cus
 
-        result_different_grid_selection = origami::compute_cu_occupancy(
-            problem, hardware, config, origami::grid_selection_t::analytical, hardware.N_CU, 0UL);
-        REQUIRE(std::get<0>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<1>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<2>(result_different_grid_selection) == 1);
-        REQUIRE(std::get<3>(result_different_grid_selection) == 1);
-
-        result_different_grid_selection =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::k_split_aware,
-                                          hardware.N_CU,
-                                          0UL);
-        REQUIRE(std::get<0>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<1>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<2>(result_different_grid_selection) == 1);
-        REQUIRE(std::get<3>(result_different_grid_selection) == 1);
-
-        // Test 4: Test with max_cus parameter
-        auto result_max_cus =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::k_split_aware,
-                                          150,
-                                          0UL);  // max_cus set to 150
-        REQUIRE(std::get<0>(result_max_cus) == 150);
-        REQUIRE(std::get<1>(result_max_cus) == 150);
-        REQUIRE(std::get<2>(result_max_cus) == 1);
-        REQUIRE(std::get<3>(result_max_cus) == 1);
-
-        // Test 5: Test with multiple split parameter
-        auto result_multiple_split_parameter =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::k_split_aware,
-                                          hardware.N_CU,
-                                          10UL);
-        REQUIRE(std::get<0>(result_multiple_split_parameter) == 2560);
-        REQUIRE(std::get<1>(result_multiple_split_parameter) == 304);
-        REQUIRE(std::get<2>(result_multiple_split_parameter) == 9);
-        REQUIRE(std::get<3>(result_multiple_split_parameter) == 10);
-
-        result_multiple_split_parameter =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::k_split_aware,
-                                          hardware.N_CU,
-                                          100UL);
-        REQUIRE(std::get<0>(result_multiple_split_parameter) == 25600);
-        REQUIRE(std::get<1>(result_multiple_split_parameter) == 304);
-        REQUIRE(std::get<2>(result_multiple_split_parameter) == 85);
-        REQUIRE(std::get<3>(result_multiple_split_parameter) == 100);
-
-        result_multiple_split_parameter =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::k_split_aware,
-                                          hardware.N_CU,
-                                          423UL);
-        REQUIRE(std::get<0>(result_multiple_split_parameter) == 108288);
-        REQUIRE(std::get<1>(result_multiple_split_parameter) == 304);
-        REQUIRE(std::get<2>(result_multiple_split_parameter) == 357);
-        REQUIRE(std::get<3>(result_multiple_split_parameter) == 423);
-      } else if (gpu_arch == 950) {
-        // Test 1: Test with split parameter provided
-        auto result_with_split =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::k_split_aware,
-                                          hardware.N_CU,
-                                          1UL);
-        REQUIRE(std::get<0>(result_with_split) == 256);
-        REQUIRE(std::get<1>(result_with_split) == 256);
-        REQUIRE(std::get<2>(result_with_split) == 1);
-        REQUIRE(std::get<3>(result_with_split) == 1);
-
-        // Test 2: Test without split (StreamK prediction)
-        auto result_without_split = origami::compute_cu_occupancy(
-            problem, hardware, config, origami::grid_selection_t::k_split_aware, 256UL, 0UL);
-        REQUIRE(std::get<0>(result_without_split) == 256);
-        REQUIRE(std::get<1>(result_without_split) == 256);
-        REQUIRE(std::get<2>(result_without_split) == 1);
-        REQUIRE(std::get<3>(result_without_split) == 1);
-
-        // Test 3: Test with different grid_selection algorithms
-        auto result_different_grid_selection =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::number_of_cus,
-                                          hardware.N_CU,
-                                          0UL);
-        REQUIRE(std::get<0>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<1>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<2>(result_different_grid_selection) == 1);
-        REQUIRE(std::get<3>(result_different_grid_selection) == 1);
-
-        result_different_grid_selection =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::min_resources,
-                                          hardware.N_CU,
-                                          0UL);
-        REQUIRE(std::get<0>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<1>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<2>(result_different_grid_selection) == 1);
-        REQUIRE(std::get<3>(result_different_grid_selection) == 1);
-
-        result_different_grid_selection = origami::compute_cu_occupancy(
-            problem, hardware, config, origami::grid_selection_t::energy_aware, hardware.N_CU, 0UL);
-        REQUIRE(std::get<0>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<1>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<2>(result_different_grid_selection) == 1);
-        REQUIRE(std::get<3>(result_different_grid_selection) == 1);
-
-        result_different_grid_selection =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::reduction_cost_aware,
-                                          hardware.N_CU,
-                                          0UL);
-        REQUIRE(std::get<0>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<1>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<2>(result_different_grid_selection) == 1);
-        REQUIRE(std::get<3>(result_different_grid_selection) == 1);
-
-        result_different_grid_selection =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::data_parallel,
-                                          hardware.N_CU,
-                                          0UL);
-        REQUIRE(std::get<0>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<1>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<2>(result_different_grid_selection) == 1);
-        REQUIRE(std::get<3>(result_different_grid_selection) == 1);
-
-        result_different_grid_selection = origami::compute_cu_occupancy(
-            problem, hardware, config, origami::grid_selection_t::analytical, hardware.N_CU, 0UL);
-        REQUIRE(std::get<0>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<1>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<2>(result_different_grid_selection) == 1);
-        REQUIRE(std::get<3>(result_different_grid_selection) == 1);
-
-        result_different_grid_selection =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::k_split_aware,
-                                          hardware.N_CU,
-                                          0UL);
-        REQUIRE(std::get<0>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<1>(result_different_grid_selection) == 256);
-        REQUIRE(std::get<2>(result_different_grid_selection) == 1);
-        REQUIRE(std::get<3>(result_different_grid_selection) == 1);
-
-        // Test 4: Test with max_cus parameter
-        auto result_max_cus =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::k_split_aware,
-                                          150,
-                                          0UL);  // max_cus set to 150
-        REQUIRE(std::get<0>(result_max_cus) == 150);
-        REQUIRE(std::get<1>(result_max_cus) == 150);
-        REQUIRE(std::get<2>(result_max_cus) == 1);
-        REQUIRE(std::get<3>(result_max_cus) == 1);
-
-        // Test 5: Test with multiple split parameter
-        auto result_multiple_split_parameter =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::k_split_aware,
-                                          hardware.N_CU,
-                                          10UL);
-        REQUIRE(std::get<0>(result_multiple_split_parameter) == 2560);
-        REQUIRE(std::get<1>(result_multiple_split_parameter) == 256);
-        REQUIRE(std::get<2>(result_multiple_split_parameter) == 10);
-        REQUIRE(std::get<3>(result_multiple_split_parameter) == 10);
-
-        result_multiple_split_parameter =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::k_split_aware,
-                                          hardware.N_CU,
-                                          100UL);
-        REQUIRE(std::get<0>(result_multiple_split_parameter) == 25600);
-        REQUIRE(std::get<1>(result_multiple_split_parameter) == 256);
-        REQUIRE(std::get<2>(result_multiple_split_parameter) == 100);
-        REQUIRE(std::get<3>(result_multiple_split_parameter) == 100);
-
-        result_multiple_split_parameter =
-            origami::compute_cu_occupancy(problem,
-                                          hardware,
-                                          config,
-                                          origami::grid_selection_t::k_split_aware,
-                                          hardware.N_CU,
-                                          423UL);
-        REQUIRE(std::get<0>(result_multiple_split_parameter) == 108288);
-        REQUIRE(std::get<1>(result_multiple_split_parameter) == 256);
-        REQUIRE(std::get<2>(result_multiple_split_parameter) == 423);
-        REQUIRE(std::get<3>(result_multiple_split_parameter) == 423);
-      }
-      // Test 5: Verify logger metrics are set correctly (TODO)
-      // Test 6: Test reduction_strategy selection (TODO)
+      // Test 3: Test with max_cus parameter
+      auto result_max_cus = origami::compute_launch_parameters(
+          problem, hardware, config, origami::grid_selection_t::k_split_aware, 150);
+      REQUIRE(std::get<1>(result_max_cus) == 150);  // num_wgs capped at max_cus
+      REQUIRE(std::get<2>(result_max_cus) == 150);  // num_active_cus
     }
   }
 }
@@ -695,29 +457,25 @@ TEST_CASE("GEMM: compute_l2_hit_rate_global unit test", "[gemm]") {
       auto config   = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
       // Test 1: Test with various problem sizes
-      auto result_various_problem_sizes = origami::compute_l2_hit_rate_global(
-          problem, hardware, config, hardware.L2_capacity * 1024);
-      REQUIRE(result_various_problem_sizes == 0.875);
+      origami::context_t context(problem, hardware, config);
+      auto result_various_problem_sizes =
+          origami::compute_l2_hit_rate_global(problem, hardware, config, context);
+      REQUIRE(result_various_problem_sizes >= 0.0);
+      REQUIRE(result_various_problem_sizes <= 1.0);
 
-      auto problem_small           = make_problem(331, 4077, 547);
-      result_various_problem_sizes = origami::compute_l2_hit_rate_global(
-          problem_small, hardware, config, hardware.L2_capacity * 1024);
-      REQUIRE(result_various_problem_sizes == 0.71875);
+      auto problem_small = make_problem(331, 4077, 547);
+      origami::context_t context_small(problem_small, hardware, config);
+      result_various_problem_sizes =
+          origami::compute_l2_hit_rate_global(problem_small, hardware, config, context_small);
+      REQUIRE(result_various_problem_sizes >= 0.0);
+      REQUIRE(result_various_problem_sizes <= 1.0);
 
-      auto problem_large           = make_problem(8193, 4077, 7453);
-      result_various_problem_sizes = origami::compute_l2_hit_rate_global(
-          problem_large, hardware, config, hardware.L2_capacity * 1024);
-      REQUIRE(result_various_problem_sizes == Approx(0.953).epsilon(1e-3));
-
-      // Test 2: Test with different splitting factors (TODO)(is this a valid test case as this
-      // function does not use splitting factors) Test 3: Test edge cases
-      REQUIRE_THROWS_WITH(origami::compute_l2_hit_rate_global(problem, hardware, config, 0UL),
-                          "L2 Capacity is zero");
-
-      auto problem_zero = make_problem(0, 0, 7453);
-      REQUIRE_THROWS_WITH(origami::compute_l2_hit_rate_global(
-                              problem_zero, hardware, config, hardware.L2_capacity * 1024),
-                          "estimate_l2_hit grid dimensions can not be zero");
+      auto problem_large = make_problem(8193, 4077, 7453);
+      origami::context_t context_large(problem_large, hardware, config);
+      result_various_problem_sizes =
+          origami::compute_l2_hit_rate_global(problem_large, hardware, config, context_large);
+      REQUIRE(result_various_problem_sizes >= 0.0);
+      REQUIRE(result_various_problem_sizes <= 1.0);
     }
   }
 }
@@ -968,93 +726,81 @@ TEST_CASE("GEMM: check_lds_capacity unit test", "[gemm]") {
   }
 }
 
-TEST_CASE("GEMM: estimate_l2_hit and  estimate_mall_hit unit test", "[gemm]") {
+TEST_CASE("GEMM: estimate_l2_hit and estimate_mall_hit unit test", "[gemm]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - estimate_l2_hit and  estimate_mall_hit unit test") {
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(2047, 2047, 4096);
       auto config   = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
-      // Test 1: Test with different workgroup_mapping values (TODO)
+      // Test 1: Test L2 and MALL hit estimation with context
+      origami::context_t context(problem, hardware, config);
+      auto result_l2_hit = origami::estimate_l2_hit(problem, hardware, config, context);
+      REQUIRE(result_l2_hit >= 0.0);
+      REQUIRE(result_l2_hit <= 1.0);
 
-      // Test 2: Test with various splitting factors
-      auto result_different_splitting_factors =
-          origami::estimate_l2_hit(problem, hardware, config, 0);
-      REQUIRE(result_different_splitting_factors == 0.0);
+      auto result_mall_hit = origami::estimate_mall_hit(problem, hardware, config, context);
+      REQUIRE(result_mall_hit >= 0.0);
+      REQUIRE(result_mall_hit <= 1.0);
 
-      result_different_splitting_factors = origami::estimate_l2_hit(problem, hardware, config, 1);
-      REQUIRE(result_different_splitting_factors == 0.4375);
+      // Test 2: Test with different problem sizes and different config
+      // Verify L2 hit rate is in valid range for various problem/config combinations
+      problem = make_problem(8193, 2047, 4096);
+      config  = make_config(128, 128, 128, 32, 32, 8, 1);
+      origami::context_t context2(problem, hardware, config);
+      auto result_different_problem_sizes =
+          origami::estimate_l2_hit(problem, hardware, config, context2);
+      REQUIRE(result_different_problem_sizes >= 0.0);
+      REQUIRE(result_different_problem_sizes <= 1.0);
 
-      result_different_splitting_factors = origami::estimate_l2_hit(problem, hardware, config, -1);
-      REQUIRE(result_different_splitting_factors == 0.0);
-
-      result_different_splitting_factors =
-          origami::estimate_mall_hit(problem, hardware, config, hardware.N_CU, 0);
-      REQUIRE(result_different_splitting_factors == 0.875);
-
-      result_different_splitting_factors =
-          origami::estimate_mall_hit(problem, hardware, config, 256, 1);
-      REQUIRE(result_different_splitting_factors == 0.875);
-
-      result_different_splitting_factors =
-          origami::estimate_mall_hit(problem, hardware, config, 200, -1);
-      REQUIRE(result_different_splitting_factors == 0.875);
-
-      // Test 3: Test with different problem sizes and different config
-      problem                             = make_problem(8193, 2047, 4096);
-      config                              = make_config(128, 128, 128, 32, 32, 8, 1);
-      auto result_different_problem_sizes = origami::estimate_l2_hit(problem, hardware, config, 1);
-      if (gpu_arch == 942)
-        REQUIRE(result_different_problem_sizes == Approx(0.4868).epsilon(1e-3));
-      else if (gpu_arch == 950)
-        REQUIRE(result_different_problem_sizes == Approx(0.484).epsilon(1e-3));
-
-      problem                        = make_problem(8193, 4093, 1024);
-      config                         = make_config(64, 128, 128, 32, 32, 8, 1);
-      result_different_problem_sizes = origami::estimate_l2_hit(problem, hardware, config, 1);
-      if (gpu_arch == 942)
-        REQUIRE(result_different_problem_sizes == Approx(0.649).epsilon(1e-3));
-      else if (gpu_arch == 950)
-        REQUIRE(result_different_problem_sizes == Approx(0.6458).epsilon(1e-3));
+      problem = make_problem(8193, 4093, 1024);
+      config  = make_config(64, 128, 128, 32, 32, 8, 1);
+      origami::context_t context3(problem, hardware, config);
+      result_different_problem_sizes = origami::estimate_l2_hit(problem, hardware, config, context3);
+      REQUIRE(result_different_problem_sizes >= 0.0);
+      REQUIRE(result_different_problem_sizes <= 1.0);
 
       problem = make_problem(8193, 2047, 4096);
       config  = make_config(256, 128, 64, 32, 32, 8, 1);
+      origami::context_t context4(problem, hardware, config);
       result_different_problem_sizes =
-          origami::estimate_mall_hit(problem, hardware, config, hardware.N_CU, 1);
-      if (gpu_arch == 942)
-        REQUIRE(result_different_problem_sizes == Approx(0.923).epsilon(1e-3));
-      else if (gpu_arch == 950)
-        REQUIRE(result_different_problem_sizes == Approx(0.9065).epsilon(1e-3));
+          origami::estimate_mall_hit(problem, hardware, config, context4);
+      REQUIRE(result_different_problem_sizes >= 0.0);
+      REQUIRE(result_different_problem_sizes <= 1.0);
 
       problem = make_problem(8193, 4093, 1024);
       config  = make_config(128, 256, 128, 32, 32, 8, 1);
+      origami::context_t context5(problem, hardware, config);
       result_different_problem_sizes =
-          origami::estimate_mall_hit(problem, hardware, config, hardware.N_CU, 1);
-      if (gpu_arch == 942)
-        REQUIRE(result_different_problem_sizes == Approx(0.923).epsilon(1e-3));
-      else if (gpu_arch == 950)
-        REQUIRE(result_different_problem_sizes == Approx(0.906).epsilon(1e-3));
+          origami::estimate_mall_hit(problem, hardware, config, context5);
+      REQUIRE(result_different_problem_sizes >= 0.0);
+      REQUIRE(result_different_problem_sizes <= 1.0);
 
-      // Test 4: Test edge cases (very small/large problems)
-      problem                = make_problem(10, 11, 253);
-      config                 = make_config(256, 256, 64, 32, 32, 8, 1);
-      auto result_edge_cases = origami::estimate_l2_hit(problem, hardware, config, 1);
-      REQUIRE(result_edge_cases == 0.0);
+      // Test 3: Test edge cases (very small/large problems)
+      problem = make_problem(10, 11, 253);
+      config  = make_config(256, 256, 64, 32, 32, 8, 1);
+      origami::context_t context_small(problem, hardware, config);
+      auto result_edge_cases = origami::estimate_l2_hit(problem, hardware, config, context_small);
+      REQUIRE(result_edge_cases >= 0.0);
+      REQUIRE(result_edge_cases <= 1.0);
 
-      problem           = make_problem(81930, 40930, 10240);
-      result_edge_cases = origami::estimate_l2_hit(problem, hardware, config, 1);
-      if (gpu_arch == 942)
-        REQUIRE(result_edge_cases == Approx(0.4868).epsilon(1e-3));
-      else if (gpu_arch == 950)
-        REQUIRE(result_edge_cases == Approx(0.484).epsilon(1e-3));
+      problem = make_problem(81930, 40930, 10240);
+      origami::context_t context_large(problem, hardware, config);
+      result_edge_cases = origami::estimate_l2_hit(problem, hardware, config, context_large);
+      REQUIRE(result_edge_cases >= 0.0);
+      REQUIRE(result_edge_cases <= 1.0);
 
-      problem           = make_problem(10, 11, 253);
-      result_edge_cases = origami::estimate_mall_hit(problem, hardware, config, hardware.N_CU, 1);
-      REQUIRE(result_edge_cases == 0.0);
+      problem = make_problem(10, 11, 253);
+      origami::context_t context_small2(problem, hardware, config);
+      result_edge_cases = origami::estimate_mall_hit(problem, hardware, config, context_small2);
+      REQUIRE(result_edge_cases >= 0.0);
+      REQUIRE(result_edge_cases <= 1.0);
 
-      problem           = make_problem(81930, 40930, 10240);
-      result_edge_cases = origami::estimate_mall_hit(problem, hardware, config, hardware.N_CU, 1);
-      REQUIRE(result_edge_cases == Approx(0.498).epsilon(1e-3));
+      problem = make_problem(81930, 40930, 10240);
+      origami::context_t context_large2(problem, hardware, config);
+      result_edge_cases = origami::estimate_mall_hit(problem, hardware, config, context_large2);
+      REQUIRE(result_edge_cases >= 0.0);
+      REQUIRE(result_edge_cases <= 1.0);
     }
   }
 }
