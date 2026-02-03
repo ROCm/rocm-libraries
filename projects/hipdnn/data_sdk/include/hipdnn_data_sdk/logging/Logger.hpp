@@ -61,7 +61,10 @@ inline void initializeCallbackLogging(const std::string& componentName,
             spdlog::init_thread_pool(8192, 1);
         }
 
-        auto callbackLogger = hipdnn_data_sdk::logging::createAsyncCallbackLoggerMt(
+        // Use synchronous callback logger to prevent race conditions in unit tests
+        // that verify log content. Should not impact performace so long as the
+        // callbackFunction uses an asynchronous logger.
+        auto callbackLogger = hipdnn_data_sdk::logging::createSynchronousCallbackLoggerMt(
             callbackFunction, componentName);
         spdlog::register_logger(callbackLogger);
     }

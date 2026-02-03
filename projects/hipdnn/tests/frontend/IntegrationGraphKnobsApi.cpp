@@ -3,9 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_frontend.hpp>
-#include <spdlog/sinks/ostream_sink.h>
-#include <spdlog/spdlog.h>
-#include <sstream>
+#include <hipdnn_test_sdk/utilities/LoggingUtils.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
 using namespace hipdnn_frontend;
@@ -214,26 +212,8 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithUnsupportedKnob)
 
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithDeprecatedKnob)
 {
-    // Initialize and verify the frontend logger is running with the right log level.
-    auto logger = spdlog::get(COMPONENT_NAME);
-    auto origLogLevel = logger ? logger->level() : spdlog::level::off;
-    // Mimic initializeFrontendLogging()
-    hipdnn::logging::initializeCallbackLogging(COMPONENT_NAME, hipdnnLoggingCallback_ext);
-    logger = spdlog::get(COMPONENT_NAME);
-    ASSERT_NE(logger, nullptr) << "Frontend logger should be initialized";
-    if(logger->level() == spdlog::level::off || logger->level() == spdlog::level::critical)
-    {
-        logger->set_level(spdlog::level::warn);
-    }
-    ASSERT_LE(logger->level(), spdlog::level::warn)
-        << "Logger level must be warn or lower to capture warnings";
-
-    // Use ostringstream to capture log output
-    std::ostringstream oss;
-    auto ostreamSink = std::make_shared<spdlog::sinks::ostream_sink_mt>(oss);
-    logger->sinks().push_back(ostreamSink);
-
-    // Run the test
+    // Start recording logs
+    hipdnn_test_sdk::utilities::LogRecorder recorder;
 
     Graph graph = createAndBuildSimpleGraph();
 
@@ -245,20 +225,11 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithDeprecatedKnob)
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
 
-    logger->flush();
-    std::string captured = oss.str();
-
-    // Clean up
-    auto& sinks = logger->sinks();
-    sinks.erase(std::remove(sinks.begin(), sinks.end(), ostreamSink), sinks.end());
-    logger->set_level(origLogLevel);
-
-    // Verify the expected deprecation warning was logged
     std::string expectedLog = "Knob test.deprecated_knob has been marked as deprecated.";
-    bool foundWarning = captured.find(expectedLog) != std::string::npos;
-    EXPECT_TRUE(foundWarning) << "Expected deprecation warning '" << expectedLog
-                              << "' was not found in logs:\n"
-                              << captured;
+    EXPECT_TRUE(
+        hipdnn_test_sdk::utilities::LogRecorder::hasLogContaining(HIPDNN_SEV_WARN, expectedLog))
+        << "Expected warning-level deprecation log '" << expectedLog << "' was not found in logs:\n"
+        << hipdnn_test_sdk::utilities::LogRecorder::getRecordedLogsAsString();
 }
 
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithSharedKnob)
