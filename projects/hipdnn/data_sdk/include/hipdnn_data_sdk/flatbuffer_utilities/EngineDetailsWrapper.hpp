@@ -11,7 +11,7 @@
 #include <hipdnn_data_sdk/flatbuffer_utilities/KnobWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
-namespace hipdnn_plugin_sdk
+namespace hipdnn_data_sdk::flatbuffer_utilities
 {
 
 class IEngineDetails
@@ -150,4 +150,13 @@ private:
     mutable bool _knobsPopulated = false;
 };
 
-}
+} // namespace hipdnn_data_sdk::flatbuffer_utilities
+
+// Backward compatibility aliases - DEPRECATED
+// These aliases are deprecated and will be removed in a future release.
+// Use hipdnn_data_sdk::flatbuffer_utilities::<TypeName> instead.
+namespace hipdnn_plugin_sdk
+{
+using IEngineDetails = hipdnn_data_sdk::flatbuffer_utilities::IEngineDetails;
+using EngineDetailsWrapper = hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper;
+} // namespace hipdnn_plugin_sdk

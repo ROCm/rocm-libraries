@@ -46,7 +46,8 @@ void EngineDescriptor::finalize()
     auto engineDetailsPtr = _engineDetails->get();
     if(engineDetailsPtr != nullptr)
     {
-        hipdnn_plugin_sdk::EngineDetailsWrapper detailsWrapper(engineDetailsPtr);
+        hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper detailsWrapper(
+            engineDetailsPtr);
         auto knobCount = detailsWrapper.knobCount();
 
         if(knobCount > 0)

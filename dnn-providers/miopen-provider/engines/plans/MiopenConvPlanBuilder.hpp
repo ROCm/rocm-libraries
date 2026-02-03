@@ -20,15 +20,20 @@ public:
     MiopenConvPlanBuilder& operator=(const MiopenConvPlanBuilder&) = delete;
 
     bool isApplicable(const HipdnnEnginePluginHandle& handle,
-                      const hipdnn_plugin_sdk::IGraph& opGraph) const override;
+                      const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
     WorkspaceSizeRange getWorkspaceSizeRange(const HipdnnEnginePluginHandle& handle,
-                                             const hipdnn_plugin_sdk::IGraph& opGraph) const override;
+                                             const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
     size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                               const hipdnn_plugin_sdk::IGraph& opGraph) const override;
+                               const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
     void buildPlan(const HipdnnEnginePluginHandle& handle,
-                   const hipdnn_plugin_sdk::IGraph& opGraph,
+                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                   const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
                    HipdnnEnginePluginExecutionContext& executionContext) const override;
+
+    std::vector<hipdnn_data_sdk::data_objects::KnobT>
+        getCustomKnobs(const HipdnnEnginePluginHandle& handle,
+                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 };
 
 }

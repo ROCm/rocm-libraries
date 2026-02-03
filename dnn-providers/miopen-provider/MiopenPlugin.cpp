@@ -23,6 +23,7 @@
 static const char* pluginName = "miopen_plugin";
 static const char* pluginVersion = "1.0.0";
 
+using namespace hipdnn_data_sdk::flatbuffer_utilities;
 using namespace hipdnn_plugin_sdk;
 using namespace miopen_plugin;
 
