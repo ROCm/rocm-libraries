@@ -240,6 +240,12 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
         CHECK_THAT(simplify(reinterpret(DataType::Int32, v)), IdenticalTo(v));
         CHECK_THAT(simplify(reinterpret(DataType::UInt64, v3)), IdenticalTo(v3));
     }
+
+    SECTION("conditional")
+    {
+        auto expr = conditional(b > zero, v2, v2 + v);
+        CHECK_THAT(simplify(expr), IdenticalTo(v2));
+    }
 }
 
 TEST_CASE("FuseAssociative ExpressionTransformation works",
