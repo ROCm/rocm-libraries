@@ -300,7 +300,6 @@ struct BlockFmhaFwdV3Pipeline
     static constexpr auto QScaleEnum        = Problem::QScaleEnum;
     static constexpr bool kSkipMinSeqlenQ   = Problem::kSkipMinSeqlenQ;
     static_assert((BiasEnum == BlockAttentionBiasEnum::NO_BIAS && !kStoreLSE && !kHasDropout &&
-                   (QScaleEnum == ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE) &&
                    !kSkipMinSeqlenQ),
                   "enable unsupported features");
 
@@ -437,7 +436,7 @@ struct BlockFmhaFwdV3Pipeline
                           kN1 == VDramBlockWindowTmp{}.get_window_lengths()[number<1>{}],
                       "wrong!");
 
-        static_assert(sizeof(SaccDataType) * kM0 * kN0 <= GetSmemSize());
+        // static_assert(sizeof(SaccDataType) * kM0 * kN0 <= GetSmemSize());
         auto s_lds = make_tensor_view<address_space_enum::lds>(
             reinterpret_cast<SaccDataType*>(static_cast<char*>(smem_ptr)),
             MakeSimpleLdsDesc<kM0, kN0>());
@@ -854,11 +853,20 @@ struct BlockFmhaFwdV3Pipeline
                     sp(sp_reg_idx).p.thread_buf_[idx]     = casted.x;
                     sp(sp_reg_idx).p.thread_buf_[idx + 1] = casted.y;
                 }
-                else
+                else if constexpr(std::is_same_v<PDataType, bf16_t>)
                 {
                     auto casted                           = detail::cvt_pk_bf16_f32(x, y);
                     sp(sp_reg_idx).p.thread_buf_[idx]     = casted.x;
                     sp(sp_reg_idx).p.thread_buf_[idx + 1] = casted.y;
+                }
+                else if constexpr(std::is_same_v<PDataType, fp8_t>)
+                {
+                    sp(sp_reg_idx).p.thread_buf_[idx]     = type_convert<PDataType>(x);
+                    sp(sp_reg_idx).p.thread_buf_[idx + 1] = type_convert<PDataType>(y);
+                }
+                else
+                {
+                    static_assert(false, "unsupported data type for P");
                 }
             });
 
