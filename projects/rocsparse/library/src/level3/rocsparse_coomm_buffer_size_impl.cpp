@@ -27,6 +27,7 @@
 #include "rocsparse_utility.hpp"
 
 template <>
+// LCOV_EXCL_START
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_coomm_alg value_)
 {
     switch(value_)
@@ -202,6 +203,7 @@ namespace rocsparse
         // LCOV_EXCL_STOP
     }
 }
+// LCOV_EXCL_STOP
 
 template <typename T, typename I, typename A>
 rocsparse_status rocsparse::coomm_buffer_size_template(rocsparse_handle          handle,

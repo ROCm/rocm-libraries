@@ -37,6 +37,7 @@
 #include "rocsparse_spmv.hpp"
 
 template <>
+// LCOV_EXCL_START
 const char* rocsparse::enum_utils::to_string(rocsparse_spmv_alg value_)
 {
 #define CASE(C) \
@@ -60,8 +61,10 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spmv_alg value_)
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
     // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
 template <>
+// LCOV_EXCL_START
 const char* rocsparse::enum_utils::to_string(rocsparse_spmv_stage value_)
 {
 #define CASE(C) \
@@ -78,8 +81,10 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spmv_stage value_)
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
     // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
 template <>
+// LCOV_EXCL_START
 bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_stage value_)
 {
     switch(value_)
@@ -93,6 +98,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_stage value_)
     }
     return true;
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse::check_spmv_alg(rocsparse_format format, rocsparse_spmv_alg alg)
 {

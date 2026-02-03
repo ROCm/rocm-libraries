@@ -31,6 +31,7 @@
 #include "rocsparse_csrmv.hpp"
 
 template <>
+// LCOV_EXCL_START
 inline bool rocsparse::enum_utils::is_invalid(rocsparse::csrmv_alg value_)
 {
     switch(value_)
@@ -69,6 +70,7 @@ rocsparse_status rocsparse::csrmv_alg_default2csrmv_alg(rocsparse::csrmv_alg& al
     }
     return rocsparse_status_success;
 }
+// LCOV_EXCL_STOP
 
 template <typename I, typename J, typename A>
 rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          handle,

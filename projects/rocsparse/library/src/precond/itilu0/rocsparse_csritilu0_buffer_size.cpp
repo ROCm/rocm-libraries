@@ -28,6 +28,7 @@
 #include "rocsparse_csritilu0_driver.hpp"
 #include "rocsparse_enum_utils.hpp"
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_itilu0_alg value)
 {
@@ -44,9 +45,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_itilu0_alg value)
         CASE(rocsparse_itilu0_alg_sync_split_fusion);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 };
 
 template <>
@@ -65,6 +64,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_itilu0_alg value)
     }
     return true;
 }
+// LCOV_EXCL_STOP
 
 namespace rocsparse
 {

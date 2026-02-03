@@ -34,6 +34,7 @@
 #include "rocsparse_determine_indextype.hpp"
 
 template <>
+// LCOV_EXCL_START
 const char* rocsparse::enum_utils::to_string(rocsparse_check_spmat_stage value_)
 {
 #define CASE(C) \
@@ -49,8 +50,10 @@ const char* rocsparse::enum_utils::to_string(rocsparse_check_spmat_stage value_)
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
     // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
 template <>
+// LCOV_EXCL_START
 const char* rocsparse::enum_utils::to_string(rocsparse_data_status data_status)
 {
     switch(data_status)
@@ -76,8 +79,10 @@ const char* rocsparse::enum_utils::to_string(rocsparse_data_status data_status)
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
     // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
 template <>
+// LCOV_EXCL_START
 bool rocsparse::enum_utils::is_invalid(rocsparse_check_spmat_stage value_)
 {
     switch(value_)
@@ -90,6 +95,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_check_spmat_stage value_)
     }
     return true;
 }
+// LCOV_EXCL_STOP
 
 namespace rocsparse
 {

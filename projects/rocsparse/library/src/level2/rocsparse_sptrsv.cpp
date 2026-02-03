@@ -38,6 +38,7 @@
 #include "rocsparse_sptrsv_descr.hpp"
 
 template <>
+// LCOV_EXCL_START
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsv_stage value)
 {
     switch(value)
@@ -52,6 +53,7 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsv_stage value)
 };
 
 template <>
+// LCOV_EXCL_START
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsv_alg value)
 {
     switch(value)
@@ -65,6 +67,7 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsv_alg value)
 };
 
 template <>
+// LCOV_EXCL_START
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsv_input value)
 {
     switch(value)
@@ -83,6 +86,7 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsv_input value)
 };
 
 template <>
+// LCOV_EXCL_START
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsv_output value)
 {
     switch(value)
@@ -208,6 +212,7 @@ try
     }
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
+// LCOV_EXCL_STOP
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();

@@ -41,6 +41,7 @@
 #include "rocsparse_csrmv_helpers.cpp"
 
 template <>
+// LCOV_EXCL_START
 bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_alg value_)
 {
     switch(value_)
@@ -61,8 +62,10 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_alg value_)
     }
     return true;
 }
+// LCOV_EXCL_STOP
 
 template <>
+// LCOV_EXCL_START
 bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_input value_)
 {
     switch(value_)
@@ -81,6 +84,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_input value_)
 };
 
 template <>
+// LCOV_EXCL_START
 bool rocsparse::enum_utils::is_invalid(rocsparse_v2_spmv_stage value_)
 {
     switch(value_)
@@ -439,6 +443,7 @@ try
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
+// LCOV_EXCL_STOP
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();

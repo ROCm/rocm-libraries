@@ -96,6 +96,7 @@ rocsparse_status
 }
 
 template <>
+// LCOV_EXCL_START
 const char* rocsparse::enum_utils::to_string(rocsparse_spgeam_alg value_)
 {
 #define CASE(C) \
@@ -108,8 +109,10 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spgeam_alg value_)
     }
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
+// LCOV_EXCL_STOP
 
 template <>
+// LCOV_EXCL_START
 const char* rocsparse::enum_utils::to_string(rocsparse_spgeam_stage value_)
 {
 #define CASE(C) \
@@ -127,8 +130,10 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spgeam_stage value_)
     }
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
+// LCOV_EXCL_STOP
 
 template <>
+// LCOV_EXCL_START
 const char* rocsparse::enum_utils::to_string(rocsparse_spgeam_input value_)
 {
 #define CASE(C) \
@@ -147,8 +152,10 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spgeam_input value_)
     }
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
+// LCOV_EXCL_STOP
 
 template <>
+// LCOV_EXCL_START
 const char* rocsparse::enum_utils::to_string(rocsparse_spgeam_output value_)
 {
 #define CASE(C) \
@@ -161,8 +168,10 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spgeam_output value_)
     }
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
+// LCOV_EXCL_STOP
 
 template <>
+// LCOV_EXCL_START
 bool rocsparse::enum_utils::is_invalid(rocsparse_spgeam_alg value_)
 {
     switch(value_)
@@ -174,8 +183,10 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spgeam_alg value_)
     }
     return true;
 }
+// LCOV_EXCL_STOP
 
 template <>
+// LCOV_EXCL_START
 bool rocsparse::enum_utils::is_invalid(rocsparse_spgeam_stage value_)
 {
     switch(value_)
@@ -192,8 +203,10 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spgeam_stage value_)
     }
     return true;
 }
+// LCOV_EXCL_STOP
 
 template <>
+// LCOV_EXCL_START
 bool rocsparse::enum_utils::is_invalid(rocsparse_spgeam_input value_)
 {
     switch(value_)
@@ -211,8 +224,10 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spgeam_input value_)
     }
     return true;
 }
+// LCOV_EXCL_STOP
 
 template <>
+// LCOV_EXCL_START
 bool rocsparse::enum_utils::is_invalid(rocsparse_spgeam_output value_)
 {
     switch(value_)
@@ -224,6 +239,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spgeam_output value_)
     }
     return true;
 }
+// LCOV_EXCL_STOP
 
 namespace rocsparse
 {

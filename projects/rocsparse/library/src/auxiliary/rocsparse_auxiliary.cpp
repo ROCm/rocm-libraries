@@ -33,6 +33,7 @@
 #define TO_STR2(x) #x
 #define TO_STR(x) TO_STR2(x)
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_status status)
 {
@@ -52,10 +53,8 @@ const char* rocsparse::enum_utils::to_string(rocsparse_status status)
         return "memory error";
     case rocsparse_status_internal_error:
         return "internal error";
-        // LCOV_EXCL_START
     case rocsparse_status_invalid_value:
         return "invalid value";
-        // LCOV_EXCL_STOP
     case rocsparse_status_arch_mismatch:
         return "arch mismatch";
     case rocsparse_status_zero_pivot:
@@ -71,11 +70,11 @@ const char* rocsparse::enum_utils::to_string(rocsparse_status status)
     case rocsparse_status_continue:
         return "continue";
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_pointer_mode value)
 {
@@ -88,11 +87,11 @@ const char* rocsparse::enum_utils::to_string(rocsparse_pointer_mode value)
         CASE(rocsparse_pointer_mode_host);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_spmat_attribute value)
 {
@@ -107,9 +106,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spmat_attribute value)
         CASE(rocsparse_spmat_storage_mode);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -124,9 +121,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_diag_type value)
         CASE(rocsparse_diag_type_non_unit);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -141,9 +136,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_fill_mode value_)
         CASE(rocsparse_fill_mode_upper);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -158,9 +151,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_storage_mode value_)
         CASE(rocsparse_storage_mode_unsorted);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -175,9 +166,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_index_base value_)
         CASE(rocsparse_index_base_one);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -194,9 +183,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_matrix_type value_)
         CASE(rocsparse_matrix_type_triangular);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -211,9 +198,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_direction value_)
         CASE(rocsparse_direction_column);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -229,9 +214,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_operation value_)
         CASE(rocsparse_operation_conjugate_transpose);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -247,9 +230,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_indextype value_)
         CASE(rocsparse_indextype_i64);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -272,9 +253,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_datatype value_)
         CASE(rocsparse_datatype_bf16_r);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -289,9 +268,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_order value_)
         CASE(rocsparse_order_column);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -306,9 +283,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_action value)
         CASE(rocsparse_action_symbolic);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -322,9 +297,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_solve_policy value_)
         CASE(rocsparse_solve_policy_auto);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -339,9 +312,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_analysis_policy value_)
         CASE(rocsparse_analysis_policy_force);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -362,11 +333,11 @@ const char* rocsparse::enum_utils::to_string(rocsparse_format value_)
         CASE(rocsparse_format_sell);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
+// LCOV_EXCL_START
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_spmat_attribute value)
 {
@@ -589,6 +560,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_analysis_policy value_)
     }
     return true;
 }
+// LCOV_EXCL_STOP
 
 #ifdef __cplusplus
 extern "C" {
@@ -804,6 +776,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, stream_id);
     rocsparse::log_trace(handle, "rocsparse_get_stream", *stream_id);
 
     RETURN_IF_ROCSPARSE_ERROR(handle->get_stream(stream_id));
@@ -828,6 +801,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, version);
     *version = ROCSPARSE_VERSION_MAJOR * 100000 + ROCSPARSE_VERSION_MINOR * 100
                + ROCSPARSE_VERSION_PATCH;
 

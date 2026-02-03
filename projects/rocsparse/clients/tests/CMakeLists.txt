@@ -405,7 +405,7 @@ set(ROCSPARSE_CLIENTS_COMMON
 if (BUILD_CLIENTS_ONLY)
   add_executable(rocsparse-test rocsparse_test_main.cpp ${ROCSPARSE_TEST_SOURCES} ${ROCSPARSE_CLIENTS_COMMON} ${ROCSPARSE_CLIENTS_TESTINGS})
 else()
-  add_executable(rocsparse-test rocsparse_test_main.cpp test_atomic_add.cpp ${ROCSPARSE_TEST_SOURCES} ${ROCSPARSE_CLIENTS_COMMON} ${ROCSPARSE_CLIENTS_TESTINGS})
+  add_executable(rocsparse-test rocsparse_test_main.cpp test_atomic_add.cpp test_auxiliary.cpp ${ROCSPARSE_TEST_SOURCES} ${ROCSPARSE_CLIENTS_COMMON} ${ROCSPARSE_CLIENTS_TESTINGS})
 endif()
 
 # Set GOOGLE_TEST definition
