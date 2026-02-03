@@ -20,8 +20,16 @@ struct GemmPipelineAgBgCrImplBase
     using ADataType   = remove_cvref_t<std::tuple_element_t<number<0>{}, AsDataType>>;
     using ALayout     = remove_cvref_t<std::tuple_element_t<number<0>{}, AsLayout>>;
     using BInDataType = remove_cvref_t<std::tuple_element_t<number<0>{}, BsDataType>>;
-    using BDataType =
-        std::conditional_t<std::is_same_v<BInDataType, pk_fp4_raw_t>, ADataType, BInDataType>;
+
+    static constexpr bool IsBCastPolicyBeforeLDSWrite = [] {
+        if constexpr(has_bcastpolicy<Problem>::value)
+            return Problem::BCastPolicy == CastPolicy::BeforeLDSWrite;
+        else
+            return false;
+    }();
+
+    using BDataType = std::conditional_t<IsBCastPolicyBeforeLDSWrite, ADataType, BInDataType>;
+
     using BLayout = remove_cvref_t<std::tuple_element_t<number<0>{}, BsLayout>>;
 
     static constexpr index_t MPerBlock = BlockGemmShape::kM;
@@ -313,10 +321,9 @@ struct GemmPipelineAgBgCrImplBase
 
         auto b_copy_lds_window = make_tile_window(b_lds_block_view, b_lds_shape, {0, 0});
 
-        using BLdsDataType =
-            std::conditional_t<std::is_same_v<typename Problem::BDataType, pk_fp4_raw_t>,
-                               typename Problem::ADataType,
-                               typename Problem::BDataType>;
+        using BLdsDataType = std::conditional_t<IsBCastPolicyBeforeLDSWrite,
+                                                typename Problem::ADataType,
+                                                typename Problem::BDataType>;
 
         auto b_lds_load_tile_distr = []() {
             if constexpr(is_b_load_tr)
