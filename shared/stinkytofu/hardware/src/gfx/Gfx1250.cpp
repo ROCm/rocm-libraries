@@ -388,6 +388,8 @@ namespace stinkytofu
             {"VReadfirstlaneB32", "v_readfirstlane_b32"},
             {"VRndneF32", "v_rndne_f32"},
             {"VPermB32", "v_perm_b32"},
+            {"VPrngB32", "v_prng_b32"},
+
         };
 
         registry.setLogicalToArchMap(std::move(rocisaToHwInstMap));
@@ -405,10 +407,6 @@ namespace stinkytofu
             {"SWaitTensorcnt", "lowerRocisaWaitTensorcnt"},
             {"SWaitAlu", "lowerRocisaWaitAlu"},
 
-            // {"VMulPKF32", "v_pk_mul_f32" /* todo */},
-            // {"VAddPKF32", "v_pk_add_f32" /* todo */},
-
-            // {"VPrngB32", "v_prng_b32"},
             // {"VMaxPKF16", "v_max_pk_f16"},
 
             /* mfma.hpp */

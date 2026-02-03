@@ -3,7 +3,6 @@
 
 set(SOURCES
     tablegen.cpp
-    GenIsa.cpp
     GenRocisaHwMapping.cpp
     GenPatterns.cpp
     GenLogicalIR.cpp
@@ -41,10 +40,9 @@ set(TABLEGEN_GENERATED_FILES "")
 # Depend on the C++ files that define instruction mappings and costs
 set(HARDWARE_SOURCE_FILES "")
 
+# Per-arch Isa.inc and gfxIsa.inc are produced by tablegen_inst_gen (instruction_generated), not full tablegen.
 foreach(arch ${STINKYTOFU_ARCHS_TO_BUILD})
-    list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/hardware/${arch}Isa.inc")
     list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/rocisa/Rocisa${arch}Mappings.inc")
-
     list(APPEND HARDWARE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/src/gfx/${arch}.cpp")
 endforeach()
 
@@ -61,8 +59,9 @@ list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/logical/LogicalI
 list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/IRMnemonics_generated.inc")
 list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/PythonBindings_generated.inc")
 
-# Instruction metadata generated from .def files (Gfx1250, Gfx942, Gfx950)
-# Built by tablegen_inst_gen (no gfxisa) to avoid circular dependency.
+# Instruction metadata and ISA .inc from .def files (tablegen_inst_gen, no gfxisa).
+# Single run produces: hardware/generated/*_costs.inc, *_init.inc, *_operands.inc and
+# hardware/*Isa.inc, hardware/gfxIsa.inc so the full tablegen does not need gfxisa for ISA.
 get_filename_component(INSTRUCTION_DEF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/defs" ABSOLUTE)
 set(INSTRUCTION_GEN_DIR "${TABLEGEN_OUTPUT_DIR}/hardware/generated")
 set(INSTRUCTION_GEN_FILES "")
@@ -70,7 +69,9 @@ foreach(arch Gfx1250 Gfx942 Gfx950)
     list(APPEND INSTRUCTION_GEN_FILES "${INSTRUCTION_GEN_DIR}/${arch}_costs.inc")
     list(APPEND INSTRUCTION_GEN_FILES "${INSTRUCTION_GEN_DIR}/${arch}_init.inc")
     list(APPEND INSTRUCTION_GEN_FILES "${INSTRUCTION_GEN_DIR}/${arch}_operands.inc")
+    list(APPEND INSTRUCTION_GEN_FILES "${TABLEGEN_OUTPUT_DIR}/hardware/${arch}Isa.inc")
 endforeach()
+list(APPEND INSTRUCTION_GEN_FILES "${TABLEGEN_OUTPUT_DIR}/hardware/gfxIsa.inc")
 list(APPEND TABLEGEN_GENERATED_FILES ${INSTRUCTION_GEN_FILES})
 set(INSTRUCTION_DEF_FILES
     "${INSTRUCTION_DEF_DIR}/Gfx1250Formats.def"
@@ -81,15 +82,14 @@ set(INSTRUCTION_DEF_FILES
     "${INSTRUCTION_DEF_DIR}/Gfx950Instructions.def"
 )
 
-# Generate instruction .inc files first (tablegen_inst_gen does not link gfxisa)
+# One tablegen_inst_gen run: all archs + ISA .inc (single build, no two-phase).
 add_custom_command(
     OUTPUT ${INSTRUCTION_GEN_FILES}
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${INSTRUCTION_GEN_DIR}"
-    COMMAND $<TARGET_FILE:tablegen_inst_gen> --gen-instructions --arch=Gfx1250 --input-dir="${INSTRUCTION_DEF_DIR}" --output-dir="${INSTRUCTION_GEN_DIR}"
-    COMMAND $<TARGET_FILE:tablegen_inst_gen> --gen-instructions --arch=Gfx942 --input-dir="${INSTRUCTION_DEF_DIR}" --output-dir="${INSTRUCTION_GEN_DIR}"
-    COMMAND $<TARGET_FILE:tablegen_inst_gen> --gen-instructions --arch=Gfx950 --input-dir="${INSTRUCTION_DEF_DIR}" --output-dir="${INSTRUCTION_GEN_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/hardware/generated"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/hardware"
+    COMMAND $<TARGET_FILE:tablegen_inst_gen> --input-dir="${INSTRUCTION_DEF_DIR}" --output-dir="${TABLEGEN_OUTPUT_DIR}"
     DEPENDS tablegen_inst_gen ${INSTRUCTION_DEF_FILES}
-    COMMENT "Generating instruction metadata from .def files..."
+    COMMENT "Generating instruction metadata and ISA from .def files..."
     VERBATIM
 )
 add_custom_target(instruction_generated DEPENDS ${INSTRUCTION_GEN_FILES})

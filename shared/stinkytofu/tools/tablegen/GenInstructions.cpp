@@ -40,12 +40,16 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <map>
 #include <set>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
+
+#include <filesystem>
 
 namespace stinkytofu
 {
@@ -802,6 +806,151 @@ namespace stinkytofu
     };
 
     //==========================================================================
+    // ISA .inc EMISSION (from .def only; no gfxisa dependency)
+    //==========================================================================
+
+    // Convert finalFlags to C++ makeFlagSet({ IF_XXX, ... }) content (IF_ prefix per flag)
+    static std::string flagsToMakeFlagSetContent(const std::vector<std::string>& flags)
+    {
+        if(flags.empty())
+            return "";
+        std::ostringstream os;
+        for(size_t i = 0; i < flags.size(); ++i)
+            os << (i ? ", " : "") << "IF_" << flags[i];
+        return os.str();
+    }
+
+    // Emit one arch's Isa.inc (opcode enum, MCIDTable, getArchOpcode, MnemonicToIsaOpcodeMap).
+    // unifiedOpcodeMap: mnemonic -> global unified opcode index.
+    static bool emitArchIsaFile(const std::string&                          arch,
+                                const std::vector<InstructionDef>&          instructions,
+                                const std::unordered_map<std::string, int>& unifiedOpcodeMap,
+                                const std::string&                          outputPath)
+    {
+        std::ofstream out(outputPath);
+        if(!out)
+        {
+            std::cerr << "Error: Cannot write " << outputPath << "\n";
+            return false;
+        }
+
+        size_t maxMnemonicLen = 0;
+        for(const auto& inst : instructions)
+            maxMnemonicLen = std::max(maxMnemonicLen, inst.mnemonic.size());
+
+        out << "//===----------------------------------------------------------------------===//\n"
+            << "// Auto-generated ISA header for " << arch << " (from .def, tablegen_inst_gen)\n"
+            << "// DO NOT EDIT MANUALLY! DO NOT USE #pragma once IN THIS FILE!\n"
+            << "//===----------------------------------------------------------------------===//"
+               "\n\n";
+
+#define EMIT_GUARD(MACRO) out << "#ifdef " << (MACRO) << "\n#undef " << (MACRO) << "\n\n"
+
+        // Opcode enumeration
+        EMIT_GUARD("GET_ISAINFO_OPCODE_ENUMERATION");
+        out << "enum " << arch << " : uint16_t {\n";
+        for(size_t i = 0; i < instructions.size(); ++i)
+            out << "  " << instructions[i].mnemonic << ", // " << i << "\n";
+        out << "};\n\n";
+        out << "#endif // GET_ISAINFO_OPCODE_ENUMERATION\n\n";
+
+        // MCIDTable
+        EMIT_GUARD("GET_ISAINFO_HWINSTDESC_TABLE");
+        out << "// MCIDTable: operandWidths set by ArchInfo getMCIDTable()\n"
+            << "static HwInstDesc MCIDTable[] = {\n";
+        for(size_t i = 0; i < instructions.size(); ++i)
+        {
+            const auto& inst = instructions[i];
+            int         uop  = 0;
+            auto        it   = unifiedOpcodeMap.find(inst.mnemonic);
+            if(it != unifiedOpcodeMap.end())
+                uop = it->second;
+            std::string flagStr = flagsToMakeFlagSetContent(inst.finalFlags);
+            out << "  { " << std::setw(3) << i << ", " << std::setw(5) << uop << ", "
+                << std::setw(3) << inst.cycle << ", " << std::setw(4) << inst.latency << ", "
+                << "\"" << inst.mnemonic << "\", "
+                << "makeFlagSet({" << (flagStr.empty() ? "" : flagStr) << "}), "
+                << "{} },\n";
+        }
+        out << "};\n\n";
+        out << "#endif // GET_ISAINFO_HWINSTDESC_TABLE\n\n";
+
+        // getArchOpcode(unifiedOpcode) - binary search table
+        EMIT_GUARD("GET_ISAINFO_UOP_MAPPINGS");
+        // Sort by unified opcode for binary search
+        std::vector<size_t> idx(instructions.size());
+        for(size_t i = 0; i < instructions.size(); ++i)
+            idx[i] = i;
+        std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
+            int  ua = 0, ub = 0;
+            auto ita = unifiedOpcodeMap.find(instructions[a].mnemonic);
+            auto itb = unifiedOpcodeMap.find(instructions[b].mnemonic);
+            if(ita != unifiedOpcodeMap.end())
+                ua = ita->second;
+            if(itb != unifiedOpcodeMap.end())
+                ub = itb->second;
+            return ua < ub;
+        });
+        out << "uint16_t get" << arch << "Opcode(uint16_t unifiedOpcode) {\n"
+            << "    static constexpr uint16_t Table[][2] = {\n";
+        for(size_t k = 0; k < idx.size(); ++k)
+        {
+            size_t i   = idx[k];
+            int    uop = 0;
+            auto   it  = unifiedOpcodeMap.find(instructions[i].mnemonic);
+            if(it != unifiedOpcodeMap.end())
+                uop = it->second;
+            out << "      { " << uop << ", " << i << " }, // " << instructions[i].mnemonic << "\n";
+        }
+        out << "    };\n"
+            << "    unsigned low = 0, high = " << (instructions.size() - 1) << ";\n"
+            << "    while(low <= high) {\n"
+            << "      unsigned mid = low + (high - low) / 2;\n"
+            << "      if(Table[mid][0] == unifiedOpcode) return Table[mid][1];\n"
+            << "      if(Table[mid][0] < unifiedOpcode) low = mid + 1; else high = mid - 1;\n"
+            << "    }\n"
+            << "    return GFX::INVALID;\n"
+            << "}\n\n";
+        out << "#endif // GET_ISAINFO_UOP_MAPPINGS\n\n";
+
+        // MnemonicToIsaOpcodeMap
+        EMIT_GUARD("GET_ISAINFO_MNEMONIC_TO_OPCODE_MAPPINGS");
+        out << "static const std::unordered_map<std::string, IsaOpcode> MnemonicToIsaOpcodeMap = "
+               "{\n";
+        for(size_t i = 0; i < instructions.size(); ++i)
+            out << "  {\"" << instructions[i].mnemonic << "\", " << i << "},\n";
+        out << "};\n\n";
+        out << "#endif // GET_ISAINFO_MNEMONIC_TO_OPCODE_MAPPINGS\n\n";
+
+#undef EMIT_GUARD
+        return true;
+    }
+
+    // Emit hardware/gfxIsa.inc (GFX unified opcode enum)
+    static bool emitGfxIsaFile(const std::vector<std::string>& unifiedMnemonics,
+                               const std::string&              outputPath)
+    {
+        std::ofstream out(outputPath);
+        if(!out)
+        {
+            std::cerr << "Error: Cannot write " << outputPath << "\n";
+            return false;
+        }
+        out << "//===----------------------------------------------------------------------===//\n"
+            << "// Auto-generated unified opcodes (from .def, tablegen_inst_gen)\n"
+            << "// DO NOT EDIT MANUALLY! DO NOT USE #pragma once IN THIS FILE!\n"
+            << "//===----------------------------------------------------------------------===//"
+               "\n\n";
+        out << "#ifdef GET_ISAINFO_UNIFIED_OPCODES\n"
+            << "#undef GET_ISAINFO_UNIFIED_OPCODES\n\n";
+        out << "enum GFX : uint16_t {\n";
+        for(size_t i = 0; i < unifiedMnemonics.size(); ++i)
+            out << "  " << unifiedMnemonics[i] << ", // " << i << "\n";
+        out << "};\n\n#endif // GET_ISAINFO_UNIFIED_OPCODES\n\n";
+        return true;
+    }
+
+    //==========================================================================
     // MAIN ENTRY POINT
     //==========================================================================
 
@@ -859,6 +1008,79 @@ namespace stinkytofu
             std::cout << "Successfully generated instruction metadata for " << normArch << "\n";
         }
 
+        return success;
+    }
+
+    // Generate for all archs from .def and emit ISA .inc (so full tablegen does not need gfxisa for ISA).
+    // Single run: *.def -> costs, init, operands, *Isa.inc, gfxIsa.inc -> one build.
+    bool genAllInstructions(const std::string& inputDir, const std::string& outputDir)
+    {
+        const std::vector<std::string> archs = {"Gfx1250", "Gfx942", "Gfx950"};
+
+        std::map<std::string, std::vector<InstructionDef>> archInstructions;
+        for(const std::string& arch : archs)
+        {
+            std::string formatFile = inputDir + "/" + arch + "Formats.def";
+            std::string instFile   = inputDir + "/" + arch + "Instructions.def";
+            DefTParser  parser(arch);
+            if(!parser.parseFormats(formatFile))
+            {
+                std::cerr << "Error: Failed to parse format file " << formatFile << "\n";
+                return false;
+            }
+            if(!parser.parseInstructions(instFile))
+            {
+                std::cerr << "Error: Failed to parse instruction file " << instFile << "\n";
+                return false;
+            }
+            parser.applyFormatDefaults();
+            archInstructions[arch] = parser.getInstructions();
+        }
+
+        // Build unified mnemonic list (sorted, + LABEL, INVALID) and map mnemonic -> index
+        std::set<std::string> allMnemonics;
+        for(const auto& p : archInstructions)
+            for(const auto& inst : p.second)
+                allMnemonics.insert(inst.mnemonic);
+        std::vector<std::string> unifiedList(allMnemonics.begin(), allMnemonics.end());
+        std::sort(unifiedList.begin(), unifiedList.end());
+        unifiedList.push_back("LABEL");
+        unifiedList.push_back("INVALID");
+        std::unordered_map<std::string, int> unifiedOpcodeMap;
+        for(size_t i = 0; i < unifiedList.size(); ++i)
+            unifiedOpcodeMap[unifiedList[i]] = static_cast<int>(i);
+
+        std::filesystem::path outPath(outputDir);
+        if(!outPath.is_absolute())
+            outPath = std::filesystem::absolute(outPath);
+        std::filesystem::path hwDir  = outPath / "hardware";
+        std::filesystem::path genDir = hwDir / "generated";
+        std::error_code       ec;
+        std::filesystem::create_directories(hwDir, ec);
+        std::filesystem::create_directories(genDir, ec);
+        if(!std::filesystem::is_directory(genDir) || !std::filesystem::is_directory(hwDir))
+        {
+            std::cerr << "Error: Output directories missing or not usable: " << genDir.string()
+                      << " " << hwDir.string() << "\n";
+            return false;
+        }
+
+        bool success = true;
+        for(const std::string& arch : archs)
+        {
+            const std::vector<InstructionDef>& insts = archInstructions[arch];
+            InstructionCodeGen                 codegen(arch, insts);
+            success &= codegen.generateCostTable((genDir / (arch + "_costs.inc")).string());
+            success &= codegen.generateOperandRequirements(
+                (genDir / (arch + "_operands.inc")).string());
+            success &= codegen.generateInitFile((genDir / (arch + "_init.inc")).string());
+            success &= emitArchIsaFile(
+                arch, insts, unifiedOpcodeMap, (hwDir / (arch + "Isa.inc")).string());
+        }
+        success &= emitGfxIsaFile(unifiedList, (hwDir / "gfxIsa.inc").string());
+
+        if(success)
+            std::cout << "Successfully generated instruction metadata and ISA for all archs\n";
         return success;
     }
 

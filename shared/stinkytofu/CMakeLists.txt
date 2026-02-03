@@ -104,8 +104,6 @@ list(TRANSFORM STINKYTOFU_SOURCE_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/src/
 # (1) stinkytofu designs a new rocisa IR to replace the original ones, or
 # (2) stinkytofu completely replaces rocisa IR with stinkyAsm IR.
 set(ROCISA_TO_STINKYTOFU_SOURCE_FILES
-    ir/rocisa/ToStinkyAsmPass.cpp
-    ir/rocisa/FromStinkyAsmPass.cpp
     ir/rocisa/AllHwMappings.cpp
     ir/rocisa/ToStinkyTofuUtils.cpp
 )
@@ -168,6 +166,9 @@ target_include_directories(stinkytofu
 # Make stinkytofu depend on the generated ISA definition files from tablegen
 # This ensures the build order is: gfxisa -> tablegen -> run tablegen -> stinkytofu
 add_dependencies(stinkytofu tablegen_generated)
+
+# Backend-related sources are added by the backend subdirectory
+add_subdirectory(src/ir/asm/backend)
 
 ##===----------------------------------------------------------------------===##
 # Intrinsic Compiler Tool

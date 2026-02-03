@@ -166,11 +166,10 @@ namespace stinkytofu
         }
     };
 
-    struct ConditionalBranchInst : GfxInstDef
+    struct ConditionalBranchInst : BranchInst
     {
         ConditionalBranchInst()
         {
-            hwInstDesc.flags.set(IF_Branch);
             hwInstDesc.flags.set(IF_ConditionalBranch);
         }
     };
@@ -183,7 +182,7 @@ namespace stinkytofu
         }
     };
 
-    struct WaitTensorCntInst : GfxInstDef
+    struct WaitTensorCntInst : WaitCntInst
     {
         WaitTensorCntInst()
         {
@@ -364,6 +363,10 @@ namespace stinkytofu
 
     struct VCmp : GfxInstDef
     {
+        VCmp()
+        {
+            hwInstDesc.flags.set(IF_VCmp);
+        }
     };
 
     struct VCmpX : VCmp

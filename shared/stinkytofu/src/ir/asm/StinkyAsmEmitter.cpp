@@ -114,6 +114,8 @@ namespace stinkytofu
                 else
                 {
                     // Numeric format: v[46:49]
+                    // Note: rocisa could use "v[256-256:259-256]", that's why we add offsetStr to the end.
+                    // TODO: we shouldn't use v[256-256:259-256], it doesn't make sense.
                     os << "[" << reg.reg.idx << offsetStr << ":" << (reg.reg.idx + reg.reg.num - 1)
                        << offsetStr << "]";
                 }
@@ -136,6 +138,8 @@ namespace stinkytofu
                     }
                     else
                     {
+                        // Note: rocisa could use "v[256-256]", that's why we add offsetStr to the end.
+                        // TODO: we shouldn't use v[256-256], it doesn't make sense.
                         os << "[" << reg.reg.idx << offsetStr << "]";
                     }
                 }

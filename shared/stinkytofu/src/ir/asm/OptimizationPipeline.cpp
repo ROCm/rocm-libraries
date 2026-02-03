@@ -81,6 +81,19 @@ namespace stinkytofu
             config.optimizationIterations = (optLevel >= OptLevel::O3) ? 3 : 1;
             break;
 
+        case PipelineProfile::NoOptimization:
+            // No optimization passes
+            config.enablePeephole         = false;
+            config.enableDCE              = false;
+            config.enableDuplicateElim    = false;
+            config.enableCFGBuilder       = false;
+            config.enableDAGScheduler     = false;
+            config.enableScheduleLastLRs  = false;
+            config.enableScheduleFirstLRs = false;
+            config.enableWaitCnt          = false;
+            config.optimizationIterations = 0;
+            break;
+
         case PipelineProfile::Custom:
             // Leave everything as default, user will customize
             break;

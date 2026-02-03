@@ -88,10 +88,10 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_fma_f32, arch));
 
-        inst->addDestReg(StinkyRegister("v", destReg, 1));
-        inst->addSrcReg(StinkyRegister("v", aReg, 1));
-        inst->addSrcReg(StinkyRegister("v", bReg, 1));
-        inst->addSrcReg(StinkyRegister("v", cReg, 1));
+        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", aReg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", bReg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", cReg, 1));
         return inst;
     }
 
@@ -104,15 +104,15 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_fma_f32, arch));
 
-        inst->addDestReg(StinkyRegister("v", destReg, 1));
-        inst->addSrcReg(StinkyRegister("v", aReg, 1));
-        inst->addSrcReg(StinkyRegister("v", bReg, 1));
+        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", aReg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", bReg, 1));
 
         // Add constant operand
         StinkyRegister constReg;
         constReg.dataType      = StinkyRegister::Type::LiteralDouble;
         constReg.literalDouble = constVal;
-        inst->addSrcReg(constReg);
+        inst->addSrcRegAndUpdateUD(constReg);
         return inst;
     }
 
@@ -124,14 +124,14 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_fma_f16, arch));
 
-        inst->addDestReg(StinkyRegister("v", destReg, 1));
-        inst->addSrcReg(StinkyRegister("v", aReg, 1));
-        inst->addSrcReg(StinkyRegister("v", bReg, 1));
+        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", aReg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", bReg, 1));
 
         StinkyRegister constReg;
         constReg.dataType      = StinkyRegister::Type::LiteralDouble;
         constReg.literalDouble = constVal;
-        inst->addSrcReg(constReg);
+        inst->addSrcRegAndUpdateUD(constReg);
         return inst;
     }
 
@@ -143,9 +143,9 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_add_f32, arch));
 
-        inst->addDestReg(StinkyRegister("v", destReg, 1));
-        inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
-        inst->addSrcReg(StinkyRegister("v", src1Reg, 1));
+        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", src0Reg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", src1Reg, 1));
         return inst;
     }
 
@@ -157,13 +157,13 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_add_f32, arch));
 
-        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
         constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
-        inst->addSrcReg(constRegister);
-        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
+        inst->addSrcRegAndUpdateUD(constRegister);
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 
@@ -175,13 +175,13 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_add_f16, arch));
 
-        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
         constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
-        inst->addSrcReg(constRegister);
-        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
+        inst->addSrcRegAndUpdateUD(constRegister);
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 
@@ -194,13 +194,13 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_add_f32, arch));
 
-        inst->addDestReg(StinkyRegister("v", destReg, 1));
-        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
+        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", srcReg, 1));
 
         StinkyRegister constRegister;
         constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
-        inst->addSrcReg(constRegister);
+        inst->addSrcRegAndUpdateUD(constRegister);
         return inst;
     }
 
@@ -212,9 +212,9 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_mul_f32, arch));
 
-        inst->addDestReg(StinkyRegister("v", destReg, 1));
-        inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
-        inst->addSrcReg(StinkyRegister("v", src1Reg, 1));
+        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", src0Reg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", src1Reg, 1));
         return inst;
     }
 
@@ -226,13 +226,13 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_mul_f32, arch));
 
-        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
         constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
-        inst->addSrcReg(constRegister);
-        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
+        inst->addSrcRegAndUpdateUD(constRegister);
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 
@@ -244,9 +244,9 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_mul_f16, arch));
 
-        inst->addDestReg(StinkyRegister("v", destReg, 1));
-        inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
-        inst->addSrcReg(StinkyRegister("v", src1Reg, 1));
+        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", src0Reg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", src1Reg, 1));
         return inst;
     }
 
@@ -258,13 +258,13 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_mul_f16, arch));
 
-        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
         constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
-        inst->addSrcReg(constRegister);
-        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
+        inst->addSrcRegAndUpdateUD(constRegister);
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 
@@ -276,10 +276,10 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_fma_f16, arch));
 
-        inst->addDestReg(StinkyRegister("v", destReg, 1));
-        inst->addSrcReg(StinkyRegister("v", aReg, 1));
-        inst->addSrcReg(StinkyRegister("v", bReg, 1));
-        inst->addSrcReg(StinkyRegister("v", cReg, 1));
+        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", aReg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", bReg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", cReg, 1));
         return inst;
     }
 
@@ -291,8 +291,8 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_mov_b32, arch));
 
-        inst->addDestReg(StinkyRegister("v", destReg, 1));
-        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
+        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 
@@ -793,14 +793,14 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_fma_f32, arch));
 
-        inst->addDestReg(StinkyRegister("v", destReg, 1));
-        inst->addSrcReg(StinkyRegister("v", aReg, 1));
-        inst->addSrcReg(StinkyRegister("v", bReg, 1));
+        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", aReg, 1));
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", bReg, 1));
 
         StinkyRegister constReg;
         constReg.dataType      = StinkyRegister::Type::LiteralDouble;
         constReg.literalDouble = constVal;
-        inst->addSrcReg(constReg);
+        inst->addSrcRegAndUpdateUD(constReg);
         return inst;
     }
 
@@ -811,13 +811,13 @@ protected:
         StinkyInstruction* inst
             = builder.createStinkyInstBefore(insts.end(), getMCIDByUOp(GFX::v_add_f32, arch));
 
-        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
         constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
-        inst->addSrcReg(constRegister);
-        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
+        inst->addSrcRegAndUpdateUD(constRegister);
+        inst->addSrcRegAndUpdateUD(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 

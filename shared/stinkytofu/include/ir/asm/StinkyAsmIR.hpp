@@ -508,9 +508,16 @@ namespace stinkytofu
             }
         }
 
-        //----------------------------------------------------------------------
-        // Register Operand Access (LLVM-style getters)
-        //----------------------------------------------------------------------
+        void addSrcReg(const StinkyRegister& srcReg)
+        {
+            srcRegs.push_back(srcReg);
+        }
+
+        void addDestReg(const StinkyRegister& destReg)
+        {
+            destRegs.push_back(destReg);
+        }
+
         /// Get destination registers (read-only)
         const std::vector<StinkyRegister>& getDestRegs() const
         {
@@ -621,9 +628,8 @@ namespace stinkytofu
                   const std::string& prefix       = "") const;
         void dump() const;
 
-        //----------------------------------------------------------------------
-        // Automatic Use-Def Chain Maintenance (LLVM-style)
-        //----------------------------------------------------------------------
+        // TODO: Review the algorithm and usage.
+        //
         // These methods automatically maintain use-def chains when operands change.
         // Following LLVM/MLIR design: mutation methods are on the Instruction itself,
         // not on the builder.
@@ -645,10 +651,12 @@ namespace stinkytofu
         void setDestRegs(const std::vector<StinkyRegister>& destRegs);
 
         /// Add a single source register and update use-def chain.
-        void addSrcReg(const StinkyRegister& srcReg);
+        /// WARNING: O(N) backward scan. TODO: Review usage and re-design if needed.
+        void addSrcRegAndUpdateUD(const StinkyRegister& srcReg);
 
         /// Add a single destination register and update use-def chain.
-        void addDestReg(const StinkyRegister& destReg);
+        /// WARNING: O(N) forward scan. TODO: Review usage and re-design if needed.
+        void addDestRegAndUpdateUD(const StinkyRegister& destReg);
 
         /// Set a specific source register by index (for pattern rewriting).
         /// Note: Does NOT update use-def chains automatically - caller must rebuild if needed.

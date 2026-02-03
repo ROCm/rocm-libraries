@@ -21,21 +21,25 @@
  *
  * ************************************************************************ */
 #include "ir/asm/StinkyAsmModule.hpp"
+#include "ir/asm/Backend.hpp"
 #include "ir/asm/StinkyAsmEmitter.hpp"
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "ir/asm/StinkyAsmPrinter.hpp"
 #include "stinkypasses.hpp"
 
-#include <iostream>
 #include <sstream>
 
 namespace stinkytofu
 {
     struct StinkyAsmModule::Impl
     {
-        std::string          name;
-        std::array<int, 3>   arch;
-        std::vector<IRBase*> instructions;
+        std::string        name;
+        std::array<int, 3> arch;
+
+        // This map maintains the defined group names and the index of the groups.
+        // Each instruction could belong to one or more groups.
+        std::unordered_map<std::string, int>                       groupNameIndexMap;
+        std::unordered_map<const IRBase*, std::unordered_set<int>> instructionGroupsMap;
 
         // The IRList is owned by a Function/BasicBlock
         // We maintain a pointer to it for compatibility
@@ -80,30 +84,25 @@ namespace stinkytofu
         return pImpl->arch;
     }
 
-    void StinkyAsmModule::add(IRBase* inst)
+    void StinkyAsmModule::setInstructionGroups(IRBase* inst, const std::vector<int>& groups)
     {
         if(inst)
         {
-            pImpl->instructions.push_back(inst);
+            if(!groups.empty())
+            {
+                pImpl->instructionGroupsMap[inst]
+                    = std::unordered_set<int>(groups.begin(), groups.end());
+            }
+            else if(pImpl->instructionGroupsMap.find(inst) != pImpl->instructionGroupsMap.end())
+            {
+                pImpl->instructionGroupsMap.erase(inst);
+            }
         }
-    }
-
-    void StinkyAsmModule::add(const std::vector<IRBase*>& insts)
-    {
-        for(IRBase* inst : insts)
-        {
-            add(inst);
-        }
-    }
-
-    const std::vector<IRBase*>& StinkyAsmModule::getInstructions() const
-    {
-        return pImpl->instructions;
     }
 
     size_t StinkyAsmModule::size() const
     {
-        return pImpl->instructions.size();
+        return getIRList().size();
     }
 
     std::string StinkyAsmModule::toString() const
@@ -133,21 +132,9 @@ namespace stinkytofu
 
     void StinkyAsmModule::runOptimizationPipeline()
     {
-        // Create PassContext for running the pass
-        PassContext passCtx;
-
-        // Configure GemmTileConfig with the module's architecture
-        GemmTileConfig config;
-        config.arch = pImpl->arch;
-        // Set default tile sizes (not used by WaitCntLegalizationPass)
-        config.TileA0 = 0;
-        config.TileB0 = 0;
-        config.TileM0 = 0;
-        config.NumGRA = 0;
-        config.NumGRB = 0;
-        passCtx.setGemmTileConfig(config);
-
-        // Do nothing for now
+        // Run optimization pipeline using the backend
+        Backend backend(*this);
+        backend.runOptimization();
     }
 
     IRList& StinkyAsmModule::getIRList()
@@ -158,6 +145,146 @@ namespace stinkytofu
     const IRList& StinkyAsmModule::getIRList() const
     {
         return pImpl->basicBlock->getIR();
+    }
+
+    void StinkyAsmModule::addGroup(const std::string& name)
+    {
+        if(pImpl->groupNameIndexMap.find(name) != pImpl->groupNameIndexMap.end())
+        {
+            return;
+        }
+        pImpl->groupNameIndexMap[name] = pImpl->groupNameIndexMap.size();
+    }
+
+    int StinkyAsmModule::getGroupIndex(const std::string& name) const
+    {
+        return pImpl->groupNameIndexMap.at(name);
+    }
+
+    bool StinkyAsmModule::hasGroup(const std::string& name) const
+    {
+        return pImpl->groupNameIndexMap.find(name) != pImpl->groupNameIndexMap.end();
+    }
+
+    const std::unordered_map<std::string, int>& StinkyAsmModule::getGroupNameIndexMap() const
+    {
+        return pImpl->groupNameIndexMap;
+    }
+
+    std::optional<std::unordered_set<int>> StinkyAsmModule::getInstructionGroups(IRBase* inst) const
+    {
+        if(inst == nullptr
+           || pImpl->instructionGroupsMap.find(inst) == pImpl->instructionGroupsMap.end())
+        {
+            return std::nullopt;
+        }
+        return std::make_optional(pImpl->instructionGroupsMap.at(inst));
+    }
+
+    bool StinkyAsmModule::isInstructionInGroup(const IRBase* inst, int group) const
+    {
+        if(inst == nullptr
+           || pImpl->instructionGroupsMap.find(inst) == pImpl->instructionGroupsMap.end())
+        {
+            return false;
+        }
+        return pImpl->instructionGroupsMap.at(inst).find(group)
+               != pImpl->instructionGroupsMap.at(inst).end();
+    }
+
+    void StinkyAsmModule::refreshInstructionGroups()
+    {
+        std::vector<IntrusiveListIterator<IRBase>> instructionsWithoutGroup;
+        for(auto it = getIRList().begin(); it != getIRList().end(); ++it)
+        {
+            if(pImpl->instructionGroupsMap.find(it.getNodePtr())
+               == pImpl->instructionGroupsMap.end())
+            {
+                instructionsWithoutGroup.push_back(it);
+            }
+        }
+
+        // If there are no instructions without groups, return
+        if(instructionsWithoutGroup.empty())
+        {
+            return;
+        }
+
+        for(auto it : instructionsWithoutGroup)
+        {
+            // Find the previous instruction that has groups
+            auto beginInstIt = it;
+            while(--beginInstIt != getIRList().begin())
+            {
+                if(pImpl->instructionGroupsMap.find(beginInstIt.getNodePtr())
+                   != pImpl->instructionGroupsMap.end())
+                {
+                    break;
+                }
+            }
+
+            // Find the next instruction that has groups
+            auto endInstIt = it;
+            while(++endInstIt != getIRList().end())
+            {
+                if(pImpl->instructionGroupsMap.find(endInstIt.getNodePtr())
+                   != pImpl->instructionGroupsMap.end())
+                {
+                    break;
+                }
+            }
+
+            auto beginGroups    = getInstructionGroups(beginInstIt.getNodePtr());
+            int  beginGroupDeep = beginGroups.has_value() ? beginGroups.value().size() : 0;
+
+            auto endGroups    = getInstructionGroups(endInstIt.getNodePtr());
+            int  endGroupDeep = endGroups.has_value() ? endGroups.value().size() : 0;
+
+            // Set the most deep groups for the instruction without groups
+            std::vector<int> groups;
+            if(beginGroupDeep > endGroupDeep)
+            {
+                groups.assign(beginGroups.value().begin(), beginGroups.value().end());
+            }
+            else
+            {
+                groups.assign(endGroups.value().begin(), endGroups.value().end());
+            }
+            setInstructionGroups(it.getNodePtr(), groups);
+        }
+    }
+
+    StinkyAsmModule::GroupRange StinkyAsmModule::findGroupRange(const std::string& groupName)
+    {
+        if(!hasGroup(groupName))
+        {
+            return std::make_pair(IntrusiveListIterator<IRBase>(), IntrusiveListIterator<IRBase>());
+        }
+        return findGroupRange(getGroupIndex(groupName));
+    }
+
+    /* private methods */
+    StinkyAsmModule::GroupRange StinkyAsmModule::findGroupRange(int groupIndex)
+    {
+        IntrusiveListIterator<IRBase> begin      = getIRList().begin();
+        IntrusiveListIterator<IRBase> end        = getIRList().end();
+        bool                          foundBegin = false;
+        for(auto it = getIRList().begin(); it != getIRList().end(); ++it)
+        {
+            if(!foundBegin && isInstructionInGroup(it.getNodePtr(), groupIndex))
+            {
+                begin      = it;
+                foundBegin = true;
+            }
+
+            if(foundBegin && !isInstructionInGroup(it.getNodePtr(), groupIndex))
+            {
+                end = it;
+                break;
+            }
+        }
+
+        return std::make_pair(begin, end);
     }
 
 } // namespace stinkytofu

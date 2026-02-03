@@ -23,7 +23,10 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "stinkytofu.hpp"
@@ -61,6 +64,9 @@ namespace stinkytofu
     class StinkyAsmModule
     {
     public:
+        // Range of instructions in a group
+        using GroupRange = std::pair<IntrusiveListIterator<IRBase>, IntrusiveListIterator<IRBase>>;
+
         /**
          * @brief Construct a new StinkyAsmModule
          * @param name Module/kernel name
@@ -94,24 +100,12 @@ namespace stinkytofu
         std::array<int, 3> getArch() const;
 
         /**
-         * @brief Add a single assembly instruction to this module
+         * @brief Set the groups for a single assembly instruction
          *
-         * The module takes shared ownership of the instruction.
-         * Note: The instruction should already be in an IRList (BasicBlock).
-         *
-         * @param inst Assembly instruction to add
+         * @param inst Assembly instruction to set the groups for
+         * @param groups Group indices to set for the instruction
          */
-        void add(IRBase* inst);
-
-        /**
-         * @brief Add multiple assembly instructions to this module
-         *
-         * The module takes shared ownership of all instructions.
-         * Note: The instructions should already be in an IRList (BasicBlock).
-         *
-         * @param insts Vector of assembly instructions to add
-         */
-        void add(const std::vector<IRBase*>& insts);
+        void setInstructionGroups(IRBase* inst, const std::vector<int>& groups);
 
         /**
          * @brief Get all assembly instructions in this module (const version)
@@ -158,7 +152,67 @@ namespace stinkytofu
          */
         const IRList& getIRList() const;
 
+        /**
+         * @brief Add a group name to the module
+         * @param name Group name
+         */
+        void addGroup(const std::string& name);
+
+        /**
+         * @brief Get the group index by name
+         * @param name Group name
+         * @return Module group index
+         */
+        int getGroupIndex(const std::string& name) const;
+
+        /**
+         * @brief Check if the module has the given group name
+         * @param name Group name
+         * @return True if the module has the given group name, false otherwise
+         */
+        bool hasGroup(const std::string& name) const;
+
+        /**
+         * @brief Get the group name to index map
+         * @return Group name to index map
+         */
+        const std::unordered_map<std::string, int>& getGroupNameIndexMap() const;
+
+        /**
+         * @brief Get the instruction groups by instruction pointer
+         * @param inst Instruction pointer
+         * @return Instruction groups
+         */
+        std::optional<std::unordered_set<int>> getInstructionGroups(IRBase* inst) const;
+
+        /**
+         * @brief Check if the instruction is in the given group
+         * @param inst Instruction pointer
+         * @param group Group index
+         * @return True if the instruction is in the given group, false otherwise
+         */
+        bool isInstructionInGroup(const IRBase* inst, int group) const;
+
+        /**
+         * @brief Refresh the instruction groups
+         */
+        void refreshInstructionGroups();
+
+        /**
+         * @brief Find the range of instructions in the given group
+         * @param groupName Group name
+         * @return Pair of iterators to the beginning and end of the group range
+         */
+        GroupRange findGroupRange(const std::string& groupName);
+
     private:
+        /**
+         * @brief Find the range of instructions in the given group
+         * @param groupIndex Group index
+         * @return Pair of iterators to the beginning and end of the group range
+         */
+        GroupRange findGroupRange(int groupIndex);
+
         struct Impl;
         std::unique_ptr<Impl> pImpl;
     };

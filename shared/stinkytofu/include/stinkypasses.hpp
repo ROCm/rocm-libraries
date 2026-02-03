@@ -74,16 +74,4 @@ namespace stinkytofu
     // DelayAluInsertionPass inserts s_delay_alu instructions for RDNA3 (gfx11xx)
     // architectures to handle ALU instruction dependencies. Only runs on gfx11xx.
     std::unique_ptr<Pass> createDelayAluInsertionPass();
-
-    // The following passes are used for translation between rocisa and
-    // stinkytofu. They are specific to tensilelite rocisa and are therefore not
-    // included in the stinkytofu library.
-    //
-    // This is a temporary solution until:
-    // (1) stinkytofu designs a new rocisa IR to replace the original ones, or
-    // (2) stinkytofu completely replaces rocisa IR with stinkyAsm IR.
-    std::unique_ptr<AnalysisPass> createRocisaDFSFlatItemsPass(rocisa::Module&);
-    std::unique_ptr<AnalysisPass> createRocisaStinkyMappingPass();
-    std::unique_ptr<Pass>         createRocisaToStinkyAsmPass(bool doesIgnoreWaitCnt);
-    std::unique_ptr<Pass>         createStinkyAsmToRocisaPass();
 }

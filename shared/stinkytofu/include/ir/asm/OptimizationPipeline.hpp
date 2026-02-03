@@ -35,6 +35,7 @@ namespace stinkytofu
     {
         OptimizationOnly, ///< Only optimization passes (no scheduling/waitcnt)
         FullPipeline, ///< Complete pipeline with scheduling (for production kernels)
+        NoOptimization, ///< Don't run any passes
         Custom ///< Custom configuration
     };
 

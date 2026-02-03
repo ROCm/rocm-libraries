@@ -125,7 +125,7 @@ namespace stinkytofu
         updateUsersForInst();
     }
 
-    void StinkyInstruction::addSrcReg(const StinkyRegister& srcReg)
+    void StinkyInstruction::addSrcRegAndUpdateUD(const StinkyRegister& srcReg)
     {
         srcRegs.push_back(srcReg);
 
@@ -161,7 +161,7 @@ namespace stinkytofu
         }
     }
 
-    void StinkyInstruction::addDestReg(const StinkyRegister& destReg)
+    void StinkyInstruction::addDestRegAndUpdateUD(const StinkyRegister& destReg)
     {
         destRegs.push_back(destReg);
 

@@ -87,24 +87,29 @@ namespace stinkytofu
         legalizeBarrier(StinkyInstruction* inst, StinkyInstIRBuilder& irBuilder, GfxArchID archId);
 
     // Legalize ds_load_b192 instruction
-    // Expands into two ds_load_b96 instructions
+    // Expands into two ds_load instructions (b128 + b64).
+    // Caller must insert s_set_vgpr_msb between the two when they use VGPRs in different MSB
+    // ranges (e.g. b128 in 256~511, b64 in 512~767).
     //
     // Example:
     //      ds_load_b192 v[0:5], v0 offset:0  →  ds_load_b128 v[0:3], v0 offset:0
     //                                            ds_load_b64 v[4:5], v0 offset:16
     Legalized legalizeDSLoadB192(StinkyInstruction*   inst,
                                  StinkyInstIRBuilder& irBuilder,
-                                 GfxArchID            archId);
+                                 GfxArchID            archId,
+                                 bool                 hasVgprMsb);
 
     // Legalize ds_store_b192 instruction
-    // Expands into two ds_store_b96 instructions
+    // Expands into two ds_store instructions (b128 + b64).
+    // Caller must insert s_set_vgpr_msb between the two when they use VGPRs in different MSB ranges.
     //
     // Example:
     //      ds_store_b192 v[0:5], v0 offset:0  →  ds_store_b128 v[0:3], v0 offset:0
     //                                            ds_store_b64 v[4:5], v0 offset:16
     Legalized legalizeDSStoreB192(StinkyInstruction*   inst,
                                   StinkyInstIRBuilder& irBuilder,
-                                  GfxArchID            archId);
+                                  GfxArchID            archId,
+                                  bool                 hasVgprMsb);
 
 } // namespace stinkytofu
 
