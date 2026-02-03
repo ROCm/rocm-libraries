@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2018 Advanced Micro Devices, Inc.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,26 +23,24 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include "test.hpp"
-#include <array>
-#include <iostream>
-#include <iterator>
-#include <limits>
-#include <memory>
-#include <iomanip>
-#include <miopen/convolution.hpp>
-#include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
+
 #include <miopen/tensor_ops.hpp>
-#include <utility>
-#include <cstdlib>
-#include "driver.hpp"
+
 #include "get_handle.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
+#include "gtest_common.hpp"
 #include "tensor_util.hpp"
+#include "test_parameter_name_generator.hpp"
+
+namespace {
 
 #define MIO_TRANSFORM_DEBUG 0
+
+using TestCase = std::tuple<NamedContainer<std::vector<int>>,
+                            NamedContainer<std::vector<float>>,
+                            NamedContainer<std::vector<int>>,
+                            NamedContainer<std::vector<int>>,
+                            NamedContainer<std::vector<int>>,
+                            NamedParameter<int>>;
 
 #if(MIO_TRANSFORM_DEBUG)
 template <class T>
@@ -291,8 +289,96 @@ struct verify_tensor_transform_scale
     }
 };
 
+inline auto GenSmokeTestCases()
+{
+    static const std::vector<std::vector<int>> all_lens{
+        {32, 11, 32, 16}, {16, 30, 16, 16}, {15, 1, 14, 14}, {10, 16, 7, 7}, {1, 1, 1, 1}};
+
+    static const std::vector<std::vector<float>> all_scales{{1.0f, 0.0f}, {0.5f, 0.5f}};
+
+#if(MIO_TRANSFORM_DEBUG)
+#define NROWS 6
+#define NCOLS 6
+#define LENS_CONTENT NROWS, NCOLS
+#define SUBLENS_CONTENT      \
+    {                        \
+        NROWS - 2, NCOLS - 2 \
+    }
+#define OFFSET_CONTENT 0
+#else
+#define LENS_CONTENT 32, 32, 16, 16, 16
+#define SUBLENS_CONTENT \
+    {                   \
+        32, 8, 10       \
+    }
+#define OFFSET_CONTENT 7
+#endif
+
+    static const std::vector<int> lens{LENS_CONTENT};
+    static const std::vector<std::vector<int>> all_superlens_src{lens};
+    static const std::vector<std::vector<int>> all_sublens{SUBLENS_CONTENT};
+    static const std::vector<std::vector<int>> all_superlens_dst{lens};
+    static const std::vector<int> tensor_offsets{OFFSET_CONTENT};
+
+    return testing::Combine(
+        MakeNamedParameterCollectionValues<std::vector<int>>("srcLens", all_lens, "x"),
+        MakeNamedParameterCollectionValues<std::vector<float>>("scales", all_scales, ","),
+        MakeNamedParameterCollectionValues<std::vector<int>>(
+            "superLens_src", all_superlens_src, "x"),
+        MakeNamedParameterCollectionValues<std::vector<int>>("subLens", all_sublens, "x"),
+        MakeNamedParameterCollectionValues<std::vector<int>>(
+            "superLens_dst", all_superlens_dst, "x"),
+        MakeNamedParameterCollectionValues<int>("offset", tensor_offsets));
+}
+
+inline auto GenFullTestCases()
+{
+    static const std::vector<std::vector<int>> all_lens{
+        {32, 11, 32, 16}, {16, 30, 16, 16}, {15, 1, 14, 14}, {10, 16, 7, 7}, {1, 1, 1, 1}};
+
+    static const std::vector<std::vector<float>> all_scales{{1.0f, 0.0f}, {0.5f, 0.5f}};
+
+#if(MIO_TRANSFORM_DEBUG)
+#define NROWS 6
+#define NCOLS 6
+#define LENS_CONTENT NROWS, NCOLS
+#else
+#define LENS_CONTENT 32, 32, 16, 16, 16
+#endif
+
+    static const std::vector<int> lens{LENS_CONTENT};
+    static const std::vector<std::vector<int>> all_superlens_src{lens};
+    static const std::vector<std::vector<int>> all_sublens{get_sub_tensor()};
+    static const std::vector<std::vector<int>> all_superlens_dst{lens};
+    static const std::vector<int> tensor_offsets{get_tensor_offset<int>()};
+
+    return testing::Combine(
+        MakeNamedParameterCollectionValues<std::vector<int>>("srcLens", all_lens, "x"),
+        MakeNamedParameterCollectionValues<std::vector<float>>("scales", all_scales, ","),
+        MakeNamedParameterCollectionValues<std::vector<int>>(
+            "superLens_src", all_superlens_src, "x"),
+        MakeNamedParameterCollectionValues<std::vector<int>>("subLens", all_sublens, "x"),
+        MakeNamedParameterCollectionValues<std::vector<int>>(
+            "superLens_dst", all_superlens_dst, "x"),
+        MakeNamedParameterCollectionValues<int>("offset", tensor_offsets));
+}
+
+inline auto GetSmokeTestCases()
+{
+    static const auto cases = GenSmokeTestCases();
+    return cases;
+}
+
+inline auto GetFullTestCases()
+{
+    static const auto cases = GenFullTestCases();
+    return cases;
+}
+
+} // namespace
+
 template <class T>
-struct tensor_transform_driver : test_driver
+struct tensor_transform_test : public testing::TestWithParam<TestCase>
 {
     // Params for tensor layout transform functionality for low-precision computation
     tensor<T> srcSuper_pad;
@@ -316,70 +402,42 @@ struct tensor_transform_driver : test_driver
     miopen::TensorDescriptor subDesc_dst;
     size_t offset = 0;
 
-    tensor_transform_driver()
+    void SetUp() override
     {
-        disabled_cache = true;
-        // Set params for tensor layout transform
-        add(srcLens,
-            "srcLens",
-            generate_data({{32, 11, 32, 16},
-                           {16, 30, 16, 16},
-                           {15, 1, 14, 14},
-                           {10, 16, 7, 7},
-                           {1, 1, 1, 1}}));
-        add(scales, "scales", generate_data({{1.f, 0.f}, {float(0.5), float(0.5)}}));
-
-// Set params for tensor scale addition
-#if(MIO_TRANSFORM_DEBUG)
-#define NROWS 6
-#define NCOLS 6
-        std::vector<int> lens = {NROWS, NCOLS};
-
-        add(superLens_src, "superLens_src", generate_data({lens}, lens));
-        add(subLens, "subLens", generate_data(get_sub_tensor(), {NROWS - 2, NCOLS - 2}));
-        add(superLens_dst, "superLens_dst", generate_data({lens}, lens));
-        add(offset, "offset", generate_data(get_tensor_offset(), 0));
-
-#else
-        std::vector<int> lens = {32, 32, 16, 16, 16};
-
-        add(superLens_src, "superLens_src", generate_data({lens}, lens));
-        add(subLens, "subLens", generate_data(get_sub_tensor(), {32, 8, 10}));
-        add(superLens_dst, "superLens_dst", generate_data({lens}, lens));
-        add(offset, "offset", generate_data(get_tensor_offset(), 7));
-#endif
+        prng::reset_seed();
+        std::tie(srcLens, scales, superLens_src, subLens, superLens_dst, offset) = GetParam();
     }
 
-    void run()
+    void Run()
     {
-        float alpha = scales[0];
-        float beta  = scales[1];
+        const float alpha = scales[0];
+        const float beta  = scales[1];
 
-        uint64_t max_value = miopen_type<T>{} == miopenHalf   ? 5
-                             : miopen_type<T>{} == miopenInt8 ? 127
-                                                              : 17;
+        const uint64_t max_value = miopen_type<T>{} == miopenHalf   ? 5
+                                   : miopen_type<T>{} == miopenInt8 ? 127
+                                                                    : 17;
 
-        bool skip_layout = !(miopen::float_equal(static_cast<const float>(alpha), 1.0) &&
-                             miopen::float_equal(static_cast<const float>(beta), 0.0) &&
-                             std::is_same<T, int8_t>{});
+        const bool skip_layout = !(miopen::float_equal(static_cast<const float>(alpha), 1.0) &&
+                                   miopen::float_equal(static_cast<const float>(beta), 0.0) &&
+                                   std::is_same<T, int8_t>{});
         if(!skip_layout)
         {
             // Test tensor layout transform
             srcSuper_pad   = tensor<T>{srcLens}.generate(tensor_elem_gen_integer{max_value});
             dstSuper_depad = tensor<T>{srcLens}.generate(tensor_elem_gen_integer{max_value});
-            srcDesc        = miopen::TensorDescriptor(this->type, srcLens);
+            srcDesc        = miopen::TensorDescriptor(miopen_type<T>{}, srcLens);
 
             srcLens[1]     = (srcLens[1] % 4 == 0) ? srcLens[1] : ((srcLens[1] + 3) / 4) * 4;
             dstSuper_pad   = tensor<T>{srcLens}.generate(tensor_elem_gen_integer{max_value});
             srcSuper_depad = tensor<T>{srcLens}.generate(tensor_elem_gen_integer{max_value});
-            dstDesc        = miopen::TensorDescriptor(this->type, srcLens);
+            dstDesc        = miopen::TensorDescriptor(miopen_type<T>{}, srcLens);
 
             if(srcDesc.GetLengths().size() == dstDesc.GetLengths().size())
             {
-                verify_equals(verify_tensor_transform_layout<T>{
+                VerifyEquals(verify_tensor_transform_layout<T>{
                     srcSuper_pad, dstSuper_pad, srcDesc, dstDesc, alpha, beta});
 
-                verify_equals(verify_tensor_transform_layout<T>{
+                VerifyEquals(verify_tensor_transform_layout<T>{
                     srcSuper_depad, dstSuper_depad, dstDesc, srcDesc, alpha, beta});
             }
         }
@@ -397,21 +455,71 @@ struct tensor_transform_driver : test_driver
         printf("\n DST: \n");
         show_tensor(super_dst);
 #endif
-        std::vector<size_t> superStrides_src = super_src.desc.GetStrides();
-        std::vector<size_t> superStrides_dst = super_dst.desc.GetStrides();
-        std::vector<int> subStrides_src(superStrides_src.begin() +
-                                            (super_src.desc.GetNumDims() - subLens.size()),
-                                        superStrides_src.end());
-        std::vector<int> subStrides_dst(superStrides_dst.begin() +
-                                            (super_dst.desc.GetNumDims() - subLens.size()),
-                                        superStrides_dst.end());
+        const std::vector<size_t> superStrides_src = super_src.desc.GetStrides();
+        const std::vector<size_t> superStrides_dst = super_dst.desc.GetStrides();
+        const std::vector<int> subStrides_src(superStrides_src.begin() +
+                                                  (super_src.desc.GetNumDims() - subLens.size()),
+                                              superStrides_src.end());
+        const std::vector<int> subStrides_dst(superStrides_dst.begin() +
+                                                  (super_dst.desc.GetNumDims() - subLens.size()),
+                                              superStrides_dst.end());
 
-        subDesc_src = miopen::TensorDescriptor(this->type, subLens, subStrides_src);
-        subDesc_dst = miopen::TensorDescriptor(this->type, subLens, subStrides_dst);
+        subDesc_src = miopen::TensorDescriptor(miopen_type<T>{}, subLens, subStrides_src);
+        subDesc_dst = miopen::TensorDescriptor(miopen_type<T>{}, subLens, subStrides_dst);
 
-        verify_equals(verify_tensor_transform_scale<T>{
+        VerifyEquals(verify_tensor_transform_scale<T>{
             super_src, subDesc_src, super_dst, subDesc_dst, offset, offset, T(alpha), T(beta)});
+    }
+
+private:
+    void VerifyEquals(auto&& v)
+    {
+        const auto cpu = v.cpu();
+        const auto gpu = v.gpu();
+        const auto idx = miopen::mismatch_idx(cpu, gpu, miopen::float_equal);
+
+        ASSERT_GE(idx, miopen::range_distance(cpu)) << (v.fail(), "");
     }
 };
 
-int main(int argc, const char* argv[]) { test_drive<tensor_transform_driver>(argc, argv); }
+class TestNameGenerator
+{
+public:
+    std::string operator()(const auto& testCase)
+    {
+        std::stringstream ss;
+        const auto& [srcLens, scales, superLens_src, subLens, superLens_dst, offset] =
+            testCase.param;
+
+        ss << "srcLens_" << GetRangeAsString(srcLens(), "x") << "_scales_"
+           << GetRangeAsString(scales(), ",") << "_superLens_src_"
+           << GetRangeAsString(superLens_src(), "x") << "_subLens_"
+           << GetRangeAsString(subLens(), "x") << "_superLens_dst_"
+           << GetRangeAsString(superLens_dst(), "x") << "_offset_" << offset() << "_test_id_"
+           << testCase.index;
+
+        std::string testName(ss.str());
+
+        std::transform(testName.begin(), testName.end(), testName.begin(), [](char c) -> char {
+            return (c == '.') ? 'p' : (std::isalnum(c) ? c : '_');
+        });
+
+        return testName;
+    }
+};
+
+using GPU_TensorTransform_I8   = tensor_transform_test<int8_t>;
+using GPU_TensorTransform_FP16 = tensor_transform_test<half_float::half>;
+using GPU_TensorTransform_FP32 = tensor_transform_test<float>;
+
+TEST_P(GPU_TensorTransform_I8, TestInt8) { this->Run(); }
+TEST_P(GPU_TensorTransform_FP16, TestFloat16) { this->Run(); }
+TEST_P(GPU_TensorTransform_FP32, TestFloat32) { this->Run(); }
+
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTransform_I8, GetSmokeTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTransform_FP16, GetSmokeTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTransform_FP32, GetSmokeTestCases(), TestNameGenerator{});
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_TensorTransform_I8, GetFullTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_TensorTransform_FP16, GetFullTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_TensorTransform_FP32, GetFullTestCases(), TestNameGenerator{});
