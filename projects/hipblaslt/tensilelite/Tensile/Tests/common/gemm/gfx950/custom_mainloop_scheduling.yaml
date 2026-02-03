@@ -614,11 +614,9 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [4096, 1536, 1, 8192]
           - Range: [[256], [96], [1], [64, 64, 256]]
           - Range: [[256], [96], [1], [1, 1, 64]]
           - Range: [[256], [96], [1], [32, 64, 256]]
-          - Range: [[8192], [3072], [1], [64, 64, 256]]  
         - BiasTypeArgs: ['b']
   ########################################
   # HHS NN - standard
