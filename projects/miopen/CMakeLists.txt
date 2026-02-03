@@ -341,8 +341,8 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
         if(MIOPEN_BUILD_CK)
             include(cmake/Dependencies.cmake)
 
-            execute_process (
-                COMMAND bash -c "grep -P -o '^[ \t]*(?<!#)[ \t]*\.\./composable_kernel' ${CMAKE_SOURCE_DIR}/requirements.txt"
+            execute_process(
+                COMMAND bash -c "grep -P -o '^[ \t]*(?<!#)[ \t]*\.\./composablekernel' ${CMAKE_SOURCE_DIR}/requirements.txt"
                 OUTPUT_VARIABLE _match
             )
             if(_match)
