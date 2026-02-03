@@ -164,7 +164,7 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     std::size_t GetLocalMemorySize() const;
     std::size_t GetGlobalMemorySize() const;
     std::size_t GetImage3dMaxWidth() const;
-    std::size_t GetWavefrontWidth() const;
+    virtual std::size_t GetWavefrontWidth() const;
     virtual std::size_t GetMaxComputeUnits() const;
     std::size_t GetMaxHardwareComputeUnits() const
     {

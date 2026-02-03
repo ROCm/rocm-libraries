@@ -42,8 +42,8 @@ using namespace hipsparse_test;
 template <typename I, typename J, typename T>
 void testing_spmv_csr_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+#if (!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
+     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
     int64_t              m         = 100;
     int64_t              n         = 100;
     int64_t              nnz       = 100;
@@ -55,12 +55,12 @@ void testing_spmv_csr_bad_arg(const Arguments& argus)
     hipsparseIndexType_t idxType   = HIPSPARSE_INDEX_32I;
     hipDataType          dataType  = HIP_R_32F;
 
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     hipsparseSpMVAlg_t alg = HIPSPARSE_MV_ALG_DEFAULT;
 #else
-#if(CUDART_VERSION >= 12000)
+#if (CUDART_VERSION >= 12000)
     hipsparseSpMVAlg_t alg = HIPSPARSE_SPMV_ALG_DEFAULT;
-#elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
+#elif (CUDART_VERSION >= 10010 && CUDART_VERSION < 12000)
     hipsparseSpMVAlg_t alg = HIPSPARSE_MV_ALG_DEFAULT;
 #endif
 #endif
@@ -175,8 +175,8 @@ void testing_spmv_csr_bad_arg(const Arguments& argus)
 template <typename I, typename J, typename T>
 void testing_spmv_csr(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
+#if (!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
+     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
     J                    m        = argus.M;
     J                    n        = argus.N;
     T                    h_alpha  = make_DataType<T>(argus.alpha);
@@ -210,13 +210,18 @@ void testing_spmv_csr(Arguments argus)
     // Redefine sparse matrix values
     hipsparseInit<T>(hval, hval.size(), 1);
 
-    std::vector<T> hx(n);
-    std::vector<T> hy_1(m);
-    std::vector<T> hy_2(m);
-    std::vector<T> hy_gold(m);
+    // For non-transpose: y(m) = alpha * A(m x n) * x(n) + beta * y(m)
+    // For transpose/conj-transpose: y(n) = alpha * A^T/A^H(n x m) * x(m) + beta * y(n)
+    J x_size = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? n : m;
+    J y_size = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : n;
 
-    hipsparseInit<T>(hx, 1, n);
-    hipsparseInit<T>(hy_1, 1, m);
+    std::vector<T> hx(x_size);
+    std::vector<T> hy_1(y_size);
+    std::vector<T> hy_2(y_size);
+    std::vector<T> hy_gold(y_size);
+
+    hipsparseInit<T>(hx, 1, x_size);
+    hipsparseInit<T>(hy_1, 1, y_size);
 
     // copy vector is easy in STL; hy_gold = hx: save a copy in hy_gold which will be output of CPU
     hy_2    = hy_1;
@@ -226,9 +231,9 @@ void testing_spmv_csr(Arguments argus)
     auto dptr_managed    = hipsparse_unique_ptr{device_malloc(sizeof(I) * (m + 1)), device_free};
     auto dcol_managed    = hipsparse_unique_ptr{device_malloc(sizeof(J) * nnz), device_free};
     auto dval_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz), device_free};
-    auto dx_managed      = hipsparse_unique_ptr{device_malloc(sizeof(T) * n), device_free};
-    auto dy_1_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * m), device_free};
-    auto dy_2_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * m), device_free};
+    auto dx_managed      = hipsparse_unique_ptr{device_malloc(sizeof(T) * x_size), device_free};
+    auto dy_1_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * y_size), device_free};
+    auto dy_2_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * y_size), device_free};
     auto d_alpha_managed = hipsparse_unique_ptr{device_malloc(sizeof(T)), device_free};
     auto d_beta_managed  = hipsparse_unique_ptr{device_malloc(sizeof(T)), device_free};
 
@@ -246,9 +251,9 @@ void testing_spmv_csr(Arguments argus)
         hipMemcpy(dptr, hcsr_row_ptr.data(), sizeof(I) * (m + 1), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dcol, hcol_ind.data(), sizeof(J) * nnz, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dval, hval.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dx, hx.data(), sizeof(T) * n, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dy_1, hy_1.data(), sizeof(T) * m, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dy_2, hy_2.data(), sizeof(T) * m, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dx, hx.data(), sizeof(T) * x_size, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dy_1, hy_1.data(), sizeof(T) * y_size, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dy_2, hy_2.data(), sizeof(T) * y_size, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_alpha, &h_alpha, sizeof(T), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
@@ -259,9 +264,9 @@ void testing_spmv_csr(Arguments argus)
 
     // Create dense vectors
     hipsparseDnVecDescr_t x, y1, y2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, n, dx, typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y1, m, dy_1, typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y2, m, dy_2, typeT));
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, x_size, dx, typeT));
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y1, y_size, dy_1, typeT));
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y2, y_size, dy_2, typeT));
 
     // Query SpMV buffer
     size_t bufferSize;
@@ -288,8 +293,8 @@ void testing_spmv_csr(Arguments argus)
             hipsparseSpMV(handle, transA, d_alpha, A, x, d_beta, y2, typeT, alg, buffer));
 
         // copy output from device to CPU
-        CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(T) * m, hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * m, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(T) * y_size, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * y_size, hipMemcpyDeviceToHost));
 
         // Host SpMV
         host_csrmv(transA,
@@ -305,8 +310,8 @@ void testing_spmv_csr(Arguments argus)
                    hy_gold.data(),
                    idx_base);
 
-        unit_check_near(1, m, 1, hy_gold.data(), hy_1.data());
-        unit_check_near(1, m, 1, hy_gold.data(), hy_2.data());
+        unit_check_near(1, y_size, 1, hy_gold.data(), hy_1.data());
+        unit_check_near(1, y_size, 1, hy_gold.data(), hy_2.data());
     }
 
     if(argus.timing)

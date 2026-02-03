@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,6 +44,12 @@ namespace hiptensor
         static constexpr auto value = hiptensorOperator_t::HIPTENSOR_OP_IDENTITY;
     };
 
+    template <>
+    struct ElementWiseOperatorType<ck::tensor_operation::element_wise::HiptensorUnaryOp>
+    {
+        static constexpr auto value = hiptensorOperator_t::HIPTENSOR_OP_UNKNOWN;
+    };
+
     // Specialize overrides for runtime ContractionOperatorType
     template <>
     struct ContractionOperatorType<ck::tensor_operation::element_wise::Scale>
@@ -69,5 +75,10 @@ namespace hiptensor
         static constexpr auto value = ContractionOpId_t::BILINEAR_COMPLEX;
     };
 
-} // namespace hiptensor
+    template <>
+    struct ContractionOperatorType<ck::tensor_operation::element_wise::BilinearUnary>
+    {
+        static constexpr auto value = ContractionOpId_t::BILINEAR_UNARY;
+    };
 
+} // namespace hiptensor

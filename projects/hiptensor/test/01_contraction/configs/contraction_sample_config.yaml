@@ -48,7 +48,7 @@ Operators:
     # HIPTENSOR_OP_UNKNOWN - Reserved for internal use
 
   # Example:
-  - HIPTENSOR_OP_IDENTITY
+  - [HIPTENSOR_OP_IDENTITY, HIPTENSOR_OP_IDENTITY, HIPTENSOR_OP_IDENTITY]
 Worksize Prefs:
   # Workspace size selection:
     # HIPTENSOR_WORKSPACE_MIN - At least one algorithm will be available

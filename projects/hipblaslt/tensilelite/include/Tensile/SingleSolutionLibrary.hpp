@@ -27,6 +27,7 @@
 #pragma once
 
 #include <Tensile/Debug.hpp>
+#include <Tensile/PredicateDebugger.hpp>
 
 namespace TensileLite
 {
@@ -95,17 +96,20 @@ namespace TensileLite
                 Task task(hardware, problem, *(solution));
                 if(debug)
                 {
+                    PredicateDebugger::printHeader(std::cout, "Single: " + solution->name());
                     solution->hardwarePredicate->debugEval(hardware, std::cout);
-                    std::cout << std::endl;
                     solution->problemPredicate->debugEval(problem, std::cout);
-                    std::cout << std::endl;
                     solution->taskPredicate->debugEval(task, std::cout);
-                    std::cout << std::endl;
                 }
 
-                if((*solution->hardwarePredicate)(hardware)
-                   && softwarePredicate(
-                       SolutionLibrarySearchType::DEFAULT, task, hardware, (*solution), problem))
+                bool hwMatch = (*solution->hardwarePredicate)(hardware);
+                bool swMatch = softwarePredicate(
+                    SolutionLibrarySearchType::DEFAULT, task, hardware, (*solution), problem);
+
+                if(debug)
+                    PredicateDebugger::printFooter(std::cout, hwMatch && swMatch);
+
+                if(hwMatch && swMatch)
                     return solution;
             }
             else if(debug)
@@ -127,8 +131,9 @@ namespace TensileLite
             {
                 if(debug)
                 {
+                    PredicateDebugger::printHeader(std::cout, "Single (Grouped): " + solution->name());
                     solution->hardwarePredicate->debugEval(hardware, std::cout);
-                    for(int idx = 0; idx < problems.size(); idx++)
+                    for(size_t idx = 0; idx < problems.size(); idx++)
                     {
                         auto problem = problems[idx];
                         Task task(hardware, problem, *(solution));
@@ -138,18 +143,26 @@ namespace TensileLite
                 }
 
                 if(!(*solution->hardwarePredicate)(hardware))
+                {
+                    if(debug)
+                        PredicateDebugger::printFooter(std::cout, false);
                     return std::shared_ptr<MySolution>();
+                }
 
                 size_t ws = (*solution).requiredWorkspaceSizeGroupedGemm(problems, hardware);
 
-                for(int idx = 0; idx < problems.size(); idx++)
+                for(size_t idx = 0; idx < problems.size(); idx++)
                 {
                     auto problem = problems[idx];
                     Task task(hardware, problem, *(solution));
                     problem.setWorkspaceSizeGroupedGemm(ws);
                     problem.setGroupedGemmCount(problems.size());
                     if(!(*solution->problemPredicate)(problem) || !(*solution->taskPredicate)(task))
+                    {
+                        if(debug)
+                            PredicateDebugger::printFooter(std::cout, false);
                         return std::shared_ptr<MySolution>();
+                    }
                 }
 
                 if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
@@ -158,11 +171,13 @@ namespace TensileLite
                         = solution->requiredHostSizeGroupedGemmSingle(problems[0], hardware);
                 }
 
+                if(debug)
+                    PredicateDebugger::printFooter(std::cout, true);
                 return solution;
             }
             else if(debug)
             {
-                std::cout << " (empty library)";
+                std::cout << " (empty library)" << std::endl;
             }
 
             return std::shared_ptr<MySolution>();
@@ -182,6 +197,7 @@ namespace TensileLite
                 Task task(hardware, problem, (*solution));
                 if(debug)
                 {
+                    PredicateDebugger::printHeader(std::cout, "Single: " + solution->name());
                     solution->hardwarePredicate->debugEval(hardware, std::cout);
                     if(searchType == SolutionLibrarySearchType::DEFAULT)
                     {
@@ -193,18 +209,13 @@ namespace TensileLite
                 if((*solution->hardwarePredicate)(hardware)
                    && softwarePredicate(searchType, task, hardware, (*solution), problem))
                     useSolution = true;
+
+                if(debug)
+                    PredicateDebugger::printFooter(std::cout, useSolution);
             }
             else if(debug)
             {
-                std::cout << " (empty library)";
-            }
-
-            if(debug)
-            {
-                if(useSolution)
-                    std::cout << " (match)";
-                else
-                    std::cout << " (no match)";
+                std::cout << " (empty library)" << std::endl;
             }
 
             if(useSolution)
@@ -224,6 +235,9 @@ namespace TensileLite
             bool useSolution = false;
             if(solution)
             {
+                if(debug)
+                    PredicateDebugger::printHeader(std::cout, "Single (Grouped): " + solution->name());
+
                 if((*solution->hardwarePredicate)(hardware))
                     useSolution = true;
 
@@ -231,7 +245,7 @@ namespace TensileLite
                 {
                     size_t ws = (*solution).requiredWorkspaceSizeGroupedGemm(problems, hardware);
 
-                    for(int idx = 0; idx < problems.size(); idx++)
+                    for(size_t idx = 0; idx < problems.size(); idx++)
                     {
                         auto problem = problems[idx];
                         Task task(hardware, problem, (*solution));
@@ -252,26 +266,19 @@ namespace TensileLite
                 {
                     solution->hardwarePredicate->debugEval(hardware, std::cout);
                     if(searchType == SolutionLibrarySearchType::DEFAULT)
-                        for(int idx = 0; idx < problems.size(); idx++)
+                        for(size_t idx = 0; idx < problems.size(); idx++)
                         {
                             auto problem = problems[idx];
                             Task task(hardware, problem, (*solution));
                             solution->problemPredicate->debugEval(problem, std::cout);
                             solution->taskPredicate->debugEval(task, std::cout);
                         }
+                    PredicateDebugger::printFooter(std::cout, useSolution);
                 }
             }
             else if(debug)
             {
-                std::cout << " (empty library)";
-            }
-
-            if(debug)
-            {
-                if(useSolution)
-                    std::cout << " (match)";
-                else
-                    std::cout << " (no match)";
+                std::cout << " (empty library)" << std::endl;
             }
 
             if(useSolution)
