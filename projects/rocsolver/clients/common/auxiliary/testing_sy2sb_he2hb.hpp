@@ -295,7 +295,7 @@ void testing_sy2sb_he2hb(Arguments& argus)
     rocblas_int nb = argus.get<rocblas_int>("nb", kd);
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
     // rocSolver 2nd stage needs 3*kd. LAPACK needs kd+1.
-    // todo: get from argus?
+    // todo: get ldab from argus?
     rocblas_int ldab = 3*kd;  //kd + 1;
 
     rocblas_int hot_calls = argus.iters;

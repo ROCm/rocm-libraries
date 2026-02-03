@@ -25,6 +25,8 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+// todo: is there a reason this file is indented 1 space?
+
  #include "common/auxiliary/testing_sy2sb_he2hb.hpp"
 
  using ::testing::Combine;
@@ -131,7 +133,9 @@ const vector<vector<int>> large_blk_range = {
      run_tests<double>();
  }
 
-/* TEST_P(SY2SB_HE2HB, __float_complex)
+// todo: complex tests
+/*
+ TEST_P(SY2SB_HE2HB, __float_complex)
  {
      run_tests<rocblas_float_complex>();
  }
@@ -139,7 +143,8 @@ const vector<vector<int>> large_blk_range = {
  TEST_P(SY2SB_HE2HB, __double_complex)
  {
      run_tests<rocblas_double_complex>();
- }*/
+ }
+ */
 
  INSTANTIATE_TEST_SUITE_P(daily_lapack,
                           SY2SB_HE2HB,
