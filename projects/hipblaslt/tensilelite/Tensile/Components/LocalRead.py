@@ -347,8 +347,7 @@ class LocalReadMFMA(LocalRead):
         return v0, v1, v2, v3
 
     # do transpose with v_swap
-    def transposeLRVregs(self, kernel, tc, bufferIdx, iui, writer, lrvwTile, totalRegs, subTileIdx):
-        module = Module()
+    def transposeLRVregs(self, module, kernel, tc, bufferIdx, iui, writer, lrvwTile, totalRegs, subTileIdx):
         start = subTileIdx * totalRegs
         last = start + totalRegs - 1
         if lrvwTile == 1:
@@ -365,7 +364,6 @@ class LocalReadMFMA(LocalRead):
             module.add(VSwapB32(dst=vDst, src=vSrc, comment="swap %d and %d"%(newIdx, idx)))
             done.append(idx)
             done.append(newIdx)
-        return module
 
     # 8 registers were read in fp32. Write to 2 of 4 registers with high bits
     # Input: vgprValuA/B_X/T_ i ... i + 7 -> FP32
@@ -586,7 +584,7 @@ class LocalReadMFMA(LocalRead):
 
                                 if (valuiIdx % swapBlockSizeSub) == 0 and needTransposeCode:
                                     # generate Tranpose code (with v_swap) for wider local read + needTransposeCode
-                                    packPre.add(self.transposeLRVregs(kernel, tc, bufferIdx, iui, writer, lrvwTile, swapBlockSizeSub, subTileIdx))
+                                    self.transposeLRVregs(kernel, packPre, tc, bufferIdx, iui, writer, lrvwTile, swapBlockSizeSub, subTileIdx)
                                 # For every 8 read vgprs of fp32, pack high bits of bf16 into first 4 vgprs
                                 commentForSchedule1 = "__TF32_1_" + tc + "_%d"%(baseValuiIdx//8)
                                 if valuiIdx % 8 == 0:

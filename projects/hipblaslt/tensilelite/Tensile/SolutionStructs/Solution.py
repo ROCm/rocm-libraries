@@ -422,6 +422,20 @@ class Solution(collections.abc.Mapping):
       state["reorderGRInstForDTVA"] = False
       state["reorderGRInstForDTVB"] = False
 
+    # F32XEmulation related initialization
+    state["UseDot2F32XEmulation"] = False
+    state["UseMFMAF32XEmulation"] = False
+    state["UseDirect32XEmulation"] = False # directly local read into temporary vgpr
+    #ignore the F32 xDL MathOp by default.
+    #enable F32 xDL MathOp only when the input type is f32.
+    if state["UseF32XEmulation"]:
+      state["UseF32XEmulation"] = True
+      state["UseDirect32XEmulation"] = True
+      # select conversion logic for X3
+      # (1) UseMFMAF32XEmulation = True
+      # (2) UseDot2F32XEmulation = True (set (1) to False)
+      # (3) cvt + sub  (set both (1) and (2) False)
+      state["UseMFMAF32XEmulation"] = True # enable MFMA version by default
     state["UsePLRPack"] = False
     state["MfmaInitCVgprs"] = False
 
@@ -938,9 +952,6 @@ class Solution(collections.abc.Mapping):
     # the keys "EnableF32XdlMathOp" and "F32XdlMathOp".
     state["EnableF32XdlMathOp"] = False
     state["UseF32XEmulation"] = False # enable emulation for missing hardware support
-    state["UseDot2F32XEmulation"] = False
-    state["UseMFMAF32XEmulation"] = False
-    state["UseDirect32XEmulation"] = False # directly local read into temporary vgpr
     #ignore the F32 xDL MathOp by default.
     #enable F32 xDL MathOp only when the input type is f32.
     if "F32XdlMathOp" in state["ProblemType"] \
@@ -949,12 +960,6 @@ class Solution(collections.abc.Mapping):
       state["EnableF32XdlMathOp"] = True
       if isaInfoMap[isa].archCaps["HasF32XEmulation"]:
         state["UseF32XEmulation"] = True
-        state["UseDirect32XEmulation"] = True
-        # select conversion logic for X3
-        # (1) UseMFMAF32XEmulation = True
-        # (2) UseDot2F32XEmulation = True (set (1) to False)
-        # (3) cvt + sub  (set both (1) and (2) False)
-        state["UseMFMAF32XEmulation"] = True # enable MFMA version by default
 
 
     # initial info to be exported for solution prediction
