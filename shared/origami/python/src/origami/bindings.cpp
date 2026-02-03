@@ -129,17 +129,40 @@ NB_MODULE(origami, m) {
       .def_rw("a_mx_block_size", &origami::problem_t::a_mx_block_size)
       .def_rw("b_mx_block_size", &origami::problem_t::b_mx_block_size);
 
+  nanobind::class_<origami::context_t>(m, "context_t")
+      .def(nanobind::init<>())
+      .def(nanobind::init<const origami::problem_t&,
+                          const origami::hardware_t&,
+                          const origami::config_t&>())
+      .def_rw("grid_m", &origami::context_t::grid_m)
+      .def_rw("grid_n", &origami::context_t::grid_n)
+      .def_rw("num_tiles", &origami::context_t::num_tiles)
+      .def_rw("reduction_strategy", &origami::context_t::reduction_strategy)
+      .def_rw("sk_grid", &origami::context_t::sk_grid)
+      .def_rw("splitting_factor", &origami::context_t::splitting_factor)
+      .def_rw("num_wgs", &origami::context_t::num_wgs)
+      .def_rw("num_timesteps", &origami::context_t::num_timesteps)
+      .def_rw("active_cus", &origami::context_t::active_cus)
+      .def_rw("mem_bw_limited", &origami::context_t::mem_bw_limited)
+      .def_rw("tile_elements", &origami::context_t::tile_elements)
+      .def_rw("output_tile_bytes", &origami::context_t::output_tile_bytes)
+      .def_rw("wgm", &origami::context_t::wgm)
+      .def_rw("mall_tiles_m", &origami::context_t::mall_tiles_m)
+      .def_rw("mall_tiles_n", &origami::context_t::mall_tiles_n)
+      .def_rw("l2_tiles_m", &origami::context_t::l2_tiles_m)
+      .def_rw("l2_tiles_n", &origami::context_t::l2_tiles_n);
+
   nanobind::class_<hardware_t>(m, "hardware_t")
       .def(nanobind::init<hardware_t::architecture_t,
-                          size_t,  // N_CU
-                          size_t,  // lds_capacity
-                          size_t,  // NUM_XCD
-                          double,  // mem1_perf_ratio
-                          double,  // mem2_perf_ratio
-                          double,  // mem3_perf_ratio
-                          size_t,  // L2_capacity
-                          double,  // compute_clock_ghz
-                          size_t,  // parallel_mi_cu
+                          size_t,                                 // N_CU
+                          size_t,                                 // lds_capacity
+                          size_t,                                 // NUM_XCD
+                          double,                                 // mem1_perf_ratio
+                          double,                                 // mem2_perf_ratio
+                          double,                                 // mem3_perf_ratio
+                          size_t,                                 // L2_capacity
+                          double,                                 // compute_clock_ghz
+                          size_t,                                 // parallel_mi_cu
                           std::tuple<double, double, double>>())  // mem_bw_per_wg_coefficients
       .def("print", &hardware_t::print)
       .def("get_valid_matrix_instructions", &hardware_t::get_valid_matrix_instructions,
@@ -204,28 +227,100 @@ NB_MODULE(origami, m) {
   m.def("compute_mt_compute_latency",
         &origami::compute_mt_compute_latency,
         "Compute the latency to process a single macro-tile");
-  m.def("check_lds_capacity",
-        &origami::check_lds_capacity,
-        "Check if MT fits in LDS");
-  m.def("estimate_l2_hit",
-        &origami::estimate_l2_hit,
-        "Estimate L2 hit rate");
-  m.def("estimate_mall_hit",
-        &origami::estimate_mall_hit,
-        "Estimate MALL hit rate");
-  m.def("compute_memory_latency",
-        &origami::compute_memory_latency,
-        "Compute memory latency per macro tile");
-  m.def("compute_tile_latency",
-        &origami::compute_tile_latency,
-        "Compute latency to compute a K-complete tile");
-  m.def("compute_timestep_latency",
-        &origami::compute_timestep_latency,
-        "Compute latency per K-complete MT wave");
+  m.def("check_lds_capacity", &origami::check_lds_capacity, "Check if MT fits in LDS");
+  m.def(
+      "estimate_l2_hit",
+      [](const origami::problem_t& problem,
+         const origami::hardware_t& hardware,
+         const origami::config_t& config) {
+        origami::context_t context(problem, hardware, config);
+        return origami::estimate_l2_hit(problem, hardware, config, context);
+      },
+      "Estimate L2 hit rate");
+  m.def(
+      "estimate_l2_hit",
+      [](const origami::problem_t& problem,
+         const origami::hardware_t& hardware,
+         const origami::config_t& config,
+         const origami::context_t& context) {
+        return origami::estimate_l2_hit(problem, hardware, config, context);
+      },
+      "Estimate L2 hit rate with context");
+  m.def(
+      "estimate_mall_hit",
+      [](const origami::problem_t& problem,
+         const origami::hardware_t& hardware,
+         const origami::config_t& config) {
+        origami::context_t context(problem, hardware, config);
+        return origami::estimate_mall_hit(problem, hardware, config, context);
+      },
+      "Estimate MALL hit rate");
+  m.def(
+      "estimate_mall_hit",
+      [](const origami::problem_t& problem,
+         const origami::hardware_t& hardware,
+         const origami::config_t& config,
+         const origami::context_t& context) {
+        return origami::estimate_mall_hit(problem, hardware, config, context);
+      },
+      "Estimate MALL hit rate with context");
+  m.def(
+      "compute_memory_latency",
+      [](const origami::problem_t& problem,
+         const origami::hardware_t& hardware,
+         const origami::config_t& config) {
+        origami::context_t context(problem, hardware, config);
+        return origami::compute_memory_latency(problem, hardware, config, context);
+      },
+      "Compute memory latency per macro tile");
+  m.def(
+      "compute_memory_latency",
+      [](const origami::problem_t& problem,
+         const origami::hardware_t& hardware,
+         const origami::config_t& config,
+         const origami::context_t& context) {
+        return origami::compute_memory_latency(problem, hardware, config, context);
+      },
+      "Compute memory latency per macro tile with context");
+  m.def(
+      "compute_tile_latency",
+      [](const origami::problem_t& problem,
+         const origami::hardware_t& hardware,
+         const origami::config_t& config) {
+        origami::context_t context(problem, hardware, config);
+        return origami::compute_tile_latency(problem, hardware, config, context);
+      },
+      "Compute latency to compute a K-complete tile");
+  m.def(
+      "compute_tile_latency",
+      [](const origami::problem_t& problem,
+         const origami::hardware_t& hardware,
+         const origami::config_t& config,
+         const origami::context_t& context) {
+        return origami::compute_tile_latency(problem, hardware, config, context);
+      },
+      "Compute latency to compute a K-complete tile with context");
+  m.def(
+      "compute_timestep_latency",
+      [](const origami::problem_t& problem,
+         const origami::hardware_t& hardware,
+         const origami::config_t& config) {
+        origami::context_t context(problem, hardware, config);
+        return origami::compute_timestep_latency(problem, hardware, config, context);
+      },
+      "Compute latency per K-complete MT wave");
+  m.def(
+      "compute_timestep_latency",
+      [](const origami::problem_t& problem,
+         const origami::hardware_t& hardware,
+         const origami::config_t& config,
+         const origami::context_t& context) {
+        return origami::compute_timestep_latency(problem, hardware, config, context);
+      },
+      "Compute latency per K-complete MT wave with context");
 
   // StreamK functions
   m.def("compute_number_of_output_tiles",
         &origami::streamk::compute_number_of_output_tiles,
         "Compute number of output tiles");
-
 }
