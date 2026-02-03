@@ -429,12 +429,6 @@ apply_omp_settings(rocsparse-test)
 # Target link libraries
 target_link_libraries(rocsparse-test PRIVATE GTest::gtest roc::rocsparse hip::host hip::device ${ROCSPARSE_CLIENT_LIBS})
 
-# Code coverage support for test executable (needed for header-only inline functions)
-if(BUILD_CODE_COVERAGE)
-  target_compile_options(rocsparse-test PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-  target_link_libraries(rocsparse-test PRIVATE -fprofile-instr-generate)
-endif()
-
 if (NOT WIN32)
   if (BUILD_WITH_ROCTX)
     if(ROCTRACER_INCLUDE_DIR AND ROCTX_LIBRARY)

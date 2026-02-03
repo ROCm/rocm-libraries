@@ -417,7 +417,7 @@ if(BUILD_CODE_COVERAGE)
   else()
     message(STATUS "genhtml not found - using llvm-cov show (exclusion markers not reflected in HTML)")
     set(COVERAGE_HTML_COMMAND
-      COMMAND ${LLVM_COV} show -object ./library/librocsparse.so -object ./clients/staging/rocsparse-test -instr-profile=./coverage-report/rocsparse.profdata -format=html -output-dir=coverage-report
+      COMMAND ${LLVM_COV} show -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata -format=html -output-dir=coverage-report
     )
   endif()
 
@@ -425,8 +425,8 @@ if(BUILD_CODE_COVERAGE)
     coverage
     DEPENDS coverage_analysis
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocsparse-coverage_*.profraw -o ./coverage-report/rocsparse.profdata
-    COMMAND ${LLVM_COV} report -object ./library/librocsparse.so -object ./clients/staging/rocsparse-test -instr-profile=./coverage-report/rocsparse.profdata
-    COMMAND ${LLVM_COV} export -object ./library/librocsparse.so -object ./clients/staging/rocsparse-test -instr-profile=./coverage-report/rocsparse.profdata -format=lcov > ./coverage-report/coverage-raw.info
+    COMMAND ${LLVM_COV} report -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata
+    COMMAND ${LLVM_COV} export -object ./library/librocsparse.so -instr-profile=./coverage-report/rocsparse.profdata -format=lcov > ./coverage-report/coverage-raw.info
     ${COVERAGE_FILTER_COMMAND}
     ${COVERAGE_HTML_COMMAND}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
