@@ -86,7 +86,7 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
     const auto* bs_base = bias + cidx;
 
     // move across the sections of the image mini_batch stack
-    for(unsigned bid = ygidy; bid * MIO_BN_GRP1 < in_cstride; bid += gridDim.y)
+    for(unsigned bid = ygid; bid * MIO_BN_GRP1 < in_cstride; bid += gridDim.y)
     {
         const auto blockOffset = bid * MIO_BN_GRP1;
         const auto idx         = blockOffset + threadIdx.y;
