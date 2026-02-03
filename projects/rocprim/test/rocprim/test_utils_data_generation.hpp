@@ -497,8 +497,8 @@ auto generate_key_input(KeyIter keys_input, size_t size, engine_type& rng_engine
     using key_type = typename std::iterator_traits<KeyIter>::value_type;
     generate_random_data_n(keys_input,
                            size,
-                           static_cast<key_type>(-1000),
-                           static_cast<key_type>(+1000),
+                           rocprim::numeric_limits<key_type>::min(),
+                           rocprim::numeric_limits<key_type>::max(),
                            rng_engine);
     add_special_values(keys_input, size, rng_engine);
 }
