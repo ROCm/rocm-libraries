@@ -2,9 +2,12 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <miopen/miopen.h>
 
 #include "HipdnnEnginePluginHandle.hpp"
@@ -36,6 +39,39 @@ protected:
         {
             EXPECT_EQ(miopenDestroy(_handle.miopenHandle), miopenStatusSuccess);
         }
+    }
+
+    void executePlan(const miopen_plugin::IPlan& plan, const hipdnn_plugin_sdk::IGraph& graph)
+    {
+        size_t workspaceSize = plan.getWorkspaceSize(_handle);
+        hipdnn_data_sdk::utilities::Workspace workspace(workspaceSize);
+
+        std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers;
+        std::vector<std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> tensors;
+
+        const auto& tensorMap = graph.getTensorMap();
+        for(const auto& [uid, tensorAttrPtr] : tensorMap)
+        {
+            if(!tensorAttrPtr->virtual_())
+            {
+                auto dims = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(
+                    tensorAttrPtr->dims());
+                auto strides = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(
+                    tensorAttrPtr->strides());
+
+                auto tensor = hipdnn_data_sdk::utilities::createTensor(tensorAttrPtr->data_type(),
+                                                                       dims,
+                                                                       strides);
+
+                deviceBuffers.push_back({tensorAttrPtr->uid(), tensor->rawDeviceData()});
+                tensors.push_back(std::move(tensor));
+            }
+        }
+
+        EXPECT_NO_THROW(plan.execute(_handle,
+                                     deviceBuffers.data(),
+                                     static_cast<uint32_t>(deviceBuffers.size()),
+                                     workspace.get()));
     }
 
     HipdnnEnginePluginHandle _handle;
@@ -259,170 +295,62 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeWrw)
     EXPECT_LE(actualWorkspace, range.max);
 }
 
-TEST_F(TestGpuMiopenConvPlanBuilder, WorkspaceSizeRespectsMinLimitFwd)
+TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitFwd)
 {
-    // Note: This test requires a graph for which MIOpen has multiple solutions
-    // with at least two different workspace sizes. Otherwise, we cannot verify
-    // that the workspace limit is enforced.
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
-    ASSERT_NE(range.min, range.max)
-        << "No workspace size range available for testing";
+    ASSERT_NE(range.min, range.max) << "No workspace size range available for testing";
 
-    // We use a special debug mode to select a solution that requires maximum workspace
     HipdnnEnginePluginExecutionContext ctx1;
-    ctx1.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::FORCE_MAX_WORKSPACE);
+    ctx1.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
     _planBuilder.buildPlan(_handle, graph, ctx1);
-    size_t workspaceSize1 = ctx1.plan().getWorkspaceSize(_handle);
-    ASSERT_EQ(workspaceSize1, range.max);
+    executePlan(ctx1.plan(), graph);
 
-    // Set workspace limit to minimum (same debug mode)
     HipdnnEnginePluginExecutionContext ctx2;
-    ctx2.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::FORCE_MAX_WORKSPACE);
+    ctx2.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
     ctx2.setWorkspaceSizeLimit(range.min);
     _planBuilder.buildPlan(_handle, graph, ctx2);
-    size_t workspaceSize2 = ctx2.plan().getWorkspaceSize(_handle);
-    EXPECT_EQ(workspaceSize2, range.min);
+    executePlan(ctx2.plan(), graph);
 }
 
-TEST_F(TestGpuMiopenConvPlanBuilder, WorkspaceSizeRespectsMaxLimitFwd)
+TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitBwd)
 {
-    // Note: This test requires a graph for which MIOpen has multiple solutions
-    // with at least two different workspace sizes. Otherwise, we cannot verify
-    // that the workspace limit is enforced.
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-
-    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
-    ASSERT_NE(range.min, range.max)
-        << "No workspace size range available for testing";
-
-    // We use a special debug mode to select a solution that requires minimum workspace
-    HipdnnEnginePluginExecutionContext ctx1;
-    ctx1.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::FORCE_MIN_WORKSPACE);
-    _planBuilder.buildPlan(_handle, graph, ctx1);
-    size_t workspaceSize1 = ctx1.plan().getWorkspaceSize(_handle);
-    ASSERT_EQ(workspaceSize1, range.min);
-
-    // Set workspace limit to maximum (same debug mode)
-    HipdnnEnginePluginExecutionContext ctx2;
-    ctx2.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::FORCE_MIN_WORKSPACE);
-    ctx2.setWorkspaceSizeLimit(range.max);
-    _planBuilder.buildPlan(_handle, graph, ctx2);
-    size_t workspaceSize2 = ctx2.plan().getWorkspaceSize(_handle);
-    EXPECT_EQ(workspaceSize2, range.max);
-}
-
-TEST_F(TestGpuMiopenConvPlanBuilder, WorkspaceSizeRespectsMinLimitBwd)
-{
-    // Note: This test requires a graph for which MIOpen has multiple solutions
-    // with at least two different workspace sizes. Otherwise, we cannot verify
-    // that the workspace limit is enforced.
     auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
-    ASSERT_NE(range.min, range.max)
-        << "No workspace size range available for testing";
+    ASSERT_NE(range.min, range.max) << "No workspace size range available for testing";
 
-    // We use a special debug mode to select a solution that requires maximum workspace
     HipdnnEnginePluginExecutionContext ctx1;
-    ctx1.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::FORCE_MAX_WORKSPACE);
+    ctx1.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
     _planBuilder.buildPlan(_handle, graph, ctx1);
-    size_t workspaceSize1 = ctx1.plan().getWorkspaceSize(_handle);
-    ASSERT_EQ(workspaceSize1, range.max);
+    executePlan(ctx1.plan(), graph);
 
-    // Set workspace limit to minimum (same debug mode)
     HipdnnEnginePluginExecutionContext ctx2;
-    ctx2.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::FORCE_MAX_WORKSPACE);
+    ctx2.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
     ctx2.setWorkspaceSizeLimit(range.min);
     _planBuilder.buildPlan(_handle, graph, ctx2);
-    size_t workspaceSize2 = ctx2.plan().getWorkspaceSize(_handle);
-    EXPECT_EQ(workspaceSize2, range.min);
+    executePlan(ctx2.plan(), graph);
 }
 
-TEST_F(TestGpuMiopenConvPlanBuilder, WorkspaceSizeRespectsMaxLimitBwd)
+TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitWrw)
 {
-    // Note: This test requires a graph for which MIOpen has multiple solutions
-    // with at least two different workspace sizes. Otherwise, we cannot verify
-    // that the workspace limit is enforced.
-    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-
-    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
-    ASSERT_NE(range.min, range.max)
-        << "No workspace size range available for testing";
-
-    // We use a special debug mode to select a solution that requires minimum workspace
-    HipdnnEnginePluginExecutionContext ctx1;
-    ctx1.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::FORCE_MIN_WORKSPACE);
-    _planBuilder.buildPlan(_handle, graph, ctx1);
-    size_t workspaceSize1 = ctx1.plan().getWorkspaceSize(_handle);
-    ASSERT_EQ(workspaceSize1, range.min);
-
-    // Set workspace limit to maximum (same debug mode)
-    HipdnnEnginePluginExecutionContext ctx2;
-    ctx2.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::FORCE_MIN_WORKSPACE);
-    ctx2.setWorkspaceSizeLimit(range.max);
-    _planBuilder.buildPlan(_handle, graph, ctx2);
-    size_t workspaceSize2 = ctx2.plan().getWorkspaceSize(_handle);
-    EXPECT_EQ(workspaceSize2, range.max);
-}
-
-TEST_F(TestGpuMiopenConvPlanBuilder, WorkspaceSizeRespectsMinLimitWrw)
-{
-    // Note: This test requires a graph for which MIOpen has multiple solutions
-    // with at least two different workspace sizes. Otherwise, we cannot verify
-    // that the workspace limit is enforced.
     auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
-    ASSERT_NE(range.min, range.max)
-        << "No workspace size range available for testing";
+    ASSERT_NE(range.min, range.max) << "No workspace size range available for testing";
 
-    // We use a special debug mode to select a solution that requires maximum workspace
     HipdnnEnginePluginExecutionContext ctx1;
-    ctx1.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::FORCE_MAX_WORKSPACE);
+    ctx1.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
     _planBuilder.buildPlan(_handle, graph, ctx1);
-    size_t workspaceSize1 = ctx1.plan().getWorkspaceSize(_handle);
-    ASSERT_EQ(workspaceSize1, range.max);
+    executePlan(ctx1.plan(), graph);
 
-    // Set workspace limit to minimum (same debug mode)
     HipdnnEnginePluginExecutionContext ctx2;
-    ctx2.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::FORCE_MAX_WORKSPACE);
+    ctx2.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
     ctx2.setWorkspaceSizeLimit(range.min);
     _planBuilder.buildPlan(_handle, graph, ctx2);
-    size_t workspaceSize2 = ctx2.plan().getWorkspaceSize(_handle);
-    EXPECT_EQ(workspaceSize2, range.min);
-}
-
-TEST_F(TestGpuMiopenConvPlanBuilder, WorkspaceSizeRespectsMaxLimitWrw)
-{
-    // Note: This test requires a graph for which MIOpen has multiple solutions
-    // with at least two different workspace sizes. Otherwise, we cannot verify
-    // that the workspace limit is enforced.
-    auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-
-    auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
-    ASSERT_NE(range.min, range.max)
-        << "No workspace size range available for testing";
-
-    // We use a special debug mode to select a solution that requires minimum workspace
-    HipdnnEnginePluginExecutionContext ctx1;
-    ctx1.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::FORCE_MIN_WORKSPACE);
-    _planBuilder.buildPlan(_handle, graph, ctx1);
-    size_t workspaceSize1 = ctx1.plan().getWorkspaceSize(_handle);
-    ASSERT_EQ(workspaceSize1, range.min);
-
-    // Set workspace limit to maximum (same debug mode)
-    HipdnnEnginePluginExecutionContext ctx2;
-    ctx2.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::FORCE_MIN_WORKSPACE);
-    ctx2.setWorkspaceSizeLimit(range.max);
-    _planBuilder.buildPlan(_handle, graph, ctx2);
-    size_t workspaceSize2 = ctx2.plan().getWorkspaceSize(_handle);
-    EXPECT_EQ(workspaceSize2, range.max);
+    executePlan(ctx2.plan(), graph);
 }

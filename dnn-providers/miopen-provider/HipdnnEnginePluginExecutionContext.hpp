@@ -21,9 +21,8 @@ struct HipdnnEnginePluginExecutionContext
 public:
     enum class DebugMode
     {
-        NONE,                  // Debug mode disabled (default)
-        FORCE_MIN_WORKSPACE,   // Force selection of minimum workspace size solution
-        FORCE_MAX_WORKSPACE    // Force selection of maximum workspace size solution
+        NONE,                             // Debug mode disabled (default)
+        LOG_ALL_FOUND_PLAN_ALGORITHMS     // Log all found plan algorithms
     };
 
     virtual ~HipdnnEnginePluginExecutionContext() = default;

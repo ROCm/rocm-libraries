@@ -123,7 +123,6 @@ add_library(
     engines/plans/MiopenConvPlanBuilder.cpp
     engines/plans/MiopenConvWrwPlan.cpp
     engines/plans/MiopenPlanBuilderBase.cpp
-    engines/plans/MiopenPlanCommon.cpp
     EngineManager.cpp
     MiopenActivationDescriptor.cpp
     MiopenContainer.cpp

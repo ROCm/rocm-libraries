@@ -1,17 +1,14 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <array>
-
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
-#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvFwdPlan.hpp"
-#include "MiopenPlanCommon.hpp"
 #include "MiopenUtils.hpp"
 
 namespace miopen_plugin
@@ -72,27 +69,23 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnEnginePluginHandle& handle,
                          const HipdnnEnginePluginExecutionContext& executionContext)
     : _params(std::move(params))
     , _benchmarkingEnabled(executionContext.benchmarkingEnabled())
+    , _debugMode(executionContext.debugMode())
 {
-    // Set tuning policy based on benchmarking flag - RAII ensures restoration
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _benchmarkingEnabled);
-
-    // MIOpen Find 2.0 API
-    miopenProblem_t problem;
-    THROW_ON_MIOPEN_FAILURE(miopenCreateConvProblem(
-        &problem, _params.conv().convDescriptor(), miopenProblemDirectionForward));
-    hipdnn_data_sdk::utilities::ScopedResource problemRes(
-        problem, [](miopenProblem_t p) { std::ignore = miopenDestroyProblem(p); });
-
-    THROW_ON_MIOPEN_FAILURE(miopenSetProblemTensorDescriptor(
-        problem, miopenTensorConvolutionX, _params.x().tensorDescriptor()));
-    THROW_ON_MIOPEN_FAILURE(miopenSetProblemTensorDescriptor(
-        problem, miopenTensorConvolutionW, _params.w().tensorDescriptor()));
-    THROW_ON_MIOPEN_FAILURE(miopenSetProblemTensorDescriptor(
-        problem, miopenTensorConvolutionY, _params.y().tensorDescriptor()));
-
-    _solution = find20Solution(handle.miopenHandle, problem, executionContext);
-
-    THROW_ON_MIOPEN_FAILURE(miopenGetSolutionWorkspaceSize(_solution.get(), &_workspaceSize));
+    // Determine initial workspace size
+    if(executionContext.workspaceSizeLimit().has_value())
+    {
+        _workspaceSize = executionContext.workspaceSizeLimit().value();
+    }
+    else
+    {
+        THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetWorkSpaceSize(
+            handle.miopenHandle,
+            _params.w().tensorDescriptor(),
+            _params.x().tensorDescriptor(),
+            _params.conv().convDescriptor(),
+            _params.y().tensorDescriptor(),
+            &_workspaceSize));
+    }
 }
 
 size_t ConvFwdPlan::getWorkspaceSize([[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
@@ -105,21 +98,12 @@ void ConvFwdPlan::execute(const HipdnnEnginePluginHandle& handle,
                           uint32_t numDeviceBuffers,
                           void* workspace) const
 {
-    auto xDesc = _params.x().tensorDescriptor();
-    auto wDesc = _params.w().tensorDescriptor();
-    auto yDesc = _params.y().tensorDescriptor();
-
     auto xBuffer
         = miopen_utils::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);
     auto wBuffer
         = miopen_utils::findDeviceBuffer(_params.w().uid(), deviceBuffers, numDeviceBuffers);
     auto yBuffer
         = miopen_utils::findDeviceBuffer(_params.y().uid(), deviceBuffers, numDeviceBuffers);
-
-    std::array<miopenTensorArgument_t, 3> tensors
-        = {miopenTensorArgument_t{miopenTensorConvolutionX, &xDesc, xBuffer.ptr},
-           miopenTensorArgument_t{miopenTensorConvolutionW, &wDesc, wBuffer.ptr},
-           miopenTensorArgument_t{miopenTensorConvolutionY, &yDesc, yBuffer.ptr}};
 
     size_t workspaceSize = 0;
     if(workspace != nullptr)
@@ -128,12 +112,86 @@ void ConvFwdPlan::execute(const HipdnnEnginePluginHandle& handle,
         workspaceSize = _workspaceSize;
     }
 
-    THROW_ON_MIOPEN_FAILURE(miopenRunSolution(handle.miopenHandle,
-                                              _solution.get(),
-                                              tensors.size(),
-                                              tensors.data(),
-                                              workspace,
-                                              workspaceSize));
+    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _benchmarkingEnabled);
+
+    // Algorithm selection is performed on first execute() call rather than in constructor
+    // because miopenFindConvolutionForwardAlgorithm requires device memory buffers.
+    // These buffers are only available during execute(), not during plan construction.
+    // The selected algorithm is cached to avoid redundant find calls on subsequent executions.
+    if(!_algorithm.has_value())
+    {
+        int requestCount
+            = (_debugMode == HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
+                  ? 10
+                  : 1;
+
+        std::vector<miopenConvAlgoPerf_t> perfResults(static_cast<size_t>(requestCount));
+        int returnedAlgoCount;
+
+        THROW_ON_MIOPEN_FAILURE(miopenFindConvolutionForwardAlgorithm(
+            handle.miopenHandle,
+            _params.x().tensorDescriptor(),
+            xBuffer.ptr,
+            _params.w().tensorDescriptor(),
+            wBuffer.ptr,
+            _params.conv().convDescriptor(),
+            _params.y().tensorDescriptor(),
+            yBuffer.ptr,
+            requestCount,
+            &returnedAlgoCount,
+            perfResults.data(),
+            workspace,
+            workspaceSize,
+            false));
+
+        if(returnedAlgoCount <= 0)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "miopenFindConvolutionForwardAlgorithm returned no algorithms");
+        }
+
+        if(_debugMode == HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
+        {
+            HIPDNN_LOG_INFO("Convolution Fwd: Found {} algorithms", returnedAlgoCount);
+            for(size_t i = 0; i < static_cast<size_t>(returnedAlgoCount); ++i)
+            {
+                HIPDNN_LOG_INFO("  Algorithm {}: algorithm={}, time={}, workspace_size={}",
+                                i,
+                                static_cast<int>(perfResults[i].fwd_algo),
+                                perfResults[i].time,
+                                perfResults[i].memory);
+            }
+        }
+
+        HIPDNN_LOG_INFO("Convolution Fwd: Selected algorithm={}, time={}, workspace_size={}",
+                        static_cast<int>(perfResults[0].fwd_algo),
+                        perfResults[0].time,
+                        perfResults[0].memory);
+
+        _algorithm = perfResults[0].fwd_algo;
+        // Update workspace size with the actual requirement from the selected algorithm.
+        // This may differ from the initial estimate.
+        _workspaceSize = perfResults[0].memory;
+    }
+
+    float alpha = 1.0f;
+    float beta = 0.0f;
+
+    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForward(
+        handle.miopenHandle,
+        &alpha,
+        _params.x().tensorDescriptor(),
+        xBuffer.ptr,
+        _params.w().tensorDescriptor(),
+        wBuffer.ptr,
+        _params.conv().convDescriptor(),
+        _algorithm.value(),
+        &beta,
+        _params.y().tensorDescriptor(),
+        yBuffer.ptr,
+        workspace,
+        workspaceSize));
 }
 
 } // namespace miopen_plugin

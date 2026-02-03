@@ -7,7 +7,6 @@
 
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <miopen/miopen.h>
 
 #include "MiopenConvDescriptor.hpp"
@@ -70,9 +69,10 @@ public:
 
 private:
     ConvFwdParams _params;
-    hipdnn_data_sdk::utilities::ScopedResource<miopenSolution_t> _solution;
-    size_t _workspaceSize = 0;
+    mutable std::optional<miopenConvFwdAlgorithm_t> _algorithm;
+    mutable size_t _workspaceSize = 0;
     bool _benchmarkingEnabled;
+    HipdnnEnginePluginExecutionContext::DebugMode _debugMode;
 };
 
 } // namespace miopen_plugin
