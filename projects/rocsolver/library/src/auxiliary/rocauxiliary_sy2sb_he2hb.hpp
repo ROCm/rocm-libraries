@@ -31,6 +31,7 @@
  #include "lapack/roclapack_geqrf.hpp"
  #include "rocblas.hpp"
  #include "rocsolver/rocsolver.h"
+ #include "laset.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -264,10 +265,11 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             // Set upper triangle of Vi to identity.
             T const offdiag = zero;
             T const diag    = one;
-            rocsolver_laset(
-                handle, rocblas_fill_upper,
+            laset(
+                handle, 'u',
                 qn, qn, &offdiag, &diag,
-                V, idx2D( i+kd, i-j, ldv ), ldv, strideV );  // Vi
+                V, idx2D( i+kd, i-j, ldv ), ldv, strideV,  // Vi
+                batch_count );
 
             // Form corresponding matrix Ti = larft( Vi, tau_i ), stored above Vi.
             rocsolver_larft_template<T>(
@@ -297,10 +299,11 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
                 //     [ 0   Ti  ]
 
                 // Zero out block above Wi*.
-                rocsolver_laset(
+                laset(
                     handle, rocblas_fill_general,
                     i-j, qn, &zero, &zero,
-                    W, idx2D( j+kd, i-j, ldw ), ldw, strideW );  // Wi
+                    W, idx2D( j+kd, i-j, ldw ), ldw, strideW,  // Wi
+                    batch_count );
 
                 // Cji = Vj^H Wi, Cji stored in V above [ Ti; Vi ].
                 rocsolver_gemm(
@@ -437,6 +440,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
 
     // Copy last, lower triangular block of band of A to Aband.
     // Using ldab-1 converts dense to band format.
+    // todo: currently copies square block. Confirm that's okay, or copy only lower.
     cpy_mblks = ceildiv( n-i, 32 );
     ROCSOLVER_LAUNCH_KERNEL(
         copy_mat<T>,
