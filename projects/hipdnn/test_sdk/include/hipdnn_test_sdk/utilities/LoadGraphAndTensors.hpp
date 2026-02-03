@@ -76,9 +76,10 @@ struct GraphAndTensorMap
         return *hipdnn_data_sdk::data_objects::GetGraph(graphBuffer.data());
     }
 
-    hipdnn_plugin_sdk::GraphWrapper createGraphWrapper() const
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper createGraphWrapper() const
     {
-        return hipdnn_plugin_sdk::GraphWrapper{graphBuffer.data(), graphBuffer.size()};
+        return hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper{graphBuffer.data(),
+                                                                   graphBuffer.size()};
     }
 
     std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers()

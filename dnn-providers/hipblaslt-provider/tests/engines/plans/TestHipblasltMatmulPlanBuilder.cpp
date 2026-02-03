@@ -47,7 +47,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
     // Unsupported Graph with batchnorm
     {
         auto builder = createValidBatchnormInferenceGraph();
-        GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
     }
@@ -62,7 +62,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
         std::vector<int64_t> cStrides = {20, 5, 1};
 
         auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-        GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
     }
@@ -77,7 +77,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
         std::vector<int64_t> cStrides = {20, 5, 1};
 
         auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-        GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
     }
@@ -92,7 +92,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
         std::vector<int64_t> cStrides = {20, 5, 1};
 
         auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-        GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
     }
@@ -114,7 +114,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
                                               cStrides,
                                               hipdnn_data_sdk::data_objects::DataType::INT32);
 
-        GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
     }
@@ -128,14 +128,14 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
         mutableGraph->mutable_nodes()->GetMutableObject(0)->mutate_compute_data_type(
             hipdnn_data_sdk::data_objects::DataType::HALF);
 
-        GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
     }
 
     // Supported graph with matmul
     {
         auto builder = createValidMatmulGraph();
-        GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
     }
@@ -154,7 +154,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, GetWorkspaceSize)
     // Unsupported Graph with batchnorm
     {
         auto builder = createValidBatchnormInferenceGraph();
-        GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_THROW(_planBuilder.getWorkspaceSize(_handle, graph), HipdnnPluginException);
     }
@@ -162,7 +162,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, GetWorkspaceSize)
     // Supported Graph
     {
         auto builder = createValidMatmulGraph();
-        GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_NO_THROW(_planBuilder.getWorkspaceSize(_handle, graph));
     }
@@ -183,7 +183,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, BuildPlan)
     // Unsupported Graph with batchnorm
     {
         auto builder = createValidBatchnormInferenceGraph();
-        GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         HipdnnEnginePluginExecutionContext ctx;
 
         EXPECT_THROW(_planBuilder.buildPlan(_handle, graph, ctx), HipdnnPluginException);
@@ -193,7 +193,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, BuildPlan)
     // Supported Graph with matmul
     {
         auto builder = createValidMatmulGraph();
-        GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         HipdnnEnginePluginExecutionContext ctx;
 
         EXPECT_NO_THROW(_planBuilder.buildPlan(_handle, graph, ctx));

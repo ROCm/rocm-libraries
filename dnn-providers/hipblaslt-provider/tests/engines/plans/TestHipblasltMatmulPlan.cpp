@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <hipblaslt/hipblaslt.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -39,7 +39,7 @@ TEST(TestMatmulParams, InitializesAllTensorsFromValidGraph)
 {
     // Create a valid matmul graph
     auto builder = createValidMatmulGraph();
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     // Get the matmul node and attributes
     const auto& node = graph.getNode(0);
@@ -67,7 +67,7 @@ TEST(TestMatmulParams, RowMajor)
     std::vector<int64_t> cStrides = {5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -88,7 +88,7 @@ TEST(TestMatmulParams, ColumnMajor)
     std::vector<int64_t> cStrides = {5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -109,7 +109,7 @@ TEST(TestMatmulParams, BatchBroadcastWithABatchOne)
     std::vector<int64_t> cStrides = {20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -130,7 +130,7 @@ TEST(TestMatmulParams, BatchBroadcastWithBBatchOne)
     std::vector<int64_t> cStrides = {20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -151,7 +151,7 @@ TEST(TestMatmulParams, ThrowsOnDifferentRanks)
     std::vector<int64_t> cStrides = {20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -172,7 +172,7 @@ TEST(TestMatmulParams, ThrowsOnIncompatibleBatchDimensions)
     std::vector<int64_t> cStrides = {20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -193,7 +193,7 @@ TEST(TestMatmulParams, ThrowsOnOutputBatchMismatch)
     std::vector<int64_t> cStrides = {20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -214,7 +214,7 @@ TEST(TestMatmulParams, ThrowsOnOutputBatchSmallerThanMax)
     std::vector<int64_t> cStrides = {20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -234,7 +234,7 @@ TEST(TestMatmulParams, Tensor4DBroadcastWithUnitBatchB)
     std::vector<int64_t> cStrides = {60, 20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -255,7 +255,7 @@ TEST(TestMatmulParams, Tensor4DThrowsOnIncompatibleBatch)
     std::vector<int64_t> cStrides = {60, 20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -276,7 +276,7 @@ TEST(TestMatmulParams, Tensor4DThrowsOnOutputBatchMismatch)
     std::vector<int64_t> cStrides = {60, 20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -290,7 +290,7 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithValidGraph)
 {
     // Create a valid matmul graph
     auto builder = createValidMatmulGraph();
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     // Get the matmul node and attributes
     const auto& node = graph.getNode(0);
@@ -308,7 +308,7 @@ TEST_F(TestGpuMatmulPlan, PlanReturnsValidWorkspaceSize)
 {
     // Create a valid matmul graph
     auto builder = createValidMatmulGraph();
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -332,7 +332,7 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithColumnMajorInputs)
     std::vector<int64_t> cStrides = {5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -355,7 +355,7 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithLargerMatrices)
     std::vector<int64_t> cStrides = {256, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -378,7 +378,7 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithBatchedMatmul)
     std::vector<int64_t> cStrides = {20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -407,7 +407,7 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithHalfPrecision)
                                           cDims,
                                           cStrides,
                                           hipdnn_data_sdk::data_objects::DataType::HALF);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -436,7 +436,7 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithBFloat16)
                                           cDims,
                                           cStrides,
                                           hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();

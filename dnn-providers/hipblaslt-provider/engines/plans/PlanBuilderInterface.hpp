@@ -21,15 +21,16 @@ public:
     virtual ~IPlanBuilder() = default;
 
     virtual bool isApplicable(const HipdnnEnginePluginHandle& handle,
-                              const hipdnn_plugin_sdk::IGraph& opGraph) const
+                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
 
-    virtual size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                    const hipdnn_plugin_sdk::IGraph& opGraph) const
+    virtual size_t
+        getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
+                         const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
 
     virtual void buildPlan(const HipdnnEnginePluginHandle& handle,
-                           const hipdnn_plugin_sdk::IGraph& opGraph,
+                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                            HipdnnEnginePluginExecutionContext& executionContext) const
         = 0;
 };
