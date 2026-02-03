@@ -1599,37 +1599,82 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
-    if not (isTN(kernel) and TLDS):
-        return False, None
     kernel["MfmaInitCVgprs"] = True
-    nglshift = nllshift = 11 # vmcnt shift for ngl and nll
-    optSchedule = {
-    'SYNC': [[-1, 6, 14, 14, 27,27, 47, 47]], 
-    'LRA0': [[0,1, 2,3,4,5,5]],
-    'GRIncA': [[0, 0, 1, 1, 2,2 , 3,3, 4]],
-    'LRB0': [[9, 11,13, 19]],
-    'GRIncB': [[ 6,6,7,7,8,8,9,9,10]],
-    'GRA': [[14, 14, 16,16,18,18,20,20,23,23, 26,26, 27, 27]], 
-    'LRSA': [[26]],
-    'LRSB': [[26]],
-    'GRB': [[33,34,36,38,38,42,42,46]],
-    'LWSA': [[54]],
-    'LWSB': [[54]],
-    'LRA1': [[30,35,44, 45, 46, 48,51]],
-    'LRB1': [[47,52,54,55]],
-    'LCC': [[55, 55]],
-    }
 
-    syncCode = [
-        SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for all of LRA1 and the first instance of LRB1"),
-        SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for the second instance of LRB1"),
-        SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for all LRA0 to complete so GRA could begin. Makes sure LRB1 is completed so no need for a barrier at 21"),
-        SBarrier(comment=""),
-        SWaitCnt(dscnt=0, vlcnt=10, vscnt=-1, comment="wait for all LR. All of previous GRB (4) and current GRA (6), total of 10 can be outstanding"),
-        SBarrier(comment=""),
-        SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Outstanding LR are all LRA so no need to wait. All of GR from previous iteration must be done."),
-        SBarrier(comment="")
-    ]
+    optSchedule = dict()
+    syncCode = []
+
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    if isTN(kernel) and not useLDSTr and TLDS==1:
+        nglshift = nllshift = 11 # vmcnt shift for ngl and nll
+        optSchedule = {
+            'SYNC': [[-1, 6, 14, 14, 27,27, 47, 47]],
+            'LRA0': [[0,1, 2,3,4,5,5]],
+            'GRIncA': [[0, 0, 1, 1, 2,2 , 3,3, 4]],
+            'LRB0': [[9, 11,13, 19]],
+            'GRIncB': [[ 6,6,7,7,8,8,9,9,10]],
+            'GRA': [[14, 14, 16,16,18,18,20,20,23,23, 26,26, 27, 27]],
+            'LRSA': [[26]],
+            'LRSB': [[26]],
+            'GRB': [[33,34,36,38,38,42,42,46]],
+            'LWSA': [[54]],
+            'LWSB': [[54]],
+            'LRA1': [[30,35,44, 45, 46, 48,51]],
+            'LRB1': [[47,52,54,55]],
+            'LCC': [[55, 55]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for all of LRA1 and the first instance of LRB1"),
+            SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for the second instance of LRB1"),
+            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for all LRA0 to complete so GRA could begin. Makes sure LRB1 is completed so no need for a barrier at 21"),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=0, vlcnt=10, vscnt=-1, comment="wait for all LR. All of previous GRB (4) and current GRA (6), total of 10 can be outstanding"),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Outstanding LR are all LRA so no need to wait. All of GR from previous iteration must be done."),
+            SBarrier(comment="")
+        ]
+    elif isNN(kernel) and useLDSTr and TLDS==1:
+        optSchedule = {
+
+            'SYNC'   : [[-1,3, 16,16, 27,27, 48,48]],
+            'GRIncA' : [[1,2,3,4,4,5,5,6,6]],
+            'GRIncB' : [[7,7,8,8,9,9,10,11,11]],
+
+            'LRA0'   : [[0,1,1,2,2,3,4,5,6,7,8,9,10,11]],
+            'LRB0'   : [[17,18,19,20]],   ## After LRA0, we can mix LRB0 and GRA
+
+            ## GRA should start after LRA0 is done.
+            'GRA'    : [[15,16, 19,19, 22,22, 25,25, 28,28, 31,31, 34,34]],
+            ## GRB should start after LRB0 is done.
+            'GRB'    : [[42,42, 45,45, 48,48, 51,51]],
+
+            #After previous GRA is done.
+            'LRA1'   : [[29,30, 32,33, 35,36,37,38, 40,41, 43,44, 46,47]],
+            #After previous GRB is done.
+            'LRB1'   : [[49,50, 52,53]],
+
+            'LRSA'   : [[24]], # after LRA0 and before LRA1
+            'LRSB'   : [[24]], # after LRB0 and before LRB2
+            'LWSA'   : [[53]], # For A
+            'LWSB'   : [[54]],
+
+            'LCC'    : [[54, 55]],
+        }
+        # note: syncCode needs to be
+        syncCode = [SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for necessary prior LRA1/LRB1 before starting main loop"),
+                    SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1/LRB1 for the remaining main loop"),
+                    SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete to start GRA"),
+                    SBarrier(comment=""),
+                    SWaitCnt(dscnt=0, vlcnt=8, vscnt=-1, comment="Wait for LRB0/GRA to complete to start GRB/LRA1"),
+                    SBarrier(comment=""),
+                    SWaitCnt(dscnt=-1, vlcnt=9, vscnt=-1, comment="Wait for GRB to complete to start LRB1"),
+                    SBarrier(comment=""),
+                   ]
+        nglshift = nllshift = 11 # vmcnt shift for ngl and nll
+    else:
+        return False, None
+
     numMfma = 56
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
