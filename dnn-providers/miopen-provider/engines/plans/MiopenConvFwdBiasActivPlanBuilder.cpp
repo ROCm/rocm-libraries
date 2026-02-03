@@ -387,10 +387,9 @@ bool checkComputeTypesLogErrors(
         return false;
     }
 }
-} // namespace
-
-bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
-                                                     const hipdnn_plugin_sdk::IGraph& opGraph) const
+bool isApplicableInternal(const HipdnnEnginePluginHandle& handle,
+                          const hipdnn_plugin_sdk::IGraph& opGraph,
+                          bool deterministicEnabled = false)
 {
     auto nodeAttrs = getNodeAttrsLogErrors(opGraph);
     if(!nodeAttrs.has_value())
@@ -419,7 +418,8 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHan
         ConvFwdBiasActivParams params(std::get<0>(nodeAttrs.value()),
                                       std::get<1>(nodeAttrs.value()),
                                       std::get<2>(nodeAttrs.value()),
-                                      opGraph.getTensorMap());
+                                      opGraph.getTensorMap(),
+                                      deterministicEnabled);
         ConvFwdBiasActivPlan plan(handle, std::move(params), true, false, false);
         return true;
     }
@@ -428,6 +428,14 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHan
         HIPDNN_LOG_INFO(e.what());
         return false;
     }
+}
+
+} // namespace
+
+bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
+                                                     const hipdnn_plugin_sdk::IGraph& opGraph) const
+{
+    return isApplicableInternal(handle, opGraph);
 }
 
 size_t MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSize(
@@ -476,7 +484,8 @@ std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenConvFwdBiasActivPlanBuil
 {
     std::vector<hipdnn_data_sdk::data_objects::KnobT> knobs;
 
-    if(isApplicable(handle, opGraph))
+    // Check if deterministic mode is supported by passing true to isApplicableInternal
+    if(isApplicableInternal(handle, opGraph, true))
     {
         hipdnn_data_sdk::data_objects::KnobT knob;
         knob.knob_id = hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME;

@@ -24,7 +24,8 @@ namespace
 {
 
 bool isApplicableFwd(const HipdnnEnginePluginHandle& handle,
-                     const hipdnn_plugin_sdk::IGraph& opGraph)
+                     const hipdnn_plugin_sdk::IGraph& opGraph,
+                     bool deterministicEnabled = false)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
@@ -32,7 +33,7 @@ bool isApplicableFwd(const HipdnnEnginePluginHandle& handle,
     size_t solutionCount = 0;
     try
     {
-        ConvFwdParams params(attr, opGraph.getTensorMap());
+        ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         if(!params.validTensors())
         {
@@ -60,7 +61,8 @@ bool isApplicableFwd(const HipdnnEnginePluginHandle& handle,
 }
 
 bool isApplicableBwd(const HipdnnEnginePluginHandle& handle,
-                     const hipdnn_plugin_sdk::IGraph& opGraph)
+                     const hipdnn_plugin_sdk::IGraph& opGraph,
+                     bool deterministicEnabled = false)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
@@ -68,7 +70,7 @@ bool isApplicableBwd(const HipdnnEnginePluginHandle& handle,
     size_t solutionCount = 0;
     try
     {
-        ConvBwdParams params(attr, opGraph.getTensorMap());
+        ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         if(!params.validTensors())
         {
@@ -96,7 +98,8 @@ bool isApplicableBwd(const HipdnnEnginePluginHandle& handle,
 }
 
 bool isApplicableWrw(const HipdnnEnginePluginHandle& handle,
-                     const hipdnn_plugin_sdk::IGraph& opGraph)
+                     const hipdnn_plugin_sdk::IGraph& opGraph,
+                     bool deterministicEnabled = false)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
@@ -104,7 +107,7 @@ bool isApplicableWrw(const HipdnnEnginePluginHandle& handle,
     size_t solutionCount = 0;
     try
     {
-        ConvWrwParams params(attr, opGraph.getTensorMap());
+        ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         if(!params.validTensors())
         {
@@ -226,10 +229,9 @@ void buildPlanWrw(const HipdnnEnginePluginHandle& handle,
     executionContext.setPlan(std::move(plan));
 }
 
-} // namespace
-
-bool MiopenConvPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
-                                         const hipdnn_plugin_sdk::IGraph& opGraph) const
+bool isApplicableInternal(const HipdnnEnginePluginHandle& handle,
+                          const hipdnn_plugin_sdk::IGraph& opGraph,
+                          bool deterministicEnabled = false)
 {
     if(opGraph.nodeCount() != 1)
     {
@@ -252,13 +254,13 @@ bool MiopenConvPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
     switch(node.attributes_type())
     {
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
-        ret = isApplicableFwd(handle, opGraph);
+        ret = isApplicableFwd(handle, opGraph, deterministicEnabled);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
-        ret = isApplicableBwd(handle, opGraph);
+        ret = isApplicableBwd(handle, opGraph, deterministicEnabled);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
-        ret = isApplicableWrw(handle, opGraph);
+        ret = isApplicableWrw(handle, opGraph, deterministicEnabled);
         break;
     default:
         break;
@@ -269,6 +271,14 @@ bool MiopenConvPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
         HIPDNN_LOG_INFO("Convolution plan builder is not applicable for this graph");
     }
     return ret;
+}
+
+} // namespace
+
+bool MiopenConvPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
+                                         const hipdnn_plugin_sdk::IGraph& opGraph) const
+{
+    return isApplicableInternal(handle, opGraph);
 }
 
 size_t MiopenConvPlanBuilder::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
@@ -358,7 +368,8 @@ std::vector<hipdnn_data_sdk::data_objects::KnobT>
 {
     std::vector<hipdnn_data_sdk::data_objects::KnobT> knobs;
 
-    if(isApplicable(handle, opGraph))
+    // Check if deterministic mode is supported by passing true to isApplicableInternal
+    if(isApplicableInternal(handle, opGraph, true))
     {
         hipdnn_data_sdk::data_objects::KnobT knob;
         knob.knob_id = hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME;

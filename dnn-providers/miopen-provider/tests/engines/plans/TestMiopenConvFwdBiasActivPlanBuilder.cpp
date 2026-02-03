@@ -743,8 +743,23 @@ protected:
     HipdnnEnginePluginHandle _handle;
 };
 
+TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetCustomKnobsReturnsEmptyForUnsupportedGraph)
+{
+    // getCustomKnobs should return empty when the graph is not applicable
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
+
+    EXPECT_TRUE(knobs.empty());
+}
+
 TEST_F(TestGpuMiopenConvFwdBiasActivPlanBuilderKnobs, GetCustomKnobsReturnsDeterministicKnob)
 {
+    // This test verifies that getCustomKnobs returns the deterministic knob
+    // when the graph supports deterministic mode. The test implicitly verifies
+    // that isApplicableInternal(handle, opGraph, true) returns true for this graph.
+
     // Re-enable in Windows once CK is supported
     SKIP_IF_WINDOWS();
 

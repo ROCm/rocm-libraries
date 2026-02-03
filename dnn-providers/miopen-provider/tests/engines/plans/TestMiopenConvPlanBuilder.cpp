@@ -200,6 +200,9 @@ TEST_F(TestGpuMiopenConvPlanBuilder, BuildPlanCreatesValidPlanForSupportedGraph)
 
 TEST_F(TestGpuMiopenConvPlanBuilder, GetCustomKnobsReturnsDeterministicKnob)
 {
+    // This test verifies that getCustomKnobs returns the deterministic knob
+    // when the graph supports deterministic mode. The test implicitly verifies
+    // that isApplicableInternal(handle, opGraph, true) returns true for this graph.
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
     hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
@@ -218,4 +221,15 @@ TEST_F(TestGpuMiopenConvPlanBuilder, GetCustomKnobsReturnsDeterministicKnob)
     EXPECT_EQ(it->description, "Enable deterministic mode");
     EXPECT_EQ(it->default_value.type, hipdnn_data_sdk::data_objects::KnobValue::IntValue);
     EXPECT_EQ(it->constraint.type, hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint);
+}
+
+TEST_F(TestMiopenConvPlanBuilder, GetCustomKnobsReturnsEmptyForUnsupportedGraph)
+{
+    // getCustomKnobs should return empty when the graph is not applicable
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto knobs = _planBuilder.getCustomKnobs(_dummyHandle, graph);
+
+    EXPECT_TRUE(knobs.empty());
 }
