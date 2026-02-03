@@ -272,6 +272,11 @@ rocsparse_status rocsparse::spmv_alg2csrmv_alg(rocsparse_spmv_alg    spmv_alg,
     }
 
     case rocsparse_spmv_alg_default:
+    {
+        target = rocsparse::csrmv_alg_default;
+        return rocsparse_status_success;
+    }
+
     case rocsparse_spmv_alg_csr_adaptive:
     {
         target = rocsparse::csrmv_alg_adaptive;

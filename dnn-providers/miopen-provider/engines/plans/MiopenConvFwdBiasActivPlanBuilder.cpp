@@ -44,7 +44,7 @@ bool isNodeActivFwd(const hipdnn_data_sdk::data_objects::PointwiseAttributes& at
 std::tuple<const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes&,
            const hipdnn_data_sdk::data_objects::PointwiseAttributes*,
            const hipdnn_data_sdk::data_objects::PointwiseAttributes&>
-    getNodeAttrs(const hipdnn_plugin_sdk::IGraph& opGraph)
+    getNodeAttrs(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     if(opGraph.nodeCount() < 2 || opGraph.nodeCount() > 3)
     {
@@ -154,7 +154,7 @@ std::tuple<const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes&,
     return {convAttr, &biasAttr, activAttr};
 }
 
-auto getNodeAttrsLogErrors(const hipdnn_plugin_sdk::IGraph& opGraph)
+auto getNodeAttrsLogErrors(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
     -> std::optional<decltype(getNodeAttrs(opGraph))>
 {
     try
@@ -329,7 +329,7 @@ bool nodeAttrsCheckTensorsLogErrors(
 }
 
 void checkComputeTypes(
-    const hipdnn_plugin_sdk::IGraph& graph,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
     const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
@@ -369,7 +369,7 @@ void checkComputeTypes(
 }
 
 bool checkComputeTypesLogErrors(
-    const hipdnn_plugin_sdk::IGraph& graph,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
     const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
@@ -388,8 +388,9 @@ bool checkComputeTypesLogErrors(
 }
 } // namespace
 
-bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
-                                                     const hipdnn_plugin_sdk::IGraph& opGraph) const
+bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     auto nodeAttrs = getNodeAttrsLogErrors(opGraph);
     if(!nodeAttrs.has_value())
@@ -430,7 +431,8 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHan
 }
 
 size_t MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSize(
-    const HipdnnEnginePluginHandle& handle, const hipdnn_plugin_sdk::IGraph& opGraph) const
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
@@ -442,8 +444,8 @@ size_t MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSize(
 
 void MiopenConvFwdBiasActivPlanBuilder::buildPlan(
     const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin_sdk::IGraph& opGraph,
-    [[maybe_unused]] const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
@@ -457,7 +459,7 @@ void MiopenConvFwdBiasActivPlanBuilder::buildPlan(
 
 std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenConvFwdBiasActivPlanBuilder::getCustomKnobs(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    [[maybe_unused]] const hipdnn_plugin_sdk::IGraph& opGraph) const
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     return {};
 }
