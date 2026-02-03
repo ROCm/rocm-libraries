@@ -347,7 +347,7 @@ class LocalReadMFMA(LocalRead):
         return v0, v1, v2, v3
 
     # do transpose with v_swap
-    def transposeLRVregs(self, module, kernel, tc, bufferIdx, iui, writer, lrvwTile, totalRegs, subTileIdx):
+    def transposeLRVregs(self, kernel, module, tc, bufferIdx, iui, writer, lrvwTile, totalRegs, subTileIdx):
         start = subTileIdx * totalRegs
         last = start + totalRegs - 1
         if lrvwTile == 1:
