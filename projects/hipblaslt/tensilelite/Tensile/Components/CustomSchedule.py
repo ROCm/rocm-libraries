@@ -657,8 +657,10 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
             
             20, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="All LRB0 launched"),
             20, SBarrier(comment=""),
+
             35, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="All GRA launched"),
             35, SBarrier(comment=""),
+
             43, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="All GRB launched"),
             43, SBarrier(comment=""),
         ]
@@ -693,7 +695,6 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
         }
     else:
         return False, None
-
 
     numMfma = 48
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
