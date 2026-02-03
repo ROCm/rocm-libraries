@@ -25,8 +25,8 @@
 #include "rocsparse_handle.hpp"
 #include "rocsparse_utility.hpp"
 
-template <>
 // LCOV_EXCL_START
+template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse::blas_impl value)
 {
     switch(value)
@@ -40,13 +40,10 @@ bool rocsparse::enum_utils::is_invalid(rocsparse::blas_impl value)
     }
     return true;
 }
-// LCOV_EXCL_STOP
 
 template <>
-// LCOV_EXCL_START
 const char* rocsparse::enum_utils::to_string(rocsparse::blas_impl value)
 {
-
 #define CASE(C) \
     case C:     \
         return #C
@@ -56,11 +53,10 @@ const char* rocsparse::enum_utils::to_string(rocsparse::blas_impl value)
         CASE(rocsparse::blas_impl_default);
         CASE(rocsparse::blas_impl_rocblas);
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-// LCOV_EXCL_STOP
 #undef case
 };
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse::blas_create_handle(rocsparse::blas_handle* pblas_handle,
                                                rocsparse::blas_impl    blas_impl)
@@ -87,7 +83,6 @@ try
     // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
-// LCOV_EXCL_STOP
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();

@@ -35,8 +35,8 @@
 #include "rocsparse_coosm.hpp"
 #include "rocsparse_csrsm.hpp"
 
-template <>
 // LCOV_EXCL_START
+template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_spsm_alg value_)
 {
 #define CASE(C) \
@@ -47,14 +47,10 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spsm_alg value_)
         CASE(rocsparse_spsm_alg_default);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
-// LCOV_EXCL_STOP
 
 template <>
-// LCOV_EXCL_START
 const char* rocsparse::enum_utils::to_string(rocsparse_spsm_stage value_)
 {
 #define CASE(C) \
@@ -67,14 +63,10 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spsm_stage value_)
         CASE(rocsparse_spsm_stage_compute);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
-// LCOV_EXCL_STOP
 
 template <>
-// LCOV_EXCL_START
 bool rocsparse::enum_utils::is_invalid(rocsparse_spsm_alg value_)
 {
     switch(value_)
@@ -86,10 +78,8 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spsm_alg value_)
     }
     return true;
 }
-// LCOV_EXCL_STOP
 
 template <>
-// LCOV_EXCL_START
 bool rocsparse::enum_utils::is_invalid(rocsparse_spsm_stage value_)
 {
     switch(value_)

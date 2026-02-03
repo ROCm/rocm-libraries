@@ -30,8 +30,8 @@
 
 #include "rocsparse_csrmv.hpp"
 
-template <>
 // LCOV_EXCL_START
+template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse::csrmv_alg value_)
 {
     switch(value_)
@@ -47,6 +47,7 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse::csrmv_alg value_)
     }
     return true;
 };
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse::csrmv_alg_default2csrmv_alg(rocsparse::csrmv_alg& alg,
                                                         rocsparse_operation   operation)
@@ -70,7 +71,6 @@ rocsparse_status rocsparse::csrmv_alg_default2csrmv_alg(rocsparse::csrmv_alg& al
     }
     return rocsparse_status_success;
 }
-// LCOV_EXCL_STOP
 
 template <typename I, typename J, typename A>
 rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          handle,

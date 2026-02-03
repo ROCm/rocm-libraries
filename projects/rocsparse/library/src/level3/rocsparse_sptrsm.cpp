@@ -35,8 +35,8 @@
 #include "rocsparse_csrsm.hpp"
 #include "rocsparse_sptrsm_descr.hpp"
 
-template <>
 // LCOV_EXCL_START
+template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_stage value)
 {
     switch(value)
@@ -51,7 +51,6 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_stage value)
 };
 
 template <>
-// LCOV_EXCL_START
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_alg value)
 {
     switch(value)
@@ -65,7 +64,6 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_alg value)
 };
 
 template <>
-// LCOV_EXCL_START
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_input value)
 {
     switch(value)
@@ -85,7 +83,6 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_input value)
 };
 
 template <>
-// LCOV_EXCL_START
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_output value)
 {
     switch(value)
@@ -97,6 +94,7 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_output value)
     }
     return true;
 };
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_sptrsm_set_input(rocsparse_handle       handle,
                                                        rocsparse_sptrsm_descr sptrsm_descr,
@@ -224,7 +222,6 @@ try
     // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
-// LCOV_EXCL_STOP
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();

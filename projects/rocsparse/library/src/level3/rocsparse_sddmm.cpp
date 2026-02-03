@@ -34,8 +34,8 @@
 
 #include "rocsparse_sddmm.hpp"
 
-template <>
 // LCOV_EXCL_START
+template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_sddmm_alg value_)
 {
 #define CASE(C) \
@@ -47,14 +47,10 @@ const char* rocsparse::enum_utils::to_string(rocsparse_sddmm_alg value_)
         CASE(rocsparse_sddmm_alg_dense);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
-// LCOV_EXCL_STOP
 
 template <>
-// LCOV_EXCL_START
 bool rocsparse::enum_utils::is_invalid(rocsparse_sddmm_alg value_)
 {
     switch(value_)
