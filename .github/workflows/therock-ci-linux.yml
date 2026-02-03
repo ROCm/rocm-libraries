@@ -154,9 +154,7 @@ jobs:
             ERROR_LOG=$(grep -riE "(error|failed|fatal|exception)" TheRock/build/logs/ -A 3 -B 2 --max-count=5 2>/dev/null || echo "")
 
             # Categorize the issue type based on error patterns
-            if echo "$ERROR_LOG" | grep -qiE "(test.*fail|failed.*test|assertion|gtest)"; then
-              ISSUE_TYPE="Test Failure"
-            elif echo "$ERROR_LOG" | grep -qiE "(docker|container|image)"; then
+            if echo "$ERROR_LOG" | grep -qiE "(docker|container|image)"; then
               ISSUE_TYPE="Docker Issue"
             elif echo "$ERROR_LOG" | grep -qiE "(compil|undefined reference|unresolved external|linker|link.*error)"; then
               ISSUE_TYPE="Compilation Issue"
