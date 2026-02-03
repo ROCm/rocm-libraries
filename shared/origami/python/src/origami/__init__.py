@@ -113,3 +113,13 @@ __all__ = [
     # Reduction functions
     "int_to_reduction_t",
 ]
+
+try:
+    # Import the python selector if possible (requires torch)
+    from .selector import OrigamiMatmulSelector
+    __all__.append("OrigamiMatmulSelector")
+except ImportError:
+    # Do not raise this error if import fails - compiled Origami bindings still
+    # work without the dedicated Python selector
+    pass
+

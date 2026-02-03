@@ -1482,8 +1482,11 @@ class Solution(collections.abc.Mapping):
         # So far, continue with VectorWidthB //=state["numSubTiles"]
         state["VectorWidthB"] //= state["numSubTiles"]
 
-    if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
-      state["VectorWidthMetadata"] = state["VectorWidthA"] if state["ProblemType"]["Sparse"] == 1 else state["VectorWidthB"]
+    if state["ProblemType"]["Sparse"]:
+      if not state["DirectToVgprSparseMetadata"]:
+        state["VectorWidthMetadata"] = state["VectorWidthA"] if state["ProblemType"]["Sparse"] == 1 else state["VectorWidthB"]
+      # ON/OFF the sourceswap according to the sparse type automatically
+      state["SourceSwap"] = 0 if state["ProblemType"]["Sparse"] == 1 else 1
 
     # if state["EnableMatrixInstruction"] and not state["SourceSwap"] and (state["VectorWidthA"] > 1 or state["VectorWidthB"] > 1):
     #   reject(state, printRejectionReason, "not implement VectorWidth without SourceSwap")
@@ -2609,11 +2612,17 @@ class Solution(collections.abc.Mapping):
     # LDS
     ########################################
 
-    state["TransposeLDSMetadata"] = False if state["ProblemType"]["Sparse"] == 2 else True
-    state["UnrollMajorLDSMetadata"] = False if state["ProblemType"]["Sparse"] == 2 else True
+    if state["ProblemType"]["Sparse"]:
+      transposeLDSMetadata = int(state["TransposeLDSMetadata"])
+      if transposeLDSMetadata == -1:
+        state["TransposeLDSMetadata"] = int(not state["ProblemType"]["TLUMetadata"])
+      else:
+        state["TransposeLDSMetadata"] = int(transposeLDSMetadata)
 
-    if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
-      state["UnrollMajorLDSMetadata"] = state["TransposeLDSMetadata"] and (not state["ProblemType"]["TLUMetadata"])
+      state["UnrollMajorLDSMetadata"] = False if state["ProblemType"]["Sparse"] == 2 else True
+
+      if not state["DirectToVgprSparseMetadata"]:
+        state["UnrollMajorLDSMetadata"] = state["TransposeLDSMetadata"]
 
     # Determine if we can load directly-to-LDS.
     # Transpose requires a trip through registers to perform the transpose so can't use DirectToLdsA
@@ -3172,14 +3181,6 @@ class Solution(collections.abc.Mapping):
       if state["EnableMatrixInstruction"] and state["MIArchVgpr"]:
         reject(state, printRejectionReason, "Sparse A kernel does not support MIArchVgpr yet.")
         return
-      # Not Support Feature
-      if state["ProblemType"]["Sparse"] == 1 and state["SourceSwap"] :
-        reject(state, printRejectionReason, "Sparse A kernel cannot support SourceSwap.")
-        return
-      else:
-        if state["ProblemType"]["Sparse"] == 2 and not state["SourceSwap"]:
-          reject(state, printRejectionReason, "Sparse B kernel must enable SourceSwap.")
-          return
       state["AssertSummationElementMultiple"] = 8
 
     # check if need to use lds init Acc vgprs
