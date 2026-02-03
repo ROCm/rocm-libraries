@@ -1,4 +1,4 @@
-# RFC 0005: Plugin-Agnostic Integration Tests
+# RFC 0006: Plugin-Agnostic Integration Tests
 
 ## Table of Contents
 1. [Executive Summary](#executive-summary)
