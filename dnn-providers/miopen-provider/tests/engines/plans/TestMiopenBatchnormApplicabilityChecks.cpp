@@ -3092,7 +3092,8 @@ TEST_P(TestCheckBatchnormInferenceConfigSupported, ValidatesCorrectly)
 
     auto builder = buildBatchnormInferenceGraph(
         tc.tensorConfigs, tc.xUid, tc.yUid, tc.scaleUid, tc.biasUid, tc.meanUid, tc.invVarianceUid);
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_BatchnormInferenceAttributes();
@@ -3132,7 +3133,8 @@ TEST_P(TestCheckBatchnormTrainingConfigSupported, ValidatesCorrectly)
                                                tc.epsilonUid,
                                                tc.meanUid,
                                                tc.invVarianceUid);
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_BatchnormAttributes();
@@ -3173,7 +3175,8 @@ TEST_P(TestCheckBatchnormBackwardConfigSupported, ValidatesCorrectly)
                                                tc.dbiasUid,
                                                tc.meanUid,
                                                tc.invVarianceUid);
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_BatchnormBackwardAttributes();
@@ -3218,7 +3221,8 @@ TEST_P(TestCheckBatchnormFusedBackwardConfigSupported, ValidatesCorrectly)
                                                     tc.bnYVirtualUid,
                                                     tc.dxDreluVirtualUid,
                                                     tc.activationMode);
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     const auto& bnInfNode = graph.getNode(0);
     const auto& actNode = graph.getNode(1);
@@ -3418,7 +3422,8 @@ TEST(TestBatchnormApplicabilityChecks, RejectsBatchnormFwdTrainingWithPeerStats)
 
     builder.Finish(graphOffset);
 
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_BatchnormAttributes();
     ASSERT_NE(attrs, nullptr);
@@ -3729,7 +3734,8 @@ TEST_P(TestCheckBatchnormInferenceWithVarianceConfigSupported, ValidatesCorrectl
                                                             tc.epsilonUid,
                                                             tc.meanUid,
                                                             tc.varianceUid);
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_BatchnormInferenceAttributesVarianceExt();
@@ -3777,7 +3783,8 @@ TEST_P(TestCheckBatchnormInferenceWithVarianceFusedConfigSupported, ValidatesCor
                                                                  tc.varianceUid,
                                                                  bnYVirtualUid,
                                                                  tc.activationMode);
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
 
     const auto& bnNode = graph.getNode(0);
     const auto& actNode = graph.getNode(1);
@@ -3874,7 +3881,8 @@ TEST(TestBatchnormApplicabilityChecks, RejectsBatchnormBackwardWithPeerStats)
 
     builder.Finish(graphOffset);
 
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_BatchnormBackwardAttributes();
     ASSERT_NE(attrs, nullptr);
