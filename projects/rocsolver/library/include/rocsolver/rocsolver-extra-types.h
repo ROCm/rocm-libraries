@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,7 +31,7 @@
 #include <stdint.h>
 
 /*! \brief Used to specify the logging layer mode using a bitwise combination
- *of rocblas_layer_mode values.
+ *of ``rocblas_layer_mode`` values.
  ********************************************************************************/
 typedef uint32_t rocblas_layer_mode_flags;
 
@@ -43,7 +43,7 @@ typedef enum rocblas_layer_mode_ex_
 } rocblas_layer_mode_ex;
 
 /*! \brief Used to specify the order in which multiple Householder matrices or plane rotations are
- *applied together (see the documentation of the specific routines for more details).
+ *applied together (see the documentation for the specific routines for more details).
  ********************************************************************************/
 typedef enum rocblas_direct_
 {
@@ -51,8 +51,8 @@ typedef enum rocblas_direct_
     rocblas_backward_direction = 172, /**< Backward ordering. */
 } rocblas_direct;
 
-/*! \brief Used to specify how householder vectors are stored in a matrix of
- *vectors
+/*! \brief Used to specify how Householder vectors are stored in a matrix of
+ *vectors.
  ********************************************************************************/
 typedef enum rocblas_storev_
 {
@@ -60,26 +60,26 @@ typedef enum rocblas_storev_
     rocblas_row_wise = 182, /**< Householder vectors are stored in the rows of a matrix. */
 } rocblas_storev;
 
-/*! \brief Used to specify how the singular vectors are to be computed and
- *stored
+/*! \brief Used to specify how the singular vectors are computed and
+ *stored.
  ********************************************************************************/
 typedef enum rocblas_svect_
 {
     rocblas_svect_all = 191, /**< The entire associated orthogonal/unitary matrix is computed. */
     rocblas_svect_singular = 192, /**< Only the singular vectors are computed and
-                                       stored in output array. */
+                                       stored in the output array. */
     rocblas_svect_overwrite = 193, /**< Only the singular vectors are computed and
                                         overwrite the input matrix. */
     rocblas_svect_none = 194, /**< No singular vectors are computed. */
 } rocblas_svect;
 
 /*! \brief Used to enable the use of fast algorithms (with out-of-place
- *computations) in some of the routines
+ *computations) in some of the routines.
  ********************************************************************************/
 typedef enum rocblas_workmode_
 {
-    rocblas_outofplace = 201, /**< Out-of-place computations are allowed; this
-                                   requires extra device memory for workspace. */
+    rocblas_outofplace = 201, /**< Out-of-place computations are allowed. This
+                                   requires extra device memory for the workspace. */
     rocblas_inplace = 202, /**< If not enough memory is available, this forces in-place computations.  */
 } rocblas_workmode;
 
@@ -94,7 +94,7 @@ typedef enum rocblas_evect_
     rocblas_evect_none = 213, /**< No eigenvectors are computed. */
 } rocblas_evect;
 
-/*! \brief Used to specify the form of the generalized eigenproblem
+/*! \brief Used to specify the form of the generalized eigenproblem.
  ********************************************************************************/
 typedef enum rocblas_eform_
 {
@@ -104,7 +104,7 @@ typedef enum rocblas_eform_
 } rocblas_eform;
 
 /*! \brief Used to specify the type of range in which eigenvalues will be found
- *in partial eigenvalue decompositions
+ *in partial eigenvalue decompositions.
  ********************************************************************************/
 typedef enum rocblas_erange_
 {
@@ -114,7 +114,7 @@ typedef enum rocblas_erange_
     rocblas_erange_index = 233, /**< The \f$il\f$-th through \f$iu\f$-th eigenvalues will be found.*/
 } rocblas_erange;
 
-/*! \brief Used to specify whether the eigenvalues are grouped and ordered by blocks
+/*! \brief Used to specify whether the eigenvalues are grouped and ordered by blocks.
  ********************************************************************************/
 typedef enum rocblas_eorder_
 {
@@ -125,7 +125,7 @@ typedef enum rocblas_eorder_
 } rocblas_eorder;
 
 /*! \brief Used in the Jacobi methods to specify whether the eigenvalues are sorted
- *in increasing order
+ *in increasing order.
  ********************************************************************************/
 typedef enum rocblas_esort_
 {
@@ -149,12 +149,12 @@ typedef enum rocblas_srange_
 struct rocsolver_rfinfo_;
 
 /*! \brief A handle to a structure containing matrix descriptors and metadata required to interact
- *with rocSPARSE when using the rocSOLVER re-factorization functionality. It needs to be initialized
+ *with rocSPARSE when using the rocSOLVER refactorization functionality. It needs to be initialized
  *with \ref rocsolver_create_rfinfo and destroyed with \ref rocsolver_destroy_rfinfo.
  ********************************************************************************/
 typedef struct rocsolver_rfinfo_* rocsolver_rfinfo;
 
-/*! \brief Used to specify the mode of the rfinfo struct required by the re-factorization functionality.
+/*! \brief Used to specify the mode of the ``rfinfo`` struct required by the refactorization functionality.
  ********************************************************************************/
 typedef enum rocsolver_rfinfo_mode_
 {
@@ -182,6 +182,16 @@ typedef enum rocsolver_alg_mode_
     rocsolver_alg_mode_hybrid = 292, /**< Computations are performed on the CPU and GPU. */
     rocsolver_alg_mode_mixed = 293, /**< Nested functions use a mixture of hybrid and GPU-only modes. */
 } rocsolver_alg_mode;
+
+/*! \brief Used to specify the type of matrix norm to compute.
+ ********************************************************************************/
+typedef enum rocsolver_norm_type_
+{
+    rocsolver_norm_type_one = 301, /**< One-norm (maximum column sum). */
+    rocsolver_norm_type_frobenius = 302, /**< Frobenius norm (square root of sum of squares). */
+    rocsolver_norm_type_infinity = 303, /**< Infinity-norm (maximum row sum). */
+    rocsolver_norm_type_max = 304, /**< Maximum absolute value of any element. */
+} rocsolver_norm_type;
 
 /*! \brief Used to specify a function with multiple supported algorithm modes.
  ********************************************************************************/

@@ -45,46 +45,6 @@ namespace rocRoller::KernelGraph
 
     namespace AddDeallocateDetail
     {
-        void addDownstreamBarrierInLoop(std::set<int>&       dependencies,
-                                        int                  coordinate,
-                                        std::set<int> const& lastRWOps,
-                                        KernelGraph const&   original)
-        {
-            auto               compare = TopologicalCompare(original);
-            std::optional<int> maybeForLoop;
-            for(auto control : lastRWOps)
-            {
-                maybeForLoop = findContainingOperation<ForLoopOp>(control, original);
-                if(maybeForLoop)
-                    break;
-            }
-            if(not maybeForLoop)
-                return;
-
-            auto lastDependency = std::ranges::max(lastRWOps, compare);
-
-            auto isBarrierInSameLoopPredicate = [&](int barrier) {
-                auto isBarrier = original.control.get<Barrier>(barrier).has_value();
-                if(!isBarrier)
-                    return false;
-                auto maybeBarrierForLoop = findContainingOperation<ForLoopOp>(barrier, original);
-                // We know maybeForLoop has a value, so...
-                return maybeBarrierForLoop && (maybeBarrierForLoop.value() == maybeForLoop.value());
-            };
-
-            auto downstreamBarriers = filter(isBarrierInSameLoopPredicate,
-                                             original.control.depthFirstVisit(lastDependency))
-                                          .to<std::vector>();
-
-            if(downstreamBarriers.empty())
-            {
-                dependencies = {*maybeForLoop};
-                return;
-            }
-
-            dependencies.insert(std::ranges::min(downstreamBarriers, compare));
-        }
-
         std::set<int> getContainingForLoops(std::set<int> controls, KernelGraph const& graph)
         {
             std::set<int> rv;
@@ -276,12 +236,6 @@ namespace rocRoller::KernelGraph
         {
             auto dependencies = controls;
 
-            auto maybeLDS = graph.coordinates.get<LDS>(coordinate);
-            if(maybeLDS)
-            {
-                addDownstreamBarrierInLoop(dependencies, coordinate, controls, graph);
-            }
-
             simplifyDependencies(graph, dependencies);
 
             deallocateNodesToAdd[dependencies].push_back(coordinate);
@@ -296,20 +250,20 @@ namespace rocRoller::KernelGraph
         for(auto const& [controls, coords] : deallocateNodesToAdd)
         {
             {
+                // Create a Deallocate operation
+                auto deallocate = graph.control.addElement(Deallocate());
+                deallocateNodes.push_back(deallocate);
+
                 if(logger->should_log(LogLevel::Debug))
                 {
                     std::ostringstream msg;
                     msg << "After {";
                     streamJoin(msg, controls, ", ");
-                    msg << "}, Deallocate {";
+                    msg << "}, Deallocate(" << deallocate << ") {";
                     streamJoin(msg, coords, ", ");
                     msg << "}";
                     Log::debug(msg.str());
                 }
-
-                // Create a Deallocate operation
-                auto deallocate = graph.control.addElement(Deallocate());
-                deallocateNodes.push_back(deallocate);
 
                 int idx = 0;
                 for(int coordinate : coords)
@@ -321,6 +275,16 @@ namespace rocRoller::KernelGraph
                 // are all of them are within the same body-parent.
                 for(auto src : controls)
                     graph.control.addElement(Sequence(), {src}, {deallocate});
+
+                // Add a barrier before deallocating LDS to avoid write-after-read races
+                // when different LDS allocation alias to the same LDS offset/address.
+                if(std::any_of(coords.begin(), coords.end(), [&](int coordinate) {
+                       return graph.coordinates.get<LDS>(coordinate).has_value();
+                   }))
+                {
+                    auto barrierTag = graph.control.addElement(Barrier());
+                    insertBefore(graph, barrierTag, deallocate, deallocate);
+                }
             }
         }
 

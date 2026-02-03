@@ -10,7 +10,7 @@
 #include "MiopenConvDescriptor.hpp"
 #include "MiopenUtils.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 namespace

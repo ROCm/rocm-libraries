@@ -333,6 +333,7 @@ defaultBenchmarkCommonParameters = [
     {"LdsBlockSizePerPadB": [-1]},
     {"LdsBlockSizePerPadMetadata": [0]},
     {"TransposeLDS": [-1]},
+    {"TransposeLDSMetadata": [-1]},
     {"MaxOccupancy": [40]},
     {"MaxLDS": [-1]},
     {"VectorWidthA": [-1]},
@@ -429,8 +430,11 @@ defaultBenchmarkCommonParameters = [
     {"AdaptiveGemm": [0]},
     {"ExtraMiLatencyLeft": [-1]},
     {"ExtraLatencyForLR": [0]},
+    {"TailloopInNll": [False]},
     {"SwapGlobalReadOrder": [0]},
-    {"TailloopInNll": [False]}
+    {"ScheduleGROverBarrier": [-1]},
+    {"DtlPlusLdsBuf": [-1]},
+    {"MinGRIncPerMfma": [-1]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter

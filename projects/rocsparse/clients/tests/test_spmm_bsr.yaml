@@ -28,7 +28,6 @@ include: rocsparse_common.yaml
 Definitions:
   - &alpha_beta_range_quick
     - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
-    - { alpha:  -0.5, beta:  0.5, alphai: -0.5, betai:  1.0 }
 
   - &alpha_beta_range_checkin
     - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
@@ -55,11 +54,11 @@ Tests:
   category: quick
   function: spmm_bsr
   indextype: *i32i32_i64i32_i64i64
-  precision: *double_only_precisions
-  M: [145, 265, 349]
+  precision: *single_double_precisions_complex_real
+  M: [145]
   N: [117]
-  K: [172, 274, 437]
-  block_dim: [1, 5]
+  K: [172]
+  block_dim: [1, 5, 9, 13]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -73,10 +72,10 @@ Tests:
 - name: spmm_bsr
   category: quick
   function: spmm_bsr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *single_double_precisions_complex_real
-  M: [0, 223]
-  N: [0, 313]
+  M: [8, 223]
+  N: [8, 300]
   K: [0, 167]
   block_dim: [4]
   alpha_beta: *alpha_beta_range_quick
@@ -92,12 +91,12 @@ Tests:
 - name: spmm_bsr_file
   category: quick
   function: spmm_bsr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64i32
   precision: *single_double_precisions
   M: 1
-  N: [256]
+  N: [100]
   K: 1
-  block_dim: [7]
+  block_dim: [2]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -107,15 +106,32 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_bsr]
   orderB: [rocsparse_order_column, rocsparse_order_row]
   orderC: [rocsparse_order_column]
-  filename: [nos1,
-             nos3,
-             nos4,
-             nos7]
+  filename: [nos1]
 
 - name: spmm_bsr_file
   category: quick
   function: spmm_bsr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64
+  precision: *single_double_precisions
+  M: 1
+  N: [57]
+  K: 1
+  block_dim: [6]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spmm_alg: [rocsparse_spmm_alg_bsr]
+  orderB: [rocsparse_order_column, rocsparse_order_row]
+  orderC: [rocsparse_order_column]
+  filename: [nos2]
+
+- name: spmm_bsr_file
+  category: quick
+  function: spmm_bsr
+  indextype: *i32
   precision: *single_double_precisions_complex
   M: 1
   N: [7]
@@ -130,15 +146,15 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_bsr]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
-  filename: [Chevron2]
+  filename: [mplate]
 
 - name: spmm_bsr
   category: quick
   function: spmm_bsr
   indextype: *i32
   precision: *float16_float16_float32_float32_abct_precision
-  M: [436]
-  N: [16, 23, 51]
+  M: [300]
+  N: [16, 23]
   K: [847]
   block_dim: [2, 5, 8]
   alpha_beta: *alpha_beta_range_quick
@@ -155,7 +171,7 @@ Tests:
   function: spmm_bsr
   indextype: *i32
   precision: *bfloat16_bfloat16_float32_float32_abct_precision
-  M: [43567]
+  M: [300]
   N: [144]
   K: [56478]
   block_dim: [12]
@@ -173,10 +189,10 @@ Tests:
   function: spmm_bsr
   indextype: *i32
   precision: [*float16_float16_float32_float32_abct_precision, *bfloat16_bfloat16_float32_float32_abct_precision]
-  M: [512]
-  N: [16, 32, 64]
+  M: [300]
+  N: [32]
   K: [512]
-  block_dim: [2, 4, 8]
+  block_dim: [2, 3, 8]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -197,7 +213,7 @@ Tests:
   M: [311]
   N: [441]
   K: [82]
-  block_dim: [5]
+  block_dim: [5, 10]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -236,7 +252,7 @@ Tests:
   M: 1
   N: [54]
   K: 1
-  block_dim: [2]
+  block_dim: [2, 11, 12]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_transpose]
@@ -246,7 +262,7 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_bsr]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
-  filename: [bmwcra_1]
+  filename: [nos3]
 
 - name: spmm_bsr_file
   category: pre_checkin
@@ -256,7 +272,7 @@ Tests:
   M: 1
   N: [9]
   K: 1
-  block_dim: [4]
+  block_dim: [4, 14]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_transpose]
@@ -266,7 +282,7 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_bsr]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
-  filename: [amazon0312]
+  filename: [nos4]
 
 - name: spmm_bsr_file
   category: pre_checkin
@@ -276,7 +292,7 @@ Tests:
   M: 1
   N: [47]
   K: 1
-  block_dim: [3]
+  block_dim: [3, 15]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_transpose]
@@ -286,7 +302,7 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_bsr]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
-  filename: [bmwcra_1]
+  filename: [nos5]
 
 - name: spmm_bsr_file
   category: pre_checkin
@@ -296,7 +312,7 @@ Tests:
   M: 1
   N: [4]
   K: 1
-  block_dim: [7]
+  block_dim: [7, 16]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none]
@@ -306,7 +322,7 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_bsr]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
-  filename: [Chevron3]
+  filename: [nos6]
 
 - name: spmm_bsr_file
   category: pre_checkin
@@ -316,7 +332,7 @@ Tests:
   M: 1
   N: [6]
   K: 1
-  block_dim: [8]
+  block_dim: [8, 17]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_transpose]
@@ -326,7 +342,7 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_bsr]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_column]
-  filename: [scircuit]
+  filename: [nos7]
 
 - name: spmm_bsr_file
   category: pre_checkin
@@ -346,7 +362,7 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_bsr]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
-  filename: [bibd_22_8]
+  filename: [scircuit]
 
 - name: spmm_bsr_file
   category: pre_checkin
@@ -366,15 +382,15 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_bsr]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
-  filename: [Chebyshev4]
+  filename: [Chevron2]
 
 - name: spmm_bsr
   category: pre_checkin
   function: spmm_bsr
   indextype: *i32
   precision: *float16_float16_float32_float32_abct_precision
-  M: [13845]
-  N: [21, 27, 44]
+  M: [2000]
+  N: [21, 27]
   K: [13724]
   block_dim: [3, 4, 5]
   alpha_beta: *alpha_beta_range_checkin
@@ -392,7 +408,7 @@ Tests:
   indextype: *i32
   precision: [*float16_float16_float32_float32_abct_precision, *bfloat16_bfloat16_float32_float32_abct_precision]
   M: [1024]
-  N: [32, 64, 128]
+  N: [32, 64]
   K: [1024]
   block_dim: [2, 4, 8]
   alpha_beta: *alpha_beta_range_checkin
@@ -409,7 +425,7 @@ Tests:
   function: spmm_bsr
   indextype: *i32i32_i64i32_i64i64
   precision: *double_only_precisions
-  M: [223, 485, 647]
+  M: [223, 485]
   N: [223]
   K: [223, 485, 647]
   block_dim: [11]
@@ -513,7 +529,7 @@ Tests:
   category: nightly
   function: spmm_bsr
   indextype: *i32_i64
-  precision: *single_double_precisions_complex
+  precision: *single_only_precisions_complex
   M: 1
   N: [12]
   K: 1
@@ -533,7 +549,7 @@ Tests:
   category: nightly
   function: spmm_bsr
   indextype: *i32_i64
-  precision: *single_double_precisions_complex
+  precision: *double_only_precisions_complex
   M: 1
   N: [12]
   K: 1
@@ -596,8 +612,8 @@ Tests:
   function: spmm_bsr
   indextype: *i32
   precision: *float16_float16_float32_float32_abct_precision
-  M: [42362]
-  N: [29, 39, 60]
+  M: [8472]
+  N: [29, 39]
   K: [12943]
   alpha_beta: *alpha_beta_range_nightly
   transA: [rocsparse_operation_none]

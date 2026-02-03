@@ -24,4 +24,4 @@
 #include "test.hpp"
 #include "testing_coo2csr.hpp"
 
-TEST_ROUTINE(coo2csr, conversion, arg.M, arg.N, arg.baseA);
+TEST_ROUTINE(coo2csr, conversion, arg.M, arg.N, arg.baseA, arg.graph_test);
