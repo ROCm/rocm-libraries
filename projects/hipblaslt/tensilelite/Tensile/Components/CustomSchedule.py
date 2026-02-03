@@ -574,31 +574,30 @@ class RegisterSchedule:
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
-
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
 
     if isTN(kernel) and TLDS == 1:
-
         nglshift = nllshift = 11
         syncTable = [
-                    -1, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Finish all LRA1 and 1/3 LRB1"),
-                    7, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="Finish 2/3 LRB1"),
+            -1, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Finish all LRA1 and 1/3 LRB1"),
+            7, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="Finish 2/3 LRB1"),
 
-                    15, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="All LRB1 and LRA0 done"),
-                    15, SBarrier(comment=""),
+            15, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="All LRB1 and LRA0 done"),
+            15, SBarrier(comment=""),
 
-                    23, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="1/3 LRB0 done"),
+            23, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="1/3 LRB0 done"),
 
-                    29, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All LRB0 done"),
-                    29, SBarrier(comment=""),
+            29, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All LRB0 done"),
+            29, SBarrier(comment=""),
 
-                    35, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="All GRA launched, 3 prev GRB."),
-                    35, SBarrier(comment=""),
+            35, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="All GRA launched, 3 prev GRB."),
+            35, SBarrier(comment=""),
 
-                    42, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Only global reads for this iter"),
-                    42, SBarrier(comment="")]
+            42, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Only global reads for this iter"),
+            42, SBarrier(comment="")
+        ]
 
         syncCode = syncTable[1::2]
         optSchedule = {
@@ -622,9 +621,7 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
             'LCC'   : [[47, 47]],
         }
     elif isNN(kernel) and useLDSTr and TLDS == 1:
-
         nglshift = nllshift = 11
-
         syncTable = [
             -1, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for LRB1 in prev iteration"),
             
@@ -670,6 +667,40 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
 
             'LCC'    : [[47, 47]],
         }
+    elif isNT(kernel) and useLDSTr and TLDS == 0:
+        syncTable = [
+            -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0"),
+            10, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+            10, SBarrier(comment=""),
+            20, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+            28, SWaitCnt(dscnt=0, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
+            28, SBarrier(comment=""),
+            41, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
+            41, SBarrier(comment=""),
+        ]
+
+        optSchedule = {
+            'SYNC': [syncTable[::2]],
+            'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
+            'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
+
+            'LRA0': [[0, 0, 0, 1, 1, 1, 2, 2, 3, 3, 4, 4, 5, 6, 7, 8]],
+            'LRB0': [[9, 11, 13, 15, 17, 19]],
+
+            'GRA': [[12, 12, 13, 13, 14, 14, 16, 16, 18, 18, 20, 20, 22, 22, 24, 26]],
+            'GRB': [[38, 38, 39, 39, 40, 40]],
+
+            'LRA1': [[30, 30, 31, 31, 32, 32, 33, 33, 34, 34, 35, 35, 36, 36, 37, 37]],
+            'LRB1': [[42, 43, 44, 45, 46, 47]],
+
+            'LRSA': [[27]],
+            'LRSB': [[28]],
+            'LWSA': [[29]],
+            'LWSB': [[41]],
+            'LCC': [[47, 47]],
+        }
+        syncCode = syncTable[1::2]
+        nglshift = nllshift = 11
     else:
         return False, None
 
