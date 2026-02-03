@@ -152,8 +152,17 @@ std::shared_ptr<SolutionParameters>
         // For 256x256x256 tile, use BufferToLDS for scale loading to reduce register pressure
         gemm->swizzleScale   = true;
         gemm->prefetchScale  = true;
-        gemm->loadPathAScale = SolutionParams::LoadPath::BufferToLDS;
-        gemm->loadPathBScale = SolutionParams::LoadPath::BufferToLDS;
+
+        if (solutionIndexParameters.workgroupTile.m >= 128 && solutionIndexParameters.workgroupTile.n >= 128)
+        {
+            gemm->loadPathAScale = SolutionParams::LoadPath::BufferToLDS;
+            gemm->loadPathBScale = SolutionParams::LoadPath::BufferToLDS;
+        }
+        else
+        {
+            gemm->loadPathAScale = SolutionParams::LoadPath::BufferToVGPR;
+            gemm->loadPathBScale = SolutionParams::LoadPath::BufferToVGPR;
+        }
     }
     else if(solutionIndexParameters.workgroupTile.m >= 128
         && solutionIndexParameters.workgroupTile.n >= 128)
@@ -214,15 +223,15 @@ std::shared_ptr<SolutionParameters>
                                / (gemm->kernelType.scaleTypeB.blockRowSize
                                   * gemm->kernelType.scaleTypeB.blockColSize));
     }
-    if(numScaleElementsA % workgroupSizeTotal != 0)
-    {
-        gemm->loadPathAScale    = SolutionParams::LoadPath::BufferToVGPR;
-        gemm->prefetchMixMemOps = false;
-    }
-    if(numScaleElementsB % workgroupSizeTotal != 0)
-    {
-        gemm->loadPathBScale    = SolutionParams::LoadPath::BufferToVGPR;
-        gemm->prefetchMixMemOps = false;
+        if(numScaleElementsA % workgroupSizeTotal != 0)
+        {
+            gemm->loadPathAScale    = SolutionParams::LoadPath::BufferToVGPR;
+            gemm->prefetchMixMemOps = false;
+        }
+        if(numScaleElementsB % workgroupSizeTotal != 0)
+        {
+            gemm->loadPathBScale    = SolutionParams::LoadPath::BufferToVGPR;
+            gemm->prefetchMixMemOps = false;
     }
 
     if(!solutionIndexParameters.workgroupMapping)

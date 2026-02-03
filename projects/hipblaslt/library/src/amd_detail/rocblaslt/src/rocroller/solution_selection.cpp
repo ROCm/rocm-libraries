@@ -227,6 +227,8 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
             {
                 if (wgt.m % 32 != 0 || wgt.n % 32 != 0)
                     continue;
+                if (wgt.m == 96 || wgt.n == 96)
+                    continue;
             }
 
             // wgt.k has to be at least 256 when scale data is pre-swizzled
