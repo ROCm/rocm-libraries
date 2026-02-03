@@ -155,6 +155,20 @@ double hardware_t::get_adjusted_main_loop_efficiency(transpose_t transA,
   }
 }
 
+bool hardware_t::has_MALL() const {
+  switch (arch) {
+    case architecture_t::gfx90a:
+    case architecture_t::gfx942:
+    case architecture_t::gfx950:
+    case architecture_t::gfx1201:
+    case architecture_t::gfx1100:
+    case architecture_t::gfx1151: return true;
+    case architecture_t::Count:
+      // Count is not a valid architecture, this is to silence compiler warning
+      return false;
+  }
+}
+
 std::string hardware_t::get_before_first_colon(const std::string& input) {
   size_t pos = input.find(':');
   if (pos != std::string::npos) { return input.substr(0, pos); }

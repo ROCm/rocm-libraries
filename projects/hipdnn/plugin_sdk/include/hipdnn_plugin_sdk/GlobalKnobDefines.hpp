@@ -6,4 +6,5 @@
 namespace hipdnn_plugin_sdk
 {
 static constexpr const char* BENCHMARKING_KNOB_NAME = "global.benchmarking";
+static constexpr const char* DETERMINISTIC_KNOB_NAME = "global.deterministic";
 }

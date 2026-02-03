@@ -46,7 +46,7 @@ TEST(TestKnobFactory, CreateIntKnobDeprecated)
     auto root
         = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(builder.GetBufferPointer());
 
-    EXPECT_STREQ(root->knob_id_str()->c_str(), "deprecated_int_knob");
+    EXPECT_STREQ(root->knob_id()->c_str(), "deprecated_int_knob");
     EXPECT_TRUE(root->deprecated());
 }
 
@@ -81,7 +81,7 @@ TEST(TestKnobFactory, CreateFloatKnobDeprecated)
     auto root
         = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(builder.GetBufferPointer());
 
-    EXPECT_STREQ(root->knob_id_str()->c_str(), "deprecated_float_knob");
+    EXPECT_STREQ(root->knob_id()->c_str(), "deprecated_float_knob");
     EXPECT_TRUE(root->deprecated());
 }
 
@@ -121,6 +121,6 @@ TEST(TestKnobFactory, CreateStringKnobDeprecated)
     auto root
         = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(builder.GetBufferPointer());
 
-    EXPECT_STREQ(root->knob_id_str()->c_str(), "deprecated_string_knob");
+    EXPECT_STREQ(root->knob_id()->c_str(), "deprecated_string_knob");
     EXPECT_TRUE(root->deprecated());
 }

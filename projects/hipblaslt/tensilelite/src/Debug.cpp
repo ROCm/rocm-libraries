@@ -55,6 +55,11 @@ namespace TensileLite
         return m_value & 0x10;
     }
 
+    bool Debug::printPredicateEvaluationVerbose() const
+    {
+        return m_value & 0x40000;
+    }
+
     bool Debug::printCodeObjectInfo() const
     {
         return m_value & 0x20;

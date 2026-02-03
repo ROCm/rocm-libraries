@@ -13,6 +13,7 @@ Documentation for rocSPARSE is available at
 * Added brain half float mixed precision to `rocsparse_spmv` where A, X, and Y use bfloat16 and the compute type use float.
 * Added half float mixed precision to `rocsparse_spmv` where A, X, and Y use float16 and the compute type use float.
 * Added float16 and bfloat16 output support for level 3 functions (`rocsparse_spmm`, `rocsparse_csrmm`, `rocsparse_coomm`, `rocsparse_spgemm`). This enables mixed precision workflows where the output matrix C can use float16 or bfloat16 types.
+* For sparse matrix vector product (`rocsparse_spmv`), when using `rocsparse_spmv_alg_default`, the routine now automatically falls back to a supported algorithm depending on the sparse matrix format and requested operation. For example, CSR format with transposed operations or CSC format with non-transposed operations will fall back to an appropriate algorithm.
 
 ### Resolved issues
 * Fix issue in `rocsparse_[s|d|c|z]gebsrmv` routine where incorrect results could sometimes be returned.
