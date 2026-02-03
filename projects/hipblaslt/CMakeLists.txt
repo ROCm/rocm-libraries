@@ -456,7 +456,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
             "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/git_info.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/specs.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/suites.py"
-        DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/hipblaslt/performance"
         COMPONENT benchmarks
     )
 

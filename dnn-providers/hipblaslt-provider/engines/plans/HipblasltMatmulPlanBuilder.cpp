@@ -16,9 +16,9 @@ namespace hipblaslt_plugin
 {
 namespace
 {
-bool checkDataTypes(const hipdnn_plugin_sdk::TensorAttributesWrapper& tA,
-                    const hipdnn_plugin_sdk::TensorAttributesWrapper& tB,
-                    const hipdnn_plugin_sdk::TensorAttributesWrapper& tC)
+bool checkDataTypes(const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tA,
+                    const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB,
+                    const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tC)
 {
     const auto& aType = tA.dataType();
     const auto& bType = tB.dataType();
@@ -39,7 +39,7 @@ bool checkDataTypes(const hipdnn_plugin_sdk::TensorAttributesWrapper& tA,
     return true;
 }
 
-void validateGraphConfiguration(const hipdnn_plugin_sdk::IGraph& opGraph)
+void validateGraphConfiguration(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     if(opGraph.nodeCount() != 1)
     {
@@ -67,8 +67,9 @@ void validateGraphConfiguration(const hipdnn_plugin_sdk::IGraph& opGraph)
 
 } // namespace
 
-bool HipblasltMatmulPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
-                                              const hipdnn_plugin_sdk::IGraph& opGraph) const
+bool HipblasltMatmulPlanBuilder::isApplicable(
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     try
     {
@@ -97,8 +98,9 @@ bool HipblasltMatmulPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& ha
     }
 }
 
-size_t HipblasltMatmulPlanBuilder::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                                    const hipdnn_plugin_sdk::IGraph& opGraph) const
+size_t HipblasltMatmulPlanBuilder::getWorkspaceSize(
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     validateGraphConfiguration(opGraph);
 
@@ -111,7 +113,7 @@ size_t HipblasltMatmulPlanBuilder::getWorkspaceSize(const HipdnnEnginePluginHand
 
 void HipblasltMatmulPlanBuilder::buildPlan(
     const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin_sdk::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     validateGraphConfiguration(opGraph);
