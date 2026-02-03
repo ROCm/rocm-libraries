@@ -345,12 +345,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
             else:
                 return ret
 
-        needIfMacro = False
-        ToSched = dict()
-        for k, stream in InstStreams.items():
-            ToSched[k] = scheduleInst(stream[0], stream[1])
-            if len(ToSched[k]) > 1:
-                needIfMacro = True
+        ToSched = {k: scheduleInst(stream[0], stream[1]) for k, stream in InstStreams.items()}
 
         def nllvmcntHandling(inst, shift0, shift1):
             if isinstance(inst, SWaitCnt) and (inst.vlcnt != -1 or (inst.dscnt != -1 and opt1.nllZeroDscnt)):
@@ -376,66 +371,48 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
             else:
                 macro.add(inst)
 
-        def scheduleInst1(instList, macroGuard=""):
-            if len(instList) == 1:
-                if instList[0] != None:
-                    for inst in instList[0].flatitems():
-                        if isinstance(inst, SWaitCnt):
-                            nllvmcntHandling(inst, opt1.nglshift, opt1.nllshift)
-                        else:
-                            if macroGuard != "":
-                                macro.add(ValueIf(macroGuard))
-                            macro.add(inst)
-                            if macroGuard != "":
-                                macro.add(ValueEndif(comment="EndIf %s"%(macroGuard)))
+        def get_macro_guard(key):
+            """Determine the macro guard for a given instruction key."""
+            if key in ['GRIncA', 'GRIncB']:
+                return "\\useGRInc == 1"
+            elif key in ['GRA', 'GRB', 'LWSA', 'LWSB']:
+                return "\\useGR == 1"
+            elif key in ['LRA%u' % lastIter, 'LRB%u' % lastIter, 'LRSA', 'LRSB']:
+                return "\\usePLR == 1"
+            elif key in ['LCC']:
+                return "\\useLoop == 1"
+            return ""
 
-        for k,ts in ToSched.items():
-            if k in ['GRIncA', 'GRIncB']: # check for global read inc
-                scheduleInst1(ts, "\\useGRInc == 1")
-            elif k in ['GRA', 'GRB', 'LWSA', 'LWSB']: # check for global reads
-                scheduleInst1(ts, "\\useGR == 1")
-            elif k in ['LRA%u'%lastIter, 'LRB%u'%lastIter, 'LRSA', 'LRSB']: # check for next prefetch
-                scheduleInst1(ts, "\\usePLR == 1")
-            elif k in ['LCC']: # check for next prefetch
-                scheduleInst1(ts, "\\useLoop == 1")
-            else:
-                scheduleInst1(ts)
-
-        if needIfMacro:
-            for codepath in range(numCodePath):
-                if codepath == 0:
-                    macro.add(ValueIf("\\ID == %u"%codepath))
-                else:
-                    macro.add(ValueElseIf("\\ID == %u\n"%codepath))
-
-                def scheduleInst2(instList, macroGuard=""):
-                    if len(instList) == numCodePath:
-                        if instList[codepath] != None:
-                            for inst in instList[codepath].flatitems():
-                                if isinstance(inst, SWaitCnt):
-                                    nllvmcntHandling(inst, opt1.nglshift, opt1.nllshift)
-                                else:
-                                    if macroGuard != "":
-                                        macro.add(ValueIf(macroGuard))
-                                    macro.add(inst)
-                                    if macroGuard != "":
-                                        macro.add(ValueEndif(comment="EndIf %s"%(macroGuard)))
-
-                for k,ts in ToSched.items():
-                    if k in ['GRIncA', 'GRIncB']: # check for global read inc
-                        scheduleInst2(ts, "\\useGRInc == 1\n")
-                    elif k in ['GRA', 'GRB', 'LWSA', 'LWSB']: # check for global reads
-                        scheduleInst2(ts, "\\useGR == 1\n")
-                    elif k in ['LRA%u'%lastIter, 'LRB%u'%lastIter, 'LRSA', 'LRSB']: # check for next prefetch
-                        scheduleInst2(ts, "\\usePLR == 1\n")
-                    elif k in ['LCC']: # check for next prefetch
-                        scheduleInst2(ts, "\\useLoop == 1\n")
+        def emit_instructions(instModule, macroGuard: str):
+            """Emit instructions from a module with optional macro guard."""
+            if instModule is not None:
+                for inst in instModule.flatitems():
+                    if isinstance(inst, SWaitCnt):
+                        nllvmcntHandling(inst, opt1.nglshift, opt1.nllshift)
                     else:
-                        scheduleInst2(ts)
+                        if macroGuard:
+                            macro.add(ValueIf(macroGuard))
+                        macro.add(inst)
+                        if macroGuard:
+                            macro.add(ValueEndif(comment="EndIf %s" % macroGuard))
 
-                if codepath == numCodePath - 1:
-                    macro.add(ValueEndif(comment="EndIf \\ID checks"))
+        for k, ts in ToSched.items():
+            macroGuard = get_macro_guard(k)
 
+            if len(ts) == 1:
+                emit_instructions(ts[0], macroGuard)
+            elif len(ts) == numCodePath:
+                # Multi codepath - emit inside ID conditionals
+                for codepath in range(numCodePath):
+                    if codepath == 0:
+                        macro.add(ValueIf("\\ID == %u" % codepath))
+                    else:
+                        macro.add(ValueElseIf("\\ID == %u" % codepath))
+                    emit_instructions(ts[codepath], macroGuard)
+                macro.add(ValueEndif(comment="EndIf \\ID checks"))
+            else:
+                raise ValueError(f"Invalid number of instructions for {k}: {len(ts)}")
+ 
     module.add(macro)
     return module, numCodePath
 
@@ -4307,3 +4284,84 @@ def _get_schedule_160x128x64_TF32(kernel, useLDSTr, TLDS):
 
     else:
         return False, None
+        
+@RegisterSchedule(
+    tile_config=TileConfig(128, 256, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x256x64_16bit(kernel, useLDSTr, TLDS):
+    kernel["MfmaInitCVgprs"] = True
+    
+    numMfma = 64
+    optSchedule = dict()
+    syncCode = []
+    nglshift = nllshift = 0
+    if isNN(kernel) and useLDSTr and TLDS == 1:
+        lra0 = [create_range(min_val = 1, num = 4, step = 2, repeat = 2),
+                create_range(min_val = 0, num = 4, step = 2, repeat = 2)]
+
+        GRIncA = [create_range(min_val = 2, num = 3, step = 2, repeat = 3),
+                  create_range(min_val = 1, num = 3, step = 2, repeat = 3)]
+
+        waitLRA0 = max(lra0[1])+5
+        gra = create_range(min_val = waitLRA0+1, num = 4, step = 2, repeat = 2)
+        lrb0 = create_range(min_val = max(gra)+1, num = 8, step = 1, repeat = 1)
+        GRIncB = create_range(min_val = max(gra)+1, num = 9, step = 1, repeat = 1)
+
+        assert max(lrb0) < numMfma // 2, "lrb0 max {} numMfma/2 {}".format(max(lrb0), numMfma//2)
+
+        startGRB = max(lrb0) + 5
+
+        assert startGRB < numMfma // 2, "startGRB {} numMfma/2 {}".format(startGRB, numMfma//2)
+        grb = create_range(min_val = startGRB, num = 4, step = 2, repeat = 2)
+        startLRA1 = max(grb) + 3
+
+        lra1 = create_range(min_val = startLRA1, num = 8, step = 1, repeat = 1)
+        startLRB1 = max(lra1) + 1
+        grb += create_range(min_val = startLRB1, num = 4, step = 2, repeat = 2)
+        lrb1 = create_range(min_val = startLRB1+1, num = 4, step = 2, repeat = 1)
+        lrb1 += create_range(min_val = max(lrb1)+2, num = 4, step = 1, repeat = 1)
+        syncTable = [
+            -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 & LRB0"),
+            waitLRA0,  SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0"),
+            waitLRA0, SBarrier(comment=""),
+
+            startGRB-1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0"),
+            startGRB-1, SBarrier(comment=""),
+            startLRA1-1, SWaitCnt(dscnt=-1, vlcnt=16, vscnt=-1, comment="wait for previous GRA & GRB"),
+            startLRA1-1, SBarrier(comment=""),
+
+            startLRB1-1, SWaitCnt(dscnt=-1, vlcnt=8, vscnt=-1, comment="wait for previous GRA & GRB"),
+            startLRB1-1, SBarrier(comment="")
+        ]
+
+        optSchedule = {
+            'GRA': [gra],
+            'GRB': [grb],
+            'GRIncA': [*GRIncA],
+            'GRIncB': [GRIncB],
+            'LCC': [[numMfma-2,numMfma-2]],
+            'LRA0': [*lra0],
+            'LRA1': [lra1],
+            'LRB0': [lrb0],
+            'LRB1': [lrb1],
+            'LRSA': [[startGRB-1]],
+            'LRSB': [[startGRB-1]],
+            'LWSA': [[numMfma-3]],
+            'LWSB': [[numMfma-3]],
+            'SYNC': [syncTable[::2]],
+        }
+
+
+        syncCode = syncTable[1::2]
+        nglshift = nllshift = 12 
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+        
+        return True, opt1
+   
+    # No matching variant found
+    return False, None
+
