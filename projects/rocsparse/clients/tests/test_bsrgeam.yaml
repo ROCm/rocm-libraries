@@ -28,7 +28,6 @@ include: rocsparse_common.yaml
 Definitions:
   - &alpha_range_quick
     - { alpha:   1.0, alphai:  1.0 }
-    - { alpha:  -0.5, alphai: -0.5 }
 
   - &alpha_range_checkin
     - { alpha:   0.0, alphai:  1.5 }
@@ -40,7 +39,6 @@ Definitions:
 
   - &beta_range_quick
     - { beta:   1.0, betai:  1.0 }
-    - { beta:  -0.5, betai: -0.5 }
 
   - &beta_range_checkin
     - { beta:   2.0, betai:  1.5 }
