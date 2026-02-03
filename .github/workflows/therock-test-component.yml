@@ -103,7 +103,7 @@ jobs:
           # Read from captured test output
           if [ -f "./test_logs/test_output.log" ]; then
             # Extract last 100 lines and look for failure patterns
-            ERROR_LOG=$(tail -n 100 ./test_logs/test_output.log | grep -iE "(error|failed|fatal|exception|assertion)" -A 2 -B 1 | head -n 10 || echo "")
+            ERROR_LOG=$(tail -n 100 ./test_logs/test_output.log | grep -iE "(error|failed|fatal|exception|assertion)" -A 3 -B 2 | head -n 10 || echo "")
           fi
 
           # Categorize the issue type based on error patterns
