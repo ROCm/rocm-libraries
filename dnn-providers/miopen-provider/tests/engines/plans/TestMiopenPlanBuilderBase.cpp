@@ -26,8 +26,16 @@ public:
 
     void buildPlan([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
                    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                   [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
                    [[maybe_unused]] HipdnnEnginePluginExecutionContext& executionContext) const override
     {
+    }
+
+    std::vector<hipdnn_data_sdk::data_objects::KnobT>
+        getCustomKnobs([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+                       [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override
+    {
+        return {};
     }
 };
 

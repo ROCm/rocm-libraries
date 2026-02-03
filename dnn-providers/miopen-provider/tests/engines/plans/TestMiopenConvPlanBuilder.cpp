@@ -272,8 +272,9 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeFwd)
 
     auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
 
+    MockEngineConfig mockEngineConfig;
     HipdnnEnginePluginExecutionContext ctx;
-    _planBuilder.buildPlan(_handle, graph, ctx);
+    _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx);
 
     size_t actualWorkspace = ctx.plan().getWorkspaceSize(_handle);
 
@@ -288,8 +289,9 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeBwd)
 
     auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
 
+    MockEngineConfig mockEngineConfig;
     HipdnnEnginePluginExecutionContext ctx;
-    _planBuilder.buildPlan(_handle, graph, ctx);
+    _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx);
 
     size_t actualWorkspace = ctx.plan().getWorkspaceSize(_handle);
 
@@ -304,8 +306,9 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeWrw)
 
     auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
 
+    MockEngineConfig mockEngineConfig;
     HipdnnEnginePluginExecutionContext ctx;
-    _planBuilder.buildPlan(_handle, graph, ctx);
+    _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx);
 
     size_t actualWorkspace = ctx.plan().getWorkspaceSize(_handle);
 
@@ -321,15 +324,16 @@ TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitFwd)
     auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
     ASSERT_NE(range.min, range.max) << "No workspace size range available for testing";
 
+    MockEngineConfig mockEngineConfig;
     HipdnnEnginePluginExecutionContext ctx1;
     ctx1.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
-    _planBuilder.buildPlan(_handle, graph, ctx1);
+    _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx1);
     executePlan(ctx1.plan(), graph);
 
     HipdnnEnginePluginExecutionContext ctx2;
     ctx2.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
     ctx2.setWorkspaceSizeLimit(range.min);
-    _planBuilder.buildPlan(_handle, graph, ctx2);
+    _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx2);
     executePlan(ctx2.plan(), graph);
 }
 
@@ -341,15 +345,16 @@ TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitBwd)
     auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
     ASSERT_NE(range.min, range.max) << "No workspace size range available for testing";
 
+    MockEngineConfig mockEngineConfig;
     HipdnnEnginePluginExecutionContext ctx1;
     ctx1.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
-    _planBuilder.buildPlan(_handle, graph, ctx1);
+    _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx1);
     executePlan(ctx1.plan(), graph);
 
     HipdnnEnginePluginExecutionContext ctx2;
     ctx2.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
     ctx2.setWorkspaceSizeLimit(range.min);
-    _planBuilder.buildPlan(_handle, graph, ctx2);
+    _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx2);
     executePlan(ctx2.plan(), graph);
 }
 
@@ -361,14 +366,15 @@ TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitWrw)
     auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
     ASSERT_NE(range.min, range.max) << "No workspace size range available for testing";
 
+    MockEngineConfig mockEngineConfig;
     HipdnnEnginePluginExecutionContext ctx1;
     ctx1.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
-    _planBuilder.buildPlan(_handle, graph, ctx1);
+    _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx1);
     executePlan(ctx1.plan(), graph);
 
     HipdnnEnginePluginExecutionContext ctx2;
     ctx2.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
     ctx2.setWorkspaceSizeLimit(range.min);
-    _planBuilder.buildPlan(_handle, graph, ctx2);
+    _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx2);
     executePlan(ctx2.plan(), graph);
 }
