@@ -27,8 +27,10 @@
 #pragma once
 
 #include <Tensile/AMDGPU.hpp>
+#include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Predicates.hpp>
 
+#include <sstream>
 #include <vector>
 
 namespace TensileLite
@@ -72,7 +74,7 @@ namespace TensileLite
                 virtual bool debugEval(AMDGPU const& gpu,
                                        std::ostream& stream) const override
                 {
-                    return debugEvalCmp(gpu, stream, "prob", gpu.processor, "==", "sol", value);
+                    return debugEvalCmp(gpu, stream, "gpu", gpu.archName(), "==", "sol", AMDGPU::toString(value));
                 }
             };
 
@@ -104,7 +106,7 @@ namespace TensileLite
                 virtual bool debugEval(AMDGPU const& gpu,
                                        std::ostream& stream) const override
                 {
-                    return debugEvalCmp(gpu, stream, "prob", gpu.computeUnitCount, "==", "sol", value);
+                    return debugEvalCmp(gpu, stream, "gpu", gpu.computeUnitCount, "==", "sol", value);
                 }
             };
 
@@ -136,9 +138,7 @@ namespace TensileLite
                 virtual bool debugEval(AMDGPU const& gpu,
                                        std::ostream& stream) const override
                 {
-                    bool rv = (*this)(gpu);
-                    stream << rv << ": " << this->type() << std::endl;
-                    return rv;
+                    return debugEvalCmp(gpu, stream, "gpu", gpu.archName(), "can run", "sol", AMDGPU::toString(value));
                 }
             };
         } // namespace GPU
