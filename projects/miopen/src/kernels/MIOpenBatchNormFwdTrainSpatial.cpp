@@ -779,7 +779,8 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         }
 
         if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
-                     (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
+                     (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1 ||
+                     (MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL < 64))
         {
             __shared__ FpAccumCType
                 lcl_data[2 * MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL];
