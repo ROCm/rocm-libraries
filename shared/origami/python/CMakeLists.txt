@@ -82,6 +82,13 @@ if(ORIGAMI_PYTHON_ENABLE_WARNINGS)
     )
 endif()
 
+# Set RPATH so the Python extension can find liborigami.so at runtime.
+if(NOT WIN32)
+    set_target_properties(_pyorigami PROPERTIES
+        INSTALL_RPATH "$ORIGIN/../../..:$ORIGIN/../../lib"
+    )
+endif()
+
 # Install the compiled module to the package directory
 install(TARGETS _pyorigami LIBRARY DESTINATION "${PYTHON_INSTALL_DIR}")
 
