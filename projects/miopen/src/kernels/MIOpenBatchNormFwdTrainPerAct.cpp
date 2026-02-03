@@ -86,7 +86,7 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
     const auto* bs_base = bias + cidx;
 
     // move across the sections of the image mini_batch stack
-    for(unsigned bid = blockIdx.y; bid * MIO_BN_GRP1 < in_cstride; bid += gridDim.y)
+    for(unsigned bid = ygidy; bid * MIO_BN_GRP1 < in_cstride; bid += gridDim.y)
     {
         const auto blockOffset = bid * MIO_BN_GRP1;
         const auto idx         = blockOffset + threadIdx.y;
@@ -104,23 +104,23 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
         const auto* in_ptr = in_base + blockOffset;
         auto* out_ptr      = out_base + blockOffset;
 
-        const auto getInput = [&](unsigned int i) {
-            return miopen::cast<fp_prec_type>(in_ptr[in_nstride * i + threadIdx.y]);
-        };
 
         const auto getIndex = [&](unsigned int i) {
             return in_nstride * i + threadIdx.y;
         };
+        const auto getInput = [&](unsigned int i) {
+            return miopen::cast<fp_prec_type>(in_ptr[getIndex(i)]);
+        };
 
         for(unsigned int n = 0; n < MIO_BN_N; n++)
         {
-            mean += miopen::cast<fp_prec_type>(in_ptr[getIndex(n)]);
+            mean += getInput(n);
         }
         mean *= invN;
 
         for(unsigned int n = 0; n < MIO_BN_N; n++)
         {
-            const fp_prec_type x = miopen::cast<fp_prec_type>(in_ptr[getIndex(n)]);
+            const fp_prec_type x = getInput(n);
             const fp_prec_type d = x - mean;
             variance += d * d;
         }
