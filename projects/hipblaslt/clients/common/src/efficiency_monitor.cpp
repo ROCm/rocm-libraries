@@ -100,24 +100,26 @@ public:
     const double cHzToMHz = 0.000001;
     const double cMhzToHz = 1000000;
 
-    // deleting copy constructor
     EfficiencyMonitorImp(const EfficiencyMonitorImp& obj) = delete;
 
 #ifndef _WIN32
 
     bool enabled()
     {
-        static const char* env1_freq = getenv("HIPBLASLT_BENCH_FREQ");
-        static const char* env1_eff = getenv("HIPBLASLT_BENCH_EFF");
-        static const char* env2      = getenv("HIPBLASLT_BENCH_FREQ_ALL");
-        return env1_freq != nullptr || env1_eff != nullptr
-               || (env2 != nullptr && m_isMultiXCDSupported);
+        static const char* env = getenv("HIPBLASLT_BENCH_FREQ");
+        return (env != nullptr || efficiencyReport() || detailedReport());
     }
 
     bool detailedReport()
     {
-        static const char* env2 = getenv("HIPBLASLT_BENCH_FREQ_ALL");
-        return (env2 != nullptr && m_isMultiXCDSupported);
+        static const char* env = getenv("HIPBLASLT_BENCH_FREQ_ALL");
+        return (env != nullptr && m_isMultiXCDSupported);
+    }
+
+    bool efficiencyReport()
+    {
+        static const char* env = getenv("HIPBLASLT_BENCH_PERF");
+        return (env != nullptr);
     }
 
     EfficiencyMonitorImp()
@@ -545,6 +547,11 @@ public:
     }
 
     bool detailedReport()
+    {
+        return false;
+    }
+
+    bool efficiencyReport()
     {
         return false;
     }
