@@ -7,7 +7,7 @@
 #include <ostream>
 #endif
 
-#include "ck/utility/integral_constant.hpp"
+#include "ck/utility/array.hpp"
 #include "ck/utility/type.hpp"
 #include "ck/utility/functional.hpp"
 #include "ck/utility/math.hpp"
@@ -368,29 +368,62 @@ struct uniform_sequence_gen<0, I>
 };
 
 // reverse inclusive scan (with init) sequence
-template <typename, typename, index_t>
-struct sequence_reverse_inclusive_scan;
+namespace impl {
+template <typename Seq, typename Reduce, index_t Init>
+struct sequence_reverse_inclusive_scan_impl;
 
-template <index_t I, index_t... Is, typename Reduce, index_t Init>
-struct sequence_reverse_inclusive_scan<Sequence<I, Is...>, Reduce, Init>
+template <index_t... Is, typename Reduce, index_t Init>
+struct sequence_reverse_inclusive_scan_impl<Sequence<Is...>, Reduce, Init>
 {
-    using old_scan = typename sequence_reverse_inclusive_scan<Sequence<Is...>, Reduce, Init>::type;
+    template <index_t Size>
+    static constexpr Array<index_t, Size> compute_array()
+    {
+        Array<index_t, Size> values = {Is...};
+        Array<index_t, Size> result = {0};
+        result.At(Size - 1)         = Reduce{}(values[Size - 1], Init);
+        for(index_t i = Size - 1; i > 0; --i)
+        {
+            result.At(i - 1) = Reduce{}(values[i - 1], result[i]);
+        }
+        return result;
+    }
 
-    static constexpr index_t new_reduce = Reduce{}(I, old_scan{}.Front());
+    template <index_t... Indices>
+    static constexpr auto compute(Sequence<Indices...>)
+    {
+        constexpr index_t size = sizeof...(Is);
 
-    using type = typename sequence_merge<Sequence<new_reduce>, old_scan>::type;
+        if constexpr(size == 0)
+        {
+            return Sequence<>{};
+        }
+        else if constexpr(size == 1)
+        {
+            constexpr index_t values[1] = {Is...};
+            return Sequence<Reduce{}(values[0], Init)>{};
+        }
+        else if constexpr(size == 2)
+        {
+            constexpr index_t values[2] = {Is...};
+            constexpr index_t r1        = Reduce{}(values[1], Init);
+            constexpr index_t r0        = Reduce{}(values[0], r1);
+            return Sequence<r0, r1>{};
+        }
+        else
+        {
+            constexpr Array<index_t, size> arr = compute_array<size>();
+            return Sequence<arr[Indices]...>{};
+        }
+    }
+
+    using type = decltype(compute(make_index_sequence<sizeof...(Is)>{}));
 };
+} // namespace impl
 
-template <index_t I, typename Reduce, index_t Init>
-struct sequence_reverse_inclusive_scan<Sequence<I>, Reduce, Init>
+template <typename Seq, typename Reduce, index_t Init>
+struct sequence_reverse_inclusive_scan
 {
-    using type = Sequence<Reduce{}(I, Init)>;
-};
-
-template <typename Reduce, index_t Init>
-struct sequence_reverse_inclusive_scan<Sequence<>, Reduce, Init>
-{
-    using type = Sequence<>;
+    using type = typename impl::sequence_reverse_inclusive_scan_impl<Seq, Reduce, Init>::type;
 };
 
 // split sequence

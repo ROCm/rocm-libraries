@@ -4,10 +4,9 @@
 #ifndef CK_ARRAY_HPP
 #define CK_ARRAY_HPP
 
-#include "functional2.hpp"
-#include "sequence.hpp"
 #include <type_traits>
 #include <cassert>
+#include "type.hpp"
 
 namespace ck {
 
@@ -43,7 +42,10 @@ struct Array
     {
         static_assert(T::Size() == Size(), "wrong! size not the same");
 
-        static_for<0, Size(), 1>{}([&](auto i) { operator()(i) = a[i]; });
+        for(index_t i = 0; i < NSize; i++)
+        {
+            mData[i] = a[i];
+        }
 
         return *this;
     }
