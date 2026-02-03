@@ -146,11 +146,6 @@ TEST_P(IntegrationGraphKnobsApi, CreateExecutionPlanWithEmptyKnobs)
 
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithValidKnobs)
 {
-    // TODO: KNOWN ISSUE - initializeEngineConfig() finalizes the descriptor before
-    // create_execution_plan_ext() can set knobs on it. This needs to be fixed in the
-    // Graph implementation to set knobs before finalization.
-    // For now, this test documents the expected behavior.
-
     Graph graph = createAndBuildSimpleGraph();
 
     int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
