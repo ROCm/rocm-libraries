@@ -492,6 +492,86 @@ class TestValidateLRsCompleteBeforeVMFMA_MfmaReorder(CMSValidationTestBase):
 
         self.validate(optSchedule, syncCode, 1, None, None, 0, None, nllZeroDscnt=True, mfmaReorder=mfmaReorder)
 
+    def test_asymmetric_reorder_bf16(self):
+        """
+        Test with asymmetric mfmaReorder that exposes the inverse mapping bug.
+        
+        Uses 3x2 tile configuration (n_tiles_a=3, n_tiles_b=2) for 12 total MFMAs.
+        The reordering groups by A tile within each half, keeping halves separate.
+        This mirrors the pattern used in the 96x256x64 schedule.
+        
+        Default column-major MFMA layout:
+           B0  B1                    B0  B1
+        A0 [ 0   3 ]  1st half    A0 [ 6   9 ]  2nd half
+        A1 [ 1   4 ]              A1 [ 7  10 ]
+        A2 [ 2   5 ]              A2 [ 8  11 ]
+        
+        Reorder: group by A tile within each half (A0s first, then A1s, then A2s)
+        mfmaReorder[new_pos] = original_pos
+        - 1st half: new [0,1,2,3,4,5] get originals [0,3, 1,4, 2,5]
+        - 2nd half: new [6,7,8,9,10,11] get originals [6,9, 7,10, 8,11]
+        
+        Inverse mapping (original -> new_pos) for 1st half:
+        - original 0 -> new 0,  original 3 -> new 1
+        - original 1 -> new 2,  original 4 -> new 3
+        - original 2 -> new 4,  original 5 -> new 5
+        
+        For LRA1 loading A tile 2 (for next iteration, original indices 2, 5):
+        - Correct: inverse[2]=4, inverse[5]=5, min=4
+        - Buggy: mfma_reorder[2]=1, mfma_reorder[5]=5, min=1
+        
+        With buggy logic:
+        - needed_by = 1
+        
+        With correct logic:
+        - needed_by = 4
+        """
+        # Use 3x2 tile configuration
+        self.setUp({"MIWaveTileA": 3, "MIWaveTileB": 2})
+        assert self.num_vmfma == 12  # 2 * 3 * 2
+        
+        # Reorder: Reorder to row-major order.
+        # Before reordering (default col-major order), MFMA tiles are multiplied in the following order:
+        #   idx: 0    1    2    3    4    5    | 6    7    8    9    10   11
+        #   mul: A0B0 A1B0 A2B0 A0B1 A1B1 A2B1 | A0B0 A1B0 A2B0 A0B1 A1B1 A2B1
+
+        # After reordering (mfmaReorder), new order of multiplication:
+        #     idx: 0    1    2    3    4    5    | 6    7    8    9    10   11
+        # old idx: 0    3    1    4    2    5    | 6    9    7    10    8   11
+        #     mul: A0B0 A0B1 A1B0 A1B1 A2B0 A2B1 | A0B0 A0B1 A1B0 A1B1 A2B0 A2B1
+        mfmaReorder = [
+            0, 3, 
+            1, 4, 
+            2, 5,
+            
+            6, 9,
+            7, 10,
+            8, 11
+        ]
+        
+        syncTable = [
+            -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All LR1s done"),
+            
+            1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All LRB0 done"),
+
+            5, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="All LRB0 and 1/3 LRA0s done"),
+            7, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="2/3 LRA1s done"),
+            9, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="3/3 LRA1s done"),
+        ]
+
+        optSchedule = {
+            "SYNC": [syncTable[::2]],
+            # LR0s load data for 2nd half - issue early
+            "LRB0": [[0,0]],
+            "LRA0": [[2, 3, 4]],
+            
+            "LRA1": [[11,11,11]],
+            "LRB1": [[11,11]],
+        }
+        syncCode = syncTable[1::2]
+        
+        self.validate(optSchedule, syncCode, 1, None, None, 0, None, mfmaReorder=mfmaReorder)
+
     def test_tf32(self):
         """
         """
