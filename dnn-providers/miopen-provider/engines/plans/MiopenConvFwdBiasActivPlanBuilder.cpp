@@ -14,6 +14,11 @@
 namespace miopen_plugin
 {
 
+MiopenConvFwdBiasActivPlanBuilder::MiopenConvFwdBiasActivPlanBuilder(bool deterministic)
+    : _deterministic(deterministic)
+{
+}
+
 namespace
 {
 
@@ -435,7 +440,7 @@ bool isApplicableInternal(const HipdnnEnginePluginHandle& handle,
 bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
                                                      const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
-    return isApplicableInternal(handle, opGraph);
+    return isApplicableInternal(handle, opGraph, _deterministic);
 }
 
 size_t MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSize(
@@ -444,7 +449,8 @@ size_t MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSize(
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
 
-    ConvFwdBiasActivParams params(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
+    ConvFwdBiasActivParams params(
+        convAttr, biasAttr, activAttr, opGraph.getTensorMap(), _deterministic);
     ConvFwdBiasActivPlan plan(handle, std::move(params), false, true, false);
     return plan.getWorkspaceSize(handle);
 }
@@ -458,19 +464,9 @@ void MiopenConvFwdBiasActivPlanBuilder::buildPlan(
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
 
-    // Read deterministic knob setting
-    bool deterministicEnabled = false;
-    if(engineConfig.isValid()
-       && engineConfig.hasKnobSetting(hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME))
-    {
-        const auto& knobSetting
-            = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME);
-        if(knobSetting.valueType() == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
-        {
-            auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
-            deterministicEnabled = (value != 0);
-        }
-    }
+    // Use deterministic mode from plan builder configuration
+    bool deterministicEnabled = _deterministic;
+    (void)engineConfig; // engineConfig parameter kept for interface compatibility
 
     ConvFwdBiasActivParams params(
         convAttr, biasAttr, activAttr, opGraph.getTensorMap(), deterministicEnabled);
@@ -482,29 +478,11 @@ void MiopenConvFwdBiasActivPlanBuilder::buildPlan(
 std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenConvFwdBiasActivPlanBuilder::getCustomKnobs(
     const HipdnnEnginePluginHandle& handle, const hipdnn_plugin_sdk::IGraph& opGraph) const
 {
-    std::vector<hipdnn_data_sdk::data_objects::KnobT> knobs;
-
-    // Check if deterministic mode is supported by passing true to isApplicableInternal
-    if(isApplicableInternal(handle, opGraph, true))
-    {
-        hipdnn_data_sdk::data_objects::KnobT knob;
-        knob.knob_id = hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME;
-        knob.description = "Enable deterministic mode";
-
-        hipdnn_data_sdk::data_objects::IntValueT defaultValue;
-        defaultValue.value = 0;
-        knob.default_value.Set(defaultValue);
-
-        hipdnn_data_sdk::data_objects::IntConstraintT constraint;
-        constraint.min_value = 0;
-        constraint.max_value = 1;
-        constraint.step = 1;
-        knob.constraint.Set(constraint);
-
-        knobs.push_back(std::move(knob));
-    }
-
-    return knobs;
+    // Deterministic mode is now selected via engine choice (MIOPEN_ENGINE vs MIOPEN_ENGINE_DETERMINISTIC)
+    // No custom knobs needed for convolution operations
+    (void)handle;
+    (void)opGraph;
+    return {};
 }
 
 } // namespace miopen_plugin

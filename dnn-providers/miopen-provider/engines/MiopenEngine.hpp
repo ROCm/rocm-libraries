@@ -16,7 +16,7 @@ namespace miopen_plugin
 class MiopenEngine : public IEngine
 {
 public:
-    MiopenEngine(int64_t id);
+    MiopenEngine(int64_t id, bool deterministic = false);
 
     int64_t id() const override;
 
@@ -38,6 +38,7 @@ public:
 
 private:
     int64_t _id;
+    bool _deterministic;
     std::vector<std::unique_ptr<IPlanBuilder>> _planBuilders;
 };
 
