@@ -345,6 +345,38 @@ TEST(TestMiopenEngine, InitializeExecutionContextInvokesFirstApplicablePlanBuild
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
 }
 
+TEST(TestMiopenEngine, InitializeExecutionContextThrowsOnInvalidBenchmarkingKnobType)
+{
+    MiopenEngine engine(1);
+    MockGraph mockGraph;
+    HipdnnEnginePluginHandle dummyHandle;
+    MockHipdnnEnginePluginExecutionContext ctx;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto knobIdOffset = builder.CreateString("global.benchmarking");
+    auto stringValueOffset = builder.CreateString("invalid_value");
+    auto knobValue = hipdnn_data_sdk::data_objects::CreateStringValue(builder, stringValueOffset);
+    hipdnn_data_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
+    knobSettingBuilder.add_knob_id(knobIdOffset);
+    knobSettingBuilder.add_value_type(hipdnn_data_sdk::data_objects::KnobValue::StringValue);
+    knobSettingBuilder.add_value(knobValue.Union());
+    auto knobSetting = knobSettingBuilder.Finish();
+
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>> knobsVector;
+    knobsVector.push_back(knobSetting);
+    auto knobs = builder.CreateVector(knobsVector);
+
+    auto engineConfig = hipdnn_data_sdk::data_objects::CreateEngineConfig(builder, 1, knobs);
+    builder.Finish(engineConfig);
+
+    auto buffer = builder.Release();
+    hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
+                                                                             buffer.size());
+
+    EXPECT_THROW(engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
 TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingEnabled)
 {
     MiopenEngine engine(1);
@@ -443,6 +475,195 @@ TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhe
     engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
 
     EXPECT_FALSE(ctx.benchmarkingEnabled());
+}
+
+TEST(TestMiopenEngine, InitializeExecutionContextThrowsOnInvalidWorkspaceSizeLimitKnobType)
+{
+    auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+    EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(true));
+    EXPECT_CALL(*mockPlanBuilder, getWorkspaceSizeRange(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(IPlanBuilder::WorkspaceSizeRange{1024, 8192}));
+
+    MiopenEngine engine(1);
+    engine.addPlanBuilder(std::move(mockPlanBuilder));
+
+    MockGraph mockGraph;
+    HipdnnEnginePluginHandle dummyHandle;
+    MockHipdnnEnginePluginExecutionContext ctx;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto knobIdOffset = builder.CreateString("global.workspace_size_limit");
+    auto stringValueOffset = builder.CreateString("invalid_value");
+    auto knobValue = hipdnn_data_sdk::data_objects::CreateStringValue(builder, stringValueOffset);
+    hipdnn_data_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
+    knobSettingBuilder.add_knob_id(knobIdOffset);
+    knobSettingBuilder.add_value_type(hipdnn_data_sdk::data_objects::KnobValue::StringValue);
+    knobSettingBuilder.add_value(knobValue.Union());
+    auto knobSetting = knobSettingBuilder.Finish();
+
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>> knobsVector;
+    knobsVector.push_back(knobSetting);
+    auto knobs = builder.CreateVector(knobsVector);
+
+    auto engineConfig = hipdnn_data_sdk::data_objects::CreateEngineConfig(builder, 1, knobs);
+    builder.Finish(engineConfig);
+
+    auto buffer = builder.Release();
+    hipdnn_plugin_sdk::EngineConfigWrapper configWrapper(buffer.data(), buffer.size());
+
+    EXPECT_THROW(engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestMiopenEngine, InitializeExecutionContextThrowsOnNegativeWorkspaceSizeLimit)
+{
+    auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+    EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(true));
+    EXPECT_CALL(*mockPlanBuilder, getWorkspaceSizeRange(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(IPlanBuilder::WorkspaceSizeRange{1024, 8192}));
+
+    MiopenEngine engine(1);
+    engine.addPlanBuilder(std::move(mockPlanBuilder));
+
+    MockGraph mockGraph;
+    HipdnnEnginePluginHandle dummyHandle;
+    MockHipdnnEnginePluginExecutionContext ctx;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto knobIdOffset = builder.CreateString("global.workspace_size_limit");
+    auto knobValue = hipdnn_data_sdk::data_objects::CreateIntValue(builder, -1);
+    hipdnn_data_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
+    knobSettingBuilder.add_knob_id(knobIdOffset);
+    knobSettingBuilder.add_value_type(hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+    knobSettingBuilder.add_value(knobValue.Union());
+    auto knobSetting = knobSettingBuilder.Finish();
+
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>> knobsVector;
+    knobsVector.push_back(knobSetting);
+    auto knobs = builder.CreateVector(knobsVector);
+
+    auto engineConfig = hipdnn_data_sdk::data_objects::CreateEngineConfig(builder, 1, knobs);
+    builder.Finish(engineConfig);
+
+    auto buffer = builder.Release();
+    hipdnn_plugin_sdk::EngineConfigWrapper configWrapper(buffer.data(), buffer.size());
+
+    EXPECT_THROW(engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestMiopenEngine, InitializeExecutionContextThrowsOnWorkspaceSizeLimitBelowRange)
+{
+    auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+    EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(true));
+    EXPECT_CALL(*mockPlanBuilder, getWorkspaceSizeRange(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(IPlanBuilder::WorkspaceSizeRange{1024, 8192}));
+
+    MiopenEngine engine(1);
+    engine.addPlanBuilder(std::move(mockPlanBuilder));
+
+    MockGraph mockGraph;
+    HipdnnEnginePluginHandle dummyHandle;
+    MockHipdnnEnginePluginExecutionContext ctx;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto knobIdOffset = builder.CreateString("global.workspace_size_limit");
+    auto knobValue = hipdnn_data_sdk::data_objects::CreateIntValue(builder, 512);
+    hipdnn_data_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
+    knobSettingBuilder.add_knob_id(knobIdOffset);
+    knobSettingBuilder.add_value_type(hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+    knobSettingBuilder.add_value(knobValue.Union());
+    auto knobSetting = knobSettingBuilder.Finish();
+
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>> knobsVector;
+    knobsVector.push_back(knobSetting);
+    auto knobs = builder.CreateVector(knobsVector);
+
+    auto engineConfig = hipdnn_data_sdk::data_objects::CreateEngineConfig(builder, 1, knobs);
+    builder.Finish(engineConfig);
+
+    auto buffer = builder.Release();
+    hipdnn_plugin_sdk::EngineConfigWrapper configWrapper(buffer.data(), buffer.size());
+
+    EXPECT_THROW(engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestMiopenEngine, InitializeExecutionContextThrowsOnWorkspaceSizeLimitAboveRange)
+{
+    auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+    EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(true));
+    EXPECT_CALL(*mockPlanBuilder, getWorkspaceSizeRange(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(IPlanBuilder::WorkspaceSizeRange{1024, 8192}));
+
+    MiopenEngine engine(1);
+    engine.addPlanBuilder(std::move(mockPlanBuilder));
+
+    MockGraph mockGraph;
+    HipdnnEnginePluginHandle dummyHandle;
+    MockHipdnnEnginePluginExecutionContext ctx;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto knobIdOffset = builder.CreateString("global.workspace_size_limit");
+    auto knobValue = hipdnn_data_sdk::data_objects::CreateIntValue(builder, 16384);
+    hipdnn_data_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
+    knobSettingBuilder.add_knob_id(knobIdOffset);
+    knobSettingBuilder.add_value_type(hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+    knobSettingBuilder.add_value(knobValue.Union());
+    auto knobSetting = knobSettingBuilder.Finish();
+
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>> knobsVector;
+    knobsVector.push_back(knobSetting);
+    auto knobs = builder.CreateVector(knobsVector);
+
+    auto engineConfig = hipdnn_data_sdk::data_objects::CreateEngineConfig(builder, 1, knobs);
+    builder.Finish(engineConfig);
+
+    auto buffer = builder.Release();
+    hipdnn_plugin_sdk::EngineConfigWrapper configWrapper(buffer.data(), buffer.size());
+
+    EXPECT_THROW(engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestMiopenEngine, InitializeExecutionContextThrowsOnNoApplicablePlanBuilderForWorkspaceValidation)
+{
+    auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+    EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(false));
+
+    MiopenEngine engine(1);
+    engine.addPlanBuilder(std::move(mockPlanBuilder));
+
+    MockGraph mockGraph;
+    HipdnnEnginePluginHandle dummyHandle;
+    MockHipdnnEnginePluginExecutionContext ctx;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto knobIdOffset = builder.CreateString("global.workspace_size_limit");
+    auto knobValue = hipdnn_data_sdk::data_objects::CreateIntValue(builder, 4096);
+    hipdnn_data_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
+    knobSettingBuilder.add_knob_id(knobIdOffset);
+    knobSettingBuilder.add_value_type(hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+    knobSettingBuilder.add_value(knobValue.Union());
+    auto knobSetting = knobSettingBuilder.Finish();
+
+    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>> knobsVector;
+    knobsVector.push_back(knobSetting);
+    auto knobs = builder.CreateVector(knobsVector);
+
+    auto engineConfig = hipdnn_data_sdk::data_objects::CreateEngineConfig(builder, 1, knobs);
+    builder.Finish(engineConfig);
+
+    auto buffer = builder.Release();
+    hipdnn_plugin_sdk::EngineConfigWrapper configWrapper(buffer.data(), buffer.size());
+
+    EXPECT_THROW(engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestMiopenEngine, InitializeExecutionContextSetsWorkspaceSizeLimit)
