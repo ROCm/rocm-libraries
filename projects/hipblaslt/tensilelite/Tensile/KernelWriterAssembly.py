@@ -4317,10 +4317,12 @@ class KernelWriterAssembly(KernelWriter):
       if self.states.groOffsetInMacroTile:
         if(tc == 'A'):
           prePad1 = self.states.srdShiftLeft[tc] * tP["bpeGR"] # leave room in case we have to pointer shift
+          moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
+          moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))          
         if(tc == 'B'):
           prePad1 = self.states.srdShiftLeft[tc] * tP["bpeGR"] # leave room in case we have to pointer shift
-        moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
-        moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))            
+          moduleLoadGeneralBatch.add(SSubU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr("Srd%s+0"%tc), src1=prePad1, comment="pre-pad to make room for possible pointer shift"))
+          moduleLoadGeneralBatch.add(SSubBU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr("Srd%s+1"%tc), src1=0, comment="pre-pad to make room for possible pointer shift"))            
       moduleLoadGeneralBatch.add(scalarMultiply64Bpe(tileStart, tileStart, tP["bpeGR"], stmp, "tileStart"))
       moduleLoadGeneralBatch.add(SAddU32(dst=sgpr("Srd%s+0"%tc), src0=sgpr(tileStart+0), src1=sgpr("Srd%s+0"%tc), comment="SRD base = Address+ tileStart0"))
       moduleLoadGeneralBatch.add(SAddCU32(dst=sgpr("Srd%s+1"%tc), src0=sgpr(tileStart+1), src1=sgpr("Srd%s+1"%tc), comment="SRD base = Address+ tileStart1"))
