@@ -31,7 +31,6 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <variant>
 #include <vector>
 
 #include "adt/IntrusiveList.hpp"
@@ -99,8 +98,6 @@ namespace stinkytofu
     class IRBase : public IntrusiveListNode<IRBase>
     {
     public:
-        using AttributeValueType = std::variant<int, double, std::string, std::vector<int>>;
-
         // Stinky framework could support multiple IR types in the future,
         // conceptually similar to MLIR but in much simpler framework.
         enum class IRType
@@ -146,33 +143,12 @@ namespace stinkytofu
             return ownedExternally;
         }
 
-        // Set attribute with specific string key
-        void setAttribute(const std::string& key, const AttributeValueType& value)
-        {
-            attributes[key] = value;
-        }
-
-        // Get attribute with specific string key
-        AttributeValueType getAttribute(const std::string& key) const
-        {
-            return attributes.at(key);
-        }
-
-        // Check if the IRBase has attribute with specific string key
-        bool hasAttribute(const std::string& key) const
-        {
-            return attributes.find(key) != attributes.end();
-        }
-
     private:
         const IRType irType;
 
         // Ownership flag: true if owned by shared_ptr (Python/LogicalModule),
         // false if owned by IRList (C++ direct creation)
         bool ownedExternally;
-
-        // Attributes of the IRBase
-        std::unordered_map<std::string, AttributeValueType> attributes;
     };
 
     using IRList = IntrusiveList<IRBase>;

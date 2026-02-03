@@ -11,15 +11,18 @@ namespace stinkytofu
     bool genInstructions(const std::string& arch,
                          const std::string& inputDir,
                          const std::string& outputDir);
+    // Generate for all archs (Gfx1250, Gfx942, Gfx950) and emit ISA .inc; no --arch needed.
+    bool genAllInstructions(const std::string& inputDir, const std::string& outputDir);
 }
 
 int main(int argc, char** argv)
 {
-    if(argc < 4)
+    if(argc < 3)
     {
-        std::cerr << "Usage: " << argv[0] << " --arch=<arch> --input-dir=<dir> --output-dir=<dir>\n"
-                  << "Example: " << argv[0]
-                  << " --arch=gfx1250 --input-dir=hardware/defs --output-dir=hardware/generated\n";
+        std::cerr << "Usage: " << argv[0]
+                  << " --input-dir=<dir> --output-dir=<dir> [--arch=<arch>]\n"
+                  << "  Without --arch: generate for all archs + ISA .inc (single-build mode).\n"
+                  << "  With --arch: generate for one arch only (costs, init, operands).\n";
         return 1;
     }
 
@@ -50,12 +53,16 @@ int main(int argc, char** argv)
     stripQuotes(inputDir);
     stripQuotes(outputDir);
 
-    if(arch.empty() || inputDir.empty() || outputDir.empty())
+    if(inputDir.empty() || outputDir.empty())
     {
-        std::cerr << "Error: Missing --arch, --input-dir, or --output-dir\n";
+        std::cerr << "Error: Missing --input-dir or --output-dir\n";
         return 1;
     }
 
-    bool ok = stinkytofu::genInstructions(arch, inputDir, outputDir);
+    bool ok = false;
+    if(arch.empty())
+        ok = stinkytofu::genAllInstructions(inputDir, outputDir);
+    else
+        ok = stinkytofu::genInstructions(arch, inputDir, outputDir);
     return ok ? 0 : 1;
 }

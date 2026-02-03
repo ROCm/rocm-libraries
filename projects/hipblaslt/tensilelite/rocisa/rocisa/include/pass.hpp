@@ -24,34 +24,16 @@
 #include "code.hpp"
 #include <memory>
 
-// Forward declaration for StinkyTofu types
-namespace stinkytofu
-{
-    class StinkyAsmModule;
-}
-
 namespace rocisa
 {
     // External structures and functions
     struct rocIsaPassOption
     {
-        std::string hardwareConfigPath = "."; // Path to the hardware config files
-
-        bool stinkyOpt       = false;
         bool insertDelayAlu  = false;
         bool removeDupFunc   = true;
         bool removeDupAssign = true;
         bool getCycles       = true;
         int  numWaves        = 0; // is used when getCycles is true
-
-        // This part is for kernel config to stinkytofu
-        uint32_t TileA0        = 16;
-        uint32_t TileB0        = 16;
-        uint32_t TileM0        = 16;
-        uint32_t NumGRA        = 16;
-        uint32_t NumGRB        = 16;
-        uint32_t NumGRM        = 16;
-        uint32_t WavefrontSize = 32;
 
         bool doOpt() const
         {
@@ -67,9 +49,8 @@ namespace rocisa
     std::string getActFuncModuleName(int gwvw, int sgpr, int tmpVgpr, int tmpSgpr);
     std::string getActFuncBranchModuleName();
 
-    // rocIsaPass with optional StinkyAsmModule parameter (for gfx1250)
     rocIsaPassResult rocIsaPass(std::shared_ptr<KernelBody>& kernel,
-                                const rocIsaPassOption&      option);
+                                const rocIsaPassOption&      option); // Return value is std::move()
 
     // Internal use only
     struct Graph

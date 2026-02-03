@@ -59,6 +59,7 @@ import math
 import abc
 import sys
 import os
+import time
 import collections
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -171,7 +172,6 @@ class StateValues:
   scheduleGlobalRead: int                = 0
   scheduleLocalWrite: int                = 0
   scheduleIterAlg: int                   = 0
-  stinkyOpt: bool                        = False
   ## ShadowInit
   doShadowInit: int                      = 0
   ## Loop
@@ -5151,59 +5151,35 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Kernels with epilog especially with activation is too long (50000~ lines).
     # Need to refactor global write elements.
     ripo = rocIsaPassOption()
-    ripo.hardwareConfigPath = self.sharedFolderPath + "/stinkytofu"
     ripo.removeDupFunc = bool(kernel["ActivationFuncCall"])
     ripo.numWaves = kernel["NumThreads"] // kernel["WavefrontSize"]
-    ripo.wavefrontSz = kernel["WavefrontSize"]
-    ripo.ta0  = kernel["MacroTile0"]
-    ripo.tb0  = kernel["MacroTile1"]
-    ripo.tm0   = kernel["DepthU"]
     bytesPerVGPR = 4
-    ripo.nGRA = int((kernel["NumLoadsCoalescedA"] \
-        * kernel["NumLoadsPerpendicularA"] * kernel["GlobalReadVectorWidthA"] \
-        * kernel["GlobalReadVectorWidthA"] * tensorParametersA["bpeGR"]) \
-        // (tensorParametersA["globalReadInstruction"].blockWidth * bytesPerVGPR))
-
-    ripo.nGRB = int((kernel["NumLoadsCoalescedB"] \
-        * kernel["NumLoadsPerpendicularB"] * kernel["GlobalReadVectorWidthB"] \
-        * kernel["GlobalReadVectorWidthB"] * tensorParametersB["bpeGR"]) \
-        // (tensorParametersB["globalReadInstruction"].blockWidth * bytesPerVGPR))
-
-    # TODO: handle sparse case
-    ripo.nGRM = 0
 
     if kernel["ProblemType"]["ActivationType"] == "all":
       ripo.removeDupAssign = False
     if self.states.archCaps["HasSchedMode"]:
       ripo.insertDelayAlu = True
-    if self.states.stinkyOpt:
-      ripo.stinkyOpt = True
 
     passResult = rocIsaPass(moduleKernelBody, ripo)
     kernel["MathClocksUnrolledLoop"] = passResult.cycles
 
+    import rocisa
+
     # Initialize stModule as None (will be set for supported architectures)
     stModule = None
 
-    # List of architectures that support StinkyTofu optimization
-    # Can be extended to support more architectures as needed
-    stinkyTofuSupportedArchs = [
-      (12, 5, 0),  # gfx1250
-      # Add more architectures here as needed
-      # (12, 5, 1),  # Example: gfx1251
-    ]
-
     # Run StinkyTofu conversion for supported architectures
-    if globalParameters["UseStinkyTofu"] and self.states.version in stinkyTofuSupportedArchs:
-      import rocisa
+    t0_start = time.perf_counter()
+    if globalParameters["UseStinkyTofu"] and rocisa.isSupportedByStinkyTofu(self.states.version):
 
-      print("="*80)
       print(f"StinkyTofu: Converting kernel to stinkytofu IR for gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}...")
 
+      moduleKernelBody.body.setParent()
       # Convert rocisa module to stinkytofu with signature
       # Returns a KernelBody wrapper that includes signature and instruction module
       # - runOptimizationPipeline() optimizes the instruction body
       # - emitAssembly() outputs complete kernel: signature + optimized instructions
+      t1a_start = time.perf_counter()
       stModule = rocisa.toStinkyTofuModule(moduleKernelBody.body, self.states.version, "kernel_name",
                                            signature=fs,
                                            wavefrontSize=kernel["WavefrontSize"],
@@ -5216,17 +5192,27 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                            d2lA=bool(kernel["DirectToLdsA"]),
                                            d2lB=bool(kernel["DirectToLdsB"]),
                                            useSgprForGRO=kernel["_UseSgprForGRO"])
+      t1a_end = time.perf_counter()
+      print(f"StinkyTofu (1a) toStinkyTofuModule: {t1a_end - t1a_start:.4f}s")
 
       # Run optimizations on the instruction body
+      t1b_start = time.perf_counter()
       stModule.runOptimizationPipeline()
+      t1b_end = time.perf_counter()
+      print(f"StinkyTofu (1b) runOptimizationPipeline: {t1b_end - t1b_start:.4f}s")
 
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
 
     # Check if StinkyTofu assembly output should be used
     if globalParameters["UseStinkyTofu"] and stModule is not None:
+      t2_start = time.perf_counter()
       st_asm = stModule.emitAssembly()
+      t2_end = time.perf_counter()
+      print(f"StinkyTofu (2) emitAssembly: {t2_end - t2_start:.4f}s")
+
       if os.environ.get("ENABLE_DEBUG_STINKYTOFU_ASM") is not None:
+        t3_start = time.perf_counter()
         # Find the next available sequential number starting from 0
         os.makedirs("cmpasm/orig", exist_ok=True)
         os.makedirs("cmpasm/st", exist_ok=True)
@@ -5243,7 +5229,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
             fd_st = os.open(f"cmpasm/st/{file_id}.s", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
 
             # Write content and close file descriptors
-            os.write(fd_orig, str(moduleKernelBody).encode('utf-8'))
+            t_str_start = time.perf_counter()
+            orig_asm_str = str(moduleKernelBody)
+            t_str_end = time.perf_counter()
+            print(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
+            os.write(fd_orig, orig_asm_str.encode('utf-8'))
             os.write(fd_st, st_asm.encode('utf-8'))
             os.close(fd_orig)
             os.close(fd_st)
@@ -5262,6 +5252,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
             if fd_st is not None:
               os.close(fd_st)
             raise RuntimeError(f"Failed to create debug file {file_id}.s: {e}")
+
+        t3_end = time.perf_counter()
+        print(f"StinkyTofu (3) debug file write: {t3_end - t3_start:.4f}s")
+
+      t0_end = time.perf_counter()
+      print(f"StinkyTofu (0) total: {t0_end - t0_start:.4f}s")
 
       print(f"Using StinkyTofu Assembly")
       return (error, st_asm)
@@ -5332,10 +5328,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.scheduleLocalWrite = kernel["ScheduleLocalWrite"] \
           and kernel["PrefetchGlobalRead"] \
           and kernel["BufferLoad"]  # flat updates lgkmcnt counts = hard to schedule writes and loads?
-      if kernel["ScheduleIterAlg"] == 0:
-        self.states.stinkyOpt = True
-      else:
-        self.states.stinkyOpt = False
 
       self.states.scheduleIterAlg = kernel["ScheduleIterAlg"]
     else:

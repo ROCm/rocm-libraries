@@ -344,6 +344,15 @@ namespace stinkytofu
         return {signalInst, waitInst};
     }
 
+    /// Helper: compute MSB offset for VGPR when hasVgprMsb is true.
+    /// When regIdx crosses 256 boundary (e.g., 256, 512), the offset differs from the base.
+    static int16_t getVgprMsbOffsetForIdx(RegType type, uint32_t regIdx, bool hasVgprMsb)
+    {
+        if(!hasVgprMsb || type != RegType::V)
+            return 0;
+        return static_cast<int16_t>((regIdx / 256) * (-256));
+    }
+
     /// Helper function to adjust symbolic register name for split instructions
     std::string adjustSymbolicRegName(const std::string& symbolicName, int offsetAdjust = 0)
     {
@@ -370,7 +379,8 @@ namespace stinkytofu
 
     Legalized legalizeDSLoadB192(StinkyInstruction*   inst,
                                  StinkyInstIRBuilder& irBuilder,
-                                 GfxArchID            archId)
+                                 GfxArchID            archId,
+                                 bool                 hasVgprMsb)
     {
         // DSLoadB192: ds_load_b192 v[a:a+5], v[b] offset:X
         // →
@@ -431,10 +441,12 @@ namespace stinkytofu
         assert(origDst.reg.idx + 4 < std::numeric_limits<uint16_t>::max()
                && "Invalid destination register index");
 
-        StinkyRegister dstData2{origDst.reg.type,
-                                static_cast<uint16_t>(origDst.reg.idx + 4),
-                                2, // 2 registers
-                                origDst.reg.offset};
+        uint32_t dstData2Idx  = static_cast<uint16_t>(origDst.reg.idx + 4);
+        int16_t  dstData2Offs = (hasVgprMsb && origDst.reg.type == RegType::V)
+                                   ? getVgprMsbOffsetForIdx(origDst.reg.type, dstData2Idx, hasVgprMsb)
+                                   : origDst.reg.offset;
+
+        StinkyRegister dstData2{origDst.reg.type, dstData2Idx, 2, dstData2Offs};
 
         if(!origDst.getSymbolicName().empty())
         {
@@ -468,12 +480,13 @@ namespace stinkytofu
 
     Legalized legalizeDSStoreB192(StinkyInstruction*   inst,
                                   StinkyInstIRBuilder& irBuilder,
-                                  GfxArchID            archId)
+                                  GfxArchID            archId,
+                                  bool                 hasVgprMsb)
     {
-        // DSStoreB192: ds_store_b192 v[a], v[b:b+5] offset:X
+        // DSStoreB192: ds_store_b192 v[addr], v[b:b+5] offset:X
         // →
-        // ds_store_b128 v[a], v[b:b+3] offset:X
-        // ds_store_b64  v[a], v[b+4:b+5] offset:X+16
+        // ds_store_b128 v[addr], v[b:b+3] offset:X
+        // ds_store_b64  v[addr], v[b+4:b+5] offset:X+16
 
         // Get the original address and source data registers
         assert(inst->getNumDestRegs() == 0 && inst->getNumSrcRegs() == 2
@@ -532,10 +545,12 @@ namespace stinkytofu
         assert(origSrcData.reg.idx + 4 < std::numeric_limits<uint16_t>::max()
                && "Invalid source register index");
 
-        StinkyRegister srcData2{origSrcData.reg.type,
-                                static_cast<uint16_t>(origSrcData.reg.idx + 4),
-                                2, // 2 registers
-                                origSrcData.reg.offset};
+        uint32_t srcData2Idx  = static_cast<uint16_t>(origSrcData.reg.idx + 4);
+        int16_t  srcData2Offs = (hasVgprMsb && origSrcData.reg.type == RegType::V)
+                                   ? getVgprMsbOffsetForIdx(origSrcData.reg.type, srcData2Idx, hasVgprMsb)
+                                   : origSrcData.reg.offset;
+
+        StinkyRegister srcData2{origSrcData.reg.type, srcData2Idx, 2, srcData2Offs};
 
         if(!origSrcData.getSymbolicName().empty())
         {

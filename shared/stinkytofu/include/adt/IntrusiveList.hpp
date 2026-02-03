@@ -125,6 +125,16 @@ namespace stinkytofu
         {
         }
 
+        // Conversion constructor from non-const to const iterator
+        template <typename U = T>
+        IntrusiveListIterator(
+            const IntrusiveListIterator<U>& other,
+            typename std::enable_if<std::is_same<U, typename std::remove_const<T>::type>::value
+                                    && std::is_const<T>::value>::type* = nullptr)
+            : node_(other.getNodePtr())
+        {
+        }
+
         T& operator*() const
         {
             return *node_;
