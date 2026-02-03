@@ -78,12 +78,18 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   // -------------------
   // NonTemporal Cases
   // -------------------
-  if(nta > 3 && ntb < 4)
-      return workgroup_mapping_t{0, numMTs == 1 ? 1 : numXCD, 1};
-  else if(nta < 4 && ntb > 3)
-      return workgroup_mapping_t{0, numMTs == 1 ? 1 : numXCD, -1};
-  else if(nta > 3 && ntb > 3)
-      return workgroup_mapping_t{0, numMTs == 1 ? 1 : numXCD, 1};
+  {
+    bool use_wgmxcc = (numMT_M != 1 && numMT_N != 1);
+    bool use_wgm = use_wgmxcc;
+    bool use_chunk = use_wgmxcc && ((numMTs < numCUs && numMTs % numXCD == 0) || (numMTs % numCUs == 0));
+
+    size_t out_wgmxccchunk = use_chunk ? std::min(math::safe_ceil_div(numMTs, numXCD), numCUsPerXCD) : 0;
+    size_t out_wgmxcc = use_wgmxcc ? numXCD : 1;
+    if(nta > 3 && ntb < 4)
+        return workgroup_mapping_t{out_wgmxccchunk, out_wgmxcc, use_wgm ? static_cast<int>(numMT_N) : 1};
+    else if(nta < 4 && ntb > 3)
+        return workgroup_mapping_t{out_wgmxccchunk, out_wgmxcc, use_wgm ? -static_cast<int>(numMT_M) : 1};
+  }
 
   // -------------------
   // Batch Case
@@ -162,7 +168,23 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
     out_wgm = numMT_N;
   else {
     // List of candidates for WGM values
-    std::vector<int> wgmList = {1, 2, 3, 4, 5, 6, 8, 16};
+    size_t numWGsPerXCD = std::min(math::safe_ceil_div(numMTs, numXCD), numCUsPerXCD);
+    int wgm_cap_size = std::min(numMT_N, numWGsPerXCD);
+    std::set<int> wgmSet;
+    // Add initial candidates that are <= wgm_cap_size
+    for (int val : {1, 2, 3, 4, 6, 8}) {
+      if (val <= wgm_cap_size) {
+        wgmSet.insert(val);
+      }
+    }
+    // Add all divisors of wgm_cap_size
+    for (int i = 1; i <= std::sqrt(wgm_cap_size); i++) {
+      if (wgm_cap_size % i == 0) {
+        wgmSet.insert(i);
+        wgmSet.insert(wgm_cap_size / i);
+      }
+    }    
+    std::vector<int> wgmList(wgmSet.begin(), wgmSet.end());
 
     // Setup
     size_t numWGs, q, r;
