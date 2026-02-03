@@ -550,7 +550,7 @@ std::vector<Solution> FindConvolution(const ExecutionContext& ctx,
 
 template <class FieldType>
 static inline void FillFindReturnParameters(const std::vector<Solution>& results,
-                                            FieldType miopenConvAlgoPerf_t::* field,
+                                            FieldType miopenConvAlgoPerf_t::*field,
                                             const char* log_start,
                                             int* const returned_algo_count,
                                             miopenConvAlgoPerf_t* perf_results)
