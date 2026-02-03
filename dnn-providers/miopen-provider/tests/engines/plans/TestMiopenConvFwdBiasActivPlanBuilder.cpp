@@ -139,7 +139,7 @@ protected:
         _graphObj.set_intermediate_data_type(param.defaultDataType);
         _graphObj.set_io_data_type(param.defaultDataType);
 
-        auto xTensorAttrObj = hipdnn_frontend::makeTensorAttributes(
+        auto xTensorAttrObj = hipdnn_frontend::graph::makeTensorAttributes(
             "x",
             param.dataTypes[TypeKey::X],
             convTestCase.xDims,
@@ -147,7 +147,7 @@ protected:
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xTensorAttrObj));
         xTensorAttr->set_is_virtual(isVirtual(TypeKey::X));
 
-        auto wTensorAttrObj = hipdnn_frontend::makeTensorAttributes(
+        auto wTensorAttrObj = hipdnn_frontend::graph::makeTensorAttributes(
             "w",
             param.dataTypes[TypeKey::W],
             convTestCase.wDims,
@@ -172,7 +172,7 @@ protected:
         {
             const auto biasDims = getDerivedShape(convTestCase.yDims);
 
-            auto biasTensorAttrObj = hipdnn_frontend::makeTensorAttributes(
+            auto biasTensorAttrObj = hipdnn_frontend::graph::makeTensorAttributes(
                 "bias",
                 param.dataTypes[TypeKey::BIAS],
                 biasDims,

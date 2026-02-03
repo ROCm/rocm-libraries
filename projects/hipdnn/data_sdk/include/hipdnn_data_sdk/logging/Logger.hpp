@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "CallbackSink.hpp"
 #include "CallbackTypes.h"
+#include "detail/CallbackSink.hpp"
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -61,7 +61,7 @@ inline void initializeCallbackLogging(const std::string& componentName,
             spdlog::init_thread_pool(8192, 1);
         }
 
-        auto callbackLogger = hipdnn_data_sdk::logging::createAsyncCallbackLoggerMt(
+        auto callbackLogger = hipdnn_data_sdk::logging::detail::createAsyncCallbackLoggerMt(
             callbackFunction, componentName);
         spdlog::register_logger(callbackLogger);
     }

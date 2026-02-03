@@ -27,12 +27,12 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     graph->set_compute_data_type(hipdnn_frontend::fromSdkType(accumulatorDataType));
 
     int64_t uid = 1;
-    auto xAttr = hipdnn_frontend::makeTensorAttributes(
+    auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "X", hipdnn_frontend::fromSdkType(inputDataType), tensorBundle.xTensor);
     xAttr.set_uid(uid++);
     auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
 
-    auto wAttr = hipdnn_frontend::makeTensorAttributes(
+    auto wAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "W", hipdnn_frontend::fromSdkType(inputDataType), tensorBundle.wTensor);
     wAttr.set_uid(uid++);
     auto wTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(wAttr));
@@ -76,13 +76,13 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 
     int64_t uid = 1;
 
-    auto dyAttr = hipdnn_frontend::makeTensorAttributes(
+    auto dyAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "dY", hipdnn_frontend::fromSdkType(inputDataType), tensorBundle.dyTensor);
     dyAttr.set_uid(uid++);
     auto dyTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(dyAttr));
 
-    auto wAttr = hipdnn_frontend::makeTensorAttributes(
+    auto wAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "W", hipdnn_frontend::fromSdkType(inputDataType), tensorBundle.wTensor);
     wAttr.set_uid(uid++);
     auto wTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(wAttr));
@@ -126,13 +126,13 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 
     int64_t uid = 1;
 
-    auto dyAttr = hipdnn_frontend::makeTensorAttributes(
+    auto dyAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "dY", hipdnn_frontend::fromSdkType(inputDataType), tensorBundle.dyTensor);
     dyAttr.set_uid(uid++);
     auto dyTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(dyAttr));
 
-    auto xAttr = hipdnn_frontend::makeTensorAttributes(
+    auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "X", hipdnn_frontend::fromSdkType(inputDataType), tensorBundle.xTensor);
     xAttr.set_uid(uid++);
     auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));

@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "CallbackTypes.h"
-#include "LoggingUtils.hpp"
+#include "../CallbackTypes.h"
+#include "../LoggingUtils.hpp"
 #include <functional>
 #include <mutex>
 #include <spdlog/async.h>
@@ -13,7 +13,7 @@
 #include <spdlog/sinks/base_sink.h>
 #include <string>
 
-namespace hipdnn_data_sdk::logging
+namespace hipdnn_data_sdk::logging::detail
 {
 
 inline hipdnnSeverity_t spdlogToHipdnnSeverity(spdlog::level::level_enum level)
@@ -80,7 +80,7 @@ using CallbackSinkMt = CallbackSink<std::mutex>;
 inline std::shared_ptr<spdlog::logger> createAsyncCallbackLoggerMt(hipdnnCallback_t callback,
                                                                    const std::string& source)
 {
-    auto sink = std::make_shared<hipdnn_data_sdk::logging::CallbackSinkMt>(callback);
+    auto sink = std::make_shared<CallbackSinkMt>(callback);
     auto logger = std::make_shared<spdlog::async_logger>(
         source, sink, spdlog::thread_pool(), spdlog::async_overflow_policy::block);
     logger->set_pattern(generatePatternString(source));
@@ -92,10 +92,9 @@ template <typename Factory = spdlog::synchronous_factory>
 inline std::shared_ptr<spdlog::logger> createCallbackLoggerMt(hipdnnCallback_t callback,
                                                               const std::string& source)
 {
-    auto logger
-        = Factory::template create<hipdnn_data_sdk::logging::CallbackSinkMt>(source, callback);
+    auto logger = Factory::template create<CallbackSinkMt>(source, callback);
     logger->set_pattern(generatePatternString(source));
     return logger;
 }
 
-} // namespace hipdnn_data_sdk::logging
+} // namespace hipdnn_data_sdk::logging::detail

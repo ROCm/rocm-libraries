@@ -23,12 +23,12 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     graph->set_compute_data_type(hipdnn_frontend::fromSdkType(computeDataType));
 
     int64_t uid = 1;
-    auto aAttr = hipdnn_frontend::makeTensorAttributes(
+    auto aAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "A", hipdnn_frontend::fromSdkType(inputDataType), tensorBundle.aTensor);
     aAttr.set_uid(uid++);
     auto aTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(aAttr));
 
-    auto bAttr = hipdnn_frontend::makeTensorAttributes(
+    auto bAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "B", hipdnn_frontend::fromSdkType(inputDataType), tensorBundle.bTensor);
     bAttr.set_uid(uid++);
     auto bTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(bAttr));
