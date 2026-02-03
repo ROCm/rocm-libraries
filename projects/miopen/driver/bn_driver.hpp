@@ -381,7 +381,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::AddCmdLineArgs()
                          "Use inverse variance for forward inference (Default=0)",
                          "int");
     inflags.AddInputFlag("ping_pong_buffers",
-                         'Q',
+                         'Z',
                          "0",
                          "Use ping-pong buffers for running mean and variance (Default=0)",
                          "int");
