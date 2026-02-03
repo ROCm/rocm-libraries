@@ -431,7 +431,7 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(
 }
 
 IPlanBuilder::WorkspaceSizeRange MiopenConvFwdBiasActivPlanBuilder::getWorkspaceSizeRange(
-    const HipdnnEnginePluginHandle& handle, const hipdnn_plugin_sdk::IGraph& opGraph) const
+    const HipdnnEnginePluginHandle& handle, const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());

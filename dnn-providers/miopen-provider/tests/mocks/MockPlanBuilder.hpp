@@ -22,7 +22,7 @@ public:
                 (const, override));
     MOCK_METHOD(WorkspaceSizeRange,
                 getWorkspaceSizeRange,
-                (const HipdnnEnginePluginHandle& handle, const hipdnn_plugin_sdk::IGraph& opGraph),
+                (const HipdnnEnginePluginHandle& handle, const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph),
                 (const, override));
     MOCK_METHOD(size_t,
                 getMaxWorkspaceSize,

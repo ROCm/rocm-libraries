@@ -36,7 +36,7 @@ auto createBenchmarkingKnob(flatbuffers::FlatBufferBuilder& builder)
 
 auto createWorkspaceSizeLimitKnob(flatbuffers::FlatBufferBuilder& builder,
                                    HipdnnEnginePluginHandle& handle,
-                                   const hipdnn_plugin_sdk::IGraph& opGraph,
+                                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                                    const std::vector<std::unique_ptr<IPlanBuilder>>& planBuilders)
 {
     // Determine workspace size range from the applicable plan builder

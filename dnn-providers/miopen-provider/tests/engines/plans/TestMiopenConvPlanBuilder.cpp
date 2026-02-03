@@ -42,7 +42,7 @@ protected:
         }
     }
 
-    void executePlan(const miopen_plugin::IPlan& plan, const hipdnn_plugin_sdk::IGraph& graph)
+    void executePlan(const miopen_plugin::IPlan& plan, const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph)
     {
         size_t workspaceSize = plan.getWorkspaceSize(_handle);
         hipdnn_data_sdk::utilities::Workspace workspace(workspaceSize);
