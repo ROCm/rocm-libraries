@@ -88,6 +88,16 @@ inline std::shared_ptr<spdlog::logger> createAsyncCallbackLoggerMt(hipdnnCallbac
     return logger;
 }
 
+inline std::shared_ptr<spdlog::logger> createSynchronousCallbackLoggerMt(hipdnnCallback_t callback,
+                                                                         const std::string& source)
+{
+    auto sink = std::make_shared<hipdnn_data_sdk::logging::CallbackSinkMt>(callback);
+    auto logger = std::make_shared<spdlog::logger>(source, sink);
+    logger->set_pattern(generatePatternString(source));
+    logger->flush_on(spdlog::level::info);
+    return logger;
+}
+
 template <typename Factory = spdlog::synchronous_factory>
 inline std::shared_ptr<spdlog::logger> createCallbackLoggerMt(hipdnnCallback_t callback,
                                                               const std::string& source)
