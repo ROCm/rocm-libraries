@@ -29,7 +29,7 @@ class ConvBackwardWeights : public IntegrationGraphVerificationHarness<DataType,
 {
 protected:
     void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
-                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
+                          GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
         for(auto& tensorPair : bundle.tensors)

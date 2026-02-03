@@ -238,7 +238,7 @@ protected:
     }
 
     void initializeBundle([[maybe_unused]] const hipdnn_frontend::graph::Graph& graph,
-                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
+                          GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
         // X input: default range

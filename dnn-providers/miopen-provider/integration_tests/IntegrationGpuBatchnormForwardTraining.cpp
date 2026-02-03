@@ -197,7 +197,7 @@ protected:
     }
 
     void initializeBundle([[maybe_unused]] const hipdnn_frontend::graph::Graph& graph,
-                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
+                          GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
         // Note: Epsilon and momentum are pass-by-value (set via set_value()), not buffers

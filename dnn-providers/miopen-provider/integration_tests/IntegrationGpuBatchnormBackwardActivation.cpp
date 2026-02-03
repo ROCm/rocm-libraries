@@ -42,7 +42,7 @@ class BatchnormBackwardActivation
 {
 protected:
     void initializeBundle([[maybe_unused]] const graph::Graph& graph,
-                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
+                          GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
         bundle.tensors.at(BatchnormActivationTensorIds::X_UID)
