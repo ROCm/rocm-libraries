@@ -4846,23 +4846,23 @@ private:
     void Init(const miopen::conv::ProblemDescription&);
 };
 
-struct ConvDepthwiseFwd2D final : ConvTunableSolver<PerformanceConfigConvDepthwiseFwd2D>
+struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd2D final
+    : ConvTunableSolver<PerformanceConfigConvDepthwiseFwd2D>
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<ConvDepthwiseFwd2D>(); }
 
-    MIOPEN_INTERNALS_EXPORT PerformanceConfigConvDepthwiseFwd2D GetDefaultPerformanceConfig(
-        const ExecutionContext&, const miopen::conv::ProblemDescription&) const override;
-    MIOPEN_INTERNALS_EXPORT bool
-    IsValidPerformanceConfig(const ExecutionContext&,
-                             const miopen::conv::ProblemDescription&,
-                             const PerformanceConfigConvDepthwiseFwd2D&) const override;
-    MIOPEN_INTERNALS_EXPORT PerformanceConfigConvDepthwiseFwd2D
-    Search(const ExecutionContext&,
-           const miopen::conv::ProblemDescription&,
-           const AnyInvokeParams& invoke_ctx) const override;
+    PerformanceConfigConvDepthwiseFwd2D
+    GetDefaultPerformanceConfig(const ExecutionContext&,
+                                const miopen::conv::ProblemDescription&) const override;
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::conv::ProblemDescription&,
+                                  const PerformanceConfigConvDepthwiseFwd2D&) const override;
+    PerformanceConfigConvDepthwiseFwd2D Search(const ExecutionContext&,
+                                               const miopen::conv::ProblemDescription&,
+                                               const AnyInvokeParams& invoke_ctx) const override;
 
-    MIOPEN_INTERNALS_EXPORT bool
-    IsApplicable(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override;
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
     bool IsDynamic() const override { return true; }
     /// Use very small fixed value enough to backup GEMM for cases when
     /// GEMM is disabled.
@@ -4877,10 +4877,9 @@ struct ConvDepthwiseFwd2D final : ConvTunableSolver<PerformanceConfigConvDepthwi
         return 0;
     }
 
-    MIOPEN_INTERNALS_EXPORT ConvSolution
-    GetSolution(const ExecutionContext&,
-                const miopen::conv::ProblemDescription&,
-                const PerformanceConfigConvDepthwiseFwd2D&) const override;
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&,
+                             const PerformanceConfigConvDepthwiseFwd2D&) const override;
 
     uint32_t GetSupportedSolutionCount(const ExecutionContext&,
                                        const miopen::conv::ProblemDescription&) const;
