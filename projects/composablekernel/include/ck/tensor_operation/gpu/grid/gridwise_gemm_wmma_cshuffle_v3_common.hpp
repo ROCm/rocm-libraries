@@ -344,6 +344,8 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
 
     using ThisThreadBlock = ThisThreadBlock<BlockSize>;
 
+    using GemmSpecialization = ck::tensor_operation::device::GemmSpecialization;
+
     static constexpr index_t APackedSize = []() {
         if constexpr(is_same_v<remove_cvref_t<LDSTypeA>, pk_i4_t>)
             return 2;
@@ -627,8 +629,8 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
                                    const std::array<index_t, NumATensor>& StrideAs,
                                    const index_t AK0)
     {
-        using GemmSpecialization = tensor_operation::device::GemmSpecialization;
-        constexpr bool padM      = GemmSpec == GemmSpecialization::MKPadding ||
+        // using GemmSpecialization = tensor_operation::device::GemmSpecialization;
+        constexpr bool padM = GemmSpec == GemmSpecialization::MKPadding ||
                               GemmSpec == GemmSpecialization::MNKPadding ||
                               GemmSpec == GemmSpecialization::MPadding ||
                               GemmSpec == GemmSpecialization::MNPadding;
@@ -696,8 +698,8 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
                                    const std::array<index_t, NumBTensor>& StrideBs,
                                    const index_t BK0)
     {
-        using GemmSpecialization = tensor_operation::device::GemmSpecialization;
-        constexpr bool padN      = GemmSpec == GemmSpecialization::NKPadding ||
+        // using GemmSpecialization = tensor_operation::device::GemmSpecialization;
+        constexpr bool padN = GemmSpec == GemmSpecialization::NKPadding ||
                               GemmSpec == GemmSpecialization::MNKPadding ||
                               GemmSpec == GemmSpecialization::NPadding ||
                               GemmSpec == GemmSpecialization::MNPadding;
@@ -794,7 +796,7 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
         // TODO: Investigate why this path is not used in the original
         // gridwise_gemm_xdl_cshuffle_v3.hpp
 #if 0
-        using GemmSpecialization = tensor_operation::device::GemmSpecialization;
+        // using GemmSpecialization = tensor_operation::device::GemmSpecialization;
 
         if constexpr(GemmSpec == GemmSpecialization::MNPadding ||
                      GemmSpec == GemmSpecialization::MNKPadding)
@@ -1089,9 +1091,11 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
             {
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {
-                    std::cout << "Arg K value is not a multiple of K_Batch * K0PerBlock * K1! K: "
-                              << karg.K << " " << __FILE__ << ":" << __LINE__
-                              << ", in function: " << __func__ << std::endl;
+                    std::cout << "Arg K value is not a multiple of K_Batch * K0PerBlock * K1! "
+                                 "K_Batch:"
+                              << karg.KBatch << " " << "K0PerBlock:" << KPerBlock << " "
+                              << "K1:" << AK1Number << " " << "K:" << karg.K << " " << __FILE__
+                              << ":" << __LINE__ << ", in function: " << __func__ << std::endl;
                 }
                 return false;
             }
