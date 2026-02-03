@@ -156,7 +156,7 @@ if(HIPBLASLT_ENABLE_LLVM)
 endif()
 
 if(HIPBLASLT_ENABLE_DEVICE)
-    if(NOT WIN32 AND (HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN"))
+    if(NOT WIN32 AND (HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN"))
         execute_process(
             COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.asan-x86_64.so
             OUTPUT_VARIABLE ASAN_LIB_PATH
@@ -456,7 +456,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
             "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/git_info.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/specs.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/suites.py"
-        DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/hipblaslt/performance"
         COMPONENT benchmarks
     )
 

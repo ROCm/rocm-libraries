@@ -11,7 +11,7 @@
 
 #include "engines/EngineInterface.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class MockEngine : public IEngine
@@ -24,7 +24,9 @@ public:
                 (const, override));
     MOCK_METHOD(void,
                 getDetails,
-                (HipdnnEnginePluginHandle & handle, hipdnnPluginConstData_t& detailsOut),
+                (HipdnnEnginePluginHandle & handle,
+                 const hipdnn_plugin_sdk::IGraph& opGraph,
+                 hipdnnPluginConstData_t& detailsOut),
                 (const, override));
     MOCK_METHOD(size_t,
                 getWorkspaceSize,
@@ -40,4 +42,4 @@ public:
                 (const, override));
 };
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

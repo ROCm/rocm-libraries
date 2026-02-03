@@ -28,8 +28,6 @@
 
 #include <miopen/batchnorm/problem_description.hpp>
 
-#define WORKAROUND_SWDEV_253606 1
-
 namespace miopen {
 
 namespace solver {
@@ -313,43 +311,32 @@ inline void DefaultConfigSpatialSingle(const miopen::batchnorm::ProblemDescripti
         }
         else
         {
-#if(WORKAROUND_SWDEV_253606 == 0)
-            if(n < 3)
+            // clang-format off
+            if(in_cstride > 512 && in_cstride <= 1024 && n < 32)
             {
-                valid_kernels.push_back(GetKernelIdFromVariant(4, 1));
+                valid_kernels.push_back(GetKernelIdFromVariant(3, 1));
                 valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
                 return;
             }
-            else
-#endif
-            {
-                // clang-format off
-                if(in_cstride > 512 && in_cstride <= 1024 && n < 32)
-                {
-                    valid_kernels.push_back(GetKernelIdFromVariant(3, 1));
-                    valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
-                    return;
-                }
 
-                if( (in_nhw < 33554432 && in_cstride > 1024) ||
-                ((n >= 256) && (in_cstride > 60) && (bfpmixparm || bbfpmixparam)) ||
-                ((in_cstride > 512) && (bfpmixparm || bbfpmixparam)))
-                {
-                    valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
-                    if(in_cstride <= 512)
-                    {
-                        valid_kernels.push_back(GetKernelIdFromVariant(0, 1));
-                    }
-                    return;
-                }
-                else if(in_cstride <= 512)
+            if( (in_nhw < 33554432 && in_cstride > 1024) ||
+            ((n >= 256) && (in_cstride > 60) && (bfpmixparm || bbfpmixparam)) ||
+            ((in_cstride > 512) && (bfpmixparm || bbfpmixparam)))
+            {
+                valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
+                if(in_cstride <= 512)
                 {
                     valid_kernels.push_back(GetKernelIdFromVariant(0, 1));
-                    valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
-                    return;
                 }
-                // clang-format on
+                return;
             }
+            else if(in_cstride <= 512)
+            {
+                valid_kernels.push_back(GetKernelIdFromVariant(0, 1));
+                valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
+                return;
+            }
+            // clang-format on
         }
         valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
     }
