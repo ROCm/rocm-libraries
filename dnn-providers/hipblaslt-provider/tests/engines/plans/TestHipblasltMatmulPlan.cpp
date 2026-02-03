@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <hipblaslt/hipblaslt.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
