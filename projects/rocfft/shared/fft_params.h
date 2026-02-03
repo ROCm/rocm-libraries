@@ -2380,8 +2380,8 @@ public:
      * of available devices (i.e., `gpusperrank * num_ranks`) starting from
      * the `start_global_dev_idx` (global) device index.
      * NOTE: The global device index `g` in `[0, gpusperrank * mp_ranks(`
-     * corresponds to device of local ID `g % gpusperrank` on process of rank
-     * `g / gpusperrank`.
+     * corresponds to device of local ID `g / mp_ranks` on process of rank
+     * `g % mp_ranks`. This prioritize distributing layout across all processes.
      * 
      * @tparam io enum flag specifying whether the input (`io == fft_io::fft_io_in`)
      * or output (`io == fft_io::fft_io_in`) field is being considered.
@@ -2491,10 +2491,8 @@ public:
                 }
             }
 
-            iobrick.device
-                = (start_global_dev_idx + b_idx) % gpusperrank; // determine GPU within rank
-            iobrick.rank
-                = ((start_global_dev_idx + b_idx) / gpusperrank) % num_ranks; // determine MPI rank
+            iobrick.rank   = (start_global_dev_idx + b_idx) % num_ranks;
+            iobrick.device = ((start_global_dev_idx + b_idx) / num_ranks) % gpusperrank;
         }
     }
 
