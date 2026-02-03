@@ -27,8 +27,9 @@
 class EfficiencyMonitor
 {
 public:
-    virtual bool enabled()        = 0;
-    virtual bool detailedReport() = 0;
+    virtual bool enabled()          = 0;
+    virtual bool detailedReport()   = 0;
+    virtual bool efficiencyReport() = 0;
 
     virtual void set_device_id(int deviceId) = 0;
 
