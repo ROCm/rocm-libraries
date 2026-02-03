@@ -264,13 +264,13 @@ bool MiopenConvPlanBuilder::isApplicable(
     switch(node.attributes_type())
     {
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
-        ret = isApplicableFwd(handle, opGraph, deterministicEnabled);
+        ret = isApplicableFwd(handle, opGraph, _deterministic);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
-        ret = isApplicableBwd(handle, opGraph, deterministicEnabled);
+        ret = isApplicableBwd(handle, opGraph, _deterministic);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
-        ret = isApplicableWrw(handle, opGraph, deterministicEnabled);
+        ret = isApplicableWrw(handle, opGraph, _deterministic);
         break;
     default:
         break;
