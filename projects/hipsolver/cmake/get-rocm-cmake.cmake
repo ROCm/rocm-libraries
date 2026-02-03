@@ -1,6 +1,5 @@
 # This finds the rocm-cmake project, and installs it if not found
 # rocm-cmake contains common cmake code for rocm projects to help setup and install
-# set(PROJECT_EXTERN_DIR ${CMAKE_CURRENT_BINARY_DIR}/extern)
 
 # By default, rocm software stack is expected at /opt/rocm
 # set environment variable ROCM_PATH to change location
