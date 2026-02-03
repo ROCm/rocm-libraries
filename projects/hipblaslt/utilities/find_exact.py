@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -56,7 +56,7 @@ globalParameters["WorkingDir"] = {}
 globalParameters["WorkingDir"]["Bench"] = "0_Bench"
 globalParameters["WorkingDir"]["LogicYaml"] = "1_LogicYaml"
 globalParameters["WorkingDir"]["GridYaml"] = "2_GridYaml"
-globalParameters["MatchTablePath"] = "/library/src/amd_detail/rocblaslt/src/MatchTable.yaml"
+globalParameters["MatchTablePath"] = "/device-library/MatchTable.yaml"
 
 defaultBenchOptions = {"ProblemType": {
     "TransposeA": 0,
