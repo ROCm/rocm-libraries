@@ -101,11 +101,6 @@ add_library(hipdnn_data_sdk INTERFACE)
 # Generate version header
 hipdnn_generate_version_header(hipdnn_data_sdk)
 
-# Add generated include directory for build interface
-target_include_directories(
-    hipdnn_data_sdk INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-)
-
 # Add includes from dependency targets
 hipdnn_add_dependency_includes(hipdnn_data_sdk flatbuffers::flatbuffers)
 hipdnn_add_dependency_includes(hipdnn_data_sdk spdlog::spdlog_header_only)
