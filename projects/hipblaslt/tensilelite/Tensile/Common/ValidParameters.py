@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -239,13 +239,27 @@ validParameters = { # we need to make sure this matches develop
     # Do another prefetch while writing data from vgpr to lds.
     #   prefetch / double-buffer reads from global memory -> vgprs --> lds.
     #                                                              |-> prefetch reads
-    "PrefetchGlobalRead": [0, 1, 2],
+    # PrefetchGlobalRead >= 3:
+    # DirectToLds only. Do PGR times prefetch global read before main loop.
+    # Need to allocate PGR+1 or PGR LDS buffer
+    # Allocating PGR+1 LDS buffer is better for instruction scheduling.
+    "PrefetchGlobalRead": [0, 1, 2] + list(range(3,16 + 1)),
     # number of iteration prefetch local reads from lds to VGPRs buffer = PLR
     "PrefetchLocalRead": list(range(128 + 1)),
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
     # So we can schedule these localReads to the front of the loop
     "ClusterLocalRead": [0, 1],
+    # Allocating PGR+1 LDS buffer if we have enough LDS memory size
+    # Only for DirectToLdsA+B + PGR>=2
+    # -1: auto (enable this for PGR>=3)
+    #  0: disable
+    #  1: enable (force to 0 if not applicable)
+    # IF LDS size exceeds maxLDS,
+    #   PGR>=3: disable (set 0) and continue
+    #   PGR==2: reject (use -1 or 0 in that case)
+    # 1LDSBuffer will be 0 if DtlPlusLdsBuf if enabled
+    "DtlPlusLdsBuf": [-1,0,1],
     # We use double LDS buffer when PrefetchGlobalRead.
     # While it reads data from LDS[0]/[1], it prefetch global data and writes to LDS[1]/[0]
     # If we can make sure all data are read from LDS to register before writing data to LDS, we can use 1 LDS buffer to save LDS memory.
@@ -309,6 +323,13 @@ validParameters = { # we need to make sure this matches develop
     # -1 will derived an optimized value internally
     # -2 will derived an optimized value and override LWPM silently (debug only, not recommended)
     "LocalWritePerMfma": [i / 100 for i in range(1, 3200)] + [-1],
+    # This is to specify minimum number of GR inc instructions per MFMA
+    # PGR>=2 and LocalWritePerMfma==-1 case, lwStart is decided by (number of GRInc) / max(roundup(miLatencyLeft/2), 1)
+    # gfx950 MI16 case, miLatencyLeft is 2 and we can schedule only 1 GRInc per MFMA.
+    # This pushes lwStart below and ends up with very less room for GR scheduling.
+    # For mid/small MT size case, we have chance to improve Global Read scheduling by putting more GRInc instructions
+    # regardless of miLatencyLeft (overhead of GR inst is often more than the latency of GR inc inst)
+    "MinGRIncPerMfma": [-1] + list(range(1,10)),
     # Interleave alpha scale calculation with beta loads and address calcs - rather
     # than as a separate block of instructions
     "InterleaveAlpha": [0, 1],
@@ -520,7 +541,7 @@ validParameters = { # we need to make sure this matches develop
     "WorkGroupMapping": list(
         range(-1024, 1024 + 1)
     ),  # change a workgroup's id so that the all the workgroups on the gpu at a time are hitting L2 cache the best
-    # 0: WorkGroupMapping is predicted at runtime. 
+    # 0: WorkGroupMapping is predicted at runtime.
     # 1: No mapping
     "WorkGroupMappingXCC": [
         -1,
@@ -797,6 +818,7 @@ validParameters = { # we need to make sure this matches develop
     # 1  : keep LDS layout same as global fetch dimension for both A and B for NN,TN,TT, but NT would be rejected
     # 2  : coalesced dimension of lds is unroll dimension for both A and B
     "TransposeLDS": [-1, 1, 0, 2],
+    "TransposeLDSMetadata": [-1, 1, 0],
     # add gls or slc after global memory read/writes to change caching, not caching the writes is promising and improved performance a tiny bit
     # 0: none, 1: glc, 2: slc, 3: glc slc
     # For gfx942, sets sc0/sc1/nt bits
@@ -868,7 +890,13 @@ validParameters = { # we need to make sure this matches develop
     # 0  : Fetch from workgroup dim -> elements dim. (default)
     # 1  : Fetch from elements dim -> workgroup dim. Has better prefetch pattern when # store elements is large.
     "MbskPrefetchMethod": [-1, 0, 1],
-    "UseCustomMainLoopSchedule" : [0, 1],
+    # Select whether to enable CMS
+    # CMS is supported for a given solution if there exists a CMS schedule in Components/CustomSchedule.py
+    #
+    # -1 : 0 if CMS is not supported, 1 if CMS is supported
+    # 0  : disable CMS even if supported
+    # 1  : enable  CMS, is set to 0 if not supported
+    "UseCustomMainLoopSchedule" : [-1, 0, 1],
     "AdaptiveGemm": [0, 1],
     # Add extra latency to calculate number of MFMA to insert between local read and wait
     # Negative value means reduce interval between local read and wait (for DirectToVgpr only)
@@ -876,7 +904,18 @@ validParameters = { # we need to make sure this matches develop
     # Add extra miLatencyLeft to improve local read scheduling
     # Adding more room for scheduling local read instructions
     # Tentative: setting >=0 value will invalidate miLatency/miIssueLatency adjustment for gfx950 + 2Byte
-    "ExtraMiLatencyLeft": [-1,0,1,2,3,4,6,8]
+    "ExtraMiLatencyLeft": [-1,0,1,2,3,4,6,8],
+    # TailLoop in NoLoadLoop optimization
+    # generate TailLoop code in NoLoadLoop to take advantage of prefetch and wider globalLoad plus instruction scheduling
+    # Need certain conditions to use TailloopInNll optimization
+    # - NT transpose or AssertSummationElementMultiple * bpeGR is multiple of 4 (with BufferLoad + ShiftPtr)
+    "TailloopInNll": [False, True],
+    # Schedule global read instructions over barrier sync.
+    # Only for DirectToLdsA+B + PGR>=2.
+    # -1: auto (enable this for PGR>=3)
+    #  0: disable
+    #  1: enable (force to 0 if not applicable)
+    "ScheduleGROverBarrier": [-1,0,1],
 }
 
 newMIValidParameters = {

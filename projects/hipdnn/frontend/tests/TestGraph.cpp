@@ -400,7 +400,7 @@ TEST_F(TestGraph, BatchnormInferenceNodeVarianceExtCreation)
     bias->set_dim(derivedDims).set_stride(derivedStrides);
 
     auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_name("Epsilon").set_value(1e-5f);
+    epsilon->set_name("Epsilon").set_value(1e-5);
 
     BatchnormInferenceAttributesVarianceExt attributes;
     attributes.set_name("BatchnormNodeVariance");
@@ -707,7 +707,7 @@ TEST_F(TestGraph, BuildAndSerializeBatchnormInferenceVarianceExtGraph)
         .set_stride(derivedStrides);
 
     auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_uid(6).set_name("Epsilon").set_value(1e-5f);
+    epsilon->set_uid(6).set_name("Epsilon").set_value(1e-5);
 
     BatchnormInferenceAttributesVarianceExt batchnormAttributes;
     batchnormAttributes.set_name("BatchnormNodeVariance");
@@ -3391,6 +3391,437 @@ TEST_F(TestGraph, BuildOperationGraphPopulatesOnlyMissingUids)
     EXPECT_NE(biasUid, 500);
 }
 
+TEST_F(TestGraph, GetTensorsByUidReturnsMap)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(42)
+        .set_name("X")
+        .set_dim({1, 2, 3, 4})
+        .set_stride({24, 12, 4, 1})
+        .set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_name("PointwiseNode");
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    auto y = graph.pointwise(x, pwAttrs);
+    y->set_uid(99);
+
+    // Get tensor map by UID
+    auto tensorsByUid = graph.getTensorsByUid();
+
+    // Map contains expected tensors
+    EXPECT_EQ(tensorsByUid.size(), 2);
+
+    auto itX = tensorsByUid.find(42);
+    ASSERT_NE(itX, tensorsByUid.end());
+    EXPECT_EQ(itX->second->get_uid(), 42);
+    EXPECT_EQ(itX->second->get_name(), "X");
+    EXPECT_EQ(itX->second, x);
+
+    auto itY = tensorsByUid.find(99);
+    ASSERT_NE(itY, tensorsByUid.end());
+    EXPECT_EQ(itY->second->get_uid(), 99);
+    EXPECT_EQ(itY->second, y);
+
+    // Non-existent UID not found in map
+    auto notFound = tensorsByUid.find(999);
+    EXPECT_EQ(notFound, tensorsByUid.end());
+}
+
+TEST_F(TestGraph, GetTensorsByNameReturnsMap)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("InputTensor")
+        .set_dim({1, 2, 3, 4})
+        .set_stride({24, 12, 4, 1})
+        .set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes pwAttrs;
+    pwAttrs.set_name("PointwiseNode");
+    pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+    auto y = graph.pointwise(x, pwAttrs);
+
+    // Get tensor map by name
+    auto tensorsByName = graph.getTensorsByName();
+
+    // Map contains expected tensors
+    EXPECT_EQ(tensorsByName.size(), 2);
+
+    auto itX = tensorsByName.find("InputTensor");
+    ASSERT_NE(itX, tensorsByName.end());
+    EXPECT_EQ(itX->second->get_name(), "InputTensor");
+    EXPECT_EQ(itX->second, x);
+
+    // Output tensor has auto-generated name
+    auto itY = tensorsByName.find("PointwiseNode::OUT_0");
+    ASSERT_NE(itY, tensorsByName.end());
+    EXPECT_EQ(itY->second, y);
+
+    // Non-existent name not found in map
+    auto notFound = tensorsByName.find("NonExistentTensor");
+    EXPECT_EQ(notFound, tensorsByName.end());
+}
+
+TEST_F(TestGraph, GetTensorsByUidAndNameIncludePeerStatTensors)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("InputX")
+        .set_dim({1, 64, 32, 32})
+        .set_stride({65536, 1024, 32, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(2)
+        .set_name("ScaleTensor")
+        .set_dim({64})
+        .set_stride({1})
+        .set_data_type(DataType::FLOAT);
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(3)
+        .set_name("BiasTensor")
+        .set_dim({64})
+        .set_stride({1})
+        .set_data_type(DataType::FLOAT);
+
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_uid(4);
+
+    // Create peer stat tensors (these go in the separate peer_stats vector, not outputs)
+    auto peerStat1 = std::make_shared<TensorAttributes>();
+    peerStat1->set_uid(20).set_name("PeerStat1");
+
+    auto peerStat2 = std::make_shared<TensorAttributes>();
+    peerStat2->set_uid(21).set_name("PeerStat2");
+
+    BatchnormAttributes bnAttrs;
+    bnAttrs.set_name("BN");
+    bnAttrs.set_epsilon(epsilon);
+    bnAttrs.set_peer_stats({peerStat1, peerStat2}); // Set peer stats separately
+
+    auto [y, savedMean, savedInvVariance, nextRunningMean, nextRunningVariance]
+        = graph.batchnorm(x, scale, bias, bnAttrs);
+
+    // Assign UIDs to output tensors
+    y->set_uid(10);
+    savedMean->set_uid(11);
+    savedInvVariance->set_uid(12);
+
+    // Test getTensorsByUid()
+    auto tensorsByUid = graph.getTensorsByUid();
+
+    // Should have:
+    // Inputs: x(1), scale(2), bias(3), epsilon(4) = 4
+    // Outputs: y(10), savedMean(11), savedInvVariance(12) = 3
+    // Peer stats: peerStat1(20), peerStat2(21) = 2
+    // Total = 9
+    EXPECT_EQ(tensorsByUid.size(), 9);
+
+    // Verify input tensors are present by UID
+    EXPECT_NE(tensorsByUid.find(1), tensorsByUid.end()); // x
+    EXPECT_NE(tensorsByUid.find(2), tensorsByUid.end()); // scale
+    EXPECT_NE(tensorsByUid.find(3), tensorsByUid.end()); // bias
+    EXPECT_NE(tensorsByUid.find(4), tensorsByUid.end()); // epsilon
+
+    // Verify output tensors are present by UID
+    EXPECT_NE(tensorsByUid.find(10), tensorsByUid.end()); // y
+    EXPECT_NE(tensorsByUid.find(11), tensorsByUid.end()); // savedMean
+    EXPECT_NE(tensorsByUid.find(12), tensorsByUid.end()); // savedInvVariance
+
+    // Verify peer stat tensors are present by UID (tests the specialized gather override)
+    EXPECT_NE(tensorsByUid.find(20), tensorsByUid.end()); // peerStat1
+    EXPECT_NE(tensorsByUid.find(21), tensorsByUid.end()); // peerStat2
+
+    // Verify the pointers match
+    EXPECT_EQ(tensorsByUid[1], x);
+    EXPECT_EQ(tensorsByUid[10], y);
+    EXPECT_EQ(tensorsByUid[20], peerStat1);
+    EXPECT_EQ(tensorsByUid[21], peerStat2);
+
+    // Test getTensorsByName()
+    auto tensorsByName = graph.getTensorsByName();
+
+    // Should have all named tensors:
+    // Inputs with names: InputX, ScaleTensor, BiasTensor (3) - epsilon has no name
+    // Outputs with names: BN::Y, BN::MEAN, BN::INV_VARIANCE (3)
+    // Peer stats with names: PeerStat1, PeerStat2 (2)
+    // Total = 8
+    EXPECT_EQ(tensorsByName.size(), 8);
+
+    // Verify input tensors are present by name
+    EXPECT_NE(tensorsByName.find("InputX"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("ScaleTensor"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("BiasTensor"), tensorsByName.end());
+
+    // Verify output tensors are present by name
+    EXPECT_NE(tensorsByName.find("BN::Y"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("BN::MEAN"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("BN::INV_VARIANCE"), tensorsByName.end());
+
+    // Verify peer stat tensors are present by name (tests the specialized gather override)
+    EXPECT_NE(tensorsByName.find("PeerStat1"), tensorsByName.end());
+    EXPECT_NE(tensorsByName.find("PeerStat2"), tensorsByName.end());
+
+    // Verify the pointers match
+    EXPECT_EQ(tensorsByName["InputX"], x);
+    EXPECT_EQ(tensorsByName["BN::Y"], y);
+    EXPECT_EQ(tensorsByName["PeerStat1"], peerStat1);
+    EXPECT_EQ(tensorsByName["PeerStat2"], peerStat2);
+}
+
+TEST_F(TestGraph, GetRankedEngineIdsReturnsRankedList)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+
+    graph.set_name("RankedEngineIdsTestGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("X")
+        .set_dim({1, 2, 3, 4})
+        .set_stride({24, 12, 4, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    mean->set_uid(2).set_name("Mean").set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
+
+    auto invVariance = std::make_shared<TensorAttributes>();
+    invVariance->set_uid(3).set_name("InvVariance").set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(4).set_name("Scale").set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(5).set_name("Bias").set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
+
+    BatchnormInferenceAttributes batchnormAttributes;
+    batchnormAttributes.set_name("BatchnormNode");
+
+    graph.batchnorm_inference(x, mean, invVariance, scale, bias, batchnormAttributes);
+
+    // Mock build_operation_graph
+    auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillOnce([&graphDesc](hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+            *descriptor = graphDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(graphDesc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(graphDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    graph.build_operation_graph(_handle);
+
+    // Mock heuristic descriptor creation
+    auto heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
+        .WillOnce(
+            [&heurDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = heurDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            heurDesc, HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(heurDesc, HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_HEUR_MODE, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(heurDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Mock getting engine count (3 engines available)
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(heurDesc,
+                                    HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    0,
+                                    _,
+                                    nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 3;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Create 3 engine config descriptors
+    auto engineConfigDesc1 = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2001);
+    auto engineConfigDesc2 = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2002);
+    auto engineConfigDesc3 = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2003);
+    auto engineDesc1 = reinterpret_cast<hipdnnBackendDescriptor_t>(0x3001);
+    auto engineDesc2 = reinterpret_cast<hipdnnBackendDescriptor_t>(0x3002);
+    auto engineDesc3 = reinterpret_cast<hipdnnBackendDescriptor_t>(0x3003);
+
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
+        .WillOnce([&engineConfigDesc1](hipdnnBackendDescriptorType_t,
+                                       hipdnnBackendDescriptor_t* descriptor) {
+            *descriptor = engineConfigDesc1;
+            return HIPDNN_STATUS_SUCCESS;
+        })
+        .WillOnce([&engineConfigDesc2](hipdnnBackendDescriptorType_t,
+                                       hipdnnBackendDescriptor_t* descriptor) {
+            *descriptor = engineConfigDesc2;
+            return HIPDNN_STATUS_SUCCESS;
+        })
+        .WillOnce([&engineConfigDesc3](hipdnnBackendDescriptorType_t,
+                                       hipdnnBackendDescriptor_t* descriptor) {
+            *descriptor = engineConfigDesc3;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Mock getting engine configs
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(heurDesc,
+                                    HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    3,
+                                    _,
+                                    NotNull()))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* retrievedCount,
+                     void*) {
+            *retrievedCount = 3;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Finalize and get IDs for each engine config
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineConfigDesc1))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineConfigDesc1,
+                                    HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    nullptr,
+                                    _))
+        .WillOnce([&engineDesc1](hipdnnBackendDescriptor_t,
+                                 hipdnnBackendAttributeName_t,
+                                 hipdnnBackendAttributeType_t,
+                                 int64_t,
+                                 int64_t*,
+                                 void* arrayOfElements) {
+            *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = engineDesc1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    engineDesc1, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t*,
+                     void* arrayOfElements) {
+            *static_cast<int64_t*>(arrayOfElements) = 100;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineConfigDesc2))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineConfigDesc2,
+                                    HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    nullptr,
+                                    _))
+        .WillOnce([&engineDesc2](hipdnnBackendDescriptor_t,
+                                 hipdnnBackendAttributeName_t,
+                                 hipdnnBackendAttributeType_t,
+                                 int64_t,
+                                 int64_t*,
+                                 void* arrayOfElements) {
+            *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = engineDesc2;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    engineDesc2, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t*,
+                     void* arrayOfElements) {
+            *static_cast<int64_t*>(arrayOfElements) = 200;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineConfigDesc3))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineConfigDesc3,
+                                    HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    nullptr,
+                                    _))
+        .WillOnce([&engineDesc3](hipdnnBackendDescriptor_t,
+                                 hipdnnBackendAttributeName_t,
+                                 hipdnnBackendAttributeType_t,
+                                 int64_t,
+                                 int64_t*,
+                                 void* arrayOfElements) {
+            *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = engineDesc3;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    engineDesc3, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t*,
+                     void* arrayOfElements) {
+            *static_cast<int64_t*>(arrayOfElements) = 300;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<int64_t> rankedEngineIds;
+    auto result = graph.get_ranked_engine_ids(rankedEngineIds);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(rankedEngineIds.size(), 3);
+    EXPECT_EQ(rankedEngineIds[0], 100);
+    EXPECT_EQ(rankedEngineIds[1], 200);
+    EXPECT_EQ(rankedEngineIds[2], 300);
+}
+
 TEST_F(TestGraph, BuildMethodSucceedsWithValidGraph)
 {
     ::testing::FLAGS_gmock_verbose = "error";
@@ -3572,6 +4003,555 @@ TEST_F(TestGraph, BuildMethodSucceedsWithValidGraph)
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
+TEST_F(TestGraph, CreateExecutionPlanExtWithKnobSettings)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    // Mock build_operation_graph
+    auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillOnce([&graphDesc](hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+            *descriptor = graphDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(graphDesc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(graphDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good());
+
+    // Mock engine descriptor creation for get_knob_lookup_for_engine
+    // and during initializeEngineConfig(engineId)
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
+        .Times(2)
+        .WillRepeatedly(
+            [&engineDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = engineDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            engineDesc, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .Times(2)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    int64_t engineId = 42;
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
+        .Times(2)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineDesc))
+        .Times(2)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Create flatbuffer knob for "global.deterministic"
+    flatbuffers::FlatBufferBuilder builder;
+    auto knobOffset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
+        builder,
+        "global.deterministic",
+        "Enable deterministic execution",
+        hipdnn_data_sdk::data_objects::KnobValue::IntValue,
+        hipdnn_data_sdk::data_objects::CreateIntValue(builder, static_cast<int64_t>(0)).Union(),
+        hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint,
+        hipdnn_data_sdk::data_objects::CreateIntConstraint(
+            builder, static_cast<int64_t>(0), static_cast<int64_t>(1), static_cast<int64_t>(1))
+            .Union(),
+        false);
+    builder.Finish(knobOffset);
+    auto knobBuffer = builder.Release();
+
+    // Mock getting knob count
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    0,
+                                    _,
+                                    nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Mock getting actual knob data
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    1,
+                                    _,
+                                    NotNull()))
+        .WillOnce([&knobBuffer](hipdnnBackendDescriptor_t,
+                                hipdnnBackendAttributeName_t,
+                                hipdnnBackendAttributeType_t,
+                                int64_t,
+                                int64_t* actualCount,
+                                void* arrayOfElements) {
+            *actualCount = 1;
+            auto fbDataArray = static_cast<hipdnnBackendFlatbufferData_t*>(arrayOfElements);
+            fbDataArray[0].ptr = knobBuffer.data();
+            fbDataArray[0].size = knobBuffer.size();
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Mock engine config descriptor creation
+    auto engineConfigDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2345);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
+        .WillOnce([&engineConfigDesc](hipdnnBackendDescriptorType_t,
+                                      hipdnnBackendDescriptor_t* descriptor) {
+            *descriptor = engineConfigDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            engineConfigDesc, HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineConfigDesc))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Mock setting knob settings on engine config
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(engineConfigDesc,
+                                    HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    1,
+                                    NotNull()))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Create knob setting for "global.deterministic" = 1
+    std::vector<KnobSetting> settings;
+    settings.emplace_back("global.deterministic", static_cast<int64_t>(1));
+
+    auto result = graph.create_execution_plan_ext(engineId, settings);
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+}
+
+TEST_F(TestGraph, CreateExecutionPlanExtWithMultipleKnobs)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    // Mock build_operation_graph
+    auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillOnce([&graphDesc](hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+            *descriptor = graphDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(graphDesc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(graphDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good());
+
+    // Mock engine descriptor creation
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
+        .Times(2)
+        .WillRepeatedly(
+            [&engineDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = engineDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            engineDesc, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .Times(2)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    int64_t engineId = 42;
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
+        .Times(2)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineDesc))
+        .Times(2)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Create multiple flatbuffer knobs
+    flatbuffers::FlatBufferBuilder builder1;
+    auto knob1Offset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
+        builder1,
+        "global.deterministic",
+        "Enable deterministic execution",
+        hipdnn_data_sdk::data_objects::KnobValue::IntValue,
+        hipdnn_data_sdk::data_objects::CreateIntValue(builder1, static_cast<int64_t>(0)).Union(),
+        hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint,
+        hipdnn_data_sdk::data_objects::CreateIntConstraint(
+            builder1, static_cast<int64_t>(0), static_cast<int64_t>(1), static_cast<int64_t>(1))
+            .Union(),
+        false);
+    builder1.Finish(knob1Offset);
+    auto knob1Buffer = builder1.Release();
+
+    flatbuffers::FlatBufferBuilder builder2;
+    auto knob2Offset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
+        builder2,
+        "performance.threads",
+        "Number of threads",
+        hipdnn_data_sdk::data_objects::KnobValue::IntValue,
+        hipdnn_data_sdk::data_objects::CreateIntValue(builder2, static_cast<int64_t>(4)).Union(),
+        hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint,
+        hipdnn_data_sdk::data_objects::CreateIntConstraint(
+            builder2, static_cast<int64_t>(1), static_cast<int64_t>(16), static_cast<int64_t>(1))
+            .Union(),
+        false);
+    builder2.Finish(knob2Offset);
+    auto knob2Buffer = builder2.Release();
+
+    // Mock getting knob count
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    0,
+                                    _,
+                                    nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 2;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Mock getting actual knob data
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    2,
+                                    _,
+                                    NotNull()))
+        .WillOnce([&knob1Buffer, &knob2Buffer](hipdnnBackendDescriptor_t,
+                                               hipdnnBackendAttributeName_t,
+                                               hipdnnBackendAttributeType_t,
+                                               int64_t,
+                                               int64_t* actualCount,
+                                               void* arrayOfElements) {
+            *actualCount = 2;
+            auto fbDataArray = static_cast<hipdnnBackendFlatbufferData_t*>(arrayOfElements);
+            fbDataArray[0].ptr = knob1Buffer.data();
+            fbDataArray[0].size = knob1Buffer.size();
+            fbDataArray[1].ptr = knob2Buffer.data();
+            fbDataArray[1].size = knob2Buffer.size();
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Mock engine config descriptor creation
+    auto engineConfigDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2345);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
+        .WillOnce([&engineConfigDesc](hipdnnBackendDescriptorType_t,
+                                      hipdnnBackendDescriptor_t* descriptor) {
+            *descriptor = engineConfigDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            engineConfigDesc, HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineConfigDesc))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Mock setting knob settings on engine config (2 knobs)
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(engineConfigDesc,
+                                    HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    2,
+                                    NotNull()))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Create multiple knob settings
+    std::vector<KnobSetting> settings;
+    settings.emplace_back("global.deterministic", static_cast<int64_t>(1));
+    settings.emplace_back("performance.threads", static_cast<int64_t>(8));
+
+    auto result = graph.create_execution_plan_ext(engineId, settings);
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+}
+
+TEST_F(TestGraph, CreateExecutionPlanExtFailsWithoutGraphBuilt)
+{
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    int64_t engineId = 42;
+    std::vector<KnobSetting> settings;
+    settings.emplace_back("global.deterministic", static_cast<int64_t>(1));
+
+    auto result = graph.create_execution_plan_ext(engineId, settings);
+    EXPECT_FALSE(result.is_good());
+    EXPECT_EQ(result.get_message(),
+              "Graph has not been built, build the operation graph first. Cannot create "
+              "execution plan.");
+}
+
+TEST_F(TestGraph, CreateExecutionPlanExtWithEmptySettings)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    // Mock build_operation_graph
+    auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillOnce([&graphDesc](hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+            *descriptor = graphDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(graphDesc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(graphDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good());
+
+    // Mock engine descriptor creation
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
+        .Times(2)
+        .WillRepeatedly(
+            [&engineDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = engineDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            engineDesc, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .Times(2)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    int64_t engineId = 42;
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
+        .Times(2)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineDesc))
+        .Times(2)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Mock getting knob count - return 0 (no knobs available)
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    0,
+                                    _,
+                                    nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 0;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Mock engine config descriptor creation
+    auto engineConfigDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2345);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
+        .WillOnce([&engineConfigDesc](hipdnnBackendDescriptorType_t,
+                                      hipdnnBackendDescriptor_t* descriptor) {
+            *descriptor = engineConfigDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            engineConfigDesc, HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineConfigDesc))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Empty settings - should not call backendSetAttribute for knobs
+    std::vector<KnobSetting> settings;
+
+    auto result = graph.create_execution_plan_ext(engineId, settings);
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+}
+
+TEST_F(TestGraph, CreateExecutionPlanExtIgnoresUnsupportedKnobs)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    // Mock build_operation_graph
+    auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillOnce([&graphDesc](hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+            *descriptor = graphDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(graphDesc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(graphDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good());
+
+    // Mock engine descriptor creation
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
+        .Times(2)
+        .WillRepeatedly(
+            [&engineDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = engineDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            engineDesc, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .Times(2)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    int64_t engineId = 42;
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
+        .Times(2)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineDesc))
+        .Times(2)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Create flatbuffer knob - only "global.deterministic" is supported
+    flatbuffers::FlatBufferBuilder builder;
+    auto knobOffset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
+        builder,
+        "global.deterministic",
+        "Enable deterministic execution",
+        hipdnn_data_sdk::data_objects::KnobValue::IntValue,
+        hipdnn_data_sdk::data_objects::CreateIntValue(builder, static_cast<int64_t>(0)).Union(),
+        hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint,
+        hipdnn_data_sdk::data_objects::CreateIntConstraint(
+            builder, static_cast<int64_t>(0), static_cast<int64_t>(1), static_cast<int64_t>(1))
+            .Union(),
+        false);
+    builder.Finish(knobOffset);
+    auto knobBuffer = builder.Release();
+
+    // Mock getting knob count
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    0,
+                                    _,
+                                    nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Mock getting actual knob data
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    1,
+                                    _,
+                                    NotNull()))
+        .WillOnce([&knobBuffer](hipdnnBackendDescriptor_t,
+                                hipdnnBackendAttributeName_t,
+                                hipdnnBackendAttributeType_t,
+                                int64_t,
+                                int64_t* actualCount,
+                                void* arrayOfElements) {
+            *actualCount = 1;
+            auto fbDataArray = static_cast<hipdnnBackendFlatbufferData_t*>(arrayOfElements);
+            fbDataArray[0].ptr = knobBuffer.data();
+            fbDataArray[0].size = knobBuffer.size();
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Mock engine config descriptor creation
+    auto engineConfigDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2345);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
+        .WillOnce([&engineConfigDesc](hipdnnBackendDescriptorType_t,
+                                      hipdnnBackendDescriptor_t* descriptor) {
+            *descriptor = engineConfigDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            engineConfigDesc, HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineConfigDesc))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Mock setting knob settings - only 1 valid knob should be set
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(engineConfigDesc,
+                                    HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    1,
+                                    NotNull()))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Create settings with one supported and one unsupported knob
+    std::vector<KnobSetting> settings;
+    settings.emplace_back("global.deterministic", static_cast<int64_t>(1));
+    settings.emplace_back("unsupported.knob", static_cast<int64_t>(999)); // Not supported
+
+    auto result = graph.create_execution_plan_ext(engineId, settings);
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+}
+
 TEST_F(TestGraph, BuildMethodFailsWhenValidationFails)
 {
     Graph graph;
@@ -3592,4 +4572,853 @@ TEST_F(TestGraph, BuildMethodFailsWhenValidationFails)
 
     auto result = graph.build(_handle);
     EXPECT_FALSE(result.is_good());
+}
+
+// ============================================================================
+// get_knobs_for_engine Tests
+// ============================================================================
+
+TEST_F(TestGraph, GetKnobsForEngineReturnsEmptyVectorWhenNoKnobs)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    // Mock build_operation_graph
+    auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillOnce([&graphDesc](hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+            *descriptor = graphDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(graphDesc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(graphDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good());
+
+    // Mock engine descriptor creation
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
+        .WillOnce(
+            [&engineDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = engineDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            engineDesc, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    int64_t engineId = 42;
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
+        .WillOnce([engineId](hipdnnBackendDescriptor_t,
+                             hipdnnBackendAttributeName_t,
+                             hipdnnBackendAttributeType_t,
+                             int64_t,
+                             const void* arrayOfElements) {
+            EXPECT_EQ(*static_cast<const int64_t*>(arrayOfElements), engineId);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Mock getting knob count - return 0 (no knobs)
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    0,
+                                    _,
+                                    nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 0;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<Knob> knobs;
+    auto result = graph.get_knobs_for_engine(engineId, knobs);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_TRUE(knobs.empty());
+}
+
+TEST_F(TestGraph, GetKnobsForEngineReturnsKnobsWhenAvailable)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    // Mock build_operation_graph
+    auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillOnce([&graphDesc](hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+            *descriptor = graphDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(graphDesc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(graphDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good());
+
+    // Mock engine descriptor creation
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
+        .WillOnce(
+            [&engineDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = engineDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            engineDesc, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    int64_t engineId = 42;
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Create flatbuffer knobs for testing
+    flatbuffers::FlatBufferBuilder builder1;
+    auto knob1Offset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
+        builder1,
+        "test_knob_1",
+        "First test knob",
+        hipdnn_data_sdk::data_objects::KnobValue::IntValue,
+        hipdnn_data_sdk::data_objects::CreateIntValue(builder1, 10).Union(),
+        hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint,
+        hipdnn_data_sdk::data_objects::CreateIntConstraint(builder1, 0, 100, 1).Union(),
+        false);
+    builder1.Finish(knob1Offset);
+    auto knob1Buffer = builder1.Release();
+
+    flatbuffers::FlatBufferBuilder builder2;
+    auto knob2Offset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
+        builder2,
+        "test_knob_2",
+        "Second test knob",
+        hipdnn_data_sdk::data_objects::KnobValue::FloatValue,
+        hipdnn_data_sdk::data_objects::CreateFloatValue(builder2, 0.5).Union(),
+        hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint,
+        hipdnn_data_sdk::data_objects::CreateFloatConstraint(builder2, 0.0, 1.0).Union(),
+        false);
+    builder2.Finish(knob2Offset);
+    auto knob2Buffer = builder2.Release();
+
+    // Mock getting knob count - return 2
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    0,
+                                    _,
+                                    nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 2;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Mock getting actual knob data
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    2,
+                                    _,
+                                    NotNull()))
+        .WillOnce([&knob1Buffer, &knob2Buffer](hipdnnBackendDescriptor_t,
+                                               hipdnnBackendAttributeName_t,
+                                               hipdnnBackendAttributeType_t,
+                                               int64_t,
+                                               int64_t* actualCount,
+                                               void* arrayOfElements) {
+            *actualCount = 2;
+            auto fbDataArray = static_cast<hipdnnBackendFlatbufferData_t*>(arrayOfElements);
+            fbDataArray[0].ptr = knob1Buffer.data();
+            fbDataArray[0].size = knob1Buffer.size();
+            fbDataArray[1].ptr = knob2Buffer.data();
+            fbDataArray[1].size = knob2Buffer.size();
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<Knob> knobs;
+    auto result = graph.get_knobs_for_engine(engineId, knobs);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(knobs.size(), 2);
+
+    // Verify first knob
+    EXPECT_EQ(knobs[0].knobId(), "test_knob_1");
+    EXPECT_EQ(knobs[0].description(), "First test knob");
+    EXPECT_EQ(knobs[0].valueType(), KnobValueType::INT64);
+    EXPECT_FALSE(knobs[0].isDeprecated());
+    auto defaultValue1 = std::get_if<int64_t>(&knobs[0].defaultValue());
+    ASSERT_NE(defaultValue1, nullptr);
+    EXPECT_EQ(*defaultValue1, 10);
+
+    // Verify second knob
+    EXPECT_EQ(knobs[1].knobId(), "test_knob_2");
+    EXPECT_EQ(knobs[1].description(), "Second test knob");
+    EXPECT_EQ(knobs[1].valueType(), KnobValueType::FLOAT64);
+    EXPECT_FALSE(knobs[1].isDeprecated());
+    auto defaultValue2 = std::get_if<double>(&knobs[1].defaultValue());
+    ASSERT_NE(defaultValue2, nullptr);
+    EXPECT_DOUBLE_EQ(*defaultValue2, 0.5);
+}
+
+TEST_F(TestGraph, GetKnobsForEngineHandlesDeprecatedKnobs)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    // Mock build_operation_graph
+    auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillOnce([&graphDesc](hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+            *descriptor = graphDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(graphDesc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(graphDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good());
+
+    // Mock engine descriptor creation
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
+        .WillOnce(
+            [&engineDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = engineDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            engineDesc, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Create a deprecated knob
+    flatbuffers::FlatBufferBuilder builder;
+    auto knobOffset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
+        builder,
+        "deprecated_knob",
+        "This knob is deprecated",
+        hipdnn_data_sdk::data_objects::KnobValue::IntValue,
+        hipdnn_data_sdk::data_objects::CreateIntValue(builder, 5).Union(),
+        hipdnn_data_sdk::data_objects::KnobConstraint::NONE,
+        0,
+        true); // deprecated = true
+    builder.Finish(knobOffset);
+    auto knobBuffer = builder.Release();
+
+    // Mock getting knob count
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    0,
+                                    _,
+                                    nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Mock getting actual knob data
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    1,
+                                    _,
+                                    NotNull()))
+        .WillOnce([&knobBuffer](hipdnnBackendDescriptor_t,
+                                hipdnnBackendAttributeName_t,
+                                hipdnnBackendAttributeType_t,
+                                int64_t,
+                                int64_t* actualCount,
+                                void* arrayOfElements) {
+            *actualCount = 1;
+            auto fbDataArray = static_cast<hipdnnBackendFlatbufferData_t*>(arrayOfElements);
+            fbDataArray[0].ptr = knobBuffer.data();
+            fbDataArray[0].size = knobBuffer.size();
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<Knob> knobs;
+    auto result = graph.get_knobs_for_engine(42, knobs);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(knobs.size(), 1);
+    EXPECT_TRUE(knobs[0].isDeprecated());
+    EXPECT_EQ(knobs[0].knobId(), "deprecated_knob");
+}
+
+TEST_F(TestGraph, GetKnobsForEngineHandlesStringKnobs)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    // Mock build_operation_graph
+    auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillOnce([&graphDesc](hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+            *descriptor = graphDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(graphDesc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(graphDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good());
+
+    // Mock engine descriptor creation
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
+        .WillOnce(
+            [&engineDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = engineDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            engineDesc, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Create a string knob with valid values constraint
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<flatbuffers::String>> validValues;
+    validValues.push_back(builder.CreateString("option1"));
+    validValues.push_back(builder.CreateString("option2"));
+    validValues.push_back(builder.CreateString("option3"));
+
+    auto constraintOffset = hipdnn_data_sdk::data_objects::CreateStringConstraint(
+        builder, 100, builder.CreateVector(validValues));
+
+    auto knobOffset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
+        builder,
+        "string_knob",
+        "String knob with choices",
+        hipdnn_data_sdk::data_objects::KnobValue::StringValue,
+        hipdnn_data_sdk::data_objects::CreateStringValueDirect(builder, "option1").Union(),
+        hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint,
+        constraintOffset.Union(),
+        false);
+    builder.Finish(knobOffset);
+    auto knobBuffer = builder.Release();
+
+    // Mock getting knob count
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    0,
+                                    _,
+                                    nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Mock getting actual knob data
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    1,
+                                    _,
+                                    NotNull()))
+        .WillOnce([&knobBuffer](hipdnnBackendDescriptor_t,
+                                hipdnnBackendAttributeName_t,
+                                hipdnnBackendAttributeType_t,
+                                int64_t,
+                                int64_t* actualCount,
+                                void* arrayOfElements) {
+            *actualCount = 1;
+            auto fbDataArray = static_cast<hipdnnBackendFlatbufferData_t*>(arrayOfElements);
+            fbDataArray[0].ptr = knobBuffer.data();
+            fbDataArray[0].size = knobBuffer.size();
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<Knob> knobs;
+    auto result = graph.get_knobs_for_engine(42, knobs);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(knobs.size(), 1);
+    EXPECT_EQ(knobs[0].knobId(), "string_knob");
+    EXPECT_EQ(knobs[0].valueType(), KnobValueType::STRING);
+    auto defaultValue = std::get_if<std::string>(&knobs[0].defaultValue());
+    ASSERT_NE(defaultValue, nullptr);
+    EXPECT_EQ(*defaultValue, "option1");
+}
+
+TEST_F(TestGraph, GetKnobsForEngineFailsWhenGraphNotBuilt)
+{
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    std::vector<Knob> knobs;
+    auto result = graph.get_knobs_for_engine(42, knobs);
+
+    // Should fail because graph hasn't been built yet
+    EXPECT_FALSE(result.is_good());
+}
+
+TEST_F(TestGraph, GetKnobsForEngineHandlesCountMismatch)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    // Mock build_operation_graph
+    auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillOnce([&graphDesc](hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+            *descriptor = graphDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(graphDesc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(graphDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good());
+
+    // Mock engine descriptor creation
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
+        .WillOnce(
+            [&engineDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = engineDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            engineDesc, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Mock getting knob count - return 2
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    0,
+                                    _,
+                                    nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 2;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Mock getting actual knob data - but return different count
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    2,
+                                    _,
+                                    NotNull()))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* actualCount,
+                     void*) {
+            *actualCount = 1; // Mismatch!
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<Knob> knobs;
+    auto result = graph.get_knobs_for_engine(42, knobs);
+
+    EXPECT_FALSE(result.is_good());
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_NE(result.get_message().find("Mismatch"), std::string::npos);
+}
+
+// ============================================================================
+// get_knob_lookup_for_engine Tests
+// ============================================================================
+
+TEST_F(TestGraph, GetKnobLookupForEngineReturnsMapByKnobId)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    // Mock build_operation_graph
+    auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillOnce([&graphDesc](hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+            *descriptor = graphDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(graphDesc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(graphDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good());
+
+    // Mock engine descriptor creation
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
+        .WillOnce(
+            [&engineDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = engineDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            engineDesc, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    std::string alphaId = "knob_alpha";
+    std::string betaId = "knob_beta";
+
+    // Create flatbuffer knobs
+    flatbuffers::FlatBufferBuilder builder1;
+    auto knob1Offset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
+        builder1,
+        alphaId.c_str(),
+        "Alpha parameter",
+        hipdnn_data_sdk::data_objects::KnobValue::IntValue,
+        hipdnn_data_sdk::data_objects::CreateIntValue(builder1, 1).Union(),
+        hipdnn_data_sdk::data_objects::KnobConstraint::NONE,
+        0,
+        false);
+    builder1.Finish(knob1Offset);
+    auto knob1Buffer = builder1.Release();
+
+    flatbuffers::FlatBufferBuilder builder2;
+    auto knob2Offset = hipdnn_data_sdk::data_objects::CreateKnobDirect(
+        builder2,
+        betaId.c_str(),
+        "Beta parameter",
+        hipdnn_data_sdk::data_objects::KnobValue::FloatValue,
+        hipdnn_data_sdk::data_objects::CreateFloatValue(builder2, 0.1).Union(),
+        hipdnn_data_sdk::data_objects::KnobConstraint::NONE,
+        0,
+        false);
+    builder2.Finish(knob2Offset);
+    auto knob2Buffer = builder2.Release();
+
+    // Mock getting knob count
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    0,
+                                    _,
+                                    nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 2;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Mock getting actual knob data
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    2,
+                                    _,
+                                    NotNull()))
+        .WillOnce([&knob1Buffer, &knob2Buffer](hipdnnBackendDescriptor_t,
+                                               hipdnnBackendAttributeName_t,
+                                               hipdnnBackendAttributeType_t,
+                                               int64_t,
+                                               int64_t* actualCount,
+                                               void* arrayOfElements) {
+            *actualCount = 2;
+            auto fbDataArray = static_cast<hipdnnBackendFlatbufferData_t*>(arrayOfElements);
+            fbDataArray[0].ptr = knob1Buffer.data();
+            fbDataArray[0].size = knob1Buffer.size();
+            fbDataArray[1].ptr = knob2Buffer.data();
+            fbDataArray[1].size = knob2Buffer.size();
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::unordered_map<KnobType_t, Knob> knobLookup;
+    auto result = graph.get_knob_lookup_for_engine(42, knobLookup);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(knobLookup.size(), 2);
+
+    // Verify knobs are accessible by their IDs
+
+    EXPECT_NE(knobLookup.find(alphaId), knobLookup.end());
+    EXPECT_NE(knobLookup.find(betaId), knobLookup.end());
+
+    EXPECT_EQ(knobLookup.at(alphaId).knobId(), alphaId);
+    EXPECT_EQ(knobLookup.at(betaId).knobId(), betaId);
+}
+
+TEST_F(TestGraph, GetKnobLookupForEngineReturnsEmptyMapWhenNoKnobs)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+
+    // Mock build_operation_graph
+    auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
+        .WillOnce([&graphDesc](hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+            *descriptor = graphDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(graphDesc, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(graphDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good());
+
+    // Mock engine descriptor creation
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
+        .WillOnce(
+            [&engineDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = engineDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            engineDesc, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineDesc)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Mock getting knob count - return 0
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineDesc,
+                                    HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT,
+                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                    0,
+                                    _,
+                                    nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 0;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::unordered_map<KnobType_t, Knob> knobLookup;
+    auto result = graph.get_knob_lookup_for_engine(42, knobLookup);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_TRUE(knobLookup.empty());
+}
+
+TEST_F(TestGraph, SetPreferredEngineIdByName)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
+
+    // Set by name
+    graph.set_preferred_engine_id_ext(testEngineName);
+
+    // Verify it was converted to the correct ID
+    auto expectedId = hipdnn_data_sdk::utilities::engineNameToId(testEngineName);
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), expectedId);
+}
+
+TEST_F(TestGraph, SetPreferredEngineIdByEmptyStringClearsPreference)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
+
+    // First set a preference
+    graph.set_preferred_engine_id_ext(testEngineName);
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+
+    // Then clear it with empty string
+    graph.set_preferred_engine_id_ext("");
+
+    // Verify no preferred engine ID is set
+    EXPECT_FALSE(graph.get_preferred_engine_id_ext().has_value());
+}
+
+TEST_F(TestGraph, SetPreferredEngineIdByNameThenById)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
+
+    // Set by name first
+    graph.set_preferred_engine_id_ext(testEngineName);
+
+    // Then override with a different ID
+    int64_t overrideId = 999;
+    graph.set_preferred_engine_id_ext(std::optional<int64_t>(overrideId));
+
+    // Verify the ID overload took precedence
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), overrideId);
+}
+
+TEST_F(TestGraph, SetPreferredEngineIdByIdThenByName)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_STRING_OVERLOAD";
+    auto expectedId = hipdnn_data_sdk::utilities::engineNameToId(testEngineName);
+
+    // Set by ID first
+    graph.set_preferred_engine_id_ext(std::optional<int64_t>(999));
+
+    // Then override with name
+    graph.set_preferred_engine_id_ext(testEngineName);
+
+    // Verify the name overload took precedence
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), expectedId);
+}
+
+TEST_F(TestGraph, MethodChaining)
+{
+    Graph graph;
+
+    const char* testEngineName = "TEST_ENGINE_FOR_CHAINING";
+    auto expectedEngineId = hipdnn_data_sdk::utilities::engineNameToId(testEngineName);
+
+    // Test that all setters return reference to self for chaining
+    auto& ref1 = graph.set_name("ChainedGraph");
+    auto& ref2 = ref1.set_compute_data_type(DataType::FLOAT);
+    auto& ref3 = ref2.set_intermediate_data_type(DataType::HALF);
+    auto& ref4 = ref3.set_io_data_type(DataType::BFLOAT16);
+    auto& ref5 = ref4.set_preferred_engine_id_ext(12345);
+
+    // All references should point to the same object
+    EXPECT_EQ(&graph, &ref1);
+    EXPECT_EQ(&graph, &ref2);
+    EXPECT_EQ(&graph, &ref3);
+    EXPECT_EQ(&graph, &ref4);
+    EXPECT_EQ(&graph, &ref5);
+
+    // Verify all values were set correctly
+    EXPECT_EQ(graph.get_name(), "ChainedGraph");
+    EXPECT_EQ(graph.get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(graph.get_intermediate_data_type(), DataType::HALF);
+    EXPECT_EQ(graph.get_io_data_type(), DataType::BFLOAT16);
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), 12345);
+
+    // Test chaining with string overload
+    auto& ref6 = graph.set_preferred_engine_id_ext(testEngineName);
+    EXPECT_EQ(&graph, &ref6);
+    EXPECT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), expectedEngineId);
 }

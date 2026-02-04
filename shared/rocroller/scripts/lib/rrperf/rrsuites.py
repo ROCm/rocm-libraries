@@ -1400,8 +1400,8 @@ def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1():
         N=4096,
         K=32768,
         beta=0.0,
-        mac_m=128,
-        mac_n=128,
+        mac_m=256,
+        mac_n=256,
         mac_k=256,
         wave_m=16,
         wave_n=16,
@@ -1413,19 +1413,21 @@ def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1():
         unroll_y=0,
         load_A="BufferToLDS",
         load_B="BufferToLDS",
-        loadScale_A="BufferToVGPR",
-        loadScale_B="BufferToVGPR",
+        loadScale_A="BufferToLDS",
+        loadScale_B="BufferToLDS",
         storeLDS_D=False,
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=1,
         prefetchScale=True,
+        pretileScale=True,
         swizzleScale=True,
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
         schedulerCost="LinearWeightedSimple",
         matchMemoryAccess=True,
+        tailLoops=False,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1439,6 +1441,7 @@ def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1():
             scale_B="Separate",
             scaleType_B="E8M0",
             scaleBlockSize=32,
+            scaleSkipPermlane=True,
         ),
         swizzleTileSize=MKNLTuple(32, 8, 32, 8),
         numOuter=1,
@@ -1455,6 +1458,17 @@ def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_pretile():
         gemm.loadScale_B = "BufferToLDS"
         gemm.swizzleTileSize = MKNLTuple(64, 4, 64, 4)
         gemm.types.scaleSkipPermlane = True
+        yield gemm
+
+
+def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_pad():
+    for gemm in fp4_target_d2lds_mi16x16x128_st32x8_pf2x1():
+        gemm.loadScale_A = "BufferToLDS"
+        gemm.loadScale_B = "BufferToLDS"
+        gemm.swizzleTileSize = MKNLTuple(64, 4, 64, 4)
+        gemm.types.scaleSkipPermlane = True
+        gemm.padLDS_A = (2048, 8)
+        gemm.padLDS_B = (2048, 8)
         yield gemm
 
 
@@ -1711,6 +1725,7 @@ def fp4_kernels():
     yield from fp4_32x32x64_scale_options()
     yield from fp4_d2lds_wgts256x256x256()
     yield from fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_pretile()
+    yield from fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_pad()
 
 
 def fp4_kernels_streamk():

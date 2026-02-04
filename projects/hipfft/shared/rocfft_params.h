@@ -355,17 +355,33 @@ public:
 
     // Return the number of expected callback entries for supplied
     // fields.
-    static size_t expected_callback_count(const std::vector<fft_field>& fields)
+    size_t expected_callback_count(const std::vector<fft_field>& fields)
     {
         // If fields are not specified, we consider the input or
         // output to have a single brick (and thus expect a single
         // callback entry)
         if(fields.empty())
             return 1;
-        return std::accumulate(fields.begin(),
-                               fields.end(),
-                               static_cast<size_t>(0),
-                               [](size_t s, const fft_field& f) { return s + f.bricks.size(); });
+
+        int mpi_rank = 0;
+#ifdef ROCFFT_MPI_ENABLE
+        if(mp_lib == fft_mp_lib_mpi)
+        {
+            MPI_Comm_rank(*static_cast<MPI_Comm*>(mp_comm), &mpi_rank);
+        }
+#endif
+
+        // count the number of bricks on this rank
+        size_t expected_callbacks = 0;
+        for(const auto& f : fields)
+        {
+            for(const auto& b : f.bricks)
+            {
+                if(b.rank == mpi_rank)
+                    ++expected_callbacks;
+            }
+        }
+        return expected_callbacks;
     }
 
     fft_status set_callbacks(std::vector<void*>* load_cb_func,
@@ -430,7 +446,7 @@ public:
 
             for(const auto& b : field.bricks)
             {
-                const size_t brick_size_elems = compute_ptrdiff(b.length(), b.stride, 0, 0);
+                const size_t brick_size_elems = compute_ptrdiff(b.length(), b.stride);
                 const size_t brick_size_bytes = brick_size_elems * elem_size_bytes;
 
                 // set device for the alloc, but we want to return to the
@@ -522,7 +538,7 @@ public:
         {
             const auto& b = ofields.front().bricks[i];
 
-            const size_t brick_size_elems = compute_ptrdiff(b.length(), b.stride, 0, 0);
+            const size_t brick_size_elems = compute_ptrdiff(b.length(), b.stride);
             const size_t brick_size_bytes = brick_size_elems * elem_size_bytes;
 
             // get this brick's starting offset in the field

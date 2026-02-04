@@ -11,6 +11,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionFwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionWrwPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/MatmulPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/PlanBuilderRegistry.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/PointwisePlan.hpp>
 
@@ -27,7 +28,7 @@ public:
                  size_t size,
                  const std::unordered_map<int64_t, void*>& variantPack)
     {
-        auto graphWrap = hipdnn_plugin_sdk::GraphWrapper(graphBuffer, size);
+        auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(graphBuffer, size);
 
         std::vector<std::unique_ptr<IGraphNodePlanExecutor>> planExecutors;
 
@@ -71,7 +72,7 @@ private:
     }
 
     std::unique_ptr<IGraphNodePlanExecutor>
-        buildPlanForNode(const hipdnn_plugin_sdk::IGraph& graph,
+        buildPlanForNode(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
                          const hipdnn_data_sdk::data_objects::Node& node)
     {
         auto key = buildSignatureKey(node, graph.getTensorMap(), node.compute_data_type());
@@ -111,6 +112,8 @@ private:
             return ConvolutionBwdSignatureKey(node, tensorMap, computeType);
         case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
             return ConvolutionWrwSignatureKey(node, tensorMap, computeType);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes:
+            return MatmulSignatureKey(node, tensorMap, computeType);
         default:
             throw std::runtime_error("Unsupported node type for signature key generation");
         }

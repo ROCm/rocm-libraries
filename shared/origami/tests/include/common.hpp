@@ -25,11 +25,22 @@
  *******************************************************************************/
 
 #pragma once
+#include <cstdlib>
 #include <vector>
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
+
+// Uses _putenv_s on Windows, setenv on POSIX
+inline int portable_setenv(const char* name, const char* value, int overwrite) {
+#ifdef _WIN32
+    (void)overwrite;
+    return _putenv_s(name, value);
+#else
+    return setenv(name, value, overwrite);
+#endif
+}
 
 // List of GPU architectures to test
 inline const std::vector<int> test_architectures = {942, 950};
@@ -66,40 +77,70 @@ inline origami::config_t make_config(size_t mt_m,
                                      size_t mi_m        = 16,
                                      size_t mi_n        = 16,
                                      size_t mi_k        = 16,
+                                     bool custom_mainloop_scheduling = false,
                                      int wgm            = 1,
                                      int occupancy      = 1,
                                      int non_temporal_a = 0,
                                      int non_temporal_b = 0) {
   origami::config_t config;
-  config.mt.m              = mt_m;
-  config.mt.n              = mt_n;
-  config.mt.k              = mt_k;
-  config.mi.m              = mi_m;
-  config.mi.n              = mi_n;
-  config.mi.k              = mi_k;
-  config.occupancy         = occupancy;
-  config.workgroup_mapping = wgm;
-  config.cache_hints_a     = non_temporal_a;
-  config.cache_hints_b     = non_temporal_b;
+  config.mt.m                       = mt_m;
+  config.mt.n                       = mt_n;
+  config.mt.k                       = mt_k;
+  config.mi.m                       = mi_m;
+  config.mi.n                       = mi_n;
+  config.mi.k                       = mi_k;
+  config.custom_mainloop_scheduling = custom_mainloop_scheduling;
+  config.occupancy                  = occupancy;
+  config.workgroup_mapping          = wgm;
+  config.cache_hints_a              = non_temporal_a;
+  config.cache_hints_b              = non_temporal_b;
   return config;
 }
 
 // Helper function to construct hardware_t with all parameters
-inline origami::hardware_t make_hardware(
-    int gpu_arch,
-    size_t n_cu                                                   = 304,
-    size_t lds_capacity                                           = 65536,
-    size_t num_xcd                                                = 8,
-    double mem1_perf_ratio                                        = 1.0,
-    double mem2_perf_ratio                                        = 1.0,
-    double mem3_perf_ratio                                        = 1.0,
-    size_t l2_capacity                                            = 4000000,
-    double compute_clock_ghz                                      = 1.0,
-    size_t parallel_mi_cu                                         = 1,
-    std::tuple<double, double, double> mem_bw_per_wg_coefficients = std::make_tuple(0, 0.015, 0)) {
+inline origami::hardware_t make_hardware(int gpu_arch) {
+  
+  //Initialize the constants
+  size_t n_cu                                                   = 0;
+  size_t lds_capacity                                           = 0;
+  size_t num_xcd                                                = 0;
+  double mem1_perf_ratio                                        = 0.0;
+  double mem2_perf_ratio                                        = 0.0;
+  double mem3_perf_ratio                                        = 0.0;
+  size_t l2_capacity                                            = 0;
+  double compute_clock_ghz                                      = 0.0;
+  size_t parallel_mi_cu                                         = 0;
+  std::tuple<double, double, double> mem_bw_per_wg_coefficients = std::make_tuple(0, 0, 0);
+
+  if(gpu_arch == 942)
+  {
+    n_cu                                                   = 304;
+    lds_capacity                                           = 65536;
+    num_xcd                                                = 8;
+    mem1_perf_ratio                                        = 1.0;
+    mem2_perf_ratio                                        = 1.0;
+    mem3_perf_ratio                                        = 1.0;
+    l2_capacity                                            = 4000000;
+    compute_clock_ghz                                      = 1;
+    parallel_mi_cu                                         = 1;
+    mem_bw_per_wg_coefficients = std::make_tuple(0, 0.015, 0);
+  }
+  else if(gpu_arch == 950)
+  {
+    n_cu                                                   = 256;
+    lds_capacity                                           = 163840;
+    num_xcd                                                = 8;
+    mem1_perf_ratio                                        = 1.0;
+    mem2_perf_ratio                                        = 1.0;
+    mem3_perf_ratio                                        = 1.0;
+    l2_capacity                                            = 4000000;
+    compute_clock_ghz                                      = 1.2;
+    parallel_mi_cu                                         = 1;
+    mem_bw_per_wg_coefficients = std::make_tuple(0, 0.008, 0);      
+  }
+  
   const std::string gpu_arch_str = "gfx" + std::to_string(gpu_arch);
   auto gpu_arch_enum             = origami::hardware_t::arch_name_to_enum(gpu_arch_str);
-
   return origami::hardware_t(gpu_arch_enum,
                              n_cu,
                              lds_capacity,

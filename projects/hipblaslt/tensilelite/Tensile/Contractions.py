@@ -608,6 +608,7 @@ class SizeMapping:
                  'synchronizerSizePerWG',
                  'nonTemporalA',
                  'nonTemporalB',
+                 'customMainLoopScheduling',
                  ]
 
     @classmethod
@@ -677,6 +678,7 @@ class SizeMapping:
                    synchronizerSizePerWG    = synchronizerSizePerWG,
                    nonTemporalA             = d['NonTemporalA'],
                    nonTemporalB             = d['NonTemporalB'],
+                   customMainLoopScheduling = d['UseCustomMainLoopSchedule'],
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):
@@ -700,12 +702,15 @@ class InternalArgsSupport:
 
     @classmethod
     def FromOriginalState(cls, d):
+        # Set useSFC to True if SpaceFillingAlgo is non-empty, regardless of
+        # the explicit InternalSupportParams setting
+        useSFC = d['InternalSupportParams']['UseSFC'] or len(d.get('SpaceFillingAlgo', [])) > 0
         return cls(version = d['InternalSupportParams']['KernArgsVersion'],
                    gsu = d['InternalSupportParams']['SupportUserGSU'],
                    wgm = d['InternalSupportParams']['SupportCustomWGM'],
                    staggerU = d['InternalSupportParams']['SupportCustomStaggerU'],
                    useUniversalArgs = d['InternalSupportParams']['UseUniversalArgs'],
-                   useSFC = d['InternalSupportParams']['UseSFC'])
+                   useSFC = useSFC)
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):

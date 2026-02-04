@@ -91,6 +91,7 @@ namespace rocRoller
             Tensor(int numDims, VariableType variableType);
             Tensor(int                        numDims,
                    VariableType               variableType,
+                   std::vector<size_t> const& literalSizes,
                    std::vector<size_t> const& literalStrides);
 
             std::string toString() const;
@@ -98,6 +99,7 @@ namespace rocRoller
 
             void allocateArguments();
 
+            std::vector<size_t> const& literalSizes() const;
             std::vector<size_t> const& literalStrides() const;
 
             std::vector<CommandArgumentPtr> const& strides() const;
@@ -126,6 +128,7 @@ namespace rocRoller
             std::vector<CommandArgumentPtr> m_sizes;
             std::vector<CommandArgumentPtr> m_strides;
 
+            std::vector<size_t> m_literalSizes;
             std::vector<size_t> m_literalStrides;
         };
 

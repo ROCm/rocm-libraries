@@ -152,8 +152,10 @@ void BnDataType(std::stringstream& ss,
 
 void BnDriverInfo(std::stringstream& ss,
                   const BatchNormDirection_t& dir,
-                  const void* resultRunningMean,
-                  const void* resultRunningVariance,
+                  const void* prevResultRunningMean,
+                  const void* prevResultRunningVariance,
+                  const void* nextResultRunningMean,
+                  const void* nextResultRunningVariance,
                   const void* resultSaveMean,
                   const void* resultSaveInvVariance)
 {
@@ -165,7 +167,9 @@ void BnDriverInfo(std::stringstream& ss,
     {
         ss << " --forw 0 -b 1";
     }
-    if((resultRunningMean != nullptr) && (resultRunningVariance != nullptr))
+    // Check if running statistics are enabled (either prev or both prev+next for V3)
+    if((prevResultRunningMean != nullptr && prevResultRunningVariance != nullptr) ||
+       (nextResultRunningMean != nullptr && nextResultRunningVariance != nullptr))
     {
         ss << " -r 1";
     }
@@ -295,8 +299,10 @@ std::string BnormArgsForMIOpenDriver(const miopenTensorDescriptor_t xDesc,
                                      const miopenTensorDescriptor_t biasDesc,
                                      const miopenTensorDescriptor_t saveMeanDesc,
                                      miopenBatchNormMode_t bn_mode,
-                                     const void* resultRunningMean,
-                                     const void* resultRunningVariance,
+                                     const void* prevResultRunningMean,
+                                     const void* prevResultRunningVariance,
+                                     const void* nextResultRunningMean,
+                                     const void* nextResultRunningVariance,
                                      const void* resultSaveMean,
                                      const void* resultSaveInvVariance,
                                      const BatchNormDirection_t& dir,
@@ -345,8 +351,10 @@ std::string BnormArgsForMIOpenDriver(const miopenTensorDescriptor_t xDesc,
     {
         BnDriverInfo(ss,
                      dir,
-                     resultRunningMean,
-                     resultRunningVariance,
+                     prevResultRunningMean,
+                     prevResultRunningVariance,
+                     nextResultRunningMean,
+                     nextResultRunningVariance,
                      resultSaveMean,
                      resultSaveInvVariance);
         ss << " --layout " << miopen::deref(xDesc).GetLayout_str();

@@ -1891,6 +1891,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             // TODO: mxDataGenerator can only generate data on CPU. Using
             //       GPU to generate data might be more efficient and avoid
             //       unnecessary hipMemCpy when CPU verification is not needed.
+
+            // preTile for A: {tileK, tileM} - swap from preTileSizeForScaleA which returns {tileM, tileK}
+            auto preTileATmp = preTileSizeForScaleA(arg.scaleA);
+            auto preTileA = (preTileATmp.size() == 2) ? std::vector<size_t>{preTileATmp[1], preTileATmp[0]} : std::vector<size_t>{};
             refA.emplace_back(generateMXInput(TiA,
                                               hA[i].buf(),
                                               hScaleA[i].buf(),
@@ -1899,6 +1903,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                               lda[i],
                                               transA == HIPBLAS_OP_T,
                                               preSwizzleSizeForScale(arg.scaleA),
+                                              preTileA,
                                               blockSize(arg.scaleA),
                                               1,
                                               true,
@@ -1944,6 +1949,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             // TODO: mxDataGenerator can only generate data on CPU. Using
             //       GPU to generate data might be more efficient and avoid
             //       unnecessary hipMemCpy when CPU verification is not needed.
+            // preTile for B: {tileK, tileN}
+            auto preTileB = preTileSizeForScaleB(arg.scaleB);
             refB.emplace_back(generateMXInput(TiB,
                                               hB[i].buf(),
                                               hScaleB[i].buf(),
@@ -1952,6 +1959,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                               ldb[i],
                                               transB == HIPBLAS_OP_T,
                                               preSwizzleSizeForScale(arg.scaleB),
+                                              preTileB,
                                               1,
                                               blockSize(arg.scaleB),
                                               false,
@@ -3700,7 +3708,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             if(!do_grouped_gemm)
             {
-                EfficiencyMonitor& perf_monitor = getEfficiencyMonitor();
+                auto perf_monitor = EfficiencyMonitor::create();
                 if(arg.use_ext)
                 {
                     for(int32_t b = 0; b < block_count; b++)
@@ -3740,7 +3748,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                             continue;
                         }
                     }
-                    perf_monitor.start();
+                    perf_monitor->start();
                     pre_gpu_time(arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
 
                     for(int i = 0; i < number_hot_calls; i++)
@@ -3809,7 +3817,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                             continue;
                         }
                     }
-                    perf_monitor.start();
+                    perf_monitor->start();
                     pre_gpu_time(arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
 
                     for(int i = 0; i < number_hot_calls; i++)
@@ -3851,11 +3859,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                               event_gpu_time_end,
                               gpu_time_used,
                               stream);
-                perf_monitor.stop();
+                perf_monitor->stop();
             }
             else
             {
-                EfficiencyMonitor& perf_monitor = getEfficiencyMonitor();
+                auto perf_monitor = EfficiencyMonitor::create();
                 if(arg.use_user_args)
                 {
                     std::vector<unsigned char*> d_userArgsVec(block_count);
@@ -3906,7 +3914,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                             continue;
                         }
                     }
-                    perf_monitor.start();
+                    perf_monitor->start();
                     pre_gpu_time(arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
 
                     for(int i = 0; i < number_hot_calls; i++)
@@ -3918,7 +3926,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   event_gpu_time_end,
                                   gpu_time_used,
                                   stream);
-                    perf_monitor.stop();
+                    perf_monitor->stop();
                 }
                 else
                 {
@@ -3963,7 +3971,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                             continue;
                         }
                     }
-                    perf_monitor.start();
+                    perf_monitor->start();
                     pre_gpu_time(arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
 
                     for(int i = 0; i < number_hot_calls; i++)
@@ -3974,7 +3982,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   event_gpu_time_end,
                                   gpu_time_used,
                                   stream);
-                    perf_monitor.stop();
+                    perf_monitor->stop();
                 }
             }
 

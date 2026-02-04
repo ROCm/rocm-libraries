@@ -1,8 +1,10 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier:  MIT
 
-include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
+
+# Version handling
+hipdnn_setup_version(hipdnn_data_sdk)
 
 set(HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/data_sdk")
 set(HIP_DNN_DATA_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -12,6 +14,7 @@ hipdnn_add_dependency(spdlog VERSION ${HIPDNN_SPDLOG_VERSION})
 hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 
 find_package(fmt ${HIPDNN_FMTLIB_VERSION} QUIET)
+find_package(hip REQUIRED)
 
 # For dependencies we are going to check if they weren't imported, and then install it along with
 # the SDK headers to allow it to work for local builds that want to install. If the dependecy is
@@ -95,10 +98,21 @@ _hipdnn_data_sdk_process_dependency(
 
 add_library(hipdnn_data_sdk INTERFACE)
 
+# Generate version header
+hipdnn_generate_version_header(hipdnn_data_sdk)
+
+# Add generated include directory for build interface
+target_include_directories(
+    hipdnn_data_sdk INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+)
+
 # Add includes from dependency targets
 hipdnn_add_dependency_includes(hipdnn_data_sdk flatbuffers::flatbuffers)
 hipdnn_add_dependency_includes(hipdnn_data_sdk spdlog::spdlog_header_only)
 hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
+
+target_link_libraries(hipdnn_data_sdk INTERFACE hip::host)
+target_compile_definitions(hipdnn_data_sdk INTERFACE __HIP_PLATFORM_AMD__)
 
 if (fmt_FOUND)
     message(STATUS "Found fmt: using system fmt")
@@ -128,6 +142,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         schemas/engine_config.fbs
         schemas/engine_details.fbs
         schemas/graph.fbs
+        schemas/knob_value.fbs
         schemas/matmul_attributes.fbs
         schemas/pointwise_attributes.fbs
         schemas/tensor_attributes.fbs
@@ -159,8 +174,8 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
     add_dependencies(hipdnn_data_sdk generate_hipdnn_data_sdk_headers)
 endif()
 
-# This is required to use hip/hip_fp16.h and hip/hip_bfloat16.h in any code that includes the sdk By
-# doing this, we don't need to link to hip::device
+# __HIPCC__ is required to use hip/hip_fp16.h and hip/hip_bfloat16.h
+# This allows non-hipcc compilers to use these HIP type headers
 target_compile_definitions(hipdnn_data_sdk INTERFACE __HIPCC__)
 
 export(TARGETS hipdnn_data_sdk ${_hipdnn_data_sdk_local_export_targets}
@@ -179,6 +194,14 @@ install(
     FILES_MATCHING
     PATTERN "*.h"
     PATTERN "*.hpp"
+    PATTERN "*.h.in" EXCLUDE
+)
+
+# Install generated version header
+install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_data_sdk/version.h"
+    DESTINATION ${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}/hipdnn_data_sdk
+    COMPONENT Development
 )
 
 install(EXPORT hipdnn_data_sdk_targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk
@@ -216,8 +239,19 @@ else()
     )
 endif()
 
-install(FILES "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_data_sdkConfig.cmake"
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk COMPONENT Development
+# Generate package version file for find_package version checking
+write_basic_package_version_file(
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_data_sdkConfigVersion.cmake"
+    VERSION ${HIPDNN_DATA_SDK_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(
+    FILES
+        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_data_sdkConfig.cmake"
+        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_data_sdkConfigVersion.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk
+    COMPONENT Development
 )
 
 add_subdirectory(tests)

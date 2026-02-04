@@ -63,8 +63,7 @@ void get_rank_load_callbacks(const fft_params&                          params,
                              std::vector<void*>&                        load_cb_data,
                              callback_hip_error_handler                 runtime_err_handler,
                              bool                                       round_trip_inverse,
-                             std::vector<gpubuf_t<callback_test_data>>& all_cb_data,
-                             int                                        rank = 0);
+                             std::vector<gpubuf_t<callback_test_data>>& all_cb_data);
 
 // Collect store callback function and data pointers for the given
 // params.  We'd expect N pointers for N output bricks on the current
@@ -76,8 +75,7 @@ void get_rank_store_callbacks(const fft_params&                          params,
                               std::vector<void*>&                        store_cb_data,
                               callback_hip_error_handler                 runtime_err_handler,
                               bool                                       round_trip_inverse,
-                              std::vector<gpubuf_t<callback_test_data>>& all_cb_data,
-                              int                                        rank = 0);
+                              std::vector<gpubuf_t<callback_test_data>>& all_cb_data);
 
 // Execute the load/store callback function on a host buffer, to
 // ensure that the reference host FFT is comparable to a device FFT

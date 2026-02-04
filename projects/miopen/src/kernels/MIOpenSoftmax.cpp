@@ -1,29 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #endif
@@ -119,11 +96,11 @@ __device__ void loop(const unsigned int lid, LAMBDA&& lambda)
     }
 }
 
-template <bool IS_PACKED>
+template <bool IS_CONTIGUOUS>
 __forceinline__ __device__ int get_index(int n, int i, int s, int s0, int s1, const int offset)
 {
     auto idx = offset;
-    if constexpr(IS_PACKED)
+    if constexpr(IS_CONTIGUOUS)
     {
         idx += (n * VECTOR_SIZE + i) * SPATIAL_DIM + s;
     }
@@ -132,40 +109,40 @@ __forceinline__ __device__ int get_index(int n, int i, int s, int s0, int s1, co
         auto i0 = i / (HEIGHT * WIDTH);
         auto i1 = (i % (HEIGHT * WIDTH)) / WIDTH;
         auto i2 = (i % (HEIGHT * WIDTH)) % WIDTH;
-        idx += n * N_STRIDE + i0 * C_STRIDE + i1 * H_STRIDE + i2;
+        idx += n * N_STRIDE + i0 * C_STRIDE + i1 * H_STRIDE + i2 * W_STRIDE;
     }
     else
     {
-        idx += n * N_STRIDE + i * C_STRIDE + s0 * H_STRIDE + s1;
+        idx += n * N_STRIDE + i * C_STRIDE + s0 * H_STRIDE + s1 * W_STRIDE;
     }
     return idx;
 }
 
 __forceinline__ __device__ int get_x_index(int n, int i, int s, int s0, int s1, const int x_offset)
 {
-    return get_index<IS_INPUT_PACKED>(n, i, s, s0, s1, x_offset);
+    return get_index<IS_INPUT_CONTIGUOUS>(n, i, s, s0, s1, x_offset);
 }
 
 __forceinline__ __device__ int get_y_index(int n, int i, int s, int s0, int s1, const int y_offset)
 {
-    return get_index<IS_OUTPUT_PACKED>(n, i, s, s0, s1, y_offset);
+    return get_index<IS_OUTPUT_CONTIGUOUS>(n, i, s, s0, s1, y_offset);
 }
 
 __forceinline__ __device__ int
 get_dx_index(int n, int i, int s, int s0, int s1, const int dx_offset)
 {
-    return get_index<IS_DINPUT_PACKED>(n, i, s, s0, s1, dx_offset);
+    return get_index<IS_DINPUT_CONTIGUOUS>(n, i, s, s0, s1, dx_offset);
 }
 
 __forceinline__ __device__ int
 get_dy_index(int n, int i, int s, int s0, int s1, const int dy_offset)
 {
-    return get_index<IS_DOUTPUT_PACKED>(n, i, s, s0, s1, dy_offset);
+    return get_index<IS_DOUTPUT_CONTIGUOUS>(n, i, s, s0, s1, dy_offset);
 }
 
-template <typename TI, typename TO>
-__forceinline__ __device__ void softmaxfwd(const TI* __restrict__ x,
-                                           TO* __restrict__ y,
+template <typename T>
+__forceinline__ __device__ void softmaxfwd(const T* __restrict__ x,
+                                           T* __restrict__ y,
                                            const int x_offset,
                                            const int y_offset,
                                            const float alpha,
@@ -280,7 +257,8 @@ __forceinline__ __device__ void softmaxfwd(const TI* __restrict__ x,
                     value *= __builtin_amdgcn_rcpf(channel_sum + EPSILON<FLOAT_ACCUM>);
                 }
 
-                value = value * FLOAT_ACCUM(alpha) + CVT_FLOAT2ACCUM(y[y_idx]) * FLOAT_ACCUM(beta);
+                value = value * CVT_FP32_2ACCUM(alpha) +
+                        CVT_FLOAT2ACCUM(y[y_idx]) * CVT_FP32_2ACCUM(beta);
                 y[y_idx] = CVT_ACCUM2FLOAT(value);
             });
         }
@@ -407,8 +385,8 @@ __forceinline__ __device__ void softmaxfwd(const TI* __restrict__ x,
                     values[v_idx] *= __builtin_amdgcn_rcpf(channel_sum + EPSILON<FLOAT_ACCUM>);
                 }
 
-                values[v_idx] = values[v_idx] * FLOAT_ACCUM(alpha) +
-                                CVT_FLOAT2ACCUM(y[y_idx]) * FLOAT_ACCUM(beta);
+                values[v_idx] = values[v_idx] * CVT_FP32_2ACCUM(alpha) +
+                                CVT_FLOAT2ACCUM(y[y_idx]) * CVT_FP32_2ACCUM(beta);
 
                 y[y_idx] = CVT_ACCUM2FLOAT(values[v_idx]);
             }
@@ -417,10 +395,10 @@ __forceinline__ __device__ void softmaxfwd(const TI* __restrict__ x,
     }
 }
 
-template <typename TI, typename TO>
-__forceinline__ __device__ void softmaxbwd(const TI* __restrict__ y,
-                                           const TI* __restrict__ dy,
-                                           TO* __restrict__ dx,
+template <typename T>
+__forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
+                                           const T* __restrict__ dy,
+                                           T* __restrict__ dx,
                                            const int y_offset,
                                            const int dy_offset,
                                            const int dx_offset,
@@ -476,8 +454,8 @@ __forceinline__ __device__ void softmaxbwd(const TI* __restrict__ y,
                 {
                     value = (value - channel_dot) * CVT_FLOAT2ACCUM(y[y_idx]);
                 }
-                value =
-                    value * FLOAT_ACCUM(alpha) + CVT_FLOAT2ACCUM(dx[dx_idx]) * FLOAT_ACCUM(beta);
+                value = value * CVT_FP32_2ACCUM(alpha) +
+                        CVT_FLOAT2ACCUM(dx[dx_idx]) * CVT_FP32_2ACCUM(beta);
                 dx[dx_idx] = CVT_ACCUM2FLOAT(value);
             });
         }
@@ -544,8 +522,8 @@ __forceinline__ __device__ void softmaxbwd(const TI* __restrict__ y,
                     dy_values[index] = (dy_values[index] - channel_dot) * y_values[index];
                 }
 
-                auto value = dy_values[index] * FLOAT_ACCUM(alpha) +
-                             CVT_FLOAT2ACCUM(dx[dx_idx]) * FLOAT_ACCUM(beta);
+                auto value = dy_values[index] * CVT_FP32_2ACCUM(alpha) +
+                             CVT_FLOAT2ACCUM(dx[dx_idx]) * CVT_FP32_2ACCUM(beta);
                 dx[dx_idx] = CVT_ACCUM2FLOAT(value);
             }
             ++index;
@@ -553,24 +531,24 @@ __forceinline__ __device__ void softmaxbwd(const TI* __restrict__ y,
     }
 }
 
-extern "C" __global__ void SoftmaxFwd(const INPUT_TYPE* __restrict__ x,
-                                      OUTPUT_TYPE* __restrict__ y,
+extern "C" __global__ void SoftmaxFwd(const DATA_TYPE* __restrict__ x,
+                                      DATA_TYPE* __restrict__ y,
                                       const int x_offset,
                                       const int y_offset,
                                       const float alpha,
                                       const float beta)
 {
-    softmaxfwd<INPUT_TYPE, OUTPUT_TYPE>(x, y, x_offset, y_offset, alpha, beta);
+    softmaxfwd<DATA_TYPE>(x, y, x_offset, y_offset, alpha, beta);
 }
 
-extern "C" __global__ void SoftmaxBwd(const INPUT_TYPE* __restrict__ y,
-                                      const INPUT_TYPE* __restrict__ dy,
-                                      OUTPUT_TYPE* __restrict__ dx,
+extern "C" __global__ void SoftmaxBwd(const DATA_TYPE* __restrict__ y,
+                                      const DATA_TYPE* __restrict__ dy,
+                                      DATA_TYPE* __restrict__ dx,
                                       const int y_offset,
                                       const int dy_offset,
                                       const int dx_offset,
                                       const float alpha,
                                       const float beta)
 {
-    softmaxbwd<INPUT_TYPE, OUTPUT_TYPE>(y, dy, dx, y_offset, dy_offset, dx_offset, alpha, beta);
+    softmaxbwd<DATA_TYPE>(y, dy, dx, y_offset, dy_offset, dx_offset, alpha, beta);
 }
