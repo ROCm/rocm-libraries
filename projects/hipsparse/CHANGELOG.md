@@ -13,12 +13,13 @@ Documentation for hipSPARSE is available at
 * Added half float mixed precision to `hipsparseSpMV` where A, X, and Y use float16 and the compute type uses float.
 * Added brain half float mixed precision to `hipsparseSpMM` where A, B, and C use bfloat16 and the compute type use float.
 * Added half float mixed precision to `hipsparseSpMM` where A, B, and C use float16 and the compute type use float.
-
+* For sparse matrix vector product (`hipsparseSpMV`), when using `HIPSPARSE_SPMV_ALG_DEFAULT`, the routine now automatically falls back to a supported algorithm depending on the sparse matrix format and requested operation. For example, CSR format with transposed operations or CSC format with non-transposed operations will fall back to an appropriate algorithm.
 
 ### Resolved issues
 * In `hipsparseSpSM_solve()`, the external buffer is passed as a parameter, which does not match the NVIDIA CUDA cuSPARSE API. The `hipsparseSpSM_solve_ex()` routine has been added to properly match the
 NVIDIA CUDA cuSPARSE `cusparseSpSM_solve()` API. The original `hipsparseSpSM_solve()` routine has been 
 deprecated and will be removed in a future release.
+* Fixed an issue where out-of-bounds memory reads can occur in the single precision bsrxmv kernels when `block_dim` equals `5` or `8`.
 
 ### Upcoming changes
 * The routine `hipsparseSpSM_solve()` has been deprecated and will be removed in a future release. 

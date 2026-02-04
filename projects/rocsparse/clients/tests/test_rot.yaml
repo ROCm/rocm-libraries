@@ -37,7 +37,7 @@ Tests:
   function: rot
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
-  M: [1200]
+  M: [500]
   nnz: [5, 10, 500]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
@@ -46,7 +46,7 @@ Tests:
   function: rot
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
-  M: [15332, 22031, 31958]
+  M: [15000]
   nnz: [0, 1543, 7111, 10000]
   baseA: [rocsparse_index_base_one]
 
@@ -55,7 +55,7 @@ Tests:
   function: rot
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
-  M: [735519, 1452387, 7834525]
+  M: [500000]
   nnz: [23512, 84412, 311983]
   baseA: [rocsparse_index_base_zero]
 

@@ -126,6 +126,21 @@ inline void vecToStream(std::ostream& os, const std::vector<T>& vec)
     os << "]";
 }
 
+// Converts a vector of strings to an ostream "[ "A", "B" , "C" ...]".
+inline void stringVecToStream(std::ostream& os, const std::vector<std::string>& vec)
+{
+    os << "[";
+    for(size_t i = 0; i < vec.size(); ++i)
+    {
+        if(i > 0)
+        {
+            os << ", ";
+        }
+        os << "\"" << vec[i] << "\"";
+    }
+    os << "]";
+}
+
 // Converts a vector of objects to a string "[A, B, C...]".
 template <typename T>
 std::enable_if_t<!std::is_arithmetic_v<T>, std::string> vecToString(const std::vector<T>& vec)

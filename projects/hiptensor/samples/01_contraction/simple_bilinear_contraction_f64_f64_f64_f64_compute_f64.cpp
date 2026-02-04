@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,7 +30,7 @@ int main(int argc, char* argv[])
     /***************************************
     * Check device support                 *
     **************************************/
-    if(!isF64Supported() || !isF64MatrixCoreSupported())
+    if(!isF64F64MatrixCoreSupported())
     {
         std::cout << "unsupported host device" << std::endl;
         exit(EXIT_FAILURE);
@@ -39,15 +39,15 @@ int main(int argc, char* argv[])
     typedef double ADataType;
     typedef double BDataType;
     typedef double CDataType;
-    typedef double floatTypeCompute;
+    typedef double doubleTypeCompute;
 
     constexpr hiptensorDataType_t          typeA       = HIPTENSOR_R_64F;
     constexpr hiptensorDataType_t          typeB       = HIPTENSOR_R_64F;
     constexpr hiptensorDataType_t          typeC       = HIPTENSOR_R_64F;
     constexpr hiptensorComputeDescriptor_t typeCompute = HIPTENSOR_COMPUTE_DESC_64F;
 
-    floatTypeCompute alpha{1.0f};
-    floatTypeCompute beta{1.0f};
+    doubleTypeCompute alpha{1.0};
+    doubleTypeCompute beta{1.0};
     return bilinearContractionSample<ADataType,
                                      BDataType,
                                      CDataType,
