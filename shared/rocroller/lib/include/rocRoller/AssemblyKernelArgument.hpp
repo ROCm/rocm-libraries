@@ -43,7 +43,7 @@ namespace rocRoller
                                DataDirection             dataDir = DataDirection::ReadOnly,
                                Expression::ExpressionPtr expr    = nullptr,
                                int                       offset  = -1,
-                               int                       size    = 1);
+                               int                       size    = -1);
 
         bool operator==(AssemblyKernelArgument const&) const;
 
