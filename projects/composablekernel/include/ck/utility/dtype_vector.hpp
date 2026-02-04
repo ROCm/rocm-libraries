@@ -196,7 +196,7 @@ struct non_native_vector_base<
     }
 
     template <typename X>
-    __host__ __device__ auto& AsType()
+    __host__ __device__ constexpr auto& AsType() [[clang::lifetimebound]]
     {
         static_assert(is_same_v<X, data_t> || is_same_v<X, data_v> || is_same_v<X, T>,
                       "Something went wrong, please check src and dst types.");
