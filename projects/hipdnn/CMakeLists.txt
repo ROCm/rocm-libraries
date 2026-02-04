@@ -158,6 +158,7 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL
 )
 
 include(cmake/Dependencies.cmake)
+include(cmake/VersionUtils.cmake)
 include(cmake/CheckToolVersion.cmake)
 include(cmake/ClangCheck.cmake)
 include(cmake/ClangTidy.cmake)

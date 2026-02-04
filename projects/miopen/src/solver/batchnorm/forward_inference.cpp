@@ -108,13 +108,24 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
             ylocalsize = max_localsize;
             ygridsize  = AlignUp(size_t{in_cstride / vectorsize}, ylocalsize);
         }
-        zlocalsize = 1;
-        zgridsize  = 1;
 
         // HIP runtime does not support non-uniform blocks
         // Adjust the global worker sizes accordingly
         xgridsize = AlignUp(xgridsize, xlocalsize);
         ygridsize = AlignUp(ygridsize, ylocalsize);
+
+        zlocalsize                = 1;
+        size_t active_threads_xy  = xgridsize * ygridsize;
+        size_t max_active_threads = handle.GetMaxComputeUnits() * 32 *
+                                    handle.GetWavefrontWidth(); // considering max 32 waves per CU
+        if(active_threads_xy < max_active_threads)
+        {
+            zgridsize = std::min(size_t{(max_active_threads / active_threads_xy)}, size_t{n});
+        }
+        else
+        {
+            zgridsize = 1;
+        }
 
         auto kernel = KernelInfo{};
 

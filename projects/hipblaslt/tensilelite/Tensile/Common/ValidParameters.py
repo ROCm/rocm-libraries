@@ -818,6 +818,7 @@ validParameters = { # we need to make sure this matches develop
     # 1  : keep LDS layout same as global fetch dimension for both A and B for NN,TN,TT, but NT would be rejected
     # 2  : coalesced dimension of lds is unroll dimension for both A and B
     "TransposeLDS": [-1, 1, 0, 2],
+    "TransposeLDSMetadata": [-1, 1, 0],
     # add gls or slc after global memory read/writes to change caching, not caching the writes is promising and improved performance a tiny bit
     # 0: none, 1: glc, 2: slc, 3: glc slc
     # For gfx942, sets sc0/sc1/nt bits

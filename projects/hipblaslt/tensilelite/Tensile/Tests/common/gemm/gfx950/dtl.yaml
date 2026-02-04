@@ -1145,9 +1145,10 @@ BenchmarkProblems:
         - MatrixInstruction:
            - [16, 16, 32, 1,  1, 2, 1,  4, 1 ]
            - [16, 16, 32, 1,  1, 2, 1,  2, 1 ]
+           - [32, 32, 16, 1,  1, 2, 1,  1, 1 ]
         - PrefetchGlobalRead: [2,3,4,5]
         - PrefetchLocalRead: [1]
-        - DepthU: [256]
+        - DepthU: [64, 256]
         - ScheduleIterAlg: [3]
         - ExpandPointerSwap: [0]
         - TransposeLDS: [2] #0,1
@@ -1183,3 +1184,4 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 255]
+          - Exact: [160, 120, 1, 3072]
