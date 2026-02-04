@@ -71,6 +71,23 @@ ConvBwdPlan::ConvBwdPlan(const HipdnnEnginePluginHandle& handle,
     , _benchmarkingEnabled(executionContext.benchmarkingEnabled())
     , _debugMode(executionContext.debugMode())
 {
+    // Validate that there are solutions available for this configuration.
+    size_t solutionCount;
+    THROW_ON_MIOPEN_FAILURE(miopenConvolutionBackwardDataGetSolutionCount(
+        handle.miopenHandle,
+        _params.dy().tensorDescriptor(),
+        _params.w().tensorDescriptor(),
+        _params.conv().convDescriptor(),
+        _params.dx().tensorDescriptor(),
+        &solutionCount));
+
+    if(solutionCount == 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "miopenConvolutionBackwardDataGetSolutionCount returned no solutions");
+    }
+
     // Determine initial workspace size
     if(executionContext.workspaceSizeLimit().has_value())
     {
