@@ -118,16 +118,7 @@ void testing_csr2coo(Arguments argus)
 
         // CPU conversion to COO
         std::vector<int> hcoo_row_ind_gold(nnz);
-        for(int i = 0; i < m; ++i)
-        {
-            int row_begin = hcsr_row_ptr[i] - idx_base;
-            int row_end   = hcsr_row_ptr[i + 1] - idx_base;
-
-            for(int j = row_begin; j < row_end; ++j)
-            {
-                hcoo_row_ind_gold[j] = i + idx_base;
-            }
-        }
+        host_csr2coo(m, nnz, hcsr_row_ptr.data(), hcoo_row_ind_gold.data(), idx_base);
 
         // Unit check
         unit_check_general(1, nnz, 1, hcoo_row_ind_gold.data(), hcoo_row_ind.data());
