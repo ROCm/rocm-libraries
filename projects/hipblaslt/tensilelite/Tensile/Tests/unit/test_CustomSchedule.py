@@ -440,8 +440,8 @@ class TestCustomScheduleBF16:
     ( False,   True,        True,       0),
     # fmt: on
     ])
-    def test_schedule_256x224x64_16bit_TN(self, transA, transB, lds_tr_inst, tr_lds):
-        """Tests the 256x224x64 16-bit TN schedule."""
+    def test_schedule_256x224x64_16bit(self, transA, transB, lds_tr_inst, tr_lds):
+        """Tests the 256x224x64 16-bit schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
         kernel["ProblemType"].update({
