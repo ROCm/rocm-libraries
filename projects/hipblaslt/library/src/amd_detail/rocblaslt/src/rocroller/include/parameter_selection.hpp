@@ -76,6 +76,8 @@ struct SolutionParameters
     bool streamK        = false;
     bool streamKTwoTile = false;
 
+    bool tailLoops = true;
+
     // Scale options
     rocRoller::Parameters::Solution::LoadPath loadPathAScale
         = rocRoller::Parameters::Solution::LoadPath::BufferToVGPR;

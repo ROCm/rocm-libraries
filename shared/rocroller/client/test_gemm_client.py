@@ -4,7 +4,7 @@
 #
 # MIT License
 #
-# Copyright 2024-2025 AMD ROCm(TM) Software
+# Copyright 2024-2026 AMD ROCm(TM) Software
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -276,10 +276,11 @@ types:
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: false
+matchMemoryAccess: true
+tailLoops: true
 streamK: false
 streamKTwoTile: false
 streamKTwoTileDPFirst: false
-matchMemoryAccess: true
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false
@@ -324,6 +325,7 @@ betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeighted
 matchMemoryAccess: true
+tailLoops: true
 types:
   trans_A: N
   trans_B: N
@@ -388,6 +390,7 @@ betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeighted
 matchMemoryAccess: true
+tailLoops: true
 types:
   trans_A: N
   trans_B: N
