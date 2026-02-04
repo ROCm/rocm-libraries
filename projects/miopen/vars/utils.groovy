@@ -317,7 +317,7 @@ def getDockerImage(Map conf=[:])
     }
     else if (params.USE_SCCACHE_DOCKER && check_host() && "${env.MIOPEN_SCCACHE}" != "null")
     {
-        dockerArgs = dockerArgs + " --build-arg MIOPEN_SCCACHE=${env.MIOPEN_SCCACHE} --build-arg COMPILER_LAUNCHER=sccache"
+        dockerArgs = dockerArgs + " --build-arg MIOPEN_SCCACHE=${env.MIOPEN_SCCACHE} --build-arg COMPILER_LAUNCHER=sccache "
     }
 
     def image = getDockerImageName(dockerArgs)
