@@ -7286,22 +7286,22 @@ class KernelWriterAssembly(KernelWriter):
       statesTc = self.states.a
       numIterPerCoalescedRead = self.states.numIterPerCoalescedReadA
       numReadsIterCoalesced = self.states.numReadsIterCoalescedA
-      useDirect32XEmulation = self.states.a.useDirect32XEmulation
+      useDirect32XEmulation = self.states.a.useDirect32XEmulationThis
     elif tc == "MXSA":
       statesTc = self.states.mxsa
       numIterPerCoalescedRead = self.states.numIterPerCoalescedReadMXSA
       numReadsIterCoalesced = self.states.numReadsIterCoalescedMXSA
-      useDirect32XEmulation = self.states.mxsa.useDirect32XEmulation
+      useDirect32XEmulation = self.states.mxsa.useDirect32XEmulationThis
     elif tc == "B":
       statesTc = self.states.b
       numIterPerCoalescedRead = self.states.numIterPerCoalescedReadB
       numReadsIterCoalesced = self.states.numReadsIterCoalescedB
-      useDirect32XEmulation = self.states.b.useDirect32XEmulation
+      useDirect32XEmulation = self.states.b.useDirect32XEmulationThis
     elif tc == "MXSB":
       statesTc = self.states.mxsb
       numIterPerCoalescedRead = self.states.numIterPerCoalescedReadMXSB
       numReadsIterCoalesced = self.states.numReadsIterCoalescedMXSB
-      useDirect32XEmulation = self.states.mxsb.useDirect32XEmulation
+      useDirect32XEmulation = self.states.mxsb.useDirect32XEmulationThis
     else:
       raise Exception(f"unsupport tc %s{tc}")
 
