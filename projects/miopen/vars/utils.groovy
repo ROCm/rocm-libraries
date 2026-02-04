@@ -276,7 +276,11 @@ def getDockerImage(Map conf=[:])
             
     // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
     def gpu_arch
-    if (gpu_family == "gfx90X")
+    if (gpu_arch == "ci")
+    {
+        gpu_arch = "gfx908;gfx90a;gfx942;gfx1101;gfx1151" // Builds docker image with subset of architectures that CI is run on.
+    }
+    else if (gpu_family == "gfx90X")
     {
         gpu_arch = "gfx908;gfx90a"
     }
