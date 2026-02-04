@@ -13,9 +13,6 @@ class MiopenPlanBuilderBase : public IPlanBuilder
 public:
     ~MiopenPlanBuilderBase() override = default;
 
-    WorkspaceSizeRange getWorkspaceSizeRange(const HipdnnEnginePluginHandle& handle,
-                                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
-
     size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
                                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 };

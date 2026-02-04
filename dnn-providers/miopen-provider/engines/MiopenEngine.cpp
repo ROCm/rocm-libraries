@@ -34,67 +34,6 @@ auto createBenchmarkingKnob(flatbuffers::FlatBufferBuilder& builder)
         {});
 }
 
-auto createWorkspaceSizeLimitKnob(flatbuffers::FlatBufferBuilder& builder,
-                                   HipdnnEnginePluginHandle& handle,
-                                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                                   const std::vector<std::unique_ptr<IPlanBuilder>>& planBuilders)
-{
-    // Determine workspace size range from the applicable plan builder
-    // This is wrong if we ever have more than 1 plan builder thats applicable.
-    // If this is the case, we should split plan builders across multiple engines.
-    int64_t minWorkspace;
-    int64_t maxWorkspace;
-    bool foundApplicable = false;
-
-    for(const auto& planBuilder : planBuilders)
-    {
-        if(planBuilder->isApplicable(handle, opGraph))
-        {
-            const auto range = planBuilder->getWorkspaceSizeRange(handle, opGraph);
-
-            // Validate that size_t values can fit into int64_t
-            if(range.min > std::numeric_limits<int64_t>::max())
-            {
-                throw hipdnn_plugin_sdk::HipdnnPluginException(
-                    HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-                    "Workspace size range minimum (" + std::to_string(range.min) +
-                    ") exceeds maximum representable int64_t value");
-            }
-            if(range.max > std::numeric_limits<int64_t>::max())
-            {
-                throw hipdnn_plugin_sdk::HipdnnPluginException(
-                    HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-                    "Workspace size range maximum (" + std::to_string(range.max) +
-                    ") exceeds maximum representable int64_t value");
-            }
-
-            minWorkspace = static_cast<int64_t>(range.min);
-            maxWorkspace = static_cast<int64_t>(range.max);
-            foundApplicable = true;
-            break;
-        }
-    }
-
-    if(!foundApplicable)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "No applicable plan builder found for operation graph when calling getDetails()");
-    }
-
-    const int64_t defaultWorkspace = maxWorkspace;
-
-    return hipdnn_plugin_sdk::KnobFactory::createIntKnob(
-        builder,
-        hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME,
-        "Workspace size limit in bytes",
-        defaultWorkspace,
-        minWorkspace,
-        maxWorkspace,
-        1,
-        {});
-}
-
 void handleBenchmarkingKnobSetting(const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
                                     HipdnnEnginePluginExecutionContext& executionContext)
 {
@@ -117,69 +56,6 @@ void handleBenchmarkingKnobSetting(const hipdnn_plugin_sdk::IEngineConfig& engin
 
     auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
     executionContext.setBenchmarkingEnabled(value != 0);
-}
-
-void handleWorkspaceSizeLimitKnobSetting(
-    const HipdnnEnginePluginHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
-    HipdnnEnginePluginExecutionContext& executionContext,
-    const std::vector<std::unique_ptr<IPlanBuilder>>& planBuilders)
-{
-    if(!engineConfig.hasKnobSetting(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME))
-    {
-        return;
-    }
-
-    const auto& knobSetting
-        = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME);
-
-    if(knobSetting.valueType() != hipdnn_data_sdk::data_objects::KnobValue::IntValue)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Workspace size limit knob setting value is not an integer. Type: " +
-            std::string(hipdnn_data_sdk::data_objects::EnumNameKnobValue(
-                knobSetting.valueType())));
-    }
-
-    auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
-
-    if(value < 0)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-            "Invalid workspace size limit value: " + std::to_string(value) + ". Must be >= 0");
-    }
-
-    // Determine workspace size range from the applicable plan builder
-    // This is wrong if we ever have more than 1 plan builder thats applicable.
-    // If this is the case, we should split plan builders across multiple engines.
-    for(const auto& planBuilder : planBuilders)
-    {
-        if(!planBuilder->isApplicable(handle, opGraph))
-        {
-            continue;
-        }
-
-        const auto range = planBuilder->getWorkspaceSizeRange(handle, opGraph);
-
-        if(static_cast<size_t>(value) < range.min || static_cast<size_t>(value) > range.max)
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-                "Invalid workspace size limit value: " + std::to_string(value) +
-                ". Must be in range [" + std::to_string(range.min) + ", " +
-                std::to_string(range.max) + "]");
-        }
-
-        executionContext.setWorkspaceSizeLimit(static_cast<size_t>(value));
-        return;
-    }
-
-    throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-        "No applicable plan builder found for workspace size validation");
 }
 
 } // namespace
@@ -216,11 +92,9 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
     flatbuffers::FlatBufferBuilder builder;
 
     auto benchmarkingKnob = createBenchmarkingKnob(builder);
-    auto workspaceSizeLimitKnob = createWorkspaceSizeLimitKnob(builder, handle, opGraph, _planBuilders);
 
     std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobsVector;
     knobsVector.push_back(benchmarkingKnob);
-    knobsVector.push_back(workspaceSizeLimitKnob);
 
     // Collect custom knobs from plan builders
     for(const auto& planBuilder : _planBuilders)
@@ -278,7 +152,6 @@ void MiopenEngine::initializeExecutionContext(
     if(engineConfig.isValid())
     {
         handleBenchmarkingKnobSetting(engineConfig, executionContext);
-        handleWorkspaceSizeLimitKnobSetting(handle, opGraph, engineConfig, executionContext, _planBuilders);
     }
     else
     {

@@ -137,8 +137,8 @@ bool isApplicableWrw(const HipdnnEnginePluginHandle& handle,
     return solutionCount != 0;
 }
 
-IPlanBuilder::WorkspaceSizeRange getWorkspaceSizeRangeFwd(const HipdnnEnginePluginHandle& handle,
-                                                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
+MiopenConvPlanBuilder::WorkspaceSizeRange getWorkspaceSizeRangeFwd(const HipdnnEnginePluginHandle& handle,
+                                                                    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
@@ -204,8 +204,8 @@ IPlanBuilder::WorkspaceSizeRange getWorkspaceSizeRangeFwd(const HipdnnEnginePlug
     return {minWorkspace, maxWorkspace};
 }
 
-IPlanBuilder::WorkspaceSizeRange getWorkspaceSizeRangeBwd(const HipdnnEnginePluginHandle& handle,
-                                                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
+MiopenConvPlanBuilder::WorkspaceSizeRange getWorkspaceSizeRangeBwd(const HipdnnEnginePluginHandle& handle,
+                                                                    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
@@ -271,8 +271,8 @@ IPlanBuilder::WorkspaceSizeRange getWorkspaceSizeRangeBwd(const HipdnnEnginePlug
     return {minWorkspace, maxWorkspace};
 }
 
-IPlanBuilder::WorkspaceSizeRange getWorkspaceSizeRangeWrw(const HipdnnEnginePluginHandle& handle,
-                                                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
+MiopenConvPlanBuilder::WorkspaceSizeRange getWorkspaceSizeRangeWrw(const HipdnnEnginePluginHandle& handle,
+                                                                    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
@@ -474,8 +474,8 @@ bool MiopenConvPlanBuilder::isApplicable(
     return ret;
 }
 
-IPlanBuilder::WorkspaceSizeRange MiopenConvPlanBuilder::getWorkspaceSizeRange(
-    const HipdnnEnginePluginHandle& handle, const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+MiopenConvPlanBuilder::WorkspaceSizeRange MiopenConvPlanBuilder::getWorkspaceSizeRange(
+    const HipdnnEnginePluginHandle& handle, const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     if(opGraph.nodeCount() != 1)
     {
@@ -561,6 +561,45 @@ void MiopenConvPlanBuilder::buildPlan(
     }
     (void)deterministicEnabled; // Will be used in a follow-up PR
 
+    // Read workspace size limit knob setting
+    if(engineConfig.isValid()
+       && engineConfig.hasKnobSetting(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME))
+    {
+        const auto& knobSetting
+            = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME);
+
+        if(knobSetting.valueType() != hipdnn_data_sdk::data_objects::KnobValue::IntValue)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Workspace size limit knob setting value is not an integer. Type: " +
+                std::string(hipdnn_data_sdk::data_objects::EnumNameKnobValue(
+                    knobSetting.valueType())));
+        }
+
+        auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
+
+        if(value < 0)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                "Invalid workspace size limit value: " + std::to_string(value) + ". Must be >= 0");
+        }
+
+        const auto range = getWorkspaceSizeRange(handle, opGraph);
+
+        if(static_cast<size_t>(value) < range.min || static_cast<size_t>(value) > range.max)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                "Invalid workspace size limit value: " + std::to_string(value) +
+                ". Must be in range [" + std::to_string(range.min) + ", " +
+                std::to_string(range.max) + "]");
+        }
+
+        executionContext.setWorkspaceSizeLimit(static_cast<size_t>(value));
+    }
+
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
     const auto nodeName = nodeWrapper.name();
 
@@ -593,24 +632,66 @@ std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenConvPlanBuilder::getCust
 {
     std::vector<hipdnn_data_sdk::data_objects::KnobT> knobs;
 
-    if(isApplicable(handle, opGraph))
+    if(!isApplicable(handle, opGraph))
     {
-        hipdnn_data_sdk::data_objects::KnobT knob;
-        knob.knob_id = hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME;
-        knob.description = "Enable deterministic mode";
-
-        hipdnn_data_sdk::data_objects::IntValueT defaultValue;
-        defaultValue.value = 0;
-        knob.default_value.Set(defaultValue);
-
-        hipdnn_data_sdk::data_objects::IntConstraintT constraint;
-        constraint.min_value = 0;
-        constraint.max_value = 1;
-        constraint.step = 1;
-        knob.constraint.Set(constraint);
-
-        knobs.push_back(std::move(knob));
+        return knobs;
     }
+
+    // Deterministic knob
+    hipdnn_data_sdk::data_objects::KnobT deterministicKnob;
+    deterministicKnob.knob_id = hipdnn_plugin_sdk::DETERMINISTIC_KNOB_NAME;
+    deterministicKnob.description = "Enable deterministic mode";
+
+    hipdnn_data_sdk::data_objects::IntValueT deterministicDefaultValue;
+    deterministicDefaultValue.value = 0;
+    deterministicKnob.default_value.Set(deterministicDefaultValue);
+
+    hipdnn_data_sdk::data_objects::IntConstraintT deterministicConstraint;
+    deterministicConstraint.min_value = 0;
+    deterministicConstraint.max_value = 1;
+    deterministicConstraint.step = 1;
+    deterministicKnob.constraint.Set(deterministicConstraint);
+
+    knobs.push_back(std::move(deterministicKnob));
+
+    // Workspace size limit knob
+    const auto range = getWorkspaceSizeRange(handle, opGraph);
+
+    // Validate that size_t values can fit into int64_t
+    if(range.min > std::numeric_limits<int64_t>::max())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "Workspace size range minimum (" + std::to_string(range.min) +
+            ") exceeds maximum representable int64_t value");
+    }
+    if(range.max > std::numeric_limits<int64_t>::max())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "Workspace size range maximum (" + std::to_string(range.max) +
+            ") exceeds maximum representable int64_t value");
+    }
+
+    const auto minWorkspace = static_cast<int64_t>(range.min);
+    const auto maxWorkspace = static_cast<int64_t>(range.max);
+    const auto defaultWorkspace = maxWorkspace;
+
+    hipdnn_data_sdk::data_objects::KnobT workspaceKnob;
+    workspaceKnob.knob_id = hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME;
+    workspaceKnob.description = "Workspace size limit in bytes";
+
+    hipdnn_data_sdk::data_objects::IntValueT workspaceDefaultValue;
+    workspaceDefaultValue.value = defaultWorkspace;
+    workspaceKnob.default_value.Set(workspaceDefaultValue);
+
+    hipdnn_data_sdk::data_objects::IntConstraintT workspaceConstraint;
+    workspaceConstraint.min_value = minWorkspace;
+    workspaceConstraint.max_value = maxWorkspace;
+    workspaceConstraint.step = 1;
+    workspaceKnob.constraint.Set(workspaceConstraint);
+
+    knobs.push_back(std::move(workspaceKnob));
 
     return knobs;
 }

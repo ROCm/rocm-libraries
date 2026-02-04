@@ -13,8 +13,8 @@ using namespace hipdnn_test_sdk::utilities;
 
 namespace
 {
-// Minimal concrete plan builder that doesn't override getMaxWorkspaceSize() or
-// getWorkspaceSizeRange() to test the default implementations
+// Minimal concrete plan builder that doesn't override getMaxWorkspaceSize()
+// to test the default implementation
 class SimplePlanBuilder : public MiopenPlanBuilderBase
 {
 public:
@@ -55,14 +55,4 @@ TEST_F(TestMiopenPlanBuilderBase, DefaultGetMaxWorkspaceSizeReturnsZero)
     size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph);
 
     EXPECT_EQ(workspaceSize, 0u);
-}
-
-TEST_F(TestMiopenPlanBuilderBase, DefaultGetWorkspaceSizeRangeReturnsZero)
-{
-    MockGraph mockGraph;
-
-    auto workspaceSizeRange = _planBuilder.getWorkspaceSizeRange(_dummyHandle, mockGraph);
-
-    EXPECT_EQ(workspaceSizeRange.min, 0u);
-    EXPECT_EQ(workspaceSizeRange.max, 0u);
 }
