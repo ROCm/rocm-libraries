@@ -201,7 +201,6 @@ TEST(TestMiopenEngine, GetDetailsContainsBenchmarkingKnob)
     EXPECT_EQ(constraint.step(), 1);
 }
 
-
 TEST(TestMiopenEngine, GetDetailsOnlyUsesFirstPlanBuilderCustomKnobs)
 {
     auto mockPlanBuilder1 = std::make_unique<MockPlanBuilder>();
