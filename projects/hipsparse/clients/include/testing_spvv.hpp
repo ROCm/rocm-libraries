@@ -197,23 +197,7 @@ void testing_spvv(Arguments argus)
             hipMemcpy(&hresult_copied_from_device, dresult, sizeof(T), hipMemcpyDeviceToHost));
 
         // CPU solution
-        if(trans == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE)
-        {
-            hresult_gold = make_DataType<T>(0);
-            for(I i = 0; i < nnz; ++i)
-            {
-                hresult_gold
-                    = hresult_gold + testing_mult(testing_conj(hx_val[i]), hy[hx_ind[i] - idxBase]);
-            }
-        }
-        else
-        {
-            hresult_gold = make_DataType<T>(0);
-            for(I i = 0; i < nnz; ++i)
-            {
-                hresult_gold = hresult_gold + testing_mult(hx_val[i], hy[hx_ind[i] - idxBase]);
-            }
-        }
+        host_spvv(nnz, hx_val.data(), hx_ind.data(), hy.data(), &hresult_gold, trans, idxBase);
 
         // Verify results against host
         unit_check_general(1, 1, 1, &hresult_gold, &hresult);
