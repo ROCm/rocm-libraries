@@ -91,6 +91,7 @@ set(HIPSPARSE_TEST_YAML_INCLUDE cuda/12.8/hipsparse_test.yaml)
 set(HIPSPARSE_TEST_YAMLS 
     # Level 2
     cuda/12.8/test_bsrmv.yaml
+    cuda/12.8/test_bsrxmv.yaml
     cuda/12.8/test_bsrsv2.yaml
     cuda/12.8/test_gemvi.yaml
     # Level 3

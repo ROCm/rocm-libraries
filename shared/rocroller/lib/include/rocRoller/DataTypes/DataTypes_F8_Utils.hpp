@@ -250,7 +250,7 @@ namespace rocRoller
                 if((wm == 3 && we == 4) || (wm == 2 && we == 5))
                     mantissa += (rng >> (32 - (mfmt - wm)));
                 else
-                    AssertFatal(false, "Not FP8 nor BF8");
+                    Throw<FatalError>("Not FP8 nor BF8");
             }
             else
             {

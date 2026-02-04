@@ -812,7 +812,7 @@ inline ::flatbuffers::Offset<StringConstraint> CreateStringConstraintDirect(
 
 struct KnobT : public ::flatbuffers::NativeTable {
   typedef Knob TableType;
-  std::string knob_id_str{};
+  std::string knob_id{};
   std::string description{};
   hipdnn_data_sdk::data_objects::KnobValueUnion default_value{};
   hipdnn_data_sdk::data_objects::KnobConstraintUnion constraint{};
@@ -823,7 +823,7 @@ struct Knob FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef KnobT NativeTableType;
   typedef KnobBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
-    VT_KNOB_ID_STR = 4,
+    VT_KNOB_ID = 4,
     VT_DESCRIPTION = 6,
     VT_DEFAULT_VALUE_TYPE = 8,
     VT_DEFAULT_VALUE = 10,
@@ -831,11 +831,11 @@ struct Knob FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_CONSTRAINT = 14,
     VT_DEPRECATED = 16
   };
-  const ::flatbuffers::String *knob_id_str() const {
-    return GetPointer<const ::flatbuffers::String *>(VT_KNOB_ID_STR);
+  const ::flatbuffers::String *knob_id() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_KNOB_ID);
   }
-  ::flatbuffers::String *mutable_knob_id_str() {
-    return GetPointer<::flatbuffers::String *>(VT_KNOB_ID_STR);
+  ::flatbuffers::String *mutable_knob_id() {
+    return GetPointer<::flatbuffers::String *>(VT_KNOB_ID);
   }
   const ::flatbuffers::String *description() const {
     return GetPointer<const ::flatbuffers::String *>(VT_DESCRIPTION);
@@ -889,8 +889,8 @@ struct Knob FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyOffset(verifier, VT_KNOB_ID_STR) &&
-           verifier.VerifyString(knob_id_str()) &&
+           VerifyOffset(verifier, VT_KNOB_ID) &&
+           verifier.VerifyString(knob_id()) &&
            VerifyOffset(verifier, VT_DESCRIPTION) &&
            verifier.VerifyString(description()) &&
            VerifyField<uint8_t>(verifier, VT_DEFAULT_VALUE_TYPE, 1) &&
@@ -935,8 +935,8 @@ struct KnobBuilder {
   typedef Knob Table;
   ::flatbuffers::FlatBufferBuilder &fbb_;
   ::flatbuffers::uoffset_t start_;
-  void add_knob_id_str(::flatbuffers::Offset<::flatbuffers::String> knob_id_str) {
-    fbb_.AddOffset(Knob::VT_KNOB_ID_STR, knob_id_str);
+  void add_knob_id(::flatbuffers::Offset<::flatbuffers::String> knob_id) {
+    fbb_.AddOffset(Knob::VT_KNOB_ID, knob_id);
   }
   void add_description(::flatbuffers::Offset<::flatbuffers::String> description) {
     fbb_.AddOffset(Knob::VT_DESCRIPTION, description);
@@ -969,7 +969,7 @@ struct KnobBuilder {
 
 inline ::flatbuffers::Offset<Knob> CreateKnob(
     ::flatbuffers::FlatBufferBuilder &_fbb,
-    ::flatbuffers::Offset<::flatbuffers::String> knob_id_str = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> knob_id = 0,
     ::flatbuffers::Offset<::flatbuffers::String> description = 0,
     hipdnn_data_sdk::data_objects::KnobValue default_value_type = hipdnn_data_sdk::data_objects::KnobValue::NONE,
     ::flatbuffers::Offset<void> default_value = 0,
@@ -980,7 +980,7 @@ inline ::flatbuffers::Offset<Knob> CreateKnob(
   builder_.add_constraint(constraint);
   builder_.add_default_value(default_value);
   builder_.add_description(description);
-  builder_.add_knob_id_str(knob_id_str);
+  builder_.add_knob_id(knob_id);
   builder_.add_deprecated(deprecated);
   builder_.add_constraint_type(constraint_type);
   builder_.add_default_value_type(default_value_type);
@@ -989,18 +989,18 @@ inline ::flatbuffers::Offset<Knob> CreateKnob(
 
 inline ::flatbuffers::Offset<Knob> CreateKnobDirect(
     ::flatbuffers::FlatBufferBuilder &_fbb,
-    const char *knob_id_str = nullptr,
+    const char *knob_id = nullptr,
     const char *description = nullptr,
     hipdnn_data_sdk::data_objects::KnobValue default_value_type = hipdnn_data_sdk::data_objects::KnobValue::NONE,
     ::flatbuffers::Offset<void> default_value = 0,
     hipdnn_data_sdk::data_objects::KnobConstraint constraint_type = hipdnn_data_sdk::data_objects::KnobConstraint::NONE,
     ::flatbuffers::Offset<void> constraint = 0,
     bool deprecated = false) {
-  auto knob_id_str__ = knob_id_str ? _fbb.CreateString(knob_id_str) : 0;
+  auto knob_id__ = knob_id ? _fbb.CreateString(knob_id) : 0;
   auto description__ = description ? _fbb.CreateString(description) : 0;
   return hipdnn_data_sdk::data_objects::CreateKnob(
       _fbb,
-      knob_id_str__,
+      knob_id__,
       description__,
       default_value_type,
       default_value,
@@ -1256,7 +1256,7 @@ inline ::flatbuffers::Offset<StringConstraint> CreateStringConstraint(::flatbuff
 
 inline bool operator==(const KnobT &lhs, const KnobT &rhs) {
   return
-      (lhs.knob_id_str == rhs.knob_id_str) &&
+      (lhs.knob_id == rhs.knob_id) &&
       (lhs.description == rhs.description) &&
       (lhs.default_value == rhs.default_value) &&
       (lhs.constraint == rhs.constraint) &&
@@ -1277,7 +1277,7 @@ inline KnobT *Knob::UnPack(const ::flatbuffers::resolver_function_t *_resolver) 
 inline void Knob::UnPackTo(KnobT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
   (void)_o;
   (void)_resolver;
-  { auto _e = knob_id_str(); if (_e) _o->knob_id_str = _e->str(); }
+  { auto _e = knob_id(); if (_e) _o->knob_id = _e->str(); }
   { auto _e = description(); if (_e) _o->description = _e->str(); }
   { auto _e = default_value_type(); _o->default_value.type = _e; }
   { auto _e = default_value(); if (_e) _o->default_value.value = hipdnn_data_sdk::data_objects::KnobValueUnion::UnPack(_e, default_value_type(), _resolver); }
@@ -1294,7 +1294,7 @@ inline ::flatbuffers::Offset<Knob> CreateKnob(::flatbuffers::FlatBufferBuilder &
   (void)_rehasher;
   (void)_o;
   struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const KnobT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
-  auto _knob_id_str = _o->knob_id_str.empty() ? 0 : _fbb.CreateString(_o->knob_id_str);
+  auto _knob_id = _o->knob_id.empty() ? 0 : _fbb.CreateString(_o->knob_id);
   auto _description = _o->description.empty() ? 0 : _fbb.CreateString(_o->description);
   auto _default_value_type = _o->default_value.type;
   auto _default_value = _o->default_value.Pack(_fbb);
@@ -1303,7 +1303,7 @@ inline ::flatbuffers::Offset<Knob> CreateKnob(::flatbuffers::FlatBufferBuilder &
   auto _deprecated = _o->deprecated;
   return hipdnn_data_sdk::data_objects::CreateKnob(
       _fbb,
-      _knob_id_str,
+      _knob_id,
       _description,
       _default_value_type,
       _default_value,

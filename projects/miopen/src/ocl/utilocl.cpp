@@ -803,7 +803,7 @@ float transpose_NCHW2CNHW(const Handle& handle,
                           miopenDataType_t type)
 {
 
-    std::string program_name = "MIOpenUtilKernels4.cl";
+    std::string program_name = "MIOpenUtilKernels4.cpp";
 
     std::string network_config = "t" + std::to_string(type);
 
@@ -824,15 +824,18 @@ float transpose_NCHW2CNHW(const Handle& handle,
 
         const std::vector<size_t> vld{std::min(MAP_RD, WG_SIZE), 1, 1};
         std::vector<size_t> vgd{MAP_RD, 1, 1};
+        if(vgd[0] % vld[0] != 0)
+        {
+            vgd[0] = ((vgd[0] / vld[0]) + 1) * vld[0];
+        }
 
         if(MAP_RD < static_cast<size_t>(MAX_ACTIVE_THREADS))
         {
-            vgd = {MAP_RD, static_cast<size_t>(n), 1};
+            vgd[1] = static_cast<size_t>(n);
             kernel_name += "_2D_WG";
         }
         else
         {
-            vgd = {MAP_RD, 1, 1};
             kernel_name += "_1D_WG";
         }
 
@@ -864,19 +867,12 @@ float transpose_NCHW2CNHW(const Handle& handle,
         size_t gd0 = static_cast<size_t>(h_out) * w_out;
         std::vector<size_t> vgd{gd0, 1, static_cast<size_t>(c)};
         const std::vector<size_t> vld{std::min(WG_SIZE, gd0), 1, 1};
+        if(vgd[0] % vld[0] != 0)
+        {
+            vgd[0] = ((vgd[0] / vld[0]) + 1) * vld[0];
+        }
 
-// disable 3D_WG kernel due to idx calc overhead
-#if 0
-        if((gd0 * c) < MAX_ACTIVE_THREADS)
-        {
-            vgd = {gd0, static_cast<size_t>(n), static_cast<size_t>(c)};
-            kernel_name += "_3D_WG";
-        }
-        else
-#endif
-        {
-            kernel_name += "_2D_WG";
-        }
+        kernel_name += "_2D_WG";
 
         kernel_name += "_off64";
 
@@ -937,7 +933,7 @@ float transpose_CNHW2NCHW(const Handle& handle,
                           miopenDataType_t type)
 {
 
-    std::string program_name = "MIOpenUtilKernels4.cl";
+    std::string program_name = "MIOpenUtilKernels4.cpp";
 
     std::string network_config = "t" + std::to_string(type);
 
@@ -958,10 +954,14 @@ float transpose_CNHW2NCHW(const Handle& handle,
 
         const std::vector<size_t> vld{std::min(MAP_RD, WG_SIZE), 1, 1};
         std::vector<size_t> vgd{MAP_RD, 1, 1};
+        if(vgd[0] % vld[0] != 0)
+        {
+            vgd[0] = ((vgd[0] / vld[0]) + 1) * vld[0];
+        }
 
         if(MAP_RD < static_cast<size_t>(MAX_ACTIVE_THREADS))
         {
-            vgd = {MAP_RD, static_cast<size_t>(n), 1};
+            vgd[1] = static_cast<size_t>(n);
             kernel_name += "_2D_WG";
         }
         else
@@ -994,19 +994,12 @@ float transpose_CNHW2NCHW(const Handle& handle,
         size_t gd0 = static_cast<size_t>(h_out) * w_out;
         const std::vector<size_t> vld{std::min(gd0, WG_SIZE), 1, 1};
         std::vector<size_t> vgd{gd0, 1, static_cast<size_t>(c)};
+        if(vgd[0] % vld[0] != 0)
+        {
+            vgd[0] = ((vgd[0] / vld[0]) + 1) * vld[0];
+        }
 
-// disable 3D_WG kernel due to idx calc overhead
-#if 0
-        if(gd0 < MAX_ACTIVE_THREADS)
-        {
-            vgd = {gd0, static_cast<size_t>(n), static_cast<size_t>(c)};
-            kernel_name += "_3D_WG";
-        }
-        else
-#endif
-        {
-            kernel_name += "_2D_WG";
-        }
+        kernel_name += "_2D_WG";
 
         /// After switching to 64-bit offsets, do not use old kernels
         /// from the binary cache that use 32-bit offsets.
@@ -1197,7 +1190,7 @@ float transpose_packed_MN2NM(const Handle& handle,
                              miopenDataType_t type)
 {
 
-    std::string program_name = "MIOpenUtilKernels4.cl";
+    std::string program_name = "MIOpenUtilKernels4.cpp";
 
     std::string network_config = "t" + std::to_string(type);
 
@@ -1214,7 +1207,7 @@ float transpose_packed_MN2NM(const Handle& handle,
 
     size_t gd0 = static_cast<size_t>(m) * n;
     const std::vector<size_t> vld{std::min(WG_SIZE, gd0), 1, 1};
-    std::vector<size_t> vgd{gd0, 1, 1};
+    std::vector<size_t> vgd{(((gd0 + (vld[0] - 1)) / vld[0]) * vld[0]), 1, 1};
 
     if(!kernels.empty())
     {

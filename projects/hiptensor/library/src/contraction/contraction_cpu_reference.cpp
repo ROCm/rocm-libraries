@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -51,7 +51,8 @@ hiptensorStatus_t hiptensorContractionReference(const hiptensorPlan_t       plan
                                                 hiptensorDataType_t         typeB,
                                                 hiptensorDataType_t         typeC,
                                                 hiptensorDataType_t         typeD,
-                                                void*                       workspace)
+                                                hiptensor::ContractionUnaryOps const& unaryOps,
+                                                void*                                 workspace)
 {
     auto& instances   = hiptensor::ContractionCpuReferenceInstances::instance();
     auto  computeType = plan->mOpDesc->mDescCompute;
@@ -59,6 +60,13 @@ hiptensorStatus_t hiptensorContractionReference(const hiptensorPlan_t       plan
         = (C == nullptr) ? instances->allSolutions().query(
               typeA, typeB, hiptensor::NONE_TYPE, typeD, computeType)
                          : instances->allSolutions().query(typeA, typeB, typeC, typeD, computeType);
+
+    bool hasUnaryOp = unaryOps.opA != HIPTENSOR_OP_IDENTITY || unaryOps.opB != HIPTENSOR_OP_IDENTITY
+                      || unaryOps.opC != HIPTENSOR_OP_IDENTITY;
+    if(hasUnaryOp)
+        candidates = candidates.query(HIPTENSOR_OP_UNKNOWN, HIPTENSOR_OP_UNKNOWN);
+    else
+        candidates = candidates.query(HIPTENSOR_OP_IDENTITY, HIPTENSOR_OP_IDENTITY);
 
     auto toCKVec
         = [](auto& inputVec) { return std::vector<ck::index_t>(inputVec.begin(), inputVec.end()); };
@@ -88,6 +96,7 @@ hiptensorStatus_t hiptensorContractionReference(const hiptensorPlan_t       plan
                                                  d_ms_ns_lengths,
                                                  d_ms_ns_strides,
                                                  d_ms_ns_modes,
+                                                 unaryOps,
                                                  workspace,
                                                  0);
         return errorCode;
