@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -80,6 +80,9 @@ namespace hiptensor
             // By contraction operation
             Query query(ContractionOpId_t opCDE) const;
 
+            // By element-wise operations
+            Query query(hiptensorOperator_t opA, hiptensorOperator_t opB) const;
+
             // Full map of Uid to ContractionSolution*
             std::unordered_map<Uid, ContractionSolution*> const& solutions() const;
 
@@ -130,10 +133,10 @@ namespace hiptensor
 
     protected:
         // Move only
-        ContractionSolutionRegistry()                              = default;
-        ContractionSolutionRegistry(ContractionSolutionRegistry&&) = default;
-        ContractionSolutionRegistry& operator=(ContractionSolutionRegistry&&) = default;
-        ContractionSolutionRegistry(ContractionSolutionRegistry const&)       = delete;
+        ContractionSolutionRegistry()                                              = default;
+        ContractionSolutionRegistry(ContractionSolutionRegistry&&)                 = default;
+        ContractionSolutionRegistry& operator=(ContractionSolutionRegistry&&)      = default;
+        ContractionSolutionRegistry(ContractionSolutionRegistry const&)            = delete;
         ContractionSolutionRegistry& operator=(ContractionSolutionRegistry const&) = delete;
 
         // Import contraction solutions for the registry to manage
@@ -158,4 +161,3 @@ namespace hiptensor
     // @endcond
 
 } // namespace hiptensor
-
