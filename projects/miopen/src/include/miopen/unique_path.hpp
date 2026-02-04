@@ -4,33 +4,11 @@
 #ifndef UNIQUE_PATH_H
 #define UNIQUE_PATH_H
 
-#include <filesystem>
-#include <system_error>
-
-namespace fs = ::std::filesystem;
+#include <miopen/filesystem.hpp>
 
 namespace miopen {
 
-namespace detail {
-
-fs::path unique_path(const fs::path& model, std::error_code* ec = nullptr);
-
-}
-
-inline fs::path unique_path(const fs::path& model = "%%%%-%%%%-%%%%-%%%%")
-{
-    return detail::unique_path(model);
-}
-
-inline fs::path unique_path(std::error_code& ec)
-{
-    return detail::unique_path("%%%%-%%%%-%%%%-%%%%", &ec);
-}
-
-inline fs::path unique_path(const fs::path& model, std::error_code& ec)
-{
-    return detail::unique_path(model, &ec);
-}
+fs::path unique_path(const fs::path& model = "%%%%-%%%%-%%%%-%%%%");
 
 } // namespace miopen
 
