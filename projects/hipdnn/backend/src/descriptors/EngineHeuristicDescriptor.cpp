@@ -35,6 +35,8 @@ void EngineHeuristicDescriptor::finalize()
     _engineIds = pluginResourceManager->getApplicableEngineIds(_graph.get());
 
     // Sort engine IDs to prioritize MIOPEN_ENGINE and deprioritize MIOPEN_ENGINE_DETERMINISTIC
+    // In the future, we will need to implement a plugin system for engine heuristics that allows
+    // plugins to determine sort order of the returned engines.
     utilities::sortEngineIds(_engineIds);
 
     HipdnnBackendDescriptorImpl<EngineHeuristicDescriptor>::finalize();
