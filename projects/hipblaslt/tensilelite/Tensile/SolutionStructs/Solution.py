@@ -2531,10 +2531,12 @@ class Solution(collections.abc.Mapping):
       # - PrefetchGlobalRead is 0
       # - NoTailLoop
       # - DepthU is not power of 2
+      # - LocalSplitU > 1
       if ((not state["EnableMatrixInstruction"]) or isaInfoMap[isa].asmCaps["HasWMMA"]) or \
          (state["PrefetchGlobalRead"] == 0) or \
          state["NoTailLoop"] or \
-         (state["DepthU"] <=1 or (state["DepthU"] & (state["DepthU"] - 1) != 0)):
+         (state["DepthU"] <=1 or (state["DepthU"] & (state["DepthU"] - 1) != 0)) or \
+         state["LocalSplitU"] > 1:
         state["TailloopInNll"] = False
 
       # need restrictions for TailloopInNll
