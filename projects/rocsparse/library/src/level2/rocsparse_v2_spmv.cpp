@@ -40,7 +40,6 @@
 // Include the helper function
 #include "rocsparse_csrmv_helpers.cpp"
 
-// LCOV_EXCL_START
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_alg value_)
 {
@@ -94,7 +93,6 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_v2_spmv_stage value_)
     }
     return true;
 };
-// LCOV_EXCL_STOP
 
 struct _rocsparse_spmv_descr
 {

@@ -27,7 +27,6 @@
 
 #include "gpsv_interleaved_batch_device.h"
 
-// LCOV_EXCL_START
 template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_gpsv_interleaved_alg value_)
 {
@@ -41,7 +40,6 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_gpsv_interleaved_alg val
     }
     return true;
 };
-// LCOV_EXCL_STOP
 
 template <typename T>
 rocsparse_status

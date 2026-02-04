@@ -337,7 +337,6 @@ const char* rocsparse::enum_utils::to_string(rocsparse_format value_)
 }
 // LCOV_EXCL_STOP
 
-// LCOV_EXCL_START
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_spmat_attribute value)
 {
@@ -560,7 +559,6 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_analysis_policy value_)
     }
     return true;
 }
-// LCOV_EXCL_STOP
 
 #ifdef __cplusplus
 extern "C" {

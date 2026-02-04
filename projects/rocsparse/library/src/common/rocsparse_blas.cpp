@@ -25,7 +25,6 @@
 #include "rocsparse_handle.hpp"
 #include "rocsparse_utility.hpp"
 
-// LCOV_EXCL_START
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse::blas_impl value)
 {
@@ -41,6 +40,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse::blas_impl value)
     return true;
 }
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse::blas_impl value)
 {

@@ -31,7 +31,6 @@
 
 #include "coomv_device.h"
 
-// LCOV_EXCL_START
 template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_coomv_alg value_)
 {
@@ -46,7 +45,6 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_coomv_alg value_)
     }
     return true;
 };
-// LCOV_EXCL_STOP
 
 namespace rocsparse
 {

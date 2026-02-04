@@ -25,7 +25,6 @@
 #include "rocsparse_extract_alg_default.hpp"
 #include "rocsparse_utility.hpp"
 
-// LCOV_EXCL_START
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_extract_stage value)
 {
@@ -52,7 +51,6 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_extract_alg value)
     }
     return true;
 }
-// LCOV_EXCL_STOP
 
 namespace rocsparse
 {

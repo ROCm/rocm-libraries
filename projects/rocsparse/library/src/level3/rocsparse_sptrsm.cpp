@@ -35,7 +35,6 @@
 #include "rocsparse_csrsm.hpp"
 #include "rocsparse_sptrsm_descr.hpp"
 
-// LCOV_EXCL_START
 template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_stage value)
 {
@@ -94,7 +93,6 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_output value)
     }
     return true;
 };
-// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_sptrsm_set_input(rocsparse_handle       handle,
                                                        rocsparse_sptrsm_descr sptrsm_descr,

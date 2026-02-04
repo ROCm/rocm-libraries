@@ -30,7 +30,6 @@
 
 #include "rocsparse_csrmv.hpp"
 
-// LCOV_EXCL_START
 template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse::csrmv_alg value_)
 {
@@ -47,7 +46,6 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse::csrmv_alg value_)
     }
     return true;
 };
-// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse::csrmv_alg_default2csrmv_alg(rocsparse::csrmv_alg& alg,
                                                         rocsparse_operation   operation)

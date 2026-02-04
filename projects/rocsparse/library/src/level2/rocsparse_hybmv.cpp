@@ -47,6 +47,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_hyb_partition value)
     }
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
+// LCOV_EXCL_STOP
 
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_hyb_partition value)
@@ -62,7 +63,6 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_hyb_partition value)
     }
     return true;
 }
-// LCOV_EXCL_STOP
 
 template <typename T>
 rocsparse_status rocsparse::hybmv_template(rocsparse_handle          handle,

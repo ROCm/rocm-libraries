@@ -44,6 +44,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_gtsv_interleaved_alg valu
     }
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
+// LCOV_EXCL_STOP
 
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_gtsv_interleaved_alg value_)
@@ -60,7 +61,6 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_gtsv_interleaved_alg value_)
     }
     return true;
 }
-// LCOV_EXCL_STOP
 
 template <typename T>
 rocsparse_status

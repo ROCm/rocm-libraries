@@ -47,6 +47,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_itilu0_alg value)
     }
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 };
+// LCOV_EXCL_STOP
 
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_itilu0_alg value)
@@ -64,7 +65,6 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_itilu0_alg value)
     }
     return true;
 }
-// LCOV_EXCL_STOP
 
 namespace rocsparse
 {
