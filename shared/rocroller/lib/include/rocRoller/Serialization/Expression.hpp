@@ -488,19 +488,12 @@ namespace rocRoller
                 if(!iot::outputting(io))
                     val = std::make_shared<AssemblyKernelArgument>();
 
-                auto name          = val->getName();
-                auto variableType  = val->getVariableType();
-                auto dataDirection = val->getDataDirection();
-                auto expression    = val->getExpression();
-                auto offset        = val->getOffset();
-                auto size          = val->getSize();
-
-                iot::mapRequired(io, "name", name);
-                iot::mapRequired(io, "variableType", variableType);
-                iot::mapRequired(io, "dataDirection", dataDirection);
-                iot::mapRequired(io, "expression", expression);
-                iot::mapRequired(io, "offset", offset);
-                iot::mapRequired(io, "size", size);
+                iot::mapRequired(io, "name", val->m_name);
+                iot::mapRequired(io, "variableType", val->m_variableType);
+                iot::mapRequired(io, "dataDirection", val->m_dataDirection);
+                iot::mapRequired(io, "expression", val->m_expression);
+                iot::mapRequired(io, "offset", val->m_offset);
+                iot::mapRequired(io, "size", val->m_size);
             }
 
             static void mapping(IO& io, AssemblyKernelArgumentPtr& val)
