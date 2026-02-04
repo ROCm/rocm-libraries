@@ -615,10 +615,10 @@ class TestCustomScheduleBF16:
 
 class TestCustomScheduleTF32:
     @staticmethod
-    def get_num_mfma(self, kernel,depthU):
+    def get_num_mfma(kernel):
         numMfma = (kernel["MIWaveTileA"] * kernel["MIWaveTileB"] *
                     3 * # tf32 emulated with 3 bf16
-                    depthU / 32   # two sub-iterations due to DepthU=64
+                    kernel["DepthU"] / kernel["MatrixInstruction"][2]   # two sub-iterations due to DepthU=64
         )
         return numMfma
     
@@ -866,7 +866,8 @@ class TestCustomScheduleTF32:
 
     @pytest.mark.parametrize(
         "transA, transB, lds_tr_inst,  tr_lds, mt0, mt1", [
-        (  True,  False,       False,       1,  128, 160),
+        (  True,  False,       False,       1, 128, 160),
+        ( False,  False,        True,       1, 160, 128),
         (  True,  False,       False,       1, 160,  128),
         # fmt: on
         ])
@@ -885,17 +886,17 @@ class TestCustomScheduleTF32:
 
         kernel.update({
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
-            "MacroTile0": mt0, "MacroTile1": mt1, "DepthU": 64,
+            "MacroTile0": mt0, "MacroTile1": mt1, "DepthU": du,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
-            "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
-            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": mt0/32, "MIWaveTileB": mt1/32,
+            "MatrixInstruction": mi, "MIWaveGroup": mi_wave_group,
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": mi_wave_tile[0], "MIWaveTileB": mi_wave_tile[1],
         })
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 2
-        numMfma = TestCustomScheduleTF32.get_num_mfma(self, kernel, depthU=64)
+        numMfma = TestCustomScheduleTF32.get_num_mfma(kernel)
         assert schedule_info.numMfma == numMfma
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
