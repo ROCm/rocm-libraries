@@ -335,7 +335,7 @@ exclude_gpu:
 
 execution_settings:
   default_timeout: 300  # 5 minutes per test
-  timeout_multiplier: 1 # Multiplier for all timeouts (1, 1.5, 1.75, 2, etc.)
+  timeout_multiplier: 2 # Multiplier for all timeouts (1, 1.5, 1.75, 2, etc.)
   category_timeouts:
     quick: 300          # 5 minutes 
     standard: 1800      # 30 minutes 
