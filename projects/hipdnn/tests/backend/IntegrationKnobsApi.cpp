@@ -156,7 +156,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateIntKnob)
 
         auto knob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(knobData[i].ptr);
 
-        if(knob->knob_id_str()->str() == "test.int_knob")
+        if(knob->knob_id()->str() == "test.int_knob")
         {
             foundIntKnob = true;
 
@@ -217,7 +217,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateFloatKnob)
     {
         auto knob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(knobData[i].ptr);
 
-        if(knob->knob_id_str()->str() == "test.float_knob")
+        if(knob->knob_id()->str() == "test.float_knob")
         {
             foundFloatKnob = true;
 
@@ -277,7 +277,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateStringKnob)
     {
         auto knob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(knobData[i].ptr);
 
-        if(knob->knob_id_str()->str() == "test.string_knob")
+        if(knob->knob_id()->str() == "test.string_knob")
         {
             foundStringKnob = true;
 
@@ -347,7 +347,7 @@ TEST_F(IntegrationKnobsApi, GetKnobInfoValidateDeprecatedKnob)
     {
         auto knob = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Knob>(knobData[i].ptr);
 
-        if(knob->knob_id_str()->str() == "test.deprecated_knob")
+        if(knob->knob_id()->str() == "test.deprecated_knob")
         {
             foundDeprecatedKnob = true;
 
@@ -636,4 +636,455 @@ TEST_F(IntegrationKnobsApi, GetMaxWorkspaceSizeWithKnobs)
                                         &workspaceSize),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(workspaceSize, 1024); // Test plugin returns 1024
+}
+
+// =============================================================================
+// Constraint Type Validation Tests
+// =============================================================================
+
+class IntegrationConstraintValidationApi : public ::testing::Test
+{
+protected:
+    hipdnnBackendDescriptor_t _engine = nullptr;
+    hipdnnBackendDescriptor_t _engineConfig = nullptr;
+    hipdnnBackendDescriptor_t _graph = nullptr;
+    hipdnnHandle_t _handle = nullptr;
+
+    void SetUp() override
+    {
+        const std::array<const char*, 1> paths
+            = {hipdnn_tests::plugin_constants::testKnobConstraintValidationPluginPath().c_str()};
+        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
+                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+                  HIPDNN_STATUS_SUCCESS);
+
+        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+    }
+
+    void TearDown() override
+    {
+        if(_engineConfig != nullptr)
+        {
+            EXPECT_EQ(hipdnnBackendDestroyDescriptor(_engineConfig), HIPDNN_STATUS_SUCCESS);
+        }
+        if(_engine != nullptr)
+        {
+            EXPECT_EQ(hipdnnBackendDestroyDescriptor(_engine), HIPDNN_STATUS_SUCCESS);
+        }
+        if(_graph != nullptr)
+        {
+            EXPECT_EQ(hipdnnBackendDestroyDescriptor(_graph), HIPDNN_STATUS_SUCCESS);
+        }
+        if(_handle != nullptr)
+        {
+            EXPECT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
+            _handle = nullptr;
+        }
+    }
+
+    void setupEngineConfig()
+    {
+        int64_t gidx = hipdnn_tests::plugin_constants::engineId<KnobConstraintValidationPlugin>();
+        ASSERT_EQ(
+            hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &_engineConfig),
+            HIPDNN_STATUS_SUCCESS);
+        test_util::createTestEngine(&_engine, &_graph, _handle, gidx, true);
+        ASSERT_EQ(hipdnnBackendSetAttribute(_engineConfig,
+                                            HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                            1,
+                                            &_engine),
+                  HIPDNN_STATUS_SUCCESS);
+    }
+};
+
+TEST_F(IntegrationConstraintValidationApi, IntValueToFloatConstraint)
+{
+    setupEngineConfig();
+
+    auto knobBuffer
+        = hipdnn_plugin_sdk::KnobSettingFactory::createIntKnobSetting("constraint.float_knob", 5);
+    hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
+
+    EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                        1,
+                                        &knobData),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_SUCCESS);
+
+    hipdnnBackendDescriptor_t executionPlan = nullptr;
+    ASSERT_EQ(
+        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &executionPlan),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(
+        hipdnnBackendSetAttribute(
+            executionPlan, HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, &_handle),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
+                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        &_engineConfig),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(executionPlan), HIPDNN_STATUS_PLUGIN_ERROR);
+
+    if(executionPlan != nullptr)
+    {
+        hipdnnBackendDestroyDescriptor(executionPlan);
+    }
+}
+
+TEST_F(IntegrationConstraintValidationApi, FloatValueToIntConstraint)
+{
+    setupEngineConfig();
+
+    auto knobBuffer = hipdnn_plugin_sdk::KnobSettingFactory::createFloatKnobSetting(
+        "constraint.int_knob", 50.0);
+    hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
+
+    EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                        1,
+                                        &knobData),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_SUCCESS);
+
+    hipdnnBackendDescriptor_t executionPlan = nullptr;
+    ASSERT_EQ(
+        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &executionPlan),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(
+        hipdnnBackendSetAttribute(
+            executionPlan, HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, &_handle),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
+                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        &_engineConfig),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(executionPlan), HIPDNN_STATUS_PLUGIN_ERROR);
+
+    if(executionPlan != nullptr)
+    {
+        hipdnnBackendDestroyDescriptor(executionPlan);
+    }
+}
+
+TEST_F(IntegrationConstraintValidationApi, StringValueToIntConstraint)
+{
+    setupEngineConfig();
+
+    auto knobBuffer = hipdnn_plugin_sdk::KnobSettingFactory::createStringKnobSetting(
+        "constraint.int_knob", "50");
+    hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
+
+    EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                        1,
+                                        &knobData),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_SUCCESS);
+
+    hipdnnBackendDescriptor_t executionPlan = nullptr;
+    ASSERT_EQ(
+        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &executionPlan),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(
+        hipdnnBackendSetAttribute(
+            executionPlan, HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, &_handle),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
+                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        &_engineConfig),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(executionPlan), HIPDNN_STATUS_PLUGIN_ERROR);
+
+    if(executionPlan != nullptr)
+    {
+        hipdnnBackendDestroyDescriptor(executionPlan);
+    }
+}
+
+TEST_F(IntegrationConstraintValidationApi, IntValueToStringConstraint)
+{
+    setupEngineConfig();
+
+    auto knobBuffer
+        = hipdnn_plugin_sdk::KnobSettingFactory::createIntKnobSetting("constraint.string_knob", 0);
+    hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
+
+    EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                        1,
+                                        &knobData),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_SUCCESS);
+
+    hipdnnBackendDescriptor_t executionPlan = nullptr;
+    ASSERT_EQ(
+        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &executionPlan),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(
+        hipdnnBackendSetAttribute(
+            executionPlan, HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, &_handle),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
+                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        &_engineConfig),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(executionPlan), HIPDNN_STATUS_PLUGIN_ERROR);
+
+    if(executionPlan != nullptr)
+    {
+        hipdnnBackendDestroyDescriptor(executionPlan);
+    }
+}
+
+TEST_F(IntegrationConstraintValidationApi, FloatValueToStringConstraint)
+{
+    setupEngineConfig();
+
+    auto knobBuffer = hipdnn_plugin_sdk::KnobSettingFactory::createFloatKnobSetting(
+        "constraint.string_knob", 1.5);
+    hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
+
+    EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                        1,
+                                        &knobData),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_SUCCESS);
+
+    hipdnnBackendDescriptor_t executionPlan = nullptr;
+    ASSERT_EQ(
+        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &executionPlan),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(
+        hipdnnBackendSetAttribute(
+            executionPlan, HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, &_handle),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
+                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        &_engineConfig),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(executionPlan), HIPDNN_STATUS_PLUGIN_ERROR);
+
+    if(executionPlan != nullptr)
+    {
+        hipdnnBackendDestroyDescriptor(executionPlan);
+    }
+}
+
+TEST_F(IntegrationConstraintValidationApi, StringValueToFloatConstraint)
+{
+    setupEngineConfig();
+
+    auto knobBuffer = hipdnn_plugin_sdk::KnobSettingFactory::createStringKnobSetting(
+        "constraint.float_knob", "5.0");
+    hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
+
+    EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                        1,
+                                        &knobData),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_SUCCESS);
+
+    hipdnnBackendDescriptor_t executionPlan = nullptr;
+    ASSERT_EQ(
+        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &executionPlan),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(
+        hipdnnBackendSetAttribute(
+            executionPlan, HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, &_handle),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
+                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        &_engineConfig),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(executionPlan), HIPDNN_STATUS_PLUGIN_ERROR);
+
+    if(executionPlan != nullptr)
+    {
+        hipdnnBackendDestroyDescriptor(executionPlan);
+    }
+}
+
+TEST_F(IntegrationConstraintValidationApi, CorrectTypesSucceed)
+{
+    setupEngineConfig();
+
+    auto intKnobBuffer
+        = hipdnn_plugin_sdk::KnobSettingFactory::createIntKnobSetting("constraint.int_knob", 50);
+    auto floatKnobBuffer = hipdnn_plugin_sdk::KnobSettingFactory::createFloatKnobSetting(
+        "constraint.float_knob", 5.0);
+    auto stringKnobBuffer = hipdnn_plugin_sdk::KnobSettingFactory::createStringKnobSetting(
+        "constraint.string_knob", "beta");
+
+    std::vector<hipdnnBackendFlatbufferData_t> knobDataArray
+        = {{intKnobBuffer.data(), intKnobBuffer.size()},
+           {floatKnobBuffer.data(), floatKnobBuffer.size()},
+           {stringKnobBuffer.data(), stringKnobBuffer.size()}};
+
+    EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                        3,
+                                        knobDataArray.data()),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_SUCCESS);
+
+    hipdnnBackendDescriptor_t executionPlan = nullptr;
+    ASSERT_EQ(
+        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &executionPlan),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(
+        hipdnnBackendSetAttribute(
+            executionPlan, HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, &_handle),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
+                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        &_engineConfig),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(executionPlan), HIPDNN_STATUS_SUCCESS);
+
+    if(executionPlan != nullptr)
+    {
+        hipdnnBackendDestroyDescriptor(executionPlan);
+    }
+}
+
+TEST_F(IntegrationConstraintValidationApi, UnknownKnobIsIgnored)
+{
+    setupEngineConfig();
+
+    auto knobBuffer
+        = hipdnn_plugin_sdk::KnobSettingFactory::createIntKnobSetting("unknown.knob", 123);
+    hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
+
+    EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                        1,
+                                        &knobData),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_SUCCESS);
+
+    hipdnnBackendDescriptor_t executionPlan = nullptr;
+    ASSERT_EQ(
+        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &executionPlan),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(
+        hipdnnBackendSetAttribute(
+            executionPlan, HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, &_handle),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
+                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        &_engineConfig),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(executionPlan), HIPDNN_STATUS_SUCCESS);
+
+    if(executionPlan != nullptr)
+    {
+        hipdnnBackendDestroyDescriptor(executionPlan);
+    }
+}
+
+TEST_F(IntegrationConstraintValidationApi, MixedValidAndInvalidKnobs)
+{
+    setupEngineConfig();
+
+    auto validKnobBuffer
+        = hipdnn_plugin_sdk::KnobSettingFactory::createIntKnobSetting("constraint.int_knob", 50);
+    auto invalidKnobBuffer
+        = hipdnn_plugin_sdk::KnobSettingFactory::createIntKnobSetting("constraint.float_knob", 5);
+
+    std::vector<hipdnnBackendFlatbufferData_t> knobDataArray
+        = {{validKnobBuffer.data(), validKnobBuffer.size()},
+           {invalidKnobBuffer.data(), invalidKnobBuffer.size()}};
+
+    EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
+                                        HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                        HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                        2,
+                                        knobDataArray.data()),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_SUCCESS);
+
+    hipdnnBackendDescriptor_t executionPlan = nullptr;
+    ASSERT_EQ(
+        hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &executionPlan),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(
+        hipdnnBackendSetAttribute(
+            executionPlan, HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, &_handle),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendSetAttribute(executionPlan,
+                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        &_engineConfig),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(hipdnnBackendFinalize(executionPlan), HIPDNN_STATUS_PLUGIN_ERROR);
+
+    if(executionPlan != nullptr)
+    {
+        hipdnnBackendDestroyDescriptor(executionPlan);
+    }
 }

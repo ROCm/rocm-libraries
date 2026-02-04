@@ -49,6 +49,22 @@ Tests:
              HIPSPARSE_SPMV_CSR_ALG1,
              HIPSPARSE_SPMV_CSR_ALG2]
 
+# Test transpose operations with default algorithm (tests fix for rocsparse fallback)
+- name: spmv_csr_transpose
+  category: quick
+  function: spmv_csr
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [50]
+  N: [84]
+  alpha: [2.0]
+  alphai: [0.0]
+  beta: [1.0]
+  betai: [0.0]
+  transA: [HIPSPARSE_OPERATION_TRANSPOSE, HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT]
+
 - name: spmv_csr
   category: pre_checkin
   function: spmv_csr
