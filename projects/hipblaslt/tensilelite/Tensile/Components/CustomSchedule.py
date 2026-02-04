@@ -1905,11 +1905,11 @@ def _get_schedule_256x224x64_16bit(kernel, useLDSTr, TLDS):
         }
 
         syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0"),
-            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for LR to complete"),
-            SWaitCnt(dscnt=0, vlcnt=7, vscnt=-1, comment="wait for previous set of global reads"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read"),
+            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for LR"),
+            SWaitCnt(dscnt=0, vlcnt=7, vscnt=-1, comment="wait for previous set of global reads and Local Reads"),
             SBarrier(comment=""),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read"),
             SBarrier(comment=""),
             SWaitCnt(dscnt=-1, vlcnt=8, vscnt=-1, comment="wait for previous set of global reads"),
             SBarrier(comment="")
