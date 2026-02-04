@@ -3,14 +3,9 @@
 
 #pragma once
 
-// Backend compilation uses its own logging macros, so include the backend header
-#ifdef HIPDNN_BACKEND_COMPILATION
-#include "logging/Logging.hpp"
-#else
-#include <hipdnn_data_sdk/logging/Logger.hpp>
-#endif
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -92,8 +87,7 @@ inline std::string_view getEngineNameFromId(int64_t id)
         return it->second;
     }
 
-    HIPDNN_LOG_WARN("Engine ID 0x{:016X} not found in registered engines.", id);
-    throw std::out_of_range("Engine ID not found");
+    throw std::out_of_range("Engine ID " + std::to_string(id) + " not found in registered engines");
 }
 
 struct EngineRegistrar
@@ -109,11 +103,9 @@ struct EngineRegistrar
         {
             if(existingId == id && existingName != name)
             {
-                HIPDNN_LOG_ERROR(
-                    "Engine name collision detected! '{}' and '{}' both hash to ID: 0x{:016X}",
-                    existingName,
-                    name,
-                    id);
+                throw std::runtime_error("Engine name collision detected! '"
+                                         + std::string(existingName) + "' and '" + std::string(name)
+                                         + "' both hash to ID: " + std::to_string(id));
             }
         }
     }
