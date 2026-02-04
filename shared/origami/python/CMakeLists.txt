@@ -38,6 +38,7 @@ FetchContent_Declare(
     GIT_TAG        v2.0.0
 )
 FetchContent_MakeAvailable(nanobind)
+
 find_package(nanobind CONFIG REQUIRED)
 
 if(SKBUILD)
@@ -54,6 +55,11 @@ endif()
 nanobind_add_module(_pyorigami "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/bindings.cpp")
 
 set_target_properties(_pyorigami PROPERTIES OUTPUT_NAME "origami")
+
+# Place the compiled module in the source package directory for development/testing
+set_target_properties(_pyorigami PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/origami"
+)
 
 # Link against origami library and HIP
 target_link_libraries(_pyorigami PRIVATE ${ORIGAMI_TARGET} hip::host)
@@ -80,7 +86,9 @@ endif()
 install(TARGETS _pyorigami LIBRARY DESTINATION "${PYTHON_INSTALL_DIR}")
 
 # Install Python package files
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/__init__.py"
+install(FILES 
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/__init__.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/selector.py"
     DESTINATION "${PYTHON_INSTALL_DIR}"
 )
 
@@ -88,18 +96,33 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     # Enable CTest so add_test() registers tests for ctest
     enable_testing()
 
-    # Run pytest tests
+    # Run core origami binding tests (no torch required)
     add_test(
-        NAME "Python: test_bindings"
-        COMMAND ${Python_EXECUTABLE} -m pytest tests/ -v
+        NAME "Python: test_origami_bindings"
+        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_origami.py -v
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
     set_tests_properties(
-        "Python: test_bindings"
+        "Python: test_origami_bindings"
         PROPERTIES
             ENVIRONMENT
-            "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}:${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            DEPENDS _pyorigami
+    )
+
+    # Run selector tests (requires torch)
+    add_test(
+        NAME "Python: test_selector"
+        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_selector.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    set_tests_properties(
+        "Python: test_selector"
+        PROPERTIES
+            ENVIRONMENT
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
             DEPENDS _pyorigami
     )
 

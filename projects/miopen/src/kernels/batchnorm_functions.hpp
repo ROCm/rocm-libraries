@@ -259,42 +259,61 @@ __forceinline__ __device__ void storeToStash(FpPrecType_C value,
     }
 }
 
-template <typename FpAccumType, typename FpAccumType_C, typename FpPrecType_C>
-__forceinline__ __device__ void
-running_stash(const FpPrecType_C* __restrict prevResultRunningMean,
-              const FpPrecType_C* __restrict prevResultRunningVariance,
-              FpPrecType_C* __restrict nextResultRunningMean,
-              FpPrecType_C* __restrict nextResultRunningVariance,
-              double expAvgFactor,
-              FpAccumType_C mean,
-              FpAccumType_C variance,
-              uint channel)
+template <typename FpAccumType_C>
+struct StashUpdater
 {
-    static_assert(config::variant != 4, "running_stash is only compiled when MIO_BN_VARIANT != 4.");
+    FpAccumType_C const mean;
+    FpAccumType_C const variance;
+    FpAccumType_C const expAvgFactor;
 
-    const auto pvt_runMean = static_cast<FpAccumType_C>(prevResultRunningMean[channel]);
+    __device__ StashUpdater(FpAccumType_C m, FpAccumType_C v, FpAccumType_C e)
+        : mean(m), variance(v), expAvgFactor(e)
+    {
+    }
 
-    const auto pvt_newRunMean =
-        miopen::fma(static_cast<FpAccumType_C>(-expAvgFactor),
-                    pvt_runMean,                              // already FpAccumType_C
-                    static_cast<FpAccumType_C>(pvt_runMean)); // tmp = oldRunMean
+    __forceinline__ __device__ void operator()(FpAccumType_C& runningMean,
+                                               FpAccumType_C& runningVariance) const
+    {
+        const FpAccumType_C newRunningMean = fma(-expAvgFactor, runningMean, runningMean);
+        runningMean                        = fma(mean, expAvgFactor, newRunningMean);
 
-    nextResultRunningMean[channel] = static_cast<FpPrecType_C>(miopen::fma(
-        static_cast<FpAccumType_C>(mean),
-        static_cast<FpAccumType_C>(expAvgFactor),
-        pvt_newRunMean)); // newMean*factor + tmp; pvt_newRunMean is already FpAccumType_C
+        const FpAccumType_C adjust = (config::nhw == 1)
+                                         ? variance
+                                         : variance * (cast<FpAccumType_C>(config::nhw) /
+                                                       cast<FpAccumType_C>(config::nhw - 1));
 
-    const FpAccumType_C adjust = static_cast<FpAccumType_C>(
-        (config::nhw == 1)
-            ? variance
-            : variance * (static_cast<FpAccumType>(config::nhw) /
-                          (static_cast<FpAccumType>(config::nhw) - FpAccumType{1.0})));
+        runningVariance =
+            fma(cast<FpAccumType_C>(1.0) - expAvgFactor, runningVariance, expAvgFactor * adjust);
+    }
+};
 
-    nextResultRunningVariance[channel] = static_cast<FpPrecType_C>(
-        (FpAccumType{1.0} - static_cast<FpAccumType>(expAvgFactor)) *
-            static_cast<FpAccumType_C>(prevResultRunningVariance[channel]) +
-        static_cast<FpAccumType>(expAvgFactor) * adjust);
-}
+template <typename FpAccumType_C>
+struct StashUpdaterPA
+{
+    FpAccumType_C const mean;
+    FpAccumType_C const variance;
+    FpAccumType_C const expAvgFactor;
+
+    __device__ StashUpdaterPA(FpAccumType_C m, FpAccumType_C v, FpAccumType_C e)
+        : mean(m), variance(v), expAvgFactor(e)
+    {
+    }
+
+    __forceinline__ __device__ void operator()(FpAccumType_C& runningMean,
+                                               FpAccumType_C& runningVariance) const
+    {
+        const FpAccumType_C newRunningMean = fma(-expAvgFactor, runningMean, runningMean);
+        runningMean                        = fma(mean, expAvgFactor, newRunningMean);
+
+        const FpAccumType_C adjust =
+            (config::n == 1)
+                ? variance
+                : variance * (cast<FpAccumType_C>(config::n) / cast<FpAccumType_C>(config::n - 1));
+
+        runningVariance =
+            fma(cast<FpAccumType_C>(1.0) - expAvgFactor, runningVariance, expAvgFactor * adjust);
+    }
+};
 
 template <typename FpAccumType_C, typename FpPrecType_C>
 __forceinline__ __device__ void saved_stash(FpPrecType_C* __restrict resultSaveMean,
@@ -303,8 +322,29 @@ __forceinline__ __device__ void saved_stash(FpPrecType_C* __restrict resultSaveM
                                             FpAccumType_C invVariance,
                                             unsigned int channel)
 {
-    resultSaveMean[channel]        = static_cast<FpPrecType_C>(mean);
-    resultSaveInvVariance[channel] = static_cast<FpPrecType_C>(invVariance);
+    resultSaveMean[channel]        = cast<FpPrecType_C>(mean);
+    resultSaveInvVariance[channel] = cast<FpPrecType_C>(invVariance);
+}
+
+template <typename FpAccumType_C, typename FpPrecType_C, typename Updater>
+__forceinline__ __device__ void running_stash(const FpPrecType_C* __restrict prevRunningMean,
+                                              const FpPrecType_C* __restrict prevRunningVariance,
+                                              FpPrecType_C* __restrict nextRunningMean,
+                                              FpPrecType_C* __restrict nextRunningVariance,
+                                              Updater const& update,
+                                              unsigned int channel)
+{
+    // Variant 4 is not used any more. There used to be a special updater for that case deleted when
+    // porting kernels to HIP.
+    static_assert(miopen::batchnorm::config::variant != 4,
+                  "running_stash is only compiled when MIO_BN_VARIANT != 4.");
+
+    auto pvt_runMean     = cast<FpAccumType_C>(prevRunningMean[channel]);
+    auto pvt_runVariance = cast<FpAccumType_C>(prevRunningVariance[channel]);
+
+    update(pvt_runMean, pvt_runVariance);
+
+    saved_stash(nextRunningMean, nextRunningVariance, pvt_runMean, pvt_runVariance, channel);
 }
 
 } // namespace batchnorm

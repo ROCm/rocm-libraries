@@ -83,7 +83,7 @@ hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
                                             const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                             uint32_t numDeviceBuffers);
 
-hipdnn_plugin_sdk::TensorAttributesWrapper findTensorAttributes(
+hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper findTensorAttributes(
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     int64_t uid);
