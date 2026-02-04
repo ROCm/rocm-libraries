@@ -1381,8 +1381,11 @@ class Solution(collections.abc.Mapping):
       else:
         state["VectorWidthB"] = 1
 
-    if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
-      state["VectorWidthMetadata"] = state["VectorWidthA"] if state["ProblemType"]["Sparse"] == 1 else state["VectorWidthB"]
+    if state["ProblemType"]["Sparse"]:
+      if not state["DirectToVgprSparseMetadata"]:
+        state["VectorWidthMetadata"] = state["VectorWidthA"] if state["ProblemType"]["Sparse"] == 1 else state["VectorWidthB"]
+      # ON/OFF the sourceswap according to the sparse type automatically
+      state["SourceSwap"] = 0 if state["ProblemType"]["Sparse"] == 1 else 1
 
     numBytes = state["ProblemType"]["DataType"].numBytes()
     isa = tuple(state["ISA"])
@@ -2528,10 +2531,12 @@ class Solution(collections.abc.Mapping):
       # - PrefetchGlobalRead is 0
       # - NoTailLoop
       # - DepthU is not power of 2
+      # - LocalSplitU > 1
       if ((not state["EnableMatrixInstruction"]) or isaInfoMap[isa].asmCaps["HasWMMA"]) or \
          (state["PrefetchGlobalRead"] == 0) or \
          state["NoTailLoop"] or \
-         (state["DepthU"] <=1 or (state["DepthU"] & (state["DepthU"] - 1) != 0)):
+         (state["DepthU"] <=1 or (state["DepthU"] & (state["DepthU"] - 1) != 0)) or \
+         state["LocalSplitU"] > 1:
         state["TailloopInNll"] = False
 
       # need restrictions for TailloopInNll
@@ -2559,11 +2564,17 @@ class Solution(collections.abc.Mapping):
     # LDS
     ########################################
 
-    state["TransposeLDSMetadata"] = False if state["ProblemType"]["Sparse"] == 2 else True
-    state["UnrollMajorLDSMetadata"] = False if state["ProblemType"]["Sparse"] == 2 else True
+    if state["ProblemType"]["Sparse"]:
+      transposeLDSMetadata = int(state["TransposeLDSMetadata"])
+      if transposeLDSMetadata == -1:
+        state["TransposeLDSMetadata"] = int(not state["ProblemType"]["TLUMetadata"])
+      else:
+        state["TransposeLDSMetadata"] = int(transposeLDSMetadata)
 
-    if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
-      state["UnrollMajorLDSMetadata"] = state["TransposeLDSMetadata"] and (not state["ProblemType"]["TLUMetadata"])
+      state["UnrollMajorLDSMetadata"] = False if state["ProblemType"]["Sparse"] == 2 else True
+
+      if not state["DirectToVgprSparseMetadata"]:
+        state["UnrollMajorLDSMetadata"] = state["TransposeLDSMetadata"]
 
     # Determine if we can load directly-to-LDS.
     # Transpose requires a trip through registers to perform the transpose so can't use DirectToLdsA
@@ -3122,14 +3133,6 @@ class Solution(collections.abc.Mapping):
       if state["EnableMatrixInstruction"] and state["MIArchVgpr"]:
         reject(state, printRejectionReason, "Sparse A kernel does not support MIArchVgpr yet.")
         return
-      # Not Support Feature
-      if state["ProblemType"]["Sparse"] == 1 and state["SourceSwap"] :
-        reject(state, printRejectionReason, "Sparse A kernel cannot support SourceSwap.")
-        return
-      else:
-        if state["ProblemType"]["Sparse"] == 2 and not state["SourceSwap"]:
-          reject(state, printRejectionReason, "Sparse B kernel must enable SourceSwap.")
-          return
       state["AssertSummationElementMultiple"] = 8
 
     # check if need to use lds init Acc vgprs
