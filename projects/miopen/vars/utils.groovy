@@ -260,13 +260,40 @@ def getDockerImage(Map conf=[:])
 {
     env.DOCKER_BUILDKIT=1
     def prefixpath = conf.get("prefixpath", "/opt/rocm") // one image for each prefix 1: /usr/local 2:/opt/rocm
-    // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
-    def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx11-generic;gfx12-generic" // prebuilt dockers should have all the architectures enabled so one image can be used for all stages
+
+    def gpu_family = conf.get("gpu_family")
 
     def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache"
 
+    def theRockHash = sh(script: 'grep -A 5 'repository: "ROCm/TheRock"' ${env.WORKSPACE}/.github/workflows/therock-ci-linux.yml | grep '^ *ref:' | awk '{print $2}'', returnStdout: true).trim()
+    
+    // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
+    def gpu_arch
+    if (gpu_family == "gfx90X")
+    {
+        gpu_arch = "gfx908,gfx90a"
+    }
+    else if (gpu_family == "gfx942")
+    {
+        gpu_arch = "gfx942"
+    }
+    else if (gpu_family == "gfx950")
+    {
+        gpu_arch = "gfx950"
+    }
+    else if (gpu_family == "navi")
+    {
+        gpu_arch = "gfx11-generic,gfx12-generic"
+    }
+    else
+    {
+        error("Unsupported GPU family: ${gpu_family}")
+    }
+
     def dockerArgs = "--build-arg PREFIX=${prefixpath} " +
-                     "--build-arg GPU_ARCHS=\"${gpu_arch}\" "
+                     "--build-arg THEROCK_ASIC=\"${gpu_arch}\" " +
+                     "--build-arg THEROCK_GIT_HASH=\"${theRockHash}\" "
+
     if(env.CCACHE_HOST)
     {
         def check_host = sh(script:"""(printf "PING\r\n";) | nc -N ${env.CCACHE_HOST} 6379 """, returnStdout: true).trim()
@@ -288,6 +315,7 @@ def getDockerImage(Map conf=[:])
     }
 
     def image = getDockerImageName(dockerArgs)
+    image = gpu_family + "_" + image
 
     // Append Dockerfile path after image name is generated to avoid affecting the hash.
     dockerArgs = dockerArgs + " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
@@ -309,7 +337,7 @@ def getDockerImage(Map conf=[:])
     {
         echo "Building image..."
         def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
-        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd " +
+        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max " +
                               "--cache-from type=registry,ref=${cacheRef} "
 
         try {
