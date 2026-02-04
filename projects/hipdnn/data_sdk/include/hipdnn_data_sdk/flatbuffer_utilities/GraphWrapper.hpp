@@ -10,7 +10,7 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp>
 
-namespace hipdnn_plugin_sdk
+namespace hipdnn_data_sdk::flatbuffer_utilities
 {
 
 /*
@@ -189,4 +189,13 @@ private:
     mutable std::vector<std::unique_ptr<INodeWrapper>> _nodeWrappers;
 };
 
-}
+} // namespace hipdnn_data_sdk::flatbuffer_utilities
+
+// Backward compatibility aliases - DEPRECATED
+// These aliases are deprecated and will be removed in a future release.
+// Use hipdnn_data_sdk::flatbuffer_utilities::<TypeName> instead.
+namespace hipdnn_plugin_sdk
+{
+using IGraph = hipdnn_data_sdk::flatbuffer_utilities::IGraph;
+using GraphWrapper = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper;
+} // namespace hipdnn_plugin_sdk
