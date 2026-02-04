@@ -290,12 +290,11 @@ namespace rocRoller
                                     "\n\t- {}: {}\n", argName, toString(arg.expression));
                             }
 
-                            AssertFatal(false,
-                                        msg,
-                                        ShowValue(expectedArgs),
-                                        ShowValue(extraArgs),
-                                        ShowValue(m_context->kernel()->arguments()),
-                                        ShowValue(operation));
+                            Throw<FatalError>(msg,
+                                              ShowValue(expectedArgs),
+                                              ShowValue(extraArgs),
+                                              ShowValue(m_context->kernel()->arguments()),
+                                              ShowValue(operation));
                         }
 
                         if(!extraArgs.empty())
