@@ -68,6 +68,7 @@ typedef enum class _hipblaslt_scaling_format
     Scalar                  = 1,
     Vector                  = 2,
     Block_32_UE8M0          = 3,
+    Block_32_UE4M3          = 4,
     Block_32_UE8M0_32_8_EXT = 1001,
 } hipblaslt_scaling_format;
 
