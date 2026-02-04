@@ -278,7 +278,6 @@ types:
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: false
-matchMemoryAccess: true
 tailLoops: true
 streamK: false
 streamKTwoTile: false
