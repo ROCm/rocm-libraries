@@ -4,7 +4,7 @@
 #
 # MIT License
 #
-# Copyright 2024-2025 AMD ROCm(TM) Software
+# Copyright 2024-2026 AMD ROCm(TM) Software
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -32,12 +32,12 @@ import functools
 import itertools
 import os
 import pathlib
+import shutil
 import subprocess
 from dataclasses import dataclass
 
 import pytest
 import yaml
-import shutil
 
 SOLUTION_NOT_SUPPORTED_ON_ARCH = 3
 

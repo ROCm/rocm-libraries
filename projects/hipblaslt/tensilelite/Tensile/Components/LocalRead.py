@@ -299,7 +299,7 @@ class LocalReadMFMA(LocalRead):
         valufIdx = 0
         if enableLDSTr:
             numberMTilesPerWave = kernel["MIWaveTile"][tile01]
-            numOffsetsPerLoad = 2
+            numOffsetsPerLoad = 2 * blocksPerTGroupSMFMA
             highBits = 0
             totalLoads = numberMTilesPerWave * numOffsetsPerLoad
             for tIdx in range(0, numberMTilesPerWave):
@@ -315,15 +315,17 @@ class LocalReadMFMA(LocalRead):
                     return offset_val
 
                 for oIdx in range(0,numOffsetsPerLoad):
+                    if blocksPerTGroupSMFMA > 1 and oIdx % blocksPerTGroupSMFMA == 0:
+                        offset_val += (kernel["MacroTile%s"%tc] * blockOffsetSMFMA) * tP["bpeDS"] * (oIdx // blocksPerTGroupSMFMA)
 
                     offset, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, offset_val)
                     offset = applyPad(offset)
                     ds = DSModifiers(na=1, offset=offset)
-                    destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc,bufferIdx,iui, 4*tIdx, oIdx * 2), 2)
+                    destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc,bufferIdx,iui, 4*tIdx*blocksPerTGroupSMFMA, oIdx * 2), 2)
                     localReadCode = Module("LocalRead%s Valu%u"%(tc,valuiIdx))
                     localReadCode.add(LocalReadX(dst=destVgpr, src=srcAddr, ds=ds, comment=comment))
                     if perpStride == 1:
-                        offset_val += UnrollStride*inputPerThread
+                        offset_val += (UnrollStride*inputPerThread) // (blocksPerTGroupSMFMA if writer.states.inTailLoop else 1)
                     else:
                         permBlock = kernel["MatrixInstK"]
                         perpStrideInv = permBlock // perpStride

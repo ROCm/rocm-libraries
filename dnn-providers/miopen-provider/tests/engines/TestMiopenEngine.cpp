@@ -19,7 +19,7 @@
 
 using namespace miopen_plugin;
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_plugin_sdk;
+using namespace hipdnn_data_sdk::flatbuffer_utilities;
 
 TEST(TestMiopenEngine, ConstructorAndId)
 {
@@ -166,7 +166,8 @@ TEST(TestMiopenEngine, GetDetailsReturnsSerializedEngineDetails)
     hipdnnPluginConstData_t result;
     engine.getDetails(dummyHandle, mockGraph, result);
 
-    hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(result.ptr, result.size);
+    hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(result.ptr,
+                                                                              result.size);
     EXPECT_EQ(engineDetails.engineId(), 1);
 }
 
@@ -179,11 +180,12 @@ TEST(TestMiopenEngine, GetDetailsContainsBenchmarkingKnob)
     hipdnnPluginConstData_t result;
     engine.getDetails(dummyHandle, mockGraph, result);
 
-    hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(result.ptr, result.size);
+    hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(result.ptr,
+                                                                              result.size);
     ASSERT_EQ(engineDetails.knobCount(), 1u);
 
     const auto& knob = engineDetails.getKnobByName("global.benchmarking");
-    EXPECT_EQ(knob.knobIdStr(), "global.benchmarking");
+    EXPECT_EQ(knob.knobId(), "global.benchmarking");
     EXPECT_EQ(knob.description(), "Enable benchmarking");
 
     ASSERT_TRUE(knob.hasDefaultValue());
@@ -249,11 +251,11 @@ TEST(TestMiopenEngine, GetDetailsOnlyUsesFirstPlanBuilderCustomKnobs)
 
     // Verify benchmarking knob is present
     const auto& benchmarkingKnob = engineDetails.getKnobByName("global.benchmarking");
-    EXPECT_EQ(benchmarkingKnob.knobIdStr(), "global.benchmarking");
+    EXPECT_EQ(benchmarkingKnob.knobId(), "global.benchmarking");
 
     // Verify first custom knob is present
     const auto& customKnob1 = engineDetails.getKnobByName("custom.knob1");
-    EXPECT_EQ(customKnob1.knobIdStr(), "custom.knob1");
+    EXPECT_EQ(customKnob1.knobId(), "custom.knob1");
     EXPECT_EQ(customKnob1.description(), "First custom knob");
 
     // Verify second custom knob is NOT present (would throw if we tried to access it)
@@ -313,7 +315,8 @@ TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingEnabled)
     builder.Finish(engineConfig);
 
     auto buffer = builder.Release();
-    hipdnn_plugin_sdk::EngineConfigWrapper configWrapper(buffer.data(), buffer.size());
+    hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
+                                                                             buffer.size());
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
 
@@ -345,7 +348,8 @@ TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingDisabled)
     builder.Finish(engineConfig);
 
     auto buffer = builder.Release();
-    hipdnn_plugin_sdk::EngineConfigWrapper configWrapper(buffer.data(), buffer.size());
+    hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
+                                                                             buffer.size());
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
 
@@ -379,7 +383,8 @@ TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhe
     builder.Finish(engineConfig);
 
     auto buffer = builder.Release();
-    hipdnn_plugin_sdk::EngineConfigWrapper configWrapper(buffer.data(), buffer.size());
+    hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(buffer.data(),
+                                                                             buffer.size());
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
 
