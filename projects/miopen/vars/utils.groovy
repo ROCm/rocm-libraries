@@ -278,7 +278,7 @@ def getDockerImage(Map conf=[:])
     def gpu_arch
     if (gpu_family == "gfx90X")
     {
-        gpu_arch = "gfx908,gfx90a"
+        gpu_arch = "gfx908;gfx90a"
     }
     else if (gpu_family == "gfx942")
     {
@@ -290,7 +290,7 @@ def getDockerImage(Map conf=[:])
     }
     else if (gpu_family == "navi")
     {
-        gpu_arch = "gfx11-generic,gfx12-generic"
+        gpu_arch = "gfx11-generic;gfx12-generic"
     }
     else
     {
