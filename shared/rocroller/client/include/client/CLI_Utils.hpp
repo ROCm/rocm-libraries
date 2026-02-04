@@ -30,7 +30,7 @@
 
 #include "client/GEMMParameters.hpp"
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
-#include <rocRoller/Utilities/Utils_impl.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 namespace CLI
 {
