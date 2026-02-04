@@ -349,8 +349,6 @@ inline bool is_e_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_DGELU_BGRAD:
     case ROCBLASLT_EPILOGUE_DRELU:
     case ROCBLASLT_EPILOGUE_DRELU_BGRAD:
-    case ROCBLASLT_EPILOGUE_DRELU_BGRADA:
-    case ROCBLASLT_EPILOGUE_DRELU_BGRADB:
         return true;
     default:
         return false;
@@ -397,8 +395,6 @@ inline bool is_act_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_DGELU_BGRAD:
     case ROCBLASLT_EPILOGUE_DRELU:
     case ROCBLASLT_EPILOGUE_DRELU_BGRAD:
-    case ROCBLASLT_EPILOGUE_DRELU_BGRADA:
-    case ROCBLASLT_EPILOGUE_DRELU_BGRADB:
     case ROCBLASLT_EPILOGUE_SWISH_EXT:
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_EXT:
