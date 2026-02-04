@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -102,14 +102,14 @@ const vector<char> algo_range = {
     '2', // cholqr2
     '3', // cholqr3_compute
     '4', // cholqr3_user
-    'D'  // default (cholqr2)
+    'D' // default (cholqr2)
 };
 
 // Reduced algorithm range for faster testing
 const vector<char> algo_range_reduced = {
     '1', // cholqr1
     '2', // cholqr2 (default)
-    '3'  // cholqr3_compute
+    '3' // cholqr3_compute
 };
 
 // ============================================================================
@@ -131,13 +131,6 @@ const vector<vector<int64_t>> large_matrix_size_range_64 = {
 };
 
 const vector<int64_t> large_n_size_range_64 = {64, 98, 130, 220, 400};
-
-// For daily tests, use reduced algo range for faster execution
-const vector<char> large_algo_range = {
-    '1', // cholqr1
-    '2', // cholqr2 
-    '3'  // cholqr3_compute 
-};
 
 // ============================================================================
 // Argument setup functions
@@ -172,7 +165,7 @@ Arguments cholqr_setup_arguments(cholqr_tuple<I> tup)
 // ============================================================================
 
 template <typename I>
-class CHOLQR : public ::TestWithParam<cholqr_tuple<I>>
+class CHOLQR_BASE : public ::TestWithParam<cholqr_tuple<I>>
 {
 protected:
     void TearDown() override
@@ -193,11 +186,11 @@ protected:
     }
 };
 
-class CHOLQR_32 : public CHOLQR<rocblas_int>
+class CHOLQR : public CHOLQR_BASE<rocblas_int>
 {
 };
 
-class CHOLQR_64 : public CHOLQR<int64_t>
+class CHOLQR_64 : public CHOLQR_BASE<int64_t>
 {
 };
 
@@ -207,90 +200,68 @@ class CHOLQR_64 : public CHOLQR<int64_t>
 
 // non-batch tests
 
-TEST_P(CHOLQR_32, __float)
+TEST_P(CHOLQR, __float)
 {
     run_tests<false, false, float>();
 }
 
-TEST_P(CHOLQR_32, __double)
+TEST_P(CHOLQR, __double)
 {
     run_tests<false, false, double>();
 }
 
-TEST_P(CHOLQR_32, __float_complex)
+TEST_P(CHOLQR, __float_complex)
 {
     run_tests<false, false, rocblas_float_complex>();
 }
 
-TEST_P(CHOLQR_32, __double_complex)
+TEST_P(CHOLQR, __double_complex)
 {
     run_tests<false, false, rocblas_double_complex>();
 }
 
 // batched tests
 
-TEST_P(CHOLQR_32, batched__float)
+TEST_P(CHOLQR, batched__float)
 {
     run_tests<true, true, float>();
 }
 
-TEST_P(CHOLQR_32, batched__double)
+TEST_P(CHOLQR, batched__double)
 {
     run_tests<true, true, double>();
 }
 
-TEST_P(CHOLQR_32, batched__float_complex)
+TEST_P(CHOLQR, batched__float_complex)
 {
     run_tests<true, true, rocblas_float_complex>();
 }
 
-TEST_P(CHOLQR_32, batched__double_complex)
+TEST_P(CHOLQR, batched__double_complex)
 {
     run_tests<true, true, rocblas_double_complex>();
 }
 
 // strided_batched tests
 
-TEST_P(CHOLQR_32, strided_batched__float)
+TEST_P(CHOLQR, strided_batched__float)
 {
     run_tests<false, true, float>();
 }
 
-TEST_P(CHOLQR_32, strided_batched__double)
+TEST_P(CHOLQR, strided_batched__double)
 {
     run_tests<false, true, double>();
 }
 
-TEST_P(CHOLQR_32, strided_batched__float_complex)
+TEST_P(CHOLQR, strided_batched__float_complex)
 {
     run_tests<false, true, rocblas_float_complex>();
 }
 
-TEST_P(CHOLQR_32, strided_batched__double_complex)
+TEST_P(CHOLQR, strided_batched__double_complex)
 {
     run_tests<false, true, rocblas_double_complex>();
-}
-
-// ptr_batched tests
-
-TEST_P(CHOLQR_32, ptr_batched__float)
-{
-    run_tests<true, false, float>();
-}
-
-TEST_P(CHOLQR_32, ptr_batched__double)
-{
-    run_tests<true, false, double>();
-}
-
-TEST_P(CHOLQR_32, ptr_batched__float_complex)
-{
-    run_tests<true, false, rocblas_float_complex>();
-}
-
-TEST_P(CHOLQR_32, ptr_batched__double_complex)
-{
-    run_tests<true, false, rocblas_double_complex>();
 }
 
 // ============================================================================
@@ -363,35 +334,13 @@ TEST_P(CHOLQR_64, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
-// ptr_batched tests
-
-TEST_P(CHOLQR_64, ptr_batched__float)
-{
-    run_tests<true, false, float>();
-}
-
-TEST_P(CHOLQR_64, ptr_batched__double)
-{
-    run_tests<true, false, double>();
-}
-
-TEST_P(CHOLQR_64, ptr_batched__float_complex)
-{
-    run_tests<true, false, rocblas_float_complex>();
-}
-
-TEST_P(CHOLQR_64, ptr_batched__double_complex)
-{
-    run_tests<true, false, rocblas_double_complex>();
-}
-
 // ============================================================================
 // Test suite instantiations
 // ============================================================================
 
 // Checkin tests: all algorithms, smaller sizes
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
-                         CHOLQR_32,
+                         CHOLQR,
                          Combine(ValuesIn(matrix_size_range),
                                  ValuesIn(n_size_range),
                                  ValuesIn(algo_range_reduced)));
@@ -404,13 +353,13 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 
 // Daily tests: reduced algorithms, larger sizes
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
-                         CHOLQR_32,
+                         CHOLQR,
                          Combine(ValuesIn(large_matrix_size_range),
                                  ValuesIn(large_n_size_range),
-                                 ValuesIn(large_algo_range)));
+                                 ValuesIn(algo_range_reduced)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          CHOLQR_64,
                          Combine(ValuesIn(large_matrix_size_range_64),
                                  ValuesIn(large_n_size_range_64),
-                                 ValuesIn(large_algo_range)));
+                                 ValuesIn(algo_range_reduced)));

@@ -39,29 +39,6 @@
 #include <iomanip>
 #include <iostream>
 
-// Helper for conjugate that works for both real and complex types
-template <typename T>
-inline T conj_helper(const T& x)
-{
-    if constexpr(rocblas_is_complex<T>)
-        return std::conj(x);
-    else
-        return x;
-}
-
-template <typename S>
-S cholqr_getToleranceByAlgo(rocsolver_cholqr_algo algo, int m, int n)
-{
-    switch(algo)
-    {
-    case rocsolver_cholqr_cholqr1: return 10 * m * n;
-    case rocsolver_cholqr_cholqr2: return 10 * m * n;
-    case rocsolver_cholqr_cholqr3_compute: return 10 * m * n;
-    case rocsolver_cholqr_cholqr3_user: return 10 * m * n;
-    default: return 10 * m * n;
-    }
-}
-
 template <bool STRIDED, typename T, typename I, typename S, typename U, typename V>
 void cholqr_checkBadArgs(const rocblas_handle handle,
                          const I m,
@@ -214,17 +191,10 @@ void cholqr_initData(const rocblas_handle handle,
             for(I b = 0; b < bc; ++b)
             {
                 // Compute ||A||_F^2 (Frobenius norm squared)
-                S gnorm_sq = S(0);
-                for(I j = 0; j < n; ++j)
-                {
-                    for(I i = 0; i < m; ++i)
-                    {
-                        T val = hA[b][i + j * lda];
-                        gnorm_sq += std::real(val * conj_helper(val));
-                    }
-                }
+                S gnorm = snorm('F', m, n, hA[b], lda);
+
                 // sigma = 11 * n * eps * (m + (n+1)) * gnorm_sq
-                hSigma[b][0] = S(11.0) * S(n) * eps * (S(m) + S(n + 1)) * gnorm_sq;
+                hSigma[b][0] = S(11.0) * S(n) * eps * (S(m) + S(n + 1)) * gnorm * gnorm;
             }
         }
         else
@@ -320,40 +290,18 @@ void cholqr_getError(const rocblas_handle handle,
             std::vector<T> QtQ(size_t(min_mn) * min_mn, T(0));
             I const ldQtQ = min_mn;
 
-            // ---------------
             // QtQ <- identity
-            // ---------------
-            {
-                char uplo = 'A';
-                T beta = T(1); // diagonal
-                T alpha = T(0); // off-diagonal
-                I mm = min_mn;
-                I nn = min_mn;
+            cpu_laset('A', min_mn, min_mn, T(0), T(1), QtQ.data(), ldQtQ);
 
-                cpu_laset(uplo, mm, nn, alpha, beta, QtQ.data(), ldQtQ);
-            }
-
-            // -------------------------
             // Compute QtQ <-  Q' * Q - identity
-            // -------------------------
-            {
-                I mm = min_mn;
-                I nn = min_mn;
-                I kk = m;
-                T alpha = T(1);
-                T beta = T(-1);
-
-                rocblas_operation transQ = rocblas_operation_conjugate_transpose;
-                cpu_gemm(transQ, rocblas_operation_none, mm, nn, kk, alpha, hARes[b], lda, hARes[b],
-                         lda, beta, QtQ.data(), ldQtQ);
-            }
+            rocblas_operation transQ = rocblas_operation_conjugate_transpose;
+            cpu_gemm(rocblas_operation_conjugate_transpose, rocblas_operation_none, min_mn, min_mn,
+                     m, T(1), hARes[b], lda, hARes[b], lda, T(-1), QtQ.data(), ldQtQ);
 
             // -----------------------
             // Compute orth_err = norm( Q^H Q - I )
             // -----------------------
-
-            char norm = 'F';
-            S orth_err = snorm(norm, min_mn, min_mn, QtQ.data(), ldQtQ);
+            S orth_err = snorm('F', min_mn, min_mn, QtQ.data(), ldQtQ);
 
             // Compute Q_gpu * R_gpu using GEMM (should equal original A)
             // QR = Q * R, result is m x n
@@ -365,7 +313,7 @@ void cholqr_getError(const rocblas_handle handle,
             //  Copy upper triangular part
             //  R_gpu_clean = triu( hRRes[b] )
             //  ------------------------------
-            cpu_lacpy('U', min_mn, min_mn, &(hRRes[b][0]), ldr, &(R_gpu_clean[0]), ldr);
+            cpu_lacpy('U', min_mn, min_mn, hRRes[b], ldr, R_gpu_clean.data(), ldr);
 
             std::vector<T> QR(size_t(lda) * n, T(0));
             I ldQR = lda;
@@ -373,25 +321,15 @@ void cholqr_getError(const rocblas_handle handle,
             // -------------------------
             // compute  QR <-  Q * R - A
             // -------------------------
+            cpu_lacpy('A', m, n, hA[b], lda, QR.data(), ldQR);
 
-            {
-                I mm = m;
-                I nn = n;
-                I kk = min_mn;
-
-                T alpha = 1;
-                T beta = -1;
-                cpu_lacpy('A', mm, nn, &(hA[b][0]), lda, QR.data(), ldQR);
-
-                cpu_gemm(rocblas_operation_none, rocblas_operation_none, mm, nn, kk,
-
-                         alpha, hARes[b], lda, R_gpu_clean.data(), ldr, beta, QR.data(), ldQR);
-            }
+            cpu_gemm(rocblas_operation_none, rocblas_operation_none, m, n, min_mn, T(1), hARes[b],
+                     lda, R_gpu_clean.data(), ldr, T(-1), QR.data(), ldQR);
 
             // Compute recon_err = norm(A - QR)
             // Note: Must iterate column by column to respect leading dimension lda
 
-            auto recon_err = snorm(norm, m, n, QR.data(), ldQR);
+            auto recon_err = snorm('F', m, n, QR.data(), ldQR);
 
             err = std::max(orth_err, recon_err);
             *max_err = err > *max_err ? err : *max_err;
@@ -570,53 +508,7 @@ void testing_cholqr(Arguments& argus)
         return;
     }
 
-    if(BATCHED && STRIDED)
-    {
-        // memory allocations
-        host_batch_vector<T> hA(size_A, 1, bc);
-        host_batch_vector<T> hARes(size_ARes, 1, bc);
-        host_strided_batch_vector<T> hR(size_R, 1, stR, bc);
-        host_strided_batch_vector<T> hRRes(size_RRes, 1, stR, bc);
-        host_strided_batch_vector<S> hSigma(size_Sigma, 1, size_Sigma, bc);
-        host_strided_batch_vector<I> hInfo(1, 1, 1, bc);
-        device_batch_vector<T> dA(size_A, 1, bc);
-        device_strided_batch_vector<T> dR(size_R, 1, stR, bc);
-        device_strided_batch_vector<S> dSigma(size_Sigma, 1, size_Sigma, bc);
-        device_strided_batch_vector<I> dInfo(1, 1, 1, bc);
-        if(size_A)
-            CHECK_HIP_ERROR(dA.memcheck());
-        if(size_R)
-            CHECK_HIP_ERROR(dR.memcheck());
-        CHECK_HIP_ERROR(dSigma.memcheck());
-        CHECK_HIP_ERROR(dInfo.memcheck());
-
-        // check quick return
-        if(m == 0 || n == 0 || bc == 0)
-        {
-            EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, m, n, dA.data(), lda, stA,
-                                                   dR.data(), ldr, stR, dSigma.data(), algo,
-                                                   dInfo.data(), bc),
-                                  rocblas_status_success);
-            if(argus.timing)
-                rocsolver_bench_inform(inform_quick_return);
-
-            return;
-        }
-
-        // check computations
-        if(argus.unit_check || argus.norm_check)
-            cholqr_getError<STRIDED, T>(handle, m, n, dA, lda, stA, dR, ldr, stR, dSigma, algo,
-                                        dInfo, bc, hA, hARes, hR, hRRes, hSigma, hInfo, &max_error);
-
-        // collect performance data
-        if(argus.timing && hot_calls > 0)
-            cholqr_getPerfData<STRIDED, T>(handle, m, n, dA, lda, stA, dR, ldr, stR, dSigma, algo,
-                                           dInfo, bc, hA, hR, hSigma, hInfo, &gpu_time_used,
-                                           &cpu_time_used, hot_calls, argus.profile,
-                                           argus.profile_kernels, argus.perf);
-    }
-
-    else if(BATCHED)
+    if(BATCHED)
     {
         // memory allocations
         host_batch_vector<T> hA(size_A, 1, bc);
@@ -710,7 +602,7 @@ void testing_cholqr(Arguments& argus)
 
     // Use tolerance based on algorithm and problem size
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, cholqr_getToleranceByAlgo<S>(algo, m, n));
+        ROCSOLVER_TEST_CHECK(T, max_error, 10 * m * n);
 
     // output results for rocsolver-bench
     if(argus.timing)

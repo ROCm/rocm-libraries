@@ -42,6 +42,15 @@
 extern "C" {
 #endif
 
+void slacpy_(char* uplo, int* m, int* n, float* A, int* lda, float* B, int* ldb);
+void dlacpy_(char* uplo, int* m, int* n, double* A, int* lda, double* B, int* ldb);
+void clacpy_(char* uplo,
+             int* m,
+             int* n,
+             rocblas_float_complex* A,
+             int* lda,
+             rocblas_float_complex* B,
+             int* ldb);
 void zlacpy_(char* uplo,
              int* m,
              int* n,
@@ -50,26 +59,8 @@ void zlacpy_(char* uplo,
              rocblas_double_complex* B,
              int* ldb);
 
-void clacpy_(char* uplo,
-             int* m,
-             int* n,
-             rocblas_float_complex* A,
-             int* lda,
-             rocblas_float_complex* B,
-             int* ldb);
-
-void dlacpy_(char* uplo, int* m, int* n, double* A, int* lda, double* B, int* ldb);
-
-void slacpy_(char* uplo, int* m, int* n, float* A, int* lda, float* B, int* ldb);
-
-void zlaset_(char* uplo,
-             int* m,
-             int* n,
-             rocblas_double_complex* alpha,
-             rocblas_double_complex* beta,
-             rocblas_double_complex* A,
-             int* lda);
-
+void slaset_(char* uplo, int* m, int* n, float* alpha, float* beta, float* A, int* lda);
+void dlaset_(char* uplo, int* m, int* n, double* alpha, double* beta, double* A, int* lda);
 void claset_(char* uplo,
              int* m,
              int* n,
@@ -77,10 +68,13 @@ void claset_(char* uplo,
              rocblas_float_complex* beta,
              rocblas_float_complex* A,
              int* lda);
-
-void dlaset_(char* uplo, int* m, int* n, double* alpha, double* beta, double* A, int* lda);
-
-void slaset_(char* uplo, int* m, int* n, float* alpha, float* beta, float* A, int* lda);
+void zlaset_(char* uplo,
+             int* m,
+             int* n,
+             rocblas_double_complex* alpha,
+             rocblas_double_complex* beta,
+             rocblas_double_complex* A,
+             int* lda);
 
 float slange_(char* norm, int* m, int* n, float* A, int* lda, float* work);
 double dlange_(char* norm, int* m, int* n, double* A, int* lda, double* work);
@@ -1045,21 +1039,6 @@ void zgelqf_(int* m,
 
 void clacgv_(int* n, rocblas_float_complex* x, int* incx);
 void zlacgv_(int* n, rocblas_double_complex* x, int* incx);
-
-void clacpy_(char* uplo,
-             int* m,
-             int* n,
-             rocblas_float_complex* A,
-             int* lda,
-             rocblas_float_complex* B,
-             int* ldb);
-void zlacpy_(char* uplo,
-             int* m,
-             int* n,
-             rocblas_double_complex* A,
-             int* lda,
-             rocblas_double_complex* B,
-             int* ldb);
 
 void slaswp_(int* n, float* A, int* lda, int* k1, int* k2, int* ipiv, int* inc);
 void dlaswp_(int* n, double* A, int* lda, int* k1, int* k2, int* ipiv, int* inc);

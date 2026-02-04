@@ -253,6 +253,12 @@ try
             "                           Leading dimension of matrices C.\n"
             "                           ")
 
+        ("ldr",
+         value<rocblas_int>(),
+            "Matrix size parameter.\n"
+            "                           Leading dimension of matrices R.\n"
+            "                           ")
+
         ("ldt",
          value<rocblas_int>(),
             "Matrix size parameter.\n"
@@ -337,6 +343,12 @@ try
          value<rocblas_stride>(),
             "Matrix/vector stride parameter.\n"
             "                           Stride for vectors tau, taup, and ipiv.\n"
+            "                           ")
+
+        ("strideR",
+         value<rocblas_stride>(),
+            "Matrix/vector stride parameter.\n"
+            "                           Stride for matrices/vectors R.\n"
             "                           ")
 
         ("strideS",
