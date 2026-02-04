@@ -4651,9 +4651,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
         isMixedPrec = (kernel["ProblemType"]["DataTypeA"].numBytes() != kernel["ProblemType"]["DataTypeB"].numBytes())
         lrvw = kernel["LocalReadVectorWidth"]
         grvw = kernel["GlobalReadVectorWidth%c"%tc]
+        bpe = kernel["ProblemType"]["DataType%s"%tc].numBytes()
+        LdsStride = kernel["VectorWidth%s"%tc] * bpe * kernel["DepthU"]
+        MinLdsBlockSizePerPad = (kernel[f"GlobalReadVectorWidth%s"%tc] * bpe) * kernel["WavefrontSize"]
+        isM0PadEnough = LdsStride >= MinLdsBlockSizePerPad
+
         # Currently only supported for 16b, DTL, TLU=0 and grvw == lrvw
         if kernel["ProblemType"]["DataType"].numBytes() == 2 and not isMixedPrec \
-           and kernel["ProblemType"]["TLU%s"%tc] == 0 and lrvw == grvw:
+           and kernel["ProblemType"]["TLU%s"%tc] == 0 and lrvw == grvw and \
+           not isM0PadEnough:
           abmatrixinfo.gRDtlSwizzlePerpBlockSize = max(1, kernel["VectorWidth%s"%tc])
           abmatrixinfo.gRDtlSwizzleParaBlockSize = kernel["MatrixInstK"] // (kernel["LocalReadVectorWidth"])
         else:
