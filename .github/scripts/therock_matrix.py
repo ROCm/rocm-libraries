@@ -87,7 +87,7 @@ additional_options = {
             "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
             "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
         ],
-        "project_to_test": ["hipdnn", "miopen_plugin"],
+        "projects_to_test": ["hipdnn", "miopen_plugin"],
         "project_to_add": "miopen",
     },
     "miopen-provider": {
@@ -97,7 +97,7 @@ additional_options = {
             "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
             "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
         ],
-        "project_to_test": ["miopen_plugin"],
+        "projects_to_test": ["miopen_plugin"],
         "project_to_add": "miopen",
     },
 }
