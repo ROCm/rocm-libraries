@@ -545,7 +545,8 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
              gemm->machineInstruction.n,
              gemm->machineInstruction.k,
              gemm->machineInstruction.b},
-            gemm->storeLDSD ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+            Parameters::Solution::IsLDSStore(gemm->storePath) ? MemoryType::WAVE_LDS
+                                                              : MemoryType::WAVE);
         params->setDimensionInfo(tagStoreD, macTileD);
     }
 

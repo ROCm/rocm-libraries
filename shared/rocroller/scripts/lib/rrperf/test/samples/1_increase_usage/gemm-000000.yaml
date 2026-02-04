@@ -47,7 +47,7 @@ unroll_x: 0
 unroll_y: 0
 load_A: BufferToLDS
 load_B: BufferToLDS
-storeLDS_D: false
+store: VGPRToGlobalMemoryWithBuffer
 prefetch: true
 prefetchInFlight: 4
 prefetchLDSFactor: 1

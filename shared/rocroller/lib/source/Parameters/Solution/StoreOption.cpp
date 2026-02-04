@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025-2026 AMD ROCm(TM) Software
+ * Copyright 2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,7 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <rocRoller/Parameters/Solution/LoadOption.hpp>
+#include <rocRoller/Parameters/Solution/StoreOption.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
 #include <string>
@@ -34,38 +34,30 @@ namespace rocRoller
     {
         namespace Solution
         {
-            MemoryType GetMemoryType(LoadPath const& mode)
+            MemoryType GetMemoryType(StorePath const& mode)
             {
                 switch(mode)
                 {
-                case LoadPath::BufferToVGPR:
+                case StorePath::VGPRToGlobalMemoryWithBuffer:
                     return MemoryType::WAVE;
-                case LoadPath::BufferToLDSViaVGPR:
-                    return MemoryType::WAVE_LDS;
-                case LoadPath::BufferToLDS:
-                    return MemoryType::WAVE_Direct2LDS;
-                case LoadPath::GlobalToVGPR:
+                case StorePath::VGPRToGlobalMemoryWithGlobal:
                     return MemoryType::WAVE_FROM_GLOBAL;
-                case LoadPath::GlobalToLDSViaVGPR:
+                case StorePath::VGPRToGlobalMemoryViaLDSWithBuffer:
+                    return MemoryType::WAVE_LDS;
+                case StorePath::VGPRToGlobalMemoryViaLDSWithGlobal:
                     return MemoryType::WAVE_LDS_FROM_GLOBAL;
-                case LoadPath::Count:
+                case StorePath::Count:
                     Throw<FatalError>(
                         fmt::format("No valid MemoryType available for mode {}\n", toString(mode)));
                 }
             }
 
-            bool IsBufferToLDS(LoadPath const& mode)
-            {
-                return mode == LoadPath::BufferToLDS;
-            }
-
-            bool IsPathToLDS(LoadPath const& mode)
+            bool IsLDSStore(StorePath const& mode)
             {
                 switch(mode)
                 {
-                case LoadPath::BufferToLDSViaVGPR:
-                case LoadPath::BufferToLDS:
-                case LoadPath::GlobalToLDSViaVGPR:
+                case StorePath::VGPRToGlobalMemoryViaLDSWithBuffer:
+                case StorePath::VGPRToGlobalMemoryViaLDSWithGlobal:
                     return true;
                 default:
                     break;
@@ -73,27 +65,25 @@ namespace rocRoller
                 return false;
             }
 
-            std::string toString(LoadPath mode)
+            std::string toString(StorePath mode)
             {
                 switch(mode)
                 {
-                case LoadPath::BufferToVGPR:
-                    return "BufferToVGPR";
-                case LoadPath::BufferToLDSViaVGPR:
-                    return "BufferToLDSViaVGPR";
-                case LoadPath::BufferToLDS:
-                    return "BufferToLDS";
-                case LoadPath::GlobalToVGPR:
-                    return "GlobalToVGPR";
-                case LoadPath::GlobalToLDSViaVGPR:
-                    return "GlobalToLDSViaVGPR";
+                case StorePath::VGPRToGlobalMemoryWithBuffer:
+                    return "VGPRToGlobalMemoryWithBuffer";
+                case StorePath::VGPRToGlobalMemoryWithGlobal:
+                    return "VGPRToGlobalMemoryWithGlobal";
+                case StorePath::VGPRToGlobalMemoryViaLDSWithBuffer:
+                    return "VGPRToGlobalMemoryViaLDSWithBuffer";
+                case StorePath::VGPRToGlobalMemoryViaLDSWithGlobal:
+                    return "VGPRToGlobalMemoryViaLDSWithGlobal";
                 default:
                     break;
                 }
                 return "Invalid";
             }
 
-            std::ostream& operator<<(std::ostream& stream, LoadPath const& mode)
+            std::ostream& operator<<(std::ostream& stream, StorePath const& mode)
             {
                 return stream << toString(mode);
             }

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025-2026 AMD ROCm(TM) Software
+ * Copyright 2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,24 +35,21 @@ namespace rocRoller
     {
         namespace Solution
         {
-            enum class LoadPath : int
+            enum class StorePath : int
             {
-                BufferToVGPR,
-                BufferToLDSViaVGPR,
-                BufferToLDS,
-                GlobalToVGPR,
-                GlobalToLDSViaVGPR,
+                VGPRToGlobalMemoryWithBuffer, // Store from VGPR to buffer using buffer_store_X
+                VGPRToGlobalMemoryWithGlobal, // Store from VGPR to global using global_store_X
+                VGPRToGlobalMemoryViaLDSWithBuffer, // Store to LDS first, then to buffer (former storeLDSD=true)
+                VGPRToGlobalMemoryViaLDSWithGlobal, // Store to LDS first, then to global
                 Count,
             };
 
-            std::string   toString(LoadPath path);
-            std::ostream& operator<<(std::ostream& stream, LoadPath const& path);
-            std::istream& operator>>(std::istream& stream, LoadPath& path);
+            std::string   toString(StorePath path);
+            std::ostream& operator<<(std::ostream& stream, StorePath const& path);
+            std::istream& operator>>(std::istream& stream, StorePath& path);
 
-            MemoryType GetMemoryType(LoadPath const& path);
-            bool       IsBufferToLDS(LoadPath const& path);
-            bool       IsPathToLDS(LoadPath const& path);
+            MemoryType GetMemoryType(StorePath const& path);
+            bool       IsLDSStore(StorePath const& path);
         } // namespace Solution
     } // namespace Parameters
-
 } // namespace rocRoller
