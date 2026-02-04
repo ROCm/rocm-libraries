@@ -599,6 +599,9 @@ def cast_missing_parameters(result):
         result["workgroupMappingDim"] = wgmDim
         result["workgroupMappingValue"] = wgmValue
 
+    if "matchMemoryAccess" in result:
+        del result["matchMemoryAccess"]
+
 
 def load_results(path: pathlib.Path):
     """
