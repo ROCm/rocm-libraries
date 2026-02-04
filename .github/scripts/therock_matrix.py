@@ -183,8 +183,8 @@ def collect_projects_to_run(subtrees):
             project_map_data["cmake_options"] = list(
                 set(project_map_data["cmake_options"])
             )
-            project_map_data["project_to_test"] = list(
-                set(project_map_data["project_to_test"])
+            project_map_data["projects_to_test"] = list(
+                set(project_map_data["projects_to_test"])
             )
 
             cmake_flag_options = " ".join(project_map_data["cmake_options"])
