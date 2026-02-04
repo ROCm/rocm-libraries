@@ -38,14 +38,18 @@ macro(hipdnn_setup_version COMPONENT_NAME)
 endmacro()
 
 # Function to generate the version header
-macro(hipdnn_generate_version_header COMPONENT_NAME)
-    set(_include_dir "${CMAKE_CURRENT_SOURCE_DIR}/include")
+function(hipdnn_generate_version_header COMPONENT_NAME)
     configure_file(
-        "${_include_dir}/${COMPONENT_NAME}/version.h.in"
+        "${CMAKE_CURRENT_SOURCE_DIR}/version.h.in"
         "${CMAKE_CURRENT_BINARY_DIR}/include/${COMPONENT_NAME}/version.h"
         @ONLY
     )
-endmacro()
+
+    # Add generated include directory for build interface
+    target_include_directories(
+        ${COMPONENT_NAME} INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+    )
+endfunction()
 
 # Capture the directory where this file resides
 set(HIPDNN_CMAKE_UTILS_DIR "${CMAKE_CURRENT_LIST_DIR}")
