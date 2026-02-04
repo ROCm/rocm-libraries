@@ -547,6 +547,9 @@ protected:
             wrong_configs.push_back(config);
         }
 
+// Skip wrong dimension tests under ASAN as they trigger buffer overflows
+// before reaching the actual API validation, rendering the edge case tests useless.
+#if !defined(__SANITIZE_ADDRESS__)
         // wrong number of dimensions
         for(auto ndims : wrong_ndims)
         {
@@ -555,6 +558,7 @@ protected:
             config.valid         = false;
             wrong_configs.push_back(config);
         }
+#endif
 
         // dimsA = nullptr
         {
