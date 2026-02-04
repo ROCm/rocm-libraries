@@ -20,9 +20,6 @@ The `global.benchmarking` knob enables benchmarking for kernel selection:
 - **0 (default)**: Disabled - benchmarking disabled
 - **1**: Enabled - use benchmarking for kernel selection
 
-> [!NOTE]
-> This knob currently only stores the value. The benchmarking functionality for kernel selection will be implemented in a future update.
-
 ### Workspace Size Limit
 
 The `global.workspace_size_limit` knob controls the maximum amount of workspace memory that MIOpen operations can use.
