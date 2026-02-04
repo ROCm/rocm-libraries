@@ -1072,6 +1072,27 @@ endif()
 target_link_libraries(MIOpen PRIVATE nlohmann_json::nlohmann_json)
 target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
 
+if(NOT WIN32 AND NOT APPLE)
+    file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/lib.def "
+    MIOPEN_${MIOPEN_BACKEND}_1
+    {
+        global:
+            miopen*;
+            extern \"C++\" {
+                miopen::*;
+            };
+        local:
+            extern \"C++\" {
+                std::*;
+            };
+    };
+")
+    target_link_libraries(MIOpen PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_BINARY_DIR}/lib.def")
+    target_link_libraries(MIOpen PRIVATE "-Wl,--exclude-libs,ALL")
+    # set_target_properties(MIOpen PROPERTIES CXX_VISIBILITY_PRESET hidden)
+    set_target_properties(MIOpen PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+endif()
+
 if(MIOPEN_ENABLE_SQLITE)
     # MIOpen depends on SQLite
     target_link_libraries(MIOpen PRIVATE SQLite::SQLite3)
@@ -1082,16 +1103,6 @@ if(MIOPEN_USE_ROCTRACER)
     target_include_directories(MIOpen PRIVATE ${ROCTRACER_INCLUDE_DIR})
     target_include_directories(MIOpen INTERFACE $<BUILD_INTERFACE:${ROCTRACER_INCLUDE_DIR}>)
     target_link_libraries(MIOpen PRIVATE ${rocTracer})
-endif()
-
-if (WIN32)
-    if (MIOPEN_FILESYSTEM_HAS_BCRYPT)
-        add_compile_definitions(MIOPEN_FILESYSTEM_HAS_BCRYPT)
-        target_link_libraries(MIOpen PRIVATE bcrypt)
-    else()
-        add_compile_definitions(MIOPEN_FILESYSTEM_DISABLE_BCRYPT)
-        target_link_libraries(MIOpen PRIVATE advapi32)
-    endif()
 endif()
 
 ############################################################

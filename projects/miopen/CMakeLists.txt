@@ -827,32 +827,6 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)
 
-include(CheckCXXSourceCompiles)
-
-if (WIN32)
-    option(MIOPEN_FILESYSTEM_DISABLE_BCRYPT "Disable usage of BCrypt API in MIOpen Filesystem" OFF)
-    set(MIOPEN_FILESYSTEM_HAS_BCRYPT False)
-
-    if (NOT MIOPEN_FILESYSTEM_DISABLE_BCRYPT)
-        check_cxx_source_compiles("
-            #include <windows.h>
-            #include <bcrypt.h>
-            int main() {return 0;}"
-            MIOPEN_FILESYSTEM_HAS_BCRYPT)
-    endif()
-else()
-    option(MIOPEN_FILESYSTEM_DISABLE_GETRANDOM "Disable usage of getrandom API in MIOpen Filesystem" OFF)
-    option(MIOPEN_FILESYSTEM_DISABLE_ARC4RANDOM "Disable usage of arc4random API in MIOpen Filesystem" OFF)
-
-    if (MIOPEN_FILESYSTEM_DISABLE_GETRANDOM)
-        add_compile_definitions(MIOPEN_FILESYSTEM_DISABLE_GETRANDOM)
-    endif()
-
-    if (MIOPEN_FILESYSTEM_DISABLE_ARC4RANDOM)
-        add_compile_definitions(MIOPEN_FILESYSTEM_DISABLE_ARC4RANDOM)
-    endif()
-endif()
-
 if(NOT MIOPEN_USE_SQLITE_PERFDB)
     add_subdirectory(tools/sqlite2txt)
 endif()

@@ -90,26 +90,48 @@ inline std::string operator+(const miopen::fs::path& path, const std::string_vie
     return path.string().append(s);
 }
 
-#if MIOPEN_HAS_FILESYSTEM_TS
-#ifdef __linux__
-#include <linux/limits.h>
+#if !MIOPEN_HAS_FILESYSTEM && MIOPEN_HAS_FILESYSTEM_TS
+
+#include <climits>
+#include <cstdlib>
+#include <vector>
+
+#if defined(__linux__) || defined(__linux) || defined(linux)
+
+#define MAX_PATH_LENGTH PATH_MAX
+
+#define get_full_path(relative_path_std_string, result_std_vector) \
+    realpath(relative_path_std_string.c_str(), result_std_vector.data())
+
+#elif defined(_WIN32) // defined(__linux__) || defined(__linux) || defined(linux)
+
+#define MAX_PATH_LENGTH _MAX_PATH
+
+#define get_full_path(relative_path_std_string, result_std_vector) \
+    _fullpath(                                                     \
+        result_std_vector.data(), relative_path_std_string.c_str(), result_std_vector.size() - 1)
+
+#else // defined(__linux__) || defined(__linux) || defined(linux)
+#error "Function weakly_canonical() not implemented for the current platform!"
+#endif // defined(__linux__) || defined(__linux) || defined(linux)
+
 namespace miopen {
+
 inline fs::path weakly_canonical(const fs::path& path)
 {
-    std::string result(PATH_MAX, '\0');
-    std::string p{path.is_relative() ? (fs::current_path() / path).string() : path.string()};
-    char* retval = realpath(p.c_str(), &result[0]);
-    return (retval == nullptr) ? path : fs::path{result};
+    std::vector<char> result(MAX_PATH_LENGTH + 1, '\0');
+    const std::string p{path.is_relative() ? (fs::current_path() / path).string() : path.string()};
+    const char* retval = get_full_path(p, result);
+    return (retval == nullptr) ? path : fs::path{result.data()};
 }
+
 } // namespace miopen
-#else
-#error "Not implemented!"
-#endif
-#else
+
+#else  // !MIOPEN_HAS_FILESYSTEM && MIOPEN_HAS_FILESYSTEM_TS
 namespace miopen {
 inline fs::path weakly_canonical(const fs::path& path) { return fs::weakly_canonical(path); }
 } // namespace miopen
-#endif
+#endif // !MIOPEN_HAS_FILESYSTEM && MIOPEN_HAS_FILESYSTEM_TS
 
 namespace miopen {
 

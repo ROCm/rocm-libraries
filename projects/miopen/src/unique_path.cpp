@@ -7,13 +7,15 @@
 #include <random>
 #include <type_traits>
 
-#include "unique_path.hpp"
+#include <miopen/unique_path.hpp>
 
+// clang-format off
 #if defined(_WIN32) || defined(__CYGWIN__) // Windows default, including MinGW and Cygwin
-#define MIOPEN_WINDOWS_API
+#   define MIOPEN_WINDOWS_API
 #else // defined(_WIN32) || defined(__CYGWIN__)
-#define MIOPEN_POSIX_API
+#   define MIOPEN_POSIX_API
 #endif // defined(_WIN32) || defined(__CYGWIN__)
+// clang-format on
 
 namespace {
 
