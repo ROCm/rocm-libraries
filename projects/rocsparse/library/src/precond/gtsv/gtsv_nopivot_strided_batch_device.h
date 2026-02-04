@@ -611,35 +611,15 @@ namespace rocsparse
         if(left < 0)
             left = 0;
 
-        T k1 = a0_col[gid] / b0_col[left];
-        T k2 = c0_col[gid] / b0_col[right];
+        T k1 = (gid > 0) ? a0_col[gid] / b0_col[left] : static_cast<T>(0);
+        T k2 = (gid < (m - 1)) ? c0_col[gid] / b0_col[right] : static_cast<T>(0);
         T k3 = rhs0_col[right];
         T k4 = rhs0_col[left];
 
-        // The first entry of the lower diagonal and the last entry of the upper
-        // diagonal should be treated as zero
-        if(gid == 0)
-        {
-            k1 = static_cast<T>(0);
-        }
-        if(gid == (m - 1))
-        {
-            k2 = static_cast<T>(0);
-        }
-
         b1_col[gid]   = b0_col[gid] - c0_col[left] * k1 - a0_col[right] * k2;
         rhs1_col[gid] = rhs0_col[gid] - k4 * k1 - k3 * k2;
-        k3            = -a0_col[left];
-        k4            = -c0_col[right];
-
-        if(left == 0)
-        {
-            k3 = static_cast<T>(0);
-        }
-        if(right == (m - 1))
-        {
-            k4 = static_cast<T>(0);
-        }
+        k3            = (left > 0) ? -a0_col[left] : static_cast<T>(0);
+        k4            = (right < (m - 1)) ? -c0_col[right] : static_cast<T>(0);
 
         a1_col[gid] = k3 * k1;
         c1_col[gid] = k4 * k2;
@@ -821,35 +801,15 @@ namespace rocsparse
         if(left < 0)
             left = 0;
 
-        T k1 = a0_col[gid] / b0_col[left];
-        T k2 = c0_col[gid] / b0_col[right];
+        T k1 = (gid > 0) ? a0_col[gid] / b0_col[left] : static_cast<T>(0);
+        T k2 = (gid < (m - 1)) ? c0_col[gid] / b0_col[right] : static_cast<T>(0);
         T k3 = rhs0_col[right];
         T k4 = rhs0_col[left];
 
-        // The first entry of the lower diagonal and the last entry of the upper
-        // diagonal should be treated as zero
-        if(gid == 0)
-        {
-            k1 = static_cast<T>(0);
-        }
-        if(gid == (m - 1))
-        {
-            k2 = static_cast<T>(0);
-        }
-
         b1_col[gid]   = b0_col[gid] - c0_col[left] * k1 - a0_col[right] * k2;
         rhs1_col[gid] = rhs0_col[gid] - k4 * k1 - k3 * k2;
-        k3            = -a0_col[left];
-        k4            = -c0_col[right];
-
-        if(left == 0)
-        {
-            k3 = static_cast<T>(0);
-        }
-        if(right == (m - 1))
-        {
-            k4 = static_cast<T>(0);
-        }
+        k3            = (left > 0) ? -a0_col[left] : static_cast<T>(0);
+        k4            = (right < (m - 1)) ? -c0_col[right] : static_cast<T>(0);
 
         a1_col[gid] = k3 * k1;
         c1_col[gid] = k4 * k2;
