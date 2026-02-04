@@ -232,7 +232,7 @@ struct fmha_fwd_args
                                            // array [batch + 1]. (Used with padding)
     const void* block_scale_seqstart_q_ptr;
     const void* block_scale_seqstart_k_ptr;
-    const void* sink_ptr = nullptr;
+    const void* sink_ptr;
 
     ck_tile::index_t seqlen_q;
     ck_tile::index_t seqlen_k;
@@ -329,7 +329,7 @@ struct fmha_fwd_pagedkv_args
     const void* seqstart_q_ptr;
     const void* seqstart_k_ptr;
     const void* seqlen_k_ptr;
-    const void* sink_ptr = nullptr;
+    const void* sink_ptr;
 
     ck_tile::index_t seqlen_q;
     ck_tile::index_t seqlen_k;
@@ -413,7 +413,7 @@ struct fmha_fwd_splitkv_args
     const void* seqstart_q_ptr;
     const void* seqstart_k_ptr;
     const void* seqlen_k_ptr;
-    const void* sink_ptr = nullptr;
+    const void* sink_ptr;
 
     ck_tile::index_t seqlen_q;
     ck_tile::index_t seqlen_k;
@@ -490,6 +490,7 @@ struct fmha_fwd_appendkv_args
     ck_tile::index_t page_block_size;          // only used if 'block_table_ptr' is not nullptr
 
     const void* cache_batch_idx; // only used if block_table_ptr is nullptr -> batch mode (kvcache)
+    const void* sink_ptr;
 
     ck_tile::index_t stride_q;
     ck_tile::index_t stride_k;
@@ -533,7 +534,7 @@ struct fmha_batch_prefill_args
     //             1) +
     //                        kargs.kv_last_page_lens[b]
     const void* seqstart_q_ptr;
-    const void* sink_ptr = nullptr;
+    const void* sink_ptr;
 
     ck_tile::index_t seqlen_q;
     ck_tile::index_t seqlen_k;
