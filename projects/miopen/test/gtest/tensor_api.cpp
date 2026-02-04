@@ -547,9 +547,10 @@ protected:
             wrong_configs.push_back(config);
         }
 
-// Skip wrong dimension tests under ASAN as they trigger buffer overflows
-// before reaching the actual API validation, rendering the edge case tests useless.
-#if !defined(__SANITIZE_ADDRESS__)
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+        // Skip wrong dimension tests when AddressSanitizer is enabled as they trigger buffer
+        // overflows before reaching actual API validation, rendering the edge case tests useless.
+#else
         // wrong number of dimensions
         for(auto ndims : wrong_ndims)
         {
