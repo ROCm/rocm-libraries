@@ -55,7 +55,15 @@ public:
             MIOPEN_THROW("Capturing output not defined for Windows.");
         }
 
-        std::string cmd{path.string()};
+        // CreateProcessA with non-NULL lpApplicationName requires explicit .exe extension
+        // Some callers (tests) derive the path from argv[0], which may lack .exe and cause
+        // WIN builds to fail and invoke MIOPEN_THROW when launched from Unix-like shells in
+        // CI (e.g. Git Bash, MSYS2).
+        auto exePath = path;
+        if(exePath.extension() != ".exe")
+            exePath.replace_extension(".exe");
+
+        std::string cmd{exePath.string()};
         if(!args.empty())
             cmd += " " + std::string{args};
 
@@ -88,7 +96,7 @@ public:
             }
         }
 
-        const auto createProcessResult = CreateProcessA(path.string().c_str(),
+        const auto createProcessResult = CreateProcessA(exePath.string().c_str(),
                                                         cmd.data(),
                                                         nullptr,
                                                         nullptr,
