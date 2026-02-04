@@ -426,22 +426,18 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
         auto m     = MLBlockTileType{};
         auto l     = MLBlockTileType{};
 
-        const auto init_m_val = [&]() {
-#if CK_TILE_FMHA_FWD_FAST_EXP2
-            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                         BiasEnum == BlockAttentionBiasEnum::ALIBI)
-                return sink_v * LOG2E * scale_s;
-            else
-                return sink_v * LOG2E;
-#else
-            return sink_v;
-#endif
-        }();
-
         clear_tile(o_acc);
         if(__builtin_isinf_sign(sink_v) >= 0)
         {
-            set_tile(m, init_m_val);
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                         BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                set_tile(m, sink_v * LOG2E * scale_s);
+            else
+                set_tile(m, sink_v * LOG2E);
+#else
+            set_tile(m, sink_v);
+#endif
             set_tile(l, SMPLComputeDataType{1.0f});
         }
         else
