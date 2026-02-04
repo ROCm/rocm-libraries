@@ -237,17 +237,17 @@ void testing_gemvi(Arguments argus)
                                                           externalBuffer));
 
         // CPU
-        for(int i = 0; i < m; ++i)
-        {
-            T sum = make_DataType<T>(0);
-
-            for(int j = 0; j < nnz; ++j)
-            {
-                sum = testing_fma(hx_val[j], hA[(hx_ind[j] - idxBase) * lda + i], sum);
-            }
-
-            hy_gold[i] = testing_fma(alpha, sum, testing_mult(beta, hy_gold[i]));
-        }
+        host_gemvi(m,
+                   n,
+                   nnz,
+                   alpha,
+                   hA.data(),
+                   lda,
+                   hx_val.data(),
+                   hx_ind.data(),
+                   beta,
+                   hy_gold.data(),
+                   idxBase);
 
         // Verify results against host
         CHECK_HIP_ERROR(hipMemcpy(hy.data(), dy, sizeof(T) * m, hipMemcpyDeviceToHost));
