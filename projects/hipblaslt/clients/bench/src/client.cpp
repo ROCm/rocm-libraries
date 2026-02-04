@@ -508,11 +508,11 @@ try
 
         ("scaleA",
          value<int>(&scaleAFormat)->default_value(0),
-         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = block, 1001 = block_preswizzled_32x8.")
+         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8.")
 
         ("scaleB",
          value<int>(&scaleBFormat)->default_value(0),
-         "Apply scale for B buffer. 0 = None, 1 = scalar, 2 = vector, 3 = block, 1001 = block_preswizzled_32x8.")
+         "Apply scale for B buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8.")
 
         ("scaleC",
          value<int>(&scaleCFormat)->default_value(0),
@@ -918,6 +918,16 @@ try
             return hipblaslt_scaling_format::Vector;
         if(s == 3)
             return hipblaslt_scaling_format::Block_32_UE8M0;
+        if(s == 4)
+            return hipblaslt_scaling_format::Block_16_UE8M0;
+        if(s == 5)
+            return hipblaslt_scaling_format::Block_32_UE4M3;
+        if(s == 6)
+            return hipblaslt_scaling_format::Block_16_UE4M3;
+        if(s == 7)
+            return hipblaslt_scaling_format::Block_32_UE5M3;
+        if(s == 8)
+            return hipblaslt_scaling_format::Block_16_UE5M3;
         if(s == 1001)
             return hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
         return hipblaslt_scaling_format::none;
