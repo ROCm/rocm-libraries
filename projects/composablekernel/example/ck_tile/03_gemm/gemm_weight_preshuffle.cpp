@@ -14,11 +14,11 @@
 #include "run_gemm_example.inc"
 #include "gemm_weight_preshuffle_invoker.hpp"
 
+// APrecType and BPrecType can be tf32_t for TF32 mode - auto-detection happens internally
 template <typename GemmConfig,
           typename APrecType,
-          typename BPrecType       = APrecType,
-          typename CPrecType       = APrecType,
-          typename ComputeDataType = APrecType>
+          typename BPrecType = APrecType,
+          typename CPrecType = APrecType>
 int run_gemm_example_prec_type(std::string a_layout,
                                std::string b_layout,
                                ck_tile::ArgParser& arg_parser)
@@ -36,15 +36,8 @@ int run_gemm_example_prec_type(std::string a_layout,
 
     if(a_layout == "R" && b_layout == "C")
     {
-        return run_gemm_example_with_layouts<GemmConfig,
-                                             Invoker,
-                                             APrecType,
-                                             BPrecType,
-                                             CPrecType,
-                                             Row,
-                                             Col,
-                                             Row,
-                                             ComputeDataType>(arg_parser, Row{}, Col{}, Row{});
+        return run_gemm_example_with_layouts<GemmConfig, Invoker, APrecType, BPrecType, CPrecType>(
+            arg_parser, Row{}, Col{}, Row{});
     }
     else
     {
@@ -72,12 +65,11 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
 #ifdef CK_GFX950_SUPPORT
     else if(data_type == "tf32")
     {
-        // TF32 uses template-specialized GemmConfig with correct tile config
+        // TF32 uses 16x16x32 warp tile (3x bf16 16x16x32 MFMA emulation)
         return run_gemm_example_prec_type<GemmConfig<ck_tile::tf32_t>,
-                                          float,
-                                          float,
-                                          float,
-                                          ck_tile::tf32_t>(a_layout, b_layout, arg_parser);
+                                          ck_tile::tf32_t,
+                                          ck_tile::tf32_t,
+                                          float>(a_layout, b_layout, arg_parser);
     }
 #endif
     else if(data_type == "fp8")

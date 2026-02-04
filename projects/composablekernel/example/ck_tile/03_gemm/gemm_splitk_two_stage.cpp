@@ -30,13 +30,12 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
 #ifdef CK_GFX950_SUPPORT
     else if(data_type == "tf32")
     {
-        // TF32 uses template-specialized GemmConfigTwoStage with correct tile config
+        // Pass tf32_t as A/B types - epilogue auto-detects and maps to float for data operations
         return run_gemm_example_prec_type<GemmConfig<ck_tile::tf32_t, float>,
                                           Invoker,
-                                          float,
-                                          float,
-                                          float,
-                                          ck_tile::tf32_t>(a_layout, b_layout, arg_parser);
+                                          ck_tile::tf32_t,
+                                          ck_tile::tf32_t,
+                                          float>(a_layout, b_layout, arg_parser);
     }
 #endif
     else

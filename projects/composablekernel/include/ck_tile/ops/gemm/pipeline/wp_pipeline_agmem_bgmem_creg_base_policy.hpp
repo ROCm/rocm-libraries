@@ -4,7 +4,6 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
-#include "ck_tile/core/numeric/numeric.hpp"
 #include "ck_tile/ops/gemm/block/block_wp_asmem_breg_creg.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
 
@@ -257,34 +256,32 @@ struct UniversalWeightPreshufflePipelineAgBgCrPolicy
         using BlockWarps = typename Problem::BlockGemmShape::BlockWarps;
         using WarpTile   = typename Problem::BlockGemmShape::WarpTile;
 
-        // Determine compute types to use
-        // This logic defaults to A/B DataType, but if one of them is packed falls back to the other
-        // If both are packed, it falls back to the explicitly defined ComputeDataType in the
-        // problem It might be a good idea to use ComputeDataType anyway, but that would break how
-        // this behaviour used to work
-        using ATypeToUse = mixed_prec_compute_type_from_input_t<typename Problem::ADataType,
-                                                                typename Problem::BDataType,
-                                                                typename Problem::ComputeDataType>;
-        using BTypeToUse = mixed_prec_compute_type_from_input_t<typename Problem::BDataType,
-                                                                typename Problem::ADataType,
-                                                                typename Problem::ComputeDataType>;
+        // Use ComputeDataType to detect tf32 mode for warp gemm selection
+        using ComputeDataType = remove_cvref_t<typename Problem::ComputeDataType>;
+        using ADataType       = remove_cvref_t<typename Problem::ADataType>;
+        using BDataType       = remove_cvref_t<typename Problem::BDataType>;
 
         constexpr index_t WaveSize = get_warp_size();
         constexpr index_t KLane    = WarpTile::at(I2) * WarpTile::at(I0) / WaveSize;
-        using BDataType            = typename Problem::BDataType;
         constexpr index_t KLaneBytes =
             KLane / numeric_traits<BDataType>::PackedSize * sizeof(BDataType);
         constexpr auto NumAccess = static_cast<WGAttrNumAccessEnum>(max(1, KLaneBytes / 16));
-        using WarpGemm           = WarpGemmDispatcher<ATypeToUse,
-                                                      BTypeToUse,
-                                                      typename Problem::CDataType,
-                                                      WarpTile::at(I0),
-                                                      WarpTile::at(I1),
-                                                      WarpTile::at(I2),
-                                                      Problem::TransposeC,
-                                                      false,
-                                                      false,
-                                                      NumAccess>;
+
+        // For tf32 mode, use tf32_t for warp gemm; otherwise use original types
+        using WarpGemm =
+            WarpGemmDispatcher<if_select_v<ComputeDataType, tf32_t, tf32_t, ADataType>,
+                               if_select_v<ComputeDataType,
+                                           tf32_t,
+                                           tf32_t,
+                                           if_select_v<BDataType, pk_int4_t, ADataType, BDataType>>,
+                               typename Problem::CDataType,
+                               WarpTile::at(I0),
+                               WarpTile::at(I1),
+                               WarpTile::at(I2),
+                               Problem::TransposeC,
+                               false,
+                               false,
+                               NumAccess>;
 
         using BlockWeightPreshufflePolicy =
             BlockWeightPreshuffleASmemBSmemCRegV1CustomPolicy<typename Problem::ADataType,

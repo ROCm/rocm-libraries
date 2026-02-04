@@ -172,7 +172,10 @@ auto shuffle_b_permuteN(const ck_tile::HostTensor<T>& t, const GemmConfig& gemmC
         else
         {
             assert(is_wave32() == false);
-            divisor = get_warp_size() / gemmConfig.N_Warp_Tile;
+            const int k_lane = get_warp_size() / gemmConfig.N_Warp_Tile;
+            const int items_per_access =
+                std::min(16 / static_cast<int>(sizeof(T)), gemmConfig.K_Warp_Tile / k_lane);
+            divisor = gemmConfig.K_Warp_Tile / items_per_access;
         }
         ck_tile::HostTensor<T> t_view({n_ / gemmConfig.N_Tile,
                                        gemmConfig.N_Warp,

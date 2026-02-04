@@ -37,23 +37,21 @@ template<> struct Dispatcher<float, float, float, 16, 16, 16, false> { using Typ
 template<> struct Dispatcher<float, float, float, 16, 16,  8, false> { using Type = WarpGemmMfmaF32F32F32M16N16K8<>; };
 template<> struct Dispatcher<float, float, float, 32, 32,  8, false> { using Type = WarpGemmMfmaF32F32F32M32N32K8<>; };
 template<> struct Dispatcher<float, float, float, 16, 16, 16,  true> { using Type = WarpGemmMfmaF32F32F32M16N16K16TransposedCDistribution<>; };
-template<> struct Dispatcher<float, float, float, 16, 16, 16, false, false, false, EDouble> { using Type = WarpGemmMfmaF32F32F32M16N16K16<EDouble>; };
-template<> struct Dispatcher<float, float, float, 16, 16, 16,  true, false, false, EDouble> { using Type = WarpGemmMfmaF32F32F32M16N16K16TransposedCDistribution<EDouble>; };
-// tf32
-// On gfx950: uses 3x bf16 MFMA emulation (no native xf32 support)
+
+// tf32 (on gfx950: uses 3x bf16 MFMA emulation)
+// ADataType, BDataType, AccDataType, MPerWave, NPerWave, KPerWave, TransposeC, SwizzleA, UseStructuredSparsity
 #if defined(CK_GFX950_SUPPORT)
-// For tf32 on gfx950: epilogue uses float types but 32x32x16 tile
-template<> struct Dispatcher<float, float, float, 32, 32, 16, false> { using Type = WarpGemmMfmaTf32Tf32F32M32N32K16<>; };
-template<> struct Dispatcher<float, float, float, 32, 32, 16,  true> { using Type = WarpGemmMfmaTf32Tf32F32M32N32K16<>; };
-template<> struct Dispatcher<float, float, float, 32, 32, 16, false, false, false, EDouble> { using Type = WarpGemmMfmaTf32Tf32F32M32N32K16<EDouble>; };
-template<> struct Dispatcher<float, float, float, 32, 32, 16, false, false, false, EQuad> { using Type = WarpGemmMfmaTf32Tf32F32M32N32K16<EQuad>; };
-// On gfx950, tf32 uses bf16 emulation
 template<> struct Dispatcher<tf32_t, tf32_t, float, 16, 16, 16, false> { using Type = WarpGemmMfmaTf32Tf32F32M16N16K16<>; };
 template<> struct Dispatcher<tf32_t, tf32_t, float, 32, 32, 16, false> { using Type = WarpGemmMfmaTf32Tf32F32M32N32K16<>; };
+template<> struct Dispatcher<tf32_t, tf32_t, float, 32, 32, 16,  true> { using Type = WarpGemmMfmaTf32Tf32F32M32N32K16<>; };
 template<> struct Dispatcher<tf32_t, tf32_t, float, 16, 16, 16, false, false, false, EDouble> { using Type = WarpGemmMfmaTf32Tf32F32M16N16K16<EDouble>; };
 template<> struct Dispatcher<tf32_t, tf32_t, float, 32, 32, 16, false, false, false, EDouble> { using Type = WarpGemmMfmaTf32Tf32F32M32N32K16<EDouble>; };
 template<> struct Dispatcher<tf32_t, tf32_t, float, 16, 16, 16, false, false, false, EQuad> { using Type = WarpGemmMfmaTf32Tf32F32M16N16K16<EQuad>; };
 template<> struct Dispatcher<tf32_t, tf32_t, float, 32, 32, 16, false, false, false, EQuad> { using Type = WarpGemmMfmaTf32Tf32F32M32N32K16<EQuad>; };
+// TF32 16x16x32 for weight preshuffle pipeline (uses native 16x16x32 TF32 MFMA emulation)
+template<> struct Dispatcher<tf32_t, tf32_t, float, 16, 16, 32, false> { using Type = WarpGemmMfmaTf32Tf32F32M16N16K32<>; };
+template<> struct Dispatcher<tf32_t, tf32_t, float, 16, 16, 32, false, false, false, EDouble> { using Type = WarpGemmMfmaTf32Tf32F32M16N16K32<EDouble>; };
+template<> struct Dispatcher<tf32_t, tf32_t, float, 16, 16, 32, false, false, false, EQuad> { using Type = WarpGemmMfmaTf32Tf32F32M16N16K32<EQuad>; };
 #endif
 // Note: For gfx11/gfx12 and other architectures that don't support tf32,
 // these dispatchers are not defined. Code using tf32 should be guarded

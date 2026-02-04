@@ -34,6 +34,10 @@ struct GemmConfigBase
     static constexpr bool TiledMMAPermuteN          = false;
 };
 
+// Type trait for tf32 storage type (tf32 uses float for memory layout calculations)
+template <typename T>
+using tf32_storage_t = ck_tile::if_select_v<T, ck_tile::tf32_t, float, T>;
+
 template <typename PrecType>
 struct GemmConfigMemoryInterwave : public GemmConfigBase
 {
@@ -80,7 +84,7 @@ struct GemmConfigComputeV3 : public GemmConfigBase
     // Compute V3 only support Intrawave scheduler
     static constexpr ck_tile::index_t M_Tile = 16;
     static constexpr ck_tile::index_t N_Tile = 64;
-    static constexpr ck_tile::index_t K_Tile = 256 / sizeof(PrecType);
+    static constexpr ck_tile::index_t K_Tile = 256 / sizeof(tf32_storage_t<PrecType>);
 
     static constexpr ck_tile::index_t M_Warp = 1;
     static constexpr ck_tile::index_t N_Warp = 4;
@@ -94,32 +98,6 @@ struct GemmConfigComputeV3 : public GemmConfigBase
     static constexpr bool DoubleSmemBuffer          = false;
     static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_V3;
 };
-
-#ifdef CK_GFX950_SUPPORT
-// Template specialization for TF32 on gfx950
-// TF32 warp gemm uses 32x32x16 tiles (3x bf16 32x32x16 MFMA emulation)
-template <>
-struct GemmConfigComputeV3<ck_tile::tf32_t> : public GemmConfigBase
-{
-    // Compute V3 only support Intrawave scheduler
-    // Use larger tile sizes for TF32 (32x32 warp tile)
-    static constexpr ck_tile::index_t M_Tile = 64;
-    static constexpr ck_tile::index_t N_Tile = 64;
-    static constexpr ck_tile::index_t K_Tile = 64; // 256 / sizeof(float)
-
-    static constexpr ck_tile::index_t M_Warp = 2;
-    static constexpr ck_tile::index_t N_Warp = 2;
-    static constexpr ck_tile::index_t K_Warp = 1;
-
-    // TF32 warp gemm requires 32x32x16 tiles
-    static constexpr ck_tile::index_t M_Warp_Tile = 32;
-    static constexpr ck_tile::index_t N_Warp_Tile = 32;
-    static constexpr ck_tile::index_t K_Warp_Tile = 16;
-
-    static constexpr bool DoubleSmemBuffer          = false;
-    static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_V3;
-};
-#endif
 
 template <typename PrecType>
 struct GemmConfigComputeV3_1 : public GemmConfigBase
@@ -146,7 +124,7 @@ struct GemmConfigComputeV3_2 : public GemmConfigBase
 {
     static constexpr ck_tile::index_t M_Tile = 128;
     static constexpr ck_tile::index_t N_Tile = 128;
-    static constexpr ck_tile::index_t K_Tile = 128 / sizeof(PrecType);
+    static constexpr ck_tile::index_t K_Tile = 128 / sizeof(tf32_storage_t<PrecType>);
 
     static constexpr ck_tile::index_t M_Warp = 2;
     static constexpr ck_tile::index_t N_Warp = 2;
@@ -162,32 +140,6 @@ struct GemmConfigComputeV3_2 : public GemmConfigBase
 
     static constexpr int kBlockPerCu = 2;
 };
-
-#ifdef CK_GFX950_SUPPORT
-// Template specialization for TF32 on gfx950
-// TF32 warp gemm uses 32x32x16 tiles (3x bf16 32x32x16 MFMA emulation)
-template <>
-struct GemmConfigComputeV3_2<ck_tile::tf32_t> : public GemmConfigBase
-{
-    static constexpr ck_tile::index_t M_Tile = 128;
-    static constexpr ck_tile::index_t N_Tile = 128;
-    static constexpr ck_tile::index_t K_Tile = 32; // 128 / sizeof(float)
-
-    static constexpr ck_tile::index_t M_Warp = 2;
-    static constexpr ck_tile::index_t N_Warp = 2;
-    static constexpr ck_tile::index_t K_Warp = 1;
-
-    // TF32 warp gemm requires 32x32x16 tiles
-    static constexpr ck_tile::index_t M_Warp_Tile = 32;
-    static constexpr ck_tile::index_t N_Warp_Tile = 32;
-    static constexpr ck_tile::index_t K_Warp_Tile = 16;
-
-    static constexpr bool DoubleSmemBuffer          = false;
-    static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_V3;
-
-    static constexpr int kBlockPerCu = 2;
-};
-#endif
 
 template <typename PrecType>
 struct GemmConfigComputeV3_WMMA : public GemmConfigBase
@@ -323,7 +275,7 @@ struct GemmConfigPreshufflePrefill : public GemmConfigBase
 {
     static constexpr ck_tile::index_t M_Tile = 128;
     static constexpr ck_tile::index_t N_Tile = 128;
-    static constexpr ck_tile::index_t K_Tile = 128 / sizeof(PrecType);
+    static constexpr ck_tile::index_t K_Tile = 128 / sizeof(tf32_storage_t<PrecType>);
 
     static constexpr ck_tile::index_t M_Warp = 1;
     static constexpr ck_tile::index_t N_Warp = 4;
@@ -332,7 +284,7 @@ struct GemmConfigPreshufflePrefill : public GemmConfigBase
     static constexpr ck_tile::index_t M_Warp_Tile = 16;
     static constexpr ck_tile::index_t N_Warp_Tile = 16;
     static constexpr ck_tile::index_t K_Warp_Tile =
-        ck_tile::get_k_warp_tile<PrecType, M_Warp_Tile, true>();
+        ck_tile::get_k_warp_tile<tf32_storage_t<PrecType>, M_Warp_Tile, true>();
 
     static constexpr int kBlockPerCu                = 2;
     static constexpr auto Scheduler                 = ck_tile::GemmPipelineScheduler::Default;
@@ -342,35 +294,6 @@ struct GemmConfigPreshufflePrefill : public GemmConfigBase
     static constexpr int N_Repeat                   = N_Tile / N_Warp_Tile / N_Warp;
     static constexpr bool TiledMMAPermuteN          = N_Repeat % 2 == 0;
 };
-
-#ifdef CK_GFX950_SUPPORT
-// Template specialization for TF32 on gfx950
-// TF32 warp gemm uses 32x32x16 tiles (3x bf16 32x32x16 MFMA emulation)
-template <>
-struct GemmConfigPreshufflePrefill<ck_tile::tf32_t> : public GemmConfigBase
-{
-    static constexpr ck_tile::index_t M_Tile = 128;
-    static constexpr ck_tile::index_t N_Tile = 128;
-    static constexpr ck_tile::index_t K_Tile = 32; // 128 / sizeof(float)
-
-    static constexpr ck_tile::index_t M_Warp = 2;
-    static constexpr ck_tile::index_t N_Warp = 2;
-    static constexpr ck_tile::index_t K_Warp = 1;
-
-    // TF32 warp gemm requires 32x32x16 tiles
-    static constexpr ck_tile::index_t M_Warp_Tile = 32;
-    static constexpr ck_tile::index_t N_Warp_Tile = 32;
-    static constexpr ck_tile::index_t K_Warp_Tile = 16;
-
-    static constexpr int kBlockPerCu                = 2;
-    static constexpr auto Scheduler                 = ck_tile::GemmPipelineScheduler::Default;
-    static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::PRESHUFFLE_V2;
-    static constexpr bool Preshuffle                = true;
-    static constexpr bool DoubleSmemBuffer          = true;
-    static constexpr int N_Repeat                   = N_Tile / N_Warp_Tile / N_Warp;
-    static constexpr bool TiledMMAPermuteN          = false;
-};
-#endif
 
 template <typename PrecType>
 struct GemmConfigPreshufflePrefill_Wmma : public GemmConfigPreshufflePrefill<PrecType>
@@ -382,15 +305,6 @@ struct GemmConfigPreshufflePrefill_Wmma : public GemmConfigPreshufflePrefill<Pre
 
 template <typename ADataType, typename BDataType = ADataType, typename CDataType = ADataType>
 struct GemmTypeConfig;
-
-template <>
-struct GemmTypeConfig<float>
-{
-    using ADataType   = float;
-    using BDataType   = float;
-    using AccDataType = float;
-    using CDataType   = float;
-};
 
 template <>
 struct GemmTypeConfig<ck_tile::tf32_t, ck_tile::tf32_t, float>
@@ -547,7 +461,7 @@ inline auto create_args()
         .insert("v", "2", "0. No validation, 1. Validation on CPU, 2. Validation on GPU")
         .insert("prec",
                 "fp16",
-                "data type. fp16/bf16/fp8/bf8/fp32/pk_int4_t/tf32 (tf32 only on gfx950)")
+                "data type. fp16/bf16/fp8/bf8/pk_int4_t/tf32 (tf32 only on gfx950)")
         .insert("warmup", "50", "number of iterations before benchmark the kernel")
         .insert("repeat", "100", "number of iterations to benchmark the kernel")
         .insert("timer", "gpu", "gpu:gpu timer, cpu:cpu timer")

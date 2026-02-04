@@ -306,10 +306,10 @@ struct UniversalGemmBasePolicy
     CK_TILE_DEVICE static constexpr auto MakeBLdsBlockDescriptor()
     {
         using BLayout = remove_cvref_t<typename Problem::BLayout>;
-        using BDataType =
-            std::conditional_t<std::is_same_v<typename Problem::BDataType, pk_fp4_raw_t>,
-                               typename Problem::ADataType,
-                               typename Problem::BDataType>;
+        using BDataType = if_select_v<typename Problem::BDataType,
+                                      pk_fp4_raw_t,
+                                      typename Problem::ADataType,
+                                      typename Problem::BDataType>;
 
         constexpr index_t NPerBlock = Problem::BlockGemmShape::kN;
         constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
@@ -595,9 +595,10 @@ struct UniversalGemmBasePolicy
         using BLayout               = remove_cvref_t<std::tuple_element_t<number<0>{}, BsLayout>>;
         using BInDataType           = remove_cvref_t<std::tuple_element_t<number<0>{}, BsDataType>>;
 
-        using BDataType = std::conditional_t<std::is_same_v<BInDataType, pk_fp4_raw_t>,
-                                             typename Problem::ADataType,
-                                             typename Problem::BDataType>;
+        using BDataType = if_select_v<BInDataType,
+                                      pk_fp4_raw_t,
+                                      typename Problem::ADataType,
+                                      typename Problem::BDataType>;
 
         if constexpr(Problem::FixedVectorSize)
         {
@@ -855,10 +856,10 @@ struct UniversalGemmBasePolicy
     template <typename Problem>
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeB()
     {
-        using BDataType =
-            std::conditional_t<std::is_same_v<typename Problem::BDataType, pk_fp4_raw_t>,
-                               typename Problem::ADataType,
-                               typename Problem::BDataType>;
+        using BDataType                 = if_select_v<typename Problem::BDataType,
+                                                      pk_fp4_raw_t,
+                                                      typename Problem::ADataType,
+                                                      typename Problem::BDataType>;
         constexpr auto b_lds_block_desc = Derived::template MakeBLdsBlockDescriptor<Problem>();
         constexpr index_t smem_size_b   = integer_least_multiple(
             b_lds_block_desc.get_element_space_size() * sizeof(BDataType), 16);
@@ -899,28 +900,23 @@ struct UniversalGemmPipelineAgBgCrPolicy
         using BDataType       = remove_cvref_t<typename Problem::BDataType>;
         using ComputeDataType = remove_cvref_t<typename Problem::ComputeDataType>;
 
-        using ATypeToUse =
-            std::conditional_t<std::is_same_v<ADataType, pk_int4_t>, BDataType, ADataType>;
+        using ATypeToUse = if_select_v<ADataType, pk_int4_t, BDataType, ADataType>;
         using BTypeToUse = std::conditional_t<std::is_same_v<BDataType, pk_int4_t> ||
                                                   std::is_same_v<BDataType, pk_fp4_raw_t>,
                                               ADataType,
                                               BDataType>;
 
-        using ATypeForDispatcher =
-            std::conditional_t<std::is_same_v<ComputeDataType, tf32_t>, tf32_t, ATypeToUse>;
-        using BTypeForDispatcher =
-            std::conditional_t<std::is_same_v<ComputeDataType, tf32_t>, tf32_t, BTypeToUse>;
-
-        using WarpGemm = WarpGemmDispatcher<ATypeForDispatcher,
-                                            BTypeForDispatcher,
-                                            typename Problem::CDataType,
-                                            WarpTile::at(I0),
-                                            WarpTile::at(I1),
-                                            WarpTile::at(I2),
-                                            Problem::TransposeC,
-                                            false,
-                                            Problem::UseStructuredSparsity,
-                                            wg_attr_num_access>;
+        using WarpGemm =
+            WarpGemmDispatcher<if_select_v<ComputeDataType, tf32_t, tf32_t, ATypeToUse>,
+                               if_select_v<ComputeDataType, tf32_t, tf32_t, BTypeToUse>,
+                               typename Problem::CDataType,
+                               WarpTile::at(I0),
+                               WarpTile::at(I1),
+                               WarpTile::at(I2),
+                               Problem::TransposeC,
+                               false,
+                               Problem::UseStructuredSparsity,
+                               wg_attr_num_access>;
 
         using BlockGemmPolicy = BlockGemmASmemBSmemCRegV1CustomPolicy<ATypeToUse,
                                                                       BTypeToUse,

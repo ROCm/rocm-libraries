@@ -10,9 +10,11 @@
 
 struct UniversalInvoker
 {
+    // ADataType_ and BDataType_ are original types (e.g., tf32_t for TF32 mode)
+    // They are passed to epilogue for auto-detection
     template <typename GemmConfig,
-              typename ADataType,
-              typename BDataType,
+              typename ADataType_,
+              typename BDataType_,
               typename DsDataType,
               typename AccDataType,
               typename CDataType,
@@ -21,10 +23,16 @@ struct UniversalInvoker
               typename DsLayout,
               typename ELayout,
               bool Persistent,
-              typename CDEElementWise,
-              typename ComputeDataType = ADataType>
+              typename CDEElementWise>
     static float gemm(const ck_tile::GemmHostArgs& args, const ck_tile::stream_config& s)
     {
+        // ADataTypeCompute: compute type (tf32_t for TF32 mode, used for warp gemm selection)
+        // ADataTypeBuf: buffer/storage type (fp32 when tf32)
+        using ADataTypeCompute = ADataType_;
+        using BDataTypeCompute = BDataType_;
+        using ADataTypeBuf = ck_tile::if_select_v<ADataType_, ck_tile::tf32_t, float, ADataType_>;
+        using BDataTypeBuf = ck_tile::if_select_v<BDataType_, ck_tile::tf32_t, float, BDataType_>;
+
         using GemmShape = ck_tile::TileGemmShape<
             ck_tile::sequence<GemmConfig::M_Tile, GemmConfig::N_Tile, GemmConfig::K_Tile>,
             ck_tile::sequence<GemmConfig::M_Warp, GemmConfig::N_Warp, GemmConfig::K_Warp>,
@@ -55,22 +63,22 @@ struct UniversalInvoker
         constexpr auto scheduler = GemmConfig::Scheduler;
 
         using UniversalGemmProblem =
-            ck_tile::UniversalGemmPipelineProblem<ADataType,
-                                                  BDataType,
+            ck_tile::UniversalGemmPipelineProblem<ADataTypeBuf,
+                                                  BDataTypeBuf,
                                                   AccDataType,
                                                   GemmShape,
                                                   GemmUniversalTraits,
                                                   scheduler,
                                                   ck_tile::element_wise::PassThrough,
                                                   ck_tile::element_wise::PassThrough,
-                                                  ComputeDataType>;
+                                                  ADataTypeCompute>;
 
         using GemmPipeline = typename PipelineTypeTraits<
             GemmConfig::Pipeline>::template GemmPipeline<UniversalGemmProblem>;
 
         using GemmEpilogue = ck_tile::CShuffleEpilogue<
-            ck_tile::CShuffleEpilogueProblem<ADataType,
-                                             BDataType,
+            ck_tile::CShuffleEpilogueProblem<ADataTypeCompute,
+                                             BDataTypeCompute,
                                              DsDataType,
                                              AccDataType,
                                              CDataType,
@@ -117,7 +125,7 @@ struct UniversalInvoker
         }
 
         // Declare rotating_mem_ptr here so it stays in scope until it is needed
-        std::unique_ptr<ck_tile::RotatingMemWrapper<ADataType, BDataType>> rotating_mem_ptr;
+        std::unique_ptr<ck_tile::RotatingMemWrapper<ADataTypeBuf, BDataTypeBuf>> rotating_mem_ptr;
         std::function<void()> preprocess;
 
         auto clear_gemm_output = [&]() {
@@ -130,15 +138,15 @@ struct UniversalInvoker
         {
             std::cout << "Flushing cache..." << std::endl;
 
-            ck_tile::HostTensor<ADataType> a_m(ck_tile::host_tensor_descriptor(
+            ck_tile::HostTensor<ADataTypeBuf> a_m(ck_tile::host_tensor_descriptor(
                 args.M, args.K, args.stride_A, is_row_major(ALayout{})));
-            ck_tile::HostTensor<BDataType> b_n(ck_tile::host_tensor_descriptor(
+            ck_tile::HostTensor<BDataTypeBuf> b_n(ck_tile::host_tensor_descriptor(
                 args.K, args.N, args.stride_B, is_row_major(BLayout{})));
 
             auto size_a_buffer = a_m.get_element_space_size_in_bytes();
             auto size_b_buffer = b_n.get_element_space_size_in_bytes();
 
-            rotating_mem_ptr = std::make_unique<ck_tile::RotatingMemWrapper<ADataType, BDataType>>(
+            rotating_mem_ptr = std::make_unique<ck_tile::RotatingMemWrapper<ADataTypeBuf, BDataTypeBuf>>(
                 kargs.as_ptr[0], kargs.bs_ptr[0], s.rotating_count_, size_a_buffer, size_b_buffer);
             rotating_mem_ptr->Print();
 
@@ -159,9 +167,10 @@ struct UniversalInvoker
             ck_tile::make_kernel<GemmConfig::kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
     }
 
+    // ADataType_ and BDataType_ are original types (e.g., tf32_t for TF32 mode)
     template <typename GemmConfig,
-              typename ADataType,
-              typename BDataType,
+              typename ADataType_,
+              typename BDataType_,
               typename DsDataType,
               typename AccDataType,
               typename CDataType,
@@ -169,11 +178,17 @@ struct UniversalInvoker
               typename BLayout,
               typename DsLayout,
               typename ELayout,
-              typename CDEElementWise,
-              typename ComputeDataType = ADataType>
+              typename CDEElementWise>
     static void test_async_input_scheduler(const ck_tile::GemmHostArgs& args,
                                            const ck_tile::stream_config& s)
     {
+        // ADataTypeCompute: compute type (tf32_t for TF32 mode, used for warp gemm selection)
+        // ADataTypeBuf: buffer/storage type (fp32 when tf32)
+        using ADataTypeCompute = ADataType_;
+        using BDataTypeCompute = BDataType_;
+        using ADataTypeBuf = ck_tile::if_select_v<ADataType_, ck_tile::tf32_t, float, ADataType_>;
+        using BDataTypeBuf = ck_tile::if_select_v<BDataType_, ck_tile::tf32_t, float, BDataType_>;
+
         using GemmShape = ck_tile::TileGemmShape<
             ck_tile::sequence<GemmConfig::M_Tile, GemmConfig::N_Tile, GemmConfig::K_Tile>,
             ck_tile::sequence<GemmConfig::M_Warp, GemmConfig::N_Warp, GemmConfig::K_Warp>,
@@ -204,22 +219,22 @@ struct UniversalInvoker
         constexpr auto scheduler = GemmConfig::Scheduler;
 
         using UniversalGemmProblem =
-            ck_tile::UniversalGemmPipelineProblem<ADataType,
-                                                  BDataType,
+            ck_tile::UniversalGemmPipelineProblem<ADataTypeBuf,
+                                                  BDataTypeBuf,
                                                   AccDataType,
                                                   GemmShape,
                                                   GemmUniversalTraits,
                                                   scheduler,
                                                   ck_tile::element_wise::PassThrough,
                                                   ck_tile::element_wise::PassThrough,
-                                                  ComputeDataType>;
+                                                  ADataTypeCompute>;
 
         using GemmPipeline = typename PipelineTypeTraits<
             GemmConfig::Pipeline>::template GemmPipeline<UniversalGemmProblem>;
 
         using GemmEpilogue = ck_tile::CShuffleEpilogue<
-            ck_tile::CShuffleEpilogueProblem<ADataType,
-                                             BDataType,
+            ck_tile::CShuffleEpilogueProblem<ADataTypeCompute,
+                                             BDataTypeCompute,
                                              DsDataType,
                                              AccDataType,
                                              CDataType,
