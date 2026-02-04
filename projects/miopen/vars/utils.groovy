@@ -265,8 +265,15 @@ def getDockerImage(Map conf=[:])
 
     def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache"
 
-    def theRockHash = sh(script: 'grep -A 5 'repository: "ROCm/TheRock"' ${env.WORKSPACE}/.github/workflows/therock-ci-linux.yml | grep '^ *ref:' | awk '{print $2}'', returnStdout: true).trim()
-    
+    def theRockHash = sh(
+            script: """
+                grep -A 5 'repository: "ROCm/TheRock"' ${env.WORKSPACE}/.github/workflows/therock-ci-linux.yml \
+                | grep '^ *ref:' \
+                | awk '{print \$2}'
+            """.stripIndent(),
+            returnStdout: true
+        ).trim()
+            
     // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
     def gpu_arch
     if (gpu_family == "gfx90X")
