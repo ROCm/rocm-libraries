@@ -1633,12 +1633,26 @@ namespace
         tensileProblem.setParams().setBiasEnum(
             tensileUseBias(prob.epilogue) ? biasType : rocisa::DataType::None);
 
-        tensileProblem.setUseScaleAB(
-            (prob.scaleA == nullptr && prob.scaleB == nullptr)
-                ? ""
-                : ((prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Vector)
-                       ? "Vector"
-                       : "Scalar"));
+        if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0)
+            tensileProblem.setMXScaleA(rocisa::DataType::E8, 32);
+        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3)
+            tensileProblem.setMXScaleA(rocisa::DataType::Float8, 16);
+        if (prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0)
+            tensileProblem.setMXScaleB(rocisa::DataType::E8, 32);
+        else if (prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3)
+            tensileProblem.setMXScaleB(rocisa::DataType::Float8, 16);
+
+        if (prob.scaleA == nullptr && prob.scaleB == nullptr)
+            tensileProblem.setUseScaleAB("");
+        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Vector
+                 || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Vector)
+            tensileProblem.setUseScaleAB("Vector");
+        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Scalar
+                 || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Scalar)
+            tensileProblem.setUseScaleAB("Scalar");
+        else
+            tensileProblem.setUseScaleAB("");
+
         tensileProblem.setUseScaleCD(prob.scaleC != nullptr || prob.scaleD != nullptr);
         tensileProblem.setUseScaleAlphaVec(prob.scaleAlphaVec != nullptr);
         tensileProblem.setScaleAlphaVec(compute_type, d.sizes()[0]);
@@ -1806,12 +1820,26 @@ namespace
         tensileProblem.setParams().setBiasEnum(
             tensileUseBias(prob.epilogue) ? biasType : rocisa::DataType::None);
 
-        tensileProblem.setUseScaleAB(
-            (prob.scaleA == nullptr && prob.scaleB == nullptr)
-                ? ""
-                : ((prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Vector)
-                       ? "Vector"
-                       : "Scalar"));
+        if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0)
+            tensileProblem.setMXScaleA(rocisa::DataType::E8, 32);
+        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3)
+            tensileProblem.setMXScaleA(rocisa::DataType::Float8, 16);
+        if (prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0)
+            tensileProblem.setMXScaleB(rocisa::DataType::E8, 32);
+        else if (prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3)
+            tensileProblem.setMXScaleB(rocisa::DataType::Float8, 16);
+
+        if (prob.scaleA == nullptr && prob.scaleB == nullptr)
+            tensileProblem.setUseScaleAB("");
+        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Vector
+                 || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Vector)
+            tensileProblem.setUseScaleAB("Vector");
+        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Scalar
+                 || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Scalar)
+            tensileProblem.setUseScaleAB("Scalar");
+        else
+            tensileProblem.setUseScaleAB("");
+
         tensileProblem.setUseScaleCD(prob.scaleC != nullptr || prob.scaleD != nullptr);
         tensileProblem.setUseScaleAlphaVec(prob.scaleAlphaVec != nullptr);
         tensileProblem.setScaleAlphaVec(compute_type, d.sizes()[0]);
@@ -1888,8 +1916,31 @@ namespace
             inputs.bias = reinterpret_cast<const void*>(prob.bias);
         else
             inputs.bias = nullptr;
-        inputs.scaleA        = reinterpret_cast<const void*>(prob.scaleA);
-        inputs.scaleB        = reinterpret_cast<const void*>(prob.scaleB);
+
+        if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
+            || prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3)
+        {
+            inputs.scaleA = nullptr;
+            inputs.mxsa   = reinterpret_cast<const void*>(prob.scaleA);
+        }
+        else
+        {
+            inputs.scaleA = reinterpret_cast<const void*>(prob.scaleA);
+            inputs.mxsa   = nullptr;
+        }
+
+        if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
+            || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3)
+        {
+            inputs.scaleB = nullptr;
+            inputs.mxsb   = reinterpret_cast<const void*>(prob.scaleB);
+        }
+        else
+        {
+            inputs.scaleB = reinterpret_cast<const void*>(prob.scaleB);
+            inputs.mxsb   = nullptr;
+        }
+
         inputs.scaleC        = reinterpret_cast<const void*>(prob.scaleC);
         inputs.scaleD        = reinterpret_cast<const void*>(prob.scaleD);
         inputs.scaleAlphaVec = reinterpret_cast<const void*>(prob.scaleAlphaVec);
