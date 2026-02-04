@@ -77,6 +77,34 @@ def runBuildAndSingleGtestJob(def flags, def build_timeout_minutes=420, def gpu_
     }
 }
 
+def buildDockerImages() {
+    def stageConfigs = [
+        ['Build Docker gfx90X', 'gfx90X'],
+        ['Build Docker gfx942', 'gfx942'],
+        ['Build Docker gfx950', 'gfx950'],
+        ['Build Docker Navi(gfx12-generic, gfx11-generic)', 'navi']
+    ]
+    
+    return stageConfigs.collectEntries { config ->
+        def stageName = config[0]
+        def gpu_family = config[1]
+        
+        [stageName: {
+            node(rocmnode("nogpu")) {
+                stage(stageName) {
+                    try {
+                        withWorkingDir {
+                            utils.getDockerImageWithStatus(gpu_family: gpu_family)
+                        }
+                    } finally {
+                        cleanWs()
+                    }
+                }
+            }
+        }]
+    }
+}
+
 //launch develop branch nightly jobs
 CRON_SETTINGS = BRANCH_NAME == "develop" ? '''
 0 0 * * * % RUN_NIGHTLY_TESTS=true;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false;TARGET_GFX908=false;TARGET_GFX90A=true;TARGET_GFX942=true
@@ -225,67 +253,9 @@ pipeline {
             when {
                 expression { params.BUILD_DOCKER && params.TARGET_NOGPU && params.DATATYPE_NA }
             }
-            parallel
-            {
-                stage('Build Docker gfx90X'){
-                    agent{ label rocmnode("nogpu") }
-                    steps{
-                        script {
-                            withWorkingDir {
-                                utils.getDockerImageWithStatus(gpu_family: "gfx90X")
-                            }
-                        }
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
-                    }
-                }
-                stage('Build Docker gfx942'){
-                    agent{ label rocmnode("nogpu") }
-                    steps{
-                        script {
-                            withWorkingDir {
-                                utils.getDockerImageWithStatus(gpu_family: "gfx942")
-                            }
-                        }
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
-                    }
-                }
-                stage('Build Docker gfx950'){
-                    agent{ label rocmnode("nogpu") }
-                    steps{
-                        script {
-                            withWorkingDir {
-                                utils.getDockerImageWithStatus(gpu_family: "gfx950")
-                            }
-                        }
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
-                    }
-                }
-                stage('Build Docker Navi(gfx12-generic, gfx11-generic)'){
-                    agent{ label rocmnode("nogpu") }
-                    steps{
-                        script {
-                            withWorkingDir {
-                                utils.getDockerImageWithStatus(gpu_family: "navi")
-                            }
-                        }
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
-                    }
+            steps{
+                script {
+                    parallel(buildDockerImages())
                 }
             }
         }
