@@ -29,63 +29,46 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <typename T, typename I, typename Istride = rocblas_stride, typename S = decltype(std::real(T{}))>
+template <typename T, typename I, typename S = decltype(std::real(T{}))>
 rocblas_status rocsolver_cholqr_strided_batched_impl(rocblas_handle handle,
                                                      const I m,
                                                      const I n,
-
-                                                     T* const A,
+                                                     T* A,
                                                      const I lda,
-                                                     const Istride strideA,
-
-                                                     T* const R,
+                                                     const rocblas_stride strideA,
+                                                     T* R,
                                                      const I ldr,
-                                                     const Istride strideR,
-
-                                                     S* const sigma,
-                                                     rocsolver_cholqr_algo const algo,
-
-                                                     I* const info,
+                                                     const rocblas_stride strideR,
+                                                     S* sigma,
+                                                     const rocsolver_cholqr_algo algo,
+                                                     I* info,
                                                      const I batch_count)
 {
     ROCSOLVER_ENTER_TOP("cholqr_strided_batched", "-m", m, "-n", n, "--lda", lda, "--strideA",
-                        strideA, "--strideR", strideR, "--batch_count", batch_count);
+                        strideA, "--ldr", ldr, "--strideR", strideR, "--algo", algo,
+                        "--batch_count", batch_count);
 
     if(!handle)
         return rocblas_status_invalid_handle;
 
-    // -----------------
-    // argument checking
-    // -----------------
-    {
-        rocblas_status st
-            = rocsolver_cholqr_strided_batched_argCheck<T>(handle, m, n,
-
-                                                           A, lda, strideA,
-
-                                                           R, ldr, strideR,
-
-                                                           sigma, algo, info, batch_count);
-
-        bool const isok = (st == rocblas_status_continue) || (st == rocblas_status_success);
-        if(!isok)
-        {
-            return st;
-        }
-    }
-
     // working with unshifted arrays
-    Istride const shiftA = 0;
-    Istride const shiftR = 0;
+    rocblas_stride shiftA = 0;
+    rocblas_stride shiftR = 0;
+
+    // argument checking
+    rocblas_status st = rocsolver_cholqr_argCheck<T>(handle, m, n, A, lda, strideA, R, ldr, strideR,
+                                                     sigma, algo, info, batch_count);
+    if(st != rocblas_status_continue)
+        return st;
 
     // memory workspace sizes:
-
     size_t size_work = 0;
     rocsolver_cholqr_getMemorySize<T, I>(m, n, batch_count, algo, &size_work);
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_work);
 
+    // memory workspace allocation
     rocblas_device_malloc mem(handle, size_work);
 
     if(!mem)
@@ -94,22 +77,9 @@ rocblas_status rocsolver_cholqr_strided_batched_impl(rocblas_handle handle,
     void* const work = (void*)mem[0];
 
     // execution
-
-    auto const istat = rocsolver_cholqr_template<T, I, rocblas_stride>(handle, m, n,
-
-                                                                       A, shiftA, lda, strideA,
-
-                                                                       R, shiftR, ldr, strideR,
-
-                                                                       sigma, algo,
-
-                                                                       info,
-
-                                                                       batch_count,
-
-                                                                       work, size_work);
-
-    return (istat);
+    return rocsolver_cholqr_template<T, I, rocblas_stride>(handle, m, n, A, shiftA, lda, strideA, R,
+                                                           shiftR, ldr, strideR, sigma, algo, info,
+                                                           batch_count, work, size_work);
 }
 
 ROCSOLVER_END_NAMESPACE
@@ -122,262 +92,161 @@ ROCSOLVER_END_NAMESPACE
 
 extern "C" {
 
-rocblas_status rocsolver_ccholqr_strided_batched(rocblas_handle handle,
-                                                 rocblas_int const m,
-                                                 rocblas_int const n,
-
-                                                 rocblas_float_complex* const A,
-                                                 rocblas_int const lda,
-                                                 rocblas_stride const strideA,
-
-                                                 rocblas_float_complex* const R,
-                                                 rocblas_int const ldr,
-                                                 rocblas_stride const strideR,
-
-                                                 float* const sigma,
-                                                 rocsolver_cholqr_algo const algo,
-
-                                                 rocblas_int* const info,
-                                                 rocblas_int const batch_count)
+rocblas_status rocsolver_scholqr_strided_batched(rocblas_handle handle,
+                                                 const rocblas_int m,
+                                                 const rocblas_int n,
+                                                 float* A,
+                                                 const rocblas_int lda,
+                                                 const rocblas_stride strideA,
+                                                 float* R,
+                                                 const rocblas_int ldr,
+                                                 const rocblas_stride strideR,
+                                                 float* sigma,
+                                                 const rocsolver_cholqr_algo algo,
+                                                 rocblas_int* info,
+                                                 const rocblas_int batch_count)
 {
-    return rocsolver::rocsolver_cholqr_strided_batched_impl<rocblas_float_complex>(handle, m, n,
-
-                                                                                   A, lda, strideA,
-
-                                                                                   R, ldr, strideR,
-
-                                                                                   sigma, algo,
-
-                                                                                   info,
-
-                                                                                   batch_count);
-}
-
-rocblas_status rocsolver_zcholqr_strided_batched(rocblas_handle handle,
-                                                 rocblas_int const m,
-                                                 rocblas_int const n,
-
-                                                 rocblas_double_complex* const A,
-                                                 rocblas_int const lda,
-                                                 rocblas_stride const strideA,
-
-                                                 rocblas_double_complex* const R,
-                                                 rocblas_int const ldr,
-                                                 rocblas_stride const strideR,
-
-                                                 double* const sigma,
-                                                 rocsolver_cholqr_algo const algo,
-
-                                                 rocblas_int* const info,
-                                                 rocblas_int const batch_count)
-{
-    return rocsolver::rocsolver_cholqr_strided_batched_impl<rocblas_double_complex>(handle, m, n,
-
-                                                                                    A, lda, strideA,
-
-                                                                                    R, ldr, strideR,
-
-                                                                                    sigma, algo,
-
-                                                                                    info,
-
-                                                                                    batch_count);
+    return rocsolver::rocsolver_cholqr_strided_batched_impl<float>(
+        handle, m, n, A, lda, strideA, R, ldr, strideR, sigma, algo, info, batch_count);
 }
 
 rocblas_status rocsolver_dcholqr_strided_batched(rocblas_handle handle,
-                                                 rocblas_int const m,
-                                                 rocblas_int const n,
-
-                                                 double* const A,
-                                                 rocblas_int const lda,
-                                                 rocblas_stride const strideA,
-
-                                                 double* const R,
-                                                 rocblas_int const ldr,
-                                                 rocblas_stride const strideR,
-
-                                                 double* const sigma,
-                                                 rocsolver_cholqr_algo const algo,
-
-                                                 rocblas_int* const info,
-                                                 rocblas_int const batch_count)
+                                                 const rocblas_int m,
+                                                 const rocblas_int n,
+                                                 double* A,
+                                                 const rocblas_int lda,
+                                                 const rocblas_stride strideA,
+                                                 double* R,
+                                                 const rocblas_int ldr,
+                                                 const rocblas_stride strideR,
+                                                 double* sigma,
+                                                 const rocsolver_cholqr_algo algo,
+                                                 rocblas_int* info,
+                                                 const rocblas_int batch_count)
 {
-    return rocsolver::rocsolver_cholqr_strided_batched_impl<double>(handle, m, n,
-
-                                                                    A, lda, strideA,
-
-                                                                    R, ldr, strideR,
-
-                                                                    sigma, algo,
-
-                                                                    info,
-
-                                                                    batch_count);
+    return rocsolver::rocsolver_cholqr_strided_batched_impl<double>(
+        handle, m, n, A, lda, strideA, R, ldr, strideR, sigma, algo, info, batch_count);
 }
 
-rocblas_status rocsolver_scholqr_strided_batched(rocblas_handle handle,
-                                                 rocblas_int const m,
-                                                 rocblas_int const n,
-
-                                                 float* const A,
-                                                 rocblas_int const lda,
-                                                 rocblas_stride const strideA,
-
-                                                 float* const R,
-                                                 rocblas_int const ldr,
-                                                 rocblas_stride const strideR,
-
-                                                 float* const sigma,
-                                                 rocsolver_cholqr_algo const algo,
-
-                                                 rocblas_int* const info,
-                                                 rocblas_int const batch_count)
+rocblas_status rocsolver_ccholqr_strided_batched(rocblas_handle handle,
+                                                 const rocblas_int m,
+                                                 const rocblas_int n,
+                                                 rocblas_float_complex* A,
+                                                 const rocblas_int lda,
+                                                 const rocblas_stride strideA,
+                                                 rocblas_float_complex* R,
+                                                 const rocblas_int ldr,
+                                                 const rocblas_stride strideR,
+                                                 float* sigma,
+                                                 const rocsolver_cholqr_algo algo,
+                                                 rocblas_int* info,
+                                                 const rocblas_int batch_count)
 {
-    return rocsolver::rocsolver_cholqr_strided_batched_impl<float>(handle, m, n,
-
-                                                                   A, lda, strideA,
-
-                                                                   R, ldr, strideR,
-
-                                                                   sigma, algo,
-
-                                                                   info,
-
-                                                                   batch_count);
+    return rocsolver::rocsolver_cholqr_strided_batched_impl<rocblas_float_complex>(
+        handle, m, n, A, lda, strideA, R, ldr, strideR, sigma, algo, info, batch_count);
 }
 
-rocblas_status rocsolver_zcholqr_strided_batched_64(rocblas_handle handle,
-                                                    int64_t const m,
-                                                    int64_t const n,
+rocblas_status rocsolver_zcholqr_strided_batched(rocblas_handle handle,
+                                                 const rocblas_int m,
+                                                 const rocblas_int n,
+                                                 rocblas_double_complex* A,
+                                                 const rocblas_int lda,
+                                                 const rocblas_stride strideA,
+                                                 rocblas_double_complex* R,
+                                                 const rocblas_int ldr,
+                                                 const rocblas_stride strideR,
+                                                 double* sigma,
+                                                 const rocsolver_cholqr_algo algo,
+                                                 rocblas_int* info,
+                                                 const rocblas_int batch_count)
+{
+    return rocsolver::rocsolver_cholqr_strided_batched_impl<rocblas_double_complex>(
+        handle, m, n, A, lda, strideA, R, ldr, strideR, sigma, algo, info, batch_count);
+}
 
-                                                    rocblas_double_complex* const A,
-                                                    int64_t const lda,
-                                                    rocblas_stride const strideA,
-
-                                                    rocblas_double_complex* const R,
-                                                    int64_t const ldr,
-                                                    rocblas_stride const strideR,
-
-                                                    double* const sigma,
-                                                    rocsolver_cholqr_algo const algo,
-
-                                                    int64_t* const info,
-
-                                                    int64_t const batch_count)
+rocblas_status rocsolver_scholqr_strided_batched_64(rocblas_handle handle,
+                                                    const int64_t m,
+                                                    const int64_t n,
+                                                    float* A,
+                                                    const int64_t lda,
+                                                    const rocblas_stride strideA,
+                                                    float* R,
+                                                    const int64_t ldr,
+                                                    const rocblas_stride strideR,
+                                                    float* sigma,
+                                                    const rocsolver_cholqr_algo algo,
+                                                    int64_t* info,
+                                                    const int64_t batch_count)
 {
 #ifdef HAVE_ROCBLAS_64
-    return rocsolver::rocsolver_cholqr_strided_batched_impl<rocblas_double_complex>(handle, m, n,
-
-                                                                                    A, lda, strideA,
-
-                                                                                    R, ldr, strideR,
-
-                                                                                    sigma, algo,
-
-                                                                                    info,
-                                                                                    batch_count);
-#else
-    return rocblas_status_not_implemented;
-#endif
-}
-
-rocblas_status rocsolver_ccholqr_strided_batched_64(rocblas_handle handle,
-                                                    int64_t const m,
-                                                    int64_t const n,
-
-                                                    rocblas_float_complex* const A,
-                                                    int64_t const lda,
-                                                    rocblas_stride const strideA,
-
-                                                    rocblas_float_complex* const R,
-                                                    int64_t const ldr,
-                                                    rocblas_stride const strideR,
-
-                                                    float* const sigma,
-                                                    rocsolver_cholqr_algo const algo,
-
-                                                    int64_t* const info,
-
-                                                    int64_t const batch_count)
-{
-#ifdef HAVE_ROCBLAS_64
-    return rocsolver::rocsolver_cholqr_strided_batched_impl<rocblas_float_complex>(handle, m, n,
-
-                                                                                   A, lda, strideA,
-
-                                                                                   R, ldr, strideR,
-
-                                                                                   sigma, algo,
-
-                                                                                   info, batch_count);
+    return rocsolver::rocsolver_cholqr_strided_batched_impl<float>(
+        handle, m, n, A, lda, strideA, R, ldr, strideR, sigma, algo, info, batch_count);
 #else
     return rocblas_status_not_implemented;
 #endif
 }
 
 rocblas_status rocsolver_dcholqr_strided_batched_64(rocblas_handle handle,
-                                                    int64_t const m,
-                                                    int64_t const n,
-
-                                                    double* const A,
-                                                    int64_t const lda,
-                                                    rocblas_stride const strideA,
-
-                                                    double* const R,
-                                                    int64_t const ldr,
-                                                    rocblas_stride const strideR,
-
-                                                    double* const sigma,
-                                                    rocsolver_cholqr_algo const algo,
-
-                                                    int64_t* const info,
-
-                                                    int64_t const batch_count)
+                                                    const int64_t m,
+                                                    const int64_t n,
+                                                    double* A,
+                                                    const int64_t lda,
+                                                    const rocblas_stride strideA,
+                                                    double* R,
+                                                    const int64_t ldr,
+                                                    const rocblas_stride strideR,
+                                                    double* sigma,
+                                                    const rocsolver_cholqr_algo algo,
+                                                    int64_t* info,
+                                                    const int64_t batch_count)
 {
 #ifdef HAVE_ROCBLAS_64
-    return rocsolver::rocsolver_cholqr_strided_batched_impl<double>(handle, m, n,
-
-                                                                    A, lda, strideA,
-
-                                                                    R, ldr, strideR,
-
-                                                                    sigma, algo,
-
-                                                                    info, batch_count);
+    return rocsolver::rocsolver_cholqr_strided_batched_impl<double>(
+        handle, m, n, A, lda, strideA, R, ldr, strideR, sigma, algo, info, batch_count);
 #else
     return rocblas_status_not_implemented;
 #endif
 }
 
-rocblas_status rocsolver_scholqr_strided_batched_64(rocblas_handle handle,
-                                                    int64_t const m,
-                                                    int64_t const n,
-
-                                                    float* const A,
-                                                    int64_t const lda,
-                                                    rocblas_stride const strideA,
-
-                                                    float* const R,
-                                                    int64_t const ldr,
-                                                    rocblas_stride const strideR,
-
-                                                    float* const sigma,
-                                                    rocsolver_cholqr_algo const algo,
-
-                                                    int64_t* const info,
-
-                                                    int64_t const batch_count)
+rocblas_status rocsolver_ccholqr_strided_batched_64(rocblas_handle handle,
+                                                    const int64_t m,
+                                                    const int64_t n,
+                                                    rocblas_float_complex* A,
+                                                    const int64_t lda,
+                                                    const rocblas_stride strideA,
+                                                    rocblas_float_complex* R,
+                                                    const int64_t ldr,
+                                                    const rocblas_stride strideR,
+                                                    float* sigma,
+                                                    const rocsolver_cholqr_algo algo,
+                                                    int64_t* info,
+                                                    const int64_t batch_count)
 {
 #ifdef HAVE_ROCBLAS_64
-    return rocsolver::rocsolver_cholqr_strided_batched_impl<float>(handle, m, n,
+    return rocsolver::rocsolver_cholqr_strided_batched_impl<rocblas_float_complex>(
+        handle, m, n, A, lda, strideA, R, ldr, strideR, sigma, algo, info, batch_count);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
 
-                                                                   A, lda, strideA,
-
-                                                                   R, ldr, strideR,
-
-                                                                   sigma, algo,
-
-                                                                   info, batch_count);
+rocblas_status rocsolver_zcholqr_strided_batched_64(rocblas_handle handle,
+                                                    const int64_t m,
+                                                    const int64_t n,
+                                                    rocblas_double_complex* A,
+                                                    const int64_t lda,
+                                                    const rocblas_stride strideA,
+                                                    rocblas_double_complex* R,
+                                                    const int64_t ldr,
+                                                    const rocblas_stride strideR,
+                                                    double* sigma,
+                                                    const rocsolver_cholqr_algo algo,
+                                                    int64_t* info,
+                                                    const int64_t batch_count)
+{
+#ifdef HAVE_ROCBLAS_64
+    return rocsolver::rocsolver_cholqr_strided_batched_impl<rocblas_double_complex>(
+        handle, m, n, A, lda, strideA, R, ldr, strideR, sigma, algo, info, batch_count);
 #else
     return rocblas_status_not_implemented;
 #endif

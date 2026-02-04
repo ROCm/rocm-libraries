@@ -76,6 +76,9 @@ void cholqr_checkBadArgs(const rocblas_handle handle,
                                            stR, dSigma, algo, dInfo, bc),
                           rocblas_status_invalid_pointer);
     EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, m, n, dA, lda, stA, dR, ldr, stR,
+                                           (S) nullptr, algo, dInfo, bc),
+                          rocblas_status_invalid_pointer);
+    EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, m, n, dA, lda, stA, dR, ldr, stR,
                                            dSigma, algo, (V) nullptr, bc),
                           rocblas_status_invalid_pointer);
 
@@ -90,7 +93,7 @@ void cholqr_checkBadArgs(const rocblas_handle handle,
     // quick return with zero batch_count if applicable
     if(STRIDED)
         EXPECT_ROCBLAS_STATUS(rocsolver_cholqr(STRIDED, handle, m, n, dA, lda, stA, dR, ldr, stR,
-                                               dSigma, algo, dInfo, (I)0),
+                                               (S) nullptr, algo, (V) nullptr, (I)0),
                               rocblas_status_success);
 }
 
@@ -108,7 +111,7 @@ void testing_cholqr_bad_arg()
     rocblas_stride stA = 1;
     rocblas_stride stR = 1;
     I bc = 1;
-    rocsolver_cholqr_algo algo = rocsolver_cholqr_default;
+    rocsolver_cholqr_algo algo = rocsolver_cholqr_cholqr3_compute;
 
     if(BATCHED)
     {

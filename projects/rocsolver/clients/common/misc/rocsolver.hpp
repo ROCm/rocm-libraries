@@ -12090,6 +12090,338 @@ inline rocblas_status rocsolver_geblttrs_npvt_interleaved(rocblas_handle handle,
 }
 /********************************************************/
 
+/******************** CHOLQR ********************/
+// normal and strided_batched
+inline rocblas_status rocsolver_cholqr(bool STRIDED,
+                                       rocblas_handle handle,
+                                       rocblas_int m,
+                                       rocblas_int n,
+                                       float* A,
+                                       rocblas_int lda,
+                                       rocblas_stride strideA,
+                                       float* R,
+                                       rocblas_int ldr,
+                                       rocblas_stride strideR,
+                                       float* sigma,
+                                       rocsolver_cholqr_algo algo,
+                                       rocblas_int* info,
+                                       rocblas_int batch_count)
+{
+    if(STRIDED)
+        return rocsolver_scholqr_strided_batched(handle, m, n, A, lda, strideA, R, ldr, strideR,
+                                                 sigma, algo, info, batch_count);
+    else
+        return rocsolver_scholqr(handle, m, n, A, lda, R, ldr, sigma, algo, info);
+}
+
+inline rocblas_status rocsolver_cholqr(bool STRIDED,
+                                       rocblas_handle handle,
+                                       rocblas_int m,
+                                       rocblas_int n,
+                                       double* A,
+                                       rocblas_int lda,
+                                       rocblas_stride strideA,
+                                       double* R,
+                                       rocblas_int ldr,
+                                       rocblas_stride strideR,
+                                       double* sigma,
+                                       rocsolver_cholqr_algo algo,
+                                       rocblas_int* info,
+                                       rocblas_int batch_count)
+{
+    if(STRIDED)
+        return rocsolver_dcholqr_strided_batched(handle, m, n, A, lda, strideA, R, ldr, strideR,
+                                                 sigma, algo, info, batch_count);
+    else
+        return rocsolver_dcholqr(handle, m, n, A, lda, R, ldr, sigma, algo, info);
+}
+
+inline rocblas_status rocsolver_cholqr(bool STRIDED,
+                                       rocblas_handle handle,
+                                       rocblas_int m,
+                                       rocblas_int n,
+                                       rocblas_float_complex* A,
+                                       rocblas_int lda,
+                                       rocblas_stride strideA,
+                                       rocblas_float_complex* R,
+                                       rocblas_int ldr,
+                                       rocblas_stride strideR,
+                                       float* sigma,
+                                       rocsolver_cholqr_algo algo,
+                                       rocblas_int* info,
+                                       rocblas_int batch_count)
+{
+    if(STRIDED)
+        return rocsolver_ccholqr_strided_batched(handle, m, n, A, lda, strideA, R, ldr, strideR,
+                                                 sigma, algo, info, batch_count);
+    else
+        return rocsolver_ccholqr(handle, m, n, A, lda, R, ldr, sigma, algo, info);
+}
+
+inline rocblas_status rocsolver_cholqr(bool STRIDED,
+                                       rocblas_handle handle,
+                                       rocblas_int m,
+                                       rocblas_int n,
+                                       rocblas_double_complex* A,
+                                       rocblas_int lda,
+                                       rocblas_stride strideA,
+                                       rocblas_double_complex* R,
+                                       rocblas_int ldr,
+                                       rocblas_stride strideR,
+                                       double* sigma,
+                                       rocsolver_cholqr_algo algo,
+                                       rocblas_int* info,
+                                       rocblas_int batch_count)
+{
+    if(STRIDED)
+        return rocsolver_zcholqr_strided_batched(handle, m, n, A, lda, strideA, R, ldr, strideR,
+                                                 sigma, algo, info, batch_count);
+    else
+        return rocsolver_zcholqr(handle, m, n, A, lda, R, ldr, sigma, algo, info);
+}
+
+inline rocblas_status rocsolver_cholqr(bool STRIDED,
+                                       rocblas_handle handle,
+                                       int64_t m,
+                                       int64_t n,
+                                       float* A,
+                                       int64_t lda,
+                                       rocblas_stride strideA,
+                                       float* R,
+                                       int64_t ldr,
+                                       rocblas_stride strideR,
+                                       float* sigma,
+                                       rocsolver_cholqr_algo algo,
+                                       int64_t* info,
+                                       int64_t batch_count)
+{
+    if(STRIDED)
+        return rocsolver_scholqr_strided_batched_64(handle, m, n, A, lda, strideA, R, ldr, strideR,
+                                                    sigma, algo, info, batch_count);
+    else
+        return rocsolver_scholqr_64(handle, m, n, A, lda, R, ldr, sigma, algo, info);
+}
+
+inline rocblas_status rocsolver_cholqr(bool STRIDED,
+                                       rocblas_handle handle,
+                                       int64_t m,
+                                       int64_t n,
+                                       double* A,
+                                       int64_t lda,
+                                       rocblas_stride strideA,
+                                       double* R,
+                                       int64_t ldr,
+                                       rocblas_stride strideR,
+                                       double* sigma,
+                                       rocsolver_cholqr_algo algo,
+                                       int64_t* info,
+                                       int64_t batch_count)
+{
+    if(STRIDED)
+        return rocsolver_dcholqr_strided_batched_64(handle, m, n, A, lda, strideA, R, ldr, strideR,
+                                                    sigma, algo, info, batch_count);
+    else
+        return rocsolver_dcholqr_64(handle, m, n, A, lda, R, ldr, sigma, algo, info);
+}
+
+inline rocblas_status rocsolver_cholqr(bool STRIDED,
+                                       rocblas_handle handle,
+                                       int64_t m,
+                                       int64_t n,
+                                       rocblas_float_complex* A,
+                                       int64_t lda,
+                                       rocblas_stride strideA,
+                                       rocblas_float_complex* R,
+                                       int64_t ldr,
+                                       rocblas_stride strideR,
+                                       float* sigma,
+                                       rocsolver_cholqr_algo algo,
+                                       int64_t* info,
+                                       int64_t batch_count)
+{
+    if(STRIDED)
+        return rocsolver_ccholqr_strided_batched_64(handle, m, n, A, lda, strideA, R, ldr, strideR,
+                                                    sigma, algo, info, batch_count);
+    else
+        return rocsolver_ccholqr_64(handle, m, n, A, lda, R, ldr, sigma, algo, info);
+}
+
+inline rocblas_status rocsolver_cholqr(bool STRIDED,
+                                       rocblas_handle handle,
+                                       int64_t m,
+                                       int64_t n,
+                                       rocblas_double_complex* A,
+                                       int64_t lda,
+                                       rocblas_stride strideA,
+                                       rocblas_double_complex* R,
+                                       int64_t ldr,
+                                       rocblas_stride strideR,
+                                       double* sigma,
+                                       rocsolver_cholqr_algo algo,
+                                       int64_t* info,
+                                       int64_t batch_count)
+{
+    if(STRIDED)
+        return rocsolver_zcholqr_strided_batched_64(handle, m, n, A, lda, strideA, R, ldr, strideR,
+                                                    sigma, algo, info, batch_count);
+    else
+        return rocsolver_zcholqr_64(handle, m, n, A, lda, R, ldr, sigma, algo, info);
+}
+
+// batched
+inline rocblas_status rocsolver_cholqr(bool STRIDED,
+                                       rocblas_handle handle,
+                                       rocblas_int m,
+                                       rocblas_int n,
+                                       float* const A[],
+                                       rocblas_int lda,
+                                       rocblas_stride strideA,
+                                       float* R,
+                                       rocblas_int ldr,
+                                       rocblas_stride strideR,
+                                       float* sigma,
+                                       rocsolver_cholqr_algo algo,
+                                       rocblas_int* info,
+                                       rocblas_int batch_count)
+{
+    return rocsolver_scholqr_batched(handle, m, n, A, lda, R, ldr, strideR, sigma, algo, info,
+                                     batch_count);
+}
+
+inline rocblas_status rocsolver_cholqr(bool STRIDED,
+                                       rocblas_handle handle,
+                                       rocblas_int m,
+                                       rocblas_int n,
+                                       double* const A[],
+                                       rocblas_int lda,
+                                       rocblas_stride strideA,
+                                       double* R,
+                                       rocblas_int ldr,
+                                       rocblas_stride strideR,
+                                       double* sigma,
+                                       rocsolver_cholqr_algo algo,
+                                       rocblas_int* info,
+                                       rocblas_int batch_count)
+{
+    return rocsolver_dcholqr_batched(handle, m, n, A, lda, R, ldr, strideR, sigma, algo, info,
+                                     batch_count);
+}
+
+inline rocblas_status rocsolver_cholqr(bool STRIDED,
+                                       rocblas_handle handle,
+                                       rocblas_int m,
+                                       rocblas_int n,
+                                       rocblas_float_complex* const A[],
+                                       rocblas_int lda,
+                                       rocblas_stride strideA,
+                                       rocblas_float_complex* R,
+                                       rocblas_int ldr,
+                                       rocblas_stride strideR,
+                                       float* sigma,
+                                       rocsolver_cholqr_algo algo,
+                                       rocblas_int* info,
+                                       rocblas_int batch_count)
+{
+    return rocsolver_ccholqr_batched(handle, m, n, A, lda, R, ldr, strideR, sigma, algo, info,
+                                     batch_count);
+}
+
+inline rocblas_status rocsolver_cholqr(bool STRIDED,
+                                       rocblas_handle handle,
+                                       rocblas_int m,
+                                       rocblas_int n,
+                                       rocblas_double_complex* const A[],
+                                       rocblas_int lda,
+                                       rocblas_stride strideA,
+                                       rocblas_double_complex* R,
+                                       rocblas_int ldr,
+                                       rocblas_stride strideR,
+                                       double* sigma,
+                                       rocsolver_cholqr_algo algo,
+                                       rocblas_int* info,
+                                       rocblas_int batch_count)
+{
+    return rocsolver_zcholqr_batched(handle, m, n, A, lda, R, ldr, strideR, sigma, algo, info,
+                                     batch_count);
+}
+
+inline rocblas_status rocsolver_cholqr(bool STRIDED,
+                                       rocblas_handle handle,
+                                       int64_t m,
+                                       int64_t n,
+                                       float* const A[],
+                                       int64_t lda,
+                                       rocblas_stride strideA,
+                                       float* R,
+                                       int64_t ldr,
+                                       rocblas_stride strideR,
+                                       float* sigma,
+                                       rocsolver_cholqr_algo algo,
+                                       int64_t* info,
+                                       int64_t batch_count)
+{
+    return rocsolver_scholqr_batched_64(handle, m, n, A, lda, R, ldr, strideR, sigma, algo, info,
+                                        batch_count);
+}
+
+inline rocblas_status rocsolver_cholqr(bool STRIDED,
+                                       rocblas_handle handle,
+                                       int64_t m,
+                                       int64_t n,
+                                       double* const A[],
+                                       int64_t lda,
+                                       rocblas_stride strideA,
+                                       double* R,
+                                       int64_t ldr,
+                                       rocblas_stride strideR,
+                                       double* sigma,
+                                       rocsolver_cholqr_algo algo,
+                                       int64_t* info,
+                                       int64_t batch_count)
+{
+    return rocsolver_dcholqr_batched_64(handle, m, n, A, lda, R, ldr, strideR, sigma, algo, info,
+                                        batch_count);
+}
+
+inline rocblas_status rocsolver_cholqr(bool STRIDED,
+                                       rocblas_handle handle,
+                                       int64_t m,
+                                       int64_t n,
+                                       rocblas_float_complex* const A[],
+                                       int64_t lda,
+                                       rocblas_stride strideA,
+                                       rocblas_float_complex* R,
+                                       int64_t ldr,
+                                       rocblas_stride strideR,
+                                       float* sigma,
+                                       rocsolver_cholqr_algo algo,
+                                       int64_t* info,
+                                       int64_t batch_count)
+{
+    return rocsolver_ccholqr_batched_64(handle, m, n, A, lda, R, ldr, strideR, sigma, algo, info,
+                                        batch_count);
+}
+
+inline rocblas_status rocsolver_cholqr(bool STRIDED,
+                                       rocblas_handle handle,
+                                       int64_t m,
+                                       int64_t n,
+                                       rocblas_double_complex* const A[],
+                                       int64_t lda,
+                                       rocblas_stride strideA,
+                                       rocblas_double_complex* R,
+                                       int64_t ldr,
+                                       rocblas_stride strideR,
+                                       double* sigma,
+                                       rocsolver_cholqr_algo algo,
+                                       int64_t* info,
+                                       int64_t batch_count)
+{
+    return rocsolver_zcholqr_batched_64(handle, m, n, A, lda, R, ldr, strideR, sigma, algo, info,
+                                        batch_count);
+}
+/********************************************************/
+
 /*************** CREATE_ DESTROY_ RFINFO ****************/
 // local rocsolver_rfinfo; automatically created and destroyed
 class rocsolver_local_rfinfo
@@ -12339,333 +12671,5 @@ inline rocblas_status rocsolver_csrrf_solve(rocblas_handle handle,
 {
     return rocsolver_dcsrrf_solve(handle, n, nrhs, nnzT, ptrT, indT, valT, pivP, pivQ, B, ldb,
                                   rfinfo);
-}
-/********************************************************/
-
-/******************** CHOLQR ********************/
-// normal and strided_batched
-inline rocblas_status rocsolver_cholqr(bool STRIDED,
-                                      rocblas_handle handle,
-                                      rocblas_int m,
-                                      rocblas_int n,
-                                      float* A,
-                                      rocblas_int lda,
-                                      rocblas_stride strideA,
-                                      float* R,
-                                      rocblas_int ldr,
-                                      rocblas_stride strideR,
-                                      float* sigma,
-                                      rocsolver_cholqr_algo algo,
-                                      rocblas_int* info,
-                                      rocblas_int batch_count)
-{
-    if(STRIDED)
-        return rocsolver_scholqr_strided_batched(handle, m, n, A, lda, strideA, R, ldr, strideR,
-                                                 sigma, algo, info, batch_count);
-    else
-        return rocsolver_scholqr(handle, m, n, A, lda, R, ldr, sigma, algo, info);
-}
-
-inline rocblas_status rocsolver_cholqr(bool STRIDED,
-                                      rocblas_handle handle,
-                                      rocblas_int m,
-                                      rocblas_int n,
-                                      double* A,
-                                      rocblas_int lda,
-                                      rocblas_stride strideA,
-                                      double* R,
-                                      rocblas_int ldr,
-                                      rocblas_stride strideR,
-                                      double* sigma,
-                                      rocsolver_cholqr_algo algo,
-                                      rocblas_int* info,
-                                      rocblas_int batch_count)
-{
-    if(STRIDED)
-        return rocsolver_dcholqr_strided_batched(handle, m, n, A, lda, strideA, R, ldr, strideR,
-                                                 sigma, algo, info, batch_count);
-    else
-        return rocsolver_dcholqr(handle, m, n, A, lda, R, ldr, sigma, algo, info);
-}
-
-inline rocblas_status rocsolver_cholqr(bool STRIDED,
-                                      rocblas_handle handle,
-                                      rocblas_int m,
-                                      rocblas_int n,
-                                      rocblas_float_complex* A,
-                                      rocblas_int lda,
-                                      rocblas_stride strideA,
-                                      rocblas_float_complex* R,
-                                      rocblas_int ldr,
-                                      rocblas_stride strideR,
-                                      float* sigma,
-                                      rocsolver_cholqr_algo algo,
-                                      rocblas_int* info,
-                                      rocblas_int batch_count)
-{
-    if(STRIDED)
-        return rocsolver_ccholqr_strided_batched(handle, m, n, A, lda, strideA, R, ldr, strideR,
-                                                 sigma, algo, info, batch_count);
-    else
-        return rocsolver_ccholqr(handle, m, n, A, lda, R, ldr, sigma, algo, info);
-}
-
-inline rocblas_status rocsolver_cholqr(bool STRIDED,
-                                      rocblas_handle handle,
-                                      rocblas_int m,
-                                      rocblas_int n,
-                                      rocblas_double_complex* A,
-                                      rocblas_int lda,
-                                      rocblas_stride strideA,
-                                      rocblas_double_complex* R,
-                                      rocblas_int ldr,
-                                      rocblas_stride strideR,
-                                      double* sigma,
-                                      rocsolver_cholqr_algo algo,
-                                      rocblas_int* info,
-                                      rocblas_int batch_count)
-{
-    if(STRIDED)
-        return rocsolver_zcholqr_strided_batched(handle, m, n, A, lda, strideA, R, ldr, strideR,
-                                                 sigma, algo, info, batch_count);
-    else
-        return rocsolver_zcholqr(handle, m, n, A, lda, R, ldr, sigma, algo, info);
-}
-
-inline rocblas_status rocsolver_cholqr(bool STRIDED,
-                                      rocblas_handle handle,
-                                      int64_t m,
-                                      int64_t n,
-                                      float* A,
-                                      int64_t lda,
-                                      rocblas_stride strideA,
-                                      float* R,
-                                      int64_t ldr,
-                                      rocblas_stride strideR,
-                                      float* sigma,
-                                      rocsolver_cholqr_algo algo,
-                                      int64_t* info,
-                                      int64_t batch_count)
-{
-    if(STRIDED)
-        return rocsolver_scholqr_strided_batched_64(handle, m, n, A, lda, strideA, R, ldr,
-                                                    strideR, sigma, algo, info, batch_count);
-    else
-        return rocsolver_scholqr_64(handle, m, n, A, lda, R, ldr, sigma, algo, info);
-}
-
-inline rocblas_status rocsolver_cholqr(bool STRIDED,
-                                      rocblas_handle handle,
-                                      int64_t m,
-                                      int64_t n,
-                                      double* A,
-                                      int64_t lda,
-                                      rocblas_stride strideA,
-                                      double* R,
-                                      int64_t ldr,
-                                      rocblas_stride strideR,
-                                      double* sigma,
-                                      rocsolver_cholqr_algo algo,
-                                      int64_t* info,
-                                      int64_t batch_count)
-{
-    if(STRIDED)
-        return rocsolver_dcholqr_strided_batched_64(handle, m, n, A, lda, strideA, R, ldr,
-                                                    strideR, sigma, algo, info, batch_count);
-    else
-        return rocsolver_dcholqr_64(handle, m, n, A, lda, R, ldr, sigma, algo, info);
-}
-
-inline rocblas_status rocsolver_cholqr(bool STRIDED,
-                                      rocblas_handle handle,
-                                      int64_t m,
-                                      int64_t n,
-                                      rocblas_float_complex* A,
-                                      int64_t lda,
-                                      rocblas_stride strideA,
-                                      rocblas_float_complex* R,
-                                      int64_t ldr,
-                                      rocblas_stride strideR,
-                                      float* sigma,
-                                      rocsolver_cholqr_algo algo,
-                                      int64_t* info,
-                                      int64_t batch_count)
-{
-    if(STRIDED)
-        return rocsolver_ccholqr_strided_batched_64(handle, m, n, A, lda, strideA, R, ldr,
-                                                    strideR, sigma, algo, info, batch_count);
-    else
-        return rocsolver_ccholqr_64(handle, m, n, A, lda, R, ldr, sigma, algo, info);
-}
-
-inline rocblas_status rocsolver_cholqr(bool STRIDED,
-                                      rocblas_handle handle,
-                                      int64_t m,
-                                      int64_t n,
-                                      rocblas_double_complex* A,
-                                      int64_t lda,
-                                      rocblas_stride strideA,
-                                      rocblas_double_complex* R,
-                                      int64_t ldr,
-                                      rocblas_stride strideR,
-                                      double* sigma,
-                                      rocsolver_cholqr_algo algo,
-                                      int64_t* info,
-                                      int64_t batch_count)
-{
-    if(STRIDED)
-        return rocsolver_zcholqr_strided_batched_64(handle, m, n, A, lda, strideA, R, ldr,
-                                                    strideR, sigma, algo, info, batch_count);
-    else
-        return rocsolver_zcholqr_64(handle, m, n, A, lda, R, ldr, sigma, algo, info);
-}
-
-// batched
-inline rocblas_status rocsolver_cholqr(bool STRIDED,
-                                      rocblas_handle handle,
-                                      rocblas_int m,
-                                      rocblas_int n,
-                                      float* const A[],
-                                      rocblas_int lda,
-                                      rocblas_stride strideA,
-                                      float* R,
-                                      rocblas_int ldr,
-                                      rocblas_stride strideR,
-                                      float* sigma,
-                                      rocsolver_cholqr_algo algo,
-                                      rocblas_int* info,
-                                      rocblas_int batch_count)
-{
-    return rocsolver_scholqr_batched(handle, m, n, const_cast<float**>(A), lda, R, ldr, strideR, sigma, algo, info, batch_count);
-}
-
-inline rocblas_status rocsolver_cholqr(bool STRIDED,
-                                      rocblas_handle handle,
-                                      rocblas_int m,
-                                      rocblas_int n,
-                                      double* const A[],
-                                      rocblas_int lda,
-                                      rocblas_stride strideA,
-                                      double* R,
-                                      rocblas_int ldr,
-                                      rocblas_stride strideR,
-                                      double* sigma,
-                                      rocsolver_cholqr_algo algo,
-                                      rocblas_int* info,
-                                      rocblas_int batch_count)
-{
-    return rocsolver_dcholqr_batched(handle, m, n, const_cast<double**>(A), lda, R, ldr, strideR, sigma, algo, info, batch_count);
-}
-
-inline rocblas_status rocsolver_cholqr(bool STRIDED,
-                                      rocblas_handle handle,
-                                      rocblas_int m,
-                                      rocblas_int n,
-                                      rocblas_float_complex* const A[],
-                                      rocblas_int lda,
-                                      rocblas_stride strideA,
-                                      rocblas_float_complex* R,
-                                      rocblas_int ldr,
-                                      rocblas_stride strideR,
-                                      float* sigma,
-                                      rocsolver_cholqr_algo algo,
-                                      rocblas_int* info,
-                                      rocblas_int batch_count)
-{
-    return rocsolver_ccholqr_batched(handle, m, n, const_cast<rocblas_float_complex**>(A), lda, R, ldr, strideR, sigma, algo, info, batch_count);
-}
-
-inline rocblas_status rocsolver_cholqr(bool STRIDED,
-                                      rocblas_handle handle,
-                                      rocblas_int m,
-                                      rocblas_int n,
-                                      rocblas_double_complex* const A[],
-                                      rocblas_int lda,
-                                      rocblas_stride strideA,
-                                      rocblas_double_complex* R,
-                                      rocblas_int ldr,
-                                      rocblas_stride strideR,
-                                      double* sigma,
-                                      rocsolver_cholqr_algo algo,
-                                      rocblas_int* info,
-                                      rocblas_int batch_count)
-{
-    return rocsolver_zcholqr_batched(handle, m, n, const_cast<rocblas_double_complex**>(A), lda, R, ldr, strideR, sigma, algo, info, batch_count);
-}
-
-inline rocblas_status rocsolver_cholqr(bool STRIDED,
-                                      rocblas_handle handle,
-                                      int64_t m,
-                                      int64_t n,
-                                      float* const A[],
-                                      int64_t lda,
-                                      rocblas_stride strideA,
-                                      float* R,
-                                      int64_t ldr,
-                                      rocblas_stride strideR,
-                                      float* sigma,
-                                      rocsolver_cholqr_algo algo,
-                                      int64_t* info,
-                                      int64_t batch_count)
-{
-    return rocsolver_scholqr_batched_64(handle, m, n, const_cast<float**>(A), lda, R, ldr, strideR, sigma, algo, info,
-                                       batch_count);
-}
-
-inline rocblas_status rocsolver_cholqr(bool STRIDED,
-                                      rocblas_handle handle,
-                                      int64_t m,
-                                      int64_t n,
-                                      double* const A[],
-                                      int64_t lda,
-                                      rocblas_stride strideA,
-                                      double* R,
-                                      int64_t ldr,
-                                      rocblas_stride strideR,
-                                      double* sigma,
-                                      rocsolver_cholqr_algo algo,
-                                      int64_t* info,
-                                      int64_t batch_count)
-{
-    return rocsolver_dcholqr_batched_64(handle, m, n, const_cast<double**>(A), lda, R, ldr, strideR, sigma, algo, info,
-                                       batch_count);
-}
-
-inline rocblas_status rocsolver_cholqr(bool STRIDED,
-                                      rocblas_handle handle,
-                                      int64_t m,
-                                      int64_t n,
-                                      rocblas_float_complex* const A[],
-                                      int64_t lda,
-                                      rocblas_stride strideA,
-                                      rocblas_float_complex* R,
-                                      int64_t ldr,
-                                      rocblas_stride strideR,
-                                      float* sigma,
-                                      rocsolver_cholqr_algo algo,
-                                      int64_t* info,
-                                      int64_t batch_count)
-{
-    return rocsolver_ccholqr_batched_64(handle, m, n, const_cast<rocblas_float_complex**>(A), lda, R, ldr, strideR, sigma, algo, info,
-                                       batch_count);
-}
-
-inline rocblas_status rocsolver_cholqr(bool STRIDED,
-                                      rocblas_handle handle,
-                                      int64_t m,
-                                      int64_t n,
-                                      rocblas_double_complex* const A[],
-                                      int64_t lda,
-                                      rocblas_stride strideA,
-                                      rocblas_double_complex* R,
-                                      int64_t ldr,
-                                      rocblas_stride strideR,
-                                      double* sigma,
-                                      rocsolver_cholqr_algo algo,
-                                      int64_t* info,
-                                      int64_t batch_count)
-{
-    return rocsolver_zcholqr_batched_64(handle, m, n, const_cast<rocblas_double_complex**>(A), lda, R, ldr, strideR, sigma, algo, info,
-                                       batch_count);
 }
 /********************************************************/

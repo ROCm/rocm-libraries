@@ -547,7 +547,7 @@ static rocblas_status rocblasCall_syrk_herk_alt(rocblas_handle handle,
 
         if constexpr(is_pointer_batched_A)
         {
-            A_ptr = A;
+            A_ptr = (T**)A;
         }
         else
         {
@@ -1846,7 +1846,7 @@ static rocblas_status rocsolver_cholqr1_template(
 // (3) R = R * R1
 //
 //
-// “Roundoff error analysis of the CholeskyQR2 algorithm”,
+// "Roundoff error analysis of the CholeskyQR2 algorithm",
 // by Yamamoto et al, Electronic Transactions on Numerical Analysis,
 // Vol 44, p 306-326, 2015.
 // -----------------------------------------------------
@@ -2120,11 +2120,11 @@ static rocblas_status rocsolver_cholqr2_template(rocblas_handle handle,
 // (3)  [Q2, R2]  = cholQR2(Q1)
 // (4)  R = R2 * R1
 //
-// “Shifted CholeskyQR for computing QR factorization of
-// ill-conditioned matrices”, Fukaya et al,
+// "Shifted CholeskyQR for computing QR factorization of
+// ill-conditioned matrices", Fukaya et al,
 // SIAM J Sci Comp, Vol 42, No 1, pp A477-A503, 2020
 //
-// “An improved Shifted CholeskyQR based on columns”,
+// "An improved Shifted CholeskyQR based on columns",
 // by Fan et al, arXiv:2408.06311v4 [math.NA] 07 Feb 2025
 //
 template <typename T,
@@ -2471,174 +2471,50 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
     return (istat);
 }
 
-template <typename T,
-          typename I,
-          typename UA,
-          typename UR,
-          typename Istride = rocblas_stride,
-          typename S = decltype(std::real(T{}))>
-static rocblas_status rocsolver_cholqr_general_batched_argCheck(rocblas_handle handle,
-                                                                const I m,
-                                                                const I n,
-
-                                                                UA A,
-                                                                const I lda,
-                                                                const Istride strideA,
-
-                                                                UR R,
-                                                                const I ldr,
-                                                                const Istride strideR,
-
-                                                                S* const sigma,
-                                                                rocsolver_cholqr_algo const algo,
-
-                                                                I* const info,
-                                                                const I batch_count)
+template <typename T, typename I, typename U, typename S = decltype(std::real(T{}))>
+rocblas_status rocsolver_cholqr_argCheck(rocblas_handle handle,
+                                         const I m,
+                                         const I n,
+                                         U A,
+                                         const I lda,
+                                         const rocblas_stride strideA,
+                                         T* R,
+                                         const I ldr,
+                                         const rocblas_stride strideR,
+                                         S* sigma,
+                                         const rocsolver_cholqr_algo algo,
+                                         I* info,
+                                         const I batch_count = 1)
 {
-    if(handle == nullptr)
-    {
-        return (rocblas_status_invalid_handle);
-    }
+    // order is important for unit tests:
 
-    {
-        bool const is_valid_algo = (algo == rocsolver_cholqr_cholqr1)
-            || (algo == rocsolver_cholqr_cholqr2) || (algo == rocsolver_cholqr_default)
-            || (algo == rocsolver_cholqr_cholqr3_compute) || (algo == rocsolver_cholqr_cholqr3_user);
-        if(!is_valid_algo)
-        {
-            return (rocblas_status_invalid_value);
-        }
-    }
+    // 1. invalid/non-supported values
+    if(algo != rocsolver_cholqr_cholqr1 && algo != rocsolver_cholqr_cholqr2
+       && algo != rocsolver_cholqr_default && algo != rocsolver_cholqr_cholqr3_compute
+       && algo != rocsolver_cholqr_cholqr3_user)
+        return rocblas_status_invalid_value;
 
     // 2. invalid size
-    {
-        bool const is_valid_size
-            = (m >= 0) && (n >= 0) && (lda >= m) && (ldr >= n) && (batch_count >= 0);
-        if(!is_valid_size)
-        {
-            return (rocblas_status_invalid_size);
-        }
-    }
+    if(m < 0 || n < 0 || lda < m || ldr < n || batch_count < 0)
+        return rocblas_status_invalid_size;
+    // only m >= n is supported
+    if(m > 0 && m < n)
+        return rocblas_status_invalid_size;
 
-    {
-        bool const has_work = (m >= 1) && (n >= 1) && (batch_count >= 1);
-        if(has_work)
-        {
-            // 3. invalid pointers
-            bool const is_valid_pointers = (A != nullptr) && (R != nullptr) && (info != nullptr);
-            if(!is_valid_pointers)
-            {
-                return (rocblas_status_invalid_pointer);
-            }
+    // skip pointer check if querying memory size
+    if(rocblas_is_device_memory_size_query(handle))
+        return rocblas_status_continue;
 
-            // info pointer is always required when batch_count > 0
-            if(info == nullptr)
-            {
-                return (rocblas_status_invalid_pointer);
-            }
+    // 3. invalid pointers
+    if((m && n && (!A || !R)) || (batch_count > 0 && !info))
+        return rocblas_status_invalid_pointer;
+    // sigma is required for cholqr3 algorithms
+    if(batch_count > 0
+       && (algo == rocsolver_cholqr_cholqr3_compute || algo == rocsolver_cholqr_cholqr3_user)
+       && !sigma)
+        return rocblas_status_invalid_pointer;
 
-            // sigma is required for cholqr3 algorithms
-            bool const is_cholqr3 = (algo == rocsolver_cholqr_cholqr3_compute)
-                || (algo == rocsolver_cholqr_cholqr3_user);
-            if(is_cholqr3 && (sigma == nullptr))
-            {
-                return (rocblas_status_invalid_pointer);
-            }
-
-            bool const isok_mn = (m >= n);
-            if(!isok_mn)
-            {
-                return (rocblas_status_invalid_size);
-            }
-        }
-    }
-
-    return (rocblas_status_continue);
-}
-
-template <typename T, typename I, typename Istride = rocblas_stride, typename S = decltype(std::real(T{}))>
-static rocblas_status rocsolver_cholqr_strided_batched_argCheck(rocblas_handle handle,
-                                                                const I m,
-                                                                const I n,
-
-                                                                T* const A,
-                                                                const I lda,
-                                                                const Istride strideA,
-
-                                                                T* const R,
-                                                                const I ldr,
-                                                                const Istride strideR,
-
-                                                                S* const sigma,
-                                                                rocsolver_cholqr_algo const algo,
-
-                                                                I* const info,
-                                                                const I batch_count)
-{
-    return (rocsolver_cholqr_general_batched_argCheck<T, I>(handle, m, n,
-
-                                                            A, lda, strideA,
-
-                                                            R, ldr, strideR,
-
-                                                            sigma, algo, info, batch_count));
-}
-
-template <typename T, typename I, typename Istride = rocblas_stride, typename S = decltype(std::real(T{}))>
-static rocblas_status rocsolver_cholqr_batched_argCheck(rocblas_handle handle,
-                                                        const I m,
-                                                        const I n,
-
-                                                        T** const A,
-                                                        const I lda,
-
-                                                        T* const R,
-                                                        const I ldr,
-                                                        const Istride strideR,
-
-                                                        S* const sigma,
-                                                        rocsolver_cholqr_algo const algo,
-
-                                                        I* const info,
-                                                        const I batch_count)
-{
-    Istride const strideA = lda * n;
-    return (rocsolver_cholqr_general_batched_argCheck<T, I>(handle, m, n,
-
-                                                            A, lda, strideA,
-
-                                                            R, ldr, strideR,
-
-                                                            sigma, algo, info, batch_count));
-}
-
-template <typename T, typename I, typename Istride = rocblas_stride, typename S = decltype(std::real(T{}))>
-static rocblas_status rocsolver_cholqr_argCheck(rocblas_handle handle,
-                                                const I m,
-                                                const I n,
-
-                                                T* const A,
-                                                const I lda,
-
-                                                T* const R,
-                                                const I ldr,
-                                                const Istride strideR,
-
-                                                S* const sigma,
-                                                rocsolver_cholqr_algo const algo,
-
-                                                I* const info)
-{
-    I const batch_count = 1;
-    Istride const strideA = lda * n;
-
-    return (rocsolver_cholqr_strided_batched_argCheck(handle, m, n,
-
-                                                      A, lda, strideA,
-
-                                                      R, ldr, strideR,
-
-                                                      sigma, algo, info, batch_count));
+    return rocblas_status_continue;
 }
 
 template <typename T, typename I>
