@@ -211,6 +211,7 @@ TEST_F(TestMiopenConvPlanBuilder, BuildPlanThrowsForUnsupportedGraph)
                                                               builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
     MockEngineConfig mockEngineConfig;
+    EXPECT_CALL(mockEngineConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
     EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
                  hipdnn_plugin_sdk::HipdnnPluginException);
@@ -234,6 +235,7 @@ TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForUnsupportedComputeT
 TEST_F(TestGpuMiopenConvPlanBuilder, BuildPlanCreatesValidPlanForSupportedGraph)
 {
     MockEngineConfig mockEngineConfig;
+    EXPECT_CALL(mockEngineConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
     {
         auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
@@ -274,6 +276,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeFwd)
     auto range = MiopenConvPlanBuilder::getWorkspaceSizeRange(_handle, graph);
 
     MockEngineConfig mockEngineConfig;
+    EXPECT_CALL(mockEngineConfig, isValid()).WillRepeatedly(::testing::Return(false));
     HipdnnEnginePluginExecutionContext ctx;
     _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx);
 
@@ -291,6 +294,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeBwd)
     auto range = MiopenConvPlanBuilder::getWorkspaceSizeRange(_handle, graph);
 
     MockEngineConfig mockEngineConfig;
+    EXPECT_CALL(mockEngineConfig, isValid()).WillRepeatedly(::testing::Return(false));
     HipdnnEnginePluginExecutionContext ctx;
     _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx);
 
@@ -308,6 +312,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeWrw)
     auto range = MiopenConvPlanBuilder::getWorkspaceSizeRange(_handle, graph);
 
     MockEngineConfig mockEngineConfig;
+    EXPECT_CALL(mockEngineConfig, isValid()).WillRepeatedly(::testing::Return(false));
     HipdnnEnginePluginExecutionContext ctx;
     _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx);
 
@@ -326,6 +331,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitFwd)
     ASSERT_NE(range.min, range.max) << "No workspace size range available for testing";
 
     MockEngineConfig mockEngineConfig;
+    EXPECT_CALL(mockEngineConfig, isValid()).WillRepeatedly(::testing::Return(false));
     HipdnnEnginePluginExecutionContext ctx1;
     ctx1.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
     _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx1);
@@ -347,6 +353,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitBwd)
     ASSERT_NE(range.min, range.max) << "No workspace size range available for testing";
 
     MockEngineConfig mockEngineConfig;
+    EXPECT_CALL(mockEngineConfig, isValid()).WillRepeatedly(::testing::Return(false));
     HipdnnEnginePluginExecutionContext ctx1;
     ctx1.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
     _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx1);
@@ -368,6 +375,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, PlanExecutesWithMinWorkspaceLimitWrw)
     ASSERT_NE(range.min, range.max) << "No workspace size range available for testing";
 
     MockEngineConfig mockEngineConfig;
+    EXPECT_CALL(mockEngineConfig, isValid()).WillRepeatedly(::testing::Return(false));
     HipdnnEnginePluginExecutionContext ctx1;
     ctx1.setDebugMode(HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS);
     _planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx1);
@@ -415,6 +423,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, GetCustomKnobsReturnsWorkspaceSizeLimitKnob
 TEST_F(TestMiopenConvPlanBuilder, GetCustomKnobsReturnsEmptyWhenNotApplicable)
 {
     MockGraph mockGraph;
+    EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(0));
 
     auto customKnobs = _planBuilder.getCustomKnobs(_dummyHandle, mockGraph);
 
