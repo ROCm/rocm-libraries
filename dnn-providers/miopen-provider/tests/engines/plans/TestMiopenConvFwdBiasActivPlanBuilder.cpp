@@ -728,24 +728,3 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForUnsupportedGraph
                  hipdnn_plugin_sdk::HipdnnPluginException);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
-
-class TestGpuMiopenConvFwdBiasActivPlanBuilderKnobs : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-        ASSERT_EQ(miopenCreate(&_handle.miopenHandle), miopenStatusSuccess);
-    }
-
-    void TearDown() override
-    {
-        if(_handle.miopenHandle != nullptr)
-        {
-            EXPECT_EQ(miopenDestroy(_handle.miopenHandle), miopenStatusSuccess);
-        }
-    }
-
-    MiopenConvFwdBiasActivPlanBuilder _planBuilder;
-    HipdnnEnginePluginHandle _handle;
-};

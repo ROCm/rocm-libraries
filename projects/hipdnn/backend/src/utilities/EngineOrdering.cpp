@@ -20,23 +20,21 @@ void sortEngineIds(std::vector<int64_t>& engineIds)
         bool bIsMiopenDet = (b == hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID);
 
         // MIOPEN_ENGINE always comes before everything
+        // Logic to check for dupes isnt really need in the backend but its here just in case
+        // that changes in the future.
+        if(aIsMiopen != bIsMiopen)
+        {
+            return aIsMiopen;
+        }
         if(aIsMiopen)
         {
-            return true;
-        }
-        if(bIsMiopen)
-        {
-            return false;
+            return false; // They are the same engine so not strictly LT.
         }
 
         // MIOPEN_ENGINE_DETERMINISTIC always comes after everything
-        if(aIsMiopenDet)
+        if(aIsMiopenDet != bIsMiopenDet)
         {
-            return false;
-        }
-        if(bIsMiopenDet)
-        {
-            return true;
+            return !aIsMiopenDet;
         }
 
         // For other engines, preserve original order (stable_sort)
