@@ -14,12 +14,9 @@
 namespace miopen_plugin
 {
 
-MiopenEngine::MiopenEngine(int64_t id, bool deterministic)
+MiopenEngine::MiopenEngine(int64_t id)
     : _id(id)
-    , _deterministic(deterministic)
 {
-    // _deterministic will be used in Phase 2 when creating engine instances
-    (void)_deterministic;
 }
 
 int64_t MiopenEngine::id() const

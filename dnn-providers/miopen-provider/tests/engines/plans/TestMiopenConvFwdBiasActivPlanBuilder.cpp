@@ -749,6 +749,3 @@ protected:
     MiopenConvFwdBiasActivPlanBuilder _planBuilder;
     HipdnnEnginePluginHandle _handle;
 };
-
-// Deterministic knob tests removed - deterministic mode is now selected via engine choice
-// (MIOPEN_ENGINE vs MIOPEN_ENGINE_DETERMINISTIC) rather than custom knobs

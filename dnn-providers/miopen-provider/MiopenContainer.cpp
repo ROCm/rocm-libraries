@@ -41,7 +41,7 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
         // MIOPEN_ENGINE (non-deterministic, default)
         {MIOPEN_ENGINE_ID,
          []() -> std::unique_ptr<IEngine> {
-             auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_ID, false);
+             auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_ID);
              engine->addPlanBuilder(std::make_unique<MiopenBatchnormPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<MiopenBatchnormFwdTrainingPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(false));
@@ -52,7 +52,7 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
         // MIOPEN_ENGINE_DETERMINISTIC (convolution-only)
         {MIOPEN_ENGINE_DETERMINISTIC_ID,
          []() -> std::unique_ptr<IEngine> {
-             auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_DETERMINISTIC_ID, true);
+             auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_DETERMINISTIC_ID);
              // Only include conv plan builders - batchnorm doesn't support deterministic mode
              engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(true));
              engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>(true));

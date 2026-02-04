@@ -210,6 +210,3 @@ TEST_F(TestGpuMiopenConvPlanBuilder, BuildPlanCreatesValidPlanForSupportedGraph)
         EXPECT_TRUE(ctx.hasValidPlan());
     }
 }
-
-// Deterministic knob tests removed - deterministic mode is now selected via engine choice
-// (MIOPEN_ENGINE vs MIOPEN_ENGINE_DETERMINISTIC) rather than custom knobs

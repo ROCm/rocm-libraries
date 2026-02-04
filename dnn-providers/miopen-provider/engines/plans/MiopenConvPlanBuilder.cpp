@@ -355,13 +355,9 @@ void MiopenConvPlanBuilder::buildPlan(
 }
 
 std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenConvPlanBuilder::getCustomKnobs(
-    const HipdnnEnginePluginHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    // Deterministic mode is now selected via engine choice (MIOPEN_ENGINE vs MIOPEN_ENGINE_DETERMINISTIC)
-    // No custom knobs needed for convolution operations
-    (void)handle;
-    (void)opGraph;
     return {};
 }
 

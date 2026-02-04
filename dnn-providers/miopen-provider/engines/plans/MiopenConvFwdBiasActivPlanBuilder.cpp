@@ -474,8 +474,6 @@ std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenConvFwdBiasActivPlanBuil
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    (void)handle;
-    (void)opGraph;
     return {};
 }
 
