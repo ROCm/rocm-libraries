@@ -52,23 +52,16 @@ namespace rocRollerTest
         auto valueExpr = (two * five) * (two * five) + two - five;
         EXPECT_EQ(97.0, std::get<float>(Expression::evaluate(valueExpr)));
 
-        m_context->kernel()->addArgument({"value",
-                                          {DataType::Float},
-                                          DataDirection::ReadOnly,
-                                          valueExpr,
-                                          nullptr,
-                                          nullptr,
-                                          nullptr,
-                                          -1,
-                                          -1});
+        m_context->kernel()->addArgument(
+            {"value", {DataType::Float}, DataDirection::ReadOnly, valueExpr, -1, -1});
 
         KernelArguments argsActual;
 
         for(auto& arg : m_context->kernel()->arguments())
         {
-            auto value = Expression::evaluate(arg.expression);
-            EXPECT_EQ(arg.variableType, variableType(value));
-            argsActual.append(arg.name, value);
+            auto value = Expression::evaluate(arg.getExpression());
+            EXPECT_EQ(arg.getVariableType(), variableType(value));
+            argsActual.append(arg.getName(), value);
         }
 
         KernelArguments argsExpected;

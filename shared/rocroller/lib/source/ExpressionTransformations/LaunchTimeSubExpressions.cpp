@@ -85,8 +85,7 @@ namespace rocRoller
                            toString(varType),
                            toString(expr));
 
-                return kernel->addArgument(
-                    {.name = argName, .variableType = varType, .expression = expr});
+                return kernel->addArgument({argName, varType, DataDirection::ReadOnly, expr});
             }
 
             ExpressionPtr maybeLaunchEval(ExpressionPtr expr, bool ignoreComplexity)

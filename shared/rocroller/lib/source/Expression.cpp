@@ -141,11 +141,11 @@ namespace rocRoller
 
             bool operator()(AssemblyKernelArgumentPtr const& a, AssemblyKernelArgumentPtr const& b)
             {
-                if(a->name == b->name)
+                if(a->getName() == b->getName())
                     return true;
 
-                if((a->expression != nullptr) && (b->expression != nullptr))
-                    return call(a->expression, b->expression);
+                if((a->getExpression() != nullptr) && (b->getExpression() != nullptr))
+                    return call(a->getExpression(), b->getExpression());
 
                 return false;
             }
@@ -217,15 +217,42 @@ namespace rocRoller
 
             bool operator()(ScaledMatrixMultiply const& a, ScaledMatrixMultiply const& b)
             {
-                return (a.accumulationPrecision == b.accumulationPrecision) && call(a.matA, b.matA)
-                       && call(a.matB, b.matB) && call(a.matC, b.matC) && call(a.scaleA, b.scaleA)
-                       && call(a.scaleB, b.scaleB);
+                if(a.accumulationPrecision != b.accumulationPrecision)
+                    return false;
+
+                if(not call(a.matA, b.matA))
+                    return false;
+
+                if(not call(a.matB, b.matB))
+                    return false;
+
+                if(not call(a.matC, b.matC))
+                    return false;
+
+                if(not call(a.scaleA, b.scaleA))
+                    return false;
+
+                if(not call(a.scaleB, b.scaleB))
+                    return false;
+
+                return true;
             }
 
             bool operator()(MatrixMultiply const& a, MatrixMultiply const& b)
             {
-                return (a.accumulationPrecision == b.accumulationPrecision) && call(a.lhs, b.lhs)
-                       && call(a.r1hs, b.r1hs) && call(a.r2hs, b.r2hs);
+                if(a.accumulationPrecision != b.accumulationPrecision)
+                    return false;
+
+                if(not call(a.lhs, b.lhs))
+                    return false;
+
+                if(not call(a.r1hs, b.r1hs))
+                    return false;
+
+                if(not call(a.r2hs, b.r2hs))
+                    return false;
+
+                return true;
             }
 
             template <CNary Expr>
@@ -284,36 +311,76 @@ namespace rocRoller
 
             bool operator()(BitfieldCombine const& a, BitfieldCombine const& b)
             {
-                return (a.srcOffset == b.srcOffset) && (a.dstOffset == b.dstOffset)
-                       && (a.width == b.width) && (a.srcIsZero == b.srcIsZero)
-                       && (a.dstIsZero == b.dstIsZero) && call(a.lhs, b.lhs) && call(a.rhs, b.rhs);
+                if(a.srcOffset != b.srcOffset)
+                    return false;
+
+                if(a.dstOffset != b.dstOffset)
+                    return false;
+
+                if(a.width != b.width)
+                    return false;
+
+                if(a.srcIsZero != b.srcIsZero)
+                    return false;
+
+                if(a.dstIsZero != b.dstIsZero)
+                    return false;
+
+                if(not call(a.lhs, b.lhs))
+                    return false;
+
+                if(not call(a.rhs, b.rhs))
+                    return false;
+
+                return true;
             }
 
             bool operator()(BitFieldExtract const& a, BitFieldExtract const& b)
             {
-                return (a.outputDataType == b.outputDataType) && (a.offset == b.offset)
-                       && (a.width == b.width) && call(a.arg, b.arg);
+                if(a.outputDataType != b.outputDataType)
+                    return false;
+
+                if(a.offset != b.offset)
+                    return false;
+
+                if(a.width != b.width)
+                    return false;
+
+                if(not call(a.arg, b.arg))
+                    return false;
+
+                return true;
             }
 
             bool operator()(Convert const& a, Convert const& b)
             {
-                bool destinationType = (a.destinationType == b.destinationType);
-                return destinationType && call(a.arg, b.arg);
+                if(a.destinationType != b.destinationType)
+                    return false;
+
+                if(not call(a.arg, b.arg))
+                    return false;
+
+                return true;
             }
 
             bool operator()(Reinterpret const& a, Reinterpret const& b)
             {
-                bool destinationType = (a.destinationType == b.destinationType);
-                return destinationType && call(a.arg, b.arg);
+                if(a.destinationType != b.destinationType)
+                    return false;
+
+                if(not call(a.arg, b.arg))
+                    return false;
+
+                return true;
             }
 
             bool operator()(AssemblyKernelArgumentPtr const& a, AssemblyKernelArgumentPtr const& b)
             {
-                if(a->name == b->name)
+                if(a->getName() == b->getName())
                     return true;
 
-                if((a->expression != nullptr) && (b->expression != nullptr))
-                    return call(a->expression, b->expression);
+                if((a->getExpression() != nullptr) && (b->getExpression() != nullptr))
+                    return call(a->getExpression(), b->getExpression());
 
                 return false;
             }

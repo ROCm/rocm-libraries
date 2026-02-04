@@ -95,15 +95,8 @@ namespace rocRollerTest
 
         kernel->setKernelDimensions(1);
 
-        AssemblyKernelArgument arg{"bar",
-                                   {DataType::Float},
-                                   DataDirection::ReadOnly,
-                                   nullptr,
-                                   nullptr,
-                                   nullptr,
-                                   nullptr,
-                                   4,
-                                   4};
+        AssemblyKernelArgument arg{
+            "bar", {DataType::Float}, DataDirection::ReadOnly, nullptr, 4, 4};
         kernel->addArgument(arg);
 
         m_context->schedule(kernel->allocateInitialRegisters());

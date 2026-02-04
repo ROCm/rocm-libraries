@@ -743,7 +743,7 @@ TEST_CASE("launchTimeSubExpressions works", "[expression][expression-transformat
 
     auto argExpr = [&]() {
         auto arg = context->kernel()->arguments().at(0);
-        CHECK_THAT(arg.expression, IdenticalTo(ex1));
+        CHECK_THAT(arg.getExpression(), IdenticalTo(ex1));
 
         auto argPtr = std::make_shared<AssemblyKernelArgument>(arg);
         return std::make_shared<Expression::Expression>(argPtr);
@@ -763,7 +763,7 @@ TEST_CASE("launchTimeSubExpressions works", "[expression][expression-transformat
 
     auto arg2Expr = [&]() {
         auto arg = context->kernel()->arguments().at(1);
-        CHECK_THAT(arg.expression, IdenticalTo(arg1e));
+        CHECK_THAT(arg.getExpression(), IdenticalTo(arg1e));
 
         auto argPtr = std::make_shared<AssemblyKernelArgument>(arg);
         return std::make_shared<Expression::Expression>(argPtr);
@@ -771,24 +771,9 @@ TEST_CASE("launchTimeSubExpressions works", "[expression][expression-transformat
 
     CHECK_THAT(ex2_launch, IdenticalTo(argExpr + arg2Expr));
 
-    std::vector<AssemblyKernelArgument> expectedArgs{{"Multiply_0",
-                                                      DataType::Int64,
-                                                      DataDirection::ReadOnly,
-                                                      ex1,
-                                                      nullptr,
-                                                      nullptr,
-                                                      nullptr,
-                                                      0,
-                                                      8},
-                                                     {"arg1_1",
-                                                      DataType::Int32,
-                                                      DataDirection::ReadOnly,
-                                                      arg1e,
-                                                      nullptr,
-                                                      nullptr,
-                                                      nullptr,
-                                                      8,
-                                                      4}};
+    std::vector<AssemblyKernelArgument> expectedArgs{
+        {"Multiply_0", DataType::Int64, DataDirection::ReadOnly, ex1, 0, 8},
+        {"arg1_1", DataType::Int32, DataDirection::ReadOnly, arg1e, 8, 4}};
 
     CHECK(expectedArgs == context->kernel()->arguments());
 }

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -488,12 +488,19 @@ namespace rocRoller
                 if(!iot::outputting(io))
                     val = std::make_shared<AssemblyKernelArgument>();
 
-                iot::mapRequired(io, "name", val->name);
-                iot::mapRequired(io, "variableType", val->variableType);
-                iot::mapRequired(io, "dataDirection", val->dataDirection);
-                iot::mapRequired(io, "expression", val->expression);
-                iot::mapRequired(io, "offset", val->offset);
-                iot::mapRequired(io, "size", val->size);
+                auto name          = val->getName();
+                auto variableType  = val->getVariableType();
+                auto dataDirection = val->getDataDirection();
+                auto expression    = val->getExpression();
+                auto offset        = val->getOffset();
+                auto size          = val->getSize();
+
+                iot::mapRequired(io, "name", name);
+                iot::mapRequired(io, "variableType", variableType);
+                iot::mapRequired(io, "dataDirection", dataDirection);
+                iot::mapRequired(io, "expression", expression);
+                iot::mapRequired(io, "offset", offset);
+                iot::mapRequired(io, "size", size);
             }
 
             static void mapping(IO& io, AssemblyKernelArgumentPtr& val)

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -267,7 +267,7 @@ TEST_CASE("AddStreamK BasicStreamKStore", "[streamk][kernel-graph][gpu]")
 
             auto assemblyArgs = context->kernel()->arguments();
             for(int i = 1; i < assemblyArgs.size(); i++)
-                kargs.append(assemblyArgs[i].name, evaluate(assemblyArgs[i].expression));
+                kargs.append(assemblyArgs[i].getName(), evaluate(assemblyArgs[i].getExpression()));
 
             KernelInvocation kinv;
             kinv.workitemCount = {numWGs, 1, 1};
@@ -466,7 +466,7 @@ TEST_CASE("AddStreamK BasicStreamKLoad", "[streamk][kernel-graph][gpu]")
 
             auto assemblyArgs = context->kernel()->arguments();
             for(int i = 2; i < assemblyArgs.size(); i++)
-                kargs.append(assemblyArgs[i].name, evaluate(assemblyArgs[i].expression));
+                kargs.append(assemblyArgs[i].getName(), evaluate(assemblyArgs[i].getExpression()));
 
             KernelInvocation kinv;
             kinv.workitemCount = {numWGs, 1, 1};
