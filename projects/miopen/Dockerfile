@@ -1,16 +1,15 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# ============================================================================
+# Common base image with all dependencies
+# ============================================================================
+FROM ubuntu:24.04 AS base
 
 ARG PROJ="miopen"
 ARG CCACHE_SECONDARY_STORAGE=""
 ARG CCACHE_DIR="/tmp"
 ARG CCACHE_COMMIT=8c107aada09df2a40930d7064bbec8120ee76c91
-
-# ============================================================================
-# Common base image with all dependencies
-# ============================================================================
-FROM ubuntu:24.04 AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HIP_PLATFORM=amd
@@ -135,6 +134,10 @@ ARG BUILD_JOBS=64
 ARG ROCM_LIBRARIES_REF=default
 ARG ROCM_SYSTEMS_REF=default
 
+ARG PROJ="miopen"
+ARG USE_FIN="OFF"
+ARG PREFIX=/usr/local
+
 RUN git config --global user.email "docker@build.local" && \
     git config --global user.name "Docker Build"
 
@@ -241,8 +244,6 @@ ADD ${PROJ}/dev-requirements.txt /dev-requirements.txt
 # rbuild is used to trigger build of requirements.txt, dev-requirements.txt.
 # Composable Kernel install separated from rbuild 
 # Additionally remove components that are already installed by other compoenents as a part of the source build.
-ARG USE_FIN="OFF"
-ARG PREFIX=/usr/local
 RUN cd / && \
     sed -i '/composablekernel/d; /half/d; /nlohmann/d' /requirements.txt && \
     if [ "$USE_FIN" = "ON" ]; then \
