@@ -163,7 +163,8 @@ TEST(TestHipblasltEngine, GetDetailsReturnsSerializedEngineDetails)
     hipdnnPluginConstData_t result;
     engine.getDetails(dummyHandle, result);
 
-    hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(result.ptr, result.size);
+    hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(result.ptr,
+                                                                              result.size);
     EXPECT_EQ(engineDetails.engineId(), hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
 }
 

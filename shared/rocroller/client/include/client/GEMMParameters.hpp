@@ -195,6 +195,8 @@ namespace rocRoller
                 std::string scheduler;
                 std::string schedulerCost;
 
+                bool tailLoops = true;
+
                 // TODO Use StreamKConfig
                 bool streamK               = false;
                 bool streamKTwoTile        = false;

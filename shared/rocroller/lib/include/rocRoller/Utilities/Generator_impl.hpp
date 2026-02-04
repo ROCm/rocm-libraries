@@ -451,8 +451,8 @@ namespace rocRoller
             co_yield func(val);
     }
 
-    template <typename T>
-    Generator<T> take(size_t n, Generator<T> gen)
+    template <std::ranges::input_range T>
+    Generator<std::ranges::range_value_t<T>> take(size_t n, T gen)
     {
         auto it = gen.begin();
         for(size_t i = 0; i < n && it != gen.end(); ++i, ++it)
@@ -493,6 +493,52 @@ namespace rocRoller
     inline constexpr bool empty(Range range)
     {
         return range.begin() == range.end();
+    }
+
+    template <std::ranges::forward_range ARange, std::ranges::forward_range... Rest>
+    Generator<std::tuple<std::ranges::range_value_t<ARange>, std::ranges::range_value_t<Rest>...>>
+        zip(ARange const& a, Rest const&... rest)
+    {
+        if constexpr(sizeof...(Rest) == 0)
+        {
+            for(auto const& el : a)
+                co_yield std::make_tuple(el);
+        }
+        else
+        {
+            auto aIter = a.begin();
+
+            auto restGen  = zip(rest...);
+            auto restIter = restGen.begin();
+
+            for(; aIter != a.end() && restIter != restGen.end(); ++aIter, ++restIter)
+            {
+                co_yield std::tuple_cat(std::make_tuple(*aIter), *restIter);
+            }
+        }
+    }
+
+    template <std::ranges::input_range ARange, std::ranges::input_range... Rest>
+    Generator<std::tuple<std::ranges::range_value_t<ARange>, std::ranges::range_value_t<Rest>...>>
+        zip(ARange&& a, Rest&&... rest)
+    {
+        if constexpr(sizeof...(Rest) == 0)
+        {
+            for(auto& el : a)
+                co_yield std::make_tuple(el);
+        }
+        else
+        {
+            auto aIter = a.begin();
+
+            auto restGen  = zip(rest...);
+            auto restIter = restGen.begin();
+
+            for(; aIter != a.end() && restIter != restGen.end(); ++aIter, ++restIter)
+            {
+                co_yield std::tuple_cat(std::make_tuple(*aIter), *restIter);
+            }
+        }
     }
 
 }

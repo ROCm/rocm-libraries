@@ -249,6 +249,7 @@ class GEMMSolution:
     streamKTwoTileDPFirst: bool = False
 
     architecture: GPUArchitectureTarget = GPUArchitectureTarget()
+    tailLoops: bool = True
 
     version: str = ""
 
