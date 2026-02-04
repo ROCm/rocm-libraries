@@ -143,11 +143,7 @@ void testing_axpyi(const Arguments& argus)
         CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * N, hipMemcpyDeviceToHost));
 
         // CPU
-        for(int i = 0; i < nnz; ++i)
-        {
-            hy_gold[hxInd[i] - idx_base]
-                = hy_gold[hxInd[i] - idx_base] + testing_mult(h_alpha, hxVal[i]);
-        }
+        host_axpyi(nnz, h_alpha, hxVal.data(), hxInd.data(), hy_gold.data(), idx_base);
 
         unit_check_general(1, N, 1, hy_gold.data(), hy_1.data());
         unit_check_general(1, N, 1, hy_gold.data(), hy_2.data());

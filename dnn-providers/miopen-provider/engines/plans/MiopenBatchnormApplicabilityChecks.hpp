@@ -15,7 +15,7 @@
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 // --- Tensor Descriptor Value Object ---
@@ -131,6 +131,12 @@ void checkBatchnormFwdTrainingTensorConfigSupported(
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
+void checkBatchnormFwdTrainingActivationTensorConfigSupported(
+    const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
 void checkBatchnormBackwardTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
@@ -179,4 +185,4 @@ std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedIntermedia
 
 } // namespace bn_type_configs
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin
