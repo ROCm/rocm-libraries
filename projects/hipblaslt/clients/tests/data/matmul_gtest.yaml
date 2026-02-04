@@ -738,7 +738,20 @@ Tests:
     - { M:  512, N:  512, K:  512 }
     - { M:  960, N: 1024, K: 1024 }
     - { M: 1024, N: 1024, K: 1024 }
-  gpu_arch: '9(0a|42)'
+  gpu_arch: '(90a|942|1250)'
+
+- name: matmul_bf16_fp32dst_edge
+  category: quick
+  function:
+    matmul: *hpa_half_bf16_fp32dst_precision
+  transA_transB: *deepbench_transA_transB_range
+  alpha: 1
+  beta: 0
+  matrix_size:
+    - { M:  1, N:  1, K:  1 }
+    - { M:  127, N:  127, K:  127 }
+    - { M:  128, N:  128, K:  128 }
+  gpu_arch: '1250'
 
 - name: matmul_small2
   category: pre_checkin
@@ -987,9 +1000,13 @@ Tests:
   function:
     matmul: *hpa_half_precisions_fp_16_32_dst
   matrix_size:
-  M: [128, 129]
-  N: [128, 129]
-  K: [128, 129]
+    - { M: 1, N: 1, K: 1 }
+    - { M: 127, N: 127, K: 127 }
+    - { M: 128, N: 128, K: 128 }
+    - { M: 129, N: 129, K: 128 }
+    - { M: 128, N: 129, K: 129 }
+    - { M: 129, N: 128, K: 129 }
+    - { M: 129, N: 129, K: 129 }
   transA_transB: *transA_transB_range
   alpha: [ 1.0, 2.0 ]
   beta: [ 0.0, 2.0 ]
