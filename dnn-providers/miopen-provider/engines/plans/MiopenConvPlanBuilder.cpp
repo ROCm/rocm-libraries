@@ -327,8 +327,6 @@ void MiopenConvPlanBuilder::buildPlan(
                 + std::to_string(opGraph.nodeCount()) + " nodes");
     }
 
-    // Use deterministic mode from plan builder configuration
-    bool deterministicEnabled = _deterministic;
     (void)engineConfig; // engineConfig parameter kept for interface compatibility
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
     const auto nodeName = nodeWrapper.name();
@@ -337,15 +335,15 @@ void MiopenConvPlanBuilder::buildPlan(
     {
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
         HIPDNN_LOG_INFO("Building convolution fwd plan for node: {}", nodeName);
-        buildPlanFwd(handle, opGraph, executionContext, deterministicEnabled);
+        buildPlanFwd(handle, opGraph, executionContext, _deterministic);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
         HIPDNN_LOG_INFO("Building convolution bwd plan for node: {}", nodeName);
-        buildPlanBwd(handle, opGraph, executionContext, deterministicEnabled);
+        buildPlanBwd(handle, opGraph, executionContext, _deterministic);
         break;
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
         HIPDNN_LOG_INFO("Building convolution wrw plan for node: {}", nodeName);
-        buildPlanWrw(handle, opGraph, executionContext, deterministicEnabled);
+        buildPlanWrw(handle, opGraph, executionContext, _deterministic);
         break;
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(
