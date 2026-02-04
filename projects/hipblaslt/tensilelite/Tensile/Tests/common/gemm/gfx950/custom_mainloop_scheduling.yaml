@@ -648,9 +648,9 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Range: [[224], [128], [1], [64, 64, 256]]    # - Range: [[MT0], [MT1], [1], [DU, DU, 4*DU]]
-          - Range: [[224], [128], [1], [1,1,64]]         # - Range: [[MT0], [MT1], [1], [1,1,DU]]
-          - Range: [[224], [128], [1], [32, 64, 256]]    # - Range: [[MT0], [MT1], [1], [DU/2, DU, 4*DU]]
+          - Range: [[224], [128], [1], [64, 64, 256]]
+          - Range: [[224], [128], [1], [1,1,64]]
+          - Range: [[224], [128], [1], [32, 64, 256]]
         - BiasTypeArgs: ['b']
   ########################################
   # HHS NN - standard
