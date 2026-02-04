@@ -2,15 +2,17 @@
 // SPDX-License-Identifier: MIT
 
 #include "test_cshuffle_epilogue_common.hpp"
-#include <algorithm>
-#include <cmath>
-#include <set>
-#include <vector>
 
 using namespace ck_tile;
 
-// Half precision test configuration for scale tests
-using HalfConfig       = TileConfig<half_t, 256, 256, 2, 2, 32, 32, 8>;
+namespace {
+constexpr float kScaleEpsilon = 0.001F;
+constexpr float kTestScaleFactor = 2.0F;
+constexpr ck_tile::index_t kScaledColIndex = 1;
+} // namespace
+
+// Half precision test configuration for scale tests (128x128 fits in unique fp16 range)
+using HalfConfig       = TileConfig<half_t, 128, 128, 2, 2, 32, 32, 8>;
 using ScaleTestProblem = MakeProblem<HalfConfig>;
 
 class CShuffleEpilogueScaleTest : public ::testing::Test
@@ -32,7 +34,7 @@ TEST_F(CShuffleEpilogueScaleTest, HalfTestWithRowColScale)
         std::min(HalfConfig::kMPerBlock, HalfConfig::MPerXdl * HalfConfig::MWave);
 
     constexpr index_t kUnscaledCol = 0;
-    constexpr index_t kScaledCol   = verification::kScaledColIndex;
+    constexpr index_t kScaledCol   = kScaledColIndex;
 
     size_t col0_unchanged_count = 0;
     size_t col1_scaled_count    = 0;
@@ -42,20 +44,20 @@ TEST_F(CShuffleEpilogueScaleTest, HalfTestWithRowColScale)
         const size_t col0_idx = static_cast<size_t>(row * HalfConfig::kNPerBlock + kUnscaledCol);
         const size_t col1_idx = static_cast<size_t>(row * HalfConfig::kNPerBlock + kScaledCol);
 
-        const auto unscaled_col0 = type_convert<float>(results.unscaled.output[col0_idx]);
-        const auto scaled_col0   = type_convert<float>(results.scaled.output[col0_idx]);
-        const auto unscaled_col1 = type_convert<float>(results.unscaled.output[col1_idx]);
-        const auto scaled_col1   = type_convert<float>(results.scaled.output[col1_idx]);
+        const auto unscaled_col0 = type_convert<float>(results.first.mData[col0_idx]);
+        const auto scaled_col0   = type_convert<float>(results.second.mData[col0_idx]);
+        const auto unscaled_col1 = type_convert<float>(results.first.mData[col1_idx]);
+        const auto scaled_col1   = type_convert<float>(results.second.mData[col1_idx]);
 
         // Count rows where column 0 is unchanged (scale = kIdentityScale)
-        if(std::abs(scaled_col0 - unscaled_col0) < verification::kScaleEpsilon)
+        if(std::abs(scaled_col0 - unscaled_col0) < kScaleEpsilon)
         {
             col0_unchanged_count++;
         }
 
         // Count rows where column 1 is scaled by kTestScaleFactor
-        const float expected_scaled = unscaled_col1 * verification::kTestScaleFactor;
-        if(std::abs(scaled_col1 - expected_scaled) < verification::kScaleEpsilon)
+        const float expected_scaled = unscaled_col1 * kTestScaleFactor;
+        if(std::abs(scaled_col1 - expected_scaled) < kScaleEpsilon)
         {
             col1_scaled_count++;
         }
@@ -77,8 +79,8 @@ TEST_F(CShuffleEpilogueScaleTest, HalfTestWithTensorScale)
                                              ScaleType::Tensor>();
 
     // Convert both to sorted vectors using helper
-    auto unscaled_vals = convert_and_sort_output(results.unscaled.output);
-    auto scaled_vals   = convert_and_sort_output(results.scaled.output);
+    auto unscaled_vals = convert_and_sort_output(results.first);
+    auto scaled_vals   = convert_and_sort_output(results.second);
 
     // With Tensor scaling (m_scale=kTestScaleFactor, n_scale=kIdentityScale),
     // all values should be scaled by kTestScaleFactor
@@ -86,10 +88,10 @@ TEST_F(CShuffleEpilogueScaleTest, HalfTestWithTensorScale)
 
     for(size_t i = 0; i < unscaled_vals.size(); ++i)
     {
-        const float expected = unscaled_vals[i] * verification::kTestScaleFactor;
-        EXPECT_NEAR(scaled_vals[i], expected, verification::kScaleEpsilon)
+        const float expected = unscaled_vals[i] * kTestScaleFactor;
+        EXPECT_NEAR(scaled_vals[i], expected, kScaleEpsilon)
             << "Tensor scale: sorted scaled[" << i << "]=" << scaled_vals[i] << " should be "
-            << verification::kTestScaleFactor << "x " << unscaled_vals[i];
+            << kTestScaleFactor << "x " << unscaled_vals[i];
     }
 }
 

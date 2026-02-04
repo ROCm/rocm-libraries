@@ -1,18 +1,32 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+/**
+ * CShuffleEpilogue Test Infrastructure
+ *
+ * File organization:
+ * - test_cshuffle_epilogue_common.hpp: TileConfig template, verification helpers,
+ *   typed test suite definition (this file)
+ * - test_cshuffle_epilogue_util.hpp: Kernel templates, launch helpers, test runners
+ * - test_cshuffle_epilogue_fp16.cpp: FP16 tile configurations
+ * - test_cshuffle_epilogue_fp8.cpp: FP8 tile configurations (standard)
+ * - test_cshuffle_epilogue_fp8_gfx950.cpp: FP8 configurations for gfx950
+ * - test_cshuffle_epilogue_scale.cpp: RowCol and Tensor scaling tests
+ */
+
 #pragma once
 
 #include "test_cshuffle_epilogue_util.hpp"
 #include <algorithm>
 #include <cmath>
 #include <gtest/gtest.h>
-#include <hip/hip_runtime.h>
 #include <vector>
 
-// Test configuration template for parameterized tests
-// MfmaDataType is used for MFMA instruction selection (determines valid KPerXdl values)
-// ODataType is the output data type
+// TileConfig defines a test configuration for CShuffleEpilogue.
+// - ODataType_: The output data type written to global memory
+// - MfmaDataType_: The data type used for MFMA instruction selection (determines valid KPerXdl)
+//   Defaults to ODataType_ but can differ (e.g., FP8 MFMA tiles with FP16 output
+//   to avoid FP8 range limitations in test verification)
 template <typename ODataType_,
           ck_tile::index_t MPerBlock_,
           ck_tile::index_t NPerBlock_,
@@ -50,10 +64,10 @@ using MakeProblem = ck_tile::SimpleCShuffleEpilogueProblem<typename Config::Mfma
                                                            Config::NPerXdl,
                                                            Config::KPerXdl>;
 
-// Verification helper: check that output contains valid data from the epilogue shuffle
-// The C-shuffle epilogue broadcasts thread-local values to multiple output locations,
-// so we verify: no NaN/zeros, reasonable value range, and at least kBlockSize unique values
-// (since each thread generates unique values)
+// Verification helper: check that output contains valid data from the epilogue shuffle.
+// The C-shuffle epilogue loads thread-local values and writes them to output through LDS.
+// We verify: correct output size, no NaN values, no unwritten zeros, and at least
+// kBlockSize unique values (one per thread).
 template <typename DataType,
           ck_tile::index_t kMPerBlock,
           ck_tile::index_t kNPerBlock,
@@ -62,76 +76,28 @@ void verify_permutation_output(const std::vector<float>& sorted_vals)
 {
     constexpr size_t expected_size = static_cast<size_t>(kMPerBlock * kNPerBlock);
 
-    // Verify output size matches expected
-    ASSERT_EQ(sorted_vals.size(), expected_size) << "CShuffleEpilogue output size mismatch";
+    ASSERT_EQ(sorted_vals.size(), expected_size) << "Output size mismatch";
 
     // Verify no NaN values
     for(size_t i = 0; i < sorted_vals.size(); ++i)
     {
-        ASSERT_FALSE(std::isnan(sorted_vals[i]))
-            << "CShuffleEpilogue output contains NaN at index " << i;
+        ASSERT_FALSE(std::isnan(sorted_vals[i])) << "NaN at index " << i;
     }
 
-    // Verify all values are positive (no zeros from unwritten memory)
-    EXPECT_GT(sorted_vals.front(), 0.0f) << "CShuffleEpilogue output contains zero values";
-
-    // Count unique values and track occurrence counts for uniformity check
-    std::vector<size_t> occurrence_counts;
-    size_t current_count = 1;
+    // Count unique values using bit-exact comparison (sorted fp32 values from fp16 should be distinct)
+    size_t num_unique = 1;
     for(size_t i = 1; i < sorted_vals.size(); ++i)
     {
-        if(std::abs(sorted_vals[i] - sorted_vals[i - 1]) > ck_tile::verification::kScaleEpsilon)
+        if(ck_tile::bit_cast<uint32_t>(sorted_vals[i]) !=
+           ck_tile::bit_cast<uint32_t>(sorted_vals[i - 1]))
         {
-            occurrence_counts.push_back(current_count);
-            current_count = 1;
-        }
-        else
-        {
-            ++current_count;
+            ++num_unique;
         }
     }
-    occurrence_counts.push_back(current_count); // Don't forget the last value
 
-    const size_t num_unique = occurrence_counts.size();
-
-    // Each thread generates unique values, so we expect at least kBlockSize unique values
-    // This verifies that all threads contributed to the output
-    EXPECT_GE(num_unique, static_cast<size_t>(kBlockSize))
-        << "CShuffleEpilogue output has fewer unique values (" << num_unique
-        << ") than threads per block (" << kBlockSize << ")";
-
-    // Check if distribution is uniform (all values appear same number of times)
-    const size_t first_count = occurrence_counts[0];
-    bool is_uniform          = true;
-    size_t min_count         = first_count;
-    size_t max_count         = first_count;
-
-    for(size_t count : occurrence_counts)
-    {
-        if(count != first_count)
-        {
-            is_uniform = false;
-        }
-        min_count = std::min(min_count, count);
-        max_count = std::max(max_count, count);
-    }
-
-    if(is_uniform)
-    {
-        // Uniform distribution: verify exact counts
-        const size_t expected_count = expected_size / num_unique;
-        EXPECT_EQ(first_count, expected_count) << "Uniform distribution but count " << first_count
-                                               << " != expected " << expected_count;
-        EXPECT_EQ(expected_size % num_unique, 0u)
-            << "Output size " << expected_size << " not evenly divisible by " << num_unique;
-    }
-    else
-    {
-        // Non-uniform distribution: log for investigation
-        std::cout << "  [INFO] Non-uniform distribution detected: " << num_unique
-                  << " unique values, counts range [" << min_count << ", " << max_count << "]"
-                  << std::endl;
-    }
+    // Verify exact permutation: all input values should appear exactly once in output
+    EXPECT_EQ(num_unique, expected_size)
+        << "Expected exact permutation with " << expected_size << " unique values, got " << num_unique;
 }
 
 // Type-parameterized test fixture
@@ -153,11 +119,12 @@ TYPED_TEST_P(CShuffleEpilogueTypedTest, BasicTest)
     using TestProblem                     = MakeProblem<Config>;
     constexpr ck_tile::index_t kBlockSize = TestProblem::kBlockSize;
 
-    auto test_result = ck_tile::run_cshuffle_epilogue_test<TestProblem, kMPerBlock, kNPerBlock>(
-        ck_tile::ScaleType::None);
+    auto host_output =
+        ck_tile::run_cshuffle_epilogue_test<TestProblem, kMPerBlock, kNPerBlock>(
+            ck_tile::ScaleType::None);
 
-    // Convert output to sorted vector and verify
-    auto output_vals = ck_tile::convert_and_sort_output(test_result.output);
+    // Convert output to sorted vector and verify using existing helper
+    auto output_vals = ck_tile::convert_and_sort_output(host_output);
     verify_permutation_output<DataType, kMPerBlock, kNPerBlock, kBlockSize>(output_vals);
 }
 
