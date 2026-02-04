@@ -430,58 +430,46 @@ inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCall
     hipdnn_data_sdk::logging::registerLoggingCallback(fn);
 
     s_loggingInitialized = true;
-    HIPDNN_LOG_INFO("Frontend logging initialized via callback.");
+
+    // Use HIPDNN_SDK_LOG_INFO to avoid re-entrant call
+    HIPDNN_SDK_LOG_INFO("Frontend logging initialized via callback.");
 
     return 0;
 }
 
-// Frontend logging macros that auto-initialize logging and always use stream-style.
-// These macros use a hardcoded component name "hipdnn_frontend" so they work
-// regardless of whether COMPONENT_NAME is defined by the consuming target.
+// ============================================================================
+// Frontend Logging Macros (HIPDNN_FE_LOG_*)
+// ============================================================================
+// These macros auto-initialize logging on first use, then forward to SDK macros.
+// Requires COMPONENT_NAME to be defined (propagated via CMake INTERFACE).
 // Usage: HIPDNN_FE_LOG_INFO("Message " << value);
 
-#define HIPDNN_FE_LOG_INFO(msg)                                                               \
-    do                                                                                        \
-    {                                                                                         \
-        hipdnn_frontend::initializeFrontendLogging();                                         \
-        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO))                    \
-        {                                                                                     \
-            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_INFO, "hipdnn_frontend") \
-                << msg;                                                                       \
-        }                                                                                     \
+#define HIPDNN_FE_LOG_INFO(msg)                       \
+    do                                                \
+    {                                                 \
+        hipdnn_frontend::initializeFrontendLogging(); \
+        HIPDNN_SDK_LOG_INFO(msg);                     \
     } while(0)
 
-#define HIPDNN_FE_LOG_WARN(msg)                                                               \
-    do                                                                                        \
-    {                                                                                         \
-        hipdnn_frontend::initializeFrontendLogging();                                         \
-        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_WARN))                    \
-        {                                                                                     \
-            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_WARN, "hipdnn_frontend") \
-                << msg;                                                                       \
-        }                                                                                     \
+#define HIPDNN_FE_LOG_WARN(msg)                       \
+    do                                                \
+    {                                                 \
+        hipdnn_frontend::initializeFrontendLogging(); \
+        HIPDNN_SDK_LOG_WARN(msg);                     \
     } while(0)
 
-#define HIPDNN_FE_LOG_ERROR(msg)                                                               \
-    do                                                                                         \
-    {                                                                                          \
-        hipdnn_frontend::initializeFrontendLogging();                                          \
-        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_ERROR))                    \
-        {                                                                                      \
-            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_ERROR, "hipdnn_frontend") \
-                << msg;                                                                        \
-        }                                                                                      \
+#define HIPDNN_FE_LOG_ERROR(msg)                      \
+    do                                                \
+    {                                                 \
+        hipdnn_frontend::initializeFrontendLogging(); \
+        HIPDNN_SDK_LOG_ERROR(msg);                    \
     } while(0)
 
-#define HIPDNN_FE_LOG_FATAL(msg)                                                               \
-    do                                                                                         \
-    {                                                                                          \
-        hipdnn_frontend::initializeFrontendLogging();                                          \
-        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_FATAL))                    \
-        {                                                                                      \
-            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_FATAL, "hipdnn_frontend") \
-                << msg;                                                                        \
-        }                                                                                      \
+#define HIPDNN_FE_LOG_FATAL(msg)                      \
+    do                                                \
+    {                                                 \
+        hipdnn_frontend::initializeFrontendLogging(); \
+        HIPDNN_SDK_LOG_FATAL(msg);                    \
     } while(0)
 
 }

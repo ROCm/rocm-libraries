@@ -13,16 +13,19 @@
 #include <type_traits>
 
 // ============================================================================
-// Logging Infrastructure
+// SDK Logging Infrastructure
 // ============================================================================
-// This header provides logging macros for frontend, plugins, and SDKs.
+// This header provides the core logging infrastructure for hipDNN.
 //
-// Two modes are supported:
-// 1. Stream-style (default): HIPDNN_LOG_INFO("msg " << value)
-// 2. Spdlog-style (opt-in): HIPDNN_LOG_INFO("msg {}", value)
+// HIPDNN_SDK_LOG_* macros:
+// - Stream-style only: HIPDNN_SDK_LOG_INFO("msg " << value)
+// - Assumes callback is already registered (no auto-init)
+// - Uses COMPONENT_NAME for component identification
 //
-// To use spdlog-style, define HIPDNN_PLUGIN_USE_SPDLOG before including.
-// Plugin providers (miopen, hipblaslt) typically define this via CMake.
+// Other components should use their scoped macros:
+// - Frontend: HIPDNN_FRONTEND_LOG_* (auto-inits, then calls SDK logging)
+// - Plugins: HIPDNN_PLUGIN_LOG_* (dual-mode: spdlog or stream)
+// - Backend: Has its own logging implementation
 
 namespace hipdnn_data_sdk::logging
 {
@@ -119,14 +122,14 @@ inline bool isLoggingCallbackRegistered()
 } // namespace hipdnn_data_sdk::logging
 
 // ============================================================================
-// Internal Data SDK Logging Macros
+// SDK Logging Macros (HIPDNN_SDK_LOG_*)
 // ============================================================================
+// These macros are the core stream-style logging for hipDNN SDK.
+// - Always stream-style: HIPDNN_SDK_LOG_INFO("msg " << value)
+// - Assumes callback is registered (no auto-init)
+// - Uses COMPONENT_NAME macro for component identification
 //
-// These macros are for use ONLY within data_sdk headers. They are always
-// stream-style and are never affected by HIPDNN_PLUGIN_USE_SPDLOG.
-// Use HIPDNN_SDK_LOG_* in data_sdk code, not HIPDNN_LOG_*.
-//
-// Usage:
+// Usage in data_sdk code:
 //   HIPDNN_SDK_LOG_WARN("Warning: " << someValue);
 //   HIPDNN_SDK_LOG_ERROR("Error in " << functionName);
 
@@ -186,155 +189,3 @@ inline bool isLoggingCallbackRegistered()
     {                             \
     } while(0)
 #endif // COMPONENT_NAME
-
-// ============================================================================
-// Logging Macros
-// ============================================================================
-
-#ifdef HIPDNN_PLUGIN_USE_SPDLOG
-// ============================================================================
-// Spdlog-style logging (for plugin providers that opt-in)
-// ============================================================================
-// Usage: HIPDNN_LOG_INFO("Value: {}", someValue);
-
-#include "CallbackSink.hpp"
-#include <iostream>
-#include <spdlog/async.h>
-#include <spdlog/sinks/basic_file_sink.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
-#include <spdlog/spdlog.h>
-
-#ifndef COMPONENT_NAME
-#define _HIPDNN_SPDLOG_ACTION(level, ...) \
-    do                                    \
-    {                                     \
-    } while(0)
-#else
-#define _HIPDNN_SPDLOG_ACTION(spdlog_level, ...)       \
-    do                                                 \
-    {                                                  \
-        auto logger = spdlog::get(COMPONENT_NAME);     \
-        if(logger && logger->should_log(spdlog_level)) \
-        {                                              \
-            logger->log(spdlog_level, __VA_ARGS__);    \
-        }                                              \
-    } while(0)
-#endif // COMPONENT_NAME
-
-#define HIPDNN_LOG_TRACE(...) _HIPDNN_SPDLOG_ACTION(spdlog::level::level_enum::trace, __VA_ARGS__)
-#define HIPDNN_LOG_INFO(...) _HIPDNN_SPDLOG_ACTION(spdlog::level::level_enum::info, __VA_ARGS__)
-#define HIPDNN_LOG_WARN(...) _HIPDNN_SPDLOG_ACTION(spdlog::level::level_enum::warn, __VA_ARGS__)
-#define HIPDNN_LOG_ERROR(...) _HIPDNN_SPDLOG_ACTION(spdlog::level::level_enum::err, __VA_ARGS__)
-#define HIPDNN_LOG_FATAL(...) \
-    _HIPDNN_SPDLOG_ACTION(spdlog::level::level_enum::critical, __VA_ARGS__)
-
-namespace hipdnn::logging
-{
-
-inline void initializeCallbackLogging(const std::string& componentName,
-                                      hipdnnCallback_t callbackFunction)
-{
-    try
-    {
-        static std::mutex s_callbackInitMutex;
-        std::lock_guard<std::mutex> lock(s_callbackInitMutex);
-
-        if(spdlog::get(componentName))
-        {
-            return;
-        }
-
-        if(!spdlog::thread_pool())
-        {
-            spdlog::init_thread_pool(8192, 1);
-        }
-
-        auto callbackLogger = hipdnn_data_sdk::logging::createAsyncCallbackLoggerMt(
-            callbackFunction, componentName);
-        spdlog::register_logger(callbackLogger);
-    }
-    catch(const spdlog::spdlog_ex& ex)
-    {
-        std::cerr << "hipDNN SDK: Failed to initialize callback logger for component '"
-                  << componentName << "'. Error: " << ex.what() << "\n";
-    }
-}
-
-} // namespace hipdnn::logging
-
-#else
-// ============================================================================
-// Stream-style logging (default for frontend, SDKs, and their tests)
-// ============================================================================
-// Usage: HIPDNN_LOG_INFO("Value: " << someValue);
-
-#ifndef COMPONENT_NAME
-#define HIPDNN_LOG_INFO(msg) \
-    do                       \
-    {                        \
-    } while(0)
-#define HIPDNN_LOG_WARN(msg) \
-    do                       \
-    {                        \
-    } while(0)
-#define HIPDNN_LOG_ERROR(msg) \
-    do                        \
-    {                         \
-    } while(0)
-#define HIPDNN_LOG_FATAL(msg) \
-    do                        \
-    {                         \
-    } while(0)
-#else
-#define HIPDNN_LOG_INFO(msg)                                                                       \
-    do                                                                                             \
-    {                                                                                              \
-        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO))                         \
-        {                                                                                          \
-            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_INFO, COMPONENT_NAME) << msg; \
-        }                                                                                          \
-    } while(0)
-
-#define HIPDNN_LOG_WARN(msg)                                                                       \
-    do                                                                                             \
-    {                                                                                              \
-        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_WARN))                         \
-        {                                                                                          \
-            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_WARN, COMPONENT_NAME) << msg; \
-        }                                                                                          \
-    } while(0)
-
-#define HIPDNN_LOG_ERROR(msg)                                                               \
-    do                                                                                      \
-    {                                                                                       \
-        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_ERROR))                 \
-        {                                                                                   \
-            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_ERROR, COMPONENT_NAME) \
-                << msg;                                                                     \
-        }                                                                                   \
-    } while(0)
-
-#define HIPDNN_LOG_FATAL(msg)                                                               \
-    do                                                                                      \
-    {                                                                                       \
-        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_FATAL))                 \
-        {                                                                                   \
-            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_FATAL, COMPONENT_NAME) \
-                << msg;                                                                     \
-        }                                                                                   \
-    } while(0)
-#endif // COMPONENT_NAME
-
-namespace hipdnn::logging
-{
-
-inline void initializeCallbackLogging([[maybe_unused]] const std::string& componentName,
-                                      hipdnnCallback_t callbackFunction)
-{
-    hipdnn_data_sdk::logging::initializeLogLevel();
-    hipdnn_data_sdk::logging::registerLoggingCallback(callbackFunction);
-}
-
-} // namespace hipdnn::logging
-
-#endif // HIPDNN_PLUGIN_USE_SPDLOG

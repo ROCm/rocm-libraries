@@ -18,7 +18,6 @@ target_compile_options(hipblaslt_plugin_integration_tests PRIVATE ${HIPDNN_WARNI
 target_compile_definitions(
     hipblaslt_plugin_integration_tests
     PRIVATE
-        COMPONENT_NAME="hipblaslt_integration_tests"
         PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/hipblaslt_plugin"
 )
 

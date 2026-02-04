@@ -122,8 +122,8 @@ namespace hipdnn_data_sdk::utilities
 /**
  * @brief Wrapper for streaming hip_fp8_e4m3 to ostream
  *
- * Usage: std::cout << streamFp8(value);
- * Usage: HIPDNN_LOG_INFO("value: " << streamFp8(fp8_val));
+ * Usage: std::cout << StreamFp8(value);
+ * Usage: HIPDNN_LOG_INFO("value: " << StreamFp8(fp8_val));
  */
 class StreamFp8
 {
@@ -141,10 +141,5 @@ public:
 private:
     hip_fp8_e4m3 _val;
 };
-
-inline StreamFp8 streamFp8(hip_fp8_e4m3 val)
-{
-    return StreamFp8(val);
-}
 
 } // namespace hipdnn_data_sdk::utilities

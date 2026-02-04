@@ -121,8 +121,8 @@ namespace hipdnn_data_sdk::utilities
 /**
  * @brief Wrapper for streaming half (fp16) to ostream
  *
- * Usage: std::cout << streamFp16(value);
- * Usage: HIPDNN_LOG_INFO("value: " << streamFp16(half_val));
+ * Usage: std::cout << StreamFp16(value);
+ * Usage: HIPDNN_LOG_INFO("value: " << StreamFp16(half_val));
  */
 class StreamFp16
 {
@@ -140,10 +140,5 @@ public:
 private:
     half _val;
 };
-
-inline StreamFp16 streamFp16(half val)
-{
-    return StreamFp16(val);
-}
 
 } // namespace hipdnn_data_sdk::utilities

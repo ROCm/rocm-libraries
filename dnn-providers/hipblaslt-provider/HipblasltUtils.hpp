@@ -8,19 +8,20 @@
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_data_sdk/flatbuffer_utilities/TensorAttributesWrapper.hpp>
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <string>
 
-#define LOG_ON_HIPBLASLT_FAILURE(status)                                                           \
-    do                                                                                             \
-    {                                                                                              \
-        if(status != HIPBLAS_STATUS_SUCCESS)                                                       \
-        {                                                                                          \
-            HIPDNN_LOG_ERROR("hipBLASLt error occurred: {}",                                       \
-                             hipblaslt_plugin::hipblaslt_utils::hipblas_status_to_string(status)); \
-        }                                                                                          \
+#define LOG_ON_HIPBLASLT_FAILURE(status)                                              \
+    do                                                                                \
+    {                                                                                 \
+        if(status != HIPBLAS_STATUS_SUCCESS)                                          \
+        {                                                                             \
+            HIPDNN_PLUGIN_LOG_ERROR(                                                  \
+                "hipBLASLt error occurred: {}",                                       \
+                hipblaslt_plugin::hipblaslt_utils::hipblas_status_to_string(status)); \
+        }                                                                             \
     } while(0)
 
 #define THROW_ON_HIPBLASLT_FAILURE(status)                                                     \

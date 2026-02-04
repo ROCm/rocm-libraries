@@ -34,11 +34,8 @@ public:
             return status;
         }
 
-#ifdef HIPDNN_PLUGIN_USE_SPDLOG
-        HIPDNN_LOG_ERROR("Error occured in status:{} message:{}", toString(status), message);
-#else
-        HIPDNN_LOG_ERROR("Error occured in status:" << status << " message:" << message);
-#endif
+        HIPDNN_SDK_LOG_ERROR("Error occured in status:" << toString(status)
+                                                        << " message:" << message);
 
         hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
             s_lastError, message, sizeof(s_lastError));

@@ -32,7 +32,6 @@ target_compile_options(miopen_plugin_integration_tests PRIVATE ${HIPDNN_WARNING_
 target_compile_definitions(
     miopen_plugin_integration_tests
     PRIVATE
-        COMPONENT_NAME="miopen_integration_tests"
         PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/miopen_plugin"
 )
 

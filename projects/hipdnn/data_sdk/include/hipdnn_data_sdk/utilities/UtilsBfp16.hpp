@@ -86,8 +86,8 @@ namespace hipdnn_data_sdk::utilities
 /**
  * @brief Wrapper for streaming hip_bfloat16 to ostream
  *
- * Usage: std::cout << streamBfp16(value);
- * Usage: HIPDNN_LOG_INFO("value: " << streamBfp16(bf16_val));
+ * Usage: std::cout << StreamBfp16(value);
+ * Usage: HIPDNN_LOG_INFO("value: " << StreamBfp16(bf16_val));
  */
 class StreamBfp16
 {
@@ -105,10 +105,5 @@ public:
 private:
     hip_bfloat16 _val;
 };
-
-inline StreamBfp16 streamBfp16(hip_bfloat16 val)
-{
-    return StreamBfp16(val);
-}
 
 } // namespace hipdnn_data_sdk::utilities

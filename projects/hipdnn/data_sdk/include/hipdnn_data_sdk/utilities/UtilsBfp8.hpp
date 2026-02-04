@@ -123,8 +123,8 @@ namespace hipdnn_data_sdk::utilities
 /**
  * @brief Wrapper for streaming hip_fp8_e5m2 to ostream
  *
- * Usage: std::cout << streamBfp8(value);
- * Usage: HIPDNN_LOG_INFO("value: " << streamBfp8(fp8_val));
+ * Usage: std::cout << StreamBfp8(value);
+ * Usage: HIPDNN_LOG_INFO("value: " << StreamBfp8(fp8_val));
  */
 class StreamBfp8
 {
@@ -142,10 +142,5 @@ public:
 private:
     hip_fp8_e5m2 _val;
 };
-
-inline StreamBfp8 streamBfp8(hip_fp8_e5m2 val)
-{
-    return StreamBfp8(val);
-}
 
 } // namespace hipdnn_data_sdk::utilities

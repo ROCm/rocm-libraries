@@ -53,7 +53,7 @@ protected:
 TEST_F(TestCallbackLogger, InfoMessageIsCorrectlyPassedToCallback)
 {
     std::string testMessage = "Test info message";
-    HIPDNN_LOG_INFO(testMessage);
+    HIPDNN_SDK_LOG_INFO(testMessage);
 
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 1);
@@ -64,7 +64,7 @@ TEST_F(TestCallbackLogger, InfoMessageIsCorrectlyPassedToCallback)
 TEST_F(TestCallbackLogger, WarnMessageIsCorrectlyPassedToCallback)
 {
     std::string testMessage = "Test warning message";
-    HIPDNN_LOG_WARN(testMessage);
+    HIPDNN_SDK_LOG_WARN(testMessage);
 
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 1);
@@ -75,7 +75,7 @@ TEST_F(TestCallbackLogger, WarnMessageIsCorrectlyPassedToCallback)
 TEST_F(TestCallbackLogger, ErrorMessageIsCorrectlyPassedToCallback)
 {
     std::string testMessage = "Test error message";
-    HIPDNN_LOG_ERROR(testMessage);
+    HIPDNN_SDK_LOG_ERROR(testMessage);
 
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 1);
@@ -87,7 +87,7 @@ TEST_F(TestCallbackLogger, StreamFormattedMessagesAreCorrectlyPassed)
 {
     int value = 42;
     std::string text = "formatted";
-    HIPDNN_LOG_INFO("Test " << text << " message with value " << value);
+    HIPDNN_SDK_LOG_INFO("Test " << text << " message with value " << value);
 
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 1);
@@ -99,9 +99,9 @@ TEST_F(TestCallbackLogger, LogLevelsAreRespected)
     // Set level to error so info and warn should be ignored
     hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_ERROR);
 
-    HIPDNN_LOG_INFO("This info should not appear");
-    HIPDNN_LOG_WARN("This warning should not appear");
-    HIPDNN_LOG_ERROR("This error should appear");
+    HIPDNN_SDK_LOG_INFO("This info should not appear");
+    HIPDNN_SDK_LOG_WARN("This warning should not appear");
+    HIPDNN_SDK_LOG_ERROR("This error should appear");
 
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 1);
@@ -110,9 +110,9 @@ TEST_F(TestCallbackLogger, LogLevelsAreRespected)
 
 TEST_F(TestCallbackLogger, MultipleMessagesAreLogged)
 {
-    HIPDNN_LOG_INFO("First message");
-    HIPDNN_LOG_WARN("Second message");
-    HIPDNN_LOG_ERROR("Third message");
+    HIPDNN_SDK_LOG_INFO("First message");
+    HIPDNN_SDK_LOG_WARN("Second message");
+    HIPDNN_SDK_LOG_ERROR("Third message");
 
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 3);
@@ -124,7 +124,7 @@ TEST_F(TestCallbackLogger, MultipleMessagesAreLogged)
 TEST_F(TestCallbackLogger, MessageContainsComponentName)
 {
     std::string testMessage = "Component check";
-    HIPDNN_LOG_INFO(testMessage);
+    HIPDNN_SDK_LOG_INFO(testMessage);
 
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 1);
@@ -155,10 +155,10 @@ TEST_F(TestCallbackLogger, ParamsAreNotExpandedIfLogLevelIsDisabled)
     // Set level to error so info and warn should be ignored
     hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_ERROR);
 
-    HIPDNN_LOG_INFO(trackingLambda(wasCalledForInfo, infoMessage));
-    HIPDNN_LOG_WARN(trackingLambda(wasCalledForWarn, warnMessage));
-    HIPDNN_LOG_ERROR(trackingLambda(wasCalledForError, errorMessage));
-    HIPDNN_LOG_FATAL(trackingLambda(wasCalledForFatal, fatalMessage));
+    HIPDNN_SDK_LOG_INFO(trackingLambda(wasCalledForInfo, infoMessage));
+    HIPDNN_SDK_LOG_WARN(trackingLambda(wasCalledForWarn, warnMessage));
+    HIPDNN_SDK_LOG_ERROR(trackingLambda(wasCalledForError, errorMessage));
+    HIPDNN_SDK_LOG_FATAL(trackingLambda(wasCalledForFatal, fatalMessage));
 
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 2);
@@ -178,10 +178,10 @@ TEST_F(TestCallbackLogger, LogLevelOffDisablesAllLogs)
 {
     hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_OFF);
 
-    HIPDNN_LOG_INFO("Info");
-    HIPDNN_LOG_WARN("Warn");
-    HIPDNN_LOG_ERROR("Error");
-    HIPDNN_LOG_FATAL("Fatal");
+    HIPDNN_SDK_LOG_INFO("Info");
+    HIPDNN_SDK_LOG_WARN("Warn");
+    HIPDNN_SDK_LOG_ERROR("Error");
+    HIPDNN_SDK_LOG_FATAL("Fatal");
 
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 0) << "No logs should be captured when log level is OFF";
@@ -191,10 +191,10 @@ TEST_F(TestCallbackLogger, SeverityLevelsAreCorrect)
 {
     hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_INFO);
 
-    HIPDNN_LOG_INFO("Info message");
-    HIPDNN_LOG_WARN("Warn message");
-    HIPDNN_LOG_ERROR("Error message");
-    HIPDNN_LOG_FATAL("Fatal message");
+    HIPDNN_SDK_LOG_INFO("Info message");
+    HIPDNN_SDK_LOG_WARN("Warn message");
+    HIPDNN_SDK_LOG_ERROR("Error message");
+    HIPDNN_SDK_LOG_FATAL("Fatal message");
 
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 4);
