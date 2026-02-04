@@ -100,8 +100,8 @@ TEST(TestEngineDetailsWrapper, KnobWrappersPopulated)
     EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
     const auto& wrappers = wrapper.knobWrappers();
     EXPECT_EQ(wrappers.size(), 2u);
-    EXPECT_EQ(wrappers[0]->knobIdStr(), "KNOB_A");
-    EXPECT_EQ(wrappers[1]->knobIdStr(), "KNOB_B");
+    EXPECT_EQ(wrappers[0]->knobId(), "KNOB_A");
+    EXPECT_EQ(wrappers[1]->knobId(), "KNOB_B");
 }
 
 TEST(TestEngineDetailsWrapper, GetKnobByNameFound)
@@ -110,10 +110,10 @@ TEST(TestEngineDetailsWrapper, GetKnobByNameFound)
     EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& knob = wrapper.getKnobByName("FIRST_KNOB");
-    EXPECT_EQ(knob.knobIdStr(), "FIRST_KNOB");
+    EXPECT_EQ(knob.knobId(), "FIRST_KNOB");
 
     const auto& knob2 = wrapper.getKnobByName("SECOND_KNOB");
-    EXPECT_EQ(knob2.knobIdStr(), "SECOND_KNOB");
+    EXPECT_EQ(knob2.knobId(), "SECOND_KNOB");
 }
 
 TEST(TestEngineDetailsWrapper, GetKnobByNameNotFound)
