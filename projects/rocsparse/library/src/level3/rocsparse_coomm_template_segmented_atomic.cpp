@@ -365,10 +365,12 @@ namespace rocsparse
             }
 #undef COOMMN_DIM
         }
+        // LCOV_EXCL_START
         else
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
+        // LCOV_EXCL_STOP
         return rocsparse_status_success;
     }
 }

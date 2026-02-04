@@ -42,7 +42,14 @@
 
 // disable normal-distribution shortcuts (it bloats prng state)
 #define ROCRAND_DETAIL_XORWOW_BM_NOT_IN_STATE
+
+// Use inlined rocrand header for runtime compilation to avoid external dependency
+// For host code compilation, use the regular rocrand header
+#ifdef MIOPEN_HIP_RUNTIME_COMPILE
+#include "rocrand_xorwow_inlined.h"
+#else
 #include <rocrand/rocrand_xorwow.h>
+#endif
 
 namespace prng {
 
