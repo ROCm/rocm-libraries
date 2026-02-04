@@ -18132,7 +18132,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zheevd(rocblas_handle handle,
     @param[in]
     strideE     rocblas_stride.
                 Stride from the start of one vector E_l to the next one E_(l+1).
-                There is no restriction for the value of strideE. NorThe normalmal use case is strideE >= n.
+                There is no restriction for the value of strideE. The normal use case is strideE >= n.
     @param[out]
     info        pointer to rocblas_int. Array of batch_count integers on the GPU.
                 If info[l] = 0, successful exit for matrix A_l.
