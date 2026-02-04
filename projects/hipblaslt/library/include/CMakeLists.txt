@@ -18,6 +18,7 @@ target_sources(hipblaslt
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt_float8.h>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt_float4.h>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt_e8.h>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt_e5m3.h>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt-ext.hpp>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt-ext-op.h>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/hipblaslt-types.h>
@@ -29,6 +30,7 @@ target_sources(hipblaslt
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt_float8.h>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt_float4.h>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt_e8.h>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt_e5m3.h>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt/hipblaslt-types.h>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt-version.h>
     PRIVATE

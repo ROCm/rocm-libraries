@@ -42,6 +42,7 @@
 #include "hipblaslt_float6.h"
 #include "hipblaslt_float4.h"
 #include "hipblaslt_e8.h"
+#include "hipblaslt_e5m3.h"
 #include <float.h>
 
 // Generic API
