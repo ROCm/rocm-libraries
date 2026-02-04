@@ -407,3 +407,150 @@ TEST(auxiliary_pre_checkin, CombinedUsage)
     ASSERT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
     ASSERT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
 }
+
+// =============================================================================
+// Getter Function Tests
+// =============================================================================
+
+TEST(auxiliary_pre_checkin, GetStatusName)
+{
+    // Test all status codes
+    EXPECT_STREQ(rocsparse_get_status_name(rocsparse_status_success), "rocsparse_status_success");
+    EXPECT_STREQ(rocsparse_get_status_name(rocsparse_status_invalid_handle), "rocsparse_status_invalid_handle");
+    EXPECT_STREQ(rocsparse_get_status_name(rocsparse_status_not_implemented), "rocsparse_status_not_implemented");
+    EXPECT_STREQ(rocsparse_get_status_name(rocsparse_status_invalid_pointer), "rocsparse_status_invalid_pointer");
+    EXPECT_STREQ(rocsparse_get_status_name(rocsparse_status_invalid_size), "rocsparse_status_invalid_size");
+    EXPECT_STREQ(rocsparse_get_status_name(rocsparse_status_memory_error), "rocsparse_status_memory_error");
+    EXPECT_STREQ(rocsparse_get_status_name(rocsparse_status_internal_error), "rocsparse_status_internal_error");
+    EXPECT_STREQ(rocsparse_get_status_name(rocsparse_status_invalid_value), "rocsparse_status_invalid_value");
+    EXPECT_STREQ(rocsparse_get_status_name(rocsparse_status_arch_mismatch), "rocsparse_status_arch_mismatch");
+    EXPECT_STREQ(rocsparse_get_status_name(rocsparse_status_zero_pivot), "rocsparse_status_zero_pivot");
+    EXPECT_STREQ(rocsparse_get_status_name(rocsparse_status_not_initialized), "rocsparse_status_not_initialized");
+    EXPECT_STREQ(rocsparse_get_status_name(rocsparse_status_type_mismatch), "rocsparse_status_type_mismatch");
+    EXPECT_STREQ(rocsparse_get_status_name(rocsparse_status_requires_sorted_storage), "rocsparse_status_requires_sorted_storage");
+    EXPECT_STREQ(rocsparse_get_status_name(rocsparse_status_thrown_exception), "rocsparse_status_thrown_exception");
+    EXPECT_STREQ(rocsparse_get_status_name(rocsparse_status_continue), "rocsparse_status_continue");
+    
+    // Test unrecognized status code
+    EXPECT_STREQ(rocsparse_get_status_name(static_cast<rocsparse_status>(999)), "Unrecognized status code");
+}
+
+TEST(auxiliary_pre_checkin, GetStatusDescription)
+{
+    // Test all status codes
+    EXPECT_STREQ(rocsparse_get_status_description(rocsparse_status_success), "success");
+    EXPECT_STREQ(rocsparse_get_status_description(rocsparse_status_invalid_handle), "handle not initialized, invalid or corrupted");
+    EXPECT_STREQ(rocsparse_get_status_description(rocsparse_status_not_implemented), "function is not implemented");
+    EXPECT_STREQ(rocsparse_get_status_description(rocsparse_status_invalid_pointer), "invalid pointer parameter");
+    EXPECT_STREQ(rocsparse_get_status_description(rocsparse_status_invalid_size), "invalid size parameter");
+    EXPECT_STREQ(rocsparse_get_status_description(rocsparse_status_memory_error), "failed memory allocation, copy, dealloc");
+    EXPECT_STREQ(rocsparse_get_status_description(rocsparse_status_internal_error), "other internal library failure");
+    EXPECT_STREQ(rocsparse_get_status_description(rocsparse_status_invalid_value), "invalid value parameter");
+    EXPECT_STREQ(rocsparse_get_status_description(rocsparse_status_arch_mismatch), "device arch is not supported");
+    EXPECT_STREQ(rocsparse_get_status_description(rocsparse_status_zero_pivot), "encountered zero pivot");
+    EXPECT_STREQ(rocsparse_get_status_description(rocsparse_status_not_initialized), "descriptor has not been initialized");
+    EXPECT_STREQ(rocsparse_get_status_description(rocsparse_status_type_mismatch), "index types do not match");
+    EXPECT_STREQ(rocsparse_get_status_description(rocsparse_status_requires_sorted_storage), "sorted storage required");
+    EXPECT_STREQ(rocsparse_get_status_description(rocsparse_status_thrown_exception), "exception thrown");
+    EXPECT_STREQ(rocsparse_get_status_description(rocsparse_status_continue), "nothing preventing function to proceed");
+    
+    // Test unrecognized status code
+    EXPECT_STREQ(rocsparse_get_status_description(static_cast<rocsparse_status>(999)), "Unrecognized status code");
+}
+
+TEST(auxiliary_pre_checkin, GetMatIndexBase)
+{
+    rocsparse_mat_descr descr;
+    ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+    
+    // Test default (should be zero-based)
+    EXPECT_EQ(rocsparse_get_mat_index_base(descr), rocsparse_index_base_zero);
+    
+    // Set and get zero-based
+    ASSERT_EQ(rocsparse_set_mat_index_base(descr, rocsparse_index_base_zero), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_get_mat_index_base(descr), rocsparse_index_base_zero);
+    
+    // Set and get one-based
+    ASSERT_EQ(rocsparse_set_mat_index_base(descr, rocsparse_index_base_one), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_get_mat_index_base(descr), rocsparse_index_base_one);
+    
+    ASSERT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+}
+
+TEST(auxiliary_pre_checkin, GetMatType)
+{
+    rocsparse_mat_descr descr;
+    ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+    
+    // Test default (should be general)
+    EXPECT_EQ(rocsparse_get_mat_type(descr), rocsparse_matrix_type_general);
+    
+    // Test all matrix types
+    ASSERT_EQ(rocsparse_set_mat_type(descr, rocsparse_matrix_type_general), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_get_mat_type(descr), rocsparse_matrix_type_general);
+    
+    ASSERT_EQ(rocsparse_set_mat_type(descr, rocsparse_matrix_type_symmetric), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_get_mat_type(descr), rocsparse_matrix_type_symmetric);
+    
+    ASSERT_EQ(rocsparse_set_mat_type(descr, rocsparse_matrix_type_hermitian), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_get_mat_type(descr), rocsparse_matrix_type_hermitian);
+    
+    ASSERT_EQ(rocsparse_set_mat_type(descr, rocsparse_matrix_type_triangular), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_get_mat_type(descr), rocsparse_matrix_type_triangular);
+    
+    ASSERT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+}
+
+TEST(auxiliary_pre_checkin, GetMatFillMode)
+{
+    rocsparse_mat_descr descr;
+    ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+    
+    // Test default (should be lower)
+    EXPECT_EQ(rocsparse_get_mat_fill_mode(descr), rocsparse_fill_mode_lower);
+    
+    // Test both fill modes
+    ASSERT_EQ(rocsparse_set_mat_fill_mode(descr, rocsparse_fill_mode_lower), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_get_mat_fill_mode(descr), rocsparse_fill_mode_lower);
+    
+    ASSERT_EQ(rocsparse_set_mat_fill_mode(descr, rocsparse_fill_mode_upper), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_get_mat_fill_mode(descr), rocsparse_fill_mode_upper);
+    
+    ASSERT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+}
+
+TEST(auxiliary_pre_checkin, GetMatDiagType)
+{
+    rocsparse_mat_descr descr;
+    ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+    
+    // Test default (should be non-unit)
+    EXPECT_EQ(rocsparse_get_mat_diag_type(descr), rocsparse_diag_type_non_unit);
+    
+    // Test both diagonal types
+    ASSERT_EQ(rocsparse_set_mat_diag_type(descr, rocsparse_diag_type_non_unit), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_get_mat_diag_type(descr), rocsparse_diag_type_non_unit);
+    
+    ASSERT_EQ(rocsparse_set_mat_diag_type(descr, rocsparse_diag_type_unit), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_get_mat_diag_type(descr), rocsparse_diag_type_unit);
+    
+    ASSERT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+}
+
+TEST(auxiliary_pre_checkin, GetMatStorageMode)
+{
+    rocsparse_mat_descr descr;
+    ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+    
+    // Test default (should be sorted)
+    EXPECT_EQ(rocsparse_get_mat_storage_mode(descr), rocsparse_storage_mode_sorted);
+    
+    // Test both storage modes
+    ASSERT_EQ(rocsparse_set_mat_storage_mode(descr, rocsparse_storage_mode_sorted), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_get_mat_storage_mode(descr), rocsparse_storage_mode_sorted);
+    
+    ASSERT_EQ(rocsparse_set_mat_storage_mode(descr, rocsparse_storage_mode_unsorted), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_get_mat_storage_mode(descr), rocsparse_storage_mode_unsorted);
+    
+    ASSERT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+}
