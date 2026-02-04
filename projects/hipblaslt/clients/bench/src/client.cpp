@@ -927,20 +927,6 @@ try
     arg.scaleC = scaleCFormat;
     arg.scaleD = scaleDFormat;
 
-    // Validation for F4 and F6
-    if(arg.a_type == HIP_R_4F_E2M1_EXT || arg.a_type == HIP_R_6F_E2M3_EXT
-       || arg.a_type == HIP_R_6F_E3M2_EXT)
-    {
-        if(!isBlockScaling(arg.scaleA))
-            throw std::invalid_argument("scaleA must be block format for F4 and F6 types");
-    }
-    if(arg.b_type == HIP_R_4F_E2M1_EXT || arg.b_type == HIP_R_6F_E2M3_EXT
-       || arg.b_type == HIP_R_6F_E3M2_EXT)
-    {
-        if(!isBlockScaling(arg.scaleB))
-            throw std::invalid_argument("scaleB must be block format for F4 and F6 types");
-    }
-
     // Block scaling only allows F8/F6/F4
     if(isBlockScaling(arg.scaleA))
     {
