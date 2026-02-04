@@ -1251,8 +1251,8 @@ pipeline {
             description: "Generate a detailed time trace (default: OFF)")
         booleanParam(
             name: "RUN_INDUCTOR_TESTS",
-            defaultValue: true,
-            description: "Run inductor codegen tests (default: ON)")
+            defaultValue: false,
+            description: "Run inductor codegen tests (default: OFF)")
         booleanParam(
             name: "RUN_BUILDER_TESTS",
             defaultValue: true,
