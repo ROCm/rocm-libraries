@@ -298,7 +298,6 @@ def getDockerImage(Map conf=[:])
     }
 
     def dockerArgs = "--build-arg PREFIX=${prefixpath} " +
-                     "--build-arg THEROCK_ASIC=\"${gpu_arch}\" " +
                      "--build-arg THEROCK_GIT_HASH=\"${theRockHash}\" "
 
     if(env.CCACHE_HOST)
@@ -323,6 +322,9 @@ def getDockerImage(Map conf=[:])
 
     def image = getDockerImageName(dockerArgs)
     image = image + "_${gpu_family}"
+
+    // Append GPU arch after image name for a common hash
+    dockerArgs = dockerArgs + "--build-arg THEROCK_ASIC=\"${gpu_arch}\" "
 
     // Append Dockerfile path after image name is generated to avoid affecting the hash.
     dockerArgs = dockerArgs + " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
