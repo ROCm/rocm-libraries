@@ -515,11 +515,11 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     // max_grid_size = (5 * 2^32 - 1) / 256 = 83,886,079
     // Using 64M to ensure we stay well below the limit with margin for rounding
     constexpr size_t MAX_GRID_SIZE = 64 * 1024 * 1024; // 64M work groups max
-    size_t block_size = 256;
+    size_t block_size              = 256;
 
-    int batch_chunk_size = n;
+    int batch_chunk_size       = n;
     size_t grid_size_per_batch = 1;
-    bool is_layout_default = problem.IsLayoutDefault();
+    bool is_layout_default     = problem.IsLayoutDefault();
 
     if(is_layout_default)
     {
@@ -534,7 +534,7 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     else if(problem.IsLayoutNHWC())
     {
         grid_size_per_batch = static_cast<size_t>(group) * do_;
-        batch_chunk_size = static_cast<int>(MAX_GRID_SIZE / grid_size_per_batch);
+        batch_chunk_size    = static_cast<int>(MAX_GRID_SIZE / grid_size_per_batch);
         if(batch_chunk_size < 1)
             batch_chunk_size = 1;
         if(batch_chunk_size > n)
@@ -591,8 +591,8 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
             // Get batch strides for offset calculation
             const auto& orig_in_strides  = tensors.inDesc.GetStrides();
             const auto& orig_out_strides = tensors.outDesc.GetStrides();
-            size_t in_batch_stride  = orig_in_strides[0];
-            size_t out_batch_stride = orig_out_strides[0];
+            size_t in_batch_stride       = orig_in_strides[0];
+            size_t out_batch_stride      = orig_out_strides[0];
 
             // Process batches in chunks to avoid exceeding GPU grid limits
             for(int batch_start = 0; batch_start < n; batch_start += batch_chunk_size)
@@ -600,12 +600,14 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
                 int current_batch_size = std::min(batch_chunk_size, n - batch_start);
 
                 // Calculate byte offsets for input and output tensors
-                size_t in_offset_bytes  = static_cast<size_t>(batch_start) * in_batch_stride * in_type_size;
-                size_t out_offset_bytes = static_cast<size_t>(batch_start) * out_batch_stride * out_type_size;
+                size_t in_offset_bytes =
+                    static_cast<size_t>(batch_start) * in_batch_stride * in_type_size;
+                size_t out_offset_bytes =
+                    static_cast<size_t>(batch_start) * out_batch_stride * out_type_size;
 
                 // Cast to char* for byte-level pointer arithmetic
-                const void* in_ptr  = static_cast<const char*>(tensors.in) + in_offset_bytes;
-                void* out_ptr       = static_cast<char*>(tensors.out) + out_offset_bytes;
+                const void* in_ptr = static_cast<const char*>(tensors.in) + in_offset_bytes;
+                void* out_ptr      = static_cast<char*>(tensors.out) + out_offset_bytes;
 
                 // Recalculate grid size for this chunk (may be smaller for last chunk)
                 size_t current_grid_size = 0;
@@ -619,7 +621,7 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
                 }
 
                 // Update kernel configuration for this chunk
-                auto kern_copy = kern;
+                auto kern_copy     = kern;
                 kern_copy.gdims[0] = current_grid_size * block_size;
 
                 handle.Run(kern_copy)(in_ptr,
