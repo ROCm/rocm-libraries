@@ -45,7 +45,7 @@ void ArgumentModel_log_performance(hipblaslt_internal_ostream& name_line,
 void ArgumentModel_log_efficiency(hipblaslt_internal_ostream& name_line,
                                   hipblaslt_internal_ostream& val_line,
                                   const Arguments&            arg,
-                                  double                      hipblaslt_gflops);
+                                  const double                hipblaslt_gflops);
 
 // ArgumentModel template has a variadic list of argument enums
 template <hipblaslt_argument... Args>
@@ -97,9 +97,9 @@ public:
         // append performance fields
         if(gflops != ArgumentLogging::NA_value)
         {
+            ArgumentModel_log_efficiency(name_line, val_line, arg, hipblaslt_gflops);
             name_line << ",hipblaslt-Gflops";
             val_line << "," << hipblaslt_gflops;
-            ArgumentModel_log_efficiency(name_line, val_line, arg, hipblaslt_gflops);
         }
 
         if(gbytes != ArgumentLogging::NA_value)

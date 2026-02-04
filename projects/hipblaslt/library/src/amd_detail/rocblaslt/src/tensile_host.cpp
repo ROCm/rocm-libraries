@@ -2634,8 +2634,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             return rocblaslt_status_invalid_value;
         }
 
-        if(getenv("HIPBLASLT_BENCH_PERF") != nullptr
-           || getenv("HIPBLASLT_BENCH_PERF_ALL") != nullptr)
+        if(getenv("HIPBLASLT_BENCH_PERF") != nullptr)
         {
             auto autoGsuVal  = solution->calculateAutoGSU(data->problem, &(*hardware));
             auto Granularity = solution->computeGranularities(

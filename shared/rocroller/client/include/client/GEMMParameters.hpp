@@ -197,6 +197,8 @@ namespace rocRoller
                 std::string schedulerCost;
                 bool        matchMemoryAccess;
 
+                bool tailLoops = true;
+
                 StreamKMode streamK = StreamKMode::None;
 
                 std::string version;
