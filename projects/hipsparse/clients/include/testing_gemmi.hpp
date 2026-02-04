@@ -390,28 +390,18 @@ void testing_gemmi(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hC_2.data(), dC_2, sizeof(T) * Cnnz, hipMemcpyDeviceToHost));
 
         // CPU
-        for(int i = 0; i < M; ++i)
-        {
-            for(int j = 0; j < N; ++j)
-            {
-                T sum = make_DataType<T>(0);
-
-                int col_begin = hcsc_col_ptrB[j];
-                int col_end   = hcsc_col_ptrB[j + 1];
-
-                for(int k = col_begin; k < col_end; ++k)
-                {
-                    int row_B = hcsc_row_indB[k];
-                    T   val_B = hcsc_valB[k];
-                    T   val_A = hA[row_B * lda + i];
-
-                    sum = testing_fma(val_A, val_B, sum);
-                }
-
-                hC_gold[j * ldc + i]
-                    = testing_fma(h_beta, hC_gold[j * ldc + i], testing_mult(h_alpha, sum));
-            }
-        }
+        host_gemmi(M,
+                   N,
+                   K,
+                   h_alpha,
+                   hA.data(),
+                   lda,
+                   hcsc_col_ptrB.data(),
+                   hcsc_row_indB.data(),
+                   hcsc_valB.data(),
+                   h_beta,
+                   hC_gold.data(),
+                   ldc);
 
         unit_check_near(M, N, ldc, hC_gold.data(), hC_1.data());
         unit_check_near(M, N, ldc, hC_gold.data(), hC_2.data());

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,7 +30,7 @@ int main(int argc, char* argv[])
     /***************************************
     * Check device support                 *
     **************************************/
-    if(!isF16Supported() || !isF32MatrixCoreSupported())
+    if(!isF16F16MatrixCoreSupported())
     {
         std::cout << "unsupported host device" << std::endl;
         exit(EXIT_FAILURE);
@@ -44,7 +44,7 @@ int main(int argc, char* argv[])
     constexpr hiptensorDataType_t          typeA       = HIPTENSOR_R_16BF;
     constexpr hiptensorDataType_t          typeB       = HIPTENSOR_R_16BF;
     constexpr hiptensorDataType_t          typeC       = HIPTENSOR_R_16BF;
-    constexpr hiptensorComputeDescriptor_t typeCompute = HIPTENSOR_COMPUTE_DESC_32F;
+    constexpr hiptensorComputeDescriptor_t typeCompute = HIPTENSOR_COMPUTE_DESC_16BF;
 
     floatTypeCompute alpha{1.0f};
     floatTypeCompute beta{1.0f};
