@@ -77,29 +77,15 @@ def runBuildAndSingleGtestJob(def flags, def build_timeout_minutes=420, def gpu_
     }
 }
 
-def buildDockerImages() {
-    def stageConfigs = [
-        ['Build Docker gfx90X', 'gfx90X'],
-        ['Build Docker gfx942', 'gfx942'],
-        ['Build Docker gfx950', 'gfx950'],
-        ['Build Docker Navi(gfx12-generic, gfx11-generic)', 'navi']
-    ]
-
-    return stageConfigs.collectEntries { config ->
-        def stageName = config[0]
-        def gpu_family = config[1]
-
-        [stageName: {
-            node(rocmnode("nogpu")) {
-                try {
-                    withWorkingDir {
-                        utils.getDockerImageWithStatus(gpu_family: gpu_family)
-                    }
-                } finally {
-                    cleanWs()
-                }
+def runDockerBuild(String gpuFamily) {
+    node(rocmnode("nogpu")) {
+        try {
+            withWorkingDir {
+                utils.getDockerImageWithStatus(gpu_family: gpuFamily)
             }
-        }]
+        } finally {
+            cleanWs()
+        }
     }
 }
 
@@ -251,10 +237,11 @@ pipeline {
             when {
                 expression { params.BUILD_DOCKER && params.TARGET_NOGPU && params.DATATYPE_NA }
             }
-            steps{
-                script {
-                    parallel(buildDockerImages())
-                }
+            parallel {
+                stage('Build Docker gfx90X') { steps { script { runDockerBuild('gfx90X') } } }
+                stage('Build Docker gfx942') { steps { script { runDockerBuild('gfx942') } } }
+                stage('Build Docker gfx950') { steps { script { runDockerBuild('gfx950') } } }
+                stage('Build Docker Navi(gfx12-generic, gfx11-generic)') { steps { script { runDockerBuild('navi') } } }
             }
         }
         stage("Package and Static checks") {
