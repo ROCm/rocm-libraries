@@ -15,6 +15,9 @@ Documentation for rocSPARSE is available at
 * Added float16 and bfloat16 output support for level 3 functions (`rocsparse_spmm`, `rocsparse_csrmm`, `rocsparse_coomm`, `rocsparse_spgemm`). This enables mixed precision workflows where the output matrix C can use float16 or bfloat16 types.
 * For sparse matrix vector product (`rocsparse_spmv`), when using `rocsparse_spmv_alg_default`, the routine now automatically falls back to a supported algorithm depending on the sparse matrix format and requested operation. For example, CSR format with transposed operations or CSC format with non-transposed operations will fall back to an appropriate algorithm.
 
+### Changed
+* Use `std::hypot` in `rocsparse_complex_num<T>::abs` function.
+
 ### Resolved issues
 * Fix issue in `rocsparse_[s|d|c|z]gebsrmv` routine where incorrect results could sometimes be returned.
 * Fix issue in `rocsparse_[s|d|c|z]bsrxmv` routine where out-of-bounds memory reads can occur in the single precision bsrxmv kernels when `block_dim` equals `5` or `8`.
