@@ -50,7 +50,8 @@
 int main(int argc, char* argv[])
 {
     primbench::settings settings;
-    settings.bytes = 512 * primbench::MiB;
+    settings.bytes                = 2 * primbench::GiB;
+    settings.min_gpu_ms_per_batch = 100;
     primbench::executor executor(argc, argv, settings);
 
 #ifndef BENCHMARK_CONFIG_TUNING

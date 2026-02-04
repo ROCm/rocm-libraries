@@ -63,7 +63,9 @@ void add_benchmarks(primbench::executor& executor)
 int main(int argc, char* argv[])
 {
     primbench::settings settings;
-    settings.bytes = 512 * primbench::MiB;
+    settings.bytes                   = 512 * primbench::MiB;
+    settings.min_gpu_ms_per_batch    = 100;
+    settings.noise_tolerance_percent = 2;
     primbench::executor executor(argc, argv, settings);
 
     add_benchmarks<subtract_left>(executor);

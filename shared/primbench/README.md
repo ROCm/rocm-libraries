@@ -283,12 +283,12 @@ If there are any custom options, the object `context.custom_settings` is output 
 
 ## Passing Settings Programmatically
 
-Benchmarks can optionally provide a `primbench::settings` struct when constructing the executor. This allows a benchmark to set sensible defaults for things like batch sizing or minimum run time directly in code:
+Benchmarks can optionally provide a `primbench::settings` struct when constructing the executor. This allows a benchmark to set defaults directly in code:
 
 ```cpp
 primbench::settings settings;
-settings.min_gpu_ms_per_batch = 1000;
-settings.batch_window_size    = 3;
+settings.min_gpu_ms_per_batch    = 100;
+settings.noise_tolerance_percent = 2;
 primbench::executor executor(argc, argv, settings);
 ```
 
@@ -298,12 +298,12 @@ Starting with C++20, you can also use designated initializers to set fields inli
 primbench::executor executor(argc,
                              argv,
                              {
-                                 .min_gpu_ms_per_batch = 1000,
-                                 .batch_window_size    = 3,
+                                 .min_gpu_ms_per_batch = 100,
+                                 .noise_tolerance_percent = 2,
                              });
 ```
 
-All command-line options are stored in this same `settings` struct and are written verbatim to `context.settings` in the JSON output. If an option is provided both programmatically and on the command line, the command-line value always takes precedence. This makes it easy to ship benchmarks with tuned defaults while still allowing users to override them at runtime.
+All command-line options are stored in this same `settings` struct and are written verbatim to `context.settings` in the JSON output. If an option is provided both programmatically and on the command line, the command-line value always takes precedence.
 
 ## Filtering Specializations
 

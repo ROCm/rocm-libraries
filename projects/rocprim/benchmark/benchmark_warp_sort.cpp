@@ -60,7 +60,8 @@
 int main(int argc, char* argv[])
 {
     primbench::settings settings;
-    settings.bytes = 128 * primbench::MiB;
+    settings.bytes                   = 128 * primbench::MiB;
+    settings.noise_tolerance_percent = 2;
     primbench::executor executor(argc, argv, settings);
 
     BENCHMARK_TYPE(int32_t)
