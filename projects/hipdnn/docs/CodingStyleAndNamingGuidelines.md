@@ -131,7 +131,7 @@ If later you add invariants or non-trivial behavior, consider converting to a cl
 
 ### 10.1 Detail Namespace
 
-The `detail` namespace is used to segregate internal implementation code from the public API. Code in the `detail` namespace:
+The `detail` namespace is used to separate internal implementation code from the public API. Code in the `detail` namespace:
 
 - Is **not** part of the public API
 - Can be changed or removed at any time without a version bump

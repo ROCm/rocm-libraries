@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "../CallbackTypes.h"
-#include "../LoggingUtils.hpp"
 #include <functional>
+#include <hipdnn_data_sdk/logging/CallbackTypes.h>
+#include <hipdnn_data_sdk/logging/LoggingUtils.hpp>
 #include <mutex>
 #include <spdlog/async.h>
 #include <spdlog/details/null_mutex.h>

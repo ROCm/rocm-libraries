@@ -5,12 +5,14 @@
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/detail/ScopedExecute.hpp>
+#include <hipdnn_test_sdk/detail/TensorFileUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hipdnn_data_sdk;
 using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_test_sdk::detail;
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -20,14 +22,14 @@ TEST(TestFillTensorFromFile, InvalidPath)
     Tensor<float> tensor({1});
     std::filesystem::path filepath = "./ea0w399059.txt";
     EXPECT_FALSE(std::filesystem::exists(filepath));
-    EXPECT_THROW(detail::fillTensorFromFile(tensor, filepath), std::runtime_error);
+    EXPECT_THROW(fillTensorFromFile(tensor, filepath), std::runtime_error);
 }
 
 TEST(TestFillTensorFromFile, PathToDirectory)
 {
     Tensor<float> tensor({1});
     hipdnn_test_sdk::utilities::ScopedDirectory dir("oijaweorij33");
-    EXPECT_THROW(detail::fillTensorFromFile(tensor, dir.path()), std::runtime_error);
+    EXPECT_THROW(fillTensorFromFile(tensor, dir.path()), std::runtime_error);
 }
 
 template <class T>
@@ -50,7 +52,7 @@ TEST(TestFillTensorFromFile, Valid)
     writeVectorToFile(filename, values);
 
     Tensor<int> tensor({static_cast<int64_t>(values.size())});
-    ASSERT_NO_THROW(detail::fillTensorFromFile(tensor, filename));
+    ASSERT_NO_THROW(fillTensorFromFile(tensor, filename));
 
     ASSERT_EQ(tensor.memory().count(), values.size());
 
