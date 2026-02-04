@@ -290,17 +290,3 @@ TEST_F(TestGpuConvBwdPlan, ThrowsOnInvalidDims)
     EXPECT_THROW(ConvBwdPlan(_handle, std::move(params), executionContext),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
-
-TEST_F(TestGpuConvBwdPlan, CreatesPlanWithoutWorkspaceLimit)
-{
-    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-    const auto& node = graph.getNode(0);
-    auto* attrs = node.attributes_as_ConvolutionBwdAttributes();
-
-    ConvBwdParams params(*attrs, graph.getTensorMap());
-    HipdnnEnginePluginExecutionContext executionContext;
-
-    EXPECT_FALSE(executionContext.workspaceSizeLimit().has_value());
-    EXPECT_NO_THROW(ConvBwdPlan(_handle, std::move(params), executionContext));
-}

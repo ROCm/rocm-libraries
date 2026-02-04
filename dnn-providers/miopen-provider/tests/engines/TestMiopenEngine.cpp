@@ -159,13 +159,7 @@ TEST(TestMiopenEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
 
 TEST(TestMiopenEngine, GetDetailsReturnsSerializedEngineDetails)
 {
-    auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
-    EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
-        .WillOnce(::testing::Return(true));
-
     MiopenEngine engine(1);
-    engine.addPlanBuilder(std::move(mockPlanBuilder));
-
     HipdnnEnginePluginHandle dummyHandle;
     MockGraph mockGraph;
 
@@ -179,13 +173,7 @@ TEST(TestMiopenEngine, GetDetailsReturnsSerializedEngineDetails)
 
 TEST(TestMiopenEngine, GetDetailsContainsBenchmarkingKnob)
 {
-    auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
-    EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
-        .WillOnce(::testing::Return(true));
-
     MiopenEngine engine(1);
-    engine.addPlanBuilder(std::move(mockPlanBuilder));
-
     HipdnnEnginePluginHandle dummyHandle;
     MockGraph mockGraph;
 
@@ -194,6 +182,7 @@ TEST(TestMiopenEngine, GetDetailsContainsBenchmarkingKnob)
 
     hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(result.ptr,
                                                                               result.size);
+    ASSERT_EQ(engineDetails.knobCount(), 1u);
 
     const auto& knob = engineDetails.getKnobByName("global.benchmarking");
     EXPECT_EQ(knob.knobId(), "global.benchmarking");
