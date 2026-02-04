@@ -136,6 +136,7 @@ jobs:
         pr_filter_query="branchName=refs/pull/$pr_number/merge&repositoryType=GitHub&repositoryId=ROCm/rocm-libraries&api-version=7.1"
 
         res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?$pr_filter_query" \
+          -u ":${{ secrets.AZ_PAT }}" \
           -H "Content-Type: application/json")
 
         runs=$(echo "$res" | jq -r ".value[] | select((.status == \"inProgress\" or .status == \"notStarted\") and .definition.name != \"rocm-ci-caller\" and .definition.name != \"rocm-libraries-superbuild\") | .id")
@@ -173,6 +174,7 @@ jobs:
         pr_filter_query="branchName=refs/pull/$pr_number/merge&repositoryType=GitHub&repositoryId=ROCm/rocm-libraries&api-version=7.1"
 
         res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?$pr_filter_query" \
+          -u ":${{ secrets.AZ_PAT }}" \
           -H "Content-Type: application/json")
 
         failed_runs_info=$(echo "$res" | jq -r ".value[] |
