@@ -35,6 +35,9 @@
 #include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
+#define debug critical
+#define Debug Critical
+
 namespace rocRoller
 {
     ArgumentLoader::ArgumentLoader(AssemblyKernelPtr kernel)
@@ -95,7 +98,7 @@ namespace rocRoller
 
         co_yield regs->allocate();
 
-        std::cout << "Splitting out preloaded args:";
+        Log::debug("Splitting out preloaded args:");
         splitOutArgs(regs, 0);
 
         count = preloadedRegs;
@@ -185,14 +188,22 @@ namespace rocRoller
             }
         }
 
-        std::cout << "Splitting regs:" << std::endl;
-        for(int i = 0; i < indices.size(); i++)
+        auto launchTimeOnly = m_kernel->launchTimeOnlyArguments();
+
+        if(Log::getLogger()->should_log(LogLevel::Debug))
         {
-            auto argIdx = argIndices[i];
-            std::cout << argIdx << "(" << args.at(argIdx).name << ")"
-                      << ": ";
-            streamJoin(std::cout, indices[i], ", ");
-            std::cout << std::endl;
+            Log::debug("Splitting regs:");
+            for(int i = 0; i < indices.size(); i++)
+            {
+                auto        argIdx = argIndices[i];
+                std::string ltOnly
+                    = launchTimeOnly.contains(args.at(argIdx).name) ? " (LT only)" : "";
+                Log::debug("{} ({}){}: {}",
+                           argIdx,
+                           args.at(argIdx).name,
+                           ltOnly,
+                           fmt::join(indices[i], ", "));
+            }
         }
 
         auto valueRegs = rawRegs->split(indices);
@@ -205,7 +216,9 @@ namespace rocRoller
             auto subReg = valueRegs[valIdx];
             subReg->setName(arg.name);
             subReg->setVariableType(arg.variableType);
-            m_loadedValues[arg.name] = subReg;
+
+            if(!launchTimeOnly.contains(arg.name))
+                m_loadedValues[arg.name] = subReg;
         }
     }
 

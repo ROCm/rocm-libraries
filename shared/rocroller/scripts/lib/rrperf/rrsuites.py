@@ -1049,6 +1049,8 @@ def fp4_small():
         wave_b=1,
         workgroup_size_x=128,
         workgroup_size_y=2,
+        workgroupMappingDim=0,
+        workgroupMappingValue=2,
         unroll_x=0,
         unroll_y=0,
         load_A="BufferToLDS",
