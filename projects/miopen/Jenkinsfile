@@ -84,21 +84,19 @@ def buildDockerImages() {
         ['Build Docker gfx950', 'gfx950'],
         ['Build Docker Navi(gfx12-generic, gfx11-generic)', 'navi']
     ]
-    
+
     return stageConfigs.collectEntries { config ->
         def stageName = config[0]
         def gpu_family = config[1]
-        
+
         [stageName: {
             node(rocmnode("nogpu")) {
-                stage(stageName) {
-                    try {
-                        withWorkingDir {
-                            utils.getDockerImageWithStatus(gpu_family: gpu_family)
-                        }
-                    } finally {
-                        cleanWs()
+                try {
+                    withWorkingDir {
+                        utils.getDockerImageWithStatus(gpu_family: gpu_family)
                     }
+                } finally {
+                    cleanWs()
                 }
             }
         }]
