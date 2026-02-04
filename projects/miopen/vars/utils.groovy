@@ -322,7 +322,7 @@ def getDockerImage(Map conf=[:])
     }
 
     def image = getDockerImageName(dockerArgs)
-    image = gpu_family + "_" + image
+    image = image + "_${gpu_family}"
 
     // Append Dockerfile path after image name is generated to avoid affecting the hash.
     dockerArgs = dockerArgs + " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
