@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@
 #include "rocsparse_handle.hpp"
 #include "rocsparse_logging.hpp"
 
+// LCOV_EXCL_START
 _rocsparse_error::_rocsparse_error(rocsparse_status status)
     : m_status(status)
 {
@@ -49,13 +50,11 @@ try
     {
         return nullptr;
     }
-    // LCOV_EXCL_START
 }
 catch(...)
 {
     return nullptr;
 }
-// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_destroy_error(rocsparse_error error)
 try
@@ -66,7 +65,6 @@ try
         delete error;
     }
     return rocsparse_status_success;
-    // LCOV_EXCL_START
 }
 catch(...)
 {

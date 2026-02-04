@@ -631,10 +631,8 @@ const char* rocsparse_get_status_name(rocsparse_status status)
         return "rocsparse_status_memory_error";
     case rocsparse_status_internal_error:
         return "rocsparse_status_internal_error";
-        // LCOV_EXCL_START
     case rocsparse_status_invalid_value:
         return "rocsparse_status_invalid_value";
-        // LCOV_EXCL_STOP
     case rocsparse_status_arch_mismatch:
         return "rocsparse_status_arch_mismatch";
     case rocsparse_status_zero_pivot:
@@ -675,10 +673,8 @@ const char* rocsparse_get_status_description(rocsparse_status status)
         return "failed memory allocation, copy, dealloc";
     case rocsparse_status_internal_error:
         return "other internal library failure";
-        // LCOV_EXCL_START
     case rocsparse_status_invalid_value:
         return "invalid value parameter";
-        // LCOV_EXCL_STOP
     case rocsparse_status_arch_mismatch:
         return "device arch is not supported";
     case rocsparse_status_zero_pivot:
@@ -5186,6 +5182,7 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
+// LCOV_EXCL_START
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_create_csr_descr_SWDEV_453599(rocsparse_spmat_descr* descr,
                                                          int64_t                rows,
@@ -5253,7 +5250,6 @@ try
     (*descr)->offsets_batch_stride        = 0;
     (*descr)->columns_values_batch_stride = 0;
     return rocsparse_status_success;
-    // LCOV_EXCL_START
 }
 catch(...)
 {
