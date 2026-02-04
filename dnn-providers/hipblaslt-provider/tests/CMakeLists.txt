@@ -25,6 +25,7 @@ add_executable(
 )
 
 target_compile_options(hipblaslt_plugin_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_definitions(hipblaslt_plugin_tests PRIVATE COMPONENT_NAME="hipblaslt_plugin_tests")
 
 target_link_libraries(
     hipblaslt_plugin_tests PUBLIC GTest::gtest GTest::gmock hip::host

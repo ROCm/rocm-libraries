@@ -32,12 +32,16 @@ target_compile_options(miopen_plugin_integration_tests PRIVATE ${HIPDNN_WARNING_
 target_compile_definitions(
     miopen_plugin_integration_tests
     PRIVATE
+        COMPONENT_NAME="miopen_integration_tests"
         PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/miopen_plugin"
 )
 
 target_link_libraries(
     miopen_plugin_integration_tests PUBLIC GTest::gtest hip::host hipdnn_test_sdk hipdnn_plugin_sdk Threads::Threads
 )
+
+# Enable spdlog support for fmt-style logging
+hipdnn_plugin_enable_spdlog(miopen_plugin_integration_tests)
 
 # Ensure that the miopen_plugin is built before the integration tests
 add_dependencies(miopen_plugin_integration_tests miopen_plugin)

@@ -74,7 +74,7 @@ hipdnnPluginStatus_t hipdnnPluginGetTypeImpl(hipdnnPluginType_t* type)
 
         *type = HIPDNN_PLUGIN_TYPE_ENGINE;
 
-        LOG_API_SUCCESS(apiName, "type={}", *type);
+        LOG_API_SUCCESS(apiName, "type={}", toString(*type));
     });
 }
 

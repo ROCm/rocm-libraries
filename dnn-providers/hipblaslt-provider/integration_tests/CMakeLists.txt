@@ -18,12 +18,16 @@ target_compile_options(hipblaslt_plugin_integration_tests PRIVATE ${HIPDNN_WARNI
 target_compile_definitions(
     hipblaslt_plugin_integration_tests
     PRIVATE
+        COMPONENT_NAME="hipblaslt_integration_tests"
         PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/hipblaslt_plugin"
 )
 
 target_link_libraries(
     hipblaslt_plugin_integration_tests PUBLIC GTest::gtest hip::host hipdnn_test_sdk hipdnn_plugin_sdk Threads::Threads
 )
+
+# Enable spdlog support for fmt-style logging
+hipdnn_plugin_enable_spdlog(hipblaslt_plugin_integration_tests)
 
 # Ensure that the hipblaslt_plugin is built before the hipblaslt_plugin_integration_tests, as the
 # integration tests depend on the hipBLASLt Provider Plugin

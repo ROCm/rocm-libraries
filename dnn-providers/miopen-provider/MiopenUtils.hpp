@@ -6,6 +6,8 @@
 #include <optional>
 #include <unordered_map>
 
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
+
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>

@@ -71,7 +71,7 @@ TEST(TestLoadGraphAndTensors, Valid)
     // TODO: Temporary fix until reference data can be properly installed
     if(!std::filesystem::exists(filepath))
     {
-        HIPDNN_LOG_WARN("Could not find {}", filepath.string());
+        HIPDNN_LOG_WARN("Could not find " << filepath.string());
         GTEST_SKIP();
     }
 
@@ -114,7 +114,7 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
     // TODO: Temporary fix until reference data can be properly installed
     if(!std::filesystem::exists(filepath))
     {
-        HIPDNN_LOG_WARN("Could not find {}", filepath.string());
+        HIPDNN_LOG_WARN("Could not find " << filepath.string());
         GTEST_SKIP();
     }
 

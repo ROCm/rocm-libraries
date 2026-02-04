@@ -8,8 +8,8 @@
 #include <algorithm>
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/logging/CallbackTypes.h>
+#include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
-#include <hipdnn_data_sdk/logging/LoggingUtils.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <numeric>
@@ -417,18 +417,17 @@ inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCall
     }
 
     static bool s_loggingInitialized = false;
-    static bool s_loggingEnabled = hipdnn_data_sdk::logging::isLoggingEnabled();
 
-    if(s_loggingInitialized || !s_loggingEnabled)
+    if(s_loggingInitialized)
     {
         return 0;
     }
 
-#ifdef COMPONENT_NAME
-    hipdnn::logging::initializeCallbackLogging(COMPONENT_NAME, fn);
-#else
-    return -1;
-#endif
+    // Initialize log level from environment variable
+    hipdnn_data_sdk::logging::initializeLogLevel();
+
+    // Register the callback so log messages get routed to the backend
+    hipdnn_data_sdk::logging::registerLoggingCallback(fn);
 
     s_loggingInitialized = true;
     HIPDNN_LOG_INFO("Frontend logging initialized via callback.");
@@ -436,32 +435,53 @@ inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCall
     return 0;
 }
 
-#define HIPDNN_FE_LOG_INFO(...)                       \
-    do                                                \
-    {                                                 \
-        hipdnn_frontend::initializeFrontendLogging(); \
-        HIPDNN_LOG_INFO(__VA_ARGS__);                 \
+// Frontend logging macros that auto-initialize logging and always use stream-style.
+// These macros use a hardcoded component name "hipdnn_frontend" so they work
+// regardless of whether COMPONENT_NAME is defined by the consuming target.
+// Usage: HIPDNN_FE_LOG_INFO("Message " << value);
+
+#define HIPDNN_FE_LOG_INFO(msg)                                                               \
+    do                                                                                        \
+    {                                                                                         \
+        hipdnn_frontend::initializeFrontendLogging();                                         \
+        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO))                    \
+        {                                                                                     \
+            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_INFO, "hipdnn_frontend") \
+                << msg;                                                                       \
+        }                                                                                     \
     } while(0)
 
-#define HIPDNN_FE_LOG_WARN(...)                       \
-    do                                                \
-    {                                                 \
-        hipdnn_frontend::initializeFrontendLogging(); \
-        HIPDNN_LOG_WARN(__VA_ARGS__);                 \
+#define HIPDNN_FE_LOG_WARN(msg)                                                               \
+    do                                                                                        \
+    {                                                                                         \
+        hipdnn_frontend::initializeFrontendLogging();                                         \
+        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_WARN))                    \
+        {                                                                                     \
+            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_WARN, "hipdnn_frontend") \
+                << msg;                                                                       \
+        }                                                                                     \
     } while(0)
 
-#define HIPDNN_FE_LOG_ERROR(...)                      \
-    do                                                \
-    {                                                 \
-        hipdnn_frontend::initializeFrontendLogging(); \
-        HIPDNN_LOG_ERROR(__VA_ARGS__);                \
+#define HIPDNN_FE_LOG_ERROR(msg)                                                               \
+    do                                                                                         \
+    {                                                                                          \
+        hipdnn_frontend::initializeFrontendLogging();                                          \
+        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_ERROR))                    \
+        {                                                                                      \
+            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_ERROR, "hipdnn_frontend") \
+                << msg;                                                                        \
+        }                                                                                      \
     } while(0)
 
-#define HIPDNN_FE_LOG_FATAL(...)                      \
-    do                                                \
-    {                                                 \
-        hipdnn_frontend::initializeFrontendLogging(); \
-        HIPDNN_LOG_FATAL(__VA_ARGS__);                \
+#define HIPDNN_FE_LOG_FATAL(msg)                                                               \
+    do                                                                                         \
+    {                                                                                          \
+        hipdnn_frontend::initializeFrontendLogging();                                          \
+        if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_FATAL))                    \
+        {                                                                                      \
+            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_FATAL, "hipdnn_frontend") \
+                << msg;                                                                        \
+        }                                                                                      \
     } while(0)
 
 }

@@ -25,6 +25,13 @@ target_link_libraries(hipdnn_plugin_sdk INTERFACE hipdnn_data_sdk)
 
 set(HIP_DNN_PLUGIN_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/plugin_sdk")
 
+# Function for plugins to opt-in to spdlog support
+# For in-tree builds, this delegates to the shared hipdnn_enable_spdlog()
+# For standalone builds, the full implementation is in hipdnn_plugin_sdkConfig.cmake.in
+function(hipdnn_plugin_enable_spdlog TARGET_NAME)
+    hipdnn_enable_spdlog(${TARGET_NAME})
+endfunction()
+
 target_include_directories(
     hipdnn_plugin_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_PLUGIN_SDK_INCLUDE_DIR}>
                                 $<INSTALL_INTERFACE:${HIP_DNN_PLUGIN_SDK_INSTALL_INCLUDE_DIR}>

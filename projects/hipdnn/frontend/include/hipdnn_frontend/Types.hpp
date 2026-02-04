@@ -13,8 +13,8 @@
 #include <hipdnn_data_sdk/utilities/UtilsFp8.hpp>
 
 #include <bitset>
+#include <ostream>
 #include <set>
-#include <spdlog/fmt/fmt.h>
 
 namespace hipdnn_frontend
 {
@@ -556,33 +556,3 @@ inline const auto& getTernaryModesBitset()
 }
 
 } // namespace hipdnn_frontend
-
-template <>
-struct fmt::formatter<hipdnn_frontend::DataType> : fmt::formatter<const char*>
-{
-    template <typename FormatContext>
-    auto format(hipdnn_frontend::DataType type, FormatContext& ctx) const
-    {
-        return fmt::formatter<const char*>::format(hipdnn_frontend::to_string(type), ctx);
-    }
-};
-
-template <>
-struct fmt::formatter<hipdnn_frontend::BuildPlanPolicy> : fmt::formatter<const char*>
-{
-    template <typename FormatContext>
-    auto format(hipdnn_frontend::BuildPlanPolicy policy, FormatContext& ctx) const
-    {
-        return fmt::formatter<const char*>::format(hipdnn_frontend::to_string(policy), ctx);
-    }
-};
-
-template <>
-struct fmt::formatter<hipdnn_frontend::HeuristicMode> : fmt::formatter<const char*>
-{
-    template <typename FormatContext>
-    auto format(hipdnn_frontend::HeuristicMode mode, FormatContext& ctx) const
-    {
-        return fmt::formatter<const char*>::format(hipdnn_frontend::to_string(mode), ctx);
-    }
-};

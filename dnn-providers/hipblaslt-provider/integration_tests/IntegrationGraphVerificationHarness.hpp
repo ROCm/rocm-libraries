@@ -88,7 +88,7 @@ protected:
             << "At least one output tensor id must be specified for "
                "validation.";
 
-        HIPDNN_LOG_INFO("Validating {} output tensors", outputTensorIds);
+        HIPDNN_LOG_INFO("Validating {} output tensors", outputTensorIds.size());
 
         // Lazily register validators after graph execution since tensor Ids and types may be inferred during graph finalization
         for(const auto& registerValidator : _deferredValidators)

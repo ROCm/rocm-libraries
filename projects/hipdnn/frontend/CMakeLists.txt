@@ -12,7 +12,9 @@ add_subdirectory(tests)
 
 add_library(hipdnn_frontend INTERFACE)
 
-target_compile_definitions(hipdnn_frontend INTERFACE COMPONENT_NAME="hipdnn_frontend")
+# Note: COMPONENT_NAME is intentionally NOT propagated as INTERFACE here.
+# Each consuming target should define its own COMPONENT_NAME.
+# The HIPDNN_FE_LOG_* macros define COMPONENT_NAME internally for frontend logging.
 
 target_link_libraries(hipdnn_frontend INTERFACE hipdnn_data_sdk hipdnn_backend)
 

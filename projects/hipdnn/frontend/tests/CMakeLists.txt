@@ -50,6 +50,7 @@ add_executable(
 )
 
 target_compile_options(hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_definitions(hipdnn_frontend_tests PRIVATE COMPONENT_NAME="hipdnn_frontend")
 
 target_link_libraries(
     hipdnn_frontend_tests GTest::gtest GTest::gmock hip::host Threads::Threads hipdnn_test_sdk

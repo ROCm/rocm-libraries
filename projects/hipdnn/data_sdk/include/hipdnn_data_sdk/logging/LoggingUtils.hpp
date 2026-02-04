@@ -26,9 +26,19 @@ inline bool isLoggingEnabled()
     return isValidLogLevel(logLevel) && logLevel != "off";
 }
 
+/**
+ * @brief Generate the spdlog pattern string for callback-based logging
+ *
+ * This pattern includes only the component name prefix in brackets for consistency
+ * with backend logging format. The backend adds timestamp, thread ID, and log level
+ * when receiving the callback message.
+ *
+ * @param componentName The name of the component
+ * @return The spdlog pattern string with bracketed component prefix
+ */
 inline std::string generatePatternString(const std::string& componentName)
 {
-    return "[%Y-%m-%d %H:%M:%S.%e] [tid %t] [%l] [" + componentName + "] %v";
+    return "[" + componentName + "] %v";
 }
 
 } // namespace hipdnn_data_sdk::logging
