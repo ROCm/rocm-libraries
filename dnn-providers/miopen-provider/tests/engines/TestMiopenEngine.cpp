@@ -239,7 +239,7 @@ TEST(TestMiopenEngine, GetDetailsContainsWorkspaceSizeLimitKnob)
     hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(result.ptr, result.size);
 
     const auto& knob = engineDetails.getKnobByName("global.workspace_size_limit");
-    EXPECT_EQ(knob.knobIdStr(), "global.workspace_size_limit");
+    EXPECT_EQ(knob.knobId(), "global.workspace_size_limit");
     EXPECT_EQ(knob.description(), "Workspace size limit in bytes");
 
     ASSERT_TRUE(knob.hasDefaultValue());
