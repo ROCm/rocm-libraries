@@ -263,7 +263,7 @@ def getDockerImage(Map conf=[:])
 
     def gpu_family = conf.get("gpu_family")
 
-    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache"
+    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache_${gpu_family}"
 
     def theRockHash = sh(
             script: """
