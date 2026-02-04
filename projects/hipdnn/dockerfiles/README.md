@@ -39,6 +39,10 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 > [!NOTE]
 > Prebuilt mode downloads pre-compiled binaries from TheRock nightly builds using `install_rocm_from_artifacts.py` (much faster than building from source)
 
+> [!NOTE]
+> There is currently an issue with using the prebuilt binaries with the gfx90X ASIC family. Refer to this GitHub issue for more details:
+https://github.com/ROCm/TheRock/issues/2179
+
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `THEROCK_RELEASE` | `latest` | Release version to install. Use `latest` to automatically fetch the newest nightly build, or specify a version like `7.12.0a20260202`. Available versions can be found at [TheRock nightly tarballs](https://therock-nightly-tarball.s3.amazonaws.com/). |
