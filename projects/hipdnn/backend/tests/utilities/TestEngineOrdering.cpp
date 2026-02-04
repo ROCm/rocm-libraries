@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include "hipdnn_data_sdk/utilities/EngineNames.hpp"
-#include "logging/Logging.hpp" // Must be included before EngineNames.hpp to provide logging macros
 #include "utilities/EngineOrdering.hpp"
 #include <gtest/gtest.h>
 

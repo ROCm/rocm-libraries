@@ -3,7 +3,12 @@
 
 #pragma once
 
+// Backend compilation uses its own logging macros, so include the backend header
+#ifdef HIPDNN_BACKEND_COMPILATION
+#include "logging/Logging.hpp"
+#else
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#endif
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <set>
 #include <string>

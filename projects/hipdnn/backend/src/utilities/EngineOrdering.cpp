@@ -3,7 +3,6 @@
 
 #include "utilities/EngineOrdering.hpp"
 #include "hipdnn_data_sdk/utilities/EngineNames.hpp"
-#include "logging/Logging.hpp" // Must be included before EngineNames.hpp to provide logging macros
 #include <algorithm>
 
 namespace hipdnn_backend
@@ -22,15 +21,23 @@ void sortEngineIds(std::vector<int64_t>& engineIds)
 
         // MIOPEN_ENGINE always comes before everything
         if(aIsMiopen)
+        {
             return true;
+        }
         if(bIsMiopen)
+        {
             return false;
+        }
 
         // MIOPEN_ENGINE_DETERMINISTIC always comes after everything
         if(aIsMiopenDet)
+        {
             return false;
+        }
         if(bIsMiopenDet)
+        {
             return true;
+        }
 
         // For other engines, preserve original order (stable_sort)
         return false;
