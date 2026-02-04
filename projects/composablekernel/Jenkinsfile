@@ -1135,6 +1135,7 @@ pipeline {
         parameterizedCron(CRON_SETTINGS)
     }
     options {
+        skipDefaultCheckout()
         parallelsAlwaysFailFast()
     }
     parameters {
