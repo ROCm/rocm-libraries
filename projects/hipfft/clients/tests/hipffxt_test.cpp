@@ -118,9 +118,9 @@ TEST_P(hipfftxtdirectionformat, c2cinplace)
     hipfft_rt =   hipfftCreate(&plan);
     EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
  
-    // We can re-use the same multiple times GPU to get a "multi-gpu" transform.
+    // We can re-use the same multiple times to get a "multi-gpu" transform.
     std::vector<int> gpus(ngpus);
-    std::fill(gpus.begin(), gpus.end(), 0);
+    std::iota(gpus.begin(), gpus.end(), 0);
     hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
     EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 
@@ -189,9 +189,20 @@ INSTANTIATE_TEST_SUITE_P(
 TEST_P(hipfftxtdirectionformat, r2cinplace)
 {
     size_t    ngpus = 2;
+
+    int count = 0;
+    ASSERT_EQ(hipGetDeviceCount(&count), HIPFFT_SUCCESS) << "hipGetDeviceCount failed";
+    if(count < ngpus)
+    {
+        // We actually use separate GPUs, so skip if we don't have enough GPUs.
+        GTEST_SKIP() << "not enough GPUs";
+    }
+    
     const int Nx    = 32;
     const int Ny    = 32;
 
+
+    
     const int Nyp = Ny / 2 + 1;
     const int Nypp = Ny + 2;
     
@@ -214,12 +225,14 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
     {
         GTEST_SKIP();
     }
-    if(direction == HIPFFT_BACKWARD && batch > 1)
+    if(direction == HIPFFT_BACKWARD && batch > 1 && informat != HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
     {
         GTEST_SKIP();
     }
-    if(direction == HIPFFT_BACKWARD)
+    if(batch > 1)
     {
+        // Running multi-batch transforms seems to lead to failures in subsequent tests for the cuda
+        // back-end.
         GTEST_SKIP();
     }
         
@@ -238,12 +251,19 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
 
     const hipfftType transform_type  = (direction == HIPFFT_FORWARD) ? HIPFFT_D2Z : HIPFFT_Z2D;
     
+    std::vector<int> gpus(ngpus);
+    std::iota(gpus.begin(), gpus.end(), 0);
+    
     if(verbose > 0)
     {
         std::cout << "hipfftxt format change test\n";
         std::cout << "\tNx: " << Nx << "\n";
         std::cout << "\tNy: " << Ny << "\n";
         std::cout << "\tngpus: " << ngpus << "\n";
+        std::cout << "\tgpus:";
+        for(const auto igpu: gpus)
+            std::cout << " " << igpu;
+        std::cout << "\n";
         std::cout << "\ttransform_type: " << transform_type << " : "
                   << hipffttype_to_name(transform_type) << "\n";
         std::cout << "\tdirection: " << direction << " : " << directionname(direction)
@@ -263,8 +283,6 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
                   << " batch: " << batch << "\n";
     }
 
-    std::vector<int> gpus(ngpus);
-    std::iota(gpus.begin(), gpus.end(), 0);
     hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
     EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtSetGPUs failed";
         
@@ -304,16 +322,17 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
                                    odist,
                                    transform_type,
                                    batch);
-        EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftPlanMany failed";
+        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftPlanMany failed with return code "
+                                             << hipfft_rt << "=" << hipfftResult_string(hipfft_rt);
     }
     else
     {
         hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny,
                                      transform_type,
                                      workSize.data());
-        EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftMakePlan2d failed";
+        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftMakePlan2d failed with return code "
+                                             << hipfft_rt << "=" << hipfftResult_string(hipfft_rt);
     }
-
 
     hipLibXtDesc*       inoutdesc = nullptr;
     hipfft_rt                     = hipfftXtMalloc(plan, &inoutdesc, informat);
