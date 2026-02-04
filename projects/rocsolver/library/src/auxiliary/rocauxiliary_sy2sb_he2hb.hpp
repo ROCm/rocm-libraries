@@ -157,6 +157,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
 
     using S = decltype(std::real(T{}));
 
+    bool const use_her2k = false;
+
     // quick return
     if(n == 0 || kd == 0 || nb == 0 || batch_count == 0)
         return rocblas_status_success;
