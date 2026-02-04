@@ -57,9 +57,11 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
     const typename mio_bn_config::fp_prec_type* __restrict__ scale, /* gamma 1xCxHxW */
     const typename mio_bn_config::fp_prec_type* __restrict__ bias,  /* beta  1xCxHxW */
 #if(MIO_RUNNING_RESULT == 1)
-    double expAvgFactor,                                                      /* input momentum */
-    typename mio_bn_config::fp_prec_type* __restrict__ resultRunningMean,     /* in/out */
-    typename mio_bn_config::fp_prec_type* __restrict__ resultRunningVariance, /* in/out */
+    double expAvgFactor, /* input momentum */
+    const typename mio_bn_config::fp_prec_type* __restrict__ prevResultRunningMean,     /* in */
+    const typename mio_bn_config::fp_prec_type* __restrict__ prevResultRunningVariance, /* in */
+    typename mio_bn_config::fp_prec_type* __restrict__ nextResultRunningMean,           /* out */
+    typename mio_bn_config::fp_prec_type* __restrict__ nextResultRunningVariance,       /* out */
 #endif
     double epsilon /* input fuzz param > 0 */
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
@@ -138,7 +140,12 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
                              static_cast<fp_accum_c_type>(expAvgFactor));
 
         miopen::batchnorm::running_stash<fp_accum_c_type, fp_prec_c_type, StashUpdater>(
-            resultRunningMean, resultRunningVariance, updater, adjIndex);
+            prevResultRunningMean,
+            prevResultRunningVariance,
+            nextResultRunningMean,
+            nextResultRunningVariance,
+            updater,
+            adjIndex);
 #endif
 
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
