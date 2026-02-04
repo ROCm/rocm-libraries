@@ -115,6 +115,9 @@ void testing_gtsv_no_pivot(const Arguments& arg)
         hdu[i] = random_cached_generator<T>(1, 8);
     }
 
+    hdl[0]     = std::numeric_limits<T>::infinity();
+    hdu[m - 1] = std::numeric_limits<T>::infinity();
+
     // Host dense rhs
     host_vector<T> hB(ldb * n, static_cast<T>(7));
 

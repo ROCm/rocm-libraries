@@ -120,6 +120,9 @@ void testing_gtsv_no_pivot_strided_batch(const Arguments& arg)
             hd[j * batch_stride + i]  = random_cached_generator<T>(17, 32);
             hdu[j * batch_stride + i] = random_cached_generator<T>(1, 8);
         }
+
+        hdl[j * batch_stride + 0]     = std::numeric_limits<T>::infinity();
+        hdu[j * batch_stride + m - 1] = std::numeric_limits<T>::infinity();
     }
 
     // Host dense rhs
