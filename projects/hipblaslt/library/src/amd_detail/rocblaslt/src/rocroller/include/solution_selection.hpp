@@ -157,8 +157,7 @@ constexpr int preferredUnrolling(rocRoller::DataType typeA,
                                   rocRoller::DataType typeB,
                                   WorkGroupTileSize   wgt,
                                   bool hasPreSwizzle,
-                                  bool hasPreTile,
-                                  bool                isOrigamiConfig = false)
+                                  bool hasPreTile)
 {
     // Other datatypes run out of registers when prefetchInFlight is too
     // large.

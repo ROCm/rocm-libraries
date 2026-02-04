@@ -153,7 +153,8 @@ std::shared_ptr<SolutionParameters>
         gemm->swizzleScale   = true;
         gemm->prefetchScale  = true;
 
-        if (solutionIndexParameters.workgroupTile.m >= 128 && solutionIndexParameters.workgroupTile.n >= 128)
+        if ((solutionIndexParameters.workgroupTile.m >= 128 && solutionIndexParameters.workgroupTile.n >= 128)
+        || (solutionIndexParameters.workgroupTile.m == 32 || solutionIndexParameters.workgroupTile.n == 32))
         {
             gemm->loadPathAScale = SolutionParams::LoadPath::BufferToLDS;
             gemm->loadPathBScale = SolutionParams::LoadPath::BufferToLDS;
@@ -203,6 +204,11 @@ std::shared_ptr<SolutionParameters>
            and SolutionParams::IsBufferToLDS(gemm->loadPathB)))
     {
         gemm->prefetchLDSFactor = 2;
+    }
+
+    if (SolutionParams::IsBufferToLDS(gemm->loadPathAScale) and SolutionParams::IsBufferToLDS(gemm->loadPathBScale))
+    {
+        gemm->prefetchLDSFactor = 1;
     }
 
     // LDS can only be used for scaling data with certain workgroup tile sizes

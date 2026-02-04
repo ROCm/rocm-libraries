@@ -199,7 +199,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                               && kernelType.scaleTypeB.preSwizzleTile.size() == 3);
         auto hasPreTile = (kernelType.scaleTypeA.preTile.size() == 2
                            && kernelType.scaleTypeB.preTile.size() == 2);
-        int unrollAmount = preferredUnrolling(kernelType.typeA, kernelType.typeB, wgt, hasPreSwizzle, hasPreTile, true);
+        int unrollAmount = preferredUnrolling(kernelType.typeA, kernelType.typeB, wgt, hasPreSwizzle, hasPreTile);
         wgt.k /= unrollAmount;
 
         if((requestedAlgoCount == -1)
@@ -246,7 +246,6 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
             if(is256Tile && !(isFP4))
                 continue;
 
-            // Set tailLoops = false for {256, 256, 256} tile size
             bool useTailLoops = true;
 
             params.push_back({wgt, true, false, useTailLoops});
