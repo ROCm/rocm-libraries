@@ -49,6 +49,59 @@ namespace rocRoller
     }
 
     Generator<Instruction>
+        ArgumentLoader::getPreloadedRegisters(Register::ValuePtr& regs, int& offset, int& count)
+    {
+        regs     = nullptr;
+        offset   = 0;
+        count    = 0;
+        auto ctx = m_context.lock();
+
+        auto maxPreloadedRegs = ctx->kernelOptions()->systemPreloadedKernelArguments;
+
+        co_yield Instruction::Comment(concatenate("maxPreloadedRegs", maxPreloadedRegs));
+
+        if(maxPreloadedRegs == 0)
+            co_return;
+
+        int numUserSGPRs = ctx->allocator(Register::Type::Scalar)->useCount();
+
+        int maxArchPreloadedRegs = 16 - numUserSGPRs;
+
+        if(maxPreloadedRegs < 0)
+        {
+            maxPreloadedRegs = maxArchPreloadedRegs;
+        }
+        else
+        {
+            maxPreloadedRegs = std::min(maxPreloadedRegs, maxArchPreloadedRegs);
+        }
+
+        int preloadedRegs = 0;
+
+        for(auto const& arg : m_kernel->arguments())
+        {
+            auto argEnd = (arg.offset + arg.size) / 4;
+            if(argEnd > maxPreloadedRegs)
+                break;
+
+            preloadedRegs = argEnd;
+        }
+
+        regs = Register::Value::Placeholder(ctx,
+                                            Register::Type::Scalar,
+                                            DataType::Raw32,
+                                            preloadedRegs,
+                                            Register::AllocationOptions::FullyContiguous());
+
+        co_yield regs->allocate();
+
+        std::cout << "Splitting out preloaded args:";
+        splitOutArgs(regs, 0);
+
+        count = preloadedRegs;
+    }
+
+    Generator<Instruction>
         ArgumentLoader::loadRange(int offset, int endOffset, Register::ValuePtr& value) const
     {
         AssertFatal(offset >= 0 && endOffset >= 0, "Negative offset");
@@ -102,6 +155,98 @@ namespace rocRoller
         }
     }
 
+    void ArgumentLoader::splitOutArgs(Register::ValuePtr rawRegs, int beginOffset)
+    {
+        AssertFatal(rawRegs->variableType() == DataType::Raw32, ShowValue(rawRegs->variableType()));
+        AssertFatal(rawRegs->allocationState() == Register::AllocationState::Allocated,
+                    ShowValue(rawRegs->allocationState()));
+        auto const& args = m_kernel->arguments();
+
+        int endOffset = beginOffset + (rawRegs->registerCount() * 4);
+
+        std::vector<std::vector<int>> indices;
+        // indices.reserve(args.size());
+        std::vector<int> argIndices;
+
+        for(int i = 0; i < args.size(); i++)
+        {
+            auto const& arg    = args[i];
+            auto        argEnd = arg.offset + arg.size;
+            if(arg.offset >= beginOffset && argEnd <= endOffset)
+            {
+                AssertFatal(!m_loadedValues.contains(arg.name), ShowValue(arg));
+
+                auto beginReg = (arg.offset - beginOffset) / 4;
+                auto endReg   = beginReg + (arg.size / 4);
+                auto range    = iota(beginReg, endReg);
+
+                indices.emplace_back(range.begin(), range.end());
+                argIndices.push_back(i);
+            }
+        }
+
+        std::cout << "Splitting regs:" << std::endl;
+        for(int i = 0; i < indices.size(); i++)
+        {
+            auto argIdx = argIndices[i];
+            std::cout << argIdx << "(" << args.at(argIdx).name << ")"
+                      << ": ";
+            streamJoin(std::cout, indices[i], ", ");
+            std::cout << std::endl;
+        }
+
+        auto valueRegs = rawRegs->split(indices);
+
+        for(int valIdx = 0; valIdx < valueRegs.size(); valIdx++)
+        {
+            int         argIdx = argIndices[valIdx];
+            auto const& arg    = args.at(argIdx);
+
+            auto subReg = valueRegs[valIdx];
+            subReg->setName(arg.name);
+            subReg->setVariableType(arg.variableType);
+            m_loadedValues[arg.name] = subReg;
+        }
+    }
+
+#if 1
+    Generator<Instruction> ArgumentLoader::loadAllArguments()
+    {
+        auto const& args    = m_kernel->arguments();
+        std::string comment = "Loading Kernel Arguments: \n";
+        for(auto const& arg : args)
+            comment += arg.toString() + "\n";
+        co_yield Instruction::Comment(comment);
+
+        if(args.empty())
+        {
+            co_yield Instruction::Comment("No kernel arguments");
+            co_return;
+        }
+
+        int beginOffset = std::numeric_limits<int>::max();
+        int endOffset   = 0;
+
+        for(auto const& arg : args)
+        {
+            if(!m_loadedValues.contains(arg.name))
+            {
+                beginOffset = std::min<int>(beginOffset, arg.offset);
+                endOffset   = std::max<int>(endOffset, arg.offset + arg.size);
+            }
+        }
+
+        Register::ValuePtr allArgs;
+
+        if(beginOffset >= endOffset)
+            co_return;
+
+        co_yield loadRange(beginOffset, endOffset, allArgs);
+
+        splitOutArgs(allArgs, beginOffset);
+    }
+
+#else
     Generator<Instruction> ArgumentLoader::loadAllArguments()
     {
         auto const& args    = m_kernel->arguments();
@@ -146,6 +291,7 @@ namespace rocRoller
             co_yield m_context.lock()->mem()->loadScalar(r, argPtr, arg.offset, arg.size);
         }
     }
+#endif
 
     Generator<Instruction> ArgumentLoader::loadArgument(std::string const& argName)
     {

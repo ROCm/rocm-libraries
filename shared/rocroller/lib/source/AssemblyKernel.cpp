@@ -45,6 +45,9 @@ namespace rocRoller
         m_argumentPointer->setName("Kernel argument pointer");
         co_yield m_argumentPointer->allocate();
 
+        co_yield ctx->argLoader()->getPreloadedRegisters(
+            m_preloadedArgs, m_preloadedRegOffset, m_numPreloadedRegs);
+
         if(ctx->targetArchitecture().HasCapability(GPUCapability::WorkgroupIdxViaTTMP))
         {
             m_workgroupIndex[0] = ctx->getTTMP9();
@@ -123,6 +126,13 @@ namespace rocRoller
         co_yield allocateInitialRegisters();
 
         co_yield Instruction::Label(m_kernelStartLabel);
+
+        if(m_numPreloadedRegs > 0)
+        {
+            co_yield Instruction::Comment("Pad to make room for arg loading preamble.");
+            for(int i = 0; i < 64; i++)
+                co_yield Instruction::Nop();
+        }
     }
 
     Generator<Instruction> AssemblyKernel::prolog()
@@ -247,6 +257,15 @@ namespace rocRoller
 
         co_yield Instruction::Comment("Initial kernel state");
         co_yield Instruction::Directive("  .amdhsa_user_sgpr_kernarg_segment_ptr 1");
+
+        if(m_numPreloadedRegs > 0)
+        {
+            co_yield Instruction::Directive(
+                concatenate("  .amdhsa_user_sgpr_kernarg_preload_length ", m_numPreloadedRegs));
+            co_yield Instruction::Directive(
+                concatenate("  .amdhsa_user_sgpr_kernarg_preload_offset ", m_preloadedRegOffset));
+        }
+
         co_yield Instruction::Directive(".amdhsa_system_sgpr_workgroup_id_x 1");
         co_yield Instruction::Directive(
             concatenate(".amdhsa_system_sgpr_workgroup_id_y ", m_kernelDimensions > 1));

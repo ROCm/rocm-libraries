@@ -83,6 +83,10 @@ namespace rocRoller
         Generator<Instruction>
             loadRange(int offset, int sizeBytes, Register::ValuePtr& value) const;
 
+        Generator<Instruction>
+             getPreloadedRegisters(Register::ValuePtr& regs, int& offset, int& count);
+        void splitOutArgs(Register::ValuePtr rawRegs, int beginOffset);
+
     private:
         friend class rocRollerTest::ArgumentLoaderTest_loadArgExtra_Test;
 

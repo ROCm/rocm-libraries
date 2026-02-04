@@ -240,6 +240,10 @@ namespace rocRoller
         KernelGraph::KernelGraphPtr m_kernelGraph;
         CommandPtr                  m_command;
 
+        int                m_preloadedRegOffset = 0;
+        int                m_numPreloadedRegs   = 0;
+        Register::ValuePtr m_preloadedArgs;
+
         // In case context is not available
         // Context does not get serialized but sometimes we need these values after serialization
         std::optional<int> m_sgprCount;
