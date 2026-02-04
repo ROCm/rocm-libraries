@@ -1,10 +1,16 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#define MIOPEN_ENABLE_STDERR_LOGGING 1
+
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+
+#if MIOPEN_ENABLE_STDERR_LOGGING
+#include <iostream>
+#endif
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
@@ -171,6 +177,9 @@ void ConvBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
         if(_debugMode == HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
         {
             HIPDNN_LOG_INFO("Convolution Bwd: Found {} algorithms", returnedAlgoCount);
+#if MIOPEN_ENABLE_STDERR_LOGGING
+            std::cerr << "Convolution Bwd: Found " << returnedAlgoCount << " algorithms\n";
+#endif
             for(size_t i = 0; i < static_cast<size_t>(returnedAlgoCount); ++i)
             {
                 HIPDNN_LOG_INFO("  Algorithm {}: algorithm={}, time={}, workspace_size={}",
@@ -178,6 +187,12 @@ void ConvBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
                                 static_cast<int>(perfResults[i].bwd_data_algo),
                                 perfResults[i].time,
                                 perfResults[i].memory);
+#if MIOPEN_ENABLE_STDERR_LOGGING
+                std::cerr << "  Algorithm " << i 
+                          << ": algorithm=" << static_cast<int>(perfResults[i].bwd_data_algo)
+                          << ", time=" << perfResults[i].time
+                          << ", workspace_size=" << perfResults[i].memory << '\n';
+#endif
             }
         }
 
@@ -185,6 +200,11 @@ void ConvBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
                         static_cast<int>(perfResults[0].bwd_data_algo),
                         perfResults[0].time,
                         perfResults[0].memory);
+#if MIOPEN_ENABLE_STDERR_LOGGING
+        std::cerr << "Convolution Bwd: Selected algorithm=" << static_cast<int>(perfResults[0].bwd_data_algo)
+                  << ", time=" << perfResults[0].time
+                  << ", workspace_size=" << perfResults[0].memory << '\n';
+#endif
 
         _algorithm = perfResults[0].bwd_data_algo;
         // Update workspace size with the actual requirement from the selected algorithm.
