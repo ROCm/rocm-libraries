@@ -1878,7 +1878,9 @@ def _get_schedule_256x224x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 15
     elif isNT(kernel) and useLDSTr and TLDS == 0:
         optSchedule = {
-            'SYNC': [[-1,10,21,21,55,55,60,60]],
+            'SYNC': [[-1,6,
+                    #    10,
+                       21,21,55,55,60,60]],
             'GRIncA': [[0,1,2,3,4,5,6,7,8]],
             'LRA0': [[0,0,2,2,4,4,6,6,8,8,10,10,12,12,14,14],
                      [1,1,3,3,5,5,7,7,9,9,11,11,13,13,15,15]],
@@ -1891,11 +1893,11 @@ def _get_schedule_256x224x64_16bit(kernel, useLDSTr, TLDS):
             'GRB': [[61,61, 63,63, 65,65, 79,79, 90,90, 95,95, 100,100],
                     [62,62, 64,64, 66,66, 80,80, 91,91, 96,96, 101,101]],
 
-            'LRA1': [[94,94,96,96,98,98,100,100,101,104,106,106,108,108,110,110],
-                     [95,95,97,97,99,99,102,102,103,103,105,105,107,107,109,109]],
+            'LRB1': [[94,94,96,96,98,98,100,100,101,104,106,106,108,108],
+                     [95,95,97,97,99,99,102,102,103,103,105,105,107,107]],
 
-            'LRB1': [[61,61, 63,63, 65,65, 79,79, 90,90, 95,95, 100,100],
-                    [62,62, 64,64, 66,66, 80,80, 91,91, 96,96, 101,101]],
+            'LRA1': [[61,61, 63,63, 65,65, 79,79, 90,90, 95,95, 100,100, 105,105],
+                    [62,62, 64,64, 66,66, 80,80, 91,91, 96,96, 101,101, 106,106]],
 
             'LRSA': [[54]],
             'LRSB': [[54]],
@@ -1905,8 +1907,9 @@ def _get_schedule_256x224x64_16bit(kernel, useLDSTr, TLDS):
         }
 
         syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read"),
-            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for LR"),
+            SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for prior local read"),
+            SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for prior local read"),
+            # SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for LR"),
             SWaitCnt(dscnt=0, vlcnt=7, vscnt=-1, comment="wait for previous set of global reads and Local Reads"),
             SBarrier(comment=""),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read"),
