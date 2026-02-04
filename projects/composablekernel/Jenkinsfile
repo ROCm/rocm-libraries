@@ -57,11 +57,13 @@ def sendFailureNotifications() {
     // Error patterns to scan build logs for specific failure types and send detailed notifications.
     def failurePatterns = [
         [pattern: /login attempt to .* failed with status: 401 Unauthorized/, description: "Docker registry authentication failed"],
-        [pattern: /(.*)docker login failed(.*)/, description: "Docker login failed"],
+        [pattern: /.*docker login failed.*/, description: "Docker login failed"],
         [pattern: /HTTP request sent .* 404 Not Found/, description: "HTTP request failed with 404"],
         [pattern: /cat: .* No such file or directory/, description: "GPU not found"],
-        [pattern: /(.*)GPU not found(.*)/, description: "GPU not found"],
-        [pattern: /Could not connect to Redis at .* Connection timed out/, description: "Redis connection timed out"]
+        [pattern: /.*GPU not found.*/, description: "GPU not found"],
+        [pattern: /Could not connect to Redis at .* Connection timed out/, description: "Redis connection timed out"],
+        [pattern: /.*unauthorized: your account must log in with a Personal Access Token.*/, description: "Docker login failed"],
+        [pattern: /.*sccache: error: Server startup failed: Address in use.*/, description: "Sccache Error"]
     ]
     
     // Get the build log.
@@ -336,33 +338,34 @@ def check_host() {
 }
 
 def check_arch_name(){
-    def arch_name = ""
     sh 'rocminfo | tee rocminfo.log'
     if ( runShell('grep -n "gfx90a" rocminfo.log') ){
-        arch_name = "gfx90a"
+        return "gfx90a"
     }
     else if ( runShell('grep -n "gfx942" rocminfo.log') ) {
-        arch_name = "gfx942"
+        return "gfx942"
     }
     else if ( runShell('grep -n "gfx101" rocminfo.log') ) {
-        arch_name = "gfx101"
+        return "gfx101"
     }
     else if ( runShell('grep -n "gfx103" rocminfo.log') ) {
-        arch_name = "gfx103"
+        return "gfx103"
     }
     else if ( runShell('grep -n "gfx11" rocminfo.log') ) {
-        arch_name = "gfx11"
+        return "gfx11"
     }
     else if ( runShell('grep -n "gfx120" rocminfo.log') ) {
-        arch_name = "gfx12"
+        return "gfx12"
     }
     else if ( runShell('grep -n "gfx908" rocminfo.log') ) {
-        arch_name = "gfx908"
+        return "gfx908"
     }
     else if ( runShell('grep -n "gfx950" rocminfo.log') ) {
-        arch_name = "gfx950"
+        return "gfx950"
     }
-    return arch_name
+    else {
+        return ""
+    }
 }
 
 def getDockerImage(Map conf=[:]){
@@ -599,7 +602,7 @@ def cmake_build(Map conf=[:]){
         if (params.NINJA_BUILD_TRACE) {
             echo "running ninja build trace"
         }
-        if ((params.RUN_BUILDER_TESTS || params.RUN_FULL_CONV_TILE_TESTS) && !setup_args.contains("-DCK_CXX_STANDARD=") && !setup_args.contains("gfx10") && !setup_args.contains("gfx11")) {
+        if (params.RUN_BUILDER_TESTS && !setup_args.contains("-DCK_CXX_STANDARD=") && !setup_args.contains("gfx10") && !setup_args.contains("gfx11")) {
             setup_args = " -D CK_EXPERIMENTAL_BUILDER=ON "  + setup_args
         }
         setup_cmd = conf.get(
@@ -1446,14 +1449,13 @@ pipeline {
                     agent{ label rocmnode("gfx90a")}
                     environment{
                         setup_args = "NO_CK_BUILD"
-                        execute_args = """ python3 ../experimental/builder/src/generate_instances.py --mode=profiler && \
-                                           ../script/cmake-ck-dev.sh  ../ gfx90a && \
+                        execute_args = """ python3 ../experimental/grouped_convolution_tile_instances/generate_instances.py --mode=profiler && \
+                                           cmake .. --preset dev-gfx90a -D CK_EXPERIMENTAL_BUILDER=ON && \
                                            make -j64 test_grouped_convnd_fwd_tile && \
                                            ./bin/test_grouped_convnd_fwd_tile"""
                     }
                     steps{
-                        // TODO: Reenable after the instance fixes
-                        // buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
+                        buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         cleanWs()
                     }
                 }

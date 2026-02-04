@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -239,6 +239,12 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
     {
         CHECK_THAT(simplify(reinterpret(DataType::Int32, v)), IdenticalTo(v));
         CHECK_THAT(simplify(reinterpret(DataType::UInt64, v3)), IdenticalTo(v3));
+    }
+
+    SECTION("conditional")
+    {
+        auto expr = conditional(b > zero, v2, v2 + v);
+        CHECK_THAT(simplify(expr), IdenticalTo(v2));
     }
 }
 
@@ -1540,7 +1546,7 @@ TEST_CASE("Code gen with ConvertPropagation", "[expression][expression-transform
 
     std::string expected;
     if(DataTypeInfo::Get(dstDatatype).isSigned)
-        expected = R"(        
+        expected = R"(
             v_add_i32 v4, v0, v2
         )";
     else
