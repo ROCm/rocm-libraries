@@ -114,7 +114,7 @@ namespace GEMMTests
         gemm.macK      = 8;
         basicGEMM<float>(gemm);
     }
-    
+
     TEST_P(UnrollKTestGPU, GPU_BasicGEMMFP16Prefetch3)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
