@@ -6,6 +6,7 @@ import os
 
 subtree_to_project_map = {
     "dnn-providers/miopen-provider": "miopen-provider",
+    "dnn-providers/hip-kernel-provider": "hip-kernel-provider",
     "projects/hipblas": "blas",
     "projects/hipblas-common": "blas",
     "projects/hipblaslt": "blas",

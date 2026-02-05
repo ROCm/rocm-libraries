@@ -242,6 +242,15 @@
       "auto_subtree_pull": false,
       "auto_subtree_push": false,
       "monorepo_source_of_truth": true
+    },
+    {
+      "name": "hip-kernel-provider",
+      "url": "ROCm/hipKernel-Provider",
+      "branch": "develop",
+      "category": "dnn-providers",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
     }
   ]
 }
