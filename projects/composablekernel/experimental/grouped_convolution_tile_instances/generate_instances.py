@@ -85,12 +85,12 @@ def get_dtype(problem_name):
     if problem_name.find("bf16") != -1:
         return "ck_tile::bf16_t"
     else:
-        raise RuntimeError("wrong dtype")
+        raise RuntimeError("Cannot parse data type from problem name: " + problem_name)
 
 
 def generate_calls_inc(instances, problem_name, direction, filter_pattern):
     generate_dir = Path(__file__).resolve().parent
-    with open(f"{generate_dir}/{problem_name}_calls.inc", "w") as f:
+    with open(f"{generate_dir}/{direction}/{problem_name}_calls.inc", "w") as f:
         if problem_name.find(filter_pattern) == -1:
             return
         for instance in instances:
@@ -100,7 +100,7 @@ def generate_calls_inc(instances, problem_name, direction, filter_pattern):
 
 def generate_defs_inc(instances, problem_name, signature, direction, filter_pattern):
     generate_dir = Path(__file__).resolve().parent
-    with open(f"{generate_dir}/{problem_name}.inc", "w") as f:
+    with open(f"{generate_dir}/{direction}/{problem_name}.inc", "w") as f:
         if problem_name.find(filter_pattern) == -1:
             return
         for instance in instances:
@@ -114,7 +114,7 @@ def generate_defs_inc(instances, problem_name, signature, direction, filter_patt
             )
 
 
-def generate_fwd_cpp(
+def generate_conv_cpp(
     instances, problem_name, config, direction, signature_name, filter_pattern
 ):
     for instance in instances:
@@ -122,10 +122,19 @@ def generate_fwd_cpp(
             break
         instance_name = problem_name + "_" + str(instance.id)
         generate_dir = Path(__file__).resolve().parent
-        directory_path = Path(f"{generate_dir}/instances/{config}")
+        directory_path = Path(f"{generate_dir}/instances/{direction}/{config}")
         directory_path.mkdir(parents=True, exist_ok=True)
+        if direction == "forward":
+            template_file = "grouped_convolution_forward_tile.cpp.in"
+        elif direction == "backward_weight":
+            template_file = "grouped_convolution_backward_weight_tile.cpp.in"
+        elif direction == "backward_data":
+            template_file = "grouped_convolution_backward_data_tile.cpp.in"
+        else:
+            raise RuntimeError(f"Unrecognized direction: {direction}")
+        
         with open(
-            f"{generate_dir}/instances/grouped_convolution_forward_tile.cpp.in",
+            f"{generate_dir}/instances/{template_file}",
             "r",
         ) as f:
             content = f.read()
@@ -218,44 +227,71 @@ def parse_bwd_weight_instances(instances, problem_name):
         device_op_name = instance.split("<")[0]
         if device_op_name.find("Explicit") == -1:
             # Skip the explicit GEMM instances for now.
+            print(f"Skipping instance {instance_id} with device op {device_op_name} since it's not supported yet.")
             continue
         else:
             instance_args_list = instance[instance.find("<") + 1 : instance.find(">")]
-            args = instance_args_list.split(", ")
+            args = instance_args_list.split(",")
+
+            is_v3_instance = instance.find("Xdl_CShuffleV3") != -1
+            is_two_stage_instance = instance.find("TwoStage") != -1
+
+            spec = args[11]
+            block_size = int(args[12])
             m_per_block = int(args[13])
             n_per_block = int(args[14])
             k_per_block = int(args[15])
-            spec = args[11]
             m_per_xdl = int(args[17])
             n_per_xdl = int(args[18])
-            m_xdl_per_wave = int(args[7])
-            n_xdl_per_wave = int(args[8])
-            a_scalar_per_vector = int(args[9])
-            b_scalar_per_vector = int(args[10])
-            c_scalar_per_vector = int(args[11])
-            if len(args) == 15:
-                num_groups_to_merge = int(args[14])
-            elif len(args) != 16 and len(args) != 14:
-                raise RuntimeError("wrong number of parameters")
-            else:
-                num_groups_to_merge = 1
-            split_image = instance.find("Large") != -1
-            double_smem_buffer = instance.find("BlkGemmPipelineVersion: v4") != -1
-            num_wave_groups = 2 if instance.find("BlkGemmPipelineVersion: v5") != -1 else 1
-            scheduler = (
-                "Intrawave" if instance.find("BlkGemmPipelineScheduler") == -1 else args[14]
-            )
-            pipeline_version = (
-                "v1" if instance.find("BlkGemmPipelineVersion") == -1 else args[15]
-            )
+            m_xdl_per_wave = int(args[19])
+            n_xdl_per_wave = int(args[20])
+            a_scalar_per_vector = int(args[25])
+            b_scalar_per_vector = int(args[32])
+            c_scalar_per_vector = int(args[38])
 
+            if is_v3_instance:
+                if len(args) != 45:
+                    raise RuntimeError(f"Wrong number of parameters in the V3 XDL CShuffle instance string: {instance}")
+
+                num_groups_to_merge = int(args[44])
+
+                # Block GEMM pipeline parameters
+                blk_gemm_pipeline_schduler = args[39]
+                blk_gemm_pipeline_version = args[40]
+            elif is_two_stage_instance:
+                print(f"Skipping instance {instance_id} with device op {device_op_name} since it's not supported yet.")
+                continue
+            else:
+                # Regular V1 XDL CShuffle instance
+                if len(args) != 43:
+                    raise RuntimeError(f"Wrong number of parameters in the XDL CShuffle instance string: {instance}")
+                
+                num_groups_to_merge = 1
+
+                # Block GEMM pipeline parameters
+                blk_gemm_pipeline_schduler = "Intrawave"
+                blk_gemm_pipeline_version = "v1"
+
+            # Sanity check for Block GEMM pipeline parameters
+            # Scheduler must be either Intrawave or Interwave.
+            # Version must be from v1 to v5
+            if blk_gemm_pipeline_schduler not in ["Intrawave", "Interwave"]:
+                raise RuntimeError(f"Invalid Block GEMM pipeline scheduler: {blk_gemm_pipeline_schduler} in instance: {instance}")
+            if blk_gemm_pipeline_version not in ["v1", "v2", "v3", "v4", "v5"]:
+                raise RuntimeError(f"Invalid Block GEMM pipeline version: {blk_gemm_pipeline_version} in instance: {instance}")
+
+            split_image = instance.find("Large") != -1
+            double_smem_buffer = blk_gemm_pipeline_version == "v4"
+            num_wave_groups = 2 if blk_gemm_pipeline_version == "v5" else 1
+            scheduler = blk_gemm_pipeline_schduler
+            pipeline_version = blk_gemm_pipeline_version
+   
             m_warp = int(m_per_block / (m_per_xdl * m_xdl_per_wave))
             n_warp = int(n_per_block / (n_per_xdl * n_xdl_per_wave))
             warp_size = 64
             k_warp = int(block_size / (warp_size * m_warp * n_warp))
             dtype = get_dtype(problem_name)
             # TODO: Make it more flexible
-            # k_per_xdl = f"ck_tile::get_k_warp_tile<{dtype}, {m_per_xdl}>()"
             k_per_xdl = 8 if dtype == "float" else 16
 
             conv = ConvInstanceTemplateParams(
@@ -270,7 +306,7 @@ def parse_bwd_weight_instances(instances, problem_name):
                 [a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector],
                 num_groups_to_merge,
                 split_image,
-                False,
+                False, # explicit_gemm
                 instance_id,
             )
             convs.append(conv)
@@ -289,7 +325,7 @@ def generate_instances_fwd(instances, problem_name, config, filter_pattern):
         direction,
         filter_pattern,
     )
-    generate_fwd_cpp(
+    generate_conv_cpp(
         instances, problem_name, config, direction, signature_name, filter_pattern
     )
 
@@ -305,7 +341,7 @@ def generate_instances_bwd_weight(instances, problem_name, config, filter_patter
         direction,
         filter_pattern,
     )
-    generate_bwd_weight_cpp(
+    generate_conv_cpp(
         instances, problem_name, config, direction, signature_name, filter_pattern
     )
 
