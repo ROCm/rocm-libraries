@@ -123,6 +123,7 @@ public:
             return;
 
         initThread();
+        clearValues();
     }
 
     ~FrequencyMonitorImp()
@@ -150,6 +151,7 @@ public:
             m_XCDCount = 1;
         }
 #endif
+        clearValues();
     }
 
     void start()
@@ -269,6 +271,8 @@ private:
     {
         m_stop = false;
         m_exit = false;
+
+        InitAMDSMI();
 
         amdsmi_version_t version;
 
@@ -510,17 +514,17 @@ private:
     std::thread             m_thread;
     std::condition_variable m_cv;
     std::mutex              m_mutex;
-    uint32_t                m_smiDeviceIndex;
+    uint32_t                m_smiDeviceIndex{};
     bool                    m_isMultiXCDSupported;
-    uint16_t                m_XCDCount;
-    uint16_t                m_CUCount;
+    uint16_t                m_XCDCount{};
+    uint16_t                m_CUCount{};
 
     std::vector<amdsmi_socket_handle>    m_socketHandles;
     std::vector<amdsmi_processor_handle> m_processorHandles;
 
     std::vector<uint64_t>              m_SYSCLK_sum;
     std::vector<std::vector<uint64_t>> m_SYSCLK_array;
-    uint64_t                           m_MEMCLK_sum;
+    uint64_t                           m_MEMCLK_sum{};
     std::vector<uint64_t>              m_MEMCLK_array;
 
 #else // WIN32
