@@ -431,7 +431,8 @@ void hipblaslt_init_device(ABC_dims                 abc,
             std::is_same_v<T, hipblaslt_f4x2>
             || std::is_same_v<T, hipblaslt_f6x16>
             || std::is_same_v<T, hipblaslt_bf6x16>
-            || std::is_same_v<T, hipblaslt_e8>)
+            || std::is_same_v<T, hipblaslt_e8>
+            || std::is_same_v<T, hipblaslt_e5m3>)
         {
             hipblaslt_cerr << "No support nan for HIP_R_4F_E2M1_EXT and HIP_R_6F_E2M3_EXT and "
                               "HIP_R_6F_E3M2_EXT in hipblaslt_init_device"
@@ -695,6 +696,10 @@ void hipblaslt_init_device(ABC_dims                 abc,
     case HIP_R_8F_UE8M0:
         hipblaslt_init_device<hipblaslt_e8>(
             abc, init, is_nan, static_cast<hipblaslt_e8*>(A), M, N, lda, stride, batch_count);
+        break;
+    case HIP_R_8F_E5M3_EXT:
+        hipblaslt_init_device<hipblaslt_e5m3>(
+            abc, init, is_nan, static_cast<hipblaslt_e5m3*>(A), M, N, lda, stride, batch_count);
         break;
     case static_cast<hipDataType>(HIP_R_6F_E2M3_EXT):
         hipblaslt_init_device<hipblaslt_f6x16>(

@@ -195,24 +195,62 @@ std::vector<float> mx_type_to_f32(T* buf, S* sbuf, size_t row, size_t col, size_
     return ref;
 }
 
-std::vector<float> mx_type_to_f32(hipDataType type, HipHostBuffer& buf, HipHostBuffer& sbuf, size_t row, size_t col, size_t srow, size_t scol)
+std::vector<float> mx_type_to_f32(hipDataType type, hipDataType stype, HipHostBuffer& buf, HipHostBuffer& sbuf, size_t row, size_t col, size_t srow, size_t scol)
 {
     switch(type)
     {
     case HIP_R_8F_E4M3:
-        return mx_type_to_f32(buf.as<hipblaslt_f8>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+        switch(stype)
+        {
+        case HIP_R_8F_UE8M0:
+            return mx_type_to_f32(buf.as<hipblaslt_f8>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+        default:
+            hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
+            throw std::runtime_error("Error type in mx_type_to_f32()");
+        }
     case HIP_R_8F_E5M2:
-        return mx_type_to_f32(buf.as<hipblaslt_bf8>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+        switch(stype)
+        {
+        case HIP_R_8F_UE8M0:
+            return mx_type_to_f32(buf.as<hipblaslt_bf8>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+        default:
+            hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
+            throw std::runtime_error("Error type in mx_type_to_f32()");
+        }
     case HIP_R_6F_E2M3_EXT:
-        return mx_type_to_f32(buf.as<hipblaslt_f6x16>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+        switch(stype)
+        {
+        case HIP_R_8F_UE8M0:
+            return mx_type_to_f32(buf.as<hipblaslt_f6x16>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+        default:
+            hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
+            throw std::runtime_error("Error type in mx_type_to_f32()");
+        }
     case HIP_R_6F_E3M2_EXT:
-        return mx_type_to_f32(buf.as<hipblaslt_bf6x16>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+        switch(stype)
+        {
+        case HIP_R_8F_UE8M0:
+            return mx_type_to_f32(buf.as<hipblaslt_bf6x16>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+        default:
+            hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
+            throw std::runtime_error("Error type in mx_type_to_f32()");
+        }
     case HIP_R_4F_E2M1_EXT:
-        return mx_type_to_f32(buf.as<hipblaslt_f4x2>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+        switch(stype)
+        {
+        case HIP_R_8F_UE8M0:
+            return mx_type_to_f32(buf.as<hipblaslt_f4x2>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+        case HIP_R_8F_E4M3:
+            return mx_type_to_f32(buf.as<hipblaslt_f4x2>(), sbuf.as<hipblaslt_f8>(), row, col, srow, scol);
+        case HIP_R_8F_E5M3_EXT:
+            return mx_type_to_f32(buf.as<hipblaslt_f4x2>(), sbuf.as<hipblaslt_e5m3>(), row, col, srow, scol);
+        default:
+            hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
+            throw std::runtime_error("Error type in mx_type_to_f32()");
+        }
     default:
-        hipblaslt_cerr << "Error type in swizzle_tensor_type()" << std::endl;
-        throw std::runtime_error("Error type in mx_type_to_f32");
-        return std::vector<float>();
+        hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
+        throw std::runtime_error("Error type in mx_type_to_f32()");
     }
 }
 
@@ -2129,7 +2167,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   A_row[i] / scaleA_row,
                                   A_col[i] / scaleA_col,
                                   lda[i] / scaleA_row,
-                                  HIP_R_8F_UE8M0,
+                                  scaleDataType(arg.scaleA),
                                   stride_a[i] / scaleA_row / scaleA_col,
                                   num_batches[i]);
 #endif
@@ -2210,7 +2248,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   B_row[i] / scaleB_row,
                                   B_col[i] / scaleB_col,
                                   ldb[i] / scaleB_row,
-                                  HIP_R_8F_UE8M0,
+                                  scaleDataType(arg.scaleB),
                                   stride_b[i] / scaleB_row / scaleB_col,
                                   num_batches[i]);
 #endif
@@ -2277,12 +2315,12 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(isBlockScaling(arg.scaleA))
             {
                 CHECK_HIP_ERROR(synchronize(hScaleA[i], dScaleA[i], 0, 0, 0, 0, 1, false, stream));
-                refA.emplace_back(mx_type_to_f32(TiA, hA[i], hScaleA[i], A_row[i], A_col[i], scaleA_row, scaleA_col));
+                refA.emplace_back(mx_type_to_f32(TiA, scaleDataType(arg.scaleA), hA[i], hScaleA[i], A_row[i], A_col[i], scaleA_row, scaleA_col));
             }
             if(isBlockScaling(arg.scaleB))
             {
                 CHECK_HIP_ERROR(synchronize(hScaleB[i], dScaleB[i], 0, 0, 0, 0, 1, false, stream));
-                refB.emplace_back(mx_type_to_f32(TiB, hB[i], hScaleB[i], B_row[i], B_col[i], scaleB_row, scaleB_col));
+                refB.emplace_back(mx_type_to_f32(TiB, scaleDataType(arg.scaleB), hB[i], hScaleB[i], B_row[i], B_col[i], scaleB_row, scaleB_col));
             }
 #endif
 
@@ -2544,6 +2582,22 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT;
             }
+            else if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE4M3)
+            {
+                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT;
+            }
+            else if(arg.scaleA == hipblaslt_scaling_format::Block_16_UE4M3)
+            {
+                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3;
+            }
+            else if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE5M3)
+            {
+                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT;
+            }
+            else if(arg.scaleA == hipblaslt_scaling_format::Block_16_UE5M3)
+            {
+                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT;
+            }
             else if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
             {
                 mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
@@ -2579,6 +2633,22 @@ void testing_matmul_with_bias(const Arguments& arg,
             else if(arg.scaleB == hipblaslt_scaling_format::Block_16_UE8M0)
             {
                 mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT;
+            }
+            else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE4M3)
+            {
+                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT;
+            }
+            else if(arg.scaleB == hipblaslt_scaling_format::Block_16_UE4M3)
+            {
+                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3;
+            }
+            else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE5M3)
+            {
+                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT;
+            }
+            else if(arg.scaleB == hipblaslt_scaling_format::Block_16_UE5M3)
+            {
+                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT;
             }
             else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
             {

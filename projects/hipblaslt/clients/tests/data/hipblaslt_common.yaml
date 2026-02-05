@@ -15,9 +15,11 @@ Datatypes:
         bf8_fnuz_r: 1001
         f8_r: 28
         bf8_r: 29
+        e8_r: 30
         f6_r: 31
         bf6_r: 32
         f4_r: 33
+        e5m3_r: 34
         hipblaslt_datatype_invalid: 255
   - hipblasComputeType_t:
       bases: [ c_int ]
