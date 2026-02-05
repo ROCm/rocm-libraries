@@ -17,7 +17,7 @@ The MIOpen Provider supports the following configuration knobs:
 
 The `global.benchmarking` knob enables benchmarking for kernel selection:
 
-- **0 (default)**: Disabled - benchmarking disabled
+- **0 (default)**: Benchmarking disabled
 - **1**: Enabled - use benchmarking for kernel selection
 
 ### Workspace Size Limit

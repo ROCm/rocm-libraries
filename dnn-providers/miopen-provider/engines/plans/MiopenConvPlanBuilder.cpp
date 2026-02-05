@@ -622,14 +622,13 @@ std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenConvPlanBuilder::getCust
 
     const auto minWorkspace = static_cast<int64_t>(range.min);
     const auto maxWorkspace = static_cast<int64_t>(range.max);
-    const auto defaultWorkspace = maxWorkspace;
 
     hipdnn_data_sdk::data_objects::KnobT workspaceKnob;
     workspaceKnob.knob_id = hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME;
     workspaceKnob.description = "Workspace size limit in bytes";
 
     hipdnn_data_sdk::data_objects::IntValueT workspaceDefaultValue;
-    workspaceDefaultValue.value = defaultWorkspace;
+    workspaceDefaultValue.value = maxWorkspace;
     workspaceKnob.default_value.Set(workspaceDefaultValue);
 
     hipdnn_data_sdk::data_objects::IntConstraintT workspaceConstraint;
