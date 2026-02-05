@@ -137,11 +137,7 @@ void testing_doti(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(&hresult_2, dresult_2, sizeof(T), hipMemcpyDeviceToHost));
 
         // CPU
-        hresult_gold = make_DataType<T>(0.0);
-        for(int i = 0; i < nnz; ++i)
-        {
-            hresult_gold = hresult_gold + testing_mult(hy[hx_ind[i] - idx_base], hx_val[i]);
-        }
+        host_doti(nnz, hx_val.data(), hx_ind.data(), hy.data(), &hresult_gold, idx_base);
 
         // enable unit check, notice unit check is not invasive, but norm check is,
         // unit check and norm check can not be interchanged their order
