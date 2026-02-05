@@ -3,7 +3,7 @@
 # Get flag --update-test-configs-only to skip running the CK profiler and update tests based on the existing profiler configs
 UPDATE_TEST_CONFIGS_ONLY=false
 for arg in "$@"; do
-    if [ "$arg" == "--update-test-configs" ]; then
+    if [ "$arg" == "--update-test-configs-only" ]; then
         UPDATE_TEST_CONFIGS_ONLY=true
     fi
 done
