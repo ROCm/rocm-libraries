@@ -262,8 +262,16 @@ __device__ auto WorkNode_Header::make_worknode(uint32_t width, Fn_t &&typed_fn, 
 template <class WorkNode_t>
 __device__ void wrapper(WorkNode_Header *worknode, bool yielding) {
     WorkNode_t *typed_node_ptr = static_cast<WorkNode_t *>(worknode);
-    typename WorkNode_t::Callable fn = ::std::move(typed_node_ptr->fn);
     uint32_t width = typed_node_ptr->tdata.width;
+
+    using Callable_t = typename WorkNode_t::Callable;
+    __shared__ Callable_t *fn_ptr;
+
+    if (threadIdx.x == 0) {
+        fn_ptr = new Callable_t(::std::move(typed_node_ptr->fn));
+        typed_node_ptr->fn.~Callable_t();
+    }
+
     __syncthreads();
     // Include a threadfence for all threads just to be safe.
     __threadfence();
@@ -271,11 +279,14 @@ __device__ void wrapper(WorkNode_Header *worknode, bool yielding) {
     if (threadIdx.x == 0)
         worknode->makeCurrent(yielding);
     if (threadIdx.x < width) {
-        fn();
+        (*fn_ptr)();
     }
     __threadfence();
-    // fn will get destructed when it goes out of scope, which will in turn invoke the destructor for the Fn_t and
-    // Args_t the user passed in when constructing the thread.
+
+    if (threadIdx.x == 0) {
+        delete fn_ptr;
+    }
+
     // TODO: figure out how to make all the threads with idx > width 'catch up' on missed __syncthreads() calls.
     // Shouldn't be a concern as long as blockDim.x == hip::thread::max_width() == warpSize
 }
