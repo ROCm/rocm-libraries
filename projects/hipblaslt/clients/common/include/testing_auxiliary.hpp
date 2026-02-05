@@ -706,6 +706,8 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
     CHECK_HIP_ERROR(hipMalloc(&d_scale_b, sizeof(float)));
     CHECK_HIP_ERROR(
         hipMemcpyAsync(d_scale_b, &h_scale_b, sizeof(float), hipMemcpyHostToDevice, stream));
+    // Wait for the memcpy to complete, otherwise
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatmulDescSetAttribute(
@@ -744,6 +746,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
         hipMemcpyAsync(d_scale_c, &h_scale_c, sizeof(float), hipMemcpyHostToDevice, stream));
     CHECK_HIP_ERROR(
         hipMemcpyAsync(d_scale_d, &h_scale_d, sizeof(float), hipMemcpyHostToDevice, stream));
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatmulDescSetAttribute(
@@ -771,6 +774,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
     CHECK_HIP_ERROR(hipMalloc(&d_scale_e, sizeof(float)));
     CHECK_HIP_ERROR(
         hipMemcpyAsync(d_scale_e, &h_scale_e, sizeof(float), hipMemcpyHostToDevice, stream));
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatmulDescSetAttribute(matmul,
@@ -1032,6 +1036,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
     CHECK_HIP_ERROR(hipFree(d_scale_b));
     CHECK_HIP_ERROR(hipFree(d_scale_c));
     CHECK_HIP_ERROR(hipFree(d_scale_d));
+    CHECK_HIP_ERROR(hipFree(d_scale_e));
     CHECK_HIP_ERROR(hipFree(d_aux_buffer));
     CHECK_HIP_ERROR(hipFree(d_out_amax));
     CHECK_HIP_ERROR(hipFree(default_ptr));
@@ -1618,6 +1623,7 @@ void testing_aux_matmul_bad_ws_size(const Arguments& arg)
     CHECK_HIP_ERROR(hipFree(d_b));
     CHECK_HIP_ERROR(hipFree(d_c));
     CHECK_HIP_ERROR(hipFree(d_d));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matA));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matB));
