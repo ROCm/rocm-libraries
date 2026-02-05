@@ -47,6 +47,8 @@ def get_changed_files(ref1, ref2):
             text=True,
             check=True,
         )
+        print("stderr:")
+        print(result.stderr)
         files = set(line.strip() for line in result.stdout.splitlines() if line.strip())
         return files
     except subprocess.CalledProcessError as e:
