@@ -295,8 +295,35 @@ RUN echo Building for GPU Archs: ${THEROCK_ASIC} && \
     fi &&\
     cd /composable_kernel && \
     mkdir build && cd build && \
-    num_threads=64 && \
-    echo Building CK with ${num_threads} threads && \
+    #########################################################################
+    ## Determine number of build threads based on CPU cores and RAM
+    #########################################################################
+    cpu_threads="$(nproc)" && \
+    mem_limit_bytes="" && \
+    if [ -r /sys/fs/cgroup/memory.max ]; then \
+        mem_limit_bytes="$(cat /sys/fs/cgroup/memory.max)"; \
+    fi && \
+    if [ -n "$mem_limit_bytes" ] && [ "$mem_limit_bytes" != "max" ]; then \
+        mem_bytes="$mem_limit_bytes"; \
+    else \
+        mem_kb="$(awk '/MemTotal/ {print $2}' /proc/meminfo)" && \
+        mem_bytes="$((mem_kb * 1024))"; \
+    fi && \
+    mem_gb="$((mem_bytes / 1024 / 1024 / 1024))" && \
+    if [ "$mem_gb" -lt 200 ]; then \
+        ram_cap=64; \
+    elif [ "$mem_gb" -ge 1024 ]; then \
+        ram_cap=512; \
+    else \
+        ram_cap="$((64 + ((mem_gb - 200) * 192) / 824))"; \
+        [ "$ram_cap" -lt 64 ] && ram_cap=64; \
+        [ "$ram_cap" -gt 256 ] && ram_cap=256; \
+    fi && \
+    num_threads="$cpu_threads" && \
+    [ "$num_threads" -gt "$ram_cap" ] && num_threads="$ram_cap" && \
+    [ "$num_threads" -lt 1 ] && num_threads=1 && \
+    echo "Detected mem=${mem_gb}GB, nproc=${cpu_threads}, Building CK with -j${num_threads}" && \
+    #########################################################################
     CXX=/opt/rocm/llvm/bin/amdclang++ cmake \
     -D CMAKE_PREFIX_PATH=/opt/rocm \
     -D CMAKE_CXX_COMPILER_LAUNCHER="${COMPILER_LAUNCHER}" \
