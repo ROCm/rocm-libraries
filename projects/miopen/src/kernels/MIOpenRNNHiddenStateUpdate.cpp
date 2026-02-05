@@ -7,10 +7,17 @@
 #endif
 
 #include "float_types.h"
-#include "vector_types.hpp"
+#include "miopen_type_traits.hpp"
 #include "miopen_cstdint.hpp"
 
 #include "activation_functions.hpp"
+
+using T_VEC2 = std::conditional<std::is_same<DATA_TYPE, half>::value, ushort2, float2>::type;
+using T_VEC4 = std::conditional<std::is_same<DATA_TYPE, half>::value, ushort4, float4>::type;
+using T_VEC =
+    std::conditional<READ_BLOCK == 4,
+                     T_VEC4,
+                     typename std::conditional<READ_BLOCK == 2, T_VEC2, DATA_TYPE>::type>::type;
 
 template <typename T>
 __forceinline__ __device__ void lstmfwdhiddenupdate(const T* __restrict__ cx,
@@ -29,8 +36,6 @@ __forceinline__ __device__ void lstmfwdhiddenupdate(const T* __restrict__ cx,
                                                     const int cur_batch,
                                                     const int use_batch)
 {
-    using T_VEC = miopen::mapped_vector_type<T, READ_BLOCK>::type;
-
     const int total_items = max(cur_batch * hy_h / READ_BLOCK, 1);
     const T activ_param   = 1;
 
@@ -167,8 +172,6 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
                                                     const int use_batch,
                                                     const int use_batch2)
 {
-    using T_VEC = miopen::mapped_vector_type<T, READ_BLOCK>::type;
-
     const int total_items = max(cur_batch * hy_h / READ_BLOCK, 1);
     const T activ_param   = 1;
 
