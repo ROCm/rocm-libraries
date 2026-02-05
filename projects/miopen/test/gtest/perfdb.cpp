@@ -46,6 +46,7 @@
 #include <shared_mutex>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -223,7 +224,11 @@ class DbTest
 public:
     DbTest(TempFile& temp_file_) : temp_file(temp_file_) { ResetDb(); }
 
-    virtual ~DbTest() { fs::remove(LockFilePath(temp_file.Path())); }
+    virtual ~DbTest()
+    {
+        std::error_code ec;
+        fs::remove(LockFilePath(temp_file.Path()), ec);
+    }
 
 protected:
     TempFile& temp_file;
@@ -1018,7 +1023,10 @@ public:
             ASSERT_EQ(child.Wait(), 0);
         }
 
-        fs::remove(lock_file_path);
+        {
+            std::error_code ec;
+            fs::remove(lock_file_path, ec);
+        }
 
         const auto c = [this]()
             MIOPEN_RETURNS(GetDbInstance<TDb>(DbKinds::PerfDb, temp_file, false));
@@ -1109,7 +1117,10 @@ public:
             ASSERT_EQ(child.Wait(), 0);
         }
 
-        fs::remove(lock_file_path);
+        {
+            std::error_code ec;
+            fs::remove(lock_file_path, ec);
+        }
     }
 
     static void WorkItem(unsigned int id, const fs::path& db_path)
