@@ -40,7 +40,7 @@ target_link_libraries(
 )
 
 # Enable spdlog support for fmt-style logging
-hipdnn_plugin_enable_spdlog(miopen_plugin_integration_tests)
+hipdnn_enable_spdlog(miopen_plugin_integration_tests)
 
 # Ensure that the miopen_plugin is built before the integration tests
 add_dependencies(miopen_plugin_integration_tests miopen_plugin)

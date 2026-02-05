@@ -26,7 +26,7 @@ target_link_libraries(
 )
 
 # Enable spdlog support for fmt-style logging
-hipdnn_plugin_enable_spdlog(hipblaslt_plugin_integration_tests)
+hipdnn_enable_spdlog(hipblaslt_plugin_integration_tests)
 
 # Ensure that the hipblaslt_plugin is built before the hipblaslt_plugin_integration_tests, as the
 # integration tests depend on the hipBLASLt Provider Plugin

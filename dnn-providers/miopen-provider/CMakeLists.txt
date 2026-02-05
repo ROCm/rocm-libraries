@@ -137,7 +137,7 @@ target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
 
 # Enable spdlog support via plugin_sdk helper function
-hipdnn_plugin_enable_spdlog(miopen_plugin_impl)
+hipdnn_enable_spdlog(miopen_plugin_impl)
 target_compile_options(miopen_plugin_impl PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(miopen_plugin_impl PROPERTIES
     CXX_VISIBILITY_PRESET hidden

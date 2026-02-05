@@ -115,7 +115,7 @@ target_include_directories(hipblaslt_plugin_private PUBLIC ${CMAKE_CURRENT_SOURC
 target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data_sdk hipdnn_plugin_sdk hip::host)
 
 # Enable spdlog support via plugin_sdk helper function
-hipdnn_plugin_enable_spdlog(hipblaslt_plugin_private)
+hipdnn_enable_spdlog(hipblaslt_plugin_private)
 target_compile_options(hipblaslt_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
 add_library(hipblaslt_plugin SHARED HipblasltPluginPublic.cpp)

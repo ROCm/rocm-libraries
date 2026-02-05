@@ -12,9 +12,13 @@
 #
 # This function:
 # - Finds spdlog if not already available
-# - Links spdlog::spdlog_header_only (or creates alias if needed)
+# - Adds spdlog include directories (header-only, no linking to avoid compile option inheritance)
 # - Configures fmt (external or bundled)
 # - Adds required compile definitions (HIPDNN_PLUGIN_USE_SPDLOG, FMT_HEADER_ONLY, etc.)
+#
+# Note: We use hipdnn_add_dependency_includes() instead of target_link_libraries() to avoid
+# inheriting compile options like /Zc:__cplusplus from spdlog which are incompatible with
+# clang++ on Windows.
 #
 function(hipdnn_enable_spdlog TARGET_NAME)
     # Try to find spdlog if not already available
@@ -27,26 +31,49 @@ function(hipdnn_enable_spdlog TARGET_NAME)
         add_library(spdlog::spdlog_header_only ALIAS spdlog_header_only)
     endif()
 
-    # Check if spdlog target exists after find attempt
-    if(NOT TARGET spdlog::spdlog_header_only)
-        message(FATAL_ERROR "hipdnn_enable_spdlog: spdlog::spdlog_header_only target not found. "
+    # Determine which spdlog target to use
+    if(TARGET spdlog::spdlog_header_only)
+        set(_spdlog_target spdlog::spdlog_header_only)
+    elseif(TARGET spdlog_header_only)
+        set(_spdlog_target spdlog_header_only)
+    else()
+        message(FATAL_ERROR "hipdnn_enable_spdlog: spdlog not found. "
             "Ensure spdlog is installed or available via CMAKE_PREFIX_PATH.")
     endif()
 
-    # Find fmt (optional - may be bundled with spdlog or external)
+    # Check if spdlog was built with external fmt by inspecting its compile definitions
+    get_target_property(_spdlog_defs ${_spdlog_target} INTERFACE_COMPILE_DEFINITIONS)
+    set(_spdlog_uses_external_fmt FALSE)
+    if(_spdlog_defs)
+        if("SPDLOG_FMT_EXTERNAL" IN_LIST _spdlog_defs)
+            set(_spdlog_uses_external_fmt TRUE)
+        endif()
+    endif()
+
+    # Find fmt - required if spdlog uses external fmt
     find_package(fmt QUIET)
 
-    # Add spdlog via header-only approach
-    target_link_libraries(${TARGET_NAME} PUBLIC spdlog::spdlog_header_only)
-
-    # Enable plugin-style logging macros and header-only fmt
-    target_compile_definitions(${TARGET_NAME} PUBLIC HIPDNN_PLUGIN_USE_SPDLOG FMT_HEADER_ONLY)
+    # Use include-only approach to avoid inheriting compile options (e.g., /Zc:__cplusplus)
+    # that are incompatible with clang++ on Windows
+    hipdnn_add_dependency_includes(${TARGET_NAME} ${_spdlog_target}
+        COMPILE_DEFINITIONS HIPDNN_PLUGIN_USE_SPDLOG FMT_HEADER_ONLY)
 
     # Handle external fmt configuration
-    if(fmt_FOUND)
-        target_compile_definitions(${TARGET_NAME} PUBLIC SPDLOG_FMT_EXTERNAL)
+    # If spdlog was built with SPDLOG_FMT_EXTERNAL, we must find and use external fmt
+    if(_spdlog_uses_external_fmt OR fmt_FOUND)
+        if(NOT fmt_FOUND)
+            message(FATAL_ERROR "hipdnn_enable_spdlog: spdlog requires external fmt but fmt was not found. "
+                "Ensure fmt is installed or available via CMAKE_PREFIX_PATH.")
+        endif()
         if(TARGET fmt::fmt-header-only)
-            target_link_libraries(${TARGET_NAME} PUBLIC fmt::fmt-header-only)
+            hipdnn_add_dependency_includes(${TARGET_NAME} fmt::fmt-header-only
+                COMPILE_DEFINITIONS SPDLOG_FMT_EXTERNAL)
+        elseif(TARGET fmt::fmt)
+            hipdnn_add_dependency_includes(${TARGET_NAME} fmt::fmt
+                COMPILE_DEFINITIONS SPDLOG_FMT_EXTERNAL)
+        else()
+            message(FATAL_ERROR "hipdnn_enable_spdlog: fmt package found but no usable target. "
+                "Expected fmt::fmt-header-only or fmt::fmt.")
         endif()
     endif()
 
