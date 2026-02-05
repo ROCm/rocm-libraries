@@ -35,7 +35,7 @@ def get_changed_files(ref1, ref2):
     """Return a set of files changed between two git refs."""
     try:
         result = subprocess.run(
-            ["git", "diff", "--name-only", ref1, ref2],
+            ["git", "diff", "--name-only", ref1, ref2, "--projects/composablekernel/"],
             capture_output=True,
             text=True,
             check=True,
