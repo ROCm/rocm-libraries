@@ -201,7 +201,7 @@ heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,
     if (it != hand_optimized_map_.end()) {
       if (origami::runtime_options().get().debug_enabled) {
         std::cout << "Found hand-optimized kernel " << fast_key.to_string() << " with efficiency "
-                  << it->second << "\n";
+                  << it->second.main_loop_efficiency << "\n";
       }
       result = it->second;
     }

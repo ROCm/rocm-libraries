@@ -28,6 +28,7 @@
 
 #include <functional>
 #include <optional>
+#include <string_view>
 #include <unordered_map>
 
 #include "origami/hardware.hpp"
@@ -184,6 +185,14 @@ struct hand_optimized_kernel_key_t {
   size_t mt_m;
   size_t mt_n;
   size_t mt_k;
+
+  std::string to_string() const {
+    return std::string(hardware_t::arch_enum_to_name(arch)) + "_" +
+           origami::datatype_to_string(mi_dtype) + "_" +
+           (a_transpose == transpose_t::T ? "T" : "N") +
+           (b_transpose == transpose_t::T ? "T" : "N") + "_" + std::to_string(mt_m) + "x" +
+           std::to_string(mt_n) + "x" + std::to_string(mt_k);
+  }
 
   bool operator==(const hand_optimized_kernel_key_t& other) const {
     return arch == other.arch && mi_dtype == other.mi_dtype && a_transpose == other.a_transpose &&

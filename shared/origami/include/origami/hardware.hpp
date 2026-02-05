@@ -67,6 +67,24 @@ class hardware_t {
   }
 
   /**
+   * @brief Convert architecture_t to string (e.g. for logging).
+   *
+   * @param a Architecture enum value
+   * @return std::string_view Corresponding string value
+   */
+  static constexpr std::string_view arch_enum_to_name(architecture_t a) noexcept {
+    switch (a) {
+      case architecture_t::gfx90a: return "gfx90a";
+      case architecture_t::gfx942: return "gfx942";
+      case architecture_t::gfx950: return "gfx950";
+      case architecture_t::gfx1201: return "gfx1201";
+      case architecture_t::gfx1100: return "gfx1100";
+      case architecture_t::gfx1151: return "gfx1151";
+      default: return "unknown";
+    }
+  }
+
+  /**
    * @brief Architecture-specific constants for memory and compute characteristics.
    *
    */
