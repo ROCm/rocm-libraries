@@ -4,7 +4,6 @@
 import argparse
 from pathlib import Path
 
-
 class ConvInstanceTemplateParams:
     def __init__(
         self,
@@ -90,7 +89,10 @@ def get_dtype(problem_name):
 
 def generate_calls_inc(instances, problem_name, direction, filter_pattern):
     generate_dir = Path(__file__).resolve().parent
-    with open(f"{generate_dir}/{direction}/{problem_name}_calls.inc", "w") as f:
+    output_dir = Path(f"{generate_dir}/instances/{direction}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(f"{generate_dir}/instances/{direction}/{problem_name}_calls.inc", "w") as f:
         if problem_name.find(filter_pattern) == -1:
             return
         for instance in instances:
@@ -100,7 +102,7 @@ def generate_calls_inc(instances, problem_name, direction, filter_pattern):
 
 def generate_defs_inc(instances, problem_name, signature, direction, filter_pattern):
     generate_dir = Path(__file__).resolve().parent
-    with open(f"{generate_dir}/{direction}/{problem_name}.inc", "w") as f:
+    with open(f"{generate_dir}/instances/{direction}/{problem_name}.inc", "w") as f:
         if problem_name.find(filter_pattern) == -1:
             return
         for instance in instances:
@@ -115,8 +117,7 @@ def generate_defs_inc(instances, problem_name, signature, direction, filter_patt
 
 
 def generate_conv_cpp(
-    instances, problem_name, config, direction, signature_name, filter_pattern
-):
+    instances, problem_name, config, direction, signature_name, filter_pattern):
     for instance in instances:
         if problem_name.find(filter_pattern) == -1:
             break
@@ -124,33 +125,20 @@ def generate_conv_cpp(
         generate_dir = Path(__file__).resolve().parent
         directory_path = Path(f"{generate_dir}/instances/{direction}/{config}")
         directory_path.mkdir(parents=True, exist_ok=True)
-        if direction == "forward":
-            template_file = "grouped_convolution_forward_tile.cpp.in"
-        elif direction == "backward_weight":
-            template_file = "grouped_convolution_backward_weight_tile.cpp.in"
-        elif direction == "backward_data":
-            template_file = "grouped_convolution_backward_data_tile.cpp.in"
-        else:
-            raise RuntimeError(f"Unrecognized direction: {direction}")
+        template_file = "grouped_convolution_tile.cpp.in"
         
-        with open(
-            f"{generate_dir}/instances/{template_file}",
-            "r",
-        ) as f:
+        with open(f"{generate_dir}/instances/{template_file}", "r",) as f:
             content = f.read()
 
-        content = content.replace("gen_signature", signature_name)
-        content = content.replace("gen_instance_name", instance_name)
-        content = content.replace("gen_specialization", instance.get_specialization())
-        content = content.replace("gen_thread_block", instance.get_thread_block())
-        content = content.replace("gen_block_gemm_desc", instance.get_block_gemm_desc())
-        content = content.replace("gen_block_transfer", instance.get_block_transfer())
-        content = content.replace("gen_optimizations", instance.get_optimizations())
+            content = content.replace("gen_signature", signature_name)
+            content = content.replace("gen_instance_name", instance_name)
+            content = content.replace("gen_specialization", instance.get_specialization())
+            content = content.replace("gen_thread_block", instance.get_thread_block())
+            content = content.replace("gen_block_gemm_desc", instance.get_block_gemm_desc())
+            content = content.replace("gen_block_transfer", instance.get_block_transfer())
+            content = content.replace("gen_optimizations", instance.get_optimizations())
 
-        with open(
-            f"{generate_dir}/instances/{config}/{instance_name}.cpp",
-            "w",
-        ) as f:
+        with open(f"{generate_dir}/instances/{direction}/{config}/{instance_name}.cpp","w",) as f:
             f.write(content)
 
 
@@ -217,6 +205,32 @@ def parse_fwd_instances(instances, problem_name):
         convs.append(conv)
     return convs
 
+def parse_instance_string(instance_string):
+    """Parse instance string, treating Seq(...) as a single parameter."""
+    params = []
+    current_param = ""
+    paren_depth = 0
+    
+    for char in instance_string:
+        if char == '(':
+            paren_depth += 1
+            current_param += char
+        elif char == ')':
+            paren_depth -= 1
+            current_param += char
+        elif char == ',' and paren_depth == 0:
+            # Only split on comma if we're not inside parentheses
+            params.append(current_param.strip())
+            current_param = ""
+        else:
+            current_param += char
+    
+    # Add the last parameter
+    if current_param.strip():
+        params.append(current_param.strip())
+    
+    return params
+
 def parse_bwd_weight_instances(instances, problem_name):
     convs = []
 
@@ -225,13 +239,15 @@ def parse_bwd_weight_instances(instances, problem_name):
             continue
 
         device_op_name = instance.split("<")[0]
-        if device_op_name.find("Explicit") == -1:
+        if device_op_name.find("Explicit") != -1:
             # Skip the explicit GEMM instances for now.
             print(f"Skipping instance {instance_id} with device op {device_op_name} since it's not supported yet.")
             continue
         else:
-            instance_args_list = instance[instance.find("<") + 1 : instance.find(">")]
-            args = instance_args_list.split(",")
+            start = instance.index('<') + 1
+            end = instance.rindex('>')
+            params_str = instance[start:end]
+            args = parse_instance_string(params_str)
 
             is_v3_instance = instance.find("Xdl_CShuffleV3") != -1
             is_two_stage_instance = instance.find("TwoStage") != -1
@@ -312,6 +328,11 @@ def parse_bwd_weight_instances(instances, problem_name):
             convs.append(conv)
     return convs
 
+def parse_bwd_data_instances(instances, problem_name):
+    convs = []
+    print("Parsing backward data instances is not supported yet, skipping all instances.")
+    # TODO: Implement parsing logic for backward data instances.
+    return convs
 
 def generate_instances_fwd(instances, problem_name, config, filter_pattern):
     direction = "forward"
@@ -345,6 +366,42 @@ def generate_instances_bwd_weight(instances, problem_name, config, filter_patter
         instances, problem_name, config, direction, signature_name, filter_pattern
     )
 
+def generate_instances_bwd_data(instances, problem_name, config, filter_pattern):
+    direction = "backward_weight"
+    signature_name = f"SIGNATURE_{config.upper()}_BWD_DATA"
+    instances = parse_bwd_data_instances(instances, problem_name)
+    generate_calls_inc(instances, problem_name, direction, filter_pattern)
+    generate_defs_inc(
+        instances,
+        problem_name,
+        signature_name,
+        direction,
+        filter_pattern,
+    )
+    generate_conv_cpp(
+        instances, problem_name, config, direction, signature_name, filter_pattern
+    )
+
+def process_direction(configs, direction, generate_func, configs_prefix, filter_pattern):
+    """Helper function to process a single direction."""
+    for config in configs:
+        instances = []
+        generate_dir = Path(__file__).resolve().parent
+        config_path = f"{generate_dir}/configs/{direction}/{configs_prefix}/{config}.conf"
+        with open(config_path, "r") as file:
+            instances = file.readlines()
+        
+        # Determine problem name based on direction
+        if direction == "forward":
+            problem_name = f"grouped_convolution_forward_tile_{config}"
+        elif direction == "backward_weight":
+            problem_name = f"grouped_convolution_backward_tile_{config}"
+        elif direction == "backward_data":
+            problem_name = f"grouped_convolution_backward_data_tile_{config}"
+        else:
+            raise RuntimeError(f"Unknown direction: {direction}")
+        
+        generate_func(instances, problem_name, config, filter_pattern)
 
 if __name__ == "__main__":
     fwd_configs = [
@@ -390,6 +447,13 @@ if __name__ == "__main__":
         default="profiler",
         help="Generator modes. compilation - empty instance list, tests - limited instance list, profiler - generate all instances",
     )
+    parser.add_argument(
+        "--direction",
+        choices=["forward", "backward_weight", "backward_data", "all"],
+        type=str,
+        default="all",
+        help="Convolution direction for which to generate instances."
+    )
     args = parser.parse_args()
 
     # apply empty filter
@@ -403,29 +467,15 @@ if __name__ == "__main__":
     else:
         raise RuntimeError("wrong mode")
 
-    for config in fwd_configs:
-        instances = []
-        generate_dir = Path(__file__).resolve().parent
-        config_path = f"{generate_dir}/configs/fwd/{configs_prefix}/{config}.conf"
-        with open(config_path, "r") as file:
-            instances = file.readlines()
-        problem_name = f"grouped_convolution_forward_tile_{config}"
-        generate_instances_fwd(instances, problem_name, config, args.filter_pattern)
+    match args.direction:
+        case "forward":
+            process_direction(fwd_configs, args.direction, generate_instances_fwd, configs_prefix, args.filter_pattern)
+        case "backward_weight":
+            process_direction(bwd_weight_configs, args.direction, generate_instances_bwd_weight, configs_prefix, args.filter_pattern)
+        case "backward_data":
+            process_direction(bwd_data_configs, args.direction, generate_instances_bwd_data, configs_prefix, args.filter_pattern)
+        case "all":
+            process_direction(fwd_configs, "forward", generate_instances_fwd, configs_prefix, args.filter_pattern)
+            process_direction(bwd_weight_configs, "backward_weight", generate_instances_bwd_weight, configs_prefix, args.filter_pattern)
+            process_direction(bwd_data_configs, "backward_data", generate_instances_bwd_data, configs_prefix, args.filter_pattern)
 
-    for config in bwd_weight_configs:
-        instances = []
-        generate_dir = Path(__file__).resolve().parent
-        config_path = f"{generate_dir}/configs/bwd_weight/{configs_prefix}/{config}.conf"
-        with open(config_path, "r") as file:
-            instances = file.readlines()
-        problem_name = f"grouped_convolution_backward_tile_{config}"
-        generate_instances_bwd_weight(instances, problem_name, config, args.filter_pattern)
-
-    for config in bwd_data_configs:
-        instances = []
-        generate_dir = Path(__file__).resolve().parent
-        config_path = f"{generate_dir}/configs/bwd_data/{configs_prefix}/{config}.conf"
-        with open(config_path, "r") as file:
-            instances = file.readlines()
-        problem_name = f"grouped_convolution_backward_data_tile_{config}"
-        generate_instances_bwd_data(instances, problem_name, config, args.filter_pattern)
