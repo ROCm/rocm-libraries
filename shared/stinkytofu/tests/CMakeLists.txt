@@ -102,6 +102,32 @@ add_dependencies(tests unit_tests)
 # add_dependencies(tests integration_tests)
 
 # =============================================================================
+# Tablegen Instruction Generation Test (Proof-of-Concept)
+# =============================================================================
+add_executable(test_gen_instructions
+    ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tablegen/test_gen_instructions.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tablegen/GenInstructions.cpp
+)
+
+target_link_libraries(test_gen_instructions PRIVATE gfxisa)
+
+target_include_directories(test_gen_instructions PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../hardware/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+
+add_test(NAME GenInstructionsTest
+         COMMAND $<TARGET_FILE:test_gen_instructions> ${CMAKE_CURRENT_SOURCE_DIR}/..
+         WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+set_tests_properties(GenInstructionsTest PROPERTIES
+    LABELS "unit_tests"
+    TIMEOUT 30
+)
+
+add_dependencies(tests test_gen_instructions)
+
+# =============================================================================
 # Python Tests (pytest)
 # =============================================================================
 

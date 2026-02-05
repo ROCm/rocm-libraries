@@ -199,6 +199,43 @@ namespace stinkytofu
         }
     };
 
+    // Simple wrappers for DEF_T(class, "mnemonic") from generated .inc (default ctor only)
+    struct MFMAInst : GfxInstDef
+    {
+        MFMAInst()
+        {
+            hwInstDesc.flags.set(IF_MFMA);
+        }
+    };
+    struct SMFMAInst : GfxInstDef
+    {
+        SMFMAInst()
+        {
+            hwInstDesc.flags.set(IF_SMFMA);
+        }
+    };
+    struct WMMAInst : GfxInstDef
+    {
+        WMMAInst()
+        {
+            hwInstDesc.flags.set(IF_WMMA);
+        }
+    };
+    struct SWMMAInst : GfxInstDef
+    {
+        SWMMAInst()
+        {
+            hwInstDesc.flags.set(IF_SWMMA);
+        }
+    };
+    struct MXWMMAInst : GfxInstDef
+    {
+        MXWMMAInst()
+        {
+            hwInstDesc.flags.set(IF_MXWMMA);
+        }
+    };
+
     struct MFMA : GfxInstDef
     {
         int M = 0, N = 0, K = 0, B = 0;

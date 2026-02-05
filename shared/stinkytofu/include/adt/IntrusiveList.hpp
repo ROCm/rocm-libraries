@@ -162,6 +162,14 @@ namespace stinkytofu
             return tmp;
         }
 
+        IntrusiveListIterator operator+(size_t n) const
+        {
+            IntrusiveListIterator tmp = *this;
+            for(size_t i = 0; i < n; ++i)
+                ++tmp;
+            return tmp;
+        }
+
         bool operator==(const IntrusiveListIterator& other) const
         {
             return node_ == other.node_;

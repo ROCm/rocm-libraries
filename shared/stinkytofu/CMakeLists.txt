@@ -89,8 +89,8 @@ set(STINKYTOFU_SOURCE_FILES
     ir/asm/StinkyAsmModule.cpp
     ir/asm/IRLexer.cpp
     ir/asm/IRParser.cpp
-    ir/asm/IRValidator.cpp
     ir/asm/PatternParser.cpp
+    ir/asm/AsmVerifierPass.cpp
     ir/IRVerifierPass.cpp
     hardware/ArchHelper.cpp
 )
@@ -119,6 +119,9 @@ endif()
 # Add subdirectories first to define gfxisa, tablegen, and tablegen_generated targets
 add_subdirectory(hardware)
 add_subdirectory(tools/tablegen)
+# gfxisa needs generated instruction .inc files (hardware/generated/*.inc)
+target_include_directories(gfxisa PUBLIC ${TABLEGEN_OUTPUT_DIR})
+add_dependencies(gfxisa instruction_generated)
 add_subdirectory(tools/stinkytofu-opt)
 # Note: intrinsic-compiler is added later after libstinkytofu is built
 

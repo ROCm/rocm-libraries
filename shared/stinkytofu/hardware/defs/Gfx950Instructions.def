@@ -1,0 +1,3488 @@
+/* ************************************************************************
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * ************************************************************************ */
+
+// GFX950 Instruction Definitions
+
+// Buffer Operations
+
+DEF_T(BufferAtomicAddF32Inst, "buffer_atomic_add_f32",
+    .format = MUBUF,
+    .flags = {MUBUFAtomic}
+)
+
+DEF_T(BufferAtomicCmpswapInst, "buffer_atomic_cmpswap",
+    .format = MUBUF,
+    .flags = {MUBUFAtomic}
+)
+
+DEF_T(BufferAtomicCmpswapX2Inst, "buffer_atomic_cmpswap_x2",
+    .format = MUBUF,
+    .flags = {MUBUFAtomic}
+)
+
+DEF_T(BufferLoadB128Inst, "buffer_load_b128",
+    .format = MUBUF,
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadB16Inst, "buffer_load_b16",
+    .format = MUBUF,
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadB32Inst, "buffer_load_b32",
+    .format = MUBUF,
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadB64Inst, "buffer_load_b64",
+    .format = MUBUF,
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadB8Inst, "buffer_load_b8",
+    .format = MUBUF,
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadB96Inst, "buffer_load_b96",
+    .format = MUBUF,
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadD16B16Inst, "buffer_load_d16_b16",
+    .format = MUBUF,
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadD16HiB16Inst, "buffer_load_d16_hi_b16",
+    .format = MUBUF,
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadShortD16HiInst, "buffer_load_short_d16_hi",
+    .format = MUBUF,
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadShortD16Inst, "buffer_load_short_d16",
+    .format = MUBUF,
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadD16HiU8Inst, "buffer_load_d16_hi_u8",
+    .format = MUBUF,
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadD16U8Inst, "buffer_load_d16_u8",
+    .format = MUBUF,
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadDwordInst, "buffer_load_dword",
+    .format = MUBUF,
+    .cost = {12, 108},
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadDwordx2Inst, "buffer_load_dwordx2",
+    .format = MUBUF,
+    .cost = {12, 120},
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadDwordx3Inst, "buffer_load_dwordx3",
+    .format = MUBUF,
+    .cost = {12, 120},
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadDwordx4Inst, "buffer_load_dwordx4",
+    .format = MUBUF,
+    .cost = {12, 116},
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadSbyteInst, "buffer_load_sbyte",
+    .format = MUBUF,
+    .cost = {12, 104},
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadSbyteD16Inst, "buffer_load_sbyte_d16",
+    .format = MUBUF,
+    .cost = {12, 108},
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadSbyteD16HiInst, "buffer_load_sbyte_d16_hi",
+    .format = MUBUF,
+    .cost = {12, 104},
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadSshortInst, "buffer_load_sshort",
+    .format = MUBUF,
+    .cost = {12, 104},
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadUbyteInst, "buffer_load_ubyte",
+    .format = MUBUF,
+    .cost = {12, 108},
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadUbyteD16Inst, "buffer_load_ubyte_d16",
+    .format = MUBUF,
+    .cost = {12, 108},
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadUbyteD16HiInst, "buffer_load_ubyte_d16_hi",
+    .format = MUBUF,
+    .cost = {12, 104},
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferLoadUshortInst, "buffer_load_ushort",
+    .format = MUBUF,
+    .cost = {12, 108},
+    .flags = {MUBUFLoad}
+)
+
+DEF_T(BufferStoreB128Inst, "buffer_store_b128",
+    .format = MUBUF,
+    .flags = {MUBUFStore}
+)
+
+DEF_T(BufferStoreB16Inst, "buffer_store_b16",
+    .format = MUBUF,
+    .flags = {MUBUFStore}
+)
+
+DEF_T(BufferStoreB32Inst, "buffer_store_b32",
+    .format = MUBUF,
+    .flags = {MUBUFStore}
+)
+
+DEF_T(BufferStoreB64Inst, "buffer_store_b64",
+    .format = MUBUF,
+    .flags = {MUBUFStore}
+)
+
+DEF_T(BufferStoreB8Inst, "buffer_store_b8",
+    .format = MUBUF,
+    .flags = {MUBUFStore}
+)
+
+DEF_T(BufferStoreB96Inst, "buffer_store_b96",
+    .format = MUBUF,
+    .flags = {MUBUFStore}
+)
+
+DEF_T(BufferStoreD16HiB16Inst, "buffer_store_d16_hi_b16",
+    .format = MUBUF,
+    .flags = {MUBUFStore}
+)
+
+DEF_T(BufferStoreD16HiB8Inst, "buffer_store_d16_hi_b8",
+    .format = MUBUF,
+    .flags = {MUBUFStore}
+)
+
+// Legacy naming (aliases; Rocisa LogicalToArch map uses these)
+DEF_T(BufferStoreByteInst, "buffer_store_byte",
+    .format = MUBUF,
+    .flags = {MUBUFStore}
+)
+DEF_T(BufferStoreByteD16HiInst, "buffer_store_byte_d16_hi",
+    .format = MUBUF,
+    .flags = {MUBUFStore}
+)
+DEF_T(BufferStoreShortInst, "buffer_store_short",
+    .format = MUBUF,
+    .flags = {MUBUFStore}
+)
+DEF_T(BufferStoreShortD16HiInst, "buffer_store_short_d16_hi",
+    .format = MUBUF,
+    .flags = {MUBUFStore}
+)
+DEF_T(BufferStoreDwordInst, "buffer_store_dword",
+    .format = MUBUF,
+    .flags = {MUBUFStore}
+)
+DEF_T(BufferStoreDwordx2Inst, "buffer_store_dwordx2",
+    .format = MUBUF,
+    .flags = {MUBUFStore}
+)
+DEF_T(BufferStoreDwordx4Inst, "buffer_store_dwordx4",
+    .format = MUBUF,
+    .flags = {MUBUFStore}
+)
+
+// Control Flow
+
+DEF_T(SBarrierInst, "s_barrier",
+    .format = SOPP,
+    .flags = {Barrier}
+)
+
+DEF_T(SBarrierSignalInst, "s_barrier_signal",
+    .format = SOPP,
+    .flags = {Barrier}
+)
+
+DEF_T(SBarrierWaitInst, "s_barrier_wait",
+    .format = SOPP,
+    .flags = {Barrier}
+)
+
+DEF_T(SBranchInst, "s_branch",
+    .format = SOPP,
+    .flags = {Branch}
+)
+
+DEF_T(SCbranchExecnzInst, "s_cbranch_execnz",
+    .format = SOPP,
+    .flags = {Branch, ConditionalBranch}
+)
+
+DEF_T(SCbranchExeczInst, "s_cbranch_execz",
+    .format = SOPP,
+    .flags = {Branch, ConditionalBranch}
+)
+
+DEF_T(SCbranchScc0Inst, "s_cbranch_scc0",
+    .format = SOPP,
+    .flags = {Branch, ConditionalBranch}
+)
+
+DEF_T(SCbranchScc1Inst, "s_cbranch_scc1",
+    .format = SOPP,
+    .flags = {Branch, ConditionalBranch}
+)
+
+DEF_T(SCbranchVccnzInst, "s_cbranch_vccnz",
+    .format = SOPP,
+    .flags = {Branch, ConditionalBranch}
+)
+
+DEF_T(SCbranchVcczInst, "s_cbranch_vccz",
+    .format = SOPP,
+    .flags = {Branch, ConditionalBranch}
+)
+
+DEF_T(SWaitAluInst, "s_wait_alu",
+    .format = SOPP,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(SWaitAsynccntInst, "s_wait_asynccnt",
+    .format = SOPP,
+    .flags = {WaitCnt}
+)
+
+DEF_T(SWaitDscntInst, "s_wait_dscnt",
+    .format = SOPP,
+    .flags = {WaitCnt}
+)
+
+DEF_T(SWaitKmcntInst, "s_wait_kmcnt",
+    .format = SOPP,
+    .flags = {WaitCnt}
+)
+
+DEF_T(SWaitLoadcntInst, "s_wait_loadcnt",
+    .format = SOPP,
+    .flags = {WaitCnt}
+)
+
+DEF_T(SWaitLoadcntDscntInst, "s_wait_loadcnt_dscnt",
+    .format = SOPP,
+    .flags = {WaitCnt}
+)
+
+DEF_T(SWaitStorecntInst, "s_wait_storecnt",
+    .format = SOPP,
+    .flags = {WaitCnt}
+)
+
+DEF_T(SWaitStorecntDscntInst, "s_wait_storecnt_dscnt",
+    .format = SOPP,
+    .flags = {WaitCnt}
+)
+
+DEF_T(SWaitcntInst, "s_waitcnt",
+    .format = SOPP,
+    .flags = {WaitCnt}
+)
+
+DEF_T(SWaitTensorcntInst, "s_wait_tensorcnt",
+    .format = SOPP,
+    .flags = {WaitTensorCnt}
+)
+
+// Flat Memory
+
+DEF_T(FlatAtomicAddInst, "flat_atomic_add",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicAddF32Inst, "flat_atomic_add_f32",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicAddF64Inst, "flat_atomic_add_f64",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicAndInst, "flat_atomic_and",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicCmpswapInst, "flat_atomic_cmpswap",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicDecInst, "flat_atomic_dec",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicIncInst, "flat_atomic_inc",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicMaxF64Inst, "flat_atomic_max_f64",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicMinF64Inst, "flat_atomic_min_f64",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicOrInst, "flat_atomic_or",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicPkAddBf16Inst, "flat_atomic_pk_add_bf16",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicPkAddF16Inst, "flat_atomic_pk_add_f16",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicSmaxInst, "flat_atomic_smax",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicSminInst, "flat_atomic_smin",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicSubInst, "flat_atomic_sub",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicSwapInst, "flat_atomic_swap",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicUmaxInst, "flat_atomic_umax",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicUminInst, "flat_atomic_umin",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicXorInst, "flat_atomic_xor",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatLoadB128Inst, "flat_load_b128",
+    .format = FLAT,
+    .flags = {FLATLoad}
+)
+
+DEF_T(FlatLoadB32Inst, "flat_load_b32",
+    .format = FLAT,
+    .flags = {FLATLoad}
+)
+
+DEF_T(FlatLoadB64Inst, "flat_load_b64",
+    .format = FLAT,
+    .flags = {FLATLoad}
+)
+
+DEF_T(FlatLoadB96Inst, "flat_load_b96",
+    .format = FLAT,
+    .flags = {FLATLoad}
+)
+
+DEF_T(FlatLoadDwordInst, "flat_load_dword",
+    .format = FLAT,
+    .flags = {FLATLoad}
+)
+
+DEF_T(FlatLoadDwordx2Inst, "flat_load_dwordx2",
+    .format = FLAT,
+    .flags = {FLATLoad}
+)
+
+DEF_T(FlatLoadDwordx3Inst, "flat_load_dwordx3",
+    .format = FLAT,
+    .flags = {FLATLoad}
+)
+
+DEF_T(FlatLoadDwordx4Inst, "flat_load_dwordx4",
+    .format = FLAT,
+    .flags = {FLATLoad}
+)
+
+DEF_T(FlatLoadSbyteInst, "flat_load_sbyte",
+    .format = FLAT,
+    .flags = {FLATLoad}
+)
+
+DEF_T(FlatLoadSbyteD16Inst, "flat_load_sbyte_d16",
+    .format = FLAT,
+    .flags = {FLATLoad}
+)
+
+DEF_T(FlatLoadSbyteD16HiInst, "flat_load_sbyte_d16_hi",
+    .format = FLAT,
+    .flags = {FLATLoad}
+)
+
+DEF_T(FlatLoadShortD16Inst, "flat_load_short_d16",
+    .format = FLAT,
+    .flags = {FLATLoad}
+)
+
+DEF_T(FlatLoadShortD16HiInst, "flat_load_short_d16_hi",
+    .format = FLAT,
+    .flags = {FLATLoad}
+)
+
+DEF_T(FlatLoadSshortInst, "flat_load_sshort",
+    .format = FLAT,
+    .flags = {FLATLoad}
+)
+
+DEF_T(FlatLoadUbyteInst, "flat_load_ubyte",
+    .format = FLAT,
+    .flags = {FLATLoad}
+)
+
+DEF_T(FlatLoadUbyteD16Inst, "flat_load_ubyte_d16",
+    .format = FLAT,
+    .flags = {FLATLoad}
+)
+
+DEF_T(FlatLoadUbyteD16HiInst, "flat_load_ubyte_d16_hi",
+    .format = FLAT,
+    .flags = {FLATLoad}
+)
+
+DEF_T(FlatLoadUshortInst, "flat_load_ushort",
+    .format = FLAT,
+    .flags = {FLATLoad}
+)
+
+DEF_T(FlatStoreB128Inst, "flat_store_b128",
+    .format = FLAT,
+    .flags = {FLATStore}
+)
+
+DEF_T(FlatStoreB32Inst, "flat_store_b32",
+    .format = FLAT,
+    .flags = {FLATStore}
+)
+
+DEF_T(FlatStoreB64Inst, "flat_store_b64",
+    .format = FLAT,
+    .flags = {FLATStore}
+)
+
+DEF_T(FlatStoreB96Inst, "flat_store_b96",
+    .format = FLAT,
+    .flags = {FLATStore}
+)
+
+DEF_T(FlatStoreByteInst, "flat_store_byte",
+    .format = FLAT,
+    .flags = {FLATStore}
+)
+
+DEF_T(FlatStoreByteD16HiInst, "flat_store_byte_d16_hi",
+    .format = FLAT,
+    .flags = {FLATStore}
+)
+
+DEF_T(FlatStoreDwordInst, "flat_store_dword",
+    .format = FLAT,
+    .flags = {FLATStore}
+)
+
+DEF_T(FlatStoreDwordx2Inst, "flat_store_dwordx2",
+    .format = FLAT,
+    .flags = {FLATStore}
+)
+
+DEF_T(FlatStoreDwordx3Inst, "flat_store_dwordx3",
+    .format = FLAT,
+    .flags = {FLATStore}
+)
+
+DEF_T(FlatStoreDwordx4Inst, "flat_store_dwordx4",
+    .format = FLAT,
+    .flags = {FLATStore}
+)
+
+DEF_T(FlatStoreShortInst, "flat_store_short",
+    .format = FLAT,
+    .flags = {FLATStore}
+)
+
+DEF_T(FlatStoreShortD16HiInst, "flat_store_short_d16_hi",
+    .format = FLAT,
+    .flags = {FLATStore}
+)
+
+// Global Memory
+
+DEF_T(GlobalLoadDwordInst, "global_load_dword",
+    .format = FLAT,
+    .flags = {GLOBALLoad}
+)
+
+DEF_T(GlobalStoreDwordInst, "global_store_dword",
+    .format = FLAT,
+    .flags = {GLOBALStore}
+)
+
+// LDS Operations
+
+DEF_T(DsLoadB128Inst, "ds_load_b128",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsLoadB192Inst, "ds_load_b192",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsLoadB32Inst, "ds_load_b32",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsLoadB64Inst, "ds_load_b64",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsLoadB96Inst, "ds_load_b96",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsLoadI16Inst, "ds_load_i16",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsLoadI8Inst, "ds_load_i8",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsLoadTr16B128Inst, "ds_load_tr16_b128",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsLoadTr4B64Inst, "ds_load_tr4_b64",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsLoadTr6B96Inst, "ds_load_tr6_b96",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsLoadTr8B64Inst, "ds_load_tr8_b64",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsLoadU16Inst, "ds_load_u16",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsLoadU8Inst, "ds_load_u8",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsRead2B32Inst, "ds_read2_b32",
+    .format = DS,
+    .cost = {4, 52},
+    .flags = {DSRead}
+)
+
+DEF_T(DsRead2B64Inst, "ds_read2_b64",
+    .format = DS,
+    .cost = {4, 64},
+    .flags = {DSRead}
+)
+
+DEF_T(DsReadB128Inst, "ds_read_b128",
+    .format = DS,
+    .cost = {4, 56},
+    .flags = {DSRead}
+)
+
+DEF_T(DsReadB32Inst, "ds_read_b32",
+    .format = DS,
+    .cost = {4, 48},
+    .flags = {DSRead}
+)
+
+DEF_T(DsReadB64Inst, "ds_read_b64",
+    .format = DS,
+    .cost = {4, 48},
+    .flags = {DSRead}
+)
+
+DEF_T(DsReadB64TrB16Inst, "ds_read_b64_tr_b16",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsReadB64TrB4Inst, "ds_read_b64_tr_b4",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsReadB64TrB8Inst, "ds_read_b64_tr_b8",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsReadB96Inst, "ds_read_b96",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsReadB96TrB6Inst, "ds_read_b96_tr_b6",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsReadI16Inst, "ds_read_i16",
+    .format = DS,
+    .cost = {4, 52},
+    .flags = {DSRead}
+)
+
+DEF_T(DsReadI8Inst, "ds_read_i8",
+    .format = DS,
+    .flags = {DSRead}
+)
+
+DEF_T(DsReadU16Inst, "ds_read_u16",
+    .format = DS,
+    .cost = {4, 48},
+    .flags = {DSRead}
+)
+
+DEF_T(DsReadU16D16HiInst, "ds_read_u16_d16_hi",
+    .format = DS,
+    .cost = {4, 48},
+    .flags = {DSRead}
+)
+
+DEF_T(DsReadU8Inst, "ds_read_u8",
+    .format = DS,
+    .cost = {4, 52},
+    .flags = {DSRead}
+)
+
+DEF_T(DsReadU8D16HiInst, "ds_read_u8_d16_hi",
+    .format = DS,
+    .cost = {4, 48},
+    .flags = {DSRead}
+)
+
+DEF_T(DsBpermuteB32Inst, "ds_bpermute_b32",
+    .format = DS,
+    .flags = {DSStore}
+)
+
+DEF_T(DsStoreB128Inst, "ds_store_b128",
+    .format = DS,
+    .flags = {DSStore}
+)
+
+DEF_T(DsStoreB16Inst, "ds_store_b16",
+    .format = DS,
+    .flags = {DSStore}
+)
+
+DEF_T(DsStoreB192Inst, "ds_store_b192",
+    .format = DS,
+    .flags = {DSStore}
+)
+
+DEF_T(DsStoreB32Inst, "ds_store_b32",
+    .format = DS,
+    .flags = {DSStore}
+)
+
+DEF_T(DsStoreB64Inst, "ds_store_b64",
+    .format = DS,
+    .flags = {DSStore}
+)
+
+DEF_T(DsStoreB8Inst, "ds_store_b8",
+    .format = DS,
+    .flags = {DSStore}
+)
+
+DEF_T(DsStoreB8D16HiInst, "ds_store_b8_d16_hi",
+    .format = DS,
+    .flags = {DSStore}
+)
+
+DEF_T(DsStoreB96Inst, "ds_store_b96",
+    .format = DS,
+    .flags = {DSStore}
+)
+
+DEF_T(DsWrite2B32Inst, "ds_write2_b32",
+    .format = DS,
+    .cost = {12, 64},
+    .flags = {DSStore}
+)
+
+DEF_T(DsWrite2B64Inst, "ds_write2_b64",
+    .format = DS,
+    .cost = {20, 72},
+    .flags = {DSStore}
+)
+
+DEF_T(DsWriteB128Inst, "ds_write_b128",
+    .format = DS,
+    .cost = {20, 72},
+    .flags = {DSStore}
+)
+
+DEF_T(DsWriteB16Inst, "ds_write_b16",
+    .format = DS,
+    .cost = {8, 56},
+    .flags = {DSStore}
+)
+
+DEF_T(DsWriteB16D16HiInst, "ds_write_b16_d16_hi",
+    .format = DS,
+    .cost = {8, 56},
+    .flags = {DSStore}
+)
+
+DEF_T(DsWriteB32Inst, "ds_write_b32",
+    .format = DS,
+    .cost = {8, 56},
+    .flags = {DSStore}
+)
+
+DEF_T(DsWriteB64Inst, "ds_write_b64",
+    .format = DS,
+    .cost = {12, 64},
+    .flags = {DSStore}
+)
+
+DEF_T(DsWriteB8Inst, "ds_write_b8",
+    .format = DS,
+    .cost = {8, 56},
+    .flags = {DSStore}
+)
+
+DEF_T(DsWriteB8D16HiInst, "ds_write_b8_d16_hi",
+    .format = DS,
+    .cost = {8, 56},
+    .flags = {DSStore}
+)
+
+DEF_T(DsWriteB96Inst, "ds_write_b96",
+    .format = DS,
+    .cost = {16, 68},
+    .flags = {DSStore}
+)
+
+// Matrix Instructions
+
+DEF_T(VMfmaF3216x16x128F8f6f4Inst, "v_mfma_f32_16x16x128_f8f6f4",
+    .format = MFMA,
+    .cost = {4, 64},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3216x16x16Bf16Inst, "v_mfma_f32_16x16x16_bf16",
+    .format = MFMA,
+    .cost = {4, 16},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3216x16x16F16Inst, "v_mfma_f32_16x16x16_f16",
+    .format = MFMA,
+    .cost = {4, 16},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3216x16x14bF32Inst, "v_mfma_f32_16x16x1_4b_f32",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3216x16x32Bf8Bf8Inst, "v_mfma_f32_16x16x32_bf8_bf8",
+    .format = MFMA,
+    .cost = {4, 16},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3216x16x32Bf8Fp8Inst, "v_mfma_f32_16x16x32_bf8_fp8",
+    .format = MFMA,
+    .cost = {4, 16},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3216x16x32Fp8Bf8Inst, "v_mfma_f32_16x16x32_fp8_bf8",
+    .format = MFMA,
+    .cost = {4, 16},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3216x16x32Fp8Fp8Inst, "v_mfma_f32_16x16x32_fp8_fp8",
+    .format = MFMA,
+    .cost = {4, 16},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3216x16x44bBf16Inst, "v_mfma_f32_16x16x4_4b_bf16",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3216x16x44bF16Inst, "v_mfma_f32_16x16x4_4b_f16",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3216x16x4F32Inst, "v_mfma_f32_16x16x4_f32",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3232x32x16Bf8Bf8Inst, "v_mfma_f32_32x32x16_bf8_bf8",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3232x32x16Bf8Fp8Inst, "v_mfma_f32_32x32x16_bf8_fp8",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3232x32x16Fp8Bf8Inst, "v_mfma_f32_32x32x16_fp8_bf8",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3232x32x16Fp8Fp8Inst, "v_mfma_f32_32x32x16_fp8_fp8",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3232x32x12bF32Inst, "v_mfma_f32_32x32x1_2b_f32",
+    .format = MFMA,
+    .cost = {4, 64},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3232x32x2F32Inst, "v_mfma_f32_32x32x2_f32",
+    .format = MFMA,
+    .cost = {4, 64},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3232x32x42bBf16Inst, "v_mfma_f32_32x32x4_2b_bf16",
+    .format = MFMA,
+    .cost = {4, 64},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3232x32x42bF16Inst, "v_mfma_f32_32x32x4_2b_f16",
+    .format = MFMA,
+    .cost = {4, 64},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3232x32x64F8f6f4Inst, "v_mfma_f32_32x32x64_f8f6f4",
+    .format = MFMA,
+    .cost = {4, 128},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3232x32x8Bf16Inst, "v_mfma_f32_32x32x8_bf16",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3232x32x8F16Inst, "v_mfma_f32_32x32x8_f16",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF324x4x116bF32Inst, "v_mfma_f32_4x4x1_16b_f32",
+    .format = MFMA,
+    .cost = {4, 8},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF324x4x416bBf16Inst, "v_mfma_f32_4x4x4_16b_bf16",
+    .format = MFMA,
+    .cost = {4, 8},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF324x4x416bF16Inst, "v_mfma_f32_4x4x4_16b_f16",
+    .format = MFMA,
+    .cost = {4, 8},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF6416x16x4F64Inst, "v_mfma_f64_16x16x4_f64",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF644x4x44bF64Inst, "v_mfma_f64_4x4x4_4b_f64",
+    .format = MFMA,
+    .cost = {4, 16},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaI3216x16x32I8Inst, "v_mfma_i32_16x16x32_i8",
+    .format = MFMA,
+    .cost = {4, 16},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaI3216x16x44bI8Inst, "v_mfma_i32_16x16x4_4b_i8",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaI3232x32x16I8Inst, "v_mfma_i32_32x32x16_i8",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaI3232x32x42bI8Inst, "v_mfma_i32_32x32x4_2b_i8",
+    .format = MFMA,
+    .cost = {4, 64},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaI324x4x416bI8Inst, "v_mfma_i32_4x4x4_16b_i8",
+    .format = MFMA,
+    .cost = {4, 8},
+    .flags = {MFMA}
+)
+
+DEF_T(VSmfmacF3216x16x32Bf16Inst, "v_smfmac_f32_16x16x32_bf16",
+    .format = MFMA,
+    .cost = {4, 16},
+    .flags = {SMFMA}
+)
+
+DEF_T(VSmfmacF3216x16x32F16Inst, "v_smfmac_f32_16x16x32_f16",
+    .format = MFMA,
+    .cost = {4, 16},
+    .flags = {SMFMA}
+)
+
+DEF_T(VSmfmacF3216x16x64Bf8Bf8Inst, "v_smfmac_f32_16x16x64_bf8_bf8",
+    .format = MFMA,
+    .cost = {4, 16},
+    .flags = {SMFMA}
+)
+
+DEF_T(VSmfmacF3216x16x64Bf8Fp8Inst, "v_smfmac_f32_16x16x64_bf8_fp8",
+    .format = MFMA,
+    .cost = {4, 16},
+    .flags = {SMFMA}
+)
+
+DEF_T(VSmfmacF3216x16x64Fp8Bf8Inst, "v_smfmac_f32_16x16x64_fp8_bf8",
+    .format = MFMA,
+    .cost = {4, 16},
+    .flags = {SMFMA}
+)
+
+DEF_T(VSmfmacF3216x16x64Fp8Fp8Inst, "v_smfmac_f32_16x16x64_fp8_fp8",
+    .format = MFMA,
+    .cost = {4, 16},
+    .flags = {SMFMA}
+)
+
+DEF_T(VSmfmacF3232x32x16Bf16Inst, "v_smfmac_f32_32x32x16_bf16",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {SMFMA}
+)
+
+DEF_T(VSmfmacF3232x32x16F16Inst, "v_smfmac_f32_32x32x16_f16",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {SMFMA}
+)
+
+DEF_T(VSmfmacF3232x32x32Bf8Bf8Inst, "v_smfmac_f32_32x32x32_bf8_bf8",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {SMFMA}
+)
+
+DEF_T(VSmfmacF3232x32x32Bf8Fp8Inst, "v_smfmac_f32_32x32x32_bf8_fp8",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {SMFMA}
+)
+
+DEF_T(VSmfmacF3232x32x32Fp8Bf8Inst, "v_smfmac_f32_32x32x32_fp8_bf8",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {SMFMA}
+)
+
+DEF_T(VSmfmacF3232x32x32Fp8Fp8Inst, "v_smfmac_f32_32x32x32_fp8_fp8",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {SMFMA}
+)
+
+DEF_T(VSmfmacI3216x16x64I8Inst, "v_smfmac_i32_16x16x64_i8",
+    .format = MFMA,
+    .cost = {4, 16},
+    .flags = {SMFMA}
+)
+
+DEF_T(VSmfmacI3232x32x32I8Inst, "v_smfmac_i32_32x32x32_i8",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {SMFMA}
+)
+
+// Other
+
+DEF_T(OrSaveexecB32Inst, "or_saveexec_b32",
+    .format = VOP2,
+    .flags = {HasSideEffect}
+)
+
+// Scalar ALU
+
+DEF_T(SAndSaveexecB64Inst, "s_and_saveexec_b64",
+    .format = SOP2,
+    .flags = {Branch}
+)
+
+DEF_T(SDcacheWbInst, "s_dcache_wb",
+    .format = SOP2,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(SDelayAluInst, "s_delay_alu",
+    .format = SOP2,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(SEndpgmInst, "s_endpgm",
+    .format = SOPP,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(SFf1I32B32Inst, "s_ff1_i32_b32",
+    .format = SOP2,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(SGetpcB64Inst, "s_getpc_b64",
+    .format = SOP2,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(SGetregB32Inst, "s_getreg_b32",
+    .format = SOP2,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(SNopInst, "s_nop",
+    .format = SOPP,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(SOrSaveexecB64Inst, "s_or_saveexec_b64",
+    .format = SOP2,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(SSetMaskInst, "s_set_mask",
+    .format = SOP2,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(SSetVgprMsbInst, "s_set_vgpr_msb",
+    .format = SOP2,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(SSetpcB64Inst, "s_setpc_b64",
+    .format = SOP2,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(SSetprioInst, "s_setprio",
+    .format = SOP2,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(SSetregImm32B32Inst, "s_setreg_IMM32_b32",
+    .format = SOP2,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(SSetregImm32B32Inst, "s_setreg_imm32_b32",
+    .format = SOP2,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(SSetregB32Inst, "s_setreg_b32",
+    .format = SOP2,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(SSleepInst, "s_sleep",
+    .format = SOP2,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(SSwappcB64Inst, "s_swappc_b64",
+    .format = SOP2,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(SAtomicDecInst, "s_atomic_dec",
+    .format = SOP2,
+    .flags = {MUBUFAtomic}
+)
+
+DEF_T(SAbsI32Inst, "s_abs_i32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SAddI32Inst, "s_add_i32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SAddU32Inst, "s_add_u32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SAddcU32Inst, "s_addc_u32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SAndB32Inst, "s_and_b32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SAndB64Inst, "s_and_b64",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SAndSaveexecB32Inst, "s_and_saveexec_b32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SAndn2B32Inst, "s_andn2_b32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SAndn2B64Inst, "s_andn2_b64",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SAshrI32Inst, "s_ashr_i32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SAshrI64Inst, "s_ashr_i64",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SBfmB32Inst, "s_bfm_b32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SCmovB32Inst, "s_cmov_b32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SCmovB64Inst, "s_cmov_b64",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SCselectB32Inst, "s_cselect_b32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SCselectB64Inst, "s_cselect_b64",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SLshl1AddU32Inst, "s_lshl1_add_u32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SLshl2AddU32Inst, "s_lshl2_add_u32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SLshl3AddU32Inst, "s_lshl3_add_u32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SLshl4AddU32Inst, "s_lshl4_add_u32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SLshlB32Inst, "s_lshl_b32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SLshlB64Inst, "s_lshl_b64",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SLshrB32Inst, "s_lshr_b32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SLshrB64Inst, "s_lshr_b64",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SMaxI32Inst, "s_max_i32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SMaxU32Inst, "s_max_u32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SMinI32Inst, "s_min_i32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SMinU32Inst, "s_min_u32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SMovB32Inst, "s_mov_b32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SMovB64Inst, "s_mov_b64",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SMovkI32Inst, "s_movk_i32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SMulHiI32Inst, "s_mul_hi_i32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SMulHiU32Inst, "s_mul_hi_u32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SMulI32Inst, "s_mul_i32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SMulLoU32Inst, "s_mul_lo_u32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SOrB32Inst, "s_or_b32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SOrB64Inst, "s_or_b64",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SOrSaveexecB32Inst, "s_or_saveexec_b32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SSextI32I16Inst, "s_sext_i32_i16",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SSubI32Inst, "s_sub_i32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SSubU32Inst, "s_sub_u32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SSubU64Inst, "s_sub_u64",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SSubbU32Inst, "s_subb_u32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SXorB32Inst, "s_xor_b32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SXorB64Inst, "s_xor_b64",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SLoadB128Inst, "s_load_b128",
+    .format = SMRD,
+    .flags = {SMemLoad}
+)
+
+DEF_T(SLoadB256Inst, "s_load_b256",
+    .format = SMRD,
+    .flags = {SMemLoad}
+)
+
+DEF_T(SLoadB32Inst, "s_load_b32",
+    .format = SMRD,
+    .flags = {SMemLoad}
+)
+
+DEF_T(SLoadB512Inst, "s_load_b512",
+    .format = SMRD,
+    .flags = {SMemLoad}
+)
+
+DEF_T(SLoadB64Inst, "s_load_b64",
+    .format = SMRD,
+    .flags = {SMemLoad}
+)
+
+DEF_T(SLoadDwordInst, "s_load_dword",
+    .format = SMRD,
+    .flags = {SMemLoad}
+)
+
+DEF_T(SLoadDwordx16Inst, "s_load_dwordx16",
+    .format = SMRD,
+    .flags = {SMemLoad}
+)
+
+DEF_T(SLoadDwordx2Inst, "s_load_dwordx2",
+    .format = SMRD,
+    .flags = {SMemLoad}
+)
+
+DEF_T(SLoadDwordx4Inst, "s_load_dwordx4",
+    .format = SMRD,
+    .flags = {SMemLoad}
+)
+
+DEF_T(SLoadDwordx8Inst, "s_load_dwordx8",
+    .format = SMRD,
+    .flags = {SMemLoad}
+)
+
+DEF_T(SStoreB128Inst, "s_store_b128",
+    .format = SMRD,
+    .flags = {SMemStore}
+)
+
+DEF_T(SStoreB32Inst, "s_store_b32",
+    .format = SMRD,
+    .flags = {SMemStore}
+)
+
+DEF_T(SStoreB64Inst, "s_store_b64",
+    .format = SMRD,
+    .flags = {SMemStore}
+)
+
+DEF_T(SStoreDwordInst, "s_store_dword",
+    .format = SMRD,
+    .flags = {SMemStore}
+)
+
+DEF_T(SStoreDwordx2Inst, "s_store_dwordx2",
+    .format = SMRD,
+    .flags = {SMemStore}
+)
+
+DEF_T(SStoreDwordx4Inst, "s_store_dwordx4",
+    .format = SMRD,
+    .flags = {SMemStore}
+)
+
+// Scalar Compare
+
+DEF_T(SBitcmp1B32Inst, "s_bitcmp1_b32",
+    .format = SOP2,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpEqI32Inst, "s_cmp_eq_i32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpEqU32Inst, "s_cmp_eq_u32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpEqU64Inst, "s_cmp_eq_u64",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpGeI32Inst, "s_cmp_ge_i32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpGeU32Inst, "s_cmp_ge_u32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpGtI32Inst, "s_cmp_gt_i32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpGtU32Inst, "s_cmp_gt_u32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpLeI32Inst, "s_cmp_le_i32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpLeU32Inst, "s_cmp_le_u32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpLgI32Inst, "s_cmp_lg_i32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpLgU32Inst, "s_cmp_lg_u32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpLgU64Inst, "s_cmp_lg_u64",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpLtI32Inst, "s_cmp_lt_i32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpLtU32Inst, "s_cmp_lt_u32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpkEqI32Inst, "s_cmpk_eq_i32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpkEqU32Inst, "s_cmpk_eq_u32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpkGeI32Inst, "s_cmpk_ge_i32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpkGeU32Inst, "s_cmpk_ge_u32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpkGtI32Inst, "s_cmpk_gt_i32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpkGtU32Inst, "s_cmpk_gt_u32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpkLeI32Inst, "s_cmpk_le_i32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpkLeU32Inst, "s_cmpk_le_u32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpkLgI32Inst, "s_cmpk_lg_i32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpkLgU32Inst, "s_cmpk_lg_u32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpkLtI32Inst, "s_cmpk_lt_i32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+DEF_T(SCmpkLtU32Inst, "s_cmpk_lt_u32",
+    .format = SOPC,
+    .flags = {SALU}
+)
+
+// Vector ALU
+
+DEF_T(VAdd3U32Inst, "v_add3_u32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VAddCoCiU32Inst, "v_add_co_ci_u32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VAddCoU32Inst, "v_add_co_u32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VAddF16Inst, "v_add_f16",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VAddF32Inst, "v_add_f32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VAddF64Inst, "v_add_f64",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VAddI32Inst, "v_add_i32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VAddU32Inst, "v_add_u32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VAddNcI32Inst, "v_add_nc_i32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VAddNcU32Inst, "v_add_nc_u32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VAddcCoU32Inst, "v_addc_co_u32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VAndB32Inst, "v_and_b32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VDot2F32F16Inst, "v_dot2_f32_f16",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VDot2cF32F16Inst, "v_dot2c_f32_f16",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VFmaF16Inst, "v_fma_f16",
+    .format = VOP3,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VFmaF32Inst, "v_fma_f32",
+    .format = VOP3,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VFmaF64Inst, "v_fma_f64",
+    .format = VOP3,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VMaxF16Inst, "v_max_f16",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VMaxF32Inst, "v_max_f32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VMaxF64Inst, "v_max_f64",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VMaxI32Inst, "v_max_i32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VMinF16Inst, "v_min_f16",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VMinF32Inst, "v_min_f32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VMinF64Inst, "v_min_f64",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VMinI32Inst, "v_min_i32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VMulF16Inst, "v_mul_f16",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VMulF32Inst, "v_mul_f32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VMulF64Inst, "v_mul_f64",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VMulHiI32Inst, "v_mul_hi_i32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VMulHiU32Inst, "v_mul_hi_u32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VMulI32I24Inst, "v_mul_i32_i24",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VMulLoU32Inst, "v_mul_lo_u32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VMulU32U24Inst, "v_mul_u32_u24",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VOrB32Inst, "v_or_b32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VPkAddF16Inst, "v_pk_add_f16",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VPkAddF32Inst, "v_pk_add_f32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VPkAddI16Inst, "v_pk_add_i16",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VPkAddU16Inst, "v_pk_add_u16",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VPkMaxF16Inst, "v_pk_max_f16",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VPkMaxI16Inst, "v_pk_max_i16",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VPkMaxU16Inst, "v_pk_max_u16",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VPkMinF16Inst, "v_pk_min_f16",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VPkMinI16Inst, "v_pk_min_i16",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VPkMinU16Inst, "v_pk_min_u16",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VPkMulF16Inst, "v_pk_mul_f16",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VPkMulF32Inst, "v_pk_mul_f32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VPkMulLoU16Inst, "v_pk_mul_lo_u16",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VXorB32Inst, "v_xor_b32",
+    .format = VOP2,
+    .flags = {VALU, Commutative}
+)
+
+DEF_T(VNopInst, "v_nop",
+    .format = VOP2,
+    .flags = {HasSideEffect}
+)
+
+DEF_T(VAccvgprReadB32Inst, "v_accvgpr_read_b32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VAccvgprWriteB32Inst, "v_accvgpr_write_b32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VAddLshlU32Inst, "v_add_lshl_u32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VAndOrB32Inst, "v_and_or_b32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VAshrrevI32Inst, "v_ashrrev_i32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VBfeI32Inst, "v_bfe_i32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VBfeU32Inst, "v_bfe_u32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VBfiB32Inst, "v_bfi_b32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VCndmaskB32Inst, "v_cndmask_b32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VFmaMixF32Inst, "v_fma_mix_f32",
+    .format = VOP3,
+    .flags = {VALU}
+)
+
+DEF_T(VFmacF32Inst, "v_fmac_f32",
+    .format = VOP3,
+    .flags = {VALU}
+)
+
+DEF_T(VLshlAddU32Inst, "v_lshl_add_u32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VLshlOrB32Inst, "v_lshl_or_b32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VLshlrevB16Inst, "v_lshlrev_b16",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VLshlrevB32Inst, "v_lshlrev_b32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VLshlrevB64Inst, "v_lshlrev_b64",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VLshrrevB32Inst, "v_lshrrev_b32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VLshrrevB64Inst, "v_lshrrev_b64",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VMadI32I24Inst, "v_mad_i32_i24",
+    .format = VOP3,
+    .flags = {VALU}
+)
+
+DEF_T(VMadMixF32Inst, "v_mad_mix_f32",
+    .format = VOP3,
+    .flags = {VALU}
+)
+
+DEF_T(VMadMixhiF16Inst, "v_mad_mixhi_f16",
+    .format = VOP3,
+    .flags = {VALU}
+)
+
+DEF_T(VMadMixloF16Inst, "v_mad_mixlo_f16",
+    .format = VOP3,
+    .flags = {VALU}
+)
+
+DEF_T(VMadU32U24Inst, "v_mad_u32_u24",
+    .format = VOP3,
+    .flags = {VALU}
+)
+
+DEF_T(VMed3F32Inst, "v_med3_f32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VMed3I32Inst, "v_med3_i32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VMovB32Inst, "v_mov_b32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VMovB64Inst, "v_mov_b64",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VNotB32Inst, "v_not_b32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VPackB32F16Inst, "v_pack_b32_f16",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VPermB32Inst, "v_perm_b32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VPkAshrrevI16Inst, "v_pk_ashrrev_i16",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VPkFmaF16Inst, "v_pk_fma_f16",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VPkFmaF32Inst, "v_pk_fma_f32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VPkLshlrevB16Inst, "v_pk_lshlrev_b16",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VPkLshrrevB16Inst, "v_pk_lshrrev_b16",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VPkMadI16Inst, "v_pk_mad_i16",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VPkMadU16Inst, "v_pk_mad_u16",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VPkMovB32Inst, "v_pk_mov_b32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VPkSubI16Inst, "v_pk_sub_i16",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VPkSubU16Inst, "v_pk_sub_u16",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VPrngB32Inst, "v_prng_b32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VReadfirstlaneB32Inst, "v_readfirstlane_b32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VRndneF32Inst, "v_rndne_f32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VSubCoU32Inst, "v_sub_co_u32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VSubF16Inst, "v_sub_f16",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VSubF32Inst, "v_sub_f32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VSubI32Inst, "v_sub_i32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VSubNcU32Inst, "v_sub_nc_u32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VSubU32Inst, "v_sub_u32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VSwapB32Inst, "v_swap_b32",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VDot2F32Bf16Inst, "v_dot2_f32_bf16",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VDot2cF32Bf16Inst, "v_dot2c_f32_bf16",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+// Vector Compare
+
+DEF_T(VCmpClassF16Inst, "v_cmp_class_f16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpClassF32Inst, "v_cmp_class_f32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpClassF64Inst, "v_cmp_class_f64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpEqF16Inst, "v_cmp_eq_f16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpEqF32Inst, "v_cmp_eq_f32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpEqF64Inst, "v_cmp_eq_f64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpEqI16Inst, "v_cmp_eq_i16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpEqI32Inst, "v_cmp_eq_i32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpEqI64Inst, "v_cmp_eq_i64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpEqU16Inst, "v_cmp_eq_u16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpEqU32Inst, "v_cmp_eq_u32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpEqU64Inst, "v_cmp_eq_u64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpFF16Inst, "v_cmp_f_f16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpFF32Inst, "v_cmp_f_f32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpFF64Inst, "v_cmp_f_f64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpFI16Inst, "v_cmp_f_i16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpFI32Inst, "v_cmp_f_i32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpFI64Inst, "v_cmp_f_i64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpFU16Inst, "v_cmp_f_u16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpFU32Inst, "v_cmp_f_u32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpFU64Inst, "v_cmp_f_u64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpGeF16Inst, "v_cmp_ge_f16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpGeF32Inst, "v_cmp_ge_f32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpGeF64Inst, "v_cmp_ge_f64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpGeI16Inst, "v_cmp_ge_i16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpGeI32Inst, "v_cmp_ge_i32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpGeI64Inst, "v_cmp_ge_i64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpGeU16Inst, "v_cmp_ge_u16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpGeU32Inst, "v_cmp_ge_u32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpGeU64Inst, "v_cmp_ge_u64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpGtF16Inst, "v_cmp_gt_f16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpGtF32Inst, "v_cmp_gt_f32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpGtF64Inst, "v_cmp_gt_f64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpGtI16Inst, "v_cmp_gt_i16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpGtI32Inst, "v_cmp_gt_i32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpGtI64Inst, "v_cmp_gt_i64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpGtU16Inst, "v_cmp_gt_u16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpGtU32Inst, "v_cmp_gt_u32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpGtU64Inst, "v_cmp_gt_u64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLeF16Inst, "v_cmp_le_f16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLeF32Inst, "v_cmp_le_f32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLeF64Inst, "v_cmp_le_f64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLeI16Inst, "v_cmp_le_i16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLeI32Inst, "v_cmp_le_i32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLeI64Inst, "v_cmp_le_i64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLeU16Inst, "v_cmp_le_u16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLeU32Inst, "v_cmp_le_u32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLeU64Inst, "v_cmp_le_u64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLgF16Inst, "v_cmp_lg_f16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLgF32Inst, "v_cmp_lg_f32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLgF64Inst, "v_cmp_lg_f64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLgI16Inst, "v_cmp_lg_i16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLgI32Inst, "v_cmp_lg_i32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLgI64Inst, "v_cmp_lg_i64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLgU16Inst, "v_cmp_lg_u16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLgU32Inst, "v_cmp_lg_u32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLgU64Inst, "v_cmp_lg_u64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLtF16Inst, "v_cmp_lt_f16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLtF32Inst, "v_cmp_lt_f32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLtF64Inst, "v_cmp_lt_f64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLtI16Inst, "v_cmp_lt_i16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLtI32Inst, "v_cmp_lt_i32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLtI64Inst, "v_cmp_lt_i64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLtU16Inst, "v_cmp_lt_u16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLtU32Inst, "v_cmp_lt_u32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpLtU64Inst, "v_cmp_lt_u64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNeI16Inst, "v_cmp_ne_i16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNeI32Inst, "v_cmp_ne_i32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNeI64Inst, "v_cmp_ne_i64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNeU16Inst, "v_cmp_ne_u16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNeU32Inst, "v_cmp_ne_u32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNeU64Inst, "v_cmp_ne_u64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNeqF16Inst, "v_cmp_neq_f16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNeqF32Inst, "v_cmp_neq_f32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNeqF64Inst, "v_cmp_neq_f64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNgeF16Inst, "v_cmp_nge_f16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNgeF32Inst, "v_cmp_nge_f32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNgeF64Inst, "v_cmp_nge_f64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNgtF16Inst, "v_cmp_ngt_f16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNgtF32Inst, "v_cmp_ngt_f32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNgtF64Inst, "v_cmp_ngt_f64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNleF16Inst, "v_cmp_nle_f16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNleF32Inst, "v_cmp_nle_f32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNleF64Inst, "v_cmp_nle_f64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNlgF16Inst, "v_cmp_nlg_f16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNlgF32Inst, "v_cmp_nlg_f32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNlgF64Inst, "v_cmp_nlg_f64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNltF16Inst, "v_cmp_nlt_f16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNltF32Inst, "v_cmp_nlt_f32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpNltF64Inst, "v_cmp_nlt_f64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpOF16Inst, "v_cmp_o_f16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpOF32Inst, "v_cmp_o_f32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpOF64Inst, "v_cmp_o_f64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpTF16Inst, "v_cmp_t_f16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpTF32Inst, "v_cmp_t_f32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpTF64Inst, "v_cmp_t_f64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpTI16Inst, "v_cmp_t_i16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpTI32Inst, "v_cmp_t_i32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpTI64Inst, "v_cmp_t_i64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpTU16Inst, "v_cmp_t_u16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpTU32Inst, "v_cmp_t_u32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpTU64Inst, "v_cmp_t_u64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpUF16Inst, "v_cmp_u_f16",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpUF32Inst, "v_cmp_u_f32",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpUF64Inst, "v_cmp_u_f64",
+    .format = VOPC,
+    .flags = {VALU}
+)
+
+DEF_T(VCmpxClassF16Inst, "v_cmpx_class_f16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxClassF32Inst, "v_cmpx_class_f32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxClassF64Inst, "v_cmpx_class_f64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxEqF16Inst, "v_cmpx_eq_f16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxEqF32Inst, "v_cmpx_eq_f32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxEqF64Inst, "v_cmpx_eq_f64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxEqI16Inst, "v_cmpx_eq_i16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxEqI32Inst, "v_cmpx_eq_i32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxEqI64Inst, "v_cmpx_eq_i64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxEqU16Inst, "v_cmpx_eq_u16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxEqU32Inst, "v_cmpx_eq_u32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxEqU64Inst, "v_cmpx_eq_u64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxFF16Inst, "v_cmpx_f_f16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxFF32Inst, "v_cmpx_f_f32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxFF64Inst, "v_cmpx_f_f64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxFI16Inst, "v_cmpx_f_i16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxFI32Inst, "v_cmpx_f_i32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxFI64Inst, "v_cmpx_f_i64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxFU16Inst, "v_cmpx_f_u16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxFU32Inst, "v_cmpx_f_u32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxFU64Inst, "v_cmpx_f_u64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxGeF16Inst, "v_cmpx_ge_f16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxGeF32Inst, "v_cmpx_ge_f32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxGeF64Inst, "v_cmpx_ge_f64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxGeI16Inst, "v_cmpx_ge_i16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxGeI32Inst, "v_cmpx_ge_i32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxGeI64Inst, "v_cmpx_ge_i64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxGeU16Inst, "v_cmpx_ge_u16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxGeU32Inst, "v_cmpx_ge_u32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxGeU64Inst, "v_cmpx_ge_u64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxGtF16Inst, "v_cmpx_gt_f16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxGtF32Inst, "v_cmpx_gt_f32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxGtF64Inst, "v_cmpx_gt_f64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxGtI16Inst, "v_cmpx_gt_i16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxGtI32Inst, "v_cmpx_gt_i32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxGtI64Inst, "v_cmpx_gt_i64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxGtU16Inst, "v_cmpx_gt_u16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxGtU32Inst, "v_cmpx_gt_u32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxGtU64Inst, "v_cmpx_gt_u64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLeF16Inst, "v_cmpx_le_f16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLeF32Inst, "v_cmpx_le_f32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLeF64Inst, "v_cmpx_le_f64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLeI16Inst, "v_cmpx_le_i16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLeI32Inst, "v_cmpx_le_i32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLeI64Inst, "v_cmpx_le_i64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLeU16Inst, "v_cmpx_le_u16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLeU32Inst, "v_cmpx_le_u32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLeU64Inst, "v_cmpx_le_u64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLgF16Inst, "v_cmpx_lg_f16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLgF32Inst, "v_cmpx_lg_f32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLgF64Inst, "v_cmpx_lg_f64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLgI16Inst, "v_cmpx_lg_i16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLgI32Inst, "v_cmpx_lg_i32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLgI64Inst, "v_cmpx_lg_i64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLgU16Inst, "v_cmpx_lg_u16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLgU32Inst, "v_cmpx_lg_u32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLgU64Inst, "v_cmpx_lg_u64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLtF16Inst, "v_cmpx_lt_f16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLtF32Inst, "v_cmpx_lt_f32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLtF64Inst, "v_cmpx_lt_f64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLtI16Inst, "v_cmpx_lt_i16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLtI32Inst, "v_cmpx_lt_i32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLtI64Inst, "v_cmpx_lt_i64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLtU16Inst, "v_cmpx_lt_u16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLtU32Inst, "v_cmpx_lt_u32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxLtU64Inst, "v_cmpx_lt_u64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNeI16Inst, "v_cmpx_ne_i16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNeI32Inst, "v_cmpx_ne_i32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNeI64Inst, "v_cmpx_ne_i64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNeU16Inst, "v_cmpx_ne_u16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNeU32Inst, "v_cmpx_ne_u32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNeU64Inst, "v_cmpx_ne_u64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNeqF16Inst, "v_cmpx_neq_f16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNeqF32Inst, "v_cmpx_neq_f32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNeqF64Inst, "v_cmpx_neq_f64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNgeF16Inst, "v_cmpx_nge_f16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNgeF32Inst, "v_cmpx_nge_f32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNgeF64Inst, "v_cmpx_nge_f64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNgtF16Inst, "v_cmpx_ngt_f16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNgtF32Inst, "v_cmpx_ngt_f32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNgtF64Inst, "v_cmpx_ngt_f64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNleF16Inst, "v_cmpx_nle_f16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNleF32Inst, "v_cmpx_nle_f32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNleF64Inst, "v_cmpx_nle_f64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNlgF16Inst, "v_cmpx_nlg_f16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNlgF32Inst, "v_cmpx_nlg_f32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNlgF64Inst, "v_cmpx_nlg_f64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNltF16Inst, "v_cmpx_nlt_f16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNltF32Inst, "v_cmpx_nlt_f32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxNltF64Inst, "v_cmpx_nlt_f64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxOF16Inst, "v_cmpx_o_f16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxOF32Inst, "v_cmpx_o_f32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxOF64Inst, "v_cmpx_o_f64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxTF16Inst, "v_cmpx_t_f16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxTF32Inst, "v_cmpx_t_f32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxTF64Inst, "v_cmpx_t_f64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxTI16Inst, "v_cmpx_t_i16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxTI32Inst, "v_cmpx_t_i32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxTI64Inst, "v_cmpx_t_i64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxTU16Inst, "v_cmpx_t_u16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxTU32Inst, "v_cmpx_t_u32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxTU64Inst, "v_cmpx_t_u64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxUF16Inst, "v_cmpx_u_f16",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxUF32Inst, "v_cmpx_u_f32",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+DEF_T(VCmpxUF64Inst, "v_cmpx_u_f64",
+    .format = VOPC,
+    .flags = {VCmpX}
+)
+
+// Vector Convert
+
+DEF_T(VCvtF16F32Inst, "v_cvt_f16_f32",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtF32Bf16Inst, "v_cvt_f32_bf16",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtF32Bf8Inst, "v_cvt_f32_bf8",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtF32F16Inst, "v_cvt_f32_f16",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtF32Fp8Inst, "v_cvt_f32_fp8",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtF32I32Inst, "v_cvt_f32_i32",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtF32U32Inst, "v_cvt_f32_u32",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtI32F32Inst, "v_cvt_i32_f32",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtPkBf16F32Inst, "v_cvt_pk_bf16_f32",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtPkBf8F32Inst, "v_cvt_pk_bf8_f32",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtPkF16F32Inst, "v_cvt_pk_f16_f32",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtPkF32Bf16Inst, "v_cvt_pk_f32_bf16",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtPkF32Bf8Inst, "v_cvt_pk_f32_bf8",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtPkF32F16Inst, "v_cvt_pk_f32_f16",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtPkF32Fp8Inst, "v_cvt_pk_f32_fp8",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtPkFp8F32Inst, "v_cvt_pk_fp8_f32",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtSrBf8F32Inst, "v_cvt_sr_bf8_f32",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtSrFp8F32Inst, "v_cvt_sr_fp8_f32",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtU32F32Inst, "v_cvt_u32_f32",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtScalef32F16Fp8Inst, "v_cvt_scalef32_f16_fp8",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtScalef32PkBf8F16Inst, "v_cvt_scalef32_pk_bf8_f16",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtScalef32PkF16Bf8Inst, "v_cvt_scalef32_pk_f16_bf8",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtScalef32PkF16Fp8Inst, "v_cvt_scalef32_pk_f16_fp8",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtScalef32PkFp8F16Inst, "v_cvt_scalef32_pk_fp8_f16",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtScalef32SrBf8F16Inst, "v_cvt_scalef32_sr_bf8_f16",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+DEF_T(VCvtScalef32SrFp8F16Inst, "v_cvt_scalef32_sr_fp8_f16",
+    .format = VOP1,
+    .flags = {VALU}
+)
+
+// Vector Transcendental
+
+DEF_T(VCosF16Inst, "v_cos_f16",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VCosF32Inst, "v_cos_f32",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VExpF16Inst, "v_exp_f16",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VExpF32Inst, "v_exp_f32",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VExpLegacyF32Inst, "v_exp_legacy_f32",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VLogF16Inst, "v_log_f16",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VLogF32Inst, "v_log_f32",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VLogLegacyF32Inst, "v_log_legacy_f32",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VRcpF16Inst, "v_rcp_f16",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VRcpF32Inst, "v_rcp_f32",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VRcpF64Inst, "v_rcp_f64",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VRcpIflagF32Inst, "v_rcp_iflag_f32",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VRsqF16Inst, "v_rsq_f16",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VRsqF32Inst, "v_rsq_f32",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VRsqF64Inst, "v_rsq_f64",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VRsqIflagF32Inst, "v_rsq_iflag_f32",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VSinF16Inst, "v_sin_f16",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VSinF32Inst, "v_sin_f32",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VSqrtF16Inst, "v_sqrt_f16",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VSqrtF32Inst, "v_sqrt_f32",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)
+
+DEF_T(VSqrtF64Inst, "v_sqrt_f64",
+    .format = VOP1,
+    .flags = {VALU, Transcendental}
+)

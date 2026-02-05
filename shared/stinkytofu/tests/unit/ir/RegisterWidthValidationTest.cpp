@@ -3,7 +3,7 @@
  * ************************************************************************ */
 
 #include "TestHelpers.hpp"
-#include "ir/IRVerifierPass.hpp"
+#include "ir/asm/AsmVerifierPass.hpp"
 #include "ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu.hpp"
 
@@ -176,7 +176,7 @@ TEST(RegisterWidthValidationTest, DisableWidthChecks)
     pm.run();
 
     // Verify with width checks DISABLED - should pass
-    IRVerifierConfig verifierConfig;
+    AsmVerifierConfig verifierConfig;
     verifierConfig.checkRegisterWidths = false;
 
     std::string error = validateStinkyIR(func, verifierConfig);

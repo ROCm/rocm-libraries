@@ -1236,30 +1236,12 @@ TEST(LogicalToAsmComprehensive, SmfmaInstructionLowering)
         {"i8", "i32", 32, 32, 32, 1, false, "v_smfmac_i32_32x32x32_i8"},
     };
 
-    std::vector<MfmaTestCase> smfma_gfx1250 = {
-        // gfx1250 also uses v_smfmac (NOT v_swmmac)
-        // 16x16 variants
-        {"bf16", "f32", 16, 16, 32, 1, false, "v_smfmac_f32_16x16x32_bf16"},
-        {"f16", "f32", 16, 16, 32, 1, false, "v_smfmac_f32_16x16x32_f16"},
-        {"fp8_fp8", "f32", 16, 16, 64, 1, false, "v_smfmac_f32_16x16x64_fp8_fp8"},
-        {"bf8_bf8", "f32", 16, 16, 64, 1, false, "v_smfmac_f32_16x16x64_bf8_bf8"},
-        {"fp8_bf8", "f32", 16, 16, 64, 1, false, "v_smfmac_f32_16x16x64_fp8_bf8"},
-        {"bf8_fp8", "f32", 16, 16, 64, 1, false, "v_smfmac_f32_16x16x64_bf8_fp8"},
-        {"i8", "i32", 16, 16, 64, 1, false, "v_smfmac_i32_16x16x64_i8"},
-        // 32x32 variants
-        {"bf16", "f32", 32, 32, 16, 1, false, "v_smfmac_f32_32x32x16_bf16"},
-        {"f16", "f32", 32, 32, 16, 1, false, "v_smfmac_f32_32x32x16_f16"},
-        {"fp8_fp8", "f32", 32, 32, 32, 1, false, "v_smfmac_f32_32x32x32_fp8_fp8"},
-        {"bf8_bf8", "f32", 32, 32, 32, 1, false, "v_smfmac_f32_32x32x32_bf8_bf8"},
-        {"fp8_bf8", "f32", 32, 32, 32, 1, false, "v_smfmac_f32_32x32x32_fp8_bf8"},
-        {"bf8_fp8", "f32", 32, 32, 32, 1, false, "v_smfmac_f32_32x32x32_bf8_fp8"},
-        {"i8", "i32", 32, 32, 32, 1, false, "v_smfmac_i32_32x32x32_i8"},
-    };
+    // gfx1250 (RDNA4) does not have SMFMA; it uses SWMMA (v_swmmac_*) instead.
+    // SMFMA is CDNA-only (gfx942, gfx950). Do not add gfx1250 to this test.
 
     std::vector<ArchTest> archTests = {
         {"gfx942", smfma_gfx942, 9, 4, 2},
         {"gfx950", smfma_gfx950, 9, 5, 0},
-        {"gfx1250", smfma_gfx1250, 12, 5, 0},
     };
 
     for(const auto& archTest : archTests)
