@@ -2578,46 +2578,10 @@ public:
 
         const auto& s = m_settings;
 
-        std::string name           = m_meta.serialize_name();
-        size_t      bytes_per_item = m_read_write_bytes / m_items;
+        std::string name            = m_meta.serialize_name();
+        std::string serialized_meta = m_meta.serialize();
 
-        if(s.dry)
-        {
-            // A dry run doesn't run anything on the GPU, so output placeholder values.
-            double   bytes_per_sec     = 0.0;
-            double   items_per_sec     = 0.0;
-            double   noise_percent     = 0.0;
-            uint16_t start_temp        = 0;
-            uint16_t end_temp          = 0;
-            double   elapsed_host_secs = 0.0;
-            double   elapsed_gpu_secs  = 0.0;
-            bool     noise_timeout     = false;
-
-            progress::print_dry_progress(name,
-                                         m_algo,
-                                         m_family_index,
-                                         m_spec_col_width,
-                                         m_family_col_width);
-
-            m_logger.output_specialization(m_family_index,
-                                           name,
-                                           m_meta.serialize(),
-                                           m_kernels_per_batch,
-                                           m_ms_per_batch,
-                                           bytes_per_sec,
-                                           items_per_sec,
-                                           bytes_per_item,
-                                           m_items,
-                                           noise_percent,
-                                           start_temp,
-                                           end_temp,
-                                           elapsed_host_secs,
-                                           elapsed_gpu_secs,
-                                           noise_timeout,
-                                           m_amdsmi);
-
-            return;
-        }
+        size_t bytes_per_item = m_read_write_bytes / m_items;
 
         warm_up();
         cool_down();
@@ -2715,7 +2679,7 @@ public:
 
                 m_logger.output_specialization(m_family_index,
                                                name,
-                                               m_meta.serialize(),
+                                               serialized_meta,
                                                m_kernels_per_batch,
                                                m_ms_per_batch,
                                                bytes_per_sec,
@@ -3681,10 +3645,21 @@ public:
         size_t family_index = 0;
         for(auto& b_unique_ptr : static_specializations)
         {
-            auto b     = b_unique_ptr.get();
-            auto algo  = b->meta().get<std::string>("algo");
-            auto state = new_state(algo, b->meta(), family_index++);
-            b->run(state);
+            auto b    = b_unique_ptr.get();
+            auto meta = b->meta();
+            auto algo = meta.get<std::string>("algo");
+
+            if(m_settings.dry)
+            {
+                output_dry_specialization(algo, meta, family_index);
+            }
+            else
+            {
+                auto state = new_state(algo, meta, family_index);
+                b->run(state);
+            }
+
+            family_index++;
         }
 
         get_logger().output_summary();
@@ -3733,8 +3708,8 @@ private:
 
         s.dry = cli.get<bool>("dry",
                               s.dry,
-                              "Perform a dry run. The benchmark setup is still run, and JSON and "
-                              "CSV files are still output, but `state.run()` immediately returns.");
+                              "Perform a dry run. JSON and CSV files are still output, but "
+                              "benchmark setup and execution are skipped.");
 
         s.min_gpu_ms_per_batch
             = cli.get<double>("min-gpu-ms-per-batch",
@@ -3885,6 +3860,52 @@ private:
                      m_flags,
                      m_spec_col_width,
                      m_family_col_width);
+    }
+
+    /**
+     * \brief Outputs a single dry specialization.
+     */
+    void output_dry_specialization(std::string_view algo, const json& meta, size_t family_index)
+    {
+        std::string name            = meta.serialize_name();
+        std::string serialized_meta = meta.serialize();
+
+        // A dry run doesn't run anything on the GPU, so output placeholder values.
+        size_t   kernels_per_batch = 0;
+        double   ms_per_batch      = 0.0;
+        double   bytes_per_sec     = 0.0;
+        double   items_per_sec     = 0.0;
+        double   bytes_per_item    = 0.0;
+        size_t   items             = 0;
+        double   noise_percent     = 0.0;
+        uint16_t start_temp        = 0;
+        uint16_t end_temp          = 0;
+        double   elapsed_host_secs = 0.0;
+        double   elapsed_gpu_secs  = 0.0;
+        bool     noise_timeout     = false;
+
+        detail::progress::print_dry_progress(name,
+                                             algo,
+                                             family_index,
+                                             m_spec_col_width,
+                                             m_family_col_width);
+
+        get_logger().output_specialization(family_index,
+                                           name,
+                                           serialized_meta,
+                                           kernels_per_batch,
+                                           ms_per_batch,
+                                           bytes_per_sec,
+                                           items_per_sec,
+                                           bytes_per_item,
+                                           items,
+                                           noise_percent,
+                                           start_temp,
+                                           end_temp,
+                                           elapsed_host_secs,
+                                           elapsed_gpu_secs,
+                                           noise_timeout,
+                                           get_amdsmi());
     }
 
     /**
