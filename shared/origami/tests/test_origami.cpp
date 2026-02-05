@@ -565,10 +565,10 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       config.cache_hints_a = 4;
       config.cache_hints_b = 3;
       auto out_wgm_1 =
-          origami::select_workgroup_mapping(problem, hardware, config, skGrid);  // nta < 4, ntb > 3
+          origami::select_workgroup_mapping(problem, hardware, config, skGrid);  // nta > 3, ntb < 4
       REQUIRE(out_wgm_1.wgmxccchunk == chunk_size);
       REQUIRE(out_wgm_1.wgmxcc == default_wgmxcc);
-      REQUIRE(out_wgm_1.wgm == numMT_M);
+      REQUIRE(out_wgm_1.wgm == numMT_N);
 
       config.cache_hints_a = 3;
       config.cache_hints_b = 4;
@@ -576,7 +576,7 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
           origami::select_workgroup_mapping(problem, hardware, config, skGrid);  // nta < 4, ntb > 3
       REQUIRE(out_wgm_2.wgmxccchunk == chunk_size);
       REQUIRE(out_wgm_2.wgmxcc == default_wgmxcc);
-      REQUIRE(out_wgm_2.wgm == -numMT_N);
+      REQUIRE(out_wgm_2.wgm == -numMT_M);
 
       config.cache_hints_a = 4;
       config.cache_hints_b = 4;

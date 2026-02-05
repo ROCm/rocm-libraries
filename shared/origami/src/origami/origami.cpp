@@ -79,18 +79,30 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   // NonTemporal Cases
   // -------------------
   {
+    // There is no need to use any mapping if one dimension is one.
     bool use_wgmxcc = (numMT_M != 1 && numMT_N != 1);
+    // If we are using wgmxcc, we can use wgm, otherwise we don't need wgm.
     bool use_wgm = use_wgmxcc;
+    // If we are using wgmxcc, we can use chunking, otherwise we don't need chunking.
+    // Moreover, we only use chunking if all XCDs take the same number of tiles, otherwise
+    // we in each group (chunk) we have more than one XCD.
     bool use_chunk = use_wgmxcc && ((numMTs < numCUs && numMTs % numXCD == 0) || (numMTs % numCUs == 0));
 
+    // If we are using chunking, we use the minimum of the number of tiles per XCD and the number of CUs per XCD.
     size_t out_wgmxccchunk = use_chunk ? std::min(math::safe_ceil_div(numMTs, numXCD), numCUsPerXCD) : 0;
+    // If we are using wgmxcc, we use the number of XCDs.
     size_t out_wgmxcc = use_wgmxcc ? numXCD : 1;
+    // If we are using wgm, we use the number of tiles in the smaller dimension.
+    // The reason is that nontemporal dimension always load for all L2 tiles, so we can only
+    // maximize the reuse in the other dimension.
     if(nta > 3 && ntb < 4)
-        return workgroup_mapping_t{out_wgmxccchunk, out_wgmxcc, use_wgm ? static_cast<int>(numMT_N) : 1};
+      return workgroup_mapping_t{out_wgmxccchunk, out_wgmxcc, use_wgm ? static_cast<int>(numMT_N) : 1};
     else if(nta < 4 && ntb > 3)
-        return workgroup_mapping_t{out_wgmxccchunk, out_wgmxcc, use_wgm ? -static_cast<int>(numMT_M) : 1};
+      // We use negative value here
+      return workgroup_mapping_t{out_wgmxccchunk, out_wgmxcc, use_wgm ? -static_cast<int>(numMT_M) : 1};
     else if(nta > 3 && ntb > 3)
-        return workgroup_mapping_t{0, numXCD, 1};
+      // Nothing to do in this case.
+      return workgroup_mapping_t{0, numXCD, 1};
   }
 
   // -------------------
