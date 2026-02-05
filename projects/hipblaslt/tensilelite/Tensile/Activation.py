@@ -173,7 +173,6 @@ class ActivationType:
                           ('dgelu', { \
                             'instance': ActivationTypeRegister('dgelu', True, 0,       False,  True, False,   False, False, False, False), \
                             'supported_by': SupportedBy.TENSILE | SupportedBy.HIPBLASLT}), \
-                          # @Siavash
                           ('drelu', { \
                             'instance': ActivationTypeRegister('drelu', True, 0,       False,  True, False,   False, False, False, False), \
                             'supported_by': SupportedBy.TENSILE | SupportedBy.HIPBLASLT}), \
@@ -858,11 +857,8 @@ class ActivationModule:
         self.needCombine = True
         module = Module("Gradient Relu")
         if cDataType.isSingle():
-            # v_cmp_ge_f32_e32 vcc, v0, 1      ; VCC = (x >= 1) ? 1 : 0
-            # v_cndmask_b32_e64 v2, 0.0, 1.0, vcc ; v2 = VCC ? 1.0 : 0.0
-            module.add(VCmpGEF32(dst=VCC(), src0=self.vgprPrefix(vgprIn), src1=0, comment=" VCC = (x >= 0) ? 1 : 0 @Siavash" ))
-            # Use float bit pattern for 1.0 (0x3f800000); literal 1 would be denormal.
-            module.add(VCndMaskB32(dst=self.vgprPrefix(vgprOut), src0=0, src1=hex(0x3f800000), src2=VCC(), comment=" y = VCC ? 1.0 : 0.0 @Siavash" ))
+            module.add(VCmpGTF32(dst=VCC(), src0=self.vgprPrefix(vgprIn), src1=0, comment=" VCC = (x > 0) ? 1 : 0" ))
+            module.add(VCndMaskB32(dst=self.vgprPrefix(vgprOut), src0=0, src1=hex(0x3f800000), src2=VCC(), comment=" y = VCC ? 1.0 : 0.0" ))
         else:
             raise RuntimeError("Unsupported data type %s."%cDataType.toDevice("HIP"))
         return module

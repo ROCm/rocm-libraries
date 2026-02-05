@@ -713,7 +713,7 @@ auto _relu = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
 };
 
 auto _drelu = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
-    return static_cast<decltype(in)>(in >= static_cast<decltype(in)>(0) ? 1 : 0);
+    return static_cast<decltype(in)>(in > static_cast<decltype(in)>(0) ? 1 : 0);
 };
 
 auto _gelu = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
