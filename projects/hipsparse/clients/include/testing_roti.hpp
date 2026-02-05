@@ -166,16 +166,7 @@ void testing_roti(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * N, hipMemcpyDeviceToHost));
 
         // CPU
-        for(int i = 0; i < nnz; ++i)
-        {
-            int idx = hx_ind[i] - idx_base;
-
-            T x = hx_val_gold[i];
-            T y = hy_gold[idx];
-
-            hx_val_gold[i] = testing_fma(c, x, testing_mult(s, y));
-            hy_gold[idx]   = testing_fma(c, y, testing_mult(-s, x));
-        }
+        host_roti(nnz, hx_val_gold.data(), hx_ind.data(), hy_gold.data(), c, s, idx_base);
 
         // enable unit check, notice unit check is not invasive, but norm check is,
         // unit check and norm check can not be interchanged their order
