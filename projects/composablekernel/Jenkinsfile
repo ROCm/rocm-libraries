@@ -55,12 +55,6 @@ def checkoutComposableKernel()
     checkout scm
 }
 
-def checkoutComposableKernel()
-{
-    // checkout project
-    checkoutscm
-}
-
 // Given a pattern, check if the log contains the pattern and return the context.
 def checkForPattern(pattern, log) {
     def lines = log.split('\n')
