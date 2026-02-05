@@ -34,7 +34,8 @@ namespace detail
 {
 
 // Global callback registry for stream-based logging
-inline std::atomic<hipdnnCallback_t>& getGlobalCallback()
+// HIPDNN_HIDDEN ensures each shared object has its own copy of the static variable
+HIPDNN_HIDDEN inline std::atomic<hipdnnCallback_t>& getGlobalCallback()
 {
     static std::atomic<hipdnnCallback_t> s_callback{nullptr};
     return s_callback;

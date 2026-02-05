@@ -429,7 +429,9 @@ inline Error validateScalarParameter(const std::shared_ptr<TensorAttributes>& pa
 
 inline constexpr const char* K_COMPONENT_NAME = "hipdnn_frontend";
 
-inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCallback_ext)
+// HIPDNN_HIDDEN ensures each shared object has its own copy of the static variable
+HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
+                                                       = hipdnnLoggingCallback_ext)
 {
     if(fn == nullptr)
     {

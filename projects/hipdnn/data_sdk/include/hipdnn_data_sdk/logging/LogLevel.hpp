@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CallbackTypes.h"
+#include <hipdnn_data_sdk/Visibility.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
 #include <atomic>
@@ -15,13 +16,14 @@ namespace hipdnn_data_sdk::logging
 namespace detail
 {
 // Cached log level for fast lookups
-inline std::atomic<hipdnnSeverity_t>& getLogLevelCache()
+// HIPDNN_HIDDEN ensures each shared object has its own copy of the static variable
+HIPDNN_HIDDEN inline std::atomic<hipdnnSeverity_t>& getLogLevelCache()
 {
     static std::atomic<hipdnnSeverity_t> s_logLevel{HIPDNN_SEV_OFF};
     return s_logLevel;
 }
 
-inline std::atomic<bool>& getLogLevelInitialized()
+HIPDNN_HIDDEN inline std::atomic<bool>& getLogLevelInitialized()
 {
     static std::atomic<bool> s_initialized{false};
     return s_initialized;

@@ -47,13 +47,14 @@ namespace detail
 {
 
 /// Thread-safe storage for the plugin component name
-inline std::string& getStoredComponentName()
+/// HIPDNN_HIDDEN ensures each shared object has its own copy of the static variable
+HIPDNN_HIDDEN inline std::string& getStoredComponentName()
 {
     static std::string s_componentName{K_DEFAULT_PLUGIN_COMPONENT_NAME};
     return s_componentName;
 }
 
-inline std::mutex& getComponentNameMutex()
+HIPDNN_HIDDEN inline std::mutex& getComponentNameMutex()
 {
     static std::mutex s_mutex;
     return s_mutex;
@@ -129,8 +130,9 @@ namespace hipdnn::logging
  * Creates an async spdlog logger that forwards messages to the callback.
  * The component name is stored and used by logging macros.
  */
-inline void initializeCallbackLogging(const std::string& componentName,
-                                      hipdnnCallback_t callbackFunction)
+// HIPDNN_HIDDEN ensures each shared object has its own copy of the static mutex
+HIPDNN_HIDDEN inline void initializeCallbackLogging(const std::string& componentName,
+                                                    hipdnnCallback_t callbackFunction)
 {
     // Store the component name for use by macros
     detail::setComponentName(componentName);
