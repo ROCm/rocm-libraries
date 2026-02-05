@@ -78,6 +78,12 @@ namespace rocRoller
              * registers a long time before they are used.
              */
             int distanceFromRoot = 0;
+
+            /**
+             * This is used as a heuristic to guide which nodes to generate first
+             * to avoid allocating temporary registers a long time before they are used.
+             */
+            int priorityOrder = 0;
         };
 
         /**
@@ -120,6 +126,18 @@ namespace rocRoller
          * Assumes (and asserts) that it is sorted in topological order.
          */
         void updateDistances(ExpressionTree& tree);
+
+        /**
+         * Calculates the priorityOrder values in every node of `tree` using a
+         * Sethi-Ullman inspired algorithm.
+         *
+         * This computes weights that approximate register pressure and then
+         * determines a traversal order where heavier subtrees are evaluated first.
+         * This helps minimize register pressure during code generation.
+         *
+         * Assumes (and asserts) that it is sorted in topological order.
+         */
+        void updatePriorityOrder(ExpressionTree& tree);
 
         /**
          * Returns a string containing some interesting statistical information
