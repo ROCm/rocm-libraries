@@ -31,6 +31,7 @@
 #include "client/GEMMParameters.hpp"
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
 #include <rocRoller/Parameters/Solution/StoreOption.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 namespace CLI
 {
@@ -46,6 +47,12 @@ namespace CLI
                                  rocRoller::Parameters::Solution::StorePath& v)
         {
             v = rocRoller::fromString<rocRoller::Parameters::Solution::StorePath>(s);
+            return true;
+        }
+  
+        inline bool lexical_cast(const std::string& s, rocRoller::StreamKMode& v)
+        {
+            v = rocRoller::fromString<rocRoller::StreamKMode>(s);
             return true;
         }
 

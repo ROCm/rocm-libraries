@@ -83,9 +83,7 @@ swizzleTileSize:
   n: 64
   l: 16
 prefetchScale: true
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 version: ""
 numWGs: 0
 numWarmUp: 1000

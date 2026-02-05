@@ -280,9 +280,7 @@ types:
   scaleSkipPermlane: false
 matchMemoryAccess: true
 tailLoops: true
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false
@@ -357,9 +355,7 @@ swizzleTileSize:
   n: 0
   l: 0
 prefetchScale: false
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 ...
 """
 
@@ -424,9 +420,7 @@ swizzleTileSize:
   n: 0
   l: 0
 prefetchScale: false
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 ...
 """
 
@@ -485,7 +479,7 @@ def build_solution_params():
         # data-parallel gemm, float, params from config file
         ["--config", DP_GEMM],
         # streamk gemm, float, params from command line
-        ["--streamk"],
+        ["--streamK", "Standard"],
     ]
 
     for type, prefetch, scaleA, scaleB in itertools.product(

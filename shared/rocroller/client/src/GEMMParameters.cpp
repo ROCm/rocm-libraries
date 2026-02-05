@@ -147,12 +147,12 @@ namespace rocRoller
 
                 fullName << "_" << scheduler;
 
-                if(streamK)
+                if(streamK != StreamKMode::None)
                 {
                     fullName << "_SK";
-                    if(streamKTwoTileDPFirst)
+                    if(streamK == StreamKMode::TwoTileDPFirst)
                         fullName << "2TDPFirst";
-                    else if(streamKTwoTile)
+                    else if(streamK == StreamKMode::TwoTile)
                         fullName << "2T";
                 }
 
@@ -262,10 +262,9 @@ namespace rocRoller
             {
                 s << "Version:         " << x.version << std::endl;
                 s << "Arch:            " << x.architecture.toString() << std::endl;
-                if(x.streamK)
+                if(x.streamK != StreamKMode::None)
                 {
-                    s << "Algorithm:       StreamK twoTile:" << x.streamKTwoTile
-                      << "(DPFirst:" << x.streamKTwoTileDPFirst << ")" << std::endl;
+                    s << "Algorithm:       StreamK(" << x.streamK << ")" << std::endl;
                 }
                 else
                 {

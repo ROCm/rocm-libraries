@@ -168,7 +168,7 @@ std::string genKernelName(std::shared_ptr<SolutionParameters> gemm)
         }
     }
 
-    if(gemm->streamK)
+    if(gemm->streamK != StreamKMode::None)
     {
         rv << "SK_";
     }
@@ -398,7 +398,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         command->addOperation(rocRoller::Operations::T_Store_Tiled(tagCvt, tagTensorD));
     }
 
-    if(gemm->streamK)
+    if(gemm->streamK != StreamKMode::None)
     {
         tagSKGrid = command->allocateTag();
         command->allocateArgument(DataType::UInt32,
@@ -592,12 +592,9 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         params->workgroupRemapXCC = 8;
     }
 
-    if(gemm->streamK)
+    if(gemm->streamK != StreamKMode::None)
     {
-        StreamKMode streamKMode = StreamKMode::Standard;
-        if(gemm->streamKTwoTile)
-            streamKMode = StreamKMode::TwoTile;
-        params->streamK = streamKMode;
+        params->streamK = gemm->streamK;
 
         params->loopOverOutputTilesDimensions = {0, 1};
     }
@@ -674,7 +671,7 @@ size_t workspaceRequired(std::shared_ptr<GemmKernel> gemm, const RocblasltContra
 {
     CommandArguments commandArgs = gemm->command->createArguments();
 
-    if(gemm->params->streamK)
+    if(gemm->params->streamK != StreamKMode::None)
     {
         commandArgs.setArgument(
             gemm->tagSKGrid, ArgumentType::Value, chooseStreamKGridSize(gemm, prob));
@@ -799,7 +796,7 @@ CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
         commandArgs.setArgument(gemm->tagWGM, ArgumentType::Value, wgm);
     }
 
-    if(gemm->params->streamK)
+    if(gemm->params->streamK != StreamKMode::None)
     {
         commandArgs.setArgument(
             gemm->tagSKGrid, ArgumentType::Value, chooseStreamKGridSize(gemm, prob));
@@ -827,7 +824,7 @@ rocblaslt_status runGemmKernel(std::shared_ptr<GemmKernel>        gemm,
     }
     auto commandArgs = createCommandArguments(gemm, prob, DEFAULT_WGM);
 
-    if(gemm->params->streamK)
+    if(gemm->params->streamK != StreamKMode::None)
     {
         auto runtimeArgs = commandArgs.runtimeArguments();
 
