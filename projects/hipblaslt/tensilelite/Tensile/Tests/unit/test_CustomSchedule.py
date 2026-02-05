@@ -872,7 +872,7 @@ class TestCustomScheduleTF32:
         # fmt: on
         ])
     def test_schedule_128x160x64_160x128x64(self, transA, transB, lds_tr_inst, tr_lds, mt0, mt1):
-        """Tests the 128x160x64 and 160x128x64 TF32 TN schedule."""
+        """Tests the 128x160x64, 160x128x64 TF32 TN schedule and 160x128x64 TF32 NN."""
 
         kernel = create_base_kernel()
         kernel["ProblemType"].update({
