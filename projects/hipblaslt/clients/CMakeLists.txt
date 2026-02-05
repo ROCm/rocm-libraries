@@ -97,8 +97,8 @@ endif()
 if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     find_package(GTest REQUIRED)
     add_executable(hipblaslt-test)
-    if(rocm_smi_FOUND)
-        target_link_libraries(hipblaslt-test PRIVATE rocm_smi64)
+    if(amd_smi_FOUND)
+        target_link_libraries(hipblaslt-test PRIVATE amd_smi)
     endif()
     target_link_libraries(hipblaslt-test
         PRIVATE
