@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -68,22 +68,26 @@ std::pair<int, int> pickWorkgroupSize(std::shared_ptr<SolutionParameters> gemm)
     if(gemm->workgroupTile.n / gemm->machineInstruction.n == 1)
         requiredY = 1;
 
+    auto isPreSwizzle = gemm->kernelType.scaleTypeA.preSwizzleTile.size() == 3 && gemm->kernelType.scaleTypeB.preSwizzleTile.size() == 3;
+
+    auto swizzleBlockSize = isPreSwizzle ? gemm->kernelType.scaleTypeA.preSwizzleTile[0] : SWIZZLE_BLOCK_SIZE;
+
     //Swizzle Scale only works with certain combinations of workgroup sizes
-    if(gemm->swizzleScale && (gemm->workgroupTile.m / SWIZZLE_BLOCK_SIZE) % x != 0)
+    if(gemm->swizzleScale && (gemm->workgroupTile.m / swizzleBlockSize) % x != 0)
         requiredX = 1;
-    if(gemm->swizzleScale && (gemm->workgroupTile.n / SWIZZLE_BLOCK_SIZE) % y != 0)
+    if(gemm->swizzleScale && (gemm->workgroupTile.n / swizzleBlockSize) % y != 0)
         requiredY = 1;
 
     if(requiredX != -1 && requiredY == -1)
     {
         x = requiredX;
-        if(gemm->swizzleScale && (gemm->workgroupTile.n / SWIZZLE_BLOCK_SIZE) % 4 == 0)
+        if(gemm->swizzleScale && (gemm->workgroupTile.n / swizzleBlockSize) % 4 == 0)
             y = 4;
     }
     else if(requiredX == -1 && requiredY != -1)
     {
         y = requiredY;
-        if(gemm->swizzleScale && (gemm->workgroupTile.m / SWIZZLE_BLOCK_SIZE) % 4 == 0)
+        if(gemm->swizzleScale && (gemm->workgroupTile.m / swizzleBlockSize) % 4 == 0)
             x = 4;
     }
     else if(requiredX != -1 && requiredY != -1)
@@ -117,10 +121,8 @@ std::shared_ptr<SolutionParameters>
 
     // Get preSwizzleTileMN for MI selection (0 if no pre-swizzle)
     size_t preSwizzleTileMN = 0;
-    if(hasPreSwizzleA)
+    if(hasPreSwizzle)
     {
-        // AssertFatal(kernelType.scaleTypeA.preSwizzleTile[0] == kernelType.scaleTypeB.preSwizzleTile[0],
-        //            "preSwizzleTileMN must be the same for both scale types");
         preSwizzleTileMN = kernelType.scaleTypeA.preSwizzleTile[0];
     }
 
@@ -132,10 +134,8 @@ std::shared_ptr<SolutionParameters>
     if(gemm->prefetchInFlight <= 1)
         gemm->prefetch = false;
 
-    // Check if using 256x256x256 tile
-    bool is256Tile = (solutionIndexParameters.workgroupTile.m == 256
-                      && solutionIndexParameters.workgroupTile.n == 256
-                      && solutionIndexParameters.workgroupTile.k == 256);
+    // Check if the workgroup tile K dimension is 256
+    bool isWorkgroupTileK256 = solutionIndexParameters.workgroupTile.k == 256;
 
     // Swizzle Scale only support in certain situations
     // Swizzle Scale also runs out of registers with FP8
@@ -147,16 +147,28 @@ std::shared_ptr<SolutionParameters>
         gemm->loadPathAScale = SolutionParams::LoadPath::BufferToVGPR;
         gemm->loadPathBScale = SolutionParams::LoadPath::BufferToVGPR;
     }
-    else if(is256Tile)
+    else if(isWorkgroupTileK256)
     {
         // For 256x256x256 tile, use BufferToLDS for scale loading to reduce register pressure
         gemm->swizzleScale   = true;
         gemm->prefetchScale  = true;
-        gemm->loadPathAScale = SolutionParams::LoadPath::BufferToLDS;
-        gemm->loadPathBScale = SolutionParams::LoadPath::BufferToLDS;
+
+        auto isValidworkgroupTileMN = (solutionIndexParameters.workgroupTile.m >= 128 && solutionIndexParameters.workgroupTile.n >= 128)
+                                      || (solutionIndexParameters.workgroupTile.m == 32 && solutionIndexParameters.workgroupTile.n == 32);
+
+        if (isValidworkgroupTileMN)
+        {
+            gemm->loadPathAScale = SolutionParams::LoadPath::BufferToLDS;
+            gemm->loadPathBScale = SolutionParams::LoadPath::BufferToLDS;
+        }
+        else
+        {
+            gemm->loadPathAScale = SolutionParams::LoadPath::BufferToVGPR;
+            gemm->loadPathBScale = SolutionParams::LoadPath::BufferToVGPR;
+        }
     }
     else if(solutionIndexParameters.workgroupTile.m >= 128
-            && solutionIndexParameters.workgroupTile.n >= 128)
+        && solutionIndexParameters.workgroupTile.n >= 128)
     {
         gemm->swizzleScale = true;
         // Use BufferToVGPR for swizzle scale (matches rocRoller client --loadScale_A BufferToVGPR)
@@ -196,6 +208,13 @@ std::shared_ptr<SolutionParameters>
         gemm->prefetchLDSFactor = 2;
     }
 
+    auto scaleIsBufferToLDS = SolutionParams::IsBufferToLDS(gemm->loadPathAScale) and SolutionParams::IsBufferToLDS(gemm->loadPathBScale);
+    auto is32MN = solutionIndexParameters.workgroupTile.m == 32 && solutionIndexParameters.workgroupTile.n == 32;
+    if (scaleIsBufferToLDS and is32MN)
+    {
+        gemm->prefetchLDSFactor = 1;
+    }
+
     // LDS can only be used for scaling data with certain workgroup tile sizes
     auto workgroupSizeTotal = gemm->workgroupSizeX * gemm->workgroupSizeY;
     auto numScaleElementsA  = 0;
@@ -214,15 +233,15 @@ std::shared_ptr<SolutionParameters>
                                / (gemm->kernelType.scaleTypeB.blockRowSize
                                   * gemm->kernelType.scaleTypeB.blockColSize));
     }
-    if(numScaleElementsA % workgroupSizeTotal != 0)
-    {
-        gemm->loadPathAScale    = SolutionParams::LoadPath::BufferToVGPR;
-        gemm->prefetchMixMemOps = false;
-    }
-    if(numScaleElementsB % workgroupSizeTotal != 0)
-    {
-        gemm->loadPathBScale    = SolutionParams::LoadPath::BufferToVGPR;
-        gemm->prefetchMixMemOps = false;
+        if(numScaleElementsA % workgroupSizeTotal != 0)
+        {
+            gemm->loadPathAScale    = SolutionParams::LoadPath::BufferToVGPR;
+            gemm->prefetchMixMemOps = false;
+        }
+        if(numScaleElementsB % workgroupSizeTotal != 0)
+        {
+            gemm->loadPathBScale    = SolutionParams::LoadPath::BufferToVGPR;
+            gemm->prefetchMixMemOps = false;
     }
 
     if(!solutionIndexParameters.workgroupMapping)
