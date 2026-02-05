@@ -49,7 +49,7 @@ namespace CLI
             v = rocRoller::fromString<rocRoller::Parameters::Solution::StorePath>(s);
             return true;
         }
-  
+
         inline bool lexical_cast(const std::string& s, rocRoller::StreamKMode& v)
         {
             v = rocRoller::fromString<rocRoller::StreamKMode>(s);
