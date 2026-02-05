@@ -11,7 +11,6 @@
 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_gemm_wmma_fixed_nk.hpp"
 #include "ck/tensor_operation/gpu/device/device_grouped_gemm.hpp"
-#include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 
 #include "ck/library/utility/check_err.hpp"
 #include "ck/library/utility/device_memory.hpp"
@@ -56,11 +55,11 @@ static constexpr auto GemmDefault = ck::tensor_operation::device::GemmSpecializa
 
 using DeviceGemmInstance = ck::tensor_operation::device::DeviceGroupedGemm_Wmma_Fixed_Nk
     // clang-format off
-//######| ALayout| BLayout| DsLayout| ELayout|     AData|     BData|     AccData|         CShuffle|     DsData|     EData|           A|           B|          CDE|           GEMM| NumGemmK| Block|  MPer|  NPer|  KPer| AK1| BK1| MPer| NPer| MRepeat| NRepeat|  ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|  BBlockTransfer| BBlockTransfer| BBlockTransfer| BlockTransfer| BBlockTransfer| BBlockTransfer| BBlockLds|    CShuffle|    CShuffle| CBlockTransferClusterLengths|  CBlockTransfer|
-//######|        |        |         |        |      Type|      Type|        Type|         DataType|       Type|      Type| Elementwise| Elementwise|  Elementwise| Spacialization| Prefetch|  Size| Block| Block| Block|    |    | Wmma| Wmma|        |        |   ThreadCluster|  ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar|      DstScalar| AddExtraM|   ThreadCluster|  ThreadCluster| SrcAccessOrder|  SrcVectorDim|      SrcScalar|      DstScalar| AddExtraN|     MRepeat|     NRepeat|              _MBlock_MRepeat| ScalarPerVector|
-//######|        |        |         |        |          |          |            |                 |           |          |   Operation|   Operation|    Operation|               |    Stage|      |      |      |      |    |    |     |     |        |        | Lengths_K0_M_K1|   ArrangeOrder|               |               |      PerVector|   PerVector_K1|          | Lengths_K0_N_K1|   ArrangeOrder|               |              |      PerVector|   PerVector_K1|          |  PerShuffle|  PerShuffle|              _NBlock_NRepeat|        _NRepeat|
-//######|        |        |         |        |          |          |            |                 |           |          |            |            |             |               |         |      |      |      |      |    |    |     |     |        |        |                |               |               |               |               |               |          |                |               |               |              |               |               |          |            |            |                             |                |
-        < ALayout, BLayout, DsLayout, ELayout, ADataType, BDataType, AccDataType, CShuffleDataType, DsDataType, EDataType,  AElementOp,  BElementOp, CDEElementOp,    GemmDefault,        1,   256,   128,   128,    64,   8,   8,   16,   16,       2,       4,     S<8, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              8,         1,     S<8, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,             2,              8,              8,         1,           1,           1,               S<1, 64, 1, 4>,               8>;
+//######| ALayout| BLayout| DsLayout| ELayout|     AData|     BData|     AccData|         CShuffle|     DsData|     EData|           A|           B|          CDE|           GEMM| Block|  MPer|  NPer|  KPer| AK1| BK1| MPer| NPer| MRepeat| NRepeat|  ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|  BBlockTransfer| BBlockTransfer| BBlockTransfer| BlockTransfer| BBlockTransfer| BBlockTransfer| BBlockLds|    CShuffle|    CShuffle| CBlockTransferClusterLengths|  CBlockTransfer|
+//######|        |        |         |        |      Type|      Type|        Type|         DataType|       Type|      Type| Elementwise| Elementwise|  Elementwise| Spacialization|  Size| Block| Block| Block|    |    | Wmma| Wmma|        |        |   ThreadCluster|  ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar|      DstScalar| AddExtraM|   ThreadCluster|  ThreadCluster| SrcAccessOrder|  SrcVectorDim|      SrcScalar|      DstScalar| AddExtraN|     MRepeat|     NRepeat|              _MBlock_MRepeat| ScalarPerVector|
+//######|        |        |         |        |          |          |            |                 |           |          |   Operation|   Operation|    Operation|               |      |      |      |      |    |    |     |     |        |        | Lengths_K0_M_K1|   ArrangeOrder|               |               |      PerVector|   PerVector_K1|          | Lengths_K0_N_K1|   ArrangeOrder|               |              |      PerVector|   PerVector_K1|          |  PerShuffle|  PerShuffle|              _NBlock_NRepeat|        _NRepeat|
+//######|        |        |         |        |          |          |            |                 |           |          |            |            |             |               |      |      |      |      |    |    |     |     |        |        |                |               |               |               |               |               |          |                |               |               |              |               |               |          |            |            |                             |                |
+        < ALayout, BLayout, DsLayout, ELayout, ADataType, BDataType, AccDataType, CShuffleDataType, DsDataType, EDataType,  AElementOp,  BElementOp, CDEElementOp,    GemmDefault,   256,   128,   128,    64,   8,   8,   16,   16,       2,       4,     S<8, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              8,         1,     S<8, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,             2,              8,              8,         1,           1,           1,               S<1, 64, 1, 4>,               8>;
 // clang-format on
 
 struct ProblemSize final
@@ -298,33 +297,7 @@ bool run_grouped_gemm(const ProblemSize& problem_size, const ExecutionConfig& co
                                             c_device_tensors[i].mDesc.GetElementSize() *
                                                 sizeof(EDataType));
         }
-        // // Print out device and reference results for debugging
-        // std::cout << "[CK GEMM RESULT TRACE]\n";
-        // for(std::size_t i = 0; i < c_device_tensors.size(); i++)
-        // {
-        //     std::cout << "GEMM[" << i << "] device C:\n";
-        //     auto& devC = c_device_tensors[i].mData;
-        //     for(std::size_t m = 0; m < static_cast<std::size_t>(problem_size.Ms[i]); m++)
-        //     {
-        //         for(std::size_t n = 0; n < static_cast<std::size_t>(problem_size.Ns[i]); n++)
-        //         {
-        //             std::cout << static_cast<float>(devC[m * problem_size.Ns[i] + n]) << " ";
-        //         }
-        //         std::cout << "\n";
-        //     }
-
-        //     std::cout << "GEMM[" << i << "] reference C:\n";
-        //     auto& refC = c_host_tensors[i].mData;
-        //     for(std::size_t m = 0; m < static_cast<std::size_t>(problem_size.Ms[i]); m++)
-        //     {
-        //         for(std::size_t n = 0; n < static_cast<std::size_t>(problem_size.Ns[i]); n++)
-        //         {
-        //             std::cout << static_cast<float>(refC[m * problem_size.Ns[i] + n]) << " ";
-        //         }
-        //         std::cout << "\n";
-        //     }
-        //     std::cout << "--------------------------------------\n";
-        // }
+    
     }
 
     std::cout << "Verification: " << (pass ? "SUCCESS" : "FAILURE") << "!" << std::endl;
@@ -366,9 +339,6 @@ int main(int argc, char* argv[])
 
     for(int i = 0; i < problem_size.group_count; i++)
     {
-        // problem_size.Ms.push_back(256);
-        // problem_size.Ns.push_back(256);
-        // problem_size.Ks.push_back(256);
         problem_size.Ms.push_back(128 + i * 128);
         problem_size.Ns.push_back(1024);
         problem_size.Ks.push_back(1024);

@@ -102,7 +102,7 @@ bool profile_grouped_gemm_fixed_nk_impl(int do_verification,
         case 1:
             ck::utils::FillUniformDistributionIntegerValue<ADataType>{-5.f, 5.f}(a_m_k[i]);
             ck::utils::FillUniformDistributionIntegerValue<BDataType>{-5.f, 5.f}(b_k_n[i]);
-            max_abs_in_val = 10.f;
+            max_abs_in_val = 5.f;
             break;
         default:
             ck::utils::FillUniformDistribution<ADataType>{0.0f, 1.0f}(a_m_k[i]);

@@ -15,8 +15,6 @@
 #include "ck/utility/tuple.hpp"
 
 #include "ck/tensor_description/tensor_descriptor.hpp"
-#include "ck/tensor_description/tensor_descriptor_helper.hpp"
-#include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
 #include "ck/tensor_operation/gpu/device/device_grouped_gemm_fixed_nk.hpp"
 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_wmma_cshuffle_v3.hpp"
@@ -133,10 +131,10 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             const auto block_2_etile_map =
                 GroupedGemmBlock2ETileMap(local_b2c_tile_map, group_start, id_off);
 
-            auto tile_index =
+            const auto tile_index =
                 block_2_etile_map.CalculateBottomIndex(make_multi_index(get_block_1d_id()));
 
-            auto splitk_batch_offset =
+            const auto splitk_batch_offset =
                 typename GridwiseGemm::SplitKBatchOffset(kernel_arg, tile_index[Number<0>{}]);
 
             auto epilogue_args = EpilogueType{};
@@ -153,12 +151,11 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                                          kernel_arg,
                                          block_2_etile_map,
                                          epilogue_args);
-
+            __builtin_amdgcn_s_barrier();
             id_off += grid_size_grp;
             id_local += grid_size_grp;
         }
 
-#undef TRACE_THREAD
 #if defined(__gfx11__)
     }
 #endif
@@ -187,7 +184,6 @@ template <typename ALayout,
           typename BElementwiseOperation,
           typename CDEElementwiseOperation,
           GemmSpecialization GemmSpec,
-          ck::index_t NumGemmKPrefetchStage,
           ck::index_t BlockSize,
           ck::index_t MPerBlock,
           ck::index_t NPerBlock,
@@ -558,14 +554,12 @@ struct DeviceGroupedGemm_Wmma_Fixed_Nk : public DeviceGroupedGemmFixedNK<ALayout
                     throw std::runtime_error("wrong! block_2_etile_map validation failed");
                 }
 
-                // if(!GridwiseGemm::CheckValidity(arg))
-                // {
-                //     std::ostringstream err;
-                //     err << "Group id: " << i << " has invalid GridwiseGemm settings!" << __FILE__
-                //         << ":" << __LINE__ << ", in function: " << __func__;
-                //     throw std::runtime_error(err.str());
-                // }
-
+                if(!GridwiseGemm::CheckValidity(AverM, N, K,StrideA, StrideB, StrideDs, StrideE, k_batch_))
+                {
+                    throw std::runtime_error(
+                        "wrong! GridwiseGemm has invalid "
+                        "setting");
+                }
                 gemm_desc_kernel_arg_.push_back(KernelArgument(std::array<const void*, 1>{nullptr},
                                                                std::array<const void*, 1>{nullptr},
                                                                p_ds_grid,
@@ -681,7 +675,7 @@ struct DeviceGroupedGemm_Wmma_Fixed_Nk : public DeviceGroupedGemmFixedNK<ALayout
                 std::ostringstream err;
                 err << "Not all gemms have same value for main_k0_block_loop! in " << __FILE__
                     << ":" << __LINE__ << ", in function: " << __func__;
-                // throw std::runtime_error(err.str());
+                throw std::runtime_error(err.str());
             }
 
             if(not_all_have_kbatch_value_same)
@@ -739,9 +733,6 @@ struct DeviceGroupedGemm_Wmma_Fixed_Nk : public DeviceGroupedGemmFixedNK<ALayout
                     arg.c_element_op_);
             };
 
-            // const auto tail_num =
-            // GridwiseGemm::CalculateKBlockLoopTailNum(arg.gemm_desc_kernel_arg_[0].K);
-            const auto tail_num             = TailNumber::Full;
             constexpr index_t min_occupancy = 1;
 
             if(all_have_main_k0_block_loop || not_all_have_main_k0_block_loop_same)
@@ -751,26 +742,21 @@ struct DeviceGroupedGemm_Wmma_Fixed_Nk : public DeviceGroupedGemmFixedNK<ALayout
                 {
                     if(all_have_kbatch_gt_one)
                     {
-
-                        SelectTailNumber(tail_num, [&](auto tail_num_ct) {
-                            ave_time = launch_kernel(
-                                std::integral_constant<bool, true>{},
-                                std::integral_constant<InMemoryDataOperationEnum,
-                                                       InMemoryDataOperationEnum::AtomicAdd>{},
-                                std::integral_constant<index_t, min_occupancy>{},
-                                tail_num_ct);
-                        });
+                        ave_time = launch_kernel(
+                            std::integral_constant<bool, true>{},
+                            std::integral_constant<InMemoryDataOperationEnum,
+                                                    InMemoryDataOperationEnum::AtomicAdd>{},
+                            std::integral_constant<index_t, min_occupancy>{},
+                            std::integral_constant<TailNumber, TailNumber::Full>{});
                     }
                     else
                     {
-                        SelectTailNumber(tail_num, [&](auto tail_num_ct) {
-                            ave_time = launch_kernel(
-                                std::integral_constant<bool, true>{},
-                                std::integral_constant<InMemoryDataOperationEnum,
-                                                       InMemoryDataOperationEnum::Set>{},
-                                std::integral_constant<index_t, min_occupancy>{},
-                                tail_num_ct);
-                        });
+                        ave_time = launch_kernel(
+                            std::integral_constant<bool, true>{},
+                            std::integral_constant<InMemoryDataOperationEnum,
+                                                    InMemoryDataOperationEnum::Set>{},
+                            std::integral_constant<index_t, min_occupancy>{},
+                            std::integral_constant<TailNumber, TailNumber::Full>{});
                     }
                 }
             }
@@ -780,92 +766,25 @@ struct DeviceGroupedGemm_Wmma_Fixed_Nk : public DeviceGroupedGemmFixedNK<ALayout
                 {
                     if(all_have_kbatch_gt_one)
                     {
-                        SelectTailNumber(tail_num, [&](auto tail_num_ct) {
-                            ave_time = launch_kernel(
-                                std::integral_constant<bool, false>{},
-                                std::integral_constant<InMemoryDataOperationEnum,
-                                                       InMemoryDataOperationEnum::AtomicAdd>{},
-                                std::integral_constant<index_t, min_occupancy>{},
-                                tail_num_ct);
-                        });
+                        ave_time = launch_kernel(
+                            std::integral_constant<bool, false>{},
+                            std::integral_constant<InMemoryDataOperationEnum,
+                                                    InMemoryDataOperationEnum::AtomicAdd>{},
+                            std::integral_constant<index_t, min_occupancy>{},
+                            std::integral_constant<TailNumber, TailNumber::Full>{});
                     }
                     else
                     {
-                        SelectTailNumber(tail_num, [&](auto tail_num_ct) {
-                            ave_time = launch_kernel(
-                                std::integral_constant<bool, false>{},
-                                std::integral_constant<InMemoryDataOperationEnum,
-                                                       InMemoryDataOperationEnum::Set>{},
-                                std::integral_constant<index_t, min_occupancy>{},
-                                tail_num_ct);
-                        });
+                       ave_time = launch_kernel(
+                            std::integral_constant<bool, false>{},
+                            std::integral_constant<InMemoryDataOperationEnum,
+                                                    InMemoryDataOperationEnum::Set>{},
+                            std::integral_constant<index_t, min_occupancy>{},
+                            std::integral_constant<TailNumber, TailNumber::Full>{});
                     }
                 }
             }
-
-            // if constexpr(std::is_same<ADataType, ck::bhalf_t>::value)
-            // {
-            //     SelectTailNumber(tail_num, [&](auto tail_num_ct) {
-            //         ave_time = launch_kernel(
-            //             std::integral_constant<bool, has_main_k_block_loop>{},
-            //             std::integral_constant<InMemoryDataOperationEnum,
-            //             InMemoryDataOperationEnum::Set>{}, std::integral_constant<index_t,
-            //             min_occupancy>{}, tail_num_ct);
-            //     });
-            // }
-            // else
-            // {
-            //     if(arg.k_batch_ > 1)
-            //     {
-            //         SelectTailNumber(tail_num, [&](auto tail_num_ct) {
-            //             ave_time = launch_kernel(
-            //                 std::integral_constant<bool, has_main_k_block_loop>{},
-            //                 std::integral_constant<InMemoryDataOperationEnum,
-            //                 InMemoryDataOperationEnum::AtomicAdd>{},
-            //                 std::integral_constant<index_t, min_occupancy>{},
-            //                 tail_num_ct);
-            //         });
-            //     }
-            //     else
-            //     {
-            //         SelectTailNumber(tail_num, [&](auto tail_num_ct) {
-            //             ave_time = launch_kernel(
-            //                 std::integral_constant<bool, has_main_k_block_loop>{},
-            //                 std::integral_constant<InMemoryDataOperationEnum,
-            //                 InMemoryDataOperationEnum::Set>{}, std::integral_constant<index_t,
-            //                 min_occupancy>{}, tail_num_ct);
-            //         });
-            //     }
-            // }
             return ave_time;
-        }
-
-        template <typename Lambda>
-        void SelectTailNumber(TailNumber tail_num, Lambda&& lambda)
-        {
-            ignore = tail_num;
-            lambda(std::integral_constant<TailNumber, TailNumber::Full>{});
-            // switch(tail_num)
-            // {
-            //     case TailNumber::Full:   lambda(std::integral_constant<TailNumber,
-            //     TailNumber::Full>{}); break; case TailNumber::Empty:
-            //     lambda(std::integral_constant<TailNumber, TailNumber::Empty>{}); break; case
-            //     TailNumber::One:    lambda(std::integral_constant<TailNumber,
-            //     TailNumber::One>{}); break; case TailNumber::Two:
-            //     lambda(std::integral_constant<TailNumber, TailNumber::Two>{}); break; case
-            //     TailNumber::Three:  lambda(std::integral_constant<TailNumber,
-            //     TailNumber::Three>{}); break; case TailNumber::Four:
-            //     lambda(std::integral_constant<TailNumber, TailNumber::Four>{}); break; case
-            //     TailNumber::Five:   lambda(std::integral_constant<TailNumber,
-            //     TailNumber::Five>{}); break; case TailNumber::Six:
-            //     lambda(std::integral_constant<TailNumber, TailNumber::Six>{}); break; case
-            //     TailNumber::Seven:  lambda(std::integral_constant<TailNumber,
-            //     TailNumber::Seven>{}); break; case TailNumber::Odd:
-            //     lambda(std::integral_constant<TailNumber, TailNumber::Odd>{}); break; case
-            //     TailNumber::Even:   lambda(std::integral_constant<TailNumber,
-            //     TailNumber::Even>{}); break; default: lambda(std::integral_constant<TailNumber,
-            //     TailNumber::Full>{}); break;;
-            // }
         }
 
         float Run(const Argument& arg, const StreamConfig& stream_config = StreamConfig{})
