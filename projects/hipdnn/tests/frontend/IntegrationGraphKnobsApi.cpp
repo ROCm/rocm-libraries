@@ -16,13 +16,12 @@ struct KnobQueryTestCase
 {
     std::string description;
     int64_t engineId;
-    size_t minKnobCount;
     std::vector<std::string> requiredKnobIds;
 
     friend std::ostream& operator<<(std::ostream& os, const KnobQueryTestCase& tc)
     {
         os << "KnobQueryTestCase{description: " << tc.description << ", engineId: " << tc.engineId
-           << ", minKnobCount: " << tc.minKnobCount << ", requiredKnobIds: [";
+           << ", requiredKnobIds: [";
         for(size_t i = 0; i < tc.requiredKnobIds.size(); ++i)
         {
             if(i > 0)
@@ -69,12 +68,12 @@ protected:
         graph.set_compute_data_type(DataType::FLOAT).set_io_data_type(DataType::FLOAT);
 
         auto x = std::make_shared<TensorAttributes>();
-        x->set_uid(1).set_name("X").set_dim({2, 3, 4, 4});
+        x->set_name("X").set_dim({2, 3, 4, 4});
 
         PointwiseAttributes attrs;
         attrs.set_mode(PointwiseMode::RELU_FWD);
         auto y = graph.pointwise(x, attrs);
-        y->set_uid(2);
+        y->set_name("Y");
 
         auto result = graph.build_operation_graph(_handle);
         EXPECT_TRUE(result.is_good()) << result.get_message();
@@ -91,18 +90,16 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         KnobQueryTestCase{"KnobsPluginHasFiveKnobs",
                           hipdnn_tests::plugin_constants::engineId<KnobsPlugin>(),
-                          5,
                           {"test.int_knob",
                            "test.float_knob",
                            "test.string_knob",
                            "test.deprecated_knob",
                            "test.shared.deterministic"}},
         KnobQueryTestCase{
-            "GoodPluginHasNoKnobs", hipdnn_tests::plugin_constants::engineId<GoodPlugin>(), 0, {}},
+            "GoodPluginHasNoKnobs", hipdnn_tests::plugin_constants::engineId<GoodPlugin>(), {}},
         KnobQueryTestCase{
             "KnobsPluginEngineBHasThreeKnobs",
             hipdnn_tests::plugin_constants::engineId<KnobsPluginEngineB>(),
-            3,
             {"test.engine_b.block_size", "test.engine_b.algorithm", "test.shared.deterministic"}}),
     [](const ::testing::TestParamInfo<KnobQueryTestCase>& info) { return info.param.description; });
 
@@ -117,7 +114,8 @@ TEST_P(IntegrationGraphKnobsApi, QueryKnobsFromEngine)
 
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
-    EXPECT_EQ(knobs.size(), testCase.minKnobCount) << "Engine returned unexpected number of knobs";
+    EXPECT_EQ(knobs.size(), testCase.requiredKnobIds.size())
+        << "Engine returned unexpected number of knobs";
 
     // Verify all required knob IDs are present
     for(const auto& requiredId : testCase.requiredKnobIds)
@@ -156,10 +154,6 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithValidKnobs)
 
     auto result = graph.create_execution_plan_ext(engineId, settings);
 
-    GTEST_SKIP()
-        << "KNOWN ISSUE: initializeEngineConfig() finalizes descriptor before knobs can be set";
-
-    // Once the issue is fixed, these expectations should pass:
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -202,6 +196,7 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithUnsupportedKnob)
 
     auto result = graph.create_execution_plan_ext(engineId, settings);
     // Should succeed - unsupported knobs are ignored with warning
+    // TODO: Add test to confirm log is emitted.
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -214,7 +209,8 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithDeprecatedKnob)
     settings.emplace_back("test.deprecated_knob", static_cast<int64_t>(5));
 
     auto result = graph.create_execution_plan_ext(engineId, settings);
-
+    // Should succeed - deprecated knobs are used with warning
+    // TODO: Add test to confirm log is emitted.
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -229,10 +225,6 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithSharedKnob)
 
     auto result = graph.create_execution_plan_ext(engineIdA, settingsA);
 
-    GTEST_SKIP()
-        << "KNOWN ISSUE: initializeEngineConfig() finalizes descriptor before knobs can be set";
-
-    // Once the issue is fixed, these expectations should pass:
     EXPECT_TRUE(result.is_good()) << "Engine A should accept shared knob: " << result.get_message();
 
     // Set same shared knob for Engine B
