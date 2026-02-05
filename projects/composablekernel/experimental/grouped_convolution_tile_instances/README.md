@@ -9,7 +9,7 @@
 6. [Generated Artifacts](#generated-artifacts)
 7. [Integration with CK Profiler](#integration-with-ck-profiler)
 8. [Directory Structure](#directory-structure)
-9. [Usage Examples](#usage-examples)
+9. [Usage](#usage)
 
 ---
 
@@ -499,7 +499,7 @@ cmake -D CMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc \
       -G Ninja \
       ..
       
-ninja grouped_convolution_tile_instances
+ninja device_grouped_conv_fwd_tile_instances
 ```
 
 ### 3: Run the Profiler
