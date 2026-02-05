@@ -499,19 +499,6 @@ def build_client_examples(String arch){
     return cmd
 }
 
-def build_client_examples_and_codegen_tests(String arch){
-    def cmd = """ cmake -DCMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install;/opt/rocm" -DCMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" ../codegen && \
-                make -j64 check && \
-                cd ../client_example && rm -rf build && mkdir build && cd build && \
-                cmake -DCMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install;/opt/rocm" \
-                -DGPU_TARGETS="${arch}" \
-                -DCMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" \
-                -DCMAKE_HIP_COMPILER="${params.BUILD_COMPILER}" \
-                -DCMAKE_CXX_FLAGS=" -O3 " .. && make -j """
-    return cmd
-}
-
-
 def build_and_run_fmha(String arch){
     def cmd = """ cmake -G Ninja -DCMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install;/opt/rocm" \
                 -DGPU_TARGETS="${arch}" \
@@ -1289,6 +1276,10 @@ pipeline {
             defaultValue: false,
             description: "Run inductor codegen tests (default: OFF)")
         booleanParam(
+            name: "RUN_CODEGEN_TESTS",
+            defaultValue: true,
+            description: "Run codegen tests (default: ON)")
+        booleanParam(
             name: "RUN_BUILDER_TESTS",
             defaultValue: true,
             description: "Run CK_BUILDER tests (default: ON)")
@@ -1557,6 +1548,33 @@ pipeline {
                                            ./bin/test_grouped_convnd_fwd_dataset_xdl && \
                                            ./bin/test_grouped_convnd_bwd_data_dataset_xdl && \
                                            ./bin/test_grouped_convnd_bwd_weight_dataset_xdl"""
+                    }
+                    steps{
+                        buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
+                        cleanWs()
+                    }
+                }
+            }
+        }
+        stage("Run Codegen Tests")
+        {
+            when {
+                beforeAgent true
+                expression { env.SHOULD_RUN_CI.toBoolean() }
+            }
+            parallel
+            {
+                stage("Run Codegen Tests on gfx90a")
+                {
+                    when {
+                        beforeAgent true
+                        expression { params.RUN_CODEGEN_TESTS.toBoolean() && !params.BUILD_INSTANCES_ONLY.toBoolean() }
+                    }
+                    agent{ label rocmnode("gfx90a")}
+                    environment{
+                        setup_args = "NO_CK_BUILD"
+                        execute_args = """ cmake -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" ../codegen && \
+                                           make -j64 check"""
                     }
                     steps{
                         buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
