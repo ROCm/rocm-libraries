@@ -34,8 +34,8 @@
 
 #ifndef _WIN32
 
-#include <hip/hip_runtime.h>
 #include <amd_smi/amdsmi.h>
+#include <hip/hip_runtime.h>
 
 template <typename T>
 inline std::ostream& stream_write(std::ostream& stream, T&& val)
@@ -142,7 +142,8 @@ public:
         m_XCDCount       = 1;
 
 #if AMDSMI_LIB_VERSION_MAJOR >= 25
-        auto status2 = amdsmi_get_gpu_xcd_counter(m_processorHandles[m_smiDeviceIndex], &m_XCDCount);
+        auto status2
+            = amdsmi_get_gpu_xcd_counter(m_processorHandles[m_smiDeviceIndex], &m_XCDCount);
 
         if(status2 != AMDSMI_STATUS_SUCCESS)
         {
@@ -285,12 +286,13 @@ private:
         for(uint32_t i = 0; i < socketCount; i++)
         {
             uint32_t processorCount = 0;
-            AMDSMI_CHECK_EXC(amdsmi_get_processor_handles(m_socketHandles[i], &processorCount, nullptr));
+            AMDSMI_CHECK_EXC(
+                amdsmi_get_processor_handles(m_socketHandles[i], &processorCount, nullptr));
 
             size_t offset = m_processorHandles.size();
             m_processorHandles.resize(offset + processorCount);
-            AMDSMI_CHECK_EXC(amdsmi_get_processor_handles(m_socketHandles[i], &processorCount,
-                                                         &m_processorHandles[offset]));
+            AMDSMI_CHECK_EXC(amdsmi_get_processor_handles(
+                m_socketHandles[i], &processorCount, &m_processorHandles[offset]));
         }
 
         m_thread = std::thread([=]() { this->runLoop(); });
@@ -352,7 +354,8 @@ private:
 
             amdsmi_gpu_metrics_t gpuMetrics;
             // multi_XCD
-            auto status1 = amdsmi_get_gpu_metrics_info(m_processorHandles[m_smiDeviceIndex], &gpuMetrics);
+            auto status1
+                = amdsmi_get_gpu_metrics_info(m_processorHandles[m_smiDeviceIndex], &gpuMetrics);
             if(status1 == AMDSMI_STATUS_SUCCESS)
             {
                 for(int i = 0; i < m_XCDCount; i++)
@@ -365,7 +368,8 @@ private:
 #else
 
             //XCD 0
-            auto status1 = amdsmi_get_clk_freq(m_processorHandles[m_smiDeviceIndex], AMDSMI_CLK_TYPE_SYS, &freq);
+            auto status1 = amdsmi_get_clk_freq(
+                m_processorHandles[m_smiDeviceIndex], AMDSMI_CLK_TYPE_SYS, &freq);
             if(status1 == AMDSMI_STATUS_SUCCESS)
             {
                 m_SYSCLK_sum[0] += freq.frequency[freq.current];
@@ -374,7 +378,8 @@ private:
 
 #endif
 
-            auto status2 = amdsmi_get_clk_freq(m_processorHandles[m_smiDeviceIndex], AMDSMI_CLK_TYPE_MEM, &freq);
+            auto status2 = amdsmi_get_clk_freq(
+                m_processorHandles[m_smiDeviceIndex], AMDSMI_CLK_TYPE_MEM, &freq);
             if(status2 == AMDSMI_STATUS_SUCCESS)
             {
                 m_MEMCLK_sum += freq.frequency[freq.current];
@@ -445,56 +450,42 @@ private:
 #endif
 
         uint64_t hipPCIID = 0;
-        // hipPCIID |= props.pciDeviceID & 0xFF;
-        // hipPCIID |= ((props.pciBusID & 0xFF) << 8);
-        // hipPCIID |= (props.pciDomainID) << 16;
 
         hipPCIID |= (((uint64_t)props.pciDomainID & 0xffffffff) << 32);
         hipPCIID |= ((props.pciBusID & 0xff) << 8);
         hipPCIID |= ((props.pciDeviceID & 0x1f) << 3);
 
+        uint32_t smiSocketCount{};
+        AMDSMI_CHECK_EXC(amdsmi_get_socket_handles(&smiSocketCount, nullptr));
+
+        m_socketHandles.resize(smiSocketCount);
+        AMDSMI_CHECK_EXC(amdsmi_get_socket_handles(&smiSocketCount, &m_socketHandles[0]));
+
         std::ostringstream msg;
         msg << "PCI IDs: [" << std::endl;
 
-        // Get socket handles
-        static std::vector<amdsmi_socket_handle> socketHandles;
-        static std::vector<amdsmi_processor_handle> processorHandles;
-
-        if(socketHandles.empty())
+        for(uint32_t device = 0; device < smiSocketCount; device++)
         {
-            uint32_t socketCount = 0;
-            AMDSMI_CHECK_EXC(amdsmi_get_socket_handles(&socketCount, nullptr));
+            uint32_t deviceCount{};
+            AMDSMI_CHECK_EXC(
+                amdsmi_get_processor_handles(m_socketHandles[device], &deviceCount, nullptr));
+            m_processorHandles.resize(deviceCount);
 
-            socketHandles.resize(socketCount);
-            AMDSMI_CHECK_EXC(amdsmi_get_socket_handles(&socketCount, socketHandles.data()));
+            AMDSMI_CHECK_EXC(amdsmi_get_processor_handles(
+                m_socketHandles[device], &deviceCount, &m_processorHandles[0]));
 
-            // Get processor handles for all sockets
-            for(uint32_t i = 0; i < socketCount; i++)
+            for(uint32_t smiIndex = 0; smiIndex < deviceCount; smiIndex++)
             {
-                uint32_t processorCount = 0;
-                AMDSMI_CHECK_EXC(amdsmi_get_processor_handles(socketHandles[i], &processorCount, nullptr));
+                uint64_t amdSMIPCIID{};
+                AMDSMI_CHECK_EXC(amdsmi_get_gpu_bdf_id(m_processorHandles[smiIndex], &amdSMIPCIID));
 
-                size_t offset = processorHandles.size();
-                processorHandles.resize(offset + processorCount);
-                AMDSMI_CHECK_EXC(amdsmi_get_processor_handles(socketHandles[i], &processorCount,
-                                                             &processorHandles[offset]));
+                msg << smiIndex << ": " << amdSMIPCIID << std::endl;
+
+                if(hipPCIID == amdSMIPCIID)
+                {
+                    return smiIndex;
+                }
             }
-        }
-
-        for(uint32_t smiIndex = 0; smiIndex < processorHandles.size(); smiIndex++)
-        {
-            amdsmi_bdf_t bdfInfo;
-            AMDSMI_CHECK_EXC(amdsmi_get_gpu_bdf_id(processorHandles[smiIndex], &bdfInfo));
-
-            uint64_t amdsmiPCIID = 0;
-            amdsmiPCIID |= (((uint64_t)bdfInfo.fields.domain_number & 0xffffffff) << 32);
-            amdsmiPCIID |= ((bdfInfo.fields.bus_number & 0xff) << 8);
-            amdsmiPCIID |= ((bdfInfo.fields.device_number & 0x1f) << 3);
-
-            msg << smiIndex << ": " << amdsmiPCIID << std::endl;
-
-            if(hipPCIID == amdsmiPCIID)
-                return smiIndex;
         }
 
         msg << "]" << std::endl;
