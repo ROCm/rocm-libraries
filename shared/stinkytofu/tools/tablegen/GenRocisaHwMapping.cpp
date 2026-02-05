@@ -56,6 +56,7 @@ namespace
                 std::cerr << "Error: Hardware instruction " << hwInstName << " not found in "
                           << archName << ".\n";
                 success = false;
+                continue;
             }
             os << "    {typeid(" << rocisaInstName
                << "), "

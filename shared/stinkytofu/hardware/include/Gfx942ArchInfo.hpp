@@ -37,7 +37,8 @@
 //   - Instruction DEFINITIONS (DEF_T calls) -> hardware/src/gfx/Gfx942.cpp
 //
 // To modify an instruction:
-//   - Update requirements: Scroll to getMCIDTable() in THIS file
+//   - Update requirements: Add .operand_widths in hardware/defs/Gfx942Instructions.def
+//     (see Gfx1250Instructions.def tensor_load_to_lds) and use generated Gfx942_operands.inc
 //   - Update costs: Open hardware/src/gfx/Gfx942.cpp (GFX942_COSTS[])
 //   - Update definition: hardware/src/gfx/Gfx942.cpp (DEF_T calls)
 //
@@ -71,8 +72,7 @@ struct Gfx942ArchInfo : public ArchHelper::ArchInfo
 #include "hardware/Gfx942Isa.inc"
 
         // Currently no operand requirements for Gfx942 instructions
-        // Add them here when needed (see Gfx1250ArchInfo.hpp for example)
-
+        // Add .operand_widths in hardware/defs/Gfx942Instructions.def when needed
         return MCIDTable;
     }
 

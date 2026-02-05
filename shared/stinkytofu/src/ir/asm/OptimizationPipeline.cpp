@@ -22,7 +22,7 @@
  * ************************************************************************ */
 #include "ir/asm/OptimizationPipeline.hpp"
 #include "ErrorHandling.hpp"
-#include "ir/IRVerifierPass.hpp"
+#include "ir/asm/AsmVerifierPass.hpp"
 #include "ir/asm/DeadCodeEliminationPass.hpp"
 #include "ir/asm/DefUseChain.hpp"
 #include "ir/asm/PeepholeOptimizationPass.hpp"

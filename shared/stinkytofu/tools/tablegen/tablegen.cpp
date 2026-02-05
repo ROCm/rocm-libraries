@@ -32,17 +32,34 @@ namespace stinkytofu
     bool genAllArchRocisaMappings(GpuArchManager& manager, const std::string& outdir);
     bool genPeepholePatterns(const std::string& patternFile, const std::string& outdir);
     bool genLogicalIR(const std::string& outdir);
+    bool genInstructions(const std::string& arch,
+                         const std::string& inputDir,
+                         const std::string& outputDir);
 }
 
 using namespace stinkytofu;
 
 void usage()
 {
-    std::cout << "Usage: tablegen <outdir> <hardwareDir>\n"
-              << "  outdir: The directory to output the generated files.\n"
-              << "  hardwareDir: The directory to the hardware data.\n"
-              << "\n"
-              << "Example: tablegen out shared/stinkytofu/hardware\n";
+    std::cout
+        << "Usage: tablegen <outdir> <hardwareDir>\n"
+        << "       tablegen --gen-instructions --arch=<gfx> --input-dir=<dir> --output-dir=<dir>\n"
+        << "\n"
+        << "Mode 1 (default):\n"
+        << "  outdir: The directory to output the generated files.\n"
+        << "  hardwareDir: The directory to the hardware data.\n"
+        << "\n"
+        << "Mode 2 (instruction generation):\n"
+        << "  --gen-instructions: Generate instruction metadata from .def files\n"
+        << "  --arch=<gfx>: Architecture (e.g. gfx1250, gfx942, gfx950); normalized to GfxXXX for "
+           ".def filenames\n"
+        << "  --input-dir=<dir>: Input directory containing .def files\n"
+        << "  --output-dir=<dir>: Output directory for generated .inc files\n"
+        << "\n"
+        << "Examples:\n"
+        << "  tablegen out shared/stinkytofu/hardware\n"
+        << "  tablegen --gen-instructions --arch=gfx1250 --input-dir=hardware/defs "
+           "--output-dir=hardware/generated\n";
 }
 
 int main(int argc, char** argv)
@@ -50,6 +67,37 @@ int main(int argc, char** argv)
     constexpr int SUCCESS = 0;
     constexpr int FAILURE = 1;
 
+    // Check for --gen-instructions mode
+    if(argc > 1 && std::string(argv[1]) == "--gen-instructions")
+    {
+        // Parse arguments
+        std::string arch;
+        std::string inputDir;
+        std::string outputDir;
+
+        for(int i = 2; i < argc; ++i)
+        {
+            std::string arg = argv[i];
+            if(arg.find("--arch=") == 0)
+                arch = arg.substr(7);
+            else if(arg.find("--input-dir=") == 0)
+                inputDir = arg.substr(12);
+            else if(arg.find("--output-dir=") == 0)
+                outputDir = arg.substr(13);
+        }
+
+        if(arch.empty() || inputDir.empty() || outputDir.empty())
+        {
+            std::cerr << "Error: Missing required arguments for --gen-instructions\n\n";
+            usage();
+            return FAILURE;
+        }
+
+        bool success = genInstructions(arch, inputDir, outputDir);
+        return success ? SUCCESS : FAILURE;
+    }
+
+    // Default mode
     if(argc < 3)
     {
         usage();

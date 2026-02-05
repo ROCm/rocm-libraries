@@ -6,12 +6,12 @@ This directory contains documentation for developers and contributors working on
 
 ### [Adding New Instructions](adding-new-ir.md)
 Complete guide for adding instructions from bottom to top (Assembly IR -> Logical IR). This guide covers:
-- Adding assembly-level hardware definitions
-- Mapping to Rocisa
-- Adding latency/cycle info for scheduling
+- Adding assembly-level hardware definitions in `.def` files (DEF_T system)
+- Mapping to Rocisa in the architecture .cpp
+- Instruction costs and formats (in .def; tablegen generates init and cost .inc)
 - Auto-generating Logical IR with tablegen
 - Testing instructions end-to-end
-- Note: Python API uses a separate decoupled wrapper
+- Note: Python API uses a separate decoupled wrapper. See also [Instruction DEF_T System](../design/instruction-def-t-system.md).
 
 ### [Adding New Instructions to WaitCntPass](adding-waitcnt-instructions.md)
 Learn how to extend the WaitCntPass to support new load and store instructions. This guide covers:
@@ -82,4 +82,5 @@ Before working on library development, you should be familiar with:
 
 - [User Guide](../user-guide/) - For using the library
 - [TableGen Tool](../../tools/tablegen/README.md) - Code generation for instruction tables
+- [Instruction DEF_T System](../design/instruction-def-t-system.md) - Design doc for .def -> tablegen -> generated .inc (no manual DEF_T in .cpp)
 

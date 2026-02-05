@@ -4,6 +4,8 @@ This guide shows you how to add a new instruction from bottom (Assembly IR) to t
 
 **Note**: Python API is decoupled via a separate wrapper layer and is not directly affected by these changes.
 
+**Instruction definitions and costs** use the [DEF_T system](../design/instruction-def-t-system.md): they live in `hardware/defs/GfxXXXInstructions.def` (and optionally `GfxXXXFormats.def`). Tablegen generates `*_init.inc` and `*_costs.inc`; the architecture `.cpp` files only include those. Do not add DEF_T or cost tables manually in the `.cpp`.
+
 ---
 
 ## Chapter 1: Assembly IR (Hardware Layer)
@@ -11,20 +13,19 @@ This guide shows you how to add a new instruction from bottom (Assembly IR) to t
 To add a new StinkyTofu assembly IR, you'll need to access the following files:
 
 ```bash
-CommonInstsDSL.cpp                    # Common instruction structures
-Flags.def                             # Instruction flags
-hardware/src/gfx/Gfx1250.cpp          # Instruction definitions + costs
-src/hardware/Gfx1250ArchInfo.hpp      # Operand requirements (register width/type)
-RocisaHwInstMappings.hpp              # Rocisa mappings
+hardware/include/gfx/CommonInstsDSL.hpp    # Common instruction structures (optional)
+include/isa/gfx/Flags.def                  # Instruction flags (optional)
+hardware/defs/GfxXXXInstructions.def       # Instruction definitions + costs (DEF_T)
+hardware/defs/GfxXXXFormats.def            # Format definitions (if new format needed)
+hardware/src/gfx/GfxXXX.cpp                # Rocisa LogicalToArch map only
+src/hardware/GfxXXXArchInfo.hpp            # Operand requirements (register width/type)
 ```
-
-**Navigation Tip**: Each architecture file (Gfx1250.cpp, Gfx942.cpp, Gfx950.cpp) contains cross-reference comments at the top pointing to related metadata locations. Use these to quickly navigate between costs and requirements.
 
 Here we will add the instruction `s_wait_tensorcnt` step by step.
 
 ### Step 1. Add a flag (Optional)
 
-Add a flag in `Flags.def` for a new instruction type if needed.
+Add a flag in `include/isa/gfx/Flags.def` for a new instruction type if needed.
 
 ```c++
 MACRO(IF_WaitTensorCnt)
@@ -32,7 +33,7 @@ MACRO(IF_WaitTensorCnt)
 
 ### Step 2. Create a new instruction structure (Optional)
 
-Add a new instruction type `CommonInstsDSL.cpp` if needed.
+Add a new instruction type in `hardware/include/gfx/CommonInstsDSL.hpp` if needed.
 
 ```c++
 struct WaitTensorCntInst : GfxInstDef
@@ -56,24 +57,36 @@ struct FloatAddInst : GfxInstDef
 };
 ```
 
-### Step 3. Add definition to the corresponding architecture
+### Step 3. Add definition and optional cost in the architecture .def file
 
-`s_wait_tensorcnt` is a new feature in GFX1250. We'll add the definition to `hardware/src/gfx/Gfx1250.cpp`.
+`s_wait_tensorcnt` is a Gfx1250 feature. Add it to `hardware/defs/Gfx1250Instructions.def` (not in the .cpp).
 
-**Quick Navigation**: Open `Gfx1250.cpp` and check the header comment at the top - it shows you where to find:
-- Instruction definitions (DEF_T calls) - typically lines 200-800
-- Instruction costs - see Step 6 below
-- Operand requirements - in `src/hardware/Gfx1250ArchInfo.hpp`
+Use `DEF_T(ClassName, "mnemonic", ...)` with optional `.format`, `.flags`, and `.cost`. The tablegen will generate the init and cost tables; the .cpp only includes the generated files.
 
-Add the definition:
+Example (minimal -- uses arch default cost). Use a flag that exists in `include/isa/gfx/Flags.def` (without the `IF_` prefix, e.g. `WaitTensorCnt`):
 
-```c++
-DEF_T(WaitTensorCntInst, "s_wait_tensorcnt");
+```c
+DEF_T(SWaitTensorcntInst, "s_wait_tensorcnt",
+    .format = SOPP,
+    .flags = {WaitTensorCnt}
+)
 ```
 
-### Step 4. At last, add the mapping to 'rocisa'
+Example with explicit cost (cycle, latency):
 
-In `RocisaHwInstMapping.cpp`, add the name of the 'struct' in 'rocisa' (`SWaitTensorcnt`) and the assembly instruction `s_wait_tensorcnt`.
+```c
+DEF_T(SWaitTensorcntInst, "s_wait_tensorcnt",
+    .format = SOPP,
+    .flags = {WaitTensorCnt},
+    .cost = {1, 1}
+)
+```
+
+Then rebuild so tablegen runs (e.g. `cmake --build .`). See [Instruction DEF_T System](../design/instruction-def-t-system.md) for full syntax and format inheritance.
+
+### Step 4. Add the Rocisa mapping in the architecture .cpp
+
+In `hardware/src/gfx/Gfx1250.cpp`, inside `setGfx1250LogicalToArchMap()`, add the Rocisa logical name and the assembly mnemonic:
 
 ```c++
 {"SWaitTensorcnt", "s_wait_tensorcnt"},
@@ -102,37 +115,28 @@ Add to `shared/stinkytofu/tools/tablegen/LogicalInstructionDefs.inc`:
 
 ### Step 6: Add Hardware Metadata (Costs + Operand Requirements)
 
-#### 6a. Add Instruction Costs
+#### 6a. Instruction Costs
 
-Add to the cost table in `hardware/src/gfx/Gfx1250.cpp`:
+Costs are defined in the **architecture .def file**, not in the .cpp.
 
-**Navigation**: Open the file and read the header comment - it tells you:
-- Where costs are defined (GFX1250_COSTS[] array)
-- Where operand requirements are (src/hardware/Gfx1250ArchInfo.hpp)
-- Where definitions are (DEF_T calls)
+- **Default cost**: Each arch sets a default (e.g. Gfx1250 uses 1,1; Gfx942/Gfx950 use 4,4) in its .cpp. Instructions without `.cost` in the .def use that default.
+- **Override**: In `hardware/defs/GfxXXXInstructions.def`, add `.cost = {cycle, latency}` to the instruction's `DEF_T(...)`. Tablegen emits only non-default costs into `GfxXXX_costs.inc`; the .cpp includes that file and applies them.
 
-```cpp
-constexpr InstructionCost GFX1250_COSTS[] = {
-    // ... existing costs ...
+Example in `Gfx1250Instructions.def`:
 
-    // Add new instruction costs
-    {"s_wait_tensorcnt", 1, 1},  // cycle, latency
-
-    // ... rest of costs ...
-};
+```c
+DEF_T(WaitTensorCntInst, "s_wait_tensorcnt",
+    .format = SOPP,
+    .flags = {SALU},
+    .cost = {1, 1}   // optional; omit to use arch default
+)
 ```
 
-**Important**:
-- Use the assembly mnemonic (`s_wait_tensorcnt`), not the class name
-- If the instruction uses default costs, you don't need to add it to the table
-- For Gfx1250 (RDNA4), default is cycle=1, latency=1
-- For Gfx942/Gfx950 (CDNA), default is cycle=4, latency=4
+Do **not** add cost entries to any array in `GfxXXX.cpp`; they are generated from the .def. See [Instruction DEF_T System](../design/instruction-def-t-system.md).
 
 #### 6b. Add Operand Requirements (Optional)
 
-If your instruction has specific register width or type requirements (e.g., `tensor_load_to_lds` requires 4 SGPRs for src0, 8 SGPRs for src1), add them in `src/hardware/Gfx1250ArchInfo.hpp`:
-
-**Navigation**: The header comment at the top tells you where to find costs (hardware/src/gfx/Gfx1250.cpp).
+If your instruction has specific register width or type requirements (e.g., `tensor_load_to_lds` requires 4 SGPRs for src0, 8 SGPRs for src1), add them in `src/hardware/GfxXXXArchInfo.hpp` (e.g. `Gfx1250ArchInfo.hpp`).
 
 ```cpp
 // In getMCIDTable() method:
@@ -184,30 +188,22 @@ The mnemonic mapping automatically enables Logical IR -> Assembly IR conversion.
 
 ## Quick Reference: Instruction Metadata Locations
 
-Each architecture has metadata split across 2 files for modularity:
+Instruction **definitions** and **costs** live in `.def` files; tablegen generates `.inc` files that the `.cpp` includes. Rocisa mappings stay in the `.cpp`.
 
-### Gfx1250 (RDNA4)
+### Per-architecture layout
 
 | Metadata Type | Location | What to Modify |
 |---------------|----------|----------------|
-| **Costs** (cycle, latency) | `hardware/src/gfx/Gfx1250.cpp` | `GFX1250_COSTS[]` array |
-| **Definitions** (DEF_T) | `hardware/src/gfx/Gfx1250.cpp` | `DEF_T()` calls (lines ~200-800) |
-| **Operand Requirements** | `src/hardware/Gfx1250ArchInfo.hpp` | `getMCIDTable()` method |
+| **Definitions + costs** (DEF_T, .cost) | `hardware/defs/GfxXXXInstructions.def` | Add or edit `DEF_T(..., .format, .flags, .cost)` |
+| **Formats** (optional) | `hardware/defs/GfxXXXFormats.def` | Add `DEF_FORMAT` if needed |
+| **Generated** (do not edit) | `hardware/generated/GfxXXX_init.inc`, `GfxXXX_costs.inc` | Produced by tablegen from .def |
+| **Rocisa LogicalToArch map** | `hardware/src/gfx/GfxXXX.cpp` | `setGfxXXXLogicalToArchMap()` |
+| **Operand requirements** | `src/hardware/GfxXXXArchInfo.hpp` | `getMCIDTable()` / operand tables |
 
-### Gfx942 (CDNA2/MI200) & Gfx950 (CDNA3/MI300)
+### Gfx1250, Gfx942, Gfx950
 
-Same structure as Gfx1250:
-- `hardware/src/gfx/Gfx942.cpp` + `src/hardware/Gfx942ArchInfo.hpp`
-- `hardware/src/gfx/Gfx950.cpp` + `src/hardware/Gfx950ArchInfo.hpp`
+Same pattern for all three: edit `hardware/defs/GfxXXXInstructions.def` (and optionally `GfxXXXFormats.def`), then rebuild. The corresponding `GfxXXX.cpp` only includes the generated .inc and holds the Rocisa map.
 
-### Navigation Tips
+### See also
 
-? **Each file has cross-reference comments at the top** pointing to related metadata locations.
-
-? **To modify an instruction**:
-1. Open the architecture's `.cpp` file (e.g., `Gfx1250.cpp`)
-2. Read the header comment - it tells you where to find costs, definitions, and requirements
-3. Update costs in the same file (scroll to `GFX*_COSTS[]`)
-4. Update requirements by opening the corresponding `ArchInfo.hpp` file
-
-? **All metadata for one architecture is just a Ctrl+Click away** - no hunting through dozens of files!
+- [Instruction DEF_T System](../design/instruction-def-t-system.md) -- design and data flow for .def -> tablegen -> .inc.

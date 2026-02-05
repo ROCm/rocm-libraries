@@ -7,6 +7,7 @@ set(SOURCES
     GenRocisaHwMapping.cpp
     GenPatterns.cpp
     GenLogicalIR.cpp
+    GenInstructions.cpp  # NEW: Instruction metadata generator (proof-of-concept)
     # Pattern parser sources (needed for GenPatterns)
     ../../src/ir/asm/IRLexer.cpp
     ../../src/ir/asm/PatternParser.cpp
@@ -15,6 +16,14 @@ set(SOURCES
 add_executable(tablegen "${SOURCES}")
 
 target_link_libraries(tablegen PRIVATE gfxisa)
+
+# Standalone instruction generator (no gfxisa dependency) to break build cycle:
+# gfxisa needs generated .inc files, but full tablegen links gfxisa.
+add_executable(tablegen_inst_gen
+    GenInstructions.cpp
+    GenInstructionsMain.cpp
+)
+# No link to gfxisa - this executable only parses .def files and writes .inc
 
 target_include_directories(tablegen PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/include"
@@ -52,24 +61,56 @@ list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/logical/LogicalI
 list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/IRMnemonics_generated.inc")
 list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/PythonBindings_generated.inc")
 
-# Custom command to run tablegen and generate .inc files
-# Using $<TARGET_FILE:tablegen> allows CMake to:
-# 1. Know the exact executable path
-# 2. Automatically track the dependency
-# 3. Check timestamps correctly
+# Instruction metadata generated from .def files (Gfx1250, Gfx942, Gfx950)
+# Built by tablegen_inst_gen (no gfxisa) to avoid circular dependency.
+get_filename_component(INSTRUCTION_DEF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/defs" ABSOLUTE)
+set(INSTRUCTION_GEN_DIR "${TABLEGEN_OUTPUT_DIR}/hardware/generated")
+set(INSTRUCTION_GEN_FILES "")
+foreach(arch Gfx1250 Gfx942 Gfx950)
+    list(APPEND INSTRUCTION_GEN_FILES "${INSTRUCTION_GEN_DIR}/${arch}_costs.inc")
+    list(APPEND INSTRUCTION_GEN_FILES "${INSTRUCTION_GEN_DIR}/${arch}_init.inc")
+    list(APPEND INSTRUCTION_GEN_FILES "${INSTRUCTION_GEN_DIR}/${arch}_operands.inc")
+endforeach()
+list(APPEND TABLEGEN_GENERATED_FILES ${INSTRUCTION_GEN_FILES})
+set(INSTRUCTION_DEF_FILES
+    "${INSTRUCTION_DEF_DIR}/Gfx1250Formats.def"
+    "${INSTRUCTION_DEF_DIR}/Gfx1250Instructions.def"
+    "${INSTRUCTION_DEF_DIR}/Gfx942Formats.def"
+    "${INSTRUCTION_DEF_DIR}/Gfx942Instructions.def"
+    "${INSTRUCTION_DEF_DIR}/Gfx950Formats.def"
+    "${INSTRUCTION_DEF_DIR}/Gfx950Instructions.def"
+)
+
+# Generate instruction .inc files first (tablegen_inst_gen does not link gfxisa)
 add_custom_command(
-    OUTPUT ${TABLEGEN_GENERATED_FILES}
+    OUTPUT ${INSTRUCTION_GEN_FILES}
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${INSTRUCTION_GEN_DIR}"
+    COMMAND $<TARGET_FILE:tablegen_inst_gen> --gen-instructions --arch=Gfx1250 --input-dir="${INSTRUCTION_DEF_DIR}" --output-dir="${INSTRUCTION_GEN_DIR}"
+    COMMAND $<TARGET_FILE:tablegen_inst_gen> --gen-instructions --arch=Gfx942 --input-dir="${INSTRUCTION_DEF_DIR}" --output-dir="${INSTRUCTION_GEN_DIR}"
+    COMMAND $<TARGET_FILE:tablegen_inst_gen> --gen-instructions --arch=Gfx950 --input-dir="${INSTRUCTION_DEF_DIR}" --output-dir="${INSTRUCTION_GEN_DIR}"
+    DEPENDS tablegen_inst_gen ${INSTRUCTION_DEF_FILES}
+    COMMENT "Generating instruction metadata from .def files..."
+    VERBATIM
+)
+add_custom_target(instruction_generated DEPENDS ${INSTRUCTION_GEN_FILES})
+
+# Remaining tablegen outputs (ISA, patterns, etc.); tablegen links gfxisa
+set(TABLEGEN_OTHER_FILES ${TABLEGEN_GENERATED_FILES})
+list(REMOVE_ITEM TABLEGEN_OTHER_FILES ${INSTRUCTION_GEN_FILES})
+
+add_custom_command(
+    OUTPUT ${TABLEGEN_OTHER_FILES}
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/hardware"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/ir"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/ir/logical"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${TABLEGEN_OUTPUT_DIR}/ir/rocisa"
     COMMAND $<TARGET_FILE:tablegen> "${TABLEGEN_OUTPUT_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware"
-    DEPENDS tablegen ${HARDWARE_SOURCE_FILES} ${PATTERN_FILE} ${HLIR_PATTERN_FILE}
+    DEPENDS tablegen instruction_generated ${HARDWARE_SOURCE_FILES} ${PATTERN_FILE} ${HLIR_PATTERN_FILE}
     COMMENT "Generating ISA definitions, IR classes, and pattern matchers with tablegen..."
     VERBATIM
 )
 
-# Custom target that depends on the generated files
+# Custom target that depends on all generated files
 add_custom_target(tablegen_generated
     DEPENDS ${TABLEGEN_GENERATED_FILES}
 )

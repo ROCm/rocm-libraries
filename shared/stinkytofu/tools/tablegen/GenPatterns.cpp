@@ -882,7 +882,7 @@ public:
 
         if(filteredPatterns.empty())
         {
-            std::cout << "No patterns of the requested type found, skipping generation\n";
+            // Normal: pattern file may only define one type (e.g. Peephole only). Skip silently.
             return true;
         }
 
