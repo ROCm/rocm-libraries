@@ -52,7 +52,10 @@ def get_changed_files(ref1, ref2):
         files = set(line.strip() for line in result.stdout.splitlines() if line.strip())
         return files
     except subprocess.CalledProcessError as e:
-        print(f"Error running git diff: {e}")
+        except subprocess.CalledProcessError as e:
+        print(f"Command '{e.cmd}' returned non-zero exit status {e.returncode}.")
+        print(f"Error output: {e.stderr}")
+        print(f"Standard output: {e.stdout}")
         sys.exit(1)
 
 
