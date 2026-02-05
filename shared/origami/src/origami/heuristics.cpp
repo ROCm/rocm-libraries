@@ -43,8 +43,8 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
     main_memory_load_latency = other.main_memory_load_latency;
   if (other.occupancy_decay_base != defaults::OCCUPANCY_DECAY_BASE)
     occupancy_decay_base = other.occupancy_decay_base;
-  if (other.ksplit_reduction_overhead != defaults::KSPLIT_REDUCTION_OVERHEAD)
-    ksplit_reduction_overhead = other.ksplit_reduction_overhead;
+  if (other.k_split_reduction_overhead != defaults::K_SPLIT_REDUCTION_OVERHEAD)
+    k_split_reduction_overhead = other.k_split_reduction_overhead;
   if (other.k_padding_penalty != defaults::K_PADDING_PENALTY)
     k_padding_penalty = other.k_padding_penalty;
 
@@ -70,8 +70,8 @@ bool heuristic_key_t::matches(const problem_t& problem,
   if (mt_m.has_value() && mt_m.value() != config.mt.m) return false;
   if (mt_n.has_value() && mt_n.value() != config.mt.n) return false;
   if (mt_k.has_value() && mt_k.value() != config.mt.k) return false;
-  if (optimized_main_loop.has_value() &&
-      optimized_main_loop.value() != config.optimized_main_loop)
+  if (hand_optimized_main_loop.has_value() &&
+      hand_optimized_main_loop.value() != config.hand_optimized_main_loop)
     return false;
 
   // Problem size ranges
@@ -96,7 +96,7 @@ size_t heuristic_key_t::specificity() const {
   if (mt_m.has_value()) count++;
   if (mt_n.has_value()) count++;
   if (mt_k.has_value()) count++;
-  if (optimized_main_loop.has_value()) count++;
+  if (hand_optimized_main_loop.has_value()) count++;
   if (min_m.has_value()) count++;
   if (max_m.has_value()) count++;
   if (min_n.has_value()) count++;
@@ -104,51 +104,6 @@ size_t heuristic_key_t::specificity() const {
   if (min_k.has_value()) count++;
   if (max_k.has_value()) count++;
   return count;
-}
-
-std::size_t heuristic_key_t::hash() const {
-  std::size_t seed = 0;
-
-  constexpr std::size_t golden_ratio = 0x9e3779b9;
-  auto hash_combine                  = [](std::size_t& seed, std::size_t value) {
-    seed ^= value + golden_ratio + (seed << 6) + (seed >> 2);
-  };
-
-  auto hash_optional = [&hash_combine, &seed](const auto& opt) {
-    if (opt.has_value()) {
-      hash_combine(seed, std::hash<std::decay_t<decltype(opt.value())>>()(opt.value()));
-    } else {
-      hash_combine(seed, 0);
-    }
-  };
-
-  hash_optional(arch);
-  hash_optional(a_dtype);
-  hash_optional(b_dtype);
-  hash_optional(mi_dtype);
-  hash_optional(a_transpose);
-  hash_optional(b_transpose);
-  hash_optional(mt_m);
-  hash_optional(mt_n);
-  hash_optional(mt_k);
-  hash_optional(optimized_main_loop);
-  hash_optional(min_m);
-  hash_optional(max_m);
-  hash_optional(min_n);
-  hash_optional(max_n);
-  hash_optional(min_k);
-  hash_optional(max_k);
-
-  return seed;
-}
-
-bool heuristic_key_t::operator==(const heuristic_key_t& other) const {
-  return arch == other.arch && a_dtype == other.a_dtype && b_dtype == other.b_dtype &&
-         mi_dtype == other.mi_dtype && a_transpose == other.a_transpose &&
-         b_transpose == other.b_transpose && mt_m == other.mt_m && mt_n == other.mt_n &&
-         mt_k == other.mt_k && optimized_main_loop == other.optimized_main_loop &&
-         min_m == other.min_m && max_m == other.max_m && min_n == other.min_n &&
-         max_n == other.max_n && min_k == other.min_k && max_k == other.max_k;
 }
 
 // ============================================================================
@@ -232,6 +187,21 @@ heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,
   // Start with default parameters
   heuristic_params_t result = default_params_;
 
+  // Fast path: O(1) lookup for hand-optimized kernels
+  if (config.hand_optimized_main_loop) {
+    hand_optimized_kernel_key_t fast_key{hardware.arch,
+                                         problem.mi_dtype,
+                                         problem.a_transpose,
+                                         problem.b_transpose,
+                                         config.mt.m,
+                                         config.mt.n,
+                                         config.mt.k};
+
+    auto it = hand_optimized_map_.find(fast_key);
+    if (it != hand_optimized_map_.end()) { result = it->second; }
+  }
+
+  // Slow path: O(n) hierarchical lookup for general heuristics
   // Find all matching entries and sort by specificity
   std::vector<std::pair<size_t, const heuristic_params_t*>> matches;
   for (const auto& [key, params] : entries_) {
@@ -254,7 +224,25 @@ heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,
 
 void heuristics_database_t::add_entry(const heuristic_key_t& key,
                                       const heuristic_params_t& params) {
-  entries_.push_back({key, params});
+  // If this is a hand-optimized kernel, also add to fast lookup map
+  if (key.hand_optimized_main_loop.has_value() && key.hand_optimized_main_loop.value()) {
+    // Hand-optimized kernels must have all required fields specified
+    if (key.arch.has_value() && key.mi_dtype.has_value() && key.a_transpose.has_value() &&
+        key.b_transpose.has_value() && key.mt_m.has_value() && key.mt_n.has_value() &&
+        key.mt_k.has_value()) {
+      hand_optimized_kernel_key_t fast_key{key.arch.value(),
+                                           key.mi_dtype.value(),
+                                           key.a_transpose.value(),
+                                           key.b_transpose.value(),
+                                           key.mt_m.value(),
+                                           key.mt_n.value(),
+                                           key.mt_k.value()};
+
+      hand_optimized_map_[fast_key] = params;
+    }
+  } else {
+    entries_.push_back({key, params});
+  }
 }
 
 void heuristics_database_t::initialize_defaults() {
@@ -291,13 +279,13 @@ void heuristics_database_t::initialize_defaults() {
     };
 
     for (const auto& cfg : bf16_nt_configs) {
-      auto key = make_kernel_variant_key(hardware_t::architecture_t::gfx950,
-                                         data_type_t::BFloat16,
-                                         transpose_t::N,
-                                         transpose_t::T,
-                                         cfg.m,
-                                         cfg.n,
-                                         cfg.k);
+      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
+                                                data_type_t::BFloat16,
+                                                transpose_t::N,
+                                                transpose_t::T,
+                                                cfg.m,
+                                                cfg.n,
+                                                cfg.k);
       heuristic_params_t params;
       params.main_loop_efficiency = cfg.eff;
       add_entry(key, params);
@@ -312,13 +300,13 @@ void heuristics_database_t::initialize_defaults() {
     };
 
     for (const auto& cfg : bf16_nn_configs) {
-      auto key = make_kernel_variant_key(hardware_t::architecture_t::gfx950,
-                                         data_type_t::BFloat16,
-                                         transpose_t::N,
-                                         transpose_t::N,
-                                         cfg.m,
-                                         cfg.n,
-                                         cfg.k);
+      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
+                                                data_type_t::BFloat16,
+                                                transpose_t::N,
+                                                transpose_t::N,
+                                                cfg.m,
+                                                cfg.n,
+                                                cfg.k);
       heuristic_params_t params;
       params.main_loop_efficiency = cfg.eff;
       add_entry(key, params);
@@ -335,13 +323,13 @@ void heuristics_database_t::initialize_defaults() {
     };
 
     for (const auto& cfg : bf16_tn_configs) {
-      auto key = make_kernel_variant_key(hardware_t::architecture_t::gfx950,
-                                         data_type_t::BFloat16,
-                                         transpose_t::T,
-                                         transpose_t::N,
-                                         cfg.m,
-                                         cfg.n,
-                                         cfg.k);
+      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
+                                                data_type_t::BFloat16,
+                                                transpose_t::T,
+                                                transpose_t::N,
+                                                cfg.m,
+                                                cfg.n,
+                                                cfg.k);
       heuristic_params_t params;
       params.main_loop_efficiency = cfg.eff;
       add_entry(key, params);
@@ -353,22 +341,22 @@ void heuristics_database_t::initialize_defaults() {
 // Helper Functions
 // ============================================================================
 
-heuristic_key_t make_kernel_variant_key(hardware_t::architecture_t arch,
-                                        data_type_t mi_dtype,
-                                        transpose_t transA,
-                                        transpose_t transB,
-                                        size_t MT_M,
-                                        size_t MT_N,
-                                        size_t MT_K) {
+heuristic_key_t make_hand_optimized_kernel_key(hardware_t::architecture_t arch,
+                                               data_type_t mi_dtype,
+                                               transpose_t transA,
+                                               transpose_t transB,
+                                               size_t MT_M,
+                                               size_t MT_N,
+                                               size_t MT_K) {
   heuristic_key_t key;
-  key.arch                = arch;
-  key.mi_dtype            = mi_dtype;
-  key.a_transpose         = transA;
-  key.b_transpose         = transB;
-  key.mt_m                = MT_M;
-  key.mt_n                = MT_N;
-  key.mt_k                = MT_K;
-  key.optimized_main_loop = true;
+  key.arch                     = arch;
+  key.mi_dtype                 = mi_dtype;
+  key.a_transpose              = transA;
+  key.b_transpose              = transB;
+  key.mt_m                     = MT_M;
+  key.mt_n                     = MT_N;
+  key.mt_k                     = MT_K;
+  key.hand_optimized_main_loop = true;
   return key;
 }
 

@@ -333,7 +333,7 @@ struct config_t {
   dim3_t mi{0, 0, 0};
 
   /// Main loop optimization flag (indicates use of any optimized kernel variant)
-  bool optimized_main_loop = false;
+  bool hand_optimized_main_loop = false;
 
   /// Occupancy (number of wavefronts resident per CU).
   int occupancy = -1;
@@ -363,21 +363,17 @@ struct config_t {
   grid_selection_t grid_selection = grid_selection_t::k_split_aware;
 
   constexpr bool operator==(const config_t& o) const noexcept {
-    return mt == o.mt && 
-           mi == o.mi && 
-           optimized_main_loop == o.optimized_main_loop &&
-           cache_hints_a == o.cache_hints_a &&
-           cache_hints_b == o.cache_hints_b && 
-           workgroup_mapping == o.workgroup_mapping &&
-           prediction_mode == o.prediction_mode && target == o.target;
+    return mt == o.mt && mi == o.mi && hand_optimized_main_loop == o.hand_optimized_main_loop &&
+           cache_hints_a == o.cache_hints_a && cache_hints_b == o.cache_hints_b &&
+           workgroup_mapping == o.workgroup_mapping && prediction_mode == o.prediction_mode &&
+           target == o.target;
   }
 
   std::size_t hash() const {
     return std::hash<size_t>()(mt.m) ^ std::hash<size_t>()(mt.n) ^ std::hash<size_t>()(mt.k) ^
            std::hash<size_t>()(mi.m) ^ std::hash<size_t>()(mi.n) ^ std::hash<size_t>()(mi.k) ^
-           std::hash<int>()(optimized_main_loop) ^
-           std::hash<int>()(cache_hints_a) ^ std::hash<int>()(cache_hints_b) ^
-           std::hash<int>()(workgroup_mapping) ^
+           std::hash<int>()(hand_optimized_main_loop) ^ std::hash<int>()(cache_hints_a) ^
+           std::hash<int>()(cache_hints_b) ^ std::hash<int>()(workgroup_mapping) ^
            std::hash<std::uint32_t>()(static_cast<std::uint32_t>(prediction_mode)) ^
            std::hash<std::uint32_t>()(static_cast<std::uint32_t>(target));
   }
@@ -477,4 +473,3 @@ struct hash<origami::config_t> {
   }
 };
 }  // namespace std
-

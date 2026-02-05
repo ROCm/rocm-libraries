@@ -36,6 +36,31 @@
 namespace origami {
 
 /**
+ * @brief Structure to hold modular epilogue penalty blocks.
+ *
+ * Each component is calculated independently and can be combined in different ways.
+ */
+struct epilogue_components_t {
+  double initial_memory_write   = 0.0;  // Base memory write latency for output
+  double compute_iteration      = 0.0;  // One compute iteration in epilogue
+  double k_split_reduction      = 0.0;  // K-split reduction overhead (L_reduce + partial_adds)
+  double k_split_overhead_const = 0.0;  // K-split constant overhead
+  double k_padding              = 0.0;  // K-dimension padding penalty
+};
+
+/**
+ * @brief Epilogue composition strategy selector.
+ *
+ * Determines how epilogue penalty blocks are combined.
+ */
+enum class epilogue_composition_strategy_t {
+  DEFAULT                = 0,  // Original formula (before modularization)
+  GLOBAL_OCCUPANCY_DECAY = 1,  // Apply occupancy decay to all components
+  MEMORY_GROUPED         = 2,  // Group memory operations together
+  COMPUTE_PRIORITIZED    = 3,  // Apply occupancy decay primarily to compute
+};
+
+/**
  * @brief Default values for heuristic parameters.
  * Centralized location for all default constants.
  */
@@ -53,11 +78,11 @@ struct heuristic_defaults_t {
   static constexpr double WEIGHT_TILE_TOTAL    = 1.0;
 
   // Empirical Constants
-  static constexpr double L2_MIN_HIT_RATE           = 0.5;
-  static constexpr double MAIN_MEMORY_LOAD_LATENCY  = 200.0;
-  static constexpr double OCCUPANCY_DECAY_BASE      = 0.95;
-  static constexpr double KSPLIT_REDUCTION_OVERHEAD = 10000.0;
-  static constexpr double K_PADDING_PENALTY         = 50000.0;
+  static constexpr double L2_MIN_HIT_RATE            = 0.5;
+  static constexpr double MAIN_MEMORY_LOAD_LATENCY   = 200.0;
+  static constexpr double OCCUPANCY_DECAY_BASE       = 0.95;
+  static constexpr double K_SPLIT_REDUCTION_OVERHEAD = 10000.0;
+  static constexpr double K_PADDING_PENALTY          = 50000.0;
 
   // Main Loop Efficiency
   static constexpr double MAIN_LOOP_EFFICIENCY = 1.0;
@@ -86,14 +111,18 @@ struct heuristic_params_t {
   double weight_tile_total    = heuristic_defaults_t::WEIGHT_TILE_TOTAL;
 
   // === Empirical Constants ===
-  double l2_min_hit_rate_default   = heuristic_defaults_t::L2_MIN_HIT_RATE;
-  double main_memory_load_latency  = heuristic_defaults_t::MAIN_MEMORY_LOAD_LATENCY;
-  double occupancy_decay_base      = heuristic_defaults_t::OCCUPANCY_DECAY_BASE;
-  double ksplit_reduction_overhead = heuristic_defaults_t::KSPLIT_REDUCTION_OVERHEAD;
-  double k_padding_penalty         = heuristic_defaults_t::K_PADDING_PENALTY;
+  double l2_min_hit_rate_default    = heuristic_defaults_t::L2_MIN_HIT_RATE;
+  double main_memory_load_latency   = heuristic_defaults_t::MAIN_MEMORY_LOAD_LATENCY;
+  double occupancy_decay_base       = heuristic_defaults_t::OCCUPANCY_DECAY_BASE;
+  double k_split_reduction_overhead = heuristic_defaults_t::K_SPLIT_REDUCTION_OVERHEAD;
+  double k_padding_penalty          = heuristic_defaults_t::K_PADDING_PENALTY;
 
   // === Main Loop Efficiency ===
   double main_loop_efficiency = heuristic_defaults_t::MAIN_LOOP_EFFICIENCY;
+
+  // === Epilogue Composition Strategy ===
+  epilogue_composition_strategy_t epilogue_composition_strategy =
+      epilogue_composition_strategy_t::DEFAULT;
 
   /**
    * @brief Merge this parameter set with another (for hierarchical lookup).
@@ -118,7 +147,7 @@ struct heuristic_key_t {
   std::optional<size_t> mt_m;
   std::optional<size_t> mt_n;
   std::optional<size_t> mt_k;
-  std::optional<bool> optimized_main_loop;
+  std::optional<bool> hand_optimized_main_loop;
 
   // For problem-size dependent heuristics
   std::optional<size_t> min_m;
@@ -139,13 +168,50 @@ struct heuristic_key_t {
    * Used for prioritizing more specific matches over general ones.
    */
   size_t specificity() const;
+};
 
-  /**
-   * @brief Hash function for use in unordered_map.
-   */
-  std::size_t hash() const;
+/**
+ * @brief Key for hand-optimized kernels.
+ *
+ * Hand-optimized kernels such as CMS(Custom Main-loop Scheduling) kernels have fully specified
+ * characteristics (arch, dtype, layout, MT sizes).
+ */
+struct hand_optimized_kernel_key_t {
+  hardware_t::architecture_t arch;
+  data_type_t mi_dtype;
+  transpose_t a_transpose;
+  transpose_t b_transpose;
+  size_t mt_m;
+  size_t mt_n;
+  size_t mt_k;
 
-  bool operator==(const heuristic_key_t& other) const;
+  bool operator==(const hand_optimized_kernel_key_t& other) const {
+    return arch == other.arch && mi_dtype == other.mi_dtype && a_transpose == other.a_transpose &&
+           b_transpose == other.b_transpose && mt_m == other.mt_m && mt_n == other.mt_n &&
+           mt_k == other.mt_k;
+  }
+
+  std::size_t hash() const {
+    std::size_t seed                   = 0;
+    constexpr std::size_t golden_ratio = 0x9e3779b9;
+    auto hash_combine                  = [](std::size_t& seed, std::size_t value) {
+      seed ^= value + golden_ratio + (seed << 6) + (seed >> 2);
+    };
+
+    hash_combine(seed, std::hash<int>()(static_cast<int>(arch)));
+    hash_combine(seed, std::hash<int>()(static_cast<int>(mi_dtype)));
+    hash_combine(seed, std::hash<int>()(static_cast<int>(a_transpose)));
+    hash_combine(seed, std::hash<int>()(static_cast<int>(b_transpose)));
+    hash_combine(seed, std::hash<size_t>()(mt_m));
+    hash_combine(seed, std::hash<size_t>()(mt_n));
+    hash_combine(seed, std::hash<size_t>()(mt_k));
+
+    return seed;
+  }
+};
+
+struct hand_optimized_kernel_key_hash {
+  std::size_t operator()(const hand_optimized_kernel_key_t& k) const { return k.hash(); }
 };
 
 /**
@@ -168,9 +234,9 @@ class heuristics_database_t {
    * @brief Lookup heuristic parameters for given problem/hardware/config.
    *
    * Performs hierarchical lookup:
-   * 1. Looks for exact matches (most specific)
-   * 2. Falls back to more general matches
-   * 3. Ultimately returns default parameters
+   * 1. For hand-optimized kernels: O(1) hash map lookup
+   * 2. For general heuristics: Linear search with specificity ordering
+   * 3. Falls back to default parameters
    *
    * @param problem Problem definition
    * @param hardware Hardware characteristics
@@ -194,10 +260,17 @@ class heuristics_database_t {
  private:
   heuristics_database_t();  // Private constructor for singleton
 
+  // General heuristics storage (linear search)
   std::vector<std::pair<heuristic_key_t, heuristic_params_t>> entries_;
+
+  // unordered_map for hand-optimized kernels
+  std::
+      unordered_map<hand_optimized_kernel_key_t, heuristic_params_t, hand_optimized_kernel_key_hash>
+          hand_optimized_map_;
+
   heuristic_params_t default_params_;
 
-  // Initialize with default heuristics from original implementation
+  // Initialize with default heuristics
   void initialize_defaults();
 };
 
@@ -213,19 +286,15 @@ inline heuristic_params_t get_heuristic_params(const problem_t& problem,
 }
 
 /**
- * @brief Helper to create a key for optimized kernel variants.
- * 
- * Creates a heuristic key for kernel configurations with empirically-tuned
- * main loop efficiency values. This applies to any optimized kernel variant,
- * regardless of the specific optimization strategy used.
+ * @brief Helper to create a key for hand-optimized kernels
  */
-heuristic_key_t make_kernel_variant_key(hardware_t::architecture_t arch,
-                                        data_type_t mi_dtype,
-                                        transpose_t transA,
-                                        transpose_t transB,
-                                        size_t MT_M,
-                                        size_t MT_N,
-                                        size_t MT_K);
+heuristic_key_t make_hand_optimized_kernel_key(hardware_t::architecture_t arch,
+                                               data_type_t mi_dtype,
+                                               transpose_t transA,
+                                               transpose_t transB,
+                                               size_t MT_M,
+                                               size_t MT_N,
+                                               size_t MT_K);
 
 /**
  * @brief Helper to create a key for tile configuration.
@@ -241,12 +310,76 @@ heuristic_key_t make_tile_key(size_t MT_M,
  */
 heuristic_key_t make_arch_dtype_key(hardware_t::architecture_t arch, data_type_t mi_dtype);
 
-}  // namespace origami
+/**
+ * @brief Epilogue composition strategy functions.
+ *
+ * These functions define how epilogue components are combined.
+ * Select via heuristic_params_t::epilogue_composition_strategy.
+ */
+// Default composition strategy
+inline double compose_epilogue_default(const epilogue_components_t& comp,
+                                       const heuristic_params_t& heuristic,
+                                       double occupancy_factor) {
+  // Original formula (before modularization):
+  // ((initial + compute) * occupancy_decay) + (k_split + overhead) + k_padding
+  return ((comp.initial_memory_write + comp.compute_iteration) * occupancy_factor) +
+         (comp.k_split_reduction + comp.k_split_overhead_const) + comp.k_padding;
+}
 
-// Hash specialization for use in unordered containers
-namespace std {
-template <>
-struct hash<origami::heuristic_key_t> {
-  std::size_t operator()(const origami::heuristic_key_t& k) const { return k.hash(); }
-};
-}  // namespace std
+// Global occupancy decay composition strategy (simple sum of all components)
+inline double compose_epilogue_global_occupancy_decay(const epilogue_components_t& comp,
+                                                      const heuristic_params_t& heuristic,
+                                                      double occupancy_factor) {
+  return (comp.initial_memory_write + comp.compute_iteration + comp.k_split_reduction +
+          comp.k_split_overhead_const + comp.k_padding) *
+         occupancy_factor;
+}
+
+// Memory grouped composition strategy: group memory operations together
+inline double compose_epilogue_memory_grouped(const epilogue_components_t& comp,
+                                              const heuristic_params_t& heuristic,
+                                              double occupancy_factor) {
+  double memory_ops = comp.initial_memory_write + comp.k_split_reduction;
+  double overheads  = comp.k_split_overhead_const + comp.k_padding;
+  return (memory_ops * occupancy_factor) + comp.compute_iteration + overheads;
+}
+
+// Compute prioritized composition strategy: prioritize compute impact
+inline double compose_epilogue_compute_prioritized(const epilogue_components_t& comp,
+                                                   const heuristic_params_t& heuristic,
+                                                   double occupancy_factor) {
+  double compute_ops = comp.compute_iteration * occupancy_factor;
+  double memory_ops  = comp.initial_memory_write + comp.k_split_reduction;
+  double overheads   = comp.k_split_overhead_const + comp.k_padding;
+  return compute_ops + memory_ops + overheads;
+}
+
+/**
+ * @brief Main dispatcher for epilogue composition.
+ *
+ * Selects the appropriate composition strategy based on heuristic parameters.
+ * This is the main entry point used by gemm.cpp.
+ * Marked inline for performance in hot path.
+ *
+ * @param comp Epilogue components calculated in gemm.cpp
+ * @param heuristic Heuristic parameters (includes strategy selector)
+ * @param occupancy_factor Occupancy decay factor (pow(decay_base, real_occupancy))
+ * @return Composed epilogue latency
+ */
+inline double compose_epilogue(const epilogue_components_t& comp,
+                               const heuristic_params_t& heuristic,
+                               double occupancy_factor) {
+  switch (heuristic.epilogue_composition_strategy) {
+    case epilogue_composition_strategy_t::DEFAULT:
+      return compose_epilogue_default(comp, heuristic, occupancy_factor);
+    case epilogue_composition_strategy_t::GLOBAL_OCCUPANCY_DECAY:
+      return compose_epilogue_global_occupancy_decay(comp, heuristic, occupancy_factor);
+    case epilogue_composition_strategy_t::MEMORY_GROUPED:
+      return compose_epilogue_memory_grouped(comp, heuristic, occupancy_factor);
+    case epilogue_composition_strategy_t::COMPUTE_PRIORITIZED:
+      return compose_epilogue_compute_prioritized(comp, heuristic, occupancy_factor);
+    default: return compose_epilogue_default(comp, heuristic, occupancy_factor);
+  }
+}
+
+}  // namespace origami

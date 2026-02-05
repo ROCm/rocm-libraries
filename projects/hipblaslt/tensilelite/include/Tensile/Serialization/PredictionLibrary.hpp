@@ -105,7 +105,7 @@ namespace TensileLite
                                        solution->sizeMapping.macroTile.y,
                                        solution->sizeMapping.depthU},
                                 .mi = origami_mi,
-                                .optimized_main_loop
+                                .hand_optimized_main_loop
                                 = (solution->sizeMapping.customMainLoopScheduling > 0) ? true
                                                                                        : false,
                                 .occupancy

@@ -716,44 +716,42 @@ double compute_tile_latency(const problem_t& problem,
   double effective_tile_penalty = (utilization > 1e-9) ? (1.0 / (utilization)) : 1.0;
   double output_utilization_penalty =
       (output_utilization > 1e-9) ? (1.0 / (output_utilization)) : 1.0;
+
   // 2) Work-group setup & iteration latencies
   double L_WG_setup = 1;  // WG_setup_Latency
 
-  // 3) Prologue: set as memory latency
-  double L_prologue = L_mem;
-  L_prologue *= effective_tile_penalty;
-
-  // L_compute *= std::max(L_compute, L_LDS);
-
-  // 4) Epilogue: writes from all active CUs with limited bandwidth
-  double mem_bw_occ            = compute_mem_bw_from_occupancy(hardware, num_active_cus);
-  double mem_bw_occ_limited    = hardware.mem3_perf_ratio * mem_bw_occ;
-  size_t MT_M_rounded_128bytes = round_elements_to_128B(MT_M, datatype_to_bits(problem.a_dtype));
-
-  double L_epilogue = (static_cast<double>(num_active_cus / splitting_factor) *
-                       MT_M_rounded_128bytes * MT_N * d_bytes) /
-                      mem_bw_occ_limited;
-  // One compute iteration happens in the prologue
-  L_epilogue += L_compute * effective_tile_penalty;
-  // Epilogue and Prologue overhead are reduced with higher occupancy kernels.
+  // 3) Prologue and Epilogue latencies
+  // Prologue and Epilogue overhead are reduced with higher occupancy kernels.
   int grid_m = static_cast<int>(math::safe_ceil_div(problem.size.m, MT_M));
   int grid_n = static_cast<int>(math::safe_ceil_div(problem.size.n, MT_N));
-
   size_t real_occupancy =
       std::min(std::max(config.occupancy, static_cast<int>(1)),
                static_cast<int>(math::safe_ceil_div(grid_m * grid_n * batch * splitting_factor,
                                                     hardware.N_CU)));  // Number of WGs per CU.
-
-  // Compute effective weights that incorporate prologue factor and occupancy decay
-  double effective_weight_prologue = heuristic.weight_prologue;
-  double effective_weight_epilogue = heuristic.weight_epilogue;
-
   double occupancy_factor = pow(heuristic.occupancy_decay_base, real_occupancy);
-  effective_weight_prologue *= occupancy_factor;
-  effective_weight_epilogue *= occupancy_factor;
 
-  // 4') K-split reductions are globally coherent, we need to write and read split-1 MT_M*MT_N
-  // tiles to coherent memory
+  // 3-1) Prologue: set as memory latency
+  double L_prologue = L_mem;
+  L_prologue *= effective_tile_penalty;
+  L_prologue *= occupancy_factor;
+
+  // 3-2) Epilogue: writes from all active CUs with limited bandwidth
+  double mem_bw_occ            = compute_mem_bw_from_occupancy(hardware, num_active_cus);
+  double mem_bw_occ_limited    = hardware.mem3_perf_ratio * mem_bw_occ;
+  size_t MT_M_rounded_128bytes = round_elements_to_128B(MT_M, datatype_to_bits(problem.a_dtype));
+
+  // Each block can be independently calculated and reordered
+  epilogue_components_t epilogue_comp = {};
+
+  // Block 1: Initial memory write latency
+  epilogue_comp.initial_memory_write = (static_cast<double>(num_active_cus / splitting_factor) *
+                                        MT_M_rounded_128bytes * MT_N * d_bytes) /
+                                       mem_bw_occ_limited;
+
+  // Block 2: One compute iteration in the epilogue
+  epilogue_comp.compute_iteration = L_compute * effective_tile_penalty;
+
+  // Block 3: K-split reduction (if applicable)
   if (splitting_factor > 1) {
     size_t n_partials = splitting_factor - 1;
 
@@ -772,10 +770,21 @@ double compute_tile_latency(const problem_t& problem,
     double partial_adds =
         (static_cast<double>(config.mt.mn()) * static_cast<double>(splitting_factor)) / (64);
 
-    double L_reduce = partial_readwrite_bytes / (mem_bw_occ_limited);
-    L_epilogue += L_reduce + partial_adds + heuristic.ksplit_reduction_overhead;
+    double L_reduce                      = partial_readwrite_bytes / (mem_bw_occ_limited);
+    epilogue_comp.k_split_reduction      = L_reduce + partial_adds;
+    epilogue_comp.k_split_overhead_const = heuristic.k_split_reduction_overhead;
   }
-  // 4'') tf32 emu has some more overhead
+
+  // Block 4: K-padding penalty (if applicable)
+  if (K % MT_K != 0) {
+    const double problem_k_quant = static_cast<double>(K % MT_K) / static_cast<double>(K);
+    epilogue_comp.k_padding      = problem_k_quant * heuristic.k_padding_penalty;
+  }
+
+  double L_epilogue = compose_epilogue(epilogue_comp, heuristic, occupancy_factor);
+
+  // 4) Single-tile latency (apply penalty after finding the bottleneck)
+  // tf32 emu has some more overhead
   double L_cvt = 0;
   if ((problem.mi_dtype == data_type_t::XFloat32) &&
       (hardware.arch == hardware_t::architecture_t::gfx950)) {
@@ -785,34 +794,22 @@ double compute_tile_latency(const problem_t& problem,
   {
     L_cvt = compute_cvt_overhead_x1(problem, hardware, config);
   }
-
-  // 5)
-  // 5-0) Get main_loop_efficiency from heuristics (includes optimized kernel adjustments)
-  double main_loop_efficiency = heuristic.main_loop_efficiency;
-
-  // 5-1) Single-tile latency (apply penalty after finding the bottleneck)
   double L_tile_single =
       std::max(L_compute * heuristic.weight_compute, L_mem * heuristic.weight_memory);
-  L_tile_single *= main_loop_efficiency;
+  L_tile_single *= heuristic.main_loop_efficiency;
   L_tile_single *= effective_tile_penalty;
   L_tile_single += L_cvt;
 
-  // 6) Number of K-iterations (excluding epilogue), at least 1
+  // 5) Number of K-iterations (excluding epilogue), at least 1
   const long k_per_split = static_cast<long>(math::safe_ceil_div(K, splitting_factor));
   long num_iter =
       std::max(static_cast<long>(math::safe_ceil_div(static_cast<size_t>(k_per_split), MT_K) - 1),
                static_cast<long>(1));
-  // Zero Padding in the K dimension on last iteration
-  if (K % MT_K != 0) {
-    const double problem_k_quant = static_cast<double>(K % MT_K) / static_cast<double>(K);
-    L_epilogue += problem_k_quant * heuristic.k_padding_penalty;
-  }
-  // L_epilogue *= output_utilization_penalty;
 
-  // 7) Total tile latency
+  // 6) Total tile latency
   double L_tile_total = L_tile_single * static_cast<double>(num_iter);
-  L_tile_total += effective_weight_prologue * L_prologue;
-  L_tile_total += effective_weight_epilogue * L_epilogue;
+  L_tile_total += heuristic.weight_prologue * L_prologue;
+  L_tile_total += heuristic.weight_epilogue * L_epilogue;
   L_tile_total += heuristic.weight_wg_setup * L_WG_setup;
   L_tile_total += heuristic.weight_loop_overhead * static_cast<double>(num_iter);
 
