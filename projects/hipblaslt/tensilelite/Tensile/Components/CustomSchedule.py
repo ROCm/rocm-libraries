@@ -1334,7 +1334,7 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
             'LRB0'   : [[0,2,3,4,5],
                         [1,3,4,5,6]],
             'LRA0'   : [[13,15,18,21,24,26,28,30],
-                        [14,16,19,22,25,27,29,31]],
+                        [13,16,19,22,25,27,29,31]],
 
             # GRB must not start before the SYNC at idx 15 (LRB0 completion).
             'GRB'    : [[14,14, 17,17, 20,20, 23,23, 26,26],
