@@ -294,7 +294,7 @@ def getDockerImage(Map conf=[:])
     }
     else if (gpu_family == "navi")
     {
-        gpu_arch = "gfx11-generic;gfx12-generic"
+        gpu_arch = "gfx1101;gfx1151"
     }
     else
     {
@@ -325,7 +325,11 @@ def getDockerImage(Map conf=[:])
     }
 
     def image = getDockerImageName(dockerArgs)
-    image = image + "_${gpu_family}"
+
+    // Do not append gpu family for common ci image
+    if(gpu_family != "ci"){
+        image = image + "_${gpu_family}"
+    }
 
     // Append GPU arch after image name for a common hash
     dockerArgs = dockerArgs + "--build-arg THEROCK_ASIC=\"${gpu_arch}\" "
