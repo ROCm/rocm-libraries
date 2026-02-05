@@ -855,7 +855,7 @@ def Build_CK(Map conf=[:]){
                             """
                     }
                     // run performance tests, stash the logs, results will be processed on the master node
-					dir("script"){
+					dir("projects/composablekernel/script"){
                         if (params.RUN_PERFORMANCE_TESTS){
                         if (params.RUN_FULL_QA && (arch == "gfx90a" || arch == "gfx942")){
                             // run full tests on gfx90a or gfx942
@@ -940,7 +940,7 @@ def process_results(Map conf=[:]){
     withDockerContainer(image: image, args: '--cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v=/var/jenkins/:/var/jenkins') {
         timeout(time: 15, unit: 'MINUTES'){
             try{
-                dir("script"){
+                dir("projects/composablekernel/script"){
                     if (params.RUN_CK_TILE_FMHA_TESTS){
                         try{
                             unstash "perf_fmha_log_gfx942"
