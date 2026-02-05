@@ -40,15 +40,13 @@ def get_changed_files(ref1, ref2):
             text=True,
             check=True,
         )
-        print(result.stdout)
+        print("cwd:", result.stdout)
         result = subprocess.run(
             ["git", "diff", "--name-only", ref1, ref2],
             capture_output=True,
             text=True,
             check=True,
         )
-        print("stderr:")
-        print(result.stderr)
         files = set(line.strip() for line in result.stdout.splitlines() if line.strip())
         return files
     except subprocess.CalledProcessError as e:
