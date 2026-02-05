@@ -256,7 +256,8 @@ def parse_bwd_weight_instances(instances, problem_name):
             block_size = int(args[12])
             m_per_block = int(args[13])
             n_per_block = int(args[14])
-            k_per_block = int(args[15])
+            k0_per_block = int(args[15])
+            k1 = int(args[16])
             m_per_xdl = int(args[17])
             n_per_xdl = int(args[18])
             m_xdl_per_wave = int(args[19])
@@ -264,6 +265,8 @@ def parse_bwd_weight_instances(instances, problem_name):
             a_scalar_per_vector = int(args[25])
             b_scalar_per_vector = int(args[32])
             c_scalar_per_vector = int(args[38])
+
+            k_per_block = k0_per_block * k1
 
             if is_v3_instance:
                 if len(args) != 45:
