@@ -49,6 +49,10 @@
   - any-glob-to-any-file: 'projects/hipsparselt/**/*'
   - any-glob-to-any-file: 'projects/hipblaslt/tensilelite/**/*'
 
+"ci:hipsparselt-fast":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipblaslt/tensilelite/**/*'
+
 "project: miopen":
 - changed-files:
   - any-glob-to-any-file: 'projects/miopen/**/*'
