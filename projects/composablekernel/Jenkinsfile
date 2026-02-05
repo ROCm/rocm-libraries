@@ -28,7 +28,7 @@ def checkoutComposableKernel()
         timeout 10 git fetch --filter=blob:none --depth 1 origin ${branch} || echo "Git fetch timed out"
         timeout 10 git sparse-checkout init --cone || echo "Git sparse-checkout init timed out"
         timeout 10 git sparse-checkout set projects/composablekernel || echo "Git sparse-checkout set timed out"
-        timeout 10 git checkout || echo "Git checkout timed out"
+        timeout 60 git checkout || echo "Git checkout timed out"
     """
 }
 
