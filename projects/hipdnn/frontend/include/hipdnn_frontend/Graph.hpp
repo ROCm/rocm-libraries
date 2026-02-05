@@ -772,7 +772,7 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error create_execution_plan_ext(int64_t engineId, const std::vector<KnobSetting>& settings)
     {
-        HIPDNN_FE_LOG_INFO("Creating execution plans for graph {}", graph_attributes.get_name());
+        HIPDNN_FE_LOG_INFO("Creating execution plans for graph " << graph_attributes.get_name());
 
         if(!_graphDesc || !_graphDesc->valid())
         {
@@ -792,10 +792,10 @@ public:
             auto knobIt = existingKnobs.find(setting.knobId());
             if(knobIt == existingKnobs.end())
             {
-                HIPDNN_FE_LOG_WARN("Ignoring knob {} when creating execution plan for graph {}.  "
-                                   "Engine doesn't support chosen knob.",
-                                   setting.knobId(),
-                                   graph_attributes.get_name());
+                HIPDNN_FE_LOG_WARN("Ignoring knob " << setting.knobId()
+                                                    << " when creating execution plan for graph "
+                                                    << graph_attributes.get_name()
+                                                    << ".  Engine doesn't support chosen knob.");
                 continue;
             }
 
@@ -803,7 +803,7 @@ public:
 
             if(knob.isDeprecated())
             {
-                HIPDNN_FE_LOG_WARN("Knob {} has been marked as deprecated.", knob.knobId());
+                HIPDNN_FE_LOG_WARN("Knob " << knob.knobId() << " has been marked as deprecated.");
             }
 
             HIPDNN_CHECK_ERROR(knob.validate(setting));
