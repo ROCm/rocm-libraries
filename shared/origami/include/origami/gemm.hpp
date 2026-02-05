@@ -84,6 +84,21 @@ double compute_mem_bw_from_occupancy(const hardware_t& hardware, size_t num_acti
  */
 size_t round_elements_to_128B(size_t elements, size_t element_size_bits);
 
+
+/**
+ * @brief Compute MALL tile dimensions based on concurrency.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param splitting_factor K-split factor.
+ * @return std::tuple<size_t, size_t, size_t, size_t> MALL tile dimensions (k, m, n, b).
+ */
+ std::tuple<size_t, size_t, size_t, size_t> compute_mall_tiles(const problem_t& problem,
+                                                               const hardware_t& hardware,
+                                                               const config_t& config,
+                                                               size_t splitting_factor);
+  
 /**
  * @brief Compute L2 tile dimensions based on cache capacity and concurrency.
  *
@@ -107,31 +122,7 @@ std::pair<size_t, size_t> compute_l2_tiles(const problem_t& problem,
                                            size_t wgm_value);
 
 /**
- * @brief Compute MALL tile dimensions based on concurrency.
- *
- * @param problem Problem description (M, N, K, etc.)
- * @param hardware Hardware characteristics (@see origami::hardware_t)
- * @param config Kernel configuration.
- * @param grid_m Number of workgroups in M dimension.
- * @param grid_n Number of workgroups in N dimension.
- * @param num_active_cus Number of active compute units.
- * @param wgm_value Workgroup mapping value.
- * @return std::pair<size_t, size_t> MALL tile dimensions (tile_m, tile_n).
- */
-std::pair<size_t, size_t> compute_mall_tiles(const problem_t& problem,
-                                             const hardware_t& hardware,
-                                             const config_t& config,
-                                             size_t grid_m,
-                                             size_t grid_n,
-                                             size_t num_active_cus,
-                                             size_t wgm_value);
-
-/**
- * @brief Context for kernel execution.
- *
- * Holds derived/computed values for a GEMM kernel execution.
- * This struct bundles grid dimensions, occupancy info, and other
- * values computed from problem, config, and hardware.
+ * @brief Context for kernel execution. Holds derived/computed values for a GEMM kernel execution. This struct bundles grid dimensions, occupancy info, and other values computed from problem, config, and hardware.
  */
 struct context_t {
   /// Grid dimensions.
@@ -157,11 +148,15 @@ struct context_t {
   /// Workgroup mapping parameters.
   workgroup_mapping_t wgm{0, 8, 1};
 
-  /// MALL and L2 Tiles
-  size_t mall_tiles_m = 0;
-  size_t mall_tiles_n = 0;
-  size_t l2_tiles_m   = 0;
-  size_t l2_tiles_n   = 0;
+  /// MALL and L2 Tiles.
+  size_t mall_tile_k = 0;
+  size_t mall_tile_m = 0;
+  size_t mall_tile_n = 0;
+  size_t mall_tile_b = 0;
+  size_t l2_tile_k   = 0;
+  size_t l2_tile_m   = 0;
+  size_t l2_tile_n   = 0;
+  size_t l2_tile_b   = 0;
 
   /// Default constructor.
   context_t() = default;
@@ -188,7 +183,7 @@ struct context_t {
     // Grid dimensions
     grid_m    = math::safe_ceil_div(M, MT_M);
     grid_n    = math::safe_ceil_div(N, MT_N);
-    num_tiles = grid_m * grid_n * batch;
+    num_tiles = grid_m * grid_n;
 
     // Launch parameters
     auto [reduction, wgs, cus, timesteps, split] =
@@ -211,31 +206,19 @@ struct context_t {
     wgm            = workgroup_mapping_t{0, NUM_XCD, std::max(defaultWGM, 1)};
 
     // MALL and L2 Tiles
-    auto [mall_m, mall_n] =
-        compute_mall_tiles(problem, hardware, config, grid_m, grid_n, active_cus, wgm.wgm);
-    mall_tiles_m = mall_m;
-    mall_tiles_n = mall_n;
+    auto [mall_k, mall_m, mall_n, mall_b] =
+        compute_mall_tiles(problem, hardware, config, splitting_factor);
+    mall_tile_k = mall_k;
+    mall_tile_m = mall_m;
+    mall_tile_n = mall_n;
+    mall_tile_b = mall_b;
 
-    auto [l2_m, l2_n] = compute_l2_tiles(
+    auto [l2_tile_m, l2_tile_n] = compute_l2_tiles(
         problem, hardware, config, grid_m, grid_n, active_cus, splitting_factor, wgm.wgm);
-    l2_tiles_m = l2_m;
-    l2_tiles_n = l2_n;
+    l2_tile_m = l2_tile_m;
+    l2_tile_n = l2_tile_n;
   }
 };
-
-/**
- * @brief L2 hit rate from a global (problem-wide) perspective using the refactored API.
- *        Computes in BYTES to correctly handle differing A/B dtypes.
- * @param problem Problem description (M, N, K, etc.)
- * @param hardware Hardware characteristics (@see origami::hardware_t)
- * @param config Kernel configuration.
- * @param context Execution context with derived parameters.
- * @return double
- */
-double compute_l2_hit_rate_global(const problem_t& problem,
-                                  const hardware_t& hardware,
-                                  const config_t& config,
-                                  const context_t& context);
 
 /**
  * @brief Compute arithmetic intensity.
@@ -305,6 +288,20 @@ size_t compute_mt_compute_latency(const problem_t& problem,
                                   const config_t& config);
 
 /**
+ * @brief Estimate the MALL-hitrate (last-level cache.)
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param context Execution context with derived parameters.
+ * @return double Predicted MALL-hitrate.
+ */
+ double estimate_mall_hit(const problem_t& problem,
+                          const hardware_t& hardware,
+                          const config_t& config,
+                          const context_t& context);
+
+/**
  * @brief A linear-estimation method for estimating L2-hitrate.
  *
  * @todo Parameterize this based on the space-filling curve algos.
@@ -320,18 +317,18 @@ double estimate_l2_hit(const problem_t& problem,
                        const context_t& context);
 
 /**
- * @brief Estimate the MALL-hitrate (last-level cache.)
- *
+ * @brief L2 hit rate from a global (problem-wide) perspective.
+ *        Computes in BYTES to correctly handle differing A/B dtypes.
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
  * @param context Execution context with derived parameters.
- * @return double Predicted MALL-hitrate.
+ * @return double L2 hit rate.
  */
-double estimate_mall_hit(const problem_t& problem,
-                         const hardware_t& hardware,
-                         const config_t& config,
-                         const context_t& context);
+double compute_l2_hit_rate_global(const problem_t& problem,
+                                  const hardware_t& hardware,
+                                  const config_t& config,
+                                  const context_t& context);
 
 /**
  * @brief Determine the memory latency per MT_M x MT_N x MT_K Macro Tile (L_MT).

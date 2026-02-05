@@ -40,6 +40,7 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
       auto hardware_slow = make_hardware(gpu_arch);
       auto hardware_fast = make_hardware(gpu_arch);
 
+      constexpr size_t MB = 1024 * 1024;
       if (gpu_arch == 942) {
         const std::string gpu_arch_str = "gfx" + std::to_string(gpu_arch);
         auto gpu_arch_enum             = origami::hardware_t::arch_name_to_enum(gpu_arch_str);
@@ -51,6 +52,7 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
                                             1.0,
                                             1.0,
                                             4000000,
+                                            256 * MB,
                                             1.4,
                                             1,
                                             std::make_tuple(0, 0.015, 0));
@@ -62,6 +64,7 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
                                             1.0,
                                             1.0,
                                             4000000,
+                                            256 * MB,
                                             1.8,
                                             1,
                                             std::make_tuple(0, 0.015, 0));
@@ -76,6 +79,7 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
                                             1.0,
                                             1.0,
                                             4000000,
+                                            256 * MB,
                                             1.4,
                                             1,
                                             std::make_tuple(0, 0.008, 0));
@@ -87,6 +91,7 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
                                             1.0,
                                             1.0,
                                             4000000,
+                                            256 * MB,
                                             1.8,
                                             1,
                                             std::make_tuple(0, 0.008, 0));

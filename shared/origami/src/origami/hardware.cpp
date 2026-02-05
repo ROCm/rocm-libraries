@@ -19,6 +19,7 @@ hardware_t::hardware_t(architecture_t arch,
                        double mem2_perf_ratio,
                        double mem3_perf_ratio,
                        size_t L2_capacity,
+                       size_t MALL_capacity,
                        double compute_clock_ghz,
                        size_t parallel_mi_cu,
                        std::tuple<double, double, double> mem_bw_per_wg_coefficients)
@@ -29,6 +30,7 @@ hardware_t::hardware_t(architecture_t arch,
     , mem2_perf_ratio(mem2_perf_ratio)
     , mem3_perf_ratio(mem3_perf_ratio)
     , L2_capacity(L2_capacity)
+    , MALL_capacity(MALL_capacity)
     , CU_per_L2(N_CU / NUM_XCD)
     , compute_clock_ghz(compute_clock_ghz)
     , parallel_mi_cu(parallel_mi_cu)
@@ -45,7 +47,8 @@ hardware_t::hardware_t(const hardware_t& other)
     , mem1_perf_ratio(other.mem1_perf_ratio)
     , mem2_perf_ratio(other.mem2_perf_ratio)
     , mem3_perf_ratio(other.mem3_perf_ratio)
-    , L2_capacity(other.L2_capacity)
+    , L2_capacity(other.L2_capacity)  
+    , MALL_capacity(other.MALL_capacity)
     , CU_per_L2(other.CU_per_L2)
     , compute_clock_ghz(other.compute_clock_ghz)
     , parallel_mi_cu(other.parallel_mi_cu)
@@ -70,6 +73,7 @@ hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties) {
       1e9 * constants.mem2_perf_ratio / (properties.memoryClockRate * constants.mem_clock_ratio),
       1e9 * constants.mem3_perf_ratio / properties.memoryClockRate,
       properties.l2CacheSize,
+      constants.mall_capacity,
       properties.clockRate / 1e6,
       constants.parallel_mi_cu,
       constants.mem_bw_per_wg_coefficients);
@@ -96,6 +100,7 @@ void hardware_t::print() const {
   std::cout << "mem2_perf_ratio           : " << mem2_perf_ratio << "\n";
   std::cout << "mem3_perf_ratio           : " << mem3_perf_ratio << "\n";
   std::cout << "L2 Cache capacity         : " << L2_capacity << " bytes\n";
+  std::cout << "MALL Cache capacity       : " << MALL_capacity << " bytes\n";
   std::cout << "CUs per L2 domain         : " << CU_per_L2 << "\n";
   std::cout << "Compute clock (GHz)       : " << compute_clock_ghz << "\n";
   std::cout << "Parallel MI/CU            : " << parallel_mi_cu << "\n";

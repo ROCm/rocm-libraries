@@ -90,10 +90,10 @@ double calculate_output_utilization(const problem_t& problem,
 
 // Computes the launch parameters for the kernel
 std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameters(const problem_t& problem,
-                                                                const hardware_t& hardware,
-                                                                const config_t& config,
-                                                                grid_selection_t grid_selection,
-                                                                size_t max_cus) {
+                                                                                  const hardware_t& hardware,
+                                                                                  const config_t& config,
+                                                                                  grid_selection_t grid_selection,
+                                                                                  size_t max_cus) {
   reduction_t reduction_strategy = streamk::select_reduction(problem, hardware, config, grid_selection);
   auto config_with_reduction = config;
   config_with_reduction.reduction_strategy = reduction_strategy;
@@ -157,15 +157,111 @@ size_t round_elements_to_128B(size_t elements, size_t element_size_bits) {
   return round_up_mul(elements, E_block);
 }
 
+// Compute MALL tile dimensions
+std::tuple<size_t, size_t, size_t, size_t> compute_mall_tiles(const problem_t& problem,
+                                                              const hardware_t& hardware,
+                                                              const config_t& config,
+                                                              size_t splitting_factor) {
+  // NOTES:
+  // 1. wgmxccchunk is not modeled yet.
+  // 2. Partial splits are not modeled yet.
+  // 3. We only model the first timestep.
+  
+  // Extract
+  const size_t a_bytes = data_type_to_bytes(problem.a_dtype);
+  const size_t b_bytes = data_type_to_bytes(problem.b_dtype);
+  const size_t M = problem.size.m;
+  const size_t N = problem.size.n;
+  const size_t K = problem.size.k;
+  const size_t B = problem.batch;
+  
+  const size_t MT_M = config.mt.m;
+  const size_t MT_N = config.mt.n;
+
+  // Setup
+  const size_t splitted_K = math::safe_ceil_div(K, splitting_factor);
+  const size_t grid_m = math::safe_ceil_div(M, MT_M);
+  const size_t grid_n = math::safe_ceil_div(N, MT_N);
+  const size_t grid_k = splitting_factor;
+  const size_t grid_b = B;
+
+  // Calculate total reads
+  const size_t total_reads_A = M * K * B * a_bytes;
+  const size_t total_reads_B = N * K * B * b_bytes;
+  const size_t total_reads = total_reads_A + total_reads_B;
+
+  // First, check if we can fit the whole problem into MALL
+  // 0.99 is a safety factor
+  if (total_reads < 0.99 * hardware.MALL_capacity) {
+    return std::make_tuple(grid_k, grid_m, grid_n, grid_b);
+  }
+  else {
+    // This is the order of filling out buckets without using "wgmxccchunk":
+    // K_splits -> M -> N -> Batch
+    // Rreducing in the reverse order of the above so that we can fit the whole problem into MALL.
+    size_t mall_tile_k = grid_k;
+    size_t mall_tile_m = grid_m;
+    size_t mall_tile_n = grid_n;
+    size_t mall_tile_b = grid_b;
+
+    size_t reads = total_reads;
+    while (reads > 0.99 * hardware.MALL_capacity) {
+      // Reduce the mall tile dimensions one by one
+      if (mall_tile_b > 1) {
+        mall_tile_b--;
+      }
+      else if (mall_tile_n > 1) {
+        mall_tile_n--;
+      }
+      else if (mall_tile_m > 1) {
+        mall_tile_m--;
+      }
+      else if (mall_tile_k > 1) {
+        mall_tile_k--;
+      }
+      // Calculate the new reads
+      size_t reads_A = (mall_tile_m * MT_M) * (mall_tile_k * splitted_K) * mall_tile_b * a_bytes;
+      size_t reads_B = (mall_tile_n * MT_N) * (mall_tile_k * splitted_K) * mall_tile_b * b_bytes;
+      reads = reads_A + reads_B;
+    }
+    return std::make_tuple(mall_tile_k, mall_tile_m, mall_tile_n, mall_tile_b);
+  }
+}
+
 // Compute L2 tile dimensions
 std::pair<size_t, size_t> compute_l2_tiles(const problem_t& problem,
                                            const hardware_t& hardware,
                                            const config_t& config,
-                                           size_t grid_m,
-                                           size_t grid_n,
-                                           size_t num_active_cus,
-                                           size_t splitting_factor,
-                                           size_t wgm_value) {
+                                           const workgroup_mapping_t& wgm,
+                                           size_t splitting_factor) {
+  // NOTES:
+  // 1. wgmxccchunk is not modeled yet.
+  // 2. Partial splits are not modeled yet.
+  // 3. We only model the first timestep.
+  
+  // Extract
+  const size_t a_bytes = data_type_to_bytes(problem.a_dtype);
+  const size_t b_bytes = data_type_to_bytes(problem.b_dtype);
+  const size_t M = problem.size.m;
+  const size_t N = problem.size.n;
+  const size_t K = problem.size.k;
+  const size_t B = problem.batch;
+  
+  const size_t MT_M = config.mt.m;
+  const size_t MT_N = config.mt.n;
+
+  // Setup
+  const size_t splitted_K = math::safe_ceil_div(K, splitting_factor);
+  const size_t grid_m = math::safe_ceil_div(M, MT_M);
+  const size_t grid_n = math::safe_ceil_div(N, MT_N);
+  const size_t grid_k = splitting_factor;
+  const size_t grid_b = B;
+
+  // Calculate total reads
+  const size_t total_reads_A = M * K * B * a_bytes;
+  const size_t total_reads_B = N * K * B * b_bytes;
+  const size_t total_reads = total_reads_A + total_reads_B;
+
   // Number of CUs that might share the same K-tiles, adjusted for K-splitting.
   const size_t effective_cus =
       math::safe_ceil_div(num_active_cus, splitting_factor * problem.batch);
@@ -208,32 +304,6 @@ std::pair<size_t, size_t> compute_l2_tiles(const problem_t& problem,
   }
 
   return {l2_tile_m, l2_tile_n};
-}
-
-// Compute MALL tile dimensions
-std::pair<size_t, size_t> compute_mall_tiles(const problem_t& problem,
-                                             const hardware_t& hardware,
-                                             const config_t& config,
-                                             size_t grid_m,
-                                             size_t grid_n,
-                                             size_t num_active_cus,
-                                             size_t wgm_value) {
-  // Initial Tile Sizing based on Concurrency
-  size_t mall_tile_m = math::safe_ceil_div(num_active_cus, wgm_value);
-  size_t mall_tile_n = std::min(wgm_value, grid_n);
-
-  // Handle wrap-around case if the tile is taller than the grid.
-  if (mall_tile_m > grid_m) {
-    size_t num_wraps = mall_tile_m / grid_m;
-    mall_tile_n += (num_wraps * wgm_value);
-    mall_tile_m = grid_m;
-  }
-
-  // Clamp initial tile dimensions to the actual grid size.
-  mall_tile_m = std::max(std::min(grid_m, mall_tile_m), static_cast<size_t>(1));
-  mall_tile_n = std::max(std::min(grid_n, mall_tile_n), static_cast<size_t>(1));
-
-  return {mall_tile_m, mall_tile_n};
 }
 
 /* ---------------------------------------------------------------------------------------- */
@@ -430,14 +500,46 @@ size_t compute_mt_compute_latency(const problem_t& problem,
 /* ---------------------------------------------------------------------------------------- */
 /* Memory-related functions                                                                 */
 /* ---------------------------------------------------------------------------------------- */
+// Estimate MALL hit-rate
+double estimate_mall_hit(const problem_t& problem,
+                         const hardware_t& hardware,
+                         const config_t& config,
+                         const context_t& context) {
+  // Extract parameters
+  const size_t MT_M       = config.mt.m;
+  const size_t MT_N       = config.mt.n;
+  const size_t splitted_K = math::safe_ceil_div(problem.size.k, context.splitting_factor);
+  const auto   a_bytes    = data_type_to_bytes(problem.a_dtype);
+  const auto   b_bytes    = data_type_to_bytes(problem.b_dtype);
+
+  // Fetch pre-computed MALL tile dimensions from context
+  const size_t mall_tile_k = context.mall_tile_k;
+  const size_t mall_tile_m = context.mall_tile_m;
+  const size_t mall_tile_n = context.mall_tile_n;
+  const size_t mall_tile_b = context.mall_tile_b;
+
+  size_t uncached_reads_A     = (mall_tile_m * MT_M) * (mall_tile_k * splitted_K) * mall_tile_b * a_bytes;
+  size_t uncached_reads_B     = (mall_tile_n * MT_N) * (mall_tile_k * splitted_K) * mall_tile_b * b_bytes;
+  size_t total_uncached_reads = uncached_reads_A + uncached_reads_B;
+
+  size_t total_reads_A = uncached_reads_A * mall_tile_n;
+  size_t total_reads_B = uncached_reads_B * mall_tile_m;
+  size_t total_reads = total_reads_A + total_reads_B;
+
+  double mall_hit_rate = static_cast<double>(total_reads - total_uncached_reads) / static_cast<double>(total_reads);
+
+  // Clamp the final result to the valid [0, 1] range.
+  return std::max(0.0, std::min(mall_hit_rate, 1.0));
+}
+
 // Estimate L2 hit rate
 double estimate_l2_hit(const problem_t& problem,
                        const hardware_t& hardware,
                        const config_t& config,
                        const context_t& context) {
   // Fetch pre-computed L2 tile dimensions from context
-  const size_t l2_tile_m = context.l2_tiles_m;
-  const size_t l2_tile_n = context.l2_tiles_n;
+  const size_t l2_tile_m = context.l2_tile_m;
+  const size_t l2_tile_n = context.l2_tile_n;
 
   // Uncached reads are the first read of each unique element within the L2 tile.
   const long long uncached_A_reads     = static_cast<long long>(l2_tile_m) * config.mt.mk();
@@ -456,32 +558,6 @@ double estimate_l2_hit(const problem_t& problem,
 
   // Clamp the hit rate to be within a realistic [0, 1] range.
   return std::max(0.0, std::min(l2_hit_rate, 1.0));
-}
-
-// Estimate MALL hit-rate
-double estimate_mall_hit(const problem_t& problem,
-                         const hardware_t& hardware,
-                         const config_t& config,
-                         const context_t& context) {
-  // Fetch pre-computed MALL tile dimensions from context
-  const size_t mall_tile_m = context.mall_tiles_m;
-  const size_t mall_tile_n = context.mall_tiles_n;
-
-  // Calculate Hit Rate based on the tile size
-  const long long uncached_A_reads     = static_cast<long long>(mall_tile_m) * config.mt.mk();
-  const long long uncached_B_reads     = static_cast<long long>(mall_tile_n) * config.mt.nk();
-  const long long total_uncached_reads = uncached_A_reads + uncached_B_reads;
-
-  const long long total_A_reads = uncached_A_reads * mall_tile_n;
-  const long long total_B_reads = uncached_B_reads * mall_tile_m;
-  const long long total_reads   = std::max(total_A_reads + total_B_reads, 1LL);
-
-  const long long cached_reads = total_reads - total_uncached_reads;
-
-  double mall_hit_rate = static_cast<double>(cached_reads) / static_cast<double>(total_reads);
-
-  // Clamp the final result to the valid [0, 1] range.
-  return std::max(0.0, std::min(mall_hit_rate, 1.0));
 }
 
 /**
@@ -621,8 +697,8 @@ double compute_memory_latency(const problem_t& problem,
   // Fetch pre-computed MALL tile dimensions from context.
   const size_t grid_m = context.grid_m;
   const size_t grid_n = context.grid_n;
-  const size_t mall_m = context.mall_tiles_m;
-  const size_t mall_n = context.mall_tiles_n;
+  const size_t mall_m = context.mall_tile_m;
+  const size_t mall_n = context.mall_tile_n;
   // This is the minimum unique bytes needed from HBM to feed the concurrent workgroups.
   double concurrent_batches =
       std::min(static_cast<double>(problem.batch),

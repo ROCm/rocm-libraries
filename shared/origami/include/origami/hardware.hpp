@@ -79,6 +79,7 @@ class hardware_t {
     std::tuple<double, double, double>
         mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup
     double mem_clock_ratio;          ///< Memory clock ratio relative to compute clock
+    size_t mall_capacity;            ///< MALL (Infinity Cache) capacity in bytes
 
     constexpr architecture_constants(size_t num_xcds,
                                      double mem1_perf_ratio,
@@ -86,14 +87,16 @@ class hardware_t {
                                      double mem3_perf_ratio,
                                      size_t parallel_mi_cu,
                                      std::tuple<double, double, double> mem_bw_per_wg_coefficients,
-                                     double mem_clock_ratio)  // Obtained through microbenchmarking
+                                     double mem_clock_ratio,
+                                     size_t mall_capacity)  // Obtained through microbenchmarking
         : num_xcds(num_xcds)
         , mem1_perf_ratio(mem1_perf_ratio)
         , mem2_perf_ratio(mem2_perf_ratio)
         , mem3_perf_ratio(mem3_perf_ratio)
         , parallel_mi_cu(parallel_mi_cu)
         , mem_bw_per_wg_coefficients(mem_bw_per_wg_coefficients)
-        , mem_clock_ratio(mem_clock_ratio) {}
+        , mem_clock_ratio(mem_clock_ratio)
+        , mall_capacity(mall_capacity) {}
   };
 
   /**
@@ -107,20 +110,21 @@ class hardware_t {
    * @return architecture_constants Constants for the specified architecture
    */
   static constexpr architecture_constants get_arch_constants(architecture_t arch) {
+    constexpr size_t MB = 1024 * 1024;
     switch (arch) {
       case architecture_t::gfx90a:
-        return {1, 5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5};
+        return {1, 5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5, 0};
       case architecture_t::gfx942:
-        return {8, 17, 1.21875121875121875122 * 6, 4, 4, std::make_tuple(0, 0.015, 0), 1.5};
+        return {8, 17, 1.21875121875121875122 * 6, 4, 4, std::make_tuple(0, 0.015, 0), 1.5, 256 * MB};
       case architecture_t::gfx950:
-        return {8, 17, 1.21875121875121875122 * 7, 6, 4, std::make_tuple(0, 0.008, 0), 1.5};
+        return {8, 17, 1.21875121875121875122 * 7, 6, 4, std::make_tuple(0, 0.008, 0), 1.5, 256 * MB};
       case architecture_t::gfx1201:
-        return {1, 5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5};
+        return {1, 5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5, 64 * MB};
       case architecture_t::gfx1100:
-        return {1, 7.12, 1.21875121875121875122 * 3.48, 0.732, 2, std::make_tuple(0, 0.11, 0), 1.5};
+        return {1, 7.12, 1.21875121875121875122 * 3.48, 0.732, 2, std::make_tuple(0, 0.11, 0), 1.5, 96 * MB};
       case architecture_t::gfx1151:
-        return {1, 2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 1.5};
-      default: return {0, 0, 0, 0, 0, std::make_tuple(0, 0, 0), 0};
+        return {1, 2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 1.5, 32 * MB};
+      default: return {0, 0, 0, 0, 0, std::make_tuple(0, 0, 0), 0, 0};
     }
   }
 
@@ -410,6 +414,7 @@ class hardware_t {
   double mem2_perf_ratio;
   double mem3_perf_ratio;
   size_t L2_capacity;        ///< Capacity of L2 cache in bytes
+  size_t MALL_capacity;      ///< Capacity of MALL cache in bytes
   size_t CU_per_L2;          ///< Number of compute units per L2 cache domain
   double compute_clock_ghz;  ///< Compute clock frequency in GHz
   size_t parallel_mi_cu;     ///< Number of parallel matrix instructions per compute unit
@@ -428,6 +433,7 @@ class hardware_t {
    * @param mem2_perf_ratio Memory level 2 performance ratio
    * @param mem3_perf_ratio Memory level 3 performance ratio
    * @param L2_capacity L2 cache capacity in bytes
+   * @param MALL_capacity MALL cache capacity in bytes
    * @param compute_clock_ghz Compute clock frequency in GHz
    * @param parallel_mi_cu Number of parallel matrix instructions per CU
    * @param mem_bw_per_wg_coefficients Memory bandwidth coefficients per workgroup
@@ -440,6 +446,7 @@ class hardware_t {
              double mem2_perf_ratio,
              double mem3_perf_ratio,
              size_t L2_capacity,
+             size_t MALL_capacity,
              double compute_clock_ghz,
              size_t parallel_mi_cu,
              std::tuple<double, double, double> mem_bw_per_wg_coefficients);

@@ -99,7 +99,8 @@ inline origami::config_t make_config(size_t mt_m,
 
 // Helper function to construct hardware_t with all parameters
 inline origami::hardware_t make_hardware(int gpu_arch) {
-  
+  const size_t MB = 1024 * 1024;
+
   //Initialize the constants
   size_t n_cu                                                   = 0;
   size_t lds_capacity                                           = 0;
@@ -108,6 +109,7 @@ inline origami::hardware_t make_hardware(int gpu_arch) {
   double mem2_perf_ratio                                        = 0.0;
   double mem3_perf_ratio                                        = 0.0;
   size_t l2_capacity                                            = 0;
+  size_t mall_capacity                                          = 0;
   double compute_clock_ghz                                      = 0.0;
   size_t parallel_mi_cu                                         = 0;
   std::tuple<double, double, double> mem_bw_per_wg_coefficients = std::make_tuple(0, 0, 0);
@@ -120,7 +122,8 @@ inline origami::hardware_t make_hardware(int gpu_arch) {
     mem1_perf_ratio                                        = 1.0;
     mem2_perf_ratio                                        = 1.0;
     mem3_perf_ratio                                        = 1.0;
-    l2_capacity                                            = 4000000;
+    l2_capacity                                            = 4 * MB;
+    mall_capacity                                          = 256 * MB;
     compute_clock_ghz                                      = 1;
     parallel_mi_cu                                         = 1;
     mem_bw_per_wg_coefficients = std::make_tuple(0, 0.015, 0);
@@ -133,7 +136,8 @@ inline origami::hardware_t make_hardware(int gpu_arch) {
     mem1_perf_ratio                                        = 1.0;
     mem2_perf_ratio                                        = 1.0;
     mem3_perf_ratio                                        = 1.0;
-    l2_capacity                                            = 4000000;
+    l2_capacity                                            = 4 * MB;
+    mall_capacity                                          = 256 * MB;
     compute_clock_ghz                                      = 1.2;
     parallel_mi_cu                                         = 1;
     mem_bw_per_wg_coefficients = std::make_tuple(0, 0.008, 0);      
@@ -149,6 +153,7 @@ inline origami::hardware_t make_hardware(int gpu_arch) {
                              mem2_perf_ratio,
                              mem3_perf_ratio,
                              l2_capacity,
+                             mall_capacity,
                              compute_clock_ghz,
                              parallel_mi_cu,
                              mem_bw_per_wg_coefficients);
