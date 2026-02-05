@@ -172,7 +172,7 @@ def main():
     #
     # Generated Tests:
     # - One test per category (quick, standard, etc.) per unique ex_gpu_* label
-    # - Test name format: {target_name}-{category}-{gpu_arch}-exclude
+    # - Test name format: {target_name}-{category}-{gpu_arch}-suite
     # - Uses gtest filter: "{category_patterns}:-{gpu_exclusion_patterns}"
     # - Labels include both category labels and ex_gpu_* label
     #
@@ -296,13 +296,13 @@ def main():
 
             print(f"# GPU exclusion for {gpu_arch} - {category_name} category")
             print("add_test(")
-            print(f"  NAME {target_name}-{category_name}-{gpu_arch}-exclude")
+            print(f"  NAME {target_name}-{category_name}-{gpu_arch}-suite")
             print(f"  COMMAND {target_name} --gtest_filter={pattern_string}")
             print(f"  WORKING_DIRECTORY {working_dir}")
             print(")")
 
             print(
-                f"set_tests_properties({target_name}-{category_name}-{gpu_arch}-exclude PROPERTIES"
+                f"set_tests_properties({target_name}-{category_name}-{gpu_arch}-suite PROPERTIES"
             )
             print(f"  LABELS {label_string}")
             print(f"  TIMEOUT {timeout}")
@@ -317,10 +317,10 @@ def main():
                         file=sys.stderr,
                     )
                     install_file_handle.write(
-                        f'add_test({target_name}-{category_name}-{gpu_arch}-exclude "../{target_name}" --gtest_filter={pattern_string})\n'
+                        f'add_test({target_name}-{category_name}-{gpu_arch}-suite "../{target_name}" --gtest_filter={pattern_string})\n'
                     )
                     install_file_handle.write(
-                        f"set_tests_properties({target_name}-{category_name}-{gpu_arch}-exclude PROPERTIES LABELS {label_string} TIMEOUT {timeout})\n\n"
+                        f"set_tests_properties({target_name}-{category_name}-{gpu_arch}-suite PROPERTIES LABELS {label_string} TIMEOUT {timeout})\n\n"
                     )
                     install_file_handle.flush()
                 except Exception as e:
