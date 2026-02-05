@@ -3288,21 +3288,6 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
-
-@RegisterSchedule(
-    tile_config=TileConfig(160, 128, 64, 2, 1, True, 0, 0),
-    dtype_predicate=isTF32,
-    vector_widths=[4, 4, 4],
-    matrix_inst=[16, 16, 32, 1],
-    mfma_wave_group=[2, 2]
-)
-def _get_schedule_160x128x64_TF32(kernel, useLDSTr, TLDS):
-    valid, opt = _get_schedule_128x160x64_TF32(kernel, useLDSTr, TLDS)
-    if not valid:
-        return False, None
-    optSchedule = switch_A_B_schedule(opt.optSchedule)
-    return True, ScheduleInfo(opt.numCodePaths, opt.numMfma, optSchedule, opt.syncCode, opt.nglshift, opt.nllshift)
-
 @RegisterSchedule(
     tile_config=TileConfig(128, 128, 32, 2, 0, True, 0, 0),
     dtype_predicate=isTF32,
@@ -4342,6 +4327,13 @@ def _get_schedule_160x128x64_TF32(kernel, useLDSTr, TLDS):
 
         opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
         return True, opt1
+
+    elif isTN(kernel) and not useLDSTr and TLDS==1:
+        valid, opt = _get_schedule_128x160x64_TF32(kernel, useLDSTr, TLDS)
+        if not valid:
+            return False, None
+        optSchedule = switch_A_B_schedule(opt.optSchedule)
+        return True, ScheduleInfo(opt.numCodePaths, opt.numMfma, optSchedule, opt.syncCode, opt.nglshift, opt.nllshift)
 
     else:
         return False, None
