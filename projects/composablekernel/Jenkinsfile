@@ -86,6 +86,10 @@ def checkoutComposableKernel()
             exit 1
         fi
 
+        # Configure git identity for merge commit
+        git config user.email "jenkins@amd.com"
+        git config user.name "Jenkins"
+
         # Merge develop into current branch
         timeout 60 git merge origin/develop
         rc=\$?
