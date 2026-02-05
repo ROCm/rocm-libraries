@@ -13,7 +13,8 @@ class HipblasltMatrixLayout
 {
 public:
     HipblasltMatrixLayout() = default;
-    HipblasltMatrixLayout(const hipdnn_plugin_sdk::TensorAttributesWrapper& tensor);
+    HipblasltMatrixLayout(
+        const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor);
 
     HipblasltMatrixLayout(const HipblasltMatrixLayout&) = delete;
     HipblasltMatrixLayout& operator=(const HipblasltMatrixLayout&) = delete;
