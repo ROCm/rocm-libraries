@@ -5,6 +5,23 @@ import platform
 import argparse
 
 
+def gpu_arch_matches(specific_arch, pattern_arch):
+    """
+    Check if a specific GPU architecture matches a pattern with X wildcards.
+    E.g., gfx1150 matches gfx1150 (exact), gfx115X, gfx11X, etc.
+    """
+    if specific_arch == pattern_arch:
+        return True
+
+    # Check if pattern_arch has X wildcards
+    if "X" not in pattern_arch:
+        return False
+
+    # Split at the first X and check if specific_arch starts with the prefix
+    prefix = pattern_arch.split("X")[0]
+    return specific_arch.startswith(prefix)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Parse test_categories.yaml and generate CMake test definitions"
@@ -55,6 +72,9 @@ def main():
     else:
         print(f"# DEBUG: No install test file provided", file=sys.stderr)
 
+    # ===============================================================================================================
+    # Parse the YAML file, add excludes (including OS-specific), and write tests to CMake and install file.
+    # ===============================================================================================================
     categories = config.get("test_categories", {})
     execution_settings = config.get("execution_settings", {})
     timeouts = execution_settings.get("category_timeouts", {})
@@ -95,18 +115,9 @@ def main():
         print(f"# Category: {category_name}")
         print(f'# Description: {category_info.get("description", "")}')
 
-        # Build positive pattern string
-        positive_string = ""
-        for pattern in patterns:
-            positive_string = positive_string + ":" + pattern
-        positive_string = positive_string[1:]  # Remove leading colon
-
-        # Build negative pattern string for exclusions
-        exclude_string = ""
-        if exclude:
-            for excluded_pattern in exclude:
-                exclude_string = exclude_string + ":" + excluded_pattern
-            exclude_string = exclude_string[1:]  # Remove leading colon
+        # Build positive pattern string and exclude string
+        positive_string = ":".join(patterns)
+        exclude_string = ":".join(exclude) if exclude else ""
 
         # Store positive and exclude strings separately for GPU exclusion processing
         category_data[category_name] = {
@@ -122,10 +133,11 @@ def main():
         else:
             pattern_string = positive_string
 
-        label_string = ""
-        for label in labels:
-            label_string = label_string + ";" + label
-        label_string = '"' + label_string[1:] + '"'
+        label_string = '"' + ";".join(labels) + '"'
+
+        # =======================================================================
+        # Write category test to CMake file and install file.
+        # =======================================================================
         print("add_test(")
         print(f"  NAME {target_name}-{category_name}-suite")
         print(f"  COMMAND {target_name} --gtest_filter={pattern_string}")
@@ -162,57 +174,16 @@ def main():
     # ========================================================================
     #
     # This section generates GPU-specific exclusion tests
-    #
-    # Hierarchical Matching:
+
     # - Uses wildcard 'X' for pattern matching (e.g., gfx11X matches gfx1100, gfx1150, etc.)
-    # - More specific GPUs inherit exclusions from general patterns
-    # - Example: gfx1150 will exclude patterns from BOTH:
-    #   * exclude_gpu_gfx11X (general gfx11 family)
-    #   * exclude_gpu_gfx1150 (specific to gfx1150)
-    #
-    # Generated Tests:
-    # - One test per category (quick, standard, etc.) per unique ex_gpu_* label
+
+    # - Generates one test per category (quick, standard, etc.) per unique ex_gpu_* label
     # - Test name format: {target_name}-{category}-{gpu_arch}-suite
     # - Uses gtest filter: "{category_patterns}:-{gpu_exclusion_patterns}"
-    # - Labels include both category labels and ex_gpu_* label
-    #
-    # Usage Examples:
-    # - On gfx1150 hardware:
-    #   ctest -L quick -L ex_gpu_gfx1150
-    #   (runs ONLY the gfx1150 GPU exclusion test with gfx11X and gfx1150 patterns excluded)
-    #
-    # - On gfx950 hardware:
-    #   ctest -L quick -L ex_gpu_gfx950
-    #   (runs ONLY the gfx950 GPU exclusion test with gfx950 patterns excluded)
-    #
-    # - On generic/other hardware:
-    #   ctest -L quick -LE ex_gpu
-    #   (runs main quick suite with ALL patterns included, excludes GPU-specific tests)
-    #
-    # Note: Using "-L quick" alone will run BOTH main suite and ALL GPU exclusion tests
     # ========================================================================
 
-    def gpu_arch_matches(specific_arch, pattern_arch):
-        """
-        Check if a specific GPU architecture matches a pattern with X wildcards.
-        E.g., gfx1150 matches gfx1150 (exact), gfx115X, gfx11X, etc.
-        X acts as a wildcard for any remaining characters after that point.
-        """
-        if specific_arch == pattern_arch:
-            return True
-
-        # Check if pattern_arch has X wildcards
-        if "X" not in pattern_arch:
-            return False
-
-        # X means "any characters after this point"
-        # So gfx11X matches gfx110, gfx1150, gfx1151, etc.
-        # Split at the first X and check if specific_arch starts with the prefix
-        prefix = pattern_arch.split("X")[0]
-        return specific_arch.startswith(prefix)
-
     # Collect all ex_gpu labels and their corresponding GPU architectures
-    # We need to process each unique ex_gpu_* label
+
     ex_gpu_labels_to_process = set()
     for gpu_key, gpu_config in exclude_gpu_config.items():
         match = re.match(r"exclude_gpu_(gfx\w+)", gpu_key)
@@ -222,9 +193,9 @@ def main():
                 if label.startswith("ex_gpu_"):
                     ex_gpu_labels_to_process.add(label)
 
-    # Process top-level exclude_gpu section
     # For each unique ex_gpu label, create tests with hierarchical pattern matching
-    for ex_gpu_label in ex_gpu_labels_to_process:
+    # Sort to ensure consistent test order
+    for ex_gpu_label in sorted(ex_gpu_labels_to_process):
         # Extract the GPU architecture from the label (e.g., ex_gpu_gfx1150 -> gfx1150)
         gpu_arch = ex_gpu_label.replace("ex_gpu_", "")
 
@@ -264,10 +235,7 @@ def main():
                 unique_patterns.append(pattern)
 
         # Build GPU exclusion pattern string - format: pattern1:pattern2
-        gpu_exclude_string = ""
-        for pattern in unique_patterns:
-            gpu_exclude_string = gpu_exclude_string + ":" + pattern
-        gpu_exclude_string = gpu_exclude_string[1:]  # Remove leading colon
+        gpu_exclude_string = ":".join(unique_patterns)
 
         # Create one test for each applicable category
         for category_name in all_applicable_categories:
@@ -278,7 +246,6 @@ def main():
             timeout = cat_data["timeout"]
 
             # Build combined pattern string: positive - category_excludes:gpu_excludes
-            # Combine all negative patterns
             combined_exclude_string = ""
             if cat_exclude_string:
                 combined_exclude_string = cat_exclude_string + ":" + gpu_exclude_string
@@ -289,11 +256,11 @@ def main():
 
             # Build label string: category_labels + ex_gpu_<arch> label
             combined_labels = cat_labels + [ex_gpu_label]
-            label_string = ""
-            for label in combined_labels:
-                label_string = label_string + ";" + label
-            label_string = '"' + label_string[1:] + '"'
+            label_string = '"' + ";".join(combined_labels) + '"'
 
+            # =======================================================================
+            # Write GPU exclusion tests to CMake file and install file.
+            # =======================================================================
             print(f"# GPU exclusion for {gpu_arch} - {category_name} category")
             print("add_test(")
             print(f"  NAME {target_name}-{category_name}-{gpu_arch}-suite")
