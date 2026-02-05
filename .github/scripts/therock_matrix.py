@@ -63,6 +63,10 @@ project_map = {
         "cmake_options": ["-DTHEROCK_ENABLE_ROCWMMA=ON"],
         "projects_to_test": ["rocwmma"],
     },
+    "hip-kernel-provider": {
+        "cmake_options": ["-DTHEROCK_ENABLE_HIP_KERNEL_PLUGIN=ON"],
+        "projects_to_test": ["hip_kernel_plugin"],
+    },
 }
 
 # For certain math components, they are optional during building and testing.
@@ -100,11 +104,6 @@ additional_options = {
         ],
         "projects_to_test": ["miopen_plugin"],
         "project_to_add": "miopen",
-    },
-    "hip-kernel-provider": {
-        "cmake_options": ["-DTHEROCK_ENABLE_HIP_KERNEL_PLUGIN=ON"],
-        "projects_to_test": ["hip_kernel_plugin"],
-        "project_to_add": "miopen",  # TODO: We need to change this based on the deps of hip kernel provider!
     },
 }
 
