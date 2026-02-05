@@ -9,14 +9,6 @@
 
 #include <miopen/unique_path.hpp>
 
-// clang-format off
-#if defined(_WIN32) || defined(__CYGWIN__) // Windows default, including MinGW and Cygwin
-#   define MIOPEN_WINDOWS_API
-#else // defined(_WIN32) || defined(__CYGWIN__)
-#   define MIOPEN_POSIX_API
-#endif // defined(_WIN32) || defined(__CYGWIN__)
-// clang-format on
-
 namespace {
 
 template <typename T = uint64_t, typename G = std::mt19937_64>
@@ -48,7 +40,7 @@ static void generate_random_data_block(void* buf, size_t len)
     }
 }
 
-#ifdef MIOPEN_WINDOWS_API
+#ifdef _WIN32
 const constexpr wchar_t hex[]   = L"0123456789abcdef";
 const constexpr wchar_t percent = L'%';
 #else
