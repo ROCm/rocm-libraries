@@ -194,10 +194,10 @@
     ScheduleIterAlg: 1
     ScheduleLocalWrite: 1
     SolutionIndex: 0
-    SolutionNameMin: Cijk_Ailk_Bljk_DB_UserArgs_MT8x8x8_SN_GSU1_SU32_SUM0_SUS256_TT1_1_WGM1
+    SolutionNameMin: Cijk_Ailk_Bljk_DB_UserArgs_MT8x8x8_SN_GSU1_SU32_SUM1_SUS256_TT1_1_WGM1
     SourceSwap: false
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -364,10 +364,10 @@
     ScheduleIterAlg: 1
     ScheduleLocalWrite: 1
     SolutionIndex: 1
-    SolutionNameMin: Cijk_Ailk_Bljk_DB_UserArgs_MT16x16x8_SN_GSU1_SU32_SUM0_SUS256_TT2_2_WGM1
+    SolutionNameMin: Cijk_Ailk_Bljk_DB_UserArgs_MT16x16x8_SN_GSU1_SU32_SUM1_SUS256_TT2_2_WGM1
     SourceSwap: false
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -534,10 +534,10 @@
     ScheduleIterAlg: 1
     ScheduleLocalWrite: 1
     SolutionIndex: 2
-    SolutionNameMin: Cijk_Ailk_Bljk_DB_UserArgs_MT8x8x16_SN_GSU1_SU32_SUM0_SUS256_TT1_1_WGM1
+    SolutionNameMin: Cijk_Ailk_Bljk_DB_UserArgs_MT8x8x16_SN_GSU1_SU32_SUM1_SUS256_TT1_1_WGM1
     SourceSwap: false
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -704,10 +704,10 @@
     ScheduleIterAlg: 1
     ScheduleLocalWrite: 1
     SolutionIndex: 3
-    SolutionNameMin: Cijk_Ailk_Bljk_DB_UserArgs_MT16x16x16_SN_GSU1_SU32_SUM0_SUS256_TT2_2_WGM1
+    SolutionNameMin: Cijk_Ailk_Bljk_DB_UserArgs_MT16x16x16_SN_GSU1_SU32_SUM1_SUS256_TT2_2_WGM1
     SourceSwap: false
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
