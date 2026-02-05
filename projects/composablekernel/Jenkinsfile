@@ -503,7 +503,7 @@ def build_client_examples_and_codegen_tests(String arch){
     def cmd = """ cd ../codegen && rm -rf build && mkdir build && cd build && \
                 cmake -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" .. && \
                 make -j64 check && \
-                cd ../client_example && rm -rf build && mkdir build && cd build && \
+                cd ../../client_example && rm -rf build && mkdir build && cd build && \
                 cmake -DCMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install;/opt/rocm" \
                 -DGPU_TARGETS="${arch}" \
                 -DCMAKE_CXX_COMPILER="${params.BUILD_COMPILER}" \
