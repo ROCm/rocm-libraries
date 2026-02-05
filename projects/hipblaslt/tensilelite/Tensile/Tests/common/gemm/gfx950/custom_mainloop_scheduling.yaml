@@ -2006,7 +2006,7 @@ BenchmarkProblems:
         - NonTemporalD: [4]
         - SourceSwap: [1]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [0, 1]
+        - UseCustomMainLoopSchedule: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -2082,6 +2082,37 @@ BenchmarkProblems:
           - Range: [[224], [256], [1], [1, 17, 256]]
           - Range: [[224], [256], [1], [32, 64, 256]]
         - BiasTypeArgs: ['b']
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 32, 1, 1, 8, 7, 2, 2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - LDSTrInst: [1]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - UseCustomMainLoopSchedule: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[256], [224], [1], [1, 17, 64]]
+          - Range: [[256], [224], [1], [32, 64, 256]]
+        - BiasTypeArgs: ['b']        
   ########################################
   # HHS NT - standard
   ########################################
