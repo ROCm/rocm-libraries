@@ -123,23 +123,44 @@ public:
 
     int Wait()
     {
+        if(waited)
+            return lastStatus;
+
         WaitForSingleObject(processInfo.hProcess, INFINITE);
 
         DWORD status;
         const auto getExitCodeStatus = GetExitCodeProcess(processInfo.hProcess, &status);
+        const auto getExitCodeError  = GetLastError();
 
         CloseHandle(processInfo.hProcess);
         CloseHandle(processInfo.hThread);
+        processInfo.hProcess = nullptr;
+        processInfo.hThread  = nullptr;
+
+        waited     = true;
+        lastStatus = static_cast<int>(status);
 
         if(getExitCodeStatus == 0)
-            MIOPEN_THROW("GetExitCodeProcess error: " + std::to_string(GetLastError()));
+            MIOPEN_THROW("GetExitCodeProcess error: " + std::to_string(getExitCodeError));
 
-        return status;
+        return lastStatus;
+    }
+
+    ~ProcessImpl()
+    {
+        if(!waited && processInfo.hProcess != nullptr)
+        {
+            WaitForSingleObject(processInfo.hProcess, 5000);
+            CloseHandle(processInfo.hProcess);
+            CloseHandle(processInfo.hThread);
+        }
     }
 
 private:
     fs::path path;
     PROCESS_INFORMATION processInfo{};
+    bool waited    = false;
+    int lastStatus = 0;
 };
 
 #else
