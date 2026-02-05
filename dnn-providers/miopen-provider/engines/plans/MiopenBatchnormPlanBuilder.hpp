@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include "MiopenPlanBuilderBase.hpp"
+#include "PlanBuilderInterface.hpp"
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 namespace miopen_plugin
 {
 
-class MiopenBatchnormPlanBuilder : public MiopenPlanBuilderBase
+class MiopenBatchnormPlanBuilder : public IPlanBuilder
 {
 public:
     MiopenBatchnormPlanBuilder() = default;
@@ -21,6 +21,9 @@ public:
 
     bool isApplicable(const HipdnnEnginePluginHandle& handle,
                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+    size_t getMaxWorkspaceSize(
+        const HipdnnEnginePluginHandle& handle,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
     void buildPlan(const HipdnnEnginePluginHandle& handle,
                    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,

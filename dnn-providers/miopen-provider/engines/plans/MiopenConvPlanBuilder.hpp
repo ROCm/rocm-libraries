@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include "MiopenPlanBuilderBase.hpp"
+#include "PlanBuilderInterface.hpp"
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 namespace miopen_plugin
 {
 
-class MiopenConvPlanBuilder : public MiopenPlanBuilderBase
+class MiopenConvPlanBuilder : public IPlanBuilder
 {
 public:
     struct WorkspaceSizeRange

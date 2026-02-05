@@ -27,7 +27,6 @@ add_executable(
     engines/plans/TestMiopenConvFwdPlan.cpp
     engines/plans/TestMiopenConvPlanBuilder.cpp
     engines/plans/TestMiopenConvWrwPlan.cpp
-    engines/plans/TestMiopenPlanBuilderBase.cpp
     engines/TestMiopenEngine.cpp
     main.cpp
     TestMiopenActivationDescriptor.cpp

@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include "MiopenPlanBuilderBase.hpp"
+#include "PlanBuilderInterface.hpp"
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 namespace miopen_plugin
 {
 
-class MiopenConvFwdBiasActivPlanBuilder : public MiopenPlanBuilderBase
+class MiopenConvFwdBiasActivPlanBuilder : public IPlanBuilder
 {
 public:
     MiopenConvFwdBiasActivPlanBuilder() = default;
