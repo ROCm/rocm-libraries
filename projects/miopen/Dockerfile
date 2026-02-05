@@ -44,6 +44,7 @@ RUN apt-get update && apt-get install -y --allow-unauthenticated \
     libncurses5-dev \
     libnuma-dev \
     libtool \
+    ninja-build \
     patchelf \
     pkg-config \
     python3-dev \
@@ -194,7 +195,6 @@ RUN git config --global url."https://github.com/".insteadOf git@github.com: && \
 RUN mkdir build
 WORKDIR /TheRock/build
 
-RUN apt-get update && apt-get install -y --allow-unauthenticated ninja-build
 RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
         echo "Building with TheRock preset: $THEROCK_BUILD_PRESET"; \
         cmake .. \
@@ -266,6 +266,8 @@ ADD ${PROJ}/script/sccache_wrapper.sh /sccache_wrapper.sh
 ARG SCCACHE_REPO_URL=http://compute-artifactory.amd.com/artifactory/rocm-generic-experimental/rocm-sccache
 ENV SCCACHE_INSTALL_LOCATION=/usr/local/.cargo/bin
 ENV PATH=$PATH:${SCCACHE_INSTALL_LOCATION}
+ARG MIOPEN_SCCACHE=""
+ARG MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER="MiOpen-Docker-CK"
 ENV MIOPEN_SCCACHE=$MIOPEN_SCCACHE
 
 # Copy Composable Kernel
@@ -329,7 +331,7 @@ RUN echo Building for GPU Archs: ${THEROCK_ASIC} && \
     -D CMAKE_CXX_COMPILER_LAUNCHER="${COMPILER_LAUNCHER}" \
     -D CMAKE_C_COMPILER_LAUNCHER="${COMPILER_LAUNCHER}" \
     -D CMAKE_BUILD_TYPE=Release \
-    -D GPU_ARCHS=${THEROCK_ASIC} \
+    -D GPU_ARCHS="${THEROCK_ASIC}" \
     -D MIOPEN_REQ_LIBS_ONLY=ON \
     -D CMAKE_CXX_FLAGS=" -O3 " .. && \
     make -j ${num_threads} install && \
