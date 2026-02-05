@@ -102,9 +102,8 @@ additional_options = {
         "project_to_add": "miopen",
     },
     "hip-kernel-provider": {
-        "cmake_options": [],
-        "projects_to_test": ["hipdnn", "hip_kernel_plugin"],
-        "project_to_add": "hipdnn",
+        "cmake_options": ["-DTHEROCK_ENABLE_HIP_KERNEL_PLUGIN=ON"],
+        "projects_to_test": ["hip_kernel_plugin"],
     },
 }
 
