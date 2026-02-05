@@ -84,8 +84,12 @@ def checkoutComposableKernel()
             exit 1
         fi
 
-        # Use reference repo for faster fetch, fetch both branches with depth 50 to allow merge
-        timeout 120 git fetch --reference ${refRepoPath} --filter=blob:none --depth 50 origin ${branch} develop
+        # Use reference repo as alternates for faster fetch
+        mkdir -p .git/objects/info
+        echo "${refRepoPath}/objects" >> .git/objects/info/alternates
+
+        # Fetch both branches with depth 50 to allow merge
+        timeout 120 git fetch --filter=blob:none --depth 50 origin ${branch} develop
         rc=\$?
         if [ \$rc -eq 124 ]; then
             echo "ERROR: Git fetch timed out after 120 seconds. This may indicate network issues."
