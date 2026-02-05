@@ -126,7 +126,7 @@ def generateAndArchiveBuildTraceVisualization(String buildTraceFileName) {
         sh """#!/bin/bash
             ls -la
             mkdir -p workspace
-            cp ./script/infra_helper/capture_build_trace.js ./workspace
+            cp ./projects/composablekernel/script/infra_helper/capture_build_trace.js ./workspace
             cp ${buildTraceFileName} ./workspace/${buildTraceFileName}
             chmod 777 ./workspace
             ls -la ./workspace
