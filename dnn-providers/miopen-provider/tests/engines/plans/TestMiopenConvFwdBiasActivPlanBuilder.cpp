@@ -6,10 +6,10 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <miopen/miopen.h>
 
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>

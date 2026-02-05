@@ -73,13 +73,13 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnEnginePluginHandle& handle,
 {
     // Validate that there are solutions available for this configuration.
     size_t solutionCount;
-    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetSolutionCount(
-        handle.miopenHandle,
-        _params.w().tensorDescriptor(),
-        _params.x().tensorDescriptor(),
-        _params.conv().convDescriptor(),
-        _params.y().tensorDescriptor(),
-        &solutionCount));
+    THROW_ON_MIOPEN_FAILURE(
+        miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
+                                                 _params.w().tensorDescriptor(),
+                                                 _params.x().tensorDescriptor(),
+                                                 _params.conv().convDescriptor(),
+                                                 _params.y().tensorDescriptor(),
+                                                 &solutionCount));
 
     if(solutionCount == 0)
     {
@@ -95,13 +95,13 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnEnginePluginHandle& handle,
     }
     else
     {
-        THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetWorkSpaceSize(
-            handle.miopenHandle,
-            _params.w().tensorDescriptor(),
-            _params.x().tensorDescriptor(),
-            _params.conv().convDescriptor(),
-            _params.y().tensorDescriptor(),
-            &_workspaceSize));
+        THROW_ON_MIOPEN_FAILURE(
+            miopenConvolutionForwardGetWorkSpaceSize(handle.miopenHandle,
+                                                     _params.w().tensorDescriptor(),
+                                                     _params.x().tensorDescriptor(),
+                                                     _params.conv().convDescriptor(),
+                                                     _params.y().tensorDescriptor(),
+                                                     &_workspaceSize));
     }
 }
 
@@ -138,28 +138,29 @@ void ConvFwdPlan::execute(const HipdnnEnginePluginHandle& handle,
     if(!_algorithm.has_value())
     {
         int requestCount
-            = (_debugMode == HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
+            = (_debugMode
+               == HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
                   ? 10
                   : 1;
 
         std::vector<miopenConvAlgoPerf_t> perfResults(static_cast<size_t>(requestCount));
         int returnedAlgoCount;
 
-        THROW_ON_MIOPEN_FAILURE(miopenFindConvolutionForwardAlgorithm(
-            handle.miopenHandle,
-            _params.x().tensorDescriptor(),
-            xBuffer.ptr,
-            _params.w().tensorDescriptor(),
-            wBuffer.ptr,
-            _params.conv().convDescriptor(),
-            _params.y().tensorDescriptor(),
-            yBuffer.ptr,
-            requestCount,
-            &returnedAlgoCount,
-            perfResults.data(),
-            workspace,
-            workspaceSize,
-            false));
+        THROW_ON_MIOPEN_FAILURE(
+            miopenFindConvolutionForwardAlgorithm(handle.miopenHandle,
+                                                  _params.x().tensorDescriptor(),
+                                                  xBuffer.ptr,
+                                                  _params.w().tensorDescriptor(),
+                                                  wBuffer.ptr,
+                                                  _params.conv().convDescriptor(),
+                                                  _params.y().tensorDescriptor(),
+                                                  yBuffer.ptr,
+                                                  requestCount,
+                                                  &returnedAlgoCount,
+                                                  perfResults.data(),
+                                                  workspace,
+                                                  workspaceSize,
+                                                  false));
 
         if(returnedAlgoCount <= 0)
         {
@@ -168,7 +169,8 @@ void ConvFwdPlan::execute(const HipdnnEnginePluginHandle& handle,
                 "miopenFindConvolutionForwardAlgorithm returned no algorithms");
         }
 
-        if(_debugMode == HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
+        if(_debugMode
+           == HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
         {
             HIPDNN_LOG_INFO("Convolution Fwd: Found {} algorithms", returnedAlgoCount);
             for(size_t i = 0; i < static_cast<size_t>(returnedAlgoCount); ++i)
@@ -195,20 +197,19 @@ void ConvFwdPlan::execute(const HipdnnEnginePluginHandle& handle,
     float alpha = 1.0f;
     float beta = 0.0f;
 
-    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForward(
-        handle.miopenHandle,
-        &alpha,
-        _params.x().tensorDescriptor(),
-        xBuffer.ptr,
-        _params.w().tensorDescriptor(),
-        wBuffer.ptr,
-        _params.conv().convDescriptor(),
-        _algorithm.value(),
-        &beta,
-        _params.y().tensorDescriptor(),
-        yBuffer.ptr,
-        workspace,
-        workspaceSize));
+    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForward(handle.miopenHandle,
+                                                     &alpha,
+                                                     _params.x().tensorDescriptor(),
+                                                     xBuffer.ptr,
+                                                     _params.w().tensorDescriptor(),
+                                                     wBuffer.ptr,
+                                                     _params.conv().convDescriptor(),
+                                                     _algorithm.value(),
+                                                     &beta,
+                                                     _params.y().tensorDescriptor(),
+                                                     yBuffer.ptr,
+                                                     workspace,
+                                                     workspaceSize));
 }
 
 } // namespace miopen_plugin

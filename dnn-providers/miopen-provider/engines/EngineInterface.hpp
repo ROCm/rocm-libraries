@@ -30,7 +30,7 @@ public:
 
     virtual size_t
         getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                         const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+                            const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
 
     virtual void initializeExecutionContext(

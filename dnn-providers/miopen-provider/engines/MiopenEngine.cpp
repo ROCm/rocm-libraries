@@ -24,18 +24,11 @@ namespace
 auto createBenchmarkingKnob(flatbuffers::FlatBufferBuilder& builder)
 {
     return hipdnn_plugin_sdk::KnobFactory::createIntKnob(
-        builder,
-        hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME,
-        "Enable benchmarking",
-        0,
-        0,
-        1,
-        1,
-        {});
+        builder, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, "Enable benchmarking", 0, 0, 1, 1, {});
 }
 
 void handleBenchmarkingKnobSetting(const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
-                                    HipdnnEnginePluginExecutionContext& executionContext)
+                                   HipdnnEnginePluginExecutionContext& executionContext)
 {
     if(!engineConfig.hasKnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME))
     {
@@ -49,9 +42,9 @@ void handleBenchmarkingKnobSetting(const hipdnn_plugin_sdk::IEngineConfig& engin
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Benchmarking knob setting value is not an integer. Type: " +
-            std::string(hipdnn_data_sdk::data_objects::EnumNameKnobValue(
-                knobSetting.valueType())));
+            "Benchmarking knob setting value is not an integer. Type: "
+                + std::string(
+                    hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType())));
     }
 
     auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
@@ -137,7 +130,8 @@ size_t MiopenEngine::getMaxWorkspaceSize(
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
-            workspaceSize = std::max(workspaceSize, planBuilder->getMaxWorkspaceSize(handle, opGraph));
+            workspaceSize
+                = std::max(workspaceSize, planBuilder->getMaxWorkspaceSize(handle, opGraph));
         }
     }
     return workspaceSize;
