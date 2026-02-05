@@ -149,6 +149,181 @@ namespace GEMMTests
     {
     };
 
+    // ========================================================================
+    // StreamKGEMMMXF8F6F4TestSuite
+    // ========================================================================
+
+    // Params are: A & B type, K tile size, (transA, transB), loadPathA, loadPathB, StreamKMode
+    class StreamKGEMMMXF8F6F4TestSuite
+        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
+                                                   int,
+                                                   std::pair<std::string, std::string>,
+                                                   SolutionParams::LoadPath,
+                                                   SolutionParams::LoadPath,
+                                                   rocRoller::StreamKMode>>
+    {
+    };
+
+    TEST_P(StreamKGEMMMXF8F6F4TestSuite, GPU_StreamKUnrollPrefetchSwizzleScaledGEMMMX)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        auto [typeAB, MFMAK, transOp, loadPathA, loadPathB, mode] = std::get<1>(GetParam());
+
+        // Note: The following cases are filtered out by FilterValidStreamKGEMMMXF8F6F4Params:
+        // - Direct2LDS not yet supported for FP6/BF6
+
+        AssertFatal(loadPathA == SolutionParams::LoadPath::BufferToLDSViaVGPR
+                        || loadPathA == SolutionParams::LoadPath::BufferToLDS,
+                    "Unexpected load path for A : ",
+                    ShowValue(loadPathA));
+
+        AssertFatal(loadPathB == SolutionParams::LoadPath::BufferToLDSViaVGPR
+                        || loadPathB == SolutionParams::LoadPath::BufferToLDS,
+                    "Unexpected load path for B : ",
+                    ShowValue(loadPathB));
+
+        int waveM = (MFMAK == 128) ? 16 : 32;
+        int waveN = (MFMAK == 128) ? 16 : 32;
+        int waveK = MFMAK;
+
+        auto problem = GEMMProblemF8F6F4{waveM, waveN, waveK};
+
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        problem.numWGs = deviceProperties.multiProcessorCount;
+
+        problem.macM = 128;
+        problem.macN = 128;
+        problem.macK = 128;
+
+        problem.workgroupSizeX = 2 * problem.wavefrontSize;
+        problem.workgroupSizeY = 2;
+
+        problem.m = problem.macM * 4;
+        problem.n = problem.macN * problem.numWGs / 2 + problem.macN * 2;
+
+        ASSERT_GE(problem.m * problem.n / problem.macM / problem.macN, problem.numWGs);
+
+        problem.streamK = mode;
+        problem.k       = problem.macK * 8;
+
+        std::tie(problem.transA, problem.transB) = transOp;
+
+        problem.loadPathA = loadPathA;
+        problem.loadPathB = loadPathB;
+
+        problem.unrollK           = 2;
+        problem.prefetch          = true;
+        problem.prefetchInFlight  = 2;
+        problem.prefetchLDSFactor = 2;
+
+        // TODO: remove the if condition when SwizzleScale supports non-TN data layout
+        if(problem.transA == "T" && problem.transB == "N")
+        {
+            problem.loadScalePathA = SolutionParams::LoadPath::BufferToVGPR;
+            problem.loadScalePathB = SolutionParams::LoadPath::BufferToVGPR;
+
+            problem.scaleAMode = Operations::ScaleMode::Separate;
+            problem.scaleBMode = Operations::ScaleMode::Separate;
+
+            problem.scaleTypeA = DataType::E8M0;
+            problem.scaleTypeB = DataType::E8M0;
+
+            problem.swizzleScale  = true;
+            problem.swizzleM      = 64;
+            problem.swizzleN      = 64;
+            problem.swizzleK      = 8;
+            problem.prefetchScale = true;
+
+            problem.scaleBlockSize = m_context->targetArchitecture().GetCapability(
+                GPUCapability::DefaultScaleBlockSize);
+        }
+
+        uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
+
+        switch(typeAB)
+        {
+        case DataType::FP8:
+            basicGEMM<FP8, FP8, float>(problem);
+            break;
+        case DataType::BF8:
+            basicGEMM<BF8, BF8, float>(problem);
+            break;
+        case DataType::FP6:
+            basicGEMM<FP6, FP6, float>(problem);
+            break;
+        case DataType::BF6:
+            basicGEMM<BF6, BF6, float>(problem);
+            break;
+        case DataType::FP4:
+            basicGEMM<FP4, FP4, float>(problem);
+            break;
+        default:
+            Throw<FatalError>(
+                fmt::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
+                            toString(typeAB)));
+        }
+    }
+
+    using StreamKGEMMMXF8F6F4TestParamGenerator
+        = ::testing::internal::ParamGenerator<StreamKGEMMMXF8F6F4TestSuite::ParamType>;
+    static auto FilterValidStreamKGEMMMXF8F6F4Params(
+        StreamKGEMMMXF8F6F4TestParamGenerator&& inputParamGenerator)
+    {
+        using LP = SolutionParams::LoadPath;
+        using DT = rocRoller::DataType;
+
+        std::vector<StreamKGEMMMXF8F6F4TestSuite::ParamType> filtered;
+        for(auto const& inputParam : inputParamGenerator)
+        {
+            auto const& params = std::get<1>(inputParam);
+
+            auto const& typeAB    = std::get<0>(params);
+            auto const& loadPathA = std::get<3>(params);
+            auto const& loadPathB = std::get<4>(params);
+
+            // Direct2LDS not yet supported for FP6/BF6
+            if((typeAB == DT::FP6 || typeAB == DT::BF6)
+               && (loadPathA == LP::BufferToLDS || loadPathB == LP::BufferToLDS))
+            {
+                continue;
+            }
+
+            filtered.push_back(inputParam);
+        }
+
+        return ::testing::ValuesIn(filtered);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        StreamKGEMMMXF8F6F4Test,
+        StreamKGEMMMXF8F6F4TestSuite,
+        FilterValidStreamKGEMMMXF8F6F4Params(::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(
+                ::testing::Values(rocRoller::DataType::FP8,
+                                  rocRoller::DataType::BF8,
+                                  rocRoller::DataType::FP6,
+                                  rocRoller::DataType::BF6,
+                                  rocRoller::DataType::FP4),
+                ::testing::Values(64, 128),
+                ::testing::Values(std::pair<std::string, std::string>("N", "N"),
+                                  std::pair<std::string, std::string>("N", "T"),
+                                  std::pair<std::string, std::string>("T", "N"),
+                                  std::pair<std::string, std::string>("T", "T")),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::BufferToLDS),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::BufferToLDS),
+                ::testing::Values(rocRoller::StreamKMode::Standard,
+                                  rocRoller::StreamKMode::TwoTile,
+                                  rocRoller::StreamKMode::TwoTileDPFirst))))); // StreamKMode
+
+    // ========================================================================
+    // GEMMF8F6F4TestSuite (tests)
+    // ========================================================================
+
     TEST_P(GEMMF8F6F4TestSuite, GPU_GEMM_DataType_F8F6F4_Basic)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
