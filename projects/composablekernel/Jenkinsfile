@@ -1160,6 +1160,7 @@ pipeline {
         parameterizedCron(CRON_SETTINGS)
     }
     options {
+        skipDefaultCheckout()
         parallelsAlwaysFailFast()
     }
     parameters {
@@ -1340,6 +1341,7 @@ pipeline {
             agent{ label rocmnode("nogpu") }
             steps {
                 script {
+                    checkoutComposableKernel
                     env.SHOULD_RUN_CI = String.valueOf(params.FORCE_CI.toBoolean() || shouldRunCICheck())
                     echo "SHOULD_RUN_CI: ${env.SHOULD_RUN_CI}"
                 }
