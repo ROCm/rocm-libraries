@@ -66,6 +66,7 @@
 #include "common/auxiliary/testing_stein.hpp"
 #include "common/auxiliary/testing_steqr.hpp"
 #include "common/auxiliary/testing_sterf.hpp"
+#include "common/auxiliary/testing_sy2sb_he2hb.hpp"
 
 // lapack
 #include "common/lapack/testing_gebd2_gebrd.hpp"

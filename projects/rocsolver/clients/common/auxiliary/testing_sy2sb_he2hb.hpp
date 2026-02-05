@@ -157,15 +157,15 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
                     const rocblas_int nb,
                     Td& dA,
                     const rocblas_int lda,
-                    Td& dTau,
                     Td& dAband,
                     const rocblas_int ldab,
+                    Td& dTau,
                     Th& hARes,
-                    Th& hTauRes,
                     Th& hAbandRes,
+                    Th& hTauRes,
                     Th& hA,
-                    Th& hTau,
                     Th& hAband,
+                    Th& hTau,
                     double* max_err)
 {
     // lwork for LAPACK hetrd_he2hb
@@ -179,9 +179,10 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
     // GPU lapack
     CHECK_ROCBLAS_ERROR(
         rocsolver_sy2sb_he2hb(
-            handle, n, kd, nb, dA.data(), lda, dTau.data(), dAband.data(), ldab));
+            handle, n, kd, nb, dA.data(), lda, dAband.data(), ldab, dTau.data()));
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
-    CHECK_HIP_ERROR(hAband_Res.transfer_from(dAband));
+    CHECK_HIP_ERROR(hAbandRes.transfer_from(dAband));
+    CHECK_HIP_ERROR(hTauRes.transfer_from(dTau));
 
     // CPU lapack
     cpu_sy2sb_he2hb(rocblas_fill_lower,
@@ -225,6 +226,7 @@ void sy2sb_he2hb_getPerfData(const rocblas_handle handle,
                        const rocblas_int lda,
                        Td& dAband,
                        const rocblas_int ldab,
+                       Td& dTau,
                        Th& hA,
                        double* gpu_time_used,
                        double* cpu_time_used,
@@ -250,8 +252,8 @@ void sy2sb_he2hb_getPerfData(const rocblas_handle handle,
             rocsolver_sy2sb_he2hb(
                 handle, n, kd, nb,
                 dA.data(), lda,
-                dTau.data(),
-                dAband.data(), ldab));
+                dAband.data(), ldab,
+                dTau.data()));
     }
 
     // gpu-lapack performance
@@ -277,8 +279,8 @@ void sy2sb_he2hb_getPerfData(const rocblas_handle handle,
         rocsolver_sy2sb_he2hb(
             handle, n, kd, nb,
             dA.data(), lda,
-            dTau.data(),
-            dAband.data(), ldab);
+            dAband.data(), ldab,
+            dTau.data());
         *gpu_time_used += get_time_us_sync(stream) - start;
     }
     *gpu_time_used /= hot_calls;
@@ -321,8 +323,8 @@ void testing_sy2sb_he2hb(Arguments& argus)
             rocsolver_sy2sb_he2hb(
                 handle, n, kd, nb,
                 (T*)nullptr, lda,
-                (T*)nullptr,
-                (T*)nullptr, ldab),
+                (T*)nullptr, ldab,
+                (T*)nullptr),
             rocblas_status_invalid_size);
 
         if(argus.timing)
@@ -339,8 +341,8 @@ void testing_sy2sb_he2hb(Arguments& argus)
             rocsolver_sy2sb_he2hb(
                 handle, n, kd, nb,
                 (T*)nullptr, lda,
-                (T*)nullptr,
-                (T*)nullptr, ldab));
+                (T*)nullptr, ldab,
+                (T*)nullptr));
 
         size_t size;
         CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &size));
@@ -375,8 +377,8 @@ void testing_sy2sb_he2hb(Arguments& argus)
             rocsolver_sy2sb_he2hb(
                 handle, n, kd, nb,
                 dA.data(), lda,
-                dTau.data(),
-                dAband.data(), ldab),
+                dAband.data(), ldab,
+                dTau.data()),
             rocblas_status_success);
         if(argus.timing)
             rocsolver_bench_inform(inform_quick_return);
@@ -388,9 +390,9 @@ void testing_sy2sb_he2hb(Arguments& argus)
     if(argus.unit_check || argus.norm_check) {
         sy2sb_he2hb_getError<T>(
             handle, n, kd, nb,
-            dA, lda, dTau, dAband, ldab,
+            dA, lda, dAband, ldab, dTau,
             hARes, hAbandRes, hTauRes,
-            hA, hTau, hAband,
+            hA, hAband, hTau,
             &max_error);
     }
 
@@ -398,7 +400,7 @@ void testing_sy2sb_he2hb(Arguments& argus)
     if(argus.timing && hot_calls > 0) {
         sy2sb_he2hb_getPerfData<T>(
             handle, n, kd, nb,
-            dA, lda, dTau, dAband, ldab, hA,
+            dA, lda, dAband, ldab, dTau, hA,
             &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
                              argus.profile_kernels, argus.perf);
     }
