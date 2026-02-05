@@ -148,7 +148,7 @@ struct CShuffleEpilogue
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
         // clang-format off
-        return concat('_', "CShuffleEpilogue",
+        return concat('_', "CShuffleEpilogue", 
                       concat('x', MWave, NWave),
                       concat('x', MPerXdl, NPerXdl, KPerXdl),
                       VectorSizeC,

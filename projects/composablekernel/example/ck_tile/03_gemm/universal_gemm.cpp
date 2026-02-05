@@ -31,7 +31,7 @@ int run_gemm_example_with_layouts_universal(ck_tile::ArgParser& arg_parser,
     // ADataTypeBuf: buffer/storage type (fp32 when tf32)
     using ADataTypeCompute = ADataType_;
     using BDataTypeCompute = BDataType_;
-    // Map tf32_t to float for buffer types
+
     using TypeConfig   = GemmTypeConfig<ADataType_, BDataType_, CDataType>;
     using ADataTypeBuf = typename TypeConfig::ADataType;
     using BDataTypeBuf = typename TypeConfig::BDataType;

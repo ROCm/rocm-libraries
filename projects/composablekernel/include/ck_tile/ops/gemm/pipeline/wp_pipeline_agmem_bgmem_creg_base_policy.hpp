@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/core/numeric/numeric.hpp"
 #include "ck_tile/ops/gemm/block/block_wp_asmem_breg_creg.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
 
@@ -261,6 +262,15 @@ struct UniversalWeightPreshufflePipelineAgBgCrPolicy
         using ADataType       = remove_cvref_t<typename Problem::ADataType>;
         using BDataType       = remove_cvref_t<typename Problem::BDataType>;
 
+        // Determine compute types to use
+        // This logic defaults to A/B DataType, but if one of them is packed falls back to the other
+        // If both are packed, it falls back to the explicitly defined ComputeDataType in the
+        // problem It might be a good idea to use ComputeDataType anyway, but that would break how
+        // this behaviour used to work
+        using ATypeToUse =
+            mixed_prec_compute_type_from_input_t<ADataType, BDataType, ComputeDataType>;
+        using BTypeToUse =
+            mixed_prec_compute_type_from_input_t<BDataType, ADataType, ComputeDataType>;
         constexpr index_t WaveSize = get_warp_size();
         constexpr index_t KLane    = WarpTile::at(I2) * WarpTile::at(I0) / WaveSize;
         constexpr index_t KLaneBytes =
@@ -269,11 +279,8 @@ struct UniversalWeightPreshufflePipelineAgBgCrPolicy
 
         // For tf32 mode, use tf32_t for warp gemm; otherwise use original types
         using WarpGemm =
-            WarpGemmDispatcher<if_select_v<ComputeDataType, tf32_t, tf32_t, ADataType>,
-                               if_select_v<ComputeDataType,
-                                           tf32_t,
-                                           tf32_t,
-                                           if_select_v<BDataType, pk_int4_t, ADataType, BDataType>>,
+            WarpGemmDispatcher<if_select_v<ComputeDataType, tf32_t, tf32_t, ATypeToUse>,
+                               if_select_v<ComputeDataType, tf32_t, tf32_t, BTypeToUse>,
                                typename Problem::CDataType,
                                WarpTile::at(I0),
                                WarpTile::at(I1),

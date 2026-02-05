@@ -98,8 +98,6 @@ void permute_tensor_b(Tensor& tensor)
     }
 }
 
-// ADataType/BDataType are original types (e.g., tf32_t) for kernel selection
-// They are passed to Invoker for epilogue auto-detection of tf32
 template <typename GemmConfig,
           typename Invoker,
           typename ADataType,

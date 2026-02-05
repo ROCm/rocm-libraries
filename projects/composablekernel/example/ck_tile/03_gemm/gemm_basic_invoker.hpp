@@ -48,7 +48,7 @@ struct BasicInvoker
         constexpr ck_tile::index_t M_Warp_Tile = 16;
         constexpr ck_tile::index_t N_Warp_Tile = 16;
         constexpr ck_tile::index_t K_Warp_Tile = 16;
-#elif defined(CK_GFX950_SUPPORT)
+#else
         // gfx950: fp32 uses 16x16x16 tile (native MFMA)
         //         tf32 uses 32x32x16 tile (3x bf16 32x32x16 MFMA emulation)
         constexpr ck_tile::index_t M_Warp = (is_fp32_input && !is_tf32_compute) ? 4 : 2;
@@ -57,15 +57,6 @@ struct BasicInvoker
 
         constexpr ck_tile::index_t M_Warp_Tile = (is_fp32_input && !is_tf32_compute) ? 16 : 32;
         constexpr ck_tile::index_t N_Warp_Tile = (is_fp32_input && !is_tf32_compute) ? 16 : 32;
-        constexpr ck_tile::index_t K_Warp_Tile = 16;
-#else
-        // Fallback or other architectures
-        constexpr ck_tile::index_t M_Warp = is_fp32_input ? 4 : 2;
-        constexpr ck_tile::index_t N_Warp = is_fp32_input ? 4 : 2;
-        constexpr ck_tile::index_t K_Warp = 1;
-
-        constexpr ck_tile::index_t M_Warp_Tile = is_fp32_input ? 16 : 32;
-        constexpr ck_tile::index_t N_Warp_Tile = is_fp32_input ? 16 : 32;
         constexpr ck_tile::index_t K_Warp_Tile = 16;
 #endif
 

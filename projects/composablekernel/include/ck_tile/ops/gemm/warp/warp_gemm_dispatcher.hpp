@@ -41,12 +41,9 @@ template<> struct Dispatcher<float, float, float, 16, 16, 16,  true> { using Typ
 // tf32 (on gfx950: uses 3x bf16 MFMA emulation)
 // ADataType, BDataType, AccDataType, MPerWave, NPerWave, KPerWave, TransposeC, SwizzleA, UseStructuredSparsity
 #if defined(CK_GFX950_SUPPORT)
-template<> struct Dispatcher<tf32_t, tf32_t, float, 16, 16, 16, false> { using Type = WarpGemmMfmaTf32Tf32F32M16N16K16<>; };
 template<> struct Dispatcher<tf32_t, tf32_t, float, 32, 32, 16, false> { using Type = WarpGemmMfmaTf32Tf32F32M32N32K16<>; };
 template<> struct Dispatcher<tf32_t, tf32_t, float, 32, 32, 16,  true> { using Type = WarpGemmMfmaTf32Tf32F32M32N32K16<>; };
-template<> struct Dispatcher<tf32_t, tf32_t, float, 16, 16, 16, false, false, false, EDouble> { using Type = WarpGemmMfmaTf32Tf32F32M16N16K16<EDouble>; };
 template<> struct Dispatcher<tf32_t, tf32_t, float, 32, 32, 16, false, false, false, EDouble> { using Type = WarpGemmMfmaTf32Tf32F32M32N32K16<EDouble>; };
-template<> struct Dispatcher<tf32_t, tf32_t, float, 16, 16, 16, false, false, false, EQuad> { using Type = WarpGemmMfmaTf32Tf32F32M16N16K16<EQuad>; };
 template<> struct Dispatcher<tf32_t, tf32_t, float, 32, 32, 16, false, false, false, EQuad> { using Type = WarpGemmMfmaTf32Tf32F32M32N32K16<EQuad>; };
 // TF32 16x16x32 for weight preshuffle pipeline (uses native 16x16x32 TF32 MFMA emulation)
 template<> struct Dispatcher<tf32_t, tf32_t, float, 16, 16, 32, false> { using Type = WarpGemmMfmaTf32Tf32F32M16N16K32<>; };

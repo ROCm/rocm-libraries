@@ -440,26 +440,27 @@ CK_TILE_HOST void reference_mxfp4gemm_quant(const HostTensor<ADataType>& a_m_k,
     std::cout << std::endl;
 }
 
-// ADataType/BDataType can be tf32_t to indicate TF32 computation mode
-// The actual tensor data type is mapped: tf32_t -> float
-template <typename ADataType,
-          typename BDataType,
+template <typename ADataType_,
+          typename BDataType_,
           typename AccDataType,
           typename CDataType,
           typename AElementOp   = ck_tile::identity,
           typename BElementOp   = ck_tile::identity,
           typename ACCElementOp = ck_tile::identity>
 CK_TILE_HOST void
-reference_gemm(const HostTensor<if_select_v<ADataType, tf32_t, float, ADataType>>& a_m_k,
-               const HostTensor<if_select_v<BDataType, tf32_t, float, BDataType>>& b_k_n,
+reference_gemm(const HostTensor<if_select_v<ADataType_, tf32_t, float, ADataType_>>& a_m_k,
+               const HostTensor<if_select_v<BDataType_, tf32_t, float, BDataType_>>& b_k_n,
                HostTensor<CDataType>& c_m_n,
                const AElementOp& a_element_op     = {},
                const BElementOp& b_element_op     = {},
                const ACCElementOp& acc_element_op = {})
 {
-    // ADataTypeBuf: buffer/storage type (fp32 when tf32)
-    using ADataTypeBuf = if_select_v<ADataType, tf32_t, float, ADataType>;
-    using BDataTypeBuf = if_select_v<BDataType, tf32_t, float, BDataType>;
+    if constexpr(std::is_same_v<ADataType_, tf32_t> || std::is_same_v<BDataType_, tf32_t>)
+        static_assert(std::is_same_v<ADataType_, BDataType_>,
+                      "ADataType and BDataType must be the same");
+    using ADataTypeCompute = ADataType_;
+    using ADataTypeBuf     = if_select_v<ADataType_, tf32_t, float, ADataType_>;
+    using BDataTypeBuf     = if_select_v<BDataType_, tf32_t, float, BDataType_>;
 
     const std::size_t M = a_m_k.get_length(0);
     const std::size_t N = b_k_n.get_length(1);
@@ -501,8 +502,7 @@ reference_gemm(const HostTensor<if_select_v<ADataType, tf32_t, float, ADataType>
                 v_b = ck_tile::type_convert<AccDataType>(b_element_op(b_k_n(k, n)));
             }
 
-            // Use ADataType (not mapped) to detect tf32 mode
-            if constexpr(std::is_same_v<ADataType, tf32_t>)
+            if constexpr(std::is_same_v<ADataTypeCompute, tf32_t>)
             {
                 if(device_name == "gfx950")
                 {
@@ -781,17 +781,15 @@ reference_gemm_multiple_d(const HostTensor<ADataType>& a_m_k,
     make_ParallelTensorFunctor(f_mk_kn_mn, M, N)(std::thread::hardware_concurrency());
 }
 
-// ADataType/BDataType can be tf32_t to indicate TF32 computation mode
-// The actual pointer data type is mapped: tf32_t -> float
-template <typename ADataType,
-          typename BDataType,
+template <typename ADataType_,
+          typename BDataType_,
           typename AccDataType,
           typename CDataType,
           typename LayoutA,
           typename LayoutB,
           typename LayoutC>
-__global__ void naive_gemm_kernel(if_select_v<ADataType, tf32_t, float, ADataType>* A,
-                                  if_select_v<BDataType, tf32_t, float, BDataType>* B,
+__global__ void naive_gemm_kernel(if_select_v<ADataType_, tf32_t, float, ADataType_>* A,
+                                  if_select_v<BDataType_, tf32_t, float, BDataType_>* B,
                                   CDataType* C,
                                   ck_tile::index_t M,
                                   ck_tile::index_t N,
@@ -800,9 +798,13 @@ __global__ void naive_gemm_kernel(if_select_v<ADataType, tf32_t, float, ADataTyp
                                   ck_tile::index_t strideB,
                                   ck_tile::index_t strideC)
 {
+    if constexpr(std::is_same_v<ADataType_, tf32_t> || std::is_same_v<BDataType_, tf32_t>)
+        static_assert(std::is_same_v<ADataType_, BDataType_>,
+                      "ADataType and BDataType must be the same");
+    using ADataTypeCompute = ADataType_;
     // ADataTypeBuf: buffer/storage type (fp32 when tf32)
-    using ADataTypeBuf = if_select_v<ADataType, tf32_t, float, ADataType>;
-    using BDataTypeBuf = if_select_v<BDataType, tf32_t, float, BDataType>;
+    using ADataTypeBuf = if_select_v<ADataType_, tf32_t, float, ADataType_>;
+    using BDataTypeBuf = if_select_v<BDataType_, tf32_t, float, BDataType_>;
 
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int row = idx / N; // Compute row index
@@ -866,8 +868,7 @@ __global__ void naive_gemm_kernel(if_select_v<ADataType, tf32_t, float, ADataTyp
                 v_b = ck_tile::type_convert<AccDataType>(B[b_index]);
             }
 
-            // Use ADataType (not mapped) to detect tf32 mode
-            if constexpr(std::is_same_v<ADataType, tf32_t>)
+            if constexpr(std::is_same_v<ADataTypeCompute, tf32_t>)
             {
 #ifdef CK_GFX950_SUPPORT
                 // gfx950: use 3x bf16 emulation
@@ -902,17 +903,15 @@ __global__ void naive_gemm_kernel(if_select_v<ADataType, tf32_t, float, ADataTyp
     }
 }
 
-// ADataType/BDataType can be tf32_t to indicate TF32 computation mode
-// The actual pointer data type is mapped: tf32_t -> float
-template <typename ADataType,
-          typename BDataType,
+template <typename ADataType_,
+          typename BDataType_,
           typename AccDataType,
           typename CDataType,
           typename LayoutA,
           typename LayoutB,
           typename LayoutC>
-__global__ void blockwise_gemm_kernel(if_select_v<ADataType, tf32_t, float, ADataType>* A,
-                                      if_select_v<BDataType, tf32_t, float, BDataType>* B,
+__global__ void blockwise_gemm_kernel(if_select_v<ADataType_, tf32_t, float, ADataType_>* A,
+                                      if_select_v<BDataType_, tf32_t, float, BDataType_>* B,
                                       CDataType* C,
                                       ck_tile::index_t M,
                                       ck_tile::index_t N,
@@ -926,9 +925,13 @@ __global__ void blockwise_gemm_kernel(if_select_v<ADataType, tf32_t, float, ADat
                                       float* scale_A_ptr,
                                       float* scale_B_ptr)
 {
+    if constexpr(std::is_same_v<ADataType_, tf32_t> || std::is_same_v<BDataType_, tf32_t>)
+        static_assert(std::is_same_v<ADataType_, BDataType_>,
+                      "ADataType and BDataType must be the same");
+    using ADataTypeCompute = ADataType_;
     // ADataTypeBuf: buffer/storage type (fp32 when tf32)
-    using ADataTypeBuf = if_select_v<ADataType, tf32_t, float, ADataType>;
-    using BDataTypeBuf = if_select_v<BDataType, tf32_t, float, BDataType>;
+    using ADataTypeBuf = if_select_v<ADataType_, tf32_t, float, ADataType_>;
+    using BDataTypeBuf = if_select_v<BDataType_, tf32_t, float, BDataType_>;
 
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int row = idx / N; // Compute row index
@@ -1012,8 +1015,7 @@ __global__ void blockwise_gemm_kernel(if_select_v<ADataType, tf32_t, float, ADat
                 v_b = ck_tile::type_convert<AccDataType>(B[b_index]);
             }
 
-            // Use ADataType (not mapped) to detect tf32 mode
-            if constexpr(std::is_same_v<ADataType, tf32_t>)
+            if constexpr(std::is_same_v<ADataTypeCompute, tf32_t>)
             {
 #ifdef CK_GFX950_SUPPORT
                 // gfx950: use 3x bf16 emulation
@@ -1050,8 +1052,6 @@ __global__ void blockwise_gemm_kernel(if_select_v<ADataType, tf32_t, float, ADat
     }
 }
 
-// ADataType/BDataType can be tf32_t to indicate TF32 computation mode
-// The actual pointer data type is mapped: tf32_t -> float
 template <typename ADataType,
           typename BDataType,
           typename AccDataType,
@@ -1073,20 +1073,13 @@ void reference_gemm_gpu(if_select_v<ADataType, tf32_t, float, ADataType>* a_ptr,
     int numThreadsPerBlock = 256; // Common choice for threads per block
     int numBlocks          = (totalElements + numThreadsPerBlock - 1) / numThreadsPerBlock;
 
-    naive_gemm_kernel<ADataType,
-                      BDataType,
-                      AccDataType,
-                      CDataType,
-                      LayoutA,
-                      LayoutB,
-                      LayoutC><<<numBlocks, numThreadsPerBlock>>>(
-        a_ptr, b_ptr, c_ptr, M, N, K, stride_a, stride_b, stride_c);
+    naive_gemm_kernel<ADataType, BDataType, AccDataType, CDataType, LayoutA, LayoutB, LayoutC>
+        <<<numBlocks, numThreadsPerBlock>>>(
+            a_ptr, b_ptr, c_ptr, M, N, K, stride_a, stride_b, stride_c);
 
     return;
 }
 
-// ADataType/BDataType can be tf32_t to indicate TF32 computation mode
-// The actual pointer data type is mapped: tf32_t -> float
 template <typename ADataType,
           typename BDataType,
           typename AccDataType,
@@ -1113,41 +1106,34 @@ void reference_blockwise_gemm_gpu(if_select_v<ADataType, tf32_t, float, ADataTyp
     int numThreadsPerBlock = 256; // Common choice for threads per block
     int numBlocks          = (totalElements + numThreadsPerBlock - 1) / numThreadsPerBlock;
 
-    blockwise_gemm_kernel<ADataType,
-                          BDataType,
-                          AccDataType,
-                          CDataType,
-                          LayoutA,
-                          LayoutB,
-                          LayoutC><<<numBlocks, numThreadsPerBlock>>>(a_ptr,
-                                                                      b_ptr,
-                                                                      c_ptr,
-                                                                      M,
-                                                                      N,
-                                                                      K,
-                                                                      stride_a,
-                                                                      stride_b,
-                                                                      stride_c,
-                                                                      scale_granularity_m,
-                                                                      scale_granularity_n,
-                                                                      scale_granularity_k,
-                                                                      scale_A_ptr,
-                                                                      scale_B_ptr);
+    blockwise_gemm_kernel<ADataType, BDataType, AccDataType, CDataType, LayoutA, LayoutB, LayoutC>
+        <<<numBlocks, numThreadsPerBlock>>>(a_ptr,
+                                            b_ptr,
+                                            c_ptr,
+                                            M,
+                                            N,
+                                            K,
+                                            stride_a,
+                                            stride_b,
+                                            stride_c,
+                                            scale_granularity_m,
+                                            scale_granularity_n,
+                                            scale_granularity_k,
+                                            scale_A_ptr,
+                                            scale_B_ptr);
 
     return;
 }
 
-// ADataType/BDataType can be tf32_t to indicate TF32 computation mode
-// The actual pointer data type is mapped: tf32_t -> float
-template <typename ADataType,
-          typename BDataType,
+template <typename ADataType_,
+          typename BDataType_,
           typename AccDataType,
           typename CDataType,
           typename LayoutA,
           typename LayoutB,
           typename LayoutC>
-void reference_batched_gemm_gpu(if_select_v<ADataType, tf32_t, float, ADataType>* a_ptr,
-                                if_select_v<BDataType, tf32_t, float, BDataType>* b_ptr,
+void reference_batched_gemm_gpu(if_select_v<ADataType_, tf32_t, float, ADataType_>* a_ptr,
+                                if_select_v<BDataType_, tf32_t, float, BDataType_>* b_ptr,
                                 CDataType* c_ptr,
                                 index_t M,
                                 index_t N,
@@ -1160,9 +1146,11 @@ void reference_batched_gemm_gpu(if_select_v<ADataType, tf32_t, float, ADataType>
                                 index_t batch_stride_C,
                                 index_t batch_count)
 {
-    // ADataTypeBuf: buffer/storage type (fp32 when tf32)
-    using ADataTypeBuf = if_select_v<ADataType, tf32_t, float, ADataType>;
-    using BDataTypeBuf = if_select_v<BDataType, tf32_t, float, BDataType>;
+    using ADataTypeBuf = if_select_v<ADataType_, tf32_t, float, ADataType_>;
+    using BDataTypeBuf = if_select_v<BDataType_, tf32_t, float, BDataType_>;
+
+    using ADataTypeCompute = ADataType_;
+    using BDataTypeCompute = BDataType_;
 
     int totalElements      = M * N;
     int numThreadsPerBlock = 256; // Common choice for threads per block
@@ -1172,9 +1160,9 @@ void reference_batched_gemm_gpu(if_select_v<ADataType, tf32_t, float, ADataType>
     {
         ADataTypeBuf* d_ATemp = a_ptr + batch_id * batch_stride_A;
         BDataTypeBuf* d_BTemp = b_ptr + batch_id * batch_stride_B;
-        CDataType* d_CTemp       = c_ptr + batch_id * batch_stride_C;
-        naive_gemm_kernel<ADataType,
-                          BDataType,
+        CDataType* d_CTemp    = c_ptr + batch_id * batch_stride_C;
+        naive_gemm_kernel<ADataTypeCompute,
+                          BDataTypeCompute,
                           AccDataType,
                           CDataType,
                           LayoutA,

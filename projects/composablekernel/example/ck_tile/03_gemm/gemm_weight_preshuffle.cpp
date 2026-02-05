@@ -14,7 +14,6 @@
 #include "run_gemm_example.inc"
 #include "gemm_weight_preshuffle_invoker.hpp"
 
-// APrecType and BPrecType can be tf32_t for TF32 mode - auto-detection happens internally
 template <typename GemmConfig,
           typename APrecType,
           typename BPrecType = APrecType,
