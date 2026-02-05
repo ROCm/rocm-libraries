@@ -16,7 +16,7 @@
 #include "engines/plans/MiopenBatchnormFwdInferenceWithVariancePlan.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlan.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 namespace
@@ -25,7 +25,8 @@ namespace
 std::tuple<const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes&,
            const hipdnn_data_sdk::data_objects::PointwiseAttributes&,
            const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes&>
-    getBatchnormBackwardFusionNodeAttrs(const hipdnn_plugin_sdk::IGraph& opGraph)
+    getBatchnormBackwardFusionNodeAttrs(
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     if(opGraph.nodeCount() != 3)
     {
@@ -49,7 +50,8 @@ std::tuple<const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes&,
     return {bnInfAttr, actAttr, bnBwdAttr};
 }
 
-auto getBatchnormBackwardFusionNodeAttrsLogErrors(const hipdnn_plugin_sdk::IGraph& opGraph)
+auto getBatchnormBackwardFusionNodeAttrsLogErrors(
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
     -> std::optional<decltype(getBatchnormBackwardFusionNodeAttrs(opGraph))>
 {
     try
@@ -373,9 +375,9 @@ bool batchnormFwdFusionCheckTensorsLogErrors(
 
 bool MiopenBatchnormPlanBuilder::isApplicable(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin_sdk::IGraph& opGraph) const
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    auto areAllNodesF32Compute = [&]() {
+    auto anyNodeIsNotF32Compute = [&]() {
         return !std::all_of(
             opGraph.nodeWrappers().begin(), opGraph.nodeWrappers().end(), [](const auto& node) {
                 return node->computeDataType() == hipdnn_data_sdk::data_objects::DataType::FLOAT;
@@ -386,7 +388,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     {
     case 1:
     {
-        if(areAllNodesF32Compute())
+        if(anyNodeIsNotF32Compute())
         {
             HIPDNN_LOG_ERROR("Batchnorm plan builder only supports nodes with an fp32 "
                              "compute_data_type");
@@ -428,21 +430,21 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             switch(node.attributes_type())
             {
             case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
-                checkBatchnormTensorConfigSupported(*node.attributes_as_BatchnormAttributes(),
-                                                    opGraph.getTensorMap());
+                checkBatchnormFwdTrainingTensorConfigSupported(
+                    *node.attributes_as_BatchnormAttributes(), opGraph.getTensorMap());
                 break;
             case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
-                checkBatchnormTensorConfigSupported(
+                checkBatchnormInferenceTensorConfigSupported(
                     *node.attributes_as_BatchnormInferenceAttributes(), opGraph.getTensorMap());
                 break;
             case hipdnn_data_sdk::data_objects::NodeAttributes::
                 BatchnormInferenceAttributesVarianceExt:
-                checkBatchnormTensorConfigSupported(
+                checkBatchnormInferenceVarianceExtTensorConfigSupported(
                     *node.attributes_as_BatchnormInferenceAttributesVarianceExt(),
                     opGraph.getTensorMap());
                 break;
             case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
-                checkBatchnormTensorConfigSupported(
+                checkBatchnormBackwardTensorConfigSupported(
                     *node.attributes_as_BatchnormBackwardAttributes(), opGraph.getTensorMap());
                 break;
             default:
@@ -460,7 +462,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     }
     case 2:
     {
-        if(areAllNodesF32Compute())
+        if(anyNodeIsNotF32Compute())
         {
             HIPDNN_LOG_ERROR("Batchnorm plan builder only supports nodes with an fp32 "
                              "compute_data_type");
@@ -502,7 +504,8 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
             // the checks manually.
             try
             {
-                checkBatchnormTensorConfigSupported(bnInfAttr, actAttr, opGraph.getTensorMap());
+                checkBatchnormInferenceActivationTensorConfigSupported(
+                    bnInfAttr, actAttr, opGraph.getTensorMap());
             }
             catch(const std::exception& e)
             {
@@ -524,7 +527,8 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
 
             try
             {
-                checkBatchnormTensorConfigSupported(bnInfAttr, actAttr, opGraph.getTensorMap());
+                checkBatchnormInferenceVarianceExtActivationTensorConfigSupported(
+                    bnInfAttr, actAttr, opGraph.getTensorMap());
             }
             catch(const std::exception& e)
             {
@@ -540,7 +544,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     case 3:
     {
         // batchnorm inference -> activation -> batchnorm backward
-        if(areAllNodesF32Compute())
+        if(anyNodeIsNotF32Compute())
         {
             HIPDNN_LOG_ERROR("Batchnorm plan builder only supports nodes with an fp32 "
                              "compute_data_type");
@@ -564,10 +568,11 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
         // checks manually.
         try
         {
-            checkBatchnormTensorConfigSupported(std::get<0>(nodeAttrs.value()),
-                                                std::get<1>(nodeAttrs.value()),
-                                                std::get<2>(nodeAttrs.value()),
-                                                opGraph.getTensorMap());
+            checkBatchnormInferenceActivationBackwardTensorConfigSupported(
+                std::get<0>(nodeAttrs.value()),
+                std::get<1>(nodeAttrs.value()),
+                std::get<2>(nodeAttrs.value()),
+                opGraph.getTensorMap());
             checkBatchnormBwdActivationModeSupported(std::get<1>(nodeAttrs.value()));
         }
         catch(const std::exception& e)
@@ -592,7 +597,7 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
 
 size_t MiopenBatchnormPlanBuilder::getWorkspaceSize(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    [[maybe_unused]] const hipdnn_plugin_sdk::IGraph& opGraph) const
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     //batchnorm plan builder does not require workspace size
     return 0u;
@@ -601,10 +606,11 @@ size_t MiopenBatchnormPlanBuilder::getWorkspaceSize(
 namespace
 {
 
-void buildPlanInferenceSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-                                  const hipdnn_plugin_sdk::IGraph& opGraph,
-                                  const hipdnn_plugin_sdk::INodeWrapper& nodeWrapper,
-                                  HipdnnEnginePluginExecutionContext& executionContext)
+void buildPlanInferenceSingleNode(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
+    HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto& attr
         = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>();
@@ -617,8 +623,8 @@ void buildPlanInferenceSingleNode([[maybe_unused]] const HipdnnEnginePluginHandl
 
 void buildPlanInferenceWithVarianceSingleNode(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin_sdk::IGraph& opGraph,
-    const hipdnn_plugin_sdk::INodeWrapper& nodeWrapper,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
     HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto& attr = nodeWrapper.attributesAs<
@@ -630,10 +636,11 @@ void buildPlanInferenceWithVarianceSingleNode(
     executionContext.setPlan(std::move(plan));
 }
 
-void buildPlanFwdTrainingSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-                                    const hipdnn_plugin_sdk::IGraph& opGraph,
-                                    const hipdnn_plugin_sdk::INodeWrapper& nodeWrapper,
-                                    HipdnnEnginePluginExecutionContext& executionContext)
+void buildPlanFwdTrainingSingleNode(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
+    HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto& attr
         = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormAttributes>();
@@ -645,8 +652,8 @@ void buildPlanFwdTrainingSingleNode([[maybe_unused]] const HipdnnEnginePluginHan
 }
 
 void buildPlanBwdSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-                            const hipdnn_plugin_sdk::IGraph& opGraph,
-                            const hipdnn_plugin_sdk::INodeWrapper& nodeWrapper,
+                            const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                            const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
                             HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto& attr
@@ -659,7 +666,7 @@ void buildPlanBwdSingleNode([[maybe_unused]] const HipdnnEnginePluginHandle& han
 }
 
 void buildPlanFusedBackwardsActivation([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-                                       const hipdnn_plugin_sdk::IGraph& opGraph,
+                                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                                        HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto [bnInfAttr, actAttr, bnBwdAttr] = getBatchnormBackwardFusionNodeAttrs(opGraph);
@@ -671,9 +678,10 @@ void buildPlanFusedBackwardsActivation([[maybe_unused]] const HipdnnEnginePlugin
     executionContext.setPlan(std::move(plan));
 }
 
-void buildPlanFusedFwdInferenceActivation([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-                                          const hipdnn_plugin_sdk::IGraph& opGraph,
-                                          HipdnnEnginePluginExecutionContext& executionContext)
+void buildPlanFusedFwdInferenceActivation(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto& node0 = opGraph.getNodeWrapper(0);
     const auto& node1 = opGraph.getNodeWrapper(1);
@@ -691,7 +699,7 @@ void buildPlanFusedFwdInferenceActivation([[maybe_unused]] const HipdnnEnginePlu
 
 void buildPlanFusedFwdInferenceWithVarianceActivation(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin_sdk::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext)
 {
     const auto& node0 = opGraph.getNodeWrapper(0);
@@ -713,7 +721,8 @@ void buildPlanFusedFwdInferenceWithVarianceActivation(
 
 void MiopenBatchnormPlanBuilder::buildPlan(
     const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin_sdk::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() == 2)
@@ -771,6 +780,13 @@ void MiopenBatchnormPlanBuilder::buildPlan(
                 + std::string(
                     hipdnn_data_sdk::data_objects::toString(nodeWrapper.attributesType())));
     }
+}
+
+std::vector<hipdnn_data_sdk::data_objects::KnobT> MiopenBatchnormPlanBuilder::getCustomKnobs(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+{
+    return {};
 }
 
 } // namespace miopen_legacy_plugin

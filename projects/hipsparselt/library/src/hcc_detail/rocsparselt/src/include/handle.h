@@ -391,6 +391,7 @@ enum _rocsparselt_matmul_datatype
     MATMUL_DATATYPE_I8_I8_S,
     MATMUL_DATATYPE_I8_H_S,
     MATMUL_DATATYPE_I8_B_S,
+    MATMUL_DATATYPE_I8_I_S,
     MATMUL_DATATYPE_E4M3_S_S,
     MATMUL_DATATYPE_E5M2_S_S,
     MATMUL_DATATYPE_UNKNOWN,
@@ -413,6 +414,7 @@ constexpr _rocsparselt_matmul_type valid_matmul_datatypes[] =
     {MATMUL_DATATYPE_I8_I8_S, HIP_R_8I, HIP_R_8I, HIP_R_8I, HIP_R_8I, rocsparselt_compute_i32},
     {MATMUL_DATATYPE_I8_H_S, HIP_R_8I, HIP_R_8I, HIP_R_16F, HIP_R_16F, rocsparselt_compute_i32},
     {MATMUL_DATATYPE_I8_B_S, HIP_R_8I, HIP_R_8I, HIP_R_16BF, HIP_R_16BF, rocsparselt_compute_i32},
+    {MATMUL_DATATYPE_I8_I_S, HIP_R_8I, HIP_R_8I, HIP_R_32I, HIP_R_32I, rocsparselt_compute_i32},
 #if HIP_FP8_TYPE_OCP
     {MATMUL_DATATYPE_E4M3_S_S, HIP_R_8F_E4M3, HIP_R_8F_E4M3, HIP_R_32F, HIP_R_32F, rocsparselt_compute_f32},
     {MATMUL_DATATYPE_E5M2_S_S, HIP_R_8F_E5M2, HIP_R_8F_E5M2, HIP_R_32F, HIP_R_32F, rocsparselt_compute_f32},

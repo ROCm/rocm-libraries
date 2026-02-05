@@ -4,13 +4,42 @@
 """Shared pytest fixtures for origami tests."""
 
 import pytest
+
+# torch is optional, tests that need it will skip appropriately
+try:
+    import torch
+except ImportError:
+    pass
 import origami
 
 
 @pytest.fixture
 def hardware():
-    """Get hardware for device 0."""
-    return origami.get_hardware_for_device(0)
+    """Get hardware for device 0, or create a mock hardware object for testing.
+    
+    Returns:
+        origami.hardware_t: Hardware object for testing. Uses real device if available,
+                           otherwise creates a mock MI300X (gfx942) configuration.
+    """
+    try:
+        # Try to get real hardware from device 0
+        return origami.get_hardware_for_device(0)
+    except RuntimeError:
+        # No ROCm device available, create mock hardware for testing
+        # Mock MI300X (gfx942) configuration
+        return origami.hardware_t(
+            origami.architecture_t.gfx942,  # architecture
+            304,                             # n_cu
+            65536,                           # lds_capacity
+            8,                               # num_xcd
+            1.0,                             # mem1_perf_ratio
+            1.0,                             # mem2_perf_ratio
+            1.0,                             # mem3_perf_ratio
+            4000000,                         # l2_capacity
+            1.0,                             # compute_clock_ghz
+            1,                               # parallel_mi_cu
+            (0.0, 0.015, 0.0)               # mem_bw_per_wg_coefficients
+        )
 
 
 @pytest.fixture

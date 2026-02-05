@@ -92,4 +92,17 @@ inline const std::string& testIncompleteApiPluginPath()
         = getPluginPath(TEST_INCOMPLETE_API_PLUGIN_NAME);
     return s_testIncompleteApiPluginPath;
 }
+
+inline const std::string& testKnobsPluginPath()
+{
+    static const std::string s_testKnobsPluginPath = getPluginPath(TEST_KNOBS_PLUGIN_NAME);
+    return s_testKnobsPluginPath;
+}
+
+inline const std::string& testKnobConstraintValidationPluginPath()
+{
+    static const std::string s_testKnobConstraintValidationPluginPath
+        = getPluginPath(TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME);
+    return s_testKnobConstraintValidationPluginPath;
+}
 } // namespace hipdnn_tests::plugin_constants

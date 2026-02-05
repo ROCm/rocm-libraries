@@ -152,7 +152,7 @@ class BenchmarkImplSLURM(object):
         section.createValue("DockerBuildFile", os.path.join(rootTensileDir, "docker", "dockerfile-tensile-tuning-slurm"))
         section.createValue("DockerImageName", "tensile-tuning-cluster-executable")
         section.createValue("DockerImageTag", "TEST")
-        section.createValue("TensileFork", "ROCmSoftwarePlatform")
+        section.createValue("TensileFork", "ROCm")
         section.createValue("TensileBranch", "develop")
         section.createValue("TensileCommit", "HEAD")
 
