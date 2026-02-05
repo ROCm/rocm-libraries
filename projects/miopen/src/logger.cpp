@@ -43,7 +43,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
-size_t getpid() { return GetCurrentProcessId(); }
+size_t getpid() { return _getpid(); }
 #endif
 
 /// Enable logging of the most important function calls.

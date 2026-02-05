@@ -351,21 +351,24 @@ void TestLogBufferOn()
     MIOPEN_LOG_I2("info2");
     MIOPEN_LOG_T("trace");
     MIOPEN_LOG_E("error");
+
     ASSERT_TRUE(fs::exists(filename));
-    auto log_file = std::ifstream{filename};
-    while(std::getline(log_file, line))
     {
-        switch(line_i)
+        auto log_file = std::ifstream{filename};
+        while(std::getline(log_file, line))
         {
-        case 0: ASSERT_TRUE(isSubStr(line, "warn")); break;
-        case 1: ASSERT_TRUE(isSubStr(line, "info")); break;
-        case 2: ASSERT_TRUE(isSubStr(line, "info2")); break;
-        case 3:
-            ASSERT_FALSE(isSubStr(line, "trace"));
-            ASSERT_TRUE(isSubStr(line, "error"));
-            break;
+            switch(line_i)
+            {
+            case 0: ASSERT_TRUE(isSubStr(line, "warn")); break;
+            case 1: ASSERT_TRUE(isSubStr(line, "info")); break;
+            case 2: ASSERT_TRUE(isSubStr(line, "info2")); break;
+            case 3:
+                ASSERT_FALSE(isSubStr(line, "trace"));
+                ASSERT_TRUE(isSubStr(line, "error"));
+                break;
+            }
+            line_i++;
         }
-        line_i++;
     }
     fs::remove(filename);
 
@@ -378,18 +381,20 @@ void TestLogBufferOn()
     EXPECT_ANY_THROW({ MIOPEN_THROW("throw"); });
 
     EXPECT_TRUE(fs::exists(filename));
-    log_file = std::ifstream{filename};
-    line_i   = 0;
-    while(std::getline(log_file, line))
     {
-        switch(line_i)
+        auto log_file = std::ifstream{filename};
+        line_i        = 0;
+        while(std::getline(log_file, line))
         {
-        case 0: ASSERT_TRUE(isSubStr(line, "warn")); break;
-        case 1: ASSERT_TRUE(isSubStr(line, "info")); break;
-        case 2: ASSERT_TRUE(isSubStr(line, "info2")); break;
-        case 3: ASSERT_TRUE(isSubStr(line, "throw")); break;
+            switch(line_i)
+            {
+            case 0: ASSERT_TRUE(isSubStr(line, "warn")); break;
+            case 1: ASSERT_TRUE(isSubStr(line, "info")); break;
+            case 2: ASSERT_TRUE(isSubStr(line, "info2")); break;
+            case 3: ASSERT_TRUE(isSubStr(line, "throw")); break;
+            }
+            line_i++;
         }
-        line_i++;
     }
     fs::remove(filename);
 }

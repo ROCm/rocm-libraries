@@ -41,6 +41,10 @@
 #include <roctracer/roctx.h>
 #endif
 
+#ifdef _WIN32
+MIOPEN_INTERNALS_EXPORT size_t getpid();
+#endif
+
 // See https://github.com/pfultz2/Cloak/wiki/C-Preprocessor-tricks,-tips,-and-idioms
 #define MIOPEN_PP_CAT(x, y) MIOPEN_PP_PRIMITIVE_CAT(x, y)
 #define MIOPEN_PP_PRIMITIVE_CAT(x, y) x##y
