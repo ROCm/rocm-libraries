@@ -310,8 +310,8 @@ size_t MiopenBatchnormFwdTrainingPlanBuilder::getMaxWorkspaceSize(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    //batchnorm plan builder does not require workspace size
-    return 0u;
+    // No workspace needed for batchnorm forward training
+    return 0;
 }
 
 void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
