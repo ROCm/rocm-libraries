@@ -1357,10 +1357,10 @@ def _get_schedule_96x256x64_16bit(kernel, useLDSTr, TLDS):
 
         # No NGL/NLL shift adjustment for this conservative schedule.
         nglshift = nllshift = 11
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     else:
         return False, None
 
-    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
 @RegisterSchedule(
