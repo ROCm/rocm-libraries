@@ -915,3 +915,51 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             "First global read for A issued at vmfma_index:2. "
             "0 waitcnt operation(s) in [0, 2) provide upper bounds on the number of outstanding LRA0 operations: [] <-- none of these is 0."
         )
+
+    def test_negative_lrb0_not_guaranteed_by_waitcnt_at_same_index_as_lra0(self):
+        """
+        Exercises a bug in get_most_recent_local_reads where a local read (LRA0)
+        issued at the same vmfma index as a SWaitCnt -- but AFTER it in within-index
+        ordering -- is incorrectly counted as a "recent" read by the SWaitCnt.
+
+        Setup (modelled after 256x160x64 TN code path 1):
+          - LRB0 issued at vmfma [1, 3, 4, 5, 6]  (5 reads, all before the sync)
+          - LRA0 issued at vmfma [14]               (1 read, same index as the sync)
+          - SYNC at vmfma 14: SWaitCnt(dscnt=1) then SBarrier
+          - GRB starts at vmfma 15
+
+        Dict key order: SYNC < LRB0 < LRA0 < GRB, so within vmfma 14 the
+        execution order is:  SWaitCnt -> SBarrier -> (LRB0: nothing) -> LRA0 -> ...
+
+        At the moment the SWaitCnt(dscnt=1) fires, only 5 LRB0 reads are outstanding
+        (LRA0 at vmfma 14 hasn't been issued yet).  After dscnt=1, at most 1 remains,
+        and that 1 is a LRB0.  GRB at vmfma 15 therefore starts while 1 LRB0 may
+        still be in flight -- a data hazard.
+
+        The validator incorrectly passes because get_most_recent_local_reads sees
+        LRA0 at vmfma 14 in its history and attributes the 1 outstanding to LRA0
+        (reporting LRB0: 0 outstanding).
+        """
+        assert self.num_vmfma == 8
+
+        optSchedule = {
+            "SYNC": [[-1, 2, 2]],
+            "LRB0": [[0,1]],
+            "LRA0": [[2]],
+            "GRB":  [[3]],
+        }
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="pre-loop wait"),
+            SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 -- but leaves 1 outstanding"),
+            SBarrier(comment=""),
+        ]
+        # Should FAIL: dscnt=1 leaves 1 LRB0 outstanding when GRB starts at 15.
+        self.validate(
+            optSchedule, syncCode, 1, None, None, 0,
+            "Failed to verify that all local reads for B (LRB0) are complete "
+            "before the first global read for B is issued. "
+            "Last local read for B issued at vmfma_index:6. "
+            "First global read for B issued at vmfma_index:15. "
+            "1 waitcnt operation(s) in [7, 16) provide upper bounds on the number "
+            "of outstanding LRB0 operations: [1] <-- none of these is 0."
+        )
