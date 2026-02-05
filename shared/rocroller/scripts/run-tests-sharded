@@ -9,6 +9,7 @@ Number of shards is auto-detected as ncores/2.
 import argparse
 import os
 import pty
+import random
 import select
 import subprocess
 import sys
@@ -71,12 +72,29 @@ def get_available_cpus():
     return os.cpu_count() or 4
 
 
+def get_shuffle_seed():
+    """Return one random seed for all shards (gtest and catch2).
+
+    Uses TEST_SHUFFLE_SEED env var if set (for reproducibility);
+    otherwise picks a random seed.
+
+    Returns:
+        (seed, from_env): seed is an int in [1, 2**31-1]; from_env is True if
+        the seed came from TEST_SHUFFLE_SEED.
+    """
+    master = os.environ.get("TEST_SHUFFLE_SEED")
+    if master is not None:
+        return int(master), True
+    return random.SystemRandom().randint(1, 2**31 - 1), False
+
+
 def start_shard(
     shard_index,
     base_cmd,
     test_type,
     num_shards,
     build_dir,
+    shard_seed=None,
 ):
     """Start a shard of tests and return process info.
 
@@ -86,6 +104,7 @@ def start_shard(
         test_type: Framework name (e.g., "gtest", "catch2", "ctest")
         num_shards: Total number of shards
         build_dir: Build directory path
+        shard_seed: Optional pre-computed random seed for this shard (used for gtest/catch2).
     """
     # Extract executable name from command
     executable = base_cmd[0]
@@ -104,11 +123,20 @@ def start_shard(
     cmd = base_cmd.copy()
 
     if test_type == "gtest":
+        if shard_seed is None:
+            raise ValueError("shard_seed is required for gtest")
         env["GTEST_TOTAL_SHARDS"] = str(num_shards)
         env["GTEST_SHARD_INDEX"] = str(shard_index)
-        cmd.append("--gtest_shuffle")
-        cmd.append(f"--gtest_output=xml:test_report/gtest_shard_{shard_index}.xml")
+        cmd.extend(
+            [
+                "--gtest_shuffle",
+                f"--gtest_random_seed={shard_seed}",
+                f"--gtest_output=xml:test_report/gtest_shard_{shard_index}.xml",
+            ]
+        )
     elif test_type == "catch2":
+        if shard_seed is None:
+            raise ValueError("shard_seed is required for catch2")
         cmd.extend(
             [
                 "--order",
@@ -117,6 +145,8 @@ def start_shard(
                 str(num_shards),
                 "--shard-index",
                 str(shard_index),
+                "--rng-seed",
+                str(shard_seed),
                 "-r",
                 "junit",
                 "-o",
@@ -321,6 +351,13 @@ def main():
         print(f"GPU architecture: {gpu_arch}")
     if not args.dry_run:
         print(f"Number of shards: {num_shards} (auto-detected)")
+        shuffle_seed, from_env = get_shuffle_seed()
+        if from_env:
+            print(
+                f"Shuffle seed: {shuffle_seed} (from TEST_SHUFFLE_SEED, reproducible)"
+            )
+        else:
+            print(f"Shuffle seed: {shuffle_seed} (set TEST_SHUFFLE_SEED to reproduce)")
     if args.dry_run:
         print("Mode: DRY RUN - listing tests only")
     print("=" * 50)
@@ -373,12 +410,14 @@ def main():
 
             for i in range(framework_num_shards):
                 try:
+                    seed = shuffle_seed if framework in ("gtest", "catch2") else None
                     info = start_shard(
                         i,
                         cmd,
                         framework,
                         framework_num_shards,
                         build_dir,
+                        shard_seed=seed,
                     )
                     shard_infos.append(info)
                 except Exception as e:
