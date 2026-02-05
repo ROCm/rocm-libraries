@@ -8,7 +8,13 @@ if(GPU_TARGETS MATCHES "gfx9")
     execute_process(
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/generate_instances.py --mode=tests
       RESULT_VARIABLE ret
+      OUTPUT_VARIABLE output
+      ERROR_VARIABLE error
     )
+
+    if(NOT ret EQUAL 0)
+      message(FATAL_ERROR "Failed to generate instances. Return code: ${ret}\nOutput: ${output}\nError: ${error}")
+    endif()
   endif()
 
   # Find cpp files and create lib for instances
