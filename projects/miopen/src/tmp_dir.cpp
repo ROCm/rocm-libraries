@@ -32,9 +32,6 @@
 
 #include <thread>
 #include <string_view>
-#include <random>
-#include <sstream>
-#include <iomanip>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_SAVE_TEMP_DIR)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_EXIT_STATUS_TEMP_DIR)
@@ -56,7 +53,7 @@ int TmpDir::Execute(std::string_view cmd, std::string_view args, bool allowChang
     {
         MIOPEN_LOG_I2(path);
     }
-    auto status = Process{cmd}(args, allowChangingCwd ? path : "");
+    const auto status = Process{cmd}(args, allowChangingCwd ? path : "");
     if(env::enabled(MIOPEN_DEBUG_EXIT_STATUS_TEMP_DIR))
     {
         MIOPEN_LOG_I2(status);
