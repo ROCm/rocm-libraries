@@ -126,6 +126,62 @@ TEST_P(IntegrationGraphKnobsApi, QueryKnobsFromEngine)
         EXPECT_NE(it, knobs.end())
             << "Required knob '" << requiredId << "' not found in engine " << testCase.engineId;
     }
+
+    // Additional constraint validation for integer and floating-point knobs
+    for(const auto& knob : knobs)
+    {
+        if(knob.knobId() == "test.int_knob")
+        {
+            ASSERT_NE(knob.constraint(), nullptr) << "test.int_knob should have a constraint";
+            auto* intConstraint = dynamic_cast<const IntConstraint*>(knob.constraint());
+            ASSERT_NE(intConstraint, nullptr) << "test.int_knob constraint should be IntConstraint";
+            EXPECT_EQ(intConstraint->getMinValue(), 0) << "test.int_knob minimum value mismatch";
+            EXPECT_EQ(intConstraint->getMaxValue(), 100) << "test.int_knob maximum value mismatch";
+            EXPECT_EQ(intConstraint->getStep(), 10) << "test.int_knob step value mismatch";
+        }
+        else if(knob.knobId() == "test.float_knob")
+        {
+            ASSERT_NE(knob.constraint(), nullptr) << "test.float_knob should have a constraint";
+            auto* floatConstraint = dynamic_cast<const FloatConstraint*>(knob.constraint());
+            ASSERT_NE(floatConstraint, nullptr)
+                << "test.float_knob constraint should be FloatConstraint";
+            EXPECT_DOUBLE_EQ(floatConstraint->getMinValue(), 0.0)
+                << "test.float_knob minimum value mismatch";
+            EXPECT_DOUBLE_EQ(floatConstraint->getMaxValue(), 1.0)
+                << "test.float_knob maximum value mismatch";
+        }
+        else if(knob.knobId() == "test.shared.deterministic")
+        {
+            ASSERT_NE(knob.constraint(), nullptr)
+                << "test.shared.deterministic should have a constraint";
+            auto* intConstraint = dynamic_cast<const IntConstraint*>(knob.constraint());
+            ASSERT_NE(intConstraint, nullptr)
+                << "test.shared.deterministic constraint should be IntConstraint";
+            EXPECT_EQ(intConstraint->getMinValue(), 0)
+                << "test.shared.deterministic minimum value mismatch";
+            EXPECT_EQ(intConstraint->getMaxValue(), 1)
+                << "test.shared.deterministic maximum value mismatch";
+            EXPECT_EQ(intConstraint->getStep(), 1)
+                << "test.shared.deterministic step value mismatch";
+        }
+        else if(knob.knobId() == "test.engine_b.block_size")
+        {
+            ASSERT_NE(knob.constraint(), nullptr)
+                << "test.engine_b.block_size should have a constraint";
+            auto* intConstraint = dynamic_cast<const IntConstraint*>(knob.constraint());
+            ASSERT_NE(intConstraint, nullptr)
+                << "test.engine_b.block_size constraint should be IntConstraint";
+            // This knob uses valid values {8, 16, 32, 64} rather than min/max
+            const auto& validValues = intConstraint->getValidValues();
+            EXPECT_FALSE(validValues.empty())
+                << "test.engine_b.block_size should have valid values";
+            std::unordered_set<int64_t> expectedValues = {8, 16, 32, 64};
+            EXPECT_EQ(validValues, expectedValues)
+                << "test.engine_b.block_size valid values mismatch";
+            EXPECT_EQ(intConstraint->getStep(), 1)
+                << "test.engine_b.block_size step value mismatch";
+        }
+    }
 }
 
 TEST_P(IntegrationGraphKnobsApi, CreateExecutionPlanWithEmptyKnobs)
@@ -153,11 +209,61 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithValidKnobs)
     settings.emplace_back("test.string_knob", std::string("accurate"));
 
     auto result = graph.create_execution_plan_ext(engineId, settings);
-
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
-TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithInvalidIntKnob)
+TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithValidBoundaryKnobs)
+{
+    Graph graph = createAndBuildSimpleGraph();
+
+    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+
+    // Query knobs to get constraint information
+    std::vector<Knob> knobs;
+    auto queryResult = graph.get_knobs_for_engine(engineId, knobs);
+    ASSERT_TRUE(queryResult.is_good()) << queryResult.get_message();
+
+    // Find int_knob and float_knob to get their constraint information
+    auto intKnobIt = std::find_if(knobs.begin(), knobs.end(), [](const Knob& knob) {
+        return knob.knobId() == "test.int_knob";
+    });
+    ASSERT_NE(intKnobIt, knobs.end()) << "Could not find test.int_knob";
+    auto* intConstraint = dynamic_cast<const IntConstraint*>(intKnobIt->constraint());
+    ASSERT_NE(intConstraint, nullptr) << "test.int_knob should have IntConstraint";
+
+    auto floatKnobIt = std::find_if(knobs.begin(), knobs.end(), [](const Knob& knob) {
+        return knob.knobId() == "test.float_knob";
+    });
+    ASSERT_NE(floatKnobIt, knobs.end()) << "Could not find test.float_knob";
+    auto* floatConstraint = dynamic_cast<const FloatConstraint*>(floatKnobIt->constraint());
+    ASSERT_NE(floatConstraint, nullptr) << "test.float_knob should have FloatConstraint";
+
+    // Test with minimum values
+    {
+        std::vector<KnobSetting> settings;
+        settings.emplace_back("test.int_knob", intConstraint->getMinValue());
+        settings.emplace_back("test.float_knob", floatConstraint->getMinValue());
+        settings.emplace_back("test.string_knob", std::string("fast"));
+
+        auto result = graph.create_execution_plan_ext(engineId, settings);
+        EXPECT_TRUE(result.is_good())
+            << "Minimum values should be accepted: " << result.get_message();
+    }
+
+    // Test with maximum values
+    {
+        std::vector<KnobSetting> settings;
+        settings.emplace_back("test.int_knob", intConstraint->getMaxValue());
+        settings.emplace_back("test.float_knob", floatConstraint->getMaxValue());
+        settings.emplace_back("test.string_knob", std::string("balanced"));
+
+        auto result = graph.create_execution_plan_ext(engineId, settings);
+        EXPECT_TRUE(result.is_good())
+            << "Maximum values should be accepted: " << result.get_message();
+    }
+}
+
+TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithOutOfRangeIntKnob)
 {
     Graph graph = createAndBuildSimpleGraph();
 
@@ -168,6 +274,20 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithInvalidIntKnob)
 
     auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_FALSE(result.is_good()) << "Should reject int value above maximum";
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithMisalignedIntKnobStep)
+{
+    Graph graph = createAndBuildSimpleGraph();
+
+    // test.int_knob has step=10, so valid values are 0, 10, 20, ..., 100
+    int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
+    std::vector<KnobSetting> settings;
+    settings.emplace_back("test.int_knob", static_cast<int64_t>(15)); // Not aligned with step
+
+    auto result = graph.create_execution_plan_ext(engineId, settings);
+    EXPECT_FALSE(result.is_good()) << "Should reject int value not aligned with step";
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
@@ -243,12 +363,12 @@ TEST_F(IntegrationGraphKnobsApi, QueryKnobsBeforeGraphBuilt)
     graph.set_compute_data_type(DataType::FLOAT).set_io_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1).set_name("X").set_dim({2, 3, 4, 4});
+    x->set_name("X").set_dim({2, 3, 4, 4});
 
     PointwiseAttributes attrs;
     attrs.set_mode(PointwiseMode::RELU_FWD);
     auto y = graph.pointwise(x, attrs);
-    y->set_uid(2);
+    y->set_name("Y");
 
     // Try to query knobs WITHOUT building the graph first
     int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
