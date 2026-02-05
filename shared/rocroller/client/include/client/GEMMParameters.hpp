@@ -34,8 +34,8 @@
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
 #include <rocRoller/Parameters/Solution/StoreOption.hpp>
-#include <rocRoller/Utilities/Utils.hpp>
 #include <rocRoller/Parameters/Solution/StreamK.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 #include "client/BenchmarkSolution.hpp"
 #include <mxDataGenerator/DataGenerator.hpp>
