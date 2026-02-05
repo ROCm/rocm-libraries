@@ -896,8 +896,7 @@ class TestCustomScheduleTF32:
         assert has_schedule
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 2
-        numMfma = TestCustomScheduleTF32.get_num_mfma(kernel)
-        assert schedule_info.numMfma == numMfma
+        assert schedule_info.numMfma == TestCustomScheduleTF32.get_num_mfma(kernel)
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
 
