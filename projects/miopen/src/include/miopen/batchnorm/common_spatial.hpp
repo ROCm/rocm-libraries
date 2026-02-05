@@ -91,8 +91,7 @@ inline void GetSpatialMultipleConfig(const miopen::batchnorm::ProblemDescription
     {
         if(c % vectorsize != 0)
         {
-            xlocalsize = 1;
-            ylocalsize = 1;
+            // xlocalsize and ylocalsize already initialized to 1
             return;
         }
         GetLocalConfigNHWC(problem, vectorsize, xlocalsize, ylocalsize);
@@ -101,11 +100,10 @@ inline void GetSpatialMultipleConfig(const miopen::batchnorm::ProblemDescription
     {
         if(in_cstride % vectorsize != 0)
         {
-            xlocalsize = 1;
-            ylocalsize = 1;
+            // xlocalsize and ylocalsize already initialized to 1
             return;
         }
-        xlocalsize = 1;
+        // xlocalsize stays at 1
         ylocalsize = 1024;
         if(ylocalsize > in_cstride / vectorsize)
         {
