@@ -12,14 +12,53 @@ def show_node_info() {
     """
 }
 
+def cloneUpdateRefRepo() {
+    def refRepoPath = "/var/jenkins/ref-repo/rocm-libraries"
+    def lockLabel = "git ref repo lock - ${env.NODE_NAME}"
+    def folderExists = sh(
+        script: "test -d ${refRepoPath}/refs",
+        returnStatus: true
+    ) == 0
+
+    if (!folderExists) {
+        echo "rocm-libraries repo does not exist at ${refRepoPath}, creating mirror clone..."
+        echo "locking on label: ${lockLabel}"
+        lock(lockLabel) {
+            def cloneCommand = """
+                set -ex
+                rm -rf ${refRepoPath} && mkdir -p ${refRepoPath}
+                git clone --mirror https://github.com/ROCm/rocm-libraries.git ${refRepoPath}
+            """
+            sh(script: cloneCommand, label: "clone ref repo")
+        }
+        echo "Completed git clone, lock released"
+    }
+    echo "rocm-libraries repo exists at ${refRepoPath}, performing git remote update..."
+    echo "locking on label: ${lockLabel}"
+    lock(lockLabel) {
+        def fetchCommand = """
+            set -ex
+            cd ${refRepoPath}
+            git remote prune origin
+            git remote update
+        """
+        sh(script: fetchCommand, label: "update ref repo")
+    }
+    echo "Completed git ref repo fetch, lock released"
+}
+
 def checkoutComposableKernel()
 {
+    // Update ref repo for faster fetches
+    cloneUpdateRefRepo()
+
     // Clean workspace first
     sh 'rm -rf .git projects'
 
     // Get the repo URL and branch from scm
     def repoUrl = scm.userRemoteConfigs[0].url
     def branch = scm.branches[0].name
+    def refRepoPath = "/var/jenkins/ref-repo/rocm-libraries"
 
     // Use git sparse-checkout for faster cloning with graceful timeout handling
     def status = sh(script: """
@@ -45,8 +84,8 @@ def checkoutComposableKernel()
             exit 1
         fi
 
-        # Fetch both branches with depth 50 to allow merge
-        timeout 120 git fetch --filter=blob:none --depth 50 origin ${branch} develop
+        # Use reference repo for faster fetch, fetch both branches with depth 50 to allow merge
+        timeout 120 git fetch --reference ${refRepoPath} --filter=blob:none --depth 50 origin ${branch} develop
         rc=\$?
         if [ \$rc -eq 124 ]; then
             echo "ERROR: Git fetch timed out after 120 seconds. This may indicate network issues."
@@ -1396,6 +1435,7 @@ pipeline {
             agent{ label rocmnode("nogpu") }
             steps {
                 script {
+                    checkoutComposableKernel()
                     env.SHOULD_RUN_CI = String.valueOf(params.FORCE_CI.toBoolean() || shouldRunCICheck())
                     echo "SHOULD_RUN_CI: ${env.SHOULD_RUN_CI}"
                 }
