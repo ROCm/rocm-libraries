@@ -779,8 +779,7 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         }
 
         // Total workgroup size for final kernel - reused in condition and array declarations
-        constexpr auto grp_final_total =
-            MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL;
+        constexpr auto grp_final_total = MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL;
 
         if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
                      (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1 ||
