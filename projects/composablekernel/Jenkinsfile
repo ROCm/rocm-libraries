@@ -1268,8 +1268,8 @@ pipeline {
             description: "Run CK_BUILDER tests (default: ON)")
         booleanParam(
             name: "RUN_ALL_UNIT_TESTS",
-            defaultValue: false,
-            description: "Run all unit tests (default: OFF)")
+            defaultValue: true,
+            description: "Run all unit tests (default: ON)")
         booleanParam(
             name: "RUN_PYTORCH_TESTS",
             defaultValue: false,
