@@ -594,7 +594,9 @@ double compute_memory_latency(const problem_t& problem,
 
   // 2) Estimate mall hit-rate
   double H_mem_mall =
-      estimate_mall_hit(problem, hardware, config, num_active_cus, splitting_factor);
+      hardware.has_MALL()
+          ? estimate_mall_hit(problem, hardware, config, num_active_cus, splitting_factor)
+          : 0.0;  // MALL is not supported, so we emulate every read as a miss
 
   // 3) Total loads are loads from A and loads from B
   size_t Ld_A_value = a_trans ? MT_M * round_elements_to_128B(MT_K, a_bits)
@@ -633,7 +635,10 @@ double compute_memory_latency(const problem_t& problem,
   double bw_limited = compute_mem_bw_from_occupancy(hardware, num_active_cus);
 
   // 8) loads that reach each level
-  double Ld_mem_mall = (1.0 - H_mem_l2) * total_Ld;
+  double Ld_mem_mall =
+      hardware.has_MALL()
+          ? (1.0 - H_mem_l2) * total_Ld
+          : 0.0;  // MALL is not supported, we emulate it by saying there are zero loads to MALL
   double Ld_mem_dram = (1.0 - H_mem_mall) * Ld_mem_mall;
 
   // 9) enforce whole‐problem minimum loads when we can fit M/N in the CUs.

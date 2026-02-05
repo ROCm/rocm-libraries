@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -167,10 +167,12 @@ namespace rocsparse
 
         switch(source_indextype_)
         {
+        // LCOV_EXCL_START
         case rocsparse_indextype_u16:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
+        // LCOV_EXCL_STOP
         case rocsparse_indextype_i32:
         {
             RETURN_IF_ROCSPARSE_ERROR(
@@ -198,10 +200,12 @@ namespace rocsparse
 
         switch(target_indextype_)
         {
+        // LCOV_EXCL_START
         case rocsparse_indextype_u16:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
+        // LCOV_EXCL_STOP
         case rocsparse_indextype_i32:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_indexbase_array_compute_dispatch<int32_t>(
@@ -273,10 +277,12 @@ namespace rocsparse
 
         switch(source_indextype_)
         {
+        // LCOV_EXCL_START
         case rocsparse_indextype_u16:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
+        // LCOV_EXCL_STOP
         case rocsparse_indextype_i32:
         {
             RETURN_IF_ROCSPARSE_ERROR(
@@ -304,10 +310,12 @@ namespace rocsparse
 
         switch(target_indextype_)
         {
+        // LCOV_EXCL_START
         case rocsparse_indextype_u16:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
+        // LCOV_EXCL_STOP
         case rocsparse_indextype_i32:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_indexing_array_compute_dispatch<int32_t>(

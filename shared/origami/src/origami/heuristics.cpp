@@ -198,7 +198,13 @@ heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,
                                          config.mt.k};
 
     auto it = hand_optimized_map_.find(fast_key);
-    if (it != hand_optimized_map_.end()) { result = it->second; }
+    if (it != hand_optimized_map_.end()) {
+      if (origami::runtime_options().get().debug_enabled) {
+        std::cout << "Found hand-optimized kernel " << fast_key.to_string() << " with efficiency "
+                  << it->second << "\n";
+      }
+      result = it->second;
+    }
   }
 
   // Slow path: O(n) hierarchical lookup for general heuristics
