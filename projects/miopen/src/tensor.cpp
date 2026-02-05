@@ -37,19 +37,144 @@
 #include <miopen/find_solution.hpp>
 #include <miopen/visit_float.hpp>
 
-#include <boost/range/combine.hpp>
-
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <numeric>
 #include <optional>
+#include <ranges>
 #include <string>
+#include <tuple>
+#include <vector>
 
 namespace miopen {
 
 namespace {
+template <typename... TDescriptors>
+std::tuple<TDescriptors...>
+GetConsistentFlattenedTensorDescriptors(const TDescriptors&... real_descriptor_pack)
+{
+    constexpr std::size_t NTensor = sizeof...(TDescriptors);
+    std::integral_constant<std::size_t, NTensor> NTensorConstant;
+
+    std::array<const TensorDescriptor*, NTensor> real_descriptors{{(&real_descriptor_pack)...}};
+
+#ifndef NDEBUG
+    // sanity check: all input TensorDescriptors should have the same GetLengths()
+    const auto& real_desc_0_lens = real_descriptors[0]->GetLengths();
+
+    for(std::size_t itensor = 1; itensor < NTensor; ++itensor)
+    {
+        if(real_desc_0_lens != real_descriptors[itensor]->GetLengths())
+            MIOPEN_THROW(miopenStatusBadParm, "Lengths of Tensors are different.");
+    }
+#endif
+
+    // if tensors are all packed
+    bool is_all_packed = true;
+    for(std::size_t itensor = 0; itensor < NTensor; ++itensor)
+        is_all_packed &= real_descriptors[itensor]->IsPacked();
+
+    bool is_all_same_strided        = true;
+    const auto& real_desc_0_strides = real_descriptors[0]->GetStrides();
+    for(std::size_t itensor = 1; itensor < NTensor; ++itensor)
+    {
+        if(real_desc_0_strides != real_descriptors[itensor]->GetStrides())
+        {
+            is_all_same_strided = false;
+            break;
+        }
+    }
+
+    const auto& length_   = real_descriptors[0]->GetLengths();
+    const size_t num_dims = length_.size();
+
+    const auto make_length_and_strides = [&](std::size_t dim) {
+        return std::apply(
+                [&](const auto*... descs) {
+                    return std::make_tuple(
+                        length_[dim],
+                        descs->GetStrides()[dim]...);
+                },
+                real_descriptors);
+    };
+
+    auto indices = std::views::iota(std::size_t(0), num_dims)
+        | std::views::filter([&](const size_t i){ return length_[i] > 1; });
+    auto non1_length_strides = indices | std::views::transform(make_length_and_strides);
+
+    if((is_all_packed && is_all_same_strided) || non1_length_strides.empty())
+    {
+        auto sz = real_descriptors[0]->GetElementSize();
+        return create_tuple<NTensor>([&](auto itensor) {
+            return TensorDescriptor{
+                real_descriptors[itensor]->GetType(), {sz}, {static_cast<std::size_t>(1)}};
+        });
+    }
+
+    // start flattening tensors
+    std::array<std::vector<std::size_t>, NTensor> array_of_flat_lengths;
+    std::array<std::vector<std::size_t>, NTensor> array_of_flat_strides;
+
+    auto i               = non1_length_strides.begin();
+    std::size_t flat_len = std::get<0>(*i);
+    auto i_previous      = i++;
+
+    // the 0-th dimension full-length doesn't matter
+    for(; i != non1_length_strides.end(); ++i)
+    {
+        std::size_t len = std::get<0>(*i);
+
+        bool is_all_full_length = true;
+        repeat_n(
+            [&](auto itensor) {
+                const std::size_t stride          = std::get<itensor + 1>(*i);
+                const std::size_t previous_stride = std::get<itensor + 1>(*i_previous);
+                const std::size_t full_len        = previous_stride / stride;
+                is_all_full_length &= (len == full_len);
+            },
+            NTensorConstant);
+
+        if(is_all_full_length)
+        {
+            flat_len *= len;
+        }
+        else
+        {
+            array_of_flat_lengths[0].push_back(flat_len);
+
+            repeat_n(
+                [&](auto itensor) {
+                    std::size_t previous_stride = std::get<itensor + 1>(*i_previous);
+                    array_of_flat_strides[itensor].push_back(previous_stride);
+                },
+                NTensorConstant);
+            flat_len = len;
+        }
+        i_previous = i;
+    }
+    // lengths of all flattend tensors are the same
+    array_of_flat_lengths[0].push_back(flat_len);
+
+    // strides of all flattend tensors are different
+    repeat_n(
+        [&](auto itensor) {
+            std::size_t previous_stride = std::get<itensor + 1>(*i_previous);
+            array_of_flat_strides[itensor].push_back(previous_stride);
+        },
+        NTensorConstant);
+
+    for(std::size_t itensor = 1; itensor < NTensor; ++itensor)
+        array_of_flat_lengths[itensor] = array_of_flat_lengths[0];
+
+    return create_tuple<NTensor>([&](auto itensor) {
+        return TensorDescriptor{real_descriptors[itensor]->GetType(),
+                                std::move(array_of_flat_lengths[itensor]),
+                                std::move(array_of_flat_strides[itensor])};
+    });
+}
 
 bool IsDataTypeSupported(miopenDataType_t t)
 {
@@ -970,19 +1095,24 @@ TensorDescriptor GetFlattenedTensorDescriptor(const TensorDescriptor& desc)
     std::vector<std::size_t> flat_lengths;
     std::vector<std::size_t> flat_strides;
 
-    auto non1_length_strides = boost::combine(desc.GetLengths(), desc.GetStrides()) |
-                               boost::adaptors::filtered(f_length_is_not_1_t());
+    const auto& length_      = desc.GetLengths();
+    const auto& strides_     = desc.GetStrides();
+    auto non1_length_strides = std::views::iota(std::size_t(0), length_.size()) |
+                               std::views::transform([&](std::size_t i) {
+                                   return std::make_tuple(length_[i], strides_[i]);
+                               }) |
+                               std::views::filter([](const auto& v) { return std::get<0>(v) > 1; });
 
     auto i               = non1_length_strides.begin();
-    std::size_t flat_len = boost::get<0>(*i);
+    std::size_t flat_len = std::get<0>(*i);
     auto i_previous      = i++;
 
     // the 0-th dimension full-length doesn't matter
     for(; i != non1_length_strides.end(); ++i)
     {
-        std::size_t len             = boost::get<0>(*i);
-        std::size_t stride          = boost::get<1>(*i);
-        std::size_t previous_stride = boost::get<1>(*i_previous);
+        std::size_t len             = std::get<0>(*i);
+        std::size_t stride          = std::get<1>(*i);
+        std::size_t previous_stride = std::get<1>(*i_previous);
         std::size_t full_len        = previous_stride / stride;
 
         if(len == full_len)
@@ -998,7 +1128,7 @@ TensorDescriptor GetFlattenedTensorDescriptor(const TensorDescriptor& desc)
         i_previous = i;
     }
     flat_lengths.push_back(flat_len);
-    flat_strides.push_back(boost::get<1>(*i_previous));
+    flat_strides.push_back(std::get<1>(*i_previous));
 
     return {desc.GetType(), flat_lengths, flat_strides};
 }
@@ -1890,10 +2020,9 @@ void TransformTensor(const Handle& handle,
     }
     else
     {
-        auto x_y_len          = boost::combine(x_len, y_len);
-        bool same_spatial_len = std::all_of(x_y_len.begin(), x_y_len.end(), [](auto v) {
-            return boost::get<0>(v) == boost::get<1>(v);
-        });
+        bool same_spatial_len =
+            std::ranges::all_of(std::views::iota(std::size_t(0), x_len.size()),
+                                [&](std::size_t i) { return x_len[i] == y_len[i]; });
 
         if(!same_spatial_len)
         {
