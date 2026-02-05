@@ -57,7 +57,8 @@ def checkoutComposableKernel()
 
     // Get the repo URL and branch from scm
     def repoUrl = scm.userRemoteConfigs[0].url
-    def branch = scm.branches[0].name
+    // Strip common prefixes like '*/' or 'origin/' from branch name
+    def branch = scm.branches[0].name.replaceAll('^\\*/', '').replaceAll('^origin/', '')
     def refRepoPath = "/var/jenkins/ref-repo/rocm-libraries"
 
     // Use git sparse-checkout for faster cloning with graceful timeout handling
