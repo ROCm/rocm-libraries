@@ -35,6 +35,24 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+#if 0 // moved to laset.hpp for now
+//------------------------------------------------------------------------------
+/// @return ceil( x / y ), for integers x, y.
+template <typename Ix, typename Iy>
+constexpr auto ceildiv( Ix x, Iy y )
+{
+    return (x + y - 1)/y;
+}
+
+//------------------------------------------------------------------------------
+/// @return y * ceil( x / y ), for integers x, y.
+template <typename Ix, typename Iy>
+constexpr auto roundup( Ix x, Iy y )
+{
+    return y * ceildiv( x, y );
+}
+#endif
+
 //------------------------------------------------------------------------------
 template <bool BATCHED, typename T>
 void rocsolver_sy2sb_he2hb_getMemorySize(
@@ -91,7 +109,10 @@ void rocsolver_sy2sb_he2hb_getMemorySize(
 
 //------------------------------------------------------------------------------
 /// Shouldn't these be T* A, tau instead of T A, tau?
-template <typename T, typename S>
+// todo: this was template <typename T, typename S> with T A, S V, S W.
+// What's the difference between T and S? For complex, they are all complex, not real.
+// Why no pointers?
+template <typename T>
 rocblas_status rocsolver_sy2sb_he2hb_argCheck(
     rocblas_handle handle,
     const rocblas_int n,
@@ -139,8 +160,11 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
     const rocblas_int shiftA,
     const rocblas_int lda,
     const rocblas_stride strideA,
-    T* Aband, const rocblas_int ldab,
+    T* Aband,
+    const rocblas_int ldab,
+    const rocblas_stride strideAb,
     T* tau,
+    const rocblas_stride strideTau,
     const rocblas_int batch_count,
     T* scalars,
     T* D, const rocblas_int ldd,
@@ -185,8 +209,9 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
     // Row of Aband that stores main diagonal.
     rocblas_int idiag = kd - 1;
 
-   // Index i tracks what sub-panels have been factored.
-   rocblas_int i = 0;
+    // Index i tracks what sub-panels have been factored.
+    rocblas_int i = 0;
+    rocblas_int cpy_mblks, cpy_nblks;
 
     // Loop over large blocks.
     for (rocblas_int j = 0; j < n - kd; j += nb)
@@ -203,8 +228,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
         // (minor todo: could copy 1st diagonal tile (j:j+kb) to Aband instead,
         // but then later code to copy panel to Aband is more complex.)
         rocblas_int jb_rnd = roundup( jb, kd );
-        rocblas_int cpy_mblks = ceildiv( n-j, 32 );
-        rocblas_int cpy_nblks = ceildiv( jb_rnd, 32 );
+        cpy_mblks = ceildiv( n-j, 32 );
+        cpy_nblks = ceildiv( jb_rnd, 32 );
         ROCSOLVER_LAUNCH_KERNEL(
             copy_mat<T>,
             dim3(cpy_mblks, cpy_nblks, batch_count), dim3(32, 32), 0, stream,
@@ -229,10 +254,10 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
                 rocsolver_gemm(
                     handle, rocblas_operation_none, rocblas_operation_conjugate_transpose,
                     n-i, kd, i-j,
-                    &negone, V, idx2d( i, 0,   ldv ), ldv, strideV,  // Vj
-                             Z, idx2d( i, 0,   ldz ), ldz, strideZ,  // Zj^H, kd cols
+                    &negone, V, idx2D( i, 0,   ldv ), ldv, strideV,  // Vj
+                             Z, idx2D( i, 0,   ldz ), ldz, strideZ,  // Zj^H, kd cols
                     &one,    V, idx2D( i, i-j, ldv ), ldv, strideV,  // Vi
-                    scalars, work, workT, workZ, workArr );
+                    batch_count, workArr );
 
                 // Ai -= Zj Vj^H
                 rocsolver_gemm(
@@ -241,16 +266,16 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
                     &negone, Z, idx2D( i, 0,   ldz ), ldz, strideZ,  // Zj
                              V, idx2D( i, 0,   ldv ), ldv, strideV,  // Vj^H, kd cols
                     &one,    V, idx2D( i, i-j, ldv ), ldv, strideV,  // Vi
-                    scalars, work, workT, workZ, workArr );
+                    batch_count, workArr );
             }
 
             // Factor current sub-panel, Ai, stored in Vi.
             // Includes all kd cols, not just qn cols; geqrf updates all cols.
             rocsolver_geqrf_template<BATCHED, STRIDED>(
                 handle, qm, kd,
-                V, idx2D( i+kd, i-j, ldv ), ldv, strideV,
-                &tau[ i ], strideP, batch_count,
-                scalars, work, workT, workZ, workArr );
+                V, idx2D( i+kd, i-j, ldv ), ldv, strideV,  // Vi
+                &tau[ i ], strideTau,                      // tau_i
+                batch_count, scalars, work, D, Z, workArr );
 
             // Copy band of A (diag tile and R) to Aband.
             // Copies some "don't care" entries from below bandwidth kd.
@@ -269,17 +294,18 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             T const diag    = one;
             laset(
                 handle, 'u',
-                qn, qn, &offdiag, &diag,
+                qn, qn, offdiag, diag,
                 V, idx2D( i+kd, i-j, ldv ), ldv, strideV,  // Vi
                 batch_count );
 
             // Form corresponding matrix Ti = larft( Vi, tau_i ), stored above Vi.
+            // todo: why does T not have shift? Is just adding okay? Why not add everywher?
             rocsolver_larft_template<T>(
                 handle, rocblas_forward_direction, rocblas_column_wise,
                 qm, qn,
                 V, idx2D( i+kd, i-j, ldv ), ldv, strideV,  // Vi
-                &tau[ i ], strideP,                        // tau_i
-                V, idx2D( i, i-j, ldv ), ldv, strideV,     // Ti
+                &tau[ i ], strideTau,                      // tau_i
+                V + idx2D( i, i-j, ldv ), ldv, strideV,    // Ti
                 batch_count, scalars, work, workArr );
 
             // Compute Wi = Vi Ti
@@ -302,8 +328,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
 
                 // Zero out block above Wi*.
                 laset(
-                    handle, rocblas_fill_general,
-                    i-j, qn, &zero, &zero,
+                    handle, 'g',
+                    i-j, qn, zero, zero,
                     W, idx2D( j+kd, i-j, ldw ), ldw, strideW,  // Wi
                     batch_count );
 
@@ -436,8 +462,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             copy_mat<T>,
             dim3(cpy_mblks, cpy_nblks, batch_count), dim3(32, 32), 0, stream,
             n-j, jb_rnd,
-            V, idx2D( j, 0, ldv ), ldv,    // Vj
-            A, idx2D( j, j, lda ), lda );  // Aj
+            V, idx2D( j, 0, ldv ), ldv, strideV,    // Vj
+            A, idx2D( j, j, lda ), lda, strideA );  // Aj
     }
 
     // Copy last, lower triangular block of band of A to Aband.
@@ -448,8 +474,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
         copy_mat<T>,
         dim3(cpy_mblks, cpy_mblks, batch_count), dim3(32, 32), 0, stream,
         n-i, n-i,
-        A, idx2D( i, i, lda ) + shiftA, lda, strideA,  // Aii
-        Aband, idx2D( idiag, i, ldab ) + shiftA, ldab-1, strideAb );  // Aband_ii
+        A,     idx2D( i, i, lda  ) + shiftA, lda,    strideA,     // Aii
+        Aband, idx2D( idiag, i, ldab ),      ldab-1, strideAb );  // Aband_ii
 
     rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
