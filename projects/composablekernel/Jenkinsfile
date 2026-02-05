@@ -429,18 +429,18 @@ def buildDocker(install_prefix){
     echo "Building Docker for ${image_name}"
     def dockerArgs = "--build-arg PREFIX=${install_prefix} --build-arg CK_SCCACHE='${env.CK_SCCACHE}' --build-arg compiler_version='${params.COMPILER_VERSION}' --build-arg compiler_commit='${params.COMPILER_COMMIT}' --build-arg ROCMVERSION='${params.ROCMVERSION}' "
     if(params.COMPILER_VERSION == "amd-staging" || params.COMPILER_VERSION == "amd-mainline" || params.COMPILER_COMMIT != ""){
-        dockerArgs = dockerArgs + " --no-cache --build-arg BASE_DOCKER='${base_image_name}' -f Dockerfile.compiler . "
+        dockerArgs = dockerArgs + " --no-cache --build-arg BASE_DOCKER='${base_image_name}' -f projects/composablekernel/Dockerfile.compiler . "
     }
     else if(params.RUN_AITER_TESTS){
         image_name = "${env.CK_DOCKERHUB_PRIVATE}:ck_aiter"
-        dockerArgs = dockerArgs + " --no-cache -f Dockerfile.aiter --build-arg AITER_BRANCH='${params.aiter_branch}' --build-arg CK_AITER_BRANCH='${params.ck_aiter_branch}' . "
+        dockerArgs = dockerArgs + " --no-cache -f projects/composablekernel/Dockerfile.aiter --build-arg AITER_BRANCH='${params.aiter_branch}' --build-arg CK_AITER_BRANCH='${params.ck_aiter_branch}' . "
     }
      else if(params.RUN_PYTORCH_TESTS){
         image_name = "${env.CK_DOCKERHUB}:ck_pytorch"
-        dockerArgs = dockerArgs + " --no-cache -f Dockerfile.pytorch --build-arg CK_PYTORCH_BRANCH='${params.ck_pytorch_branch}' . "
+        dockerArgs = dockerArgs + " --no-cache -f projects/composablekernel/Dockerfile.pytorch --build-arg CK_PYTORCH_BRANCH='${params.ck_pytorch_branch}' . "
     }
    else{
-        dockerArgs = dockerArgs + " -f Dockerfile . "
+        dockerArgs = dockerArgs + " -f projects/composablekernel/Dockerfile . "
     }
     echo "Build Args: ${dockerArgs}"
     try{
