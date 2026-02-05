@@ -23,10 +23,12 @@ def checkoutComposableKernel()
 
     // Use git sparse-checkout for faster cloning
     sh """
-        git clone --filter=blob:none --no-checkout --depth 1 --branch ${branch} ${repoUrl} .
-        git sparse-checkout init --cone
-        git sparse-checkout set projects/composablekernel
-        git checkout
+		timeout 10 git init || echo "Git init timed out"
+  		timeout 10 git remote add origin ${repoUrl} || echo "Git remote-add timed out"
+        timeout 10 git fetch --filter=blob:none --depth 1 origin ${branch} || echo "Git fetch timed out"
+        timeout 10 git sparse-checkout init --cone || echo "Git sparse-checkout init timed out"
+        timeout 10 git sparse-checkout set projects/composablekernel || echo "Git sparse-checkout set timed out"
+        timeout 10 git checkout || echo "Git checkout timed out"
     """
 }
 
