@@ -1293,16 +1293,6 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
     mfma_wave_group=[2, 2]
 )
 def _get_schedule_96x256x64_16bit(kernel, useLDSTr, TLDS):
-    """
-    CMS schedule for BF16/FP16-class kernels on gfx950:
-      - MacroTile: 96x256x64
-      - Layout: NT
-      - LDSTrInst=1, TransposeLDS=0
-
-    Notes:
-      - Expected MIWaveTile for this MacroTile with MIWG=[2,2] is [3,8].
-      - This schedule is intentionally conservative (correctness-first).
-    """
     kernel["MfmaInitCVgprs"] = True
 
     numMfma = 48
@@ -1315,9 +1305,9 @@ def _get_schedule_96x256x64_16bit(kernel, useLDSTr, TLDS):
         # B: MIWaveTileB=8 => 2*8 = 16 local/global reads
         syncTable = [
             -1, SWaitCnt(dscnt=12, vlcnt=-1, vscnt=-1, comment="wait for prior iteration LR/LW for iteration == 0"),
-            5, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for prior iteration LR/LW for iteration == 0"),
-             12, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before GRA"),
-             12, SBarrier(comment="barrier after LRA0, before GRA"),
+             5, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for prior iteration LR/LW for iteration == 0"),
+            12, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before GRA"),
+            12, SBarrier(comment="barrier after LRA0, before GRA"),
             23, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRB0 to complete before GRB"),
             23, SBarrier(comment="barrier after LRB0, before GRB"),
 
