@@ -101,7 +101,7 @@ TEST_F(TestSdkLogging, SdkLogContainsComponentName)
 
     std::string logContent = getLogContent();
 
-    // SDK logs should contain the component name from COMPONENT_NAME macro
+    // SDK logs should contain the "hipdnn_frontend" component name
     EXPECT_THAT(logContent, ::testing::HasSubstr("hipdnn_frontend"))
         << "Log message did not contain expected component name.\n"
         << "Actual log: " << logContent;

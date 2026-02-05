@@ -46,9 +46,9 @@ public:
 
     virtual ~PluginBase() = default;
 
-    std::string_view name() const;
-    std::string_view version() const;
-    hipdnnPluginType_t type() const;
+    virtual std::string_view name() const;
+    virtual std::string_view version() const;
+    virtual hipdnnPluginType_t type() const;
 
     static hipdnnPluginType_t getPluginType();
 

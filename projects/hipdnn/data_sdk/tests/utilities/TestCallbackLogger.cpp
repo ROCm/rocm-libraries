@@ -129,8 +129,8 @@ TEST_F(TestCallbackLogger, MessageContainsComponentName)
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 1);
 
-    // The message should contain the component name (COMPONENT_NAME is defined by CMake)
-    std::string componentName = COMPONENT_NAME;
+    // The message should contain the SDK component name
+    std::string componentName = hipdnn_data_sdk::logging::K_COMPONENT_NAME;
     EXPECT_NE(logs[0].second.find(componentName), std::string::npos)
         << "Log message did not contain component name.\n"
         << "Expected to find: " << componentName << "\n"

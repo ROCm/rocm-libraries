@@ -71,8 +71,8 @@ TEST_F(TestSdkLogging, SdkLogContainsComponentName)
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 1);
 
-    // COMPONENT_NAME is inherited from hipdnn_frontend
-    EXPECT_NE(logs[0].second.find("hipdnn_frontend"), std::string::npos)
+    // SDK uses fixed "hipdnn_sdk" component name
+    EXPECT_NE(logs[0].second.find("hipdnn_sdk"), std::string::npos)
         << "Log message did not contain expected component name.\n"
         << "Actual log: " << logs[0].second;
 }

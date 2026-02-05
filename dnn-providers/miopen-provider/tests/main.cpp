@@ -13,7 +13,7 @@ SPDX-License-Identifier: MIT
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
-    hipdnn::logging::initializeCallbackLogging(COMPONENT_NAME,
+    hipdnn::logging::initializeCallbackLogging("miopen_plugin_tests",
                                                hipdnn_test_sdk::utilities::testLoggingCallback);
 
     // Register HipErrorHandler to check and clear HIP errors after each test

@@ -132,7 +132,7 @@ add_library(
     MiopenPlugin.cpp
     MiopenPluginPublic.cpp
 )
-target_compile_definitions(miopen_plugin_impl PRIVATE COMPONENT_NAME="miopen_plugin")
+target_compile_definitions(miopen_plugin_impl PRIVATE)
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
 
@@ -150,7 +150,7 @@ endif()
 
 # Static library for unit tests to link against (provides access to internal implementation)
 add_library(miopen_plugin_private STATIC $<TARGET_OBJECTS:miopen_plugin_impl>)
-target_compile_definitions(miopen_plugin_private PRIVATE COMPONENT_NAME="miopen_plugin")
+target_compile_definitions(miopen_plugin_private PRIVATE)
 target_include_directories(miopen_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # Link to miopen_plugin_impl to inherit its PUBLIC properties (including spdlog setup)
 target_link_libraries(miopen_plugin_private PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk miopen_plugin_impl)
@@ -159,7 +159,7 @@ add_library(miopen_legacy_plugin_private ALIAS miopen_plugin_private)
 
 # miopen_legacy_plugin - REAL target for current TheRock compatibility
 add_library(miopen_legacy_plugin SHARED $<TARGET_OBJECTS:miopen_plugin_impl>)
-target_compile_definitions(miopen_legacy_plugin PRIVATE COMPONENT_NAME="miopen_plugin")
+target_compile_definitions(miopen_legacy_plugin PRIVATE)
 target_link_libraries(miopen_legacy_plugin PRIVATE MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
 target_link_libraries(miopen_legacy_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
 target_compile_options(miopen_legacy_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -176,7 +176,7 @@ set_target_properties(
 
 # miopen_plugin - REAL target for updated TheRock
 add_library(miopen_plugin SHARED $<TARGET_OBJECTS:miopen_plugin_impl>)
-target_compile_definitions(miopen_plugin PRIVATE COMPONENT_NAME="miopen_plugin")
+target_compile_definitions(miopen_plugin PRIVATE)
 target_link_libraries(miopen_plugin PRIVATE MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
 target_link_libraries(miopen_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
 target_compile_options(miopen_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
