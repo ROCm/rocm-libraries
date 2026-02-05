@@ -45,8 +45,11 @@ namespace rocRoller
         m_argumentPointer->setName("Kernel argument pointer");
         co_yield m_argumentPointer->allocate();
 
-        co_yield ctx->argLoader()->getPreloadedRegisters(
-            m_preloadedArgs, m_preloadedRegOffset, m_numPreloadedRegs);
+        if(ctx->targetArchitecture().HasCapability(GPUCapability::HasKernargPreloading))
+        {
+            co_yield ctx->argLoader()->getPreloadedRegisters(
+                m_preloadedArgs, m_preloadedRegOffset, m_numPreloadedRegs);
+        }
 
         if(ctx->targetArchitecture().HasCapability(GPUCapability::WorkgroupIdxViaTTMP))
         {

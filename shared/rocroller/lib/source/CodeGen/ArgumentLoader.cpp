@@ -256,6 +256,7 @@ namespace rocRoller
 
         co_yield loadRange(beginOffset, endOffset, allArgs);
 
+        Log::critical("Splitting out manually loaded args:");
         splitOutArgs(allArgs, beginOffset);
     }
 

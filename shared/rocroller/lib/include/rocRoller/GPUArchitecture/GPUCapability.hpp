@@ -175,6 +175,8 @@ namespace rocRoller
             HasXCC,
             DefaultRemapXCCValue,
 
+            HasKernargPreloading,
+
             Count,
         };
 

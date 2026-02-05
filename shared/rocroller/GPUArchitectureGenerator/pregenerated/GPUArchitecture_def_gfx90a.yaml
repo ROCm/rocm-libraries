@@ -15,6 +15,7 @@ Architectures:
       HasExplicitVectorCO: 0
       HasExplicitVectorRevCO: 0
       HasGlobalOffset: 0
+      HasKernargPreloading: 0
       HasLshlOr: 0
       HasMFMA: 0
       HasMFMA_bf16_16x16x16_1k: 0
