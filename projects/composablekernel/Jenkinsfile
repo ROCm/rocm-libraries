@@ -84,9 +84,14 @@ def checkoutComposableKernel()
             exit 1
         fi
 
-        # Use reference repo as alternates for faster fetch
-        mkdir -p .git/objects/info
-        echo "${refRepoPath}/objects" >> .git/objects/info/alternates
+        # Use reference repo as alternates for faster fetch (if it exists)
+        if [ -d "${refRepoPath}/objects" ]; then
+            mkdir -p .git/objects/info
+            echo "${refRepoPath}/objects" >> .git/objects/info/alternates
+            echo "Using reference repo at ${refRepoPath}"
+        else
+            echo "Reference repo not found, fetching without alternates"
+        fi
 
         # Fetch both branches with depth 50 to allow merge
         timeout 120 git fetch --filter=blob:none --depth 50 origin ${branch} develop
@@ -119,13 +124,28 @@ def checkoutComposableKernel()
             exit 1
         fi
 
-        timeout 60 git checkout -b ${branch} origin/${branch}
+        # Create branch without populating working tree
+        timeout 10 git branch ${branch} origin/${branch}
         rc=\$?
         if [ \$rc -eq 124 ]; then
-            echo "ERROR: Git checkout timed out after 60 seconds"
+            echo "ERROR: Git branch creation timed out after 10 seconds"
             exit 1
         elif [ \$rc -ne 0 ]; then
-            echo "ERROR: Git checkout failed"
+            echo "ERROR: Git branch creation failed"
+            exit 1
+        fi
+
+        # Point HEAD to the new branch
+        git symbolic-ref HEAD refs/heads/${branch}
+
+        # Populate working tree respecting sparse-checkout (only fetches needed blobs)
+        timeout 120 git read-tree -mu HEAD
+        rc=\$?
+        if [ \$rc -eq 124 ]; then
+            echo "ERROR: Git read-tree timed out after 120 seconds"
+            exit 1
+        elif [ \$rc -ne 0 ]; then
+            echo "ERROR: Git read-tree failed"
             exit 1
         fi
 
