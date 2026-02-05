@@ -76,7 +76,7 @@ def checkoutComposableKernel()
             exit 1
         fi
 
-        timeout 60 git checkout
+        timeout 60 git checkout -b ${branch} origin/${branch}
         rc=\$?
         if [ \$rc -eq 124 ]; then
             echo "ERROR: Git checkout timed out after 60 seconds"
