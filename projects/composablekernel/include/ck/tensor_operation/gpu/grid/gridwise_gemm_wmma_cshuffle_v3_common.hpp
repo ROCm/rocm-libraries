@@ -1062,11 +1062,9 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
 
         constexpr long_index_t TwoGB = (long_index_t{1} << 31);
 
-        const auto& a_desc =
-            get_first_element_workaround<NumATensor>(a_grid_desc_ak0_m_ak1);
-        const auto& b_desc =
-            get_first_element_workaround<NumBTensor>(b_grid_desc_bk0_n_bk1);
-
+        const auto& a_desc = a_grid_desc_ak0_m_ak1.At(I0);
+        const auto& b_desc = b_grid_desc_bk0_n_bk1.At(I0);
+        
         if(!(a_desc.GetElementSpaceSize() * sizeof(LDSTypeA) <= TwoGB &&
             b_desc.GetElementSpaceSize() * sizeof(LDSTypeB) <= TwoGB &&
             e_grid_desc_m_n.GetElementSpaceSize() * sizeof(EDataType) <= TwoGB))
