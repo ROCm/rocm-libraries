@@ -95,6 +95,30 @@ store(unsigned long i, const unsigned long i_offset, T* __restrict__ dst, vec_t<
     }
 }
 
+template <typename T, unsigned int BOUND, bool IS_CONTIGUOUS, unsigned int I_COND_STRIDE = 1>
+__forceinline__ __device__ static void store_if(unsigned long i,
+                                                const unsigned long i_offset,
+                                                unsigned long i_cond,
+                                                T* __restrict__ dst,
+                                                vec_t<T>& data)
+{
+    if(IS_CONTIGUOUS && i_cond + I_COND_STRIDE * load_factor<T> < BOUND)
+    {
+        *reinterpret_cast<load_t*>(&dst[i + i_offset]) = *reinterpret_cast<load_t*>(&data);
+    }
+    else
+    {
+#pragma unroll
+        for(int k = 0; k < load_factor<T>; ++k)
+        {
+            if(i_cond + k * I_COND_STRIDE < BOUND)
+            {
+                dst[i + k + i_offset] = data.data[k];
+            }
+        }
+    }
+}
+
 template <typename T>
 __device__ T logaddexp(T x, T y)
 {
@@ -756,7 +780,12 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                 __builtin_amdgcn_sched_barrier(0);
                 auto tmpyout = tmpy;
                 tmpy         = tmpdata;
-                store<T, VECTOR_SIZE, true>(i - BATCH_SIZE * load_factor<T>, y_offset, y, tmpyout);
+                store_if<T, VECTOR_SIZE * GRID_SIZE, true, SPATIAL_DIM>(
+                    i - BATCH_SIZE * load_factor<T>,
+                    y_offset,
+                    (batch_n * VECTOR_SIZE + i - BATCH_SIZE * load_factor<T>)*SPATIAL_DIM + batch_s,
+                    y,
+                    tmpyout);
             }
 #pragma unroll
             for(int k = 0; k < load_factor<T>; ++k)
@@ -784,7 +813,12 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                 }
                 ++index;
             }
-            store<T, VECTOR_SIZE, true>(i - BATCH_SIZE * load_factor<T>, y_offset, y, tmpy);
+            store_if<T, VECTOR_SIZE * GRID_SIZE, true, SPATIAL_DIM>(
+                i - BATCH_SIZE * load_factor<T>,
+                y_offset,
+                (batch_n * VECTOR_SIZE + i - BATCH_SIZE * load_factor<T>)*SPATIAL_DIM + batch_s,
+                y,
+                tmpy);
         }
         else
         {
@@ -1148,8 +1182,12 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                 __builtin_amdgcn_sched_barrier(0);
                 auto tmpdxout = tmpdx;
                 tmpdx         = tmpdata;
-                store<T, VECTOR_SIZE, true>(
-                    i - BATCH_SIZE * load_factor<T>, dx_offset, dx, tmpdxout);
+                store_if<T, VECTOR_SIZE * GRID_SIZE, true, SPATIAL_DIM>(
+                    i - BATCH_SIZE * load_factor<T>,
+                    dx_offset,
+                    (batch_n * VECTOR_SIZE + i - BATCH_SIZE * load_factor<T>)*SPATIAL_DIM + batch_s,
+                    dx,
+                    tmpdx);
             }
 #pragma unroll
             for(int k = 0; k < load_factor<T>; ++k)
@@ -1173,7 +1211,12 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                 }
                 ++index;
             }
-            store<T, VECTOR_SIZE, true>(i - BATCH_SIZE * load_factor<T>, dx_offset, dx, tmpdx);
+            store_if<T, VECTOR_SIZE * GRID_SIZE, true, SPATIAL_DIM>(
+                i - BATCH_SIZE * load_factor<T>,
+                dx_offset,
+                (batch_n * VECTOR_SIZE + i - BATCH_SIZE * load_factor<T>)*SPATIAL_DIM + batch_s,
+                dx,
+                tmpdx);
         }
         else
         {
