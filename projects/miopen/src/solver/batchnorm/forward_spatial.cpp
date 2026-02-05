@@ -55,8 +55,8 @@ bool PerformanceConfigBnFwdTraining::IsValid(
 
     // if default config is variant 2, check if it can be applied
     // (based on variant 2 restrictions)
-    size_t vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements;
-    int variant;
+    size_t vectorsize = 1, xlocalsize = 1, ylocalsize = 1, zlocalsize = 1, nelements = 1;
+    int variant = -1;
     GetVariantFromKernelId(
         this->kernel_id, variant, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements);
     if(variant == 2)
