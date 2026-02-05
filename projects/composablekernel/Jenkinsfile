@@ -26,74 +26,73 @@ def checkoutComposableKernel()
         set +e
 
         timeout 10 git init
-        if [ \$? -eq 124 ]; then
+        rc=\$?
+        if [ \$rc -eq 124 ]; then
             echo "ERROR: Git init timed out after 10 seconds"
             exit 1
-        elif [ \$? -ne 0 ]; then
+        elif [ \$rc -ne 0 ]; then
             echo "ERROR: Git init failed"
             exit 1
         fi
 
         timeout 10 git remote add origin ${repoUrl}
-        if [ \$? -eq 124 ]; then
+        rc=\$?
+        if [ \$rc -eq 124 ]; then
             echo "ERROR: Git remote add timed out after 10 seconds"
             exit 1
-        elif [ \$? -ne 0 ]; then
+        elif [ \$rc -ne 0 ]; then
             echo "ERROR: Git remote add failed"
             exit 1
         fi
 
-        timeout 60 git fetch --filter=blob:none --depth 1 origin ${branch}
-        if [ \$? -eq 124 ]; then
-            echo "ERROR: Git fetch timed out after 60 seconds. This may indicate network issues."
+        # Fetch both branches with depth 50 to allow merge
+        timeout 120 git fetch --filter=blob:none --depth 50 origin ${branch} develop
+        rc=\$?
+        if [ \$rc -eq 124 ]; then
+            echo "ERROR: Git fetch timed out after 120 seconds. This may indicate network issues."
             exit 1
-        elif [ \$? -ne 0 ]; then
+        elif [ \$rc -ne 0 ]; then
             echo "ERROR: Git fetch failed"
             exit 1
         fi
 
         timeout 10 git sparse-checkout init --cone
-        if [ \$? -eq 124 ]; then
+        rc=\$?
+        if [ \$rc -eq 124 ]; then
             echo "ERROR: Git sparse-checkout init timed out after 10 seconds"
             exit 1
-        elif [ \$? -ne 0 ]; then
+        elif [ \$rc -ne 0 ]; then
             echo "ERROR: Git sparse-checkout init failed"
             exit 1
         fi
 
         timeout 10 git sparse-checkout set projects/composablekernel
-        if [ \$? -eq 124 ]; then
+        rc=\$?
+        if [ \$rc -eq 124 ]; then
             echo "ERROR: Git sparse-checkout set timed out after 10 seconds"
             exit 1
-        elif [ \$? -ne 0 ]; then
+        elif [ \$rc -ne 0 ]; then
             echo "ERROR: Git sparse-checkout set failed"
             exit 1
         fi
 
         timeout 60 git checkout
-        if [ \$? -eq 124 ]; then
+        rc=\$?
+        if [ \$rc -eq 124 ]; then
             echo "ERROR: Git checkout timed out after 60 seconds"
             exit 1
-        elif [ \$? -ne 0 ]; then
+        elif [ \$rc -ne 0 ]; then
             echo "ERROR: Git checkout failed"
             exit 1
         fi
 
-        # Fetch develop branch and merge it into current branch
-        timeout 60 git fetch --filter=blob:none --depth 1 origin develop
-        if [ \$? -eq 124 ]; then
-            echo "ERROR: Git fetch develop timed out after 60 seconds"
-            exit 1
-        elif [ \$? -ne 0 ]; then
-            echo "ERROR: Git fetch develop failed"
-            exit 1
-        fi
-
+        # Merge develop into current branch
         timeout 60 git merge origin/develop
-        if [ \$? -eq 124 ]; then
+        rc=\$?
+        if [ \$rc -eq 124 ]; then
             echo "ERROR: Git merge develop timed out after 60 seconds"
             exit 1
-        elif [ \$? -ne 0 ]; then
+        elif [ \$rc -ne 0 ]; then
             echo "ERROR: Git merge develop failed. There may be conflicts."
             exit 1
         fi
