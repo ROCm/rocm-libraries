@@ -101,6 +101,11 @@ additional_options = {
         "projects_to_test": ["miopen_plugin"],
         "project_to_add": "miopen",
     },
+    "hip-kernel-provider": {
+        "cmake_options": [],
+        "projects_to_test": ["hipdnn", "hip_kernel_plugin"],
+        "project_to_add": "hipdnn",
+    },
 }
 
 # If a project has dependencies that are also being built, we combine build options and test options
