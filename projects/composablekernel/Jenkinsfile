@@ -137,7 +137,15 @@ def checkoutComposableKernel()
         fi
 
         # Point HEAD to the new branch
-        git symbolic-ref HEAD refs/heads/${branch}
+        timeout 10 git symbolic-ref HEAD refs/heads/${branch}
+        rc=\$?
+        if [ \$rc -eq 124 ]; then
+            echo "ERROR: Git symbolic-ref timed out after 10 seconds"
+            exit 1
+        elif [ \$rc -ne 0 ]; then
+            echo "ERROR: Git symbolic-ref failed"
+            exit 1
+        fi
 
         # Populate working tree respecting sparse-checkout (only fetches needed blobs)
         timeout 120 git read-tree -mu HEAD
@@ -150,19 +158,23 @@ def checkoutComposableKernel()
             exit 1
         fi
 
-        # Configure git identity for merge commit
-        git config user.email "jenkins@amd.com"
-        git config user.name "Jenkins"
+        # Merge develop into current branch (skip if already on develop)
+        if [ "${branch}" != "develop" ]; then
+            # Configure git identity for merge commit
+            git config user.email "jenkins@amd.com"
+            git config user.name "Jenkins"
 
-        # Merge develop into current branch
-        timeout 60 git merge origin/develop
-        rc=\$?
-        if [ \$rc -eq 124 ]; then
-            echo "ERROR: Git merge develop timed out after 60 seconds"
-            exit 1
-        elif [ \$rc -ne 0 ]; then
-            echo "ERROR: Git merge develop failed. There may be conflicts."
-            exit 1
+            timeout 60 git merge --no-edit origin/develop
+            rc=\$?
+            if [ \$rc -eq 124 ]; then
+                echo "ERROR: Git merge develop timed out after 60 seconds"
+                exit 1
+            elif [ \$rc -ne 0 ]; then
+                echo "ERROR: Git merge develop failed. There may be conflicts."
+                exit 1
+            fi
+        else
+            echo "Already on develop branch, skipping merge"
         fi
 
         echo "SUCCESS: ComposableKernel checkout completed successfully"
