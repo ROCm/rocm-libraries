@@ -2279,6 +2279,8 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
         return False, None
     elif isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UsePLRPack"] = True
+        kernel["UseMFMAF32XEmulation"] = False
+        kernel["UseDot2F32XEmulation"] = False
         syncTable = [
             -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Begininng of a iteration. Wait for prior local read.") ,
             5,  SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Before PackA0. Wait for first two LRA0. Skip 2*LRA0 + 1*LRB0.") ,
@@ -2345,6 +2347,7 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
+        kernel["UseDot2F32XEmulation"] = False
 
         # Used the following constrains to create schedule
         #  - LRA0 + PACKA0 needs to be done before 1/4 MFMAs
@@ -2479,7 +2482,8 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
     elif isNN(kernel) and TLDS==1:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
-        
+        kernel["UseDot2F32XEmulation"] = False
+
         numLrReadA = 24 
         numLrReadB = 8
 
@@ -2676,6 +2680,8 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     if isTN(kernel) and not useLDSTr and TLDS == 1:
         kernel["UsePLRPack"] = True
+        kernel["UseMFMAF32XEmulation"] = False
+        kernel["UseDot2F32XEmulation"] = False
         numPackInstr = 24 
         numPackIndices = numPackInstr // 2 # Assign 2 pack instructions per mfma index
         
@@ -2778,6 +2784,7 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
+        kernel["UseDot2F32XEmulation"] = False
         # This schedule follows similar pattern as 192x256x32 TF32 schedule
 
         # LRA0 + GRIncA
@@ -2916,6 +2923,8 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     if isTN(kernel) and useLDSTr and TLDS==1:
 
         kernel["UsePLRPack"] = True
+        kernel["UseMFMAF32XEmulation"] = False
+        kernel["UseDot2F32XEmulation"] = False
         # Used the following constrains to create schedule
         #  - LRA0 + PACKA0 needs to be done before 1/4 MFMAs - index 18
         #  - LBR0 + PACKB0 needs to be done before 2/4 MFMAs - index 36
@@ -3007,6 +3016,7 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = True
+        kernel["UseDot2F32XEmulation"] = False
         kernel["UsePLRPack"] = True
 
         offset=[0,0,1,1, 8,8,  9, 9,10,10, 
@@ -3095,6 +3105,7 @@ def _get_schedule_128x256x32_TF32(kernel, useLDSTr, TLDS):
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UsePLRPack"] = True
         kernel["UseMFMAF32XEmulation"] = True
+        kernel["UseDot2F32XEmulation"] = False
 
         # LRA0 + GRIncA
         lra0 = create_range(min_val = 0, num = 4, step = 1, repeat = 1)
