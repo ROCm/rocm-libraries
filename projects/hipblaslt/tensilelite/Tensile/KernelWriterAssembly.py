@@ -4476,7 +4476,9 @@ class KernelWriterAssembly(KernelWriter):
     module.addComment1("initC: remove ValuA/B vgpr buffer [%u...%u) from pool"%(self.states.a.startVgprValu , self.states.lastValuAB))
     numCVgpr = self.states.c.numVgprValu + numAccvgprs
 
-    if kernel["MfmaInitCVgprs"] == True and self.states.asmCaps["HasMFMA_f8f6f4"] and numCVgpr >= 32:
+    # TBD: optimize MfmaInitCVgprs case when using both VALU and ACC VGPRs (needs to init vgprs and acc separately)
+    # Alternatively, allow MFMAInstruction to accept acc2=0
+    if kernel["MfmaInitCVgprs"] == True and self.states.asmCaps["HasMFMA_f8f6f4"] and self.states.maxLimitAgprs >= numCVgpr >= 32:
       tmpVgpr = self.vgprPool.checkOutAligned(2,2,"tmp vgpr for lds init C registers")
       module.add(VMovB64(dst=vgpr(tmpVgpr,2), src=0, comment="A/B=0"))
 
@@ -4486,11 +4488,12 @@ class KernelWriterAssembly(KernelWriter):
         regStr = vgpr("ValuC+%u"%(i-numAccvgprs)) if i >= numAccvgprs else accvgpr(i)
         module.add(copyInst(dst=regStr, src=0, comment="initC"))
 
+      accvgprAlias = vgpr if kernel["MIArchVgpr"] else accvgpr
       for i in range(min(16, numCVgpr), numCVgpr, 16):
         if i + 16 <= numCVgpr:
           module.add(MFMAInstruction(instType=InstType.INST_I8, accType=InstType.INST_I32, variant=[32,32,16,1], mfma1k=False, \
-                                     acc=accvgpr(i,16), a=vgpr(tmpVgpr,2), b=vgpr(tmpVgpr,2), acc2=accvgpr(0,16), \
-                                     comment="initC: [%u, %u]"%(i, i+15)))
+                                    acc=accvgprAlias(i,16), a=vgpr(tmpVgpr,2), b=vgpr(tmpVgpr,2), acc2=accvgprAlias(0,16), \
+                                    comment="initC: [%u, %u]"%(i, i+15)))
         else:
           for j in range(i,min(i+16, numCVgpr)):
             copyInst = VMovB32 if j >= numAccvgprs else VAccvgprWrite
