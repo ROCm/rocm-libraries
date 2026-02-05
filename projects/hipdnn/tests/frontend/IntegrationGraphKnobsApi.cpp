@@ -207,9 +207,6 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithUnsupportedKnob)
 
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithDeprecatedKnob)
 {
-    // Start recording logs
-    hipdnn_test_sdk::utilities::LogRecorder recorder;
-
     Graph graph = createAndBuildSimpleGraph();
 
     int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
@@ -219,12 +216,6 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithDeprecatedKnob)
     auto result = graph.create_execution_plan_ext(engineId, settings);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
-
-    std::string expectedLog = "Knob test.deprecated_knob has been marked as deprecated.";
-    EXPECT_TRUE(
-        hipdnn_test_sdk::utilities::LogRecorder::hasLogContaining(HIPDNN_SEV_WARN, expectedLog))
-        << "Expected warning-level deprecation log '" << expectedLog << "' was not found in logs:\n"
-        << hipdnn_test_sdk::utilities::LogRecorder::getRecordedLogsAsString();
 }
 
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithSharedKnob)

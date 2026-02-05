@@ -14,8 +14,7 @@ int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
 
-    hipdnn_test_sdk::utilities::initializeChainedTestLogging(COMPONENT_NAME,
-                                                             hipdnnLoggingCallback_ext);
+    hipdnn_frontend::initializeFrontendLogging();
 
     // Register HipErrorHandler to check and clear HIP errors after each test
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
