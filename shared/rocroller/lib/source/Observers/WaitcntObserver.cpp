@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include "rocRoller/GPUArchitecture/GPUInstructionInfo.hpp"
 #include <rocRoller/Scheduling/Observers/WaitcntObserver.hpp>
 
 #include <rocRoller/KernelOptions_detail.hpp>
@@ -221,7 +222,7 @@ namespace rocRoller
 
             for(GPUWaitQueueType queueType : instWaitQueues)
             {
-                GPUWaitQueue waitQueue(queueType);
+                GPUWaitQueue waitQueue = fromWaitQueueType(queueType);
                 if(queueType != GPUWaitQueueType::None
                    && m_instructionQueues.find(waitQueue) != m_instructionQueues.end())
                 {
@@ -272,10 +273,10 @@ namespace rocRoller
                     {
                         retval << "\nWait Queue State:";
                     }
-                    retval << "\n--Queue: " << waitQueue.toString();
+                    retval << "\n--Queue: " << waitQueue;
                     retval << "\n----Needs Wait Zero: "
                            << (m_needsWaitZero.at(waitQueue) ? "True" : "False");
-                    retval << "\n----Type In Queue  : " << m_typeInQueue.at(waitQueue).toString();
+                    retval << "\n----Type In Queue  : " << m_typeInQueue.at(waitQueue);
                     retval << "\n----Registers      : ";
 
                     for(int queue_i = 0; queue_i < m_instructionQueues.at(waitQueue).size();
@@ -319,6 +320,39 @@ namespace rocRoller
                 }
             }
 
+            auto queuesToEmpty = inst.getWaitCount().queuesToEmpty();
+
+            if(queuesToEmpty.any())
+            {
+                for(int i = 0; i < static_cast<int>(GPUWaitQueueType::Count); i++)
+                {
+                    GPUWaitQueueType queueType = static_cast<GPUWaitQueueType>(i);
+                    GPUWaitQueue     queue     = fromWaitQueueType(queueType);
+                    // auto queueIdx = static_cast<size_t>(queue);
+
+                    if(queuesToEmpty[queueType])
+                    {
+                        if(!m_instructionQueues.at(queue).empty()
+                           && (m_typeInQueue.at(queue) == queueType || m_needsWaitZero.at(queue)))
+                        {
+                            rv.combine(WaitCount(architecture, queue, 0));
+                            rv.addComment(
+                                fmt::format("DEBUG: Wait for {} queue", toString(queueType)));
+                        }
+
+                        if(queueType == GPUWaitQueueType::SMemQueue)
+                        {
+                            rv.addComment(fmt::format(
+                                "SMemQueue {}: empty: {}, needsWaitZero: {}, typeInQueue: {}",
+                                queuesToEmpty[queueType],
+                                m_instructionQueues.at(queue).empty(),
+                                m_needsWaitZero.at(queue),
+                                toString(m_typeInQueue.at(queue))));
+                        }
+                    }
+                }
+            }
+
             return rv;
         }
 
@@ -350,7 +384,7 @@ namespace rocRoller
                                 if(explanation != nullptr)
                                 {
                                     *explanation += "WaitCnt Needed: Intersects with registers in '"
-                                                    + waitQueue.toString()
+                                                    + toString(waitQueue)
                                                     + "', which needs a wait zero.\n";
                                 }
                             }
@@ -362,7 +396,7 @@ namespace rocRoller
                                 if(explanation != nullptr)
                                 {
                                     *explanation += "WaitCnt Needed: Intersects with registers in '"
-                                                    + waitQueue.toString() + "', at "
+                                                    + toString(waitQueue) + "', at "
                                                     + std::to_string(queue_i)
                                                     + " and the queue size is "
                                                     + std::to_string(

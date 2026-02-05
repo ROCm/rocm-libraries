@@ -94,7 +94,19 @@ namespace rocRoller
         case GPUWaitQueue::VSQueue:
             m_vscnt = count;
             break;
+        case GPUWaitQueue::None:
+        case GPUWaitQueue::Count:
+            Throw<FatalError>("Invalid GPUWaitQueue!");
+            break;
         }
+    }
+
+    WaitCount::WaitCount(GPUArchitecture const&   arch,
+                         EnumBitset<GPUWaitQueueType> queuesToEmpty,
+                         std::string const&       message)
+        : m_queuesToEmpty(queuesToEmpty)
+        , m_comments({message})
+    {
     }
 
     WaitCount WaitCount::LoadCnt(GPUArchitecture const& arch, int value, std::string const& message)
@@ -191,6 +203,25 @@ namespace rocRoller
         return rv;
     }
 
+    WaitCount WaitCount::EmptyQueue(GPUArchitecture const& arch,
+                                    GPUWaitQueueType           queue,
+                                    std::string const&     message)
+    {
+        return EmptyQueue(arch, EnumBitset<GPUWaitQueueType>{queue}, message);
+    }
+
+    WaitCount WaitCount::EmptyQueue(GPUArchitecture const&   arch,
+                                    EnumBitset<GPUWaitQueueType> queues,
+                                    std::string const&       message)
+    {
+        return WaitCount(arch, queues, message);
+    }
+
+    EnumBitset<GPUWaitQueueType> const& WaitCount::queuesToEmpty() const
+    {
+        return m_queuesToEmpty;
+    }
+
     int WaitCount::CombineValues(int lhs, int rhs)
     {
         if(lhs < 0)
@@ -220,6 +251,8 @@ namespace rocRoller
         m_hasEXPCnt      = other.m_hasEXPCnt;
 
         m_comments.insert(m_comments.end(), other.m_comments.begin(), other.m_comments.end());
+
+        m_queuesToEmpty |= other.m_queuesToEmpty;
 
         return *this;
     }

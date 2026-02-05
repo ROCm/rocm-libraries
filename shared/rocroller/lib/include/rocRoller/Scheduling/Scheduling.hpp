@@ -60,7 +60,7 @@ namespace rocRoller
             unsigned int reusedOperands = 0;
 
             /// The new length of each of the queues.
-            std::array<int, GPUWaitQueueType::Count> waitLengths;
+            std::array<int, static_cast<size_t>(GPUWaitQueueType::Count)> waitLengths;
 
             /// How many new registers of each type must be allocated?
             std::array<int, static_cast<size_t>(Register::Type::Count)> allocatedRegisters;

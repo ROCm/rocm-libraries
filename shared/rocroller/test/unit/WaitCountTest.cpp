@@ -141,6 +141,13 @@ TEST_F(WaitCountTest, Combine)
     EXPECT_THAT(stringValue, testing::HasSubstr("expcnt(20)"));
 
     EXPECT_THAT(stringValue, testing::HasSubstr("s_waitcnt_vscnt 2"));
+
+    {
+        WaitCount wc = WaitCount::EmptyQueue(
+            arch, GPUWaitQueueType::SMemQueue, "DEBUG: Wait for scalar queue");
+        EXPECT_EQ(wc.queuesToEmpty().count(), 1);
+        EXPECT_EQ(wc.queuesToEmpty()[GPUWaitQueueType::SMemQueue], true);
+    }
 }
 
 /**

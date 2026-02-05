@@ -36,7 +36,7 @@ namespace rocRoller
     namespace Scheduling
     {
         template <typename T>
-        using WaitQueueMap = std::unordered_map<GPUWaitQueue, T, GPUWaitQueue::Hash>;
+        using WaitQueueMap = std::unordered_map<GPUWaitQueue, T>;
 
         using WaitQueueRegisters = std::array<Register::ValuePtr, Instruction::MaxExtraRegisters>;
 

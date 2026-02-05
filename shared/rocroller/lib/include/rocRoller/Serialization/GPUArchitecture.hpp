@@ -56,23 +56,23 @@ namespace rocRoller
         const std::string KeyArchitectures    = "Architectures";
         const std::string KeyArchString       = "ArchString";
 
-        /**
-         * GPUWaitQueueType is actually a class that look like an enum, so it is not handled by the
-         * generic enum serialization.
-         */
-        template <>
-        struct ScalarTraits<GPUWaitQueueType>
-        {
-            static std::string output(const GPUWaitQueueType& value)
-            {
-                return toString(value);
-            }
+        // /**
+        //  * GPUWaitQueueType is actually a class that look like an enum, so it is not handled by the
+        //  * generic enum serialization.
+        //  */
+        // template <>
+        // struct ScalarTraits<GPUWaitQueueType>
+        // {
+        //     static std::string output(const GPUWaitQueueType& value)
+        //     {
+        //         return toString(value);
+        //     }
 
-            static void input(std::string const& scalar, GPUWaitQueueType& value)
-            {
-                value = GPUWaitQueueType(scalar);
-            }
-        };
+        //     static void input(std::string const& scalar, GPUWaitQueueType& value)
+        //     {
+        //         value = GPUWaitQueueType(scalar);
+        //     }
+        // };
 
         template <typename IO>
         struct MappingTraits<GPUCapability, IO, EmptyContext>
