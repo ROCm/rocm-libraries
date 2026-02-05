@@ -3152,7 +3152,6 @@ class KernelWriterAssembly(KernelWriter):
         # tmpv = serial / ntc
         tmpv3 = self.vgprPool.checkOut(1)
         tmpv4 = self.vgprPool.checkOut(1)
-        tmpv5 = self.vgprPool.checkOut(1)
         # For TLU=0, apply an index rotation (with wrap-around) in the parallel dimension for a fix blocksize (=MI_K)
         # in the summation dimension.
         # ex: Given thread ID indices: [0,1,2,3,4,5,6,7, 8,9,10,..., 16,...., 24,..., 32,...., 40,....]
@@ -3171,13 +3170,12 @@ class KernelWriterAssembly(KernelWriter):
         module.add(VAddU32(dst=vgpr(tmpv3), src0=vgpr(tmpv2), src1=vgpr(tmpv4)))
         module.add(VAndB32(dst=vgpr(tmpv3), src0=hex(bS - 1), src1=vgpr(tmpv3)))
         # Compute subgroup ids of each {0,...bS-1}
-        module.add(VLShiftRightB32(dst=vgpr(tmpv5), shiftHex=log2(bS), src=vgpr(tmpv2)))
+        module.add(VLShiftRightB32(dst=vgpr(tmpv4), shiftHex=log2(bS), src=vgpr(tmpv2)))
         with self.allocTmpSgpr(1) as tmpSgprInfo:
-          module.add(vectorStaticMultiplyAdd(vgpr(tmpv2), vgpr(tmpv5), bS, vgpr(tmpv3), tmpSgprInfo))
+          module.add(vectorStaticMultiplyAdd(vgpr(tmpv2), vgpr(tmpv4), bS, vgpr(tmpv3), tmpSgprInfo))
 
         self.vgprPool.checkIn(tmpv3)
         self.vgprPool.checkIn(tmpv4)
-        self.vgprPool.checkIn(tmpv5)
 
       stride = "Strides%s"%(tc)
       module.add(VLShiftLeftB32(dst=vgpr(grov), shiftHex=log2(kernel["GlobalReadVectorWidth%c"%tc]), src=vgpr(tmpv2)))

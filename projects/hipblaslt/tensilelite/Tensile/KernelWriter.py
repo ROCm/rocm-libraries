@@ -4660,7 +4660,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if kernel["ProblemType"]["DataType"].numBytes() == 2 and not isMixedPrec \
            and kernel["ProblemType"]["TLU%s"%tc] == 0 and lrvw == grvw and \
            not isM0PadEnough:
-          abmatrixinfo.gRDtlSwizzlePerpBlockSize = max(1, kernel["VectorWidth%s"%tc])
+          abmatrixinfo.gRDtlSwizzlePerpBlockSize = kernel["VectorWidth%s"%tc]
           abmatrixinfo.gRDtlSwizzleParaBlockSize = kernel["MatrixInstK"] // (kernel["LocalReadVectorWidth"])
         else:
           abmatrixinfo.gRDtlSwizzlePerpBlockSize = 0
