@@ -1286,6 +1286,94 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
+    tile_config=TileConfig(96, 256, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_96x256x64_16bit(kernel, useLDSTr, TLDS):
+    """
+    CMS schedule for BF16/FP16-class kernels on gfx950:
+      - MacroTile: 96x256x64
+      - Layout: NT
+      - LDSTrInst=1, TransposeLDS=0
+
+    Notes:
+      - Expected MIWaveTile for this MacroTile with MIWG=[2,2] is [3,8].
+      - This schedule is intentionally conservative (correctness-first).
+    """
+    kernel["MfmaInitCVgprs"] = True
+
+    numMfma = 48
+    optSchedule = dict()
+    syncCode = []
+    nglshift = nllshift = 0
+
+    if isNT(kernel) and useLDSTr and TLDS == 0:
+        # A: MIWaveTileA=3 => 2*3 = 6 local/global reads
+        # B: MIWaveTileB=8 => 2*8 = 16 local/global reads
+        syncTable = [
+            -1, SWaitCnt(dscnt=12, vlcnt=-1, vscnt=-1, comment="wait for prior iteration LR/LW for iteration == 0"),
+            5, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for prior iteration LR/LW for iteration == 0"),
+             12, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before GRA"),
+             12, SBarrier(comment="barrier after LRA0, before GRA"),
+            23, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRB0 to complete before GRB"),
+            23, SBarrier(comment="barrier after LRB0, before GRB"),
+
+            25, SWaitCnt(dscnt=-1, vlcnt=11+1, vscnt=-1, comment="wait for global reads before next-tile LR"),
+            25, SBarrier(comment="final barrier before LRA1/LRB1"),
+            36, SWaitCnt(dscnt=-1, vlcnt=11-2, vscnt=-1, comment="wait for global reads before next-tile LR"),
+            36, SBarrier(comment="final barrier before LRA1/LRB1"),
+        ]
+        optSchedule = {
+            'SYNC'   : [syncTable[::2]],
+
+            # Address increments
+            'GRIncA' : [[0, 0, 1, 1, 2, 2, 3, 3, 4]],
+            'GRIncB' : [[4, 5, 5, 6, 6, 7, 7, 8, 8]],
+
+            # Current-iteration local reads
+            'LRA0'   : [[0, 1, 2, 3, 4, 5],
+                        [1, 2, 3, 4, 4, 6]],
+            # Ensure LRB0 completes early enough for upcoming MFMA consumers.
+            'LRB0'   : [[6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21],
+                        [7, 8, 9, 10, 11, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]],
+
+            # Global reads (DirectToLds). Issue after LRA0 barrier, while finishing LRB0.
+            # Do not interleave GRA between GRIncB indices (SCC hazard).
+            'GRA'    : [[12, 12, 18, 18, 21, 21],
+                        [13, 13, 19, 19, 22, 22]],
+            # Start GRB after the LRB0 barrier. Use stride=2 starting at 24.
+            'GRB'    : [[24, 24, 26, 26, 28, 28, 30, 30, 32, 32, 34, 34, 38, 38, 40, 40],
+                        [24, 24, 27, 27, 29, 29, 31, 31, 33, 33, 35, 35, 37, 37, 39, 39]],
+
+            # Next-iteration local reads
+            'LRA1'   : [[25, 26, 27, 28, 29, 30],
+                        [26, 27, 28, 29, 30, 31]],
+            # Keep within the mfma window; repeated indices are allowed (multiple instructions scheduled at same mfma slot).
+            'LRB1'   : [[36, 37, 37, 38, 38, 39, 39, 40, 40, 41, 41, 42, 43, 45, 46, 47],
+                        [37, 38, 38, 39, 39, 40, 40, 41, 41, 42, 42, 43, 44, 46, 47, 47]],
+
+            # Epilogue-related
+            'LRSA'   : [[22]],
+            'LRSB'   : [[23]],
+            'LWSA'   : [[46]],
+            'LWSB'   : [[46]],
+            'LCC'    : [[47, 47]],
+        }
+
+        syncCode = syncTable[1::2]
+
+        # No NGL/NLL shift adjustment for this conservative schedule.
+        nglshift = nllshift = 11
+    else:
+        return False, None
+
+    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
+@RegisterSchedule(
     tile_config=TileConfig(256, 160, 64, 2, 1, True, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
