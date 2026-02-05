@@ -32,6 +32,26 @@ from rocisa.instruction import SWaitCnt, SBarrier
 from Tensile.Common.Utilities import printWarning
 
 
+def invert_mfma_reorder(mfma_reorder: list[int]) -> dict[int, int]:
+    """
+    Compute the inverse mapping of mfmaReorder.
+    
+    The mfmaReorder array has semantics: mfmaReorder[new_position] = original_position.
+    This means the MFMA that was originally at index `original_position` will be
+    executed at `new_position` after reordering.
+    
+    This function returns the inverse: original_position -> new_position (execution index).
+    Use this when you have an original/logical MFMA index and need to find when it executes.
+    
+    Args:
+        mfma_reorder: List where mfma_reorder[new_pos] = original_pos
+        
+    Returns:
+        Dictionary mapping original_position -> new_position (execution index)
+    """
+    return {orig: new_pos for new_pos, orig in enumerate(mfma_reorder)}
+
+
 def get_most_recent_local_reads(
     vmfmas: list[int],
     counts: list[int],
@@ -984,7 +1004,7 @@ def find_earliest_mfma_execution(
         base_offset: Base MFMA index offset (e.g., for iteration quarter or half).
         num_a_tiles: Number of A tiles.
         num_b_tiles: Number of B tiles.
-        mfma_reorder: MFMA reordering list (logical -> execution index), or empty if no reordering.
+        mfma_reorder: MFMA reordering list where mfma_reorder[new_pos] = original_pos, or empty if no reordering.
         mfmas_per_tile: Number of MFMAs per tile pair (1 for BF16, 3 for TF32). Defaults to 3.
     
     Returns:
@@ -1006,17 +1026,19 @@ def find_earliest_mfma_execution(
         else:
             return tile_to_logical_mfma(a_tile=tile_index, b_tile=0)
     
-    # With reordering, search all MFMAs that use this Pack's output to find the earliest
+    # With reordering, search all MFMAs that use this Pack's output to find the earliest.
+    # mfma_reorder[new_pos] = original_pos, so we need the inverse to find execution position.
+    inverse = invert_mfma_reorder(mfma_reorder)
     if is_pack_B:
         # PackB prepares B tile data, used by MFMAs: (A0, Bi), (A1, Bi), ... for all A tiles
         return min(
-            mfma_reorder[tile_to_logical_mfma(a_tile, tile_index)]
+            inverse[tile_to_logical_mfma(a_tile, tile_index)]
             for a_tile in range(n_a_tiles)
         )
     else:
         # PackA prepares A tile data, used by MFMAs: (Ai, B0), (Ai, B1), ... for all B tiles
         return min(
-            mfma_reorder[tile_to_logical_mfma(tile_index, b_tile)]
+            inverse[tile_to_logical_mfma(tile_index, b_tile)]
             for b_tile in range(n_b_tiles)
         )
 
@@ -1755,17 +1777,19 @@ def _transform_index_with_force_unroll_sub_iter(
         return permuted * mfmas_per_tile
     
     if mfma_reorder:
-        # Find earliest consumer across all tiles in the opposite dimension
+        # Find earliest consumer across all tiles in the opposite dimension.
+        # mfma_reorder[new_pos] = original_pos, so we need the inverse to find execution position.
+        inverse = invert_mfma_reorder(mfma_reorder)
         if is_lra:
             # LRA's A tile is consumed by MFMAs at (a_tile, b) for all b tiles
             needed_by = min(
-                mfma_reorder[compute_consumer_mfma_index(a_tile, b)]
+                inverse[compute_consumer_mfma_index(a_tile, b)]
                 for b in range(n_tiles_b)
             )
         else:
             # LRB's B tile is consumed by MFMAs at (a, b_tile) for all a tiles
             needed_by = min(
-                mfma_reorder[compute_consumer_mfma_index(a, b_tile)]
+                inverse[compute_consumer_mfma_index(a, b_tile)]
                 for a in range(n_tiles_a)
             )
     else:
@@ -1808,18 +1832,20 @@ def _transform_index_standard(
     if mfma_reorder:
         # With reordering, we need to find the earliest consumer across all tiles in the opposite dimension.
         # LR data is used by multiple MFMAs - one for each tile in the opposite dimension.
+        # mfma_reorder[new_pos] = original_pos, so we need the inverse to find execution position.
+        inverse = invert_mfma_reorder(mfma_reorder)
         if is_lra:
             # LRA's A tile is consumed by MFMAs at (a, b) for all b tiles
             # In column-major layout: index = base + b * n_tiles_a * mfmas_per_tile
             needed_by = min(
-                mfma_reorder[needed_by + b * n_tiles_a * mfmas_per_tile]
+                inverse[needed_by + b * n_tiles_a * mfmas_per_tile]
                 for b in range(n_tiles_b)
             )
         else:
             # LRB's B tile is consumed by MFMAs at (a, b) for all a tiles
             # In column-major layout: index = base + a * mfmas_per_tile
             needed_by = min(
-                mfma_reorder[needed_by + a * mfmas_per_tile]
+                inverse[needed_by + a * mfmas_per_tile]
                 for a in range(n_tiles_a)
             )
     
