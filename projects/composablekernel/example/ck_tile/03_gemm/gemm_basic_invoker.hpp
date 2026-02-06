@@ -31,9 +31,8 @@ struct BasicInvoker
             std::cout << "WARNING: Ignoring persistent kernel option for basic gemm." << std::endl;
         }
 
-        constexpr bool is_fp32_input = std::is_same_v<ADataTypeBuf, float>;
-        [[maybe_unused]] constexpr bool is_tf32_compute =
-            std::is_same_v<ADataTypeCompute, ck_tile::tf32_t>;
+        constexpr bool is_fp32_input   = std::is_same_v<ADataTypeBuf, float>;
+        constexpr bool is_tf32_compute = std::is_same_v<ADataTypeCompute, ck_tile::tf32_t>;
 
         // This part comes from the Codegen
         constexpr ck_tile::index_t M_Tile = is_fp32_input ? 128 : 256;
@@ -150,8 +149,13 @@ struct BasicInvoker
             auto size_a_buffer = a_m.get_element_space_size_in_bytes();
             auto size_b_buffer = b_n.get_element_space_size_in_bytes();
 
-            rotating_mem_ptr = std::make_unique<ck_tile::RotatingMemWrapper<ADataTypeBuf, BDataTypeBuf>>(
-                kargs.as_ptr[0], kargs.bs_ptr[0], s.rotating_count_, size_a_buffer, size_b_buffer);
+            rotating_mem_ptr =
+                std::make_unique<ck_tile::RotatingMemWrapper<ADataTypeBuf, BDataTypeBuf>>(
+                    kargs.as_ptr[0],
+                    kargs.bs_ptr[0],
+                    s.rotating_count_,
+                    size_a_buffer,
+                    size_b_buffer);
             rotating_mem_ptr->Print();
 
             preprocess = [&]() {

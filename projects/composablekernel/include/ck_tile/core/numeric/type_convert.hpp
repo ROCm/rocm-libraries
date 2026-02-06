@@ -57,6 +57,8 @@ CK_TILE_TYPE_CONVERT(float, float, bf16_t, bf16)
 CK_TILE_TYPE_CONVERT(float, float, fp8_t, fp8)
 CK_TILE_TYPE_CONVERT(float, float, bf8_t, bf8)
 
+static constexpr uint32_t float32_exponent_mask = 0x7f800000u;
+
 enum class tf32_rounding_mode
 {
     trunc = 0, // truncate
@@ -69,15 +71,14 @@ CK_TILE_HOST_DEVICE constexpr float float_to_tf32(float x)
     uint32_t i = bit_cast<uint32_t>(x);
     if constexpr(rounding == tf32_rounding_mode::rne)
     {
-        // 0x7f800000 masks the exponent field; all ones (== 0x7f800000) indicates Inf/NaN,
-        // which are left unchanged and therefore excluded from RTNE rounding.
-        if((i & 0x7f800000) != 0x7f800000)
+        // RTNE rounding.
+        if((i & float32_exponent_mask) != float32_exponent_mask)
         {
             // Add rounding bias for round-to-nearest-even (RTNE) before truncating:
-            //  - 0xfff is the bias for the 13 fraction bits being discarded.
-            //  - (i >> 13) & 1 picks the least significant bit that will be rounded off,
-            //    so adding it implements "ties to even" when the discarded part is exactly
-            //    half-way.
+            //  - 0xfff is the rounding bias corresponding to the 13 fraction bits that
+            //    will be discarded.
+            //  - (i >> 13) & 1 extracts the least significant of those discarded bits and
+            //    adding it implements "ties to even" (round half-way cases to even).
             i += 0xfff + ((i >> 13) & 1);
         }
     }
