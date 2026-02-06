@@ -225,6 +225,11 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
             // check if this size is valid for pre-swizzled data
             if (hasPreSwizzle)
             {
+                if (kernelType.typeA != rocRoller::DataType::FP4 ||
+                    kernelType.typeB != rocRoller::DataType::FP4)
+                    continue;
+                if (wgt.m != 256 || wgt.n != 256 || wgt.k != 256)
+                    continue;
                 if (wgt.m % 32 != 0 || wgt.n % 32 != 0)
                     continue;
                 if (wgt.m == 96 || wgt.n == 96)
