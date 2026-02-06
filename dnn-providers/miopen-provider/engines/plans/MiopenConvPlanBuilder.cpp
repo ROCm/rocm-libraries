@@ -359,7 +359,8 @@ void buildPlanFwd(const HipdnnEnginePluginHandle& handle,
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
     ConvFwdParams params(attr, opGraph.getTensorMap());
-    auto plan = std::make_unique<ConvFwdPlan>(handle, std::move(params), executionContext);
+    auto plan = std::make_unique<ConvFwdPlan>(handle, std::move(params),
+                                              executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -370,7 +371,8 @@ void buildPlanBwd(const HipdnnEnginePluginHandle& handle,
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
     ConvBwdParams params(attr, opGraph.getTensorMap());
-    auto plan = std::make_unique<ConvBwdPlan>(handle, std::move(params), executionContext);
+    auto plan = std::make_unique<ConvBwdPlan>(handle, std::move(params),
+                                              executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -381,7 +383,8 @@ void buildPlanWrw(const HipdnnEnginePluginHandle& handle,
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
     ConvWrwParams params(attr, opGraph.getTensorMap());
-    auto plan = std::make_unique<ConvWrwPlan>(handle, std::move(params), executionContext);
+    auto plan = std::make_unique<ConvWrwPlan>(handle, std::move(params),
+                                              executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -491,20 +494,12 @@ size_t MiopenConvPlanBuilder::getMaxWorkspaceSize(
     }
 }
 
-void MiopenConvPlanBuilder::buildPlan(
+void MiopenConvPlanBuilder::initializeExecutionSettings(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-    HipdnnEnginePluginExecutionContext& executionContext) const
+    MiopenExecutionSettings& executionSettings) const
 {
-    if(opGraph.nodeCount() != 1)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Convolution plan builder supports only single node graphs. Graph has "
-                + std::to_string(opGraph.nodeCount()) + " nodes");
-    }
-
     // Read deterministic knob setting
     bool deterministicEnabled = false;
     if(engineConfig.isValid()
@@ -556,7 +551,21 @@ void MiopenConvPlanBuilder::buildPlan(
                     + std::to_string(range.max) + "]");
         }
 
-        executionContext.setWorkspaceSizeLimit(static_cast<size_t>(value));
+        executionSettings.setWorkspaceSizeLimit(static_cast<size_t>(value));
+    }
+}
+
+void MiopenConvPlanBuilder::buildPlan(
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    HipdnnEnginePluginExecutionContext& executionContext) const
+{
+    if(opGraph.nodeCount() != 1)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Convolution plan builder supports only single node graphs. Graph has "
+                + std::to_string(opGraph.nodeCount()) + " nodes");
     }
 
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);

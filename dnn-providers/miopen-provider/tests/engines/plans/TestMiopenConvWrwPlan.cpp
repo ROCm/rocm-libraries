@@ -7,8 +7,8 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
 
-#include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
+#include "MiopenExecutionSettings.hpp"
 #include "engines/plans/MiopenConvWrwPlan.hpp"
 
 using namespace miopen_plugin;
@@ -247,8 +247,8 @@ TEST_F(TestGpuConvWrwPlan, CreatesPlanWithValidGraph)
     ConvWrwParams params(*attrs, graph.getTensorMap());
 
     // Create plan
-    HipdnnEnginePluginExecutionContext executionContext;
-    ConvWrwPlan(_handle, std::move(params), executionContext);
+    MiopenExecutionSettings executionSettings;
+    ConvWrwPlan(_handle, std::move(params), executionSettings);
 }
 
 TEST_F(TestGpuConvWrwPlan, ThrowsOnInvalidDims)
@@ -286,7 +286,7 @@ TEST_F(TestGpuConvWrwPlan, ThrowsOnInvalidDims)
     ConvWrwParams params(*attrs, graph.getTensorMap());
 
     // Create plan and expect exception
-    HipdnnEnginePluginExecutionContext executionContext;
-    EXPECT_THROW(ConvWrwPlan(_handle, std::move(params), executionContext),
+    MiopenExecutionSettings executionSettings;
+    EXPECT_THROW(ConvWrwPlan(_handle, std::move(params), executionSettings),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }

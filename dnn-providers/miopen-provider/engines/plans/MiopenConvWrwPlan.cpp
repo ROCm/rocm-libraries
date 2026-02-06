@@ -66,10 +66,9 @@ bool ConvWrwParams::validTensors() const
 
 ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle,
                          ConvWrwParams&& params,
-                         const HipdnnEnginePluginExecutionContext& executionContext)
+                         const MiopenExecutionSettings& executionSettings)
     : _params(std::move(params))
-    , _benchmarkingEnabled(executionContext.benchmarkingEnabled())
-    , _debugMode(executionContext.debugMode())
+    , _executionSettings(executionSettings)
 {
     // Validate that there are solutions available for this configuration.
     size_t solutionCount;
@@ -89,9 +88,9 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle,
     }
 
     // Determine initial workspace size
-    if(executionContext.workspaceSizeLimit().has_value())
+    if(_executionSettings.workspaceSizeLimit().has_value())
     {
-        _workspaceSize = executionContext.workspaceSizeLimit().value();
+        _workspaceSize = _executionSettings.workspaceSizeLimit().value();
     }
     else
     {
@@ -129,7 +128,7 @@ void ConvWrwPlan::execute(const HipdnnEnginePluginHandle& handle,
         workspaceSize = _workspaceSize;
     }
 
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _benchmarkingEnabled);
+    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
 
     // Algorithm selection is performed on first execute() call rather than in constructor
     // because miopenFindConvolutionBackwardWeightsAlgorithm requires device memory buffers.
@@ -138,8 +137,8 @@ void ConvWrwPlan::execute(const HipdnnEnginePluginHandle& handle,
     if(!_algorithm.has_value())
     {
         int requestCount
-            = (_debugMode
-               == HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
+            = (_executionSettings.debugMode()
+               == MiopenExecutionSettings::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
                   ? 10
                   : 1;
 
@@ -169,8 +168,8 @@ void ConvWrwPlan::execute(const HipdnnEnginePluginHandle& handle,
                 "miopenFindConvolutionBackwardWeightsAlgorithm returned no algorithms");
         }
 
-        if(_debugMode
-           == HipdnnEnginePluginExecutionContext::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
+        if(_executionSettings.debugMode()
+           == MiopenExecutionSettings::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
         {
             HIPDNN_LOG_INFO("Convolution Wrw: Found {} algorithms", returnedAlgoCount);
             for(size_t i = 0; i < static_cast<size_t>(returnedAlgoCount); ++i)

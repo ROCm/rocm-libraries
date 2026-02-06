@@ -28,7 +28,7 @@ auto createBenchmarkingKnob(flatbuffers::FlatBufferBuilder& builder)
 }
 
 void handleBenchmarkingKnobSetting(const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
-                                   HipdnnEnginePluginExecutionContext& executionContext)
+                                   MiopenExecutionSettings& executionSettings)
 {
     if(!engineConfig.hasKnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME))
     {
@@ -48,7 +48,21 @@ void handleBenchmarkingKnobSetting(const hipdnn_plugin_sdk::IEngineConfig& engin
     }
 
     auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
-    executionContext.setBenchmarkingEnabled(value != 0);
+    executionSettings.setBenchmarkingEnabled(value != 0);
+}
+
+void initializeMiopenExecutionSettings(
+    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    MiopenExecutionSettings& executionSettings)
+{
+    if(engineConfig.isValid())
+    {
+        handleBenchmarkingKnobSetting(engineConfig, executionSettings);
+    }
+    else
+    {
+        HIPDNN_LOG_WARN("Engine config is invalid");
+    }
 }
 
 } // namespace
@@ -143,20 +157,30 @@ void MiopenEngine::initializeExecutionContext(
     const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
-    if(engineConfig.isValid())
-    {
-        handleBenchmarkingKnobSetting(engineConfig, executionContext);
-    }
-    else
-    {
-        HIPDNN_LOG_WARN("Engine config is invalid");
-    }
+    MiopenExecutionSettings executionSettings;
 
+    // Initialize global knobs (benchmarking)
+    initializeMiopenExecutionSettings(engineConfig, executionSettings);
+
+    // Let plan builder add custom knob settings (workspace limit, deterministic, etc.)
     for(const auto& planBuilder : _planBuilders)
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
-            planBuilder->buildPlan(handle, opGraph, engineConfig, executionContext);
+            planBuilder->initializeExecutionSettings(handle, opGraph, engineConfig, executionSettings);
+            break;
+        }
+    }
+
+    // Set fully initialized settings in execution context
+    executionContext.setExecutionSettings(executionSettings);
+
+    // Build the plan
+    for(const auto& planBuilder : _planBuilders)
+    {
+        if(planBuilder->isApplicable(handle, opGraph))
+        {
+            planBuilder->buildPlan(handle, opGraph, executionContext);
             break;
         }
     }

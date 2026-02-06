@@ -420,7 +420,8 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(
                                       std::get<1>(nodeAttrs.value()),
                                       std::get<2>(nodeAttrs.value()),
                                       opGraph.getTensorMap());
-        ConvFwdBiasActivPlan plan(handle, std::move(params), true, false, false);
+        MiopenExecutionSettings executionSettings;
+        ConvFwdBiasActivPlan plan(handle, std::move(params), executionSettings, true, false);
         return true;
     }
     catch(const std::exception& e)
@@ -438,14 +439,22 @@ size_t MiopenConvFwdBiasActivPlanBuilder::getMaxWorkspaceSize(
     nodeAttrsCheckTensors(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
 
     ConvFwdBiasActivParams params(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
-    ConvFwdBiasActivPlan plan(handle, std::move(params), false, true, false);
+    MiopenExecutionSettings executionSettings;
+    ConvFwdBiasActivPlan plan(handle, std::move(params), executionSettings, false, true);
     return plan.getWorkspaceSize(handle);
+}
+
+void MiopenConvFwdBiasActivPlanBuilder::initializeExecutionSettings(
+    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    [[maybe_unused]] MiopenExecutionSettings& executionSettings) const
+{
 }
 
 void MiopenConvFwdBiasActivPlanBuilder::buildPlan(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     const auto [convAttr, biasAttr, activAttr] = getNodeAttrs(opGraph);
@@ -453,7 +462,7 @@ void MiopenConvFwdBiasActivPlanBuilder::buildPlan(
 
     ConvFwdBiasActivParams params(convAttr, biasAttr, activAttr, opGraph.getTensorMap());
     auto plan = std::make_unique<ConvFwdBiasActivPlan>(
-        handle, std::move(params), true, true, executionContext.benchmarkingEnabled());
+        handle, std::move(params), executionContext.executionSettings(), true, true);
     executionContext.setPlan(std::move(plan));
 }
 

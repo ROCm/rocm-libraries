@@ -271,11 +271,14 @@ TEST(TestMiopenEngine, InitializeExecutionContextInvokesFirstApplicablePlanBuild
     EXPECT_CALL(*mockPlanBuilder1, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(true));
     EXPECT_CALL(*mockPlanBuilder1,
-                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+                initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(1);
+    EXPECT_CALL(*mockPlanBuilder1,
+                buildPlan(::testing::_, ::testing::_, ::testing::_))
         .Times(1);
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_)).Times(0);
     EXPECT_CALL(*mockPlanBuilder2,
-                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+                buildPlan(::testing::_, ::testing::_, ::testing::_))
         .Times(0);
 
     MiopenEngine engine(1);
@@ -352,7 +355,7 @@ TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingEnabled)
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
 
-    EXPECT_TRUE(ctx.benchmarkingEnabled());
+    EXPECT_TRUE(ctx.executionSettings().benchmarkingEnabled());
 }
 
 TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingDisabled)
@@ -385,7 +388,7 @@ TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingDisabled)
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
 
-    EXPECT_FALSE(ctx.benchmarkingEnabled());
+    EXPECT_FALSE(ctx.executionSettings().benchmarkingEnabled());
 }
 
 TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhenConfigInvalid)
@@ -400,7 +403,7 @@ TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhe
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
 
-    EXPECT_FALSE(ctx.benchmarkingEnabled());
+    EXPECT_FALSE(ctx.executionSettings().benchmarkingEnabled());
 }
 
 TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhenNoKnobs)
@@ -420,7 +423,7 @@ TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhe
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
 
-    EXPECT_FALSE(ctx.benchmarkingEnabled());
+    EXPECT_FALSE(ctx.executionSettings().benchmarkingEnabled());
 }
 
 TEST(TestMiopenEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
@@ -432,12 +435,15 @@ TEST(TestMiopenEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
     EXPECT_CALL(*mockPlanBuilder1, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(false));
     EXPECT_CALL(*mockPlanBuilder1,
-                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+                buildPlan(::testing::_, ::testing::_, ::testing::_))
         .Times(0);
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(true));
     EXPECT_CALL(*mockPlanBuilder2,
-                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+                initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(1);
+    EXPECT_CALL(*mockPlanBuilder2,
+                buildPlan(::testing::_, ::testing::_, ::testing::_))
         .Times(1);
 
     MiopenEngine engine(1);
@@ -461,12 +467,12 @@ TEST(TestMiopenEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoApplica
     EXPECT_CALL(*mockPlanBuilder1, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(false));
     EXPECT_CALL(*mockPlanBuilder1,
-                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+                buildPlan(::testing::_, ::testing::_, ::testing::_))
         .Times(0);
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(false));
     EXPECT_CALL(*mockPlanBuilder2,
-                buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+                buildPlan(::testing::_, ::testing::_, ::testing::_))
         .Times(0);
 
     MiopenEngine engine(1);

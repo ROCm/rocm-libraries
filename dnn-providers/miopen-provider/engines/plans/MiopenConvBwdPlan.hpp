@@ -10,6 +10,7 @@
 #include <miopen/miopen.h>
 
 #include "MiopenConvDescriptor.hpp"
+#include "MiopenExecutionSettings.hpp"
 #include "MiopenTensor.hpp"
 #include "PlanInterface.hpp"
 
@@ -51,7 +52,7 @@ class ConvBwdPlan : public IPlan
 public:
     ConvBwdPlan(const HipdnnEnginePluginHandle& handle,
                 ConvBwdParams&& params,
-                const HipdnnEnginePluginExecutionContext& executionContext);
+                const MiopenExecutionSettings& executionSettings);
     ~ConvBwdPlan() override = default;
 
     ConvBwdPlan(const ConvBwdPlan&) = delete;
@@ -71,8 +72,7 @@ private:
     ConvBwdParams _params;
     mutable std::optional<miopenConvBwdDataAlgorithm_t> _algorithm;
     mutable size_t _workspaceSize = 0;
-    bool _benchmarkingEnabled;
-    HipdnnEnginePluginExecutionContext::DebugMode _debugMode;
+    MiopenExecutionSettings _executionSettings;
 };
 
 } // namespace miopen_plugin

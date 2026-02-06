@@ -14,17 +14,12 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
+#include "MiopenExecutionSettings.hpp"
 #include "engines/plans/PlanInterface.hpp"
 
 struct HipdnnEnginePluginExecutionContext
 {
 public:
-    enum class DebugMode
-    {
-        NONE, // Debug mode disabled (default)
-        LOG_ALL_FOUND_PLAN_ALGORITHMS // Log all found plan algorithms
-    };
-
     virtual ~HipdnnEnginePluginExecutionContext() = default;
 
     bool hasValidPlan() const
@@ -48,39 +43,17 @@ public:
         return *_plan;
     }
 
-    void setBenchmarkingEnabled(bool enabled)
+    void setExecutionSettings(const miopen_plugin::MiopenExecutionSettings& executionSettings)
     {
-        _benchmarkingEnabled = enabled;
+        _executionSettings = executionSettings;
     }
 
-    bool benchmarkingEnabled() const
+    const miopen_plugin::MiopenExecutionSettings& executionSettings() const
     {
-        return _benchmarkingEnabled;
-    }
-
-    void setWorkspaceSizeLimit(size_t limit)
-    {
-        _workspaceSizeLimit = limit;
-    }
-
-    std::optional<size_t> workspaceSizeLimit() const
-    {
-        return _workspaceSizeLimit;
-    }
-
-    void setDebugMode(DebugMode mode)
-    {
-        _debugMode = mode;
-    }
-
-    DebugMode debugMode() const
-    {
-        return _debugMode;
+        return _executionSettings;
     }
 
 private:
     std::unique_ptr<miopen_plugin::IPlan> _plan;
-    bool _benchmarkingEnabled = false;
-    std::optional<size_t> _workspaceSizeLimit;
-    DebugMode _debugMode = DebugMode::NONE;
+    miopen_plugin::MiopenExecutionSettings _executionSettings;
 };

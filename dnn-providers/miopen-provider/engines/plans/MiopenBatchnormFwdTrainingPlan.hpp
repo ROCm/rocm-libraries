@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "MiopenExecutionSettings.hpp"
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
 #include "PlanBuilderInterface.hpp"
@@ -81,7 +82,7 @@ class BatchnormFwdTrainingPlan : public IPlan
 {
 public:
     BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams,
-                             bool benchmarkingEnabled = false);
+                             const MiopenExecutionSettings& executionSettings);
 
     BatchnormFwdTrainingPlan(const BatchnormFwdTrainingPlan&) = delete;
     BatchnormFwdTrainingPlan& operator=(const BatchnormFwdTrainingPlan&) = delete;
@@ -98,7 +99,7 @@ public:
 
 private:
     BatchnormFwdTrainingParams _trainingParams;
-    bool _benchmarkingEnabled;
+    MiopenExecutionSettings _executionSettings;
 };
 
 }

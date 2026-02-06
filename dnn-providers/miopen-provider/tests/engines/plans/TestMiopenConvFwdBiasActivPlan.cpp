@@ -8,6 +8,7 @@
 #include <miopen/miopen.h>
 
 #include "HipdnnEnginePluginHandle.hpp"
+#include "MiopenExecutionSettings.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlan.hpp"
 
 using namespace miopen_plugin;
@@ -128,7 +129,8 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraph)
 
     ConvFwdBiasActivParams params(*convAttr, nullptr, *activAttr, graph.getTensorMap());
 
-    ConvFwdBiasActivPlan(_handle, std::move(params));
+    MiopenExecutionSettings executionSettings;
+    ConvFwdBiasActivPlan(_handle, std::move(params), executionSettings);
 }
 
 TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraphCompileOnly)
@@ -147,7 +149,8 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraphCompileO
 
     ConvFwdBiasActivParams params(*convAttr, nullptr, *activAttr, graph.getTensorMap());
 
-    ConvFwdBiasActivPlan(_handle, std::move(params), true, false);
+    MiopenExecutionSettings executionSettings;
+    ConvFwdBiasActivPlan(_handle, std::move(params), executionSettings, true, false);
 }
 
 TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraphWorkspaceOnly)
@@ -166,7 +169,8 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraphWorkspac
 
     ConvFwdBiasActivParams params(*convAttr, nullptr, *activAttr, graph.getTensorMap());
 
-    ConvFwdBiasActivPlan(_handle, std::move(params), false, true);
+    MiopenExecutionSettings executionSettings;
+    ConvFwdBiasActivPlan(_handle, std::move(params), executionSettings, false, true);
 }
 
 TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraph)
@@ -189,7 +193,8 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraph)
 
     ConvFwdBiasActivParams params(*convAttr, biasAttr, *activAttr, graph.getTensorMap());
 
-    ConvFwdBiasActivPlan(_handle, std::move(params));
+    MiopenExecutionSettings executionSettings;
+    ConvFwdBiasActivPlan(_handle, std::move(params), executionSettings);
 }
 
 TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraphCompileOnly)
@@ -212,7 +217,8 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraphComp
 
     ConvFwdBiasActivParams params(*convAttr, biasAttr, *activAttr, graph.getTensorMap());
 
-    ConvFwdBiasActivPlan(_handle, std::move(params), true, false);
+    MiopenExecutionSettings executionSettings;
+    ConvFwdBiasActivPlan(_handle, std::move(params), executionSettings, true, false);
 }
 
 TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraphWorkspaceOnly)
@@ -235,5 +241,6 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraphWork
 
     ConvFwdBiasActivParams params(*convAttr, biasAttr, *activAttr, graph.getTensorMap());
 
-    ConvFwdBiasActivPlan(_handle, std::move(params), false, true);
+    MiopenExecutionSettings executionSettings;
+    ConvFwdBiasActivPlan(_handle, std::move(params), executionSettings, false, true);
 }

@@ -11,6 +11,7 @@
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 
 #include "MiopenActivationDescriptor.hpp"
+#include "MiopenExecutionSettings.hpp"
 #include "MiopenTensor.hpp"
 #include "PlanInterface.hpp"
 
@@ -69,7 +70,7 @@ private:
 class BatchnormBwdPlan : public IPlan
 {
 public:
-    BatchnormBwdPlan(BatchnormBwdParams&& params, bool benchmarkingEnabled = false);
+    BatchnormBwdPlan(BatchnormBwdParams&& params, const MiopenExecutionSettings& executionSettings);
 
     BatchnormBwdPlan(const BatchnormBwdPlan&) = delete;
     BatchnormBwdPlan& operator=(const BatchnormBwdPlan&) = delete;
@@ -86,7 +87,7 @@ public:
 
 private:
     BatchnormBwdParams _params;
-    bool _benchmarkingEnabled;
+    MiopenExecutionSettings _executionSettings;
 };
 
 } // namespace miopen_plugin
