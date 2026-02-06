@@ -704,8 +704,9 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v3<BlockGemmPipelineS
                             });
                         });
 
-                        // We have to 1 stage early sync the lds for workaround the compiler
-                        // limitation
+                        // Compiler issue. Previously the sync was done one stage earlier to fix it.
+                        // Problem shows up again with latest compiler so we sync at the correct
+                        // iteration and then we force the instructions before the sync
                         if constexpr(m0.value == (MRepeat - LocalPrefetchStages))
                         {
                             __builtin_amdgcn_sched_barrier(0); // force all instructions before this
