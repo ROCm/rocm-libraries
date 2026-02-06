@@ -305,7 +305,7 @@ struct UniversalGemmBasePolicy
     template <typename Problem>
     CK_TILE_DEVICE static constexpr auto MakeBLdsBlockDescriptor()
     {
-        using BLayout = remove_cvref_t<typename Problem::BLayout>;
+        using BLayout   = remove_cvref_t<typename Problem::BLayout>;
         using BDataType = if_select_v<typename Problem::BDataType,
                                       pk_fp4_raw_t,
                                       typename Problem::ADataType,

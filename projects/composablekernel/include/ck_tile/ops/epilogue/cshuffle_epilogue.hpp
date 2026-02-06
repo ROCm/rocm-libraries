@@ -99,22 +99,22 @@ struct CShuffleEpilogue
 
     // For warp gemm selection: use tf32_t if compute type was tf32_t
     // For pk_int4/pk_fp4: use the other data type
-    using ATypeToUse = std::conditional_t<
-        std::is_same_v<ADataTypeCompute, tf32_t>,
-        tf32_t,
-        std::conditional_t<std::is_same_v<ADataTypeBuf, pk_int4_t> ||
-                               std::is_same_v<ADataTypeBuf, pk_fp4_t>,
-                           BDataTypeBuf,
-                           ADataTypeBuf>>;
+    using ATypeToUse =
+        std::conditional_t<std::is_same_v<ADataTypeCompute, tf32_t>,
+                           tf32_t,
+                           std::conditional_t<std::is_same_v<ADataTypeBuf, pk_int4_t> ||
+                                                  std::is_same_v<ADataTypeBuf, pk_fp4_t>,
+                                              BDataTypeBuf,
+                                              ADataTypeBuf>>;
     // Used for weight-only quantization kernel, B would be dequantized to the same data type as A
-    using BTypeToUse = std::conditional_t<
-        std::is_same_v<BDataTypeCompute, tf32_t>,
-        tf32_t,
-        std::conditional_t<std::is_same_v<BDataTypeBuf, pk_int4_t> ||
-                               std::is_same_v<BDataTypeBuf, pk_fp4_t> ||
-                               std::is_same_v<BDataTypeBuf, pk_fp4_raw_t>,
-                           ADataTypeBuf,
-                           BDataTypeBuf>>;
+    using BTypeToUse =
+        std::conditional_t<std::is_same_v<BDataTypeCompute, tf32_t>,
+                           tf32_t,
+                           std::conditional_t<std::is_same_v<BDataTypeBuf, pk_int4_t> ||
+                                                  std::is_same_v<BDataTypeBuf, pk_fp4_t> ||
+                                                  std::is_same_v<BDataTypeBuf, pk_fp4_raw_t>,
+                                              ADataTypeBuf,
+                                              BDataTypeBuf>>;
 
     using ELayout                                = remove_cvref_t<typename Problem::ELayout>;
     using CDElementwise                          = remove_cvref_t<typename Problem::CDElementwise>;

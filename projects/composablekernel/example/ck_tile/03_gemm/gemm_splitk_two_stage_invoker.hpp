@@ -189,12 +189,13 @@ struct SplitKTwoStageInvoker
             auto size_a_buffer = a_m.get_element_space_size_in_bytes();
             auto size_b_buffer = b_n.get_element_space_size_in_bytes();
 
-            rotating_mem_ptr = std::make_unique<ck_tile::RotatingMemWrapper<ADataTypeBuf, BDataTypeBuf>>(
-                gemm_kargs.as_ptr[0],
-                gemm_kargs.bs_ptr[0],
-                s.rotating_count_,
-                size_a_buffer,
-                size_b_buffer);
+            rotating_mem_ptr =
+                std::make_unique<ck_tile::RotatingMemWrapper<ADataTypeBuf, BDataTypeBuf>>(
+                    gemm_kargs.as_ptr[0],
+                    gemm_kargs.bs_ptr[0],
+                    s.rotating_count_,
+                    size_a_buffer,
+                    size_b_buffer);
             rotating_mem_ptr->Print();
 
             preprocess = [&]() {

@@ -200,10 +200,9 @@ struct WarpGemmAttributeMfmaImplF32F32F32M32N32K2
 // Uses packed instructions throughout: v_cvt_pk_bf16_f32, v_pk_add_f32, bit ops
 // Set CK_TILE_TF32_USE_PACKED_CVT=0 to use scalar fallback for debugging
 template <index_t VecSize>
-CK_TILE_DEVICE void convert_float_to_bf16_pairs(
-    const ext_vector_t<float, VecSize>& reg_f32,
-    ext_vector_t<bf16_t, VecSize>& reg_bf16_big,
-    ext_vector_t<bf16_t, VecSize>& reg_bf16_small)
+CK_TILE_DEVICE void convert_float_to_bf16_pairs(const ext_vector_t<float, VecSize>& reg_f32,
+                                                ext_vector_t<bf16_t, VecSize>& reg_bf16_big,
+                                                ext_vector_t<bf16_t, VecSize>& reg_bf16_small)
 {
 #if defined(__gfx94__) && CK_TILE_TF32_USE_PACKED_CVT
     // Packed mode: use v_cvt_pk_bf16_f32 and v_pk_add_f32 instructions (gfx94x)
@@ -211,8 +210,8 @@ CK_TILE_DEVICE void convert_float_to_bf16_pairs(
 
     // Use packed instructions: 2 elements per iteration
     static_for<0, VecSize, 2>{}([&](auto k) {
-        const float* f32_ptr   = reinterpret_cast<const float*>(&reg_f32);
-        const index_t idx      = static_cast<index_t>(k);
+        const float* f32_ptr = reinterpret_cast<const float*>(&reg_f32);
+        const index_t idx    = static_cast<index_t>(k);
 
         // Pack convert 2 floats -> 2 bf16 (1 instruction)
         bf16x2_t big_pair = cvt_pk_bf16_f32(f32_ptr[idx], f32_ptr[idx + 1]);
@@ -236,9 +235,10 @@ CK_TILE_DEVICE void convert_float_to_bf16_pairs(
 #else
     // Scalar mode: process elements one by one (for debugging or non-gfx94x)
     static_for<0, VecSize, 1>{}([&](auto k) {
-        const index_t idx   = static_cast<index_t>(k);
-        reg_bf16_big[idx]   = type_convert<bf16_t>(reg_f32[idx]);
-        reg_bf16_small[idx] = type_convert<bf16_t>(reg_f32[idx] - type_convert<float>(reg_bf16_big[idx]));
+        const index_t idx = static_cast<index_t>(k);
+        reg_bf16_big[idx] = type_convert<bf16_t>(reg_f32[idx]);
+        reg_bf16_small[idx] =
+            type_convert<bf16_t>(reg_f32[idx] - type_convert<float>(reg_bf16_big[idx]));
     });
 #endif
 }

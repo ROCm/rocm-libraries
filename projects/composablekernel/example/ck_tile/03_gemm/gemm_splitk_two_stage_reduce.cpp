@@ -125,8 +125,8 @@ float gemm_stage1(const GemmSplitKHostArgs& args, const ck_tile::stream_config& 
     // ADataTypeBuf: buffer/storage type (fp32 when tf32)
     using ADataTypeCompute = ADataType_;
     using BDataTypeCompute = BDataType_;
-    using ADataTypeBuf = ck_tile::if_select_v<ADataType_, ck_tile::tf32_t, float, ADataType_>;
-    using BDataTypeBuf = ck_tile::if_select_v<BDataType_, ck_tile::tf32_t, float, BDataType_>;
+    using ADataTypeBuf     = ck_tile::if_select_v<ADataType_, ck_tile::tf32_t, float, ADataType_>;
+    using BDataTypeBuf     = ck_tile::if_select_v<BDataType_, ck_tile::tf32_t, float, BDataType_>;
 
     using GemmShape = ck_tile::TileGemmShape<
         ck_tile::sequence<GemmConfig::M_Tile, GemmConfig::N_Tile, GemmConfig::K_Tile>,
@@ -586,11 +586,11 @@ int run_gemm_example_with_layouts_two_stage(ck_tile::ArgParser& arg_parser,
 {
     // Use GemmTypeConfig to get actual data types for tensor operations
     // This handles tf32 -> float mapping for host tensors and device buffers
-    using TypeConfig  = GemmTypeConfig<ADataType_, BDataType_, CDataType_>;
+    using TypeConfig   = GemmTypeConfig<ADataType_, BDataType_, CDataType_>;
     using ADataTypeBuf = typename TypeConfig::ADataType;
     using BDataTypeBuf = typename TypeConfig::BDataType;
-    using CDataType   = typename TypeConfig::CDataType;
-    using AccDataType = typename TypeConfig::AccDataType;
+    using CDataType    = typename TypeConfig::CDataType;
+    using AccDataType  = typename TypeConfig::AccDataType;
 
     using ADataTypeCompute = ADataType_;
     using BDataTypeCompute = BDataType_;
@@ -779,7 +779,7 @@ int run_gemm_example_with_layouts_two_stage(ck_tile::ArgParser& arg_parser,
 
         ADataTypeBuf* d_A = static_cast<ADataTypeBuf*>(a_m_k_dev_buf.GetDeviceBuffer());
         BDataTypeBuf* d_B = static_cast<BDataTypeBuf*>(b_k_n_dev_buf.GetDeviceBuffer());
-        CDataType* d_C = static_cast<CDataType*>(c_m_n_gpu_buf_ref.GetDeviceBuffer());
+        CDataType* d_C    = static_cast<CDataType*>(c_m_n_gpu_buf_ref.GetDeviceBuffer());
 
         ck_tile::reference_gemm_gpu<ADataTypeCompute,
                                     BDataTypeCompute,
