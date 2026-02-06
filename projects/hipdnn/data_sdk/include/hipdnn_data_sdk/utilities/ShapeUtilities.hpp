@@ -152,7 +152,7 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
             if(strides[i] > strides[posFirstMin])
             {
                 // C is smaller than at least one of D, H, or W. Assume N...WC memory
-                // layout and force C to the end of the list before stable_sort() so
+                // layout and force C to the end of the list before sort with stable tiebreakers so
                 // that it's handled properly in case of duplicate minimum stride lengths.
                 indices.erase(indices.begin() + 1);
                 indices.push_back(1);
@@ -178,7 +178,7 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
 
     std::sort(sortItems.begin(),
               sortItems.end(),
-              [&strides, &stridesAreUnique](const SortItem& a, const SortItem& b) mutable {
+              [&strides, &stridesAreUnique](const SortItem& a, const SortItem& b) {
                   if(strides[a.index] == strides[b.index])
                   {
                       stridesAreUnique = false;
