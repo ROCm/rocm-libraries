@@ -77,8 +77,7 @@ struct SolutionParameters
 
     std::string scheduler;
 
-    bool streamK        = false;
-    bool streamKTwoTile = false;
+    rocRoller::StreamKMode streamK = rocRoller::StreamKMode::None;
 
     bool tailLoops = true;
 

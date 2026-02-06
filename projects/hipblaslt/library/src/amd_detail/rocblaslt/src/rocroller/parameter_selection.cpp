@@ -256,13 +256,14 @@ std::shared_ptr<SolutionParameters>
     }
 
     // Pass StreamK flag from solution index parameters
-    gemm->streamK = solutionIndexParameters.streamK;
+    if(solutionIndexParameters.streamK)
+        gemm->streamK = rocRoller::StreamKMode::Standard;
 
     // Pass tailLoops flag from solution index parameters
     gemm->tailLoops = solutionIndexParameters.tailLoops;
 
     // StreamK is not currently working with workgroup mapping due to register pressure
-    if(gemm->streamK)
+    if(gemm->streamK != rocRoller::StreamKMode::None)
     {
         gemm->workgroupMappingDim = -1;
         gemm->workgroupRemapXCC   = false;
