@@ -413,7 +413,7 @@ struct index_array
  * @return An index_array containing the reverse inclusive scan results
  */ 
 template <typename Reduce, index_t Init, index_t... Vs>
-constexpr auto compute_reverse_inclusive_scan()
+__host__ __device__ constexpr auto compute_reverse_inclusive_scan()
 {
     constexpr index_t N = sizeof...(Vs);
     index_array<N> result{};
@@ -687,7 +687,7 @@ namespace detail {
 
 // Compute inverse map at compile time using constexpr
 template <index_t... Is>
-constexpr auto compute_map_inverse(Sequence<Is...>)
+__host__ __device__ constexpr auto compute_map_inverse(Sequence<Is...>)
 {
     constexpr index_t N = sizeof...(Is);
     index_array<N> result{};
@@ -902,8 +902,8 @@ __host__ __device__ constexpr auto pick_sequence_elements_by_ids(Seq, Sequence<I
     return Sequence<Seq::At(Number<Is>{})...>{};
 }
 
-#if 1
 namespace detail {
+
 template <typename WorkSeq, typename RemainSeq, typename RemainMask>
 struct pick_sequence_elements_by_mask_impl
 {
@@ -959,7 +959,6 @@ __host__ __device__ constexpr auto modify_sequence_elements_by_ids(Seq, Values, 
 
     return typename detail::modify_sequence_elements_by_ids_impl<Seq, Values, Ids>::type{};
 }
-#endif
 
 template <typename Seq, typename Reduce, index_t Init>
 __host__ __device__ constexpr index_t
