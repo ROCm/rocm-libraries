@@ -3617,7 +3617,7 @@ class KernelWriterAssembly(KernelWriter):
                     strideF, comment="tlu=0, scaled tile-offset by stride"))
 
         skComponent = Component.StreamK.find(self)
-        module.add(skComponent.computeLoadSrd(self, kernel, tc, stmp))
+        module.add(skComponent.computeLoadSrd(self, kernel, tP, stmp))
 
         gsuComponent = Component.GSU.find(self)
         module.add(gsuComponent.computeLoadSrd(self, kernel, tP, stmp, tileStart))
