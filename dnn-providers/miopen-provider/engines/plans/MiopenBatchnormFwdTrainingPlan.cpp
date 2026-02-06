@@ -237,7 +237,8 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
     if(_trainingParams.hasRunningStats())
     {
         expAvgFactor = _trainingParams.momentumValue();
-        HIPDNN_LOG_INFO("BatchnormFwdTrainingPlan: expAvgFactor (momentum) = {}", expAvgFactor);
+        HIPDNN_PLUGIN_LOG_INFO("BatchnormFwdTrainingPlan: expAvgFactor (momentum) = {}",
+                               expAvgFactor);
     }
 
     // Get all required device buffers
@@ -308,8 +309,8 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
                     auto status = miopenDestroyActivationDescriptor(desc);
                     if(status != miopenStatusSuccess)
                     {
-                        HIPDNN_LOG_ERROR("miopenDestroyActivationDescriptor failed in "
-                                         "BatchnormFwdTrainingPlan::execute");
+                        HIPDNN_PLUGIN_LOG_ERROR("miopenDestroyActivationDescriptor failed in "
+                                                "BatchnormFwdTrainingPlan::execute");
                     }
                 });
 

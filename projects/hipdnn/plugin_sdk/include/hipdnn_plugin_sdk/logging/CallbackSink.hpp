@@ -3,9 +3,8 @@
 
 #pragma once
 
-#include "CallbackTypes.h"
-#include "LoggingUtils.hpp"
 #include <functional>
+#include <hipdnn_data_sdk/logging/CallbackTypes.h>
 #include <mutex>
 #include <spdlog/async.h>
 #include <spdlog/details/null_mutex.h>
@@ -13,7 +12,7 @@
 #include <spdlog/sinks/base_sink.h>
 #include <string>
 
-namespace hipdnn_data_sdk::logging
+namespace hipdnn_plugin_sdk::logging::detail
 {
 
 inline hipdnnSeverity_t spdlogToHipdnnSeverity(spdlog::level::level_enum level)
@@ -77,10 +76,25 @@ private:
 
 using CallbackSinkMt = CallbackSink<std::mutex>;
 
+/**
+ * @brief Generate the spdlog pattern string for callback-based logging
+ *
+ * This pattern includes only the component name prefix in brackets for consistency
+ * with backend logging format. The backend adds timestamp, thread ID, and log level
+ * when receiving the callback message.
+ *
+ * @param componentName The name of the component
+ * @return The spdlog pattern string with bracketed component prefix
+ */
+inline std::string generatePatternString(const std::string& componentName)
+{
+    return "[" + componentName + "] %v";
+}
+
 inline std::shared_ptr<spdlog::logger> createAsyncCallbackLoggerMt(hipdnnCallback_t callback,
                                                                    const std::string& source)
 {
-    auto sink = std::make_shared<hipdnn_data_sdk::logging::CallbackSinkMt>(callback);
+    auto sink = std::make_shared<CallbackSinkMt>(callback);
     auto logger = std::make_shared<spdlog::async_logger>(
         source, sink, spdlog::thread_pool(), spdlog::async_overflow_policy::block);
     logger->set_pattern(generatePatternString(source));
@@ -92,10 +106,9 @@ template <typename Factory = spdlog::synchronous_factory>
 inline std::shared_ptr<spdlog::logger> createCallbackLoggerMt(hipdnnCallback_t callback,
                                                               const std::string& source)
 {
-    auto logger
-        = Factory::template create<hipdnn_data_sdk::logging::CallbackSinkMt>(source, callback);
+    auto logger = Factory::template create<CallbackSinkMt>(source, callback);
     logger->set_pattern(generatePatternString(source));
     return logger;
 }
 
-} // namespace hipdnn_data_sdk::logging
+} // namespace hipdnn_plugin_sdk::logging::detail

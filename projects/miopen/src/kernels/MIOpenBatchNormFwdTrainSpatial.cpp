@@ -706,7 +706,7 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
             } // end for(n)
 
         } // end if(inImgIndex)
-    }     // end spatial norm
+    } // end spatial norm
 
     static constexpr __forceinline__ __device__ void
     FinalMeanVariance(FpType* __restrict__ meanvarbuff,
@@ -1072,8 +1072,8 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
 {
     // mean, variance, invVariance
 
-    using fp_prec_c_type = mio_bn_config::fp_prec_c_type;
-    using fp_accum_type = mio_bn_config::fp_accum_type;
+    using fp_prec_c_type  = mio_bn_config::fp_prec_c_type;
+    using fp_accum_type   = mio_bn_config::fp_accum_type;
     using fp_accum_c_type = mio_bn_config::fp_accum_c_type;
 
     fp_prec_c_type mean;
