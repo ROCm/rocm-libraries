@@ -151,7 +151,7 @@ TEST(TestMiopenEngineManager, GetWorkspaceSizeReturnsCorrectValue)
     MockGraph mockGraph;
     MockEngineConfig mockEngineConfig;
     EXPECT_CALL(mockEngineConfig, engineId()).WillRepeatedly(Return(42));
-    EXPECT_CALL(*mockEngine, getMaxWorkspaceSize(::testing::_, ::testing::_))
+    EXPECT_CALL(*mockEngine, getMaxWorkspaceSize(::testing::_, ::testing::_, ::testing::_))
         .WillOnce(Return(4096));
 
     manager.addEngine(std::move(mockEngine));

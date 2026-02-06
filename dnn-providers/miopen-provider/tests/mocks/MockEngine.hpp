@@ -32,7 +32,8 @@ public:
     MOCK_METHOD(size_t,
                 getMaxWorkspaceSize,
                 (const HipdnnEnginePluginHandle& handle,
-                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph),
+                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                 const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig),
                 (const, override));
 
     MOCK_METHOD(void,

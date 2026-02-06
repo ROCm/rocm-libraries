@@ -137,7 +137,8 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
 
 size_t MiopenEngine::getMaxWorkspaceSize(
     const HipdnnEnginePluginHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
 {
     size_t workspaceSize = 0;
     for(const auto& planBuilder : _planBuilders)

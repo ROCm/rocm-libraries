@@ -49,7 +49,7 @@ size_t EngineManager::getMaxWorkspaceSize(
     const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
 {
     auto& engine = getEngine(engineConfig.engineId());
-    return engine.getMaxWorkspaceSize(handle, opGraph);
+    return engine.getMaxWorkspaceSize(handle, opGraph, engineConfig);
 }
 
 void EngineManager::initializeExecutionContext(

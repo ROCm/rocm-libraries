@@ -31,10 +31,11 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
 {
     MiopenEngine engine(1);
 
-    MockGraph mockGraph;
-
     HipdnnEnginePluginHandle dummyHandle;
-    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph), 0u);
+    MockGraph mockGraph;
+    MockEngineConfig mockConfig;
+
+    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 0u);
 }
 
 TEST(TestMiopenEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
@@ -48,10 +49,11 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
     MiopenEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
-    MockGraph mockGraph;
-
     HipdnnEnginePluginHandle dummyHandle;
-    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph), 1337u);
+    MockGraph mockGraph;
+    MockEngineConfig mockConfig;
+
+    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 1337u);
 }
 
 TEST(TestMiopenEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
@@ -72,10 +74,11 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
-    MockGraph mockGraph;
-
     HipdnnEnginePluginHandle dummyHandle;
-    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph), 45000u);
+    MockGraph mockGraph;
+    MockEngineConfig mockConfig;
+
+    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 45000u);
 }
 
 TEST(TestMiopenEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
@@ -87,10 +90,11 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
     MiopenEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
-    MockGraph mockGraph;
-
     HipdnnEnginePluginHandle dummyHandle;
-    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph), 0u);
+    MockGraph mockGraph;
+    MockEngineConfig mockConfig;
+
+    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 0u);
 }
 
 TEST(TestMiopenEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
