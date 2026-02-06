@@ -43,13 +43,13 @@ std::vector<PoolingTestCase> GetPooling3dTestCases()
     std::vector<std::vector<int>> dataset0_lens    = {{2, 2, 2}, {3, 3, 3}, {1, 2, 2}};
     std::vector<std::vector<int>> dataset0_strides = {{2, 2, 2}, {1, 1, 1}, {1, 2, 2}};
     std::vector<std::vector<int>> dataset0_pads    = {{0, 0, 0}, {1, 1, 1}};
-    
+
     // Match ctest index types and modes
     std::vector<miopenIndexType_t> dataset0_index_types = {
         miopenIndexUint8, miopenIndexUint16, miopenIndexUint32, miopenIndexUint64};
     std::vector<miopenPoolingMode_t> modes = {
         miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
-    
+
     // Match ctest wsidx exactly (only 1 for 3D)
     std::vector<int> wsidx_values = {1};
 
@@ -193,18 +193,12 @@ void RunPooling3dTest(const PoolingTestCase& test_case)
 
 class GPU_Pooling3d_FP32 : public testing::TestWithParam<PoolingTestCase>
 {
-    void SetUp() override
-    {
-        prng::reset_seed();
-    }
+    void SetUp() override { prng::reset_seed(); }
 };
 
 class GPU_Pooling3d_FP16 : public testing::TestWithParam<PoolingTestCase>
 {
-    void SetUp() override
-    {
-        prng::reset_seed();
-    }
+    void SetUp() override { prng::reset_seed(); }
 };
 
 TEST_P(GPU_Pooling3d_FP32, Test) { RunPooling3dTest<float>(GetParam()); }

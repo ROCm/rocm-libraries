@@ -41,16 +41,16 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dWideTestCases()
 
     // Match ctest: Dataset 2 only uses miopenIndexUint32
     std::vector<miopenIndexType_t> dataset2_index_types = {miopenIndexUint32};
-    std::vector<miopenPoolingMode_t> modes = {
+    std::vector<miopenPoolingMode_t> modes              = {
         miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
     std::vector<int> wsidx_values = {0, 1};
 
     // Generate cartesian product for dataset 2
-    int num_uint16_case         = 0;
-    int num_uint32_case         = 0;
-    int num_uint32_case_imgidx  = 0;
-    int num_uint64_case         = 0;
-    int num_uint64_case_imgidx  = 0;
+    int num_uint16_case        = 0;
+    int num_uint32_case        = 0;
+    int num_uint32_case_imgidx = 0;
+    int num_uint64_case        = 0;
+    int num_uint64_case_imgidx = 0;
 
     for(const auto& input_dims : dataset2_inputs)
     {
@@ -67,9 +67,9 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dWideTestCases()
                                               num_uint32_case_imgidx,
                                               num_uint64_case,
                                               num_uint64_case_imgidx,
-                                              false,  // skip_wide_check=false for Dataset 2
-                                              false,  // apply_index_type_limits=false for Dataset 2
-                                              true);  // is_wide_dataset=true for Dataset 2
+                                              false, // skip_wide_check=false for Dataset 2
+                                              false, // apply_index_type_limits=false for Dataset 2
+                                              true); // is_wide_dataset=true for Dataset 2
     }
 
     // Cache the results

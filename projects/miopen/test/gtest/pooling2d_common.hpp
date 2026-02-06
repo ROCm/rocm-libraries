@@ -244,12 +244,12 @@ inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
         try
         {
             auto pooling_desc = miopen::PoolingDescriptor(test_case.mode,
-                                                         miopenPaddingDefault,
-                                                         test_case.lens,
-                                                         test_case.strides,
-                                                         test_case.pads);
-            auto output_desc = pooling_desc.GetForwardOutputTensor(input_desc);
-            
+                                                          miopenPaddingDefault,
+                                                          test_case.lens,
+                                                          test_case.strides,
+                                                          test_case.pads);
+            auto output_desc  = pooling_desc.GetForwardOutputTensor(input_desc);
+
             // 7a. Index range check for max pooling (moved from pooling3d.cpp)
             if(test_case.mode == miopenPoolingMax && test_case.wsidx == 1)
             {
@@ -317,13 +317,7 @@ inline void AddTestCasesForInput(const std::vector<int>& input_dims,
                         for(int wsidx : wsidx_values)
                         {
                             PoolingTestCase test_case = {
-                                input_dims,
-                                lens,
-                                pads,
-                                strides,
-                                index_type,
-                                mode,
-                                wsidx};
+                                input_dims, lens, pads, strides, index_type, mode, wsidx};
 
                             if(ShouldIncludeTestCase(test_case,
                                                      num_uint16_case,

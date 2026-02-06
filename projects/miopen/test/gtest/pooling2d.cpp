@@ -42,15 +42,15 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dTestCases()
 #else
     // When TEST_GET_INPUT_TENSOR = 0, use predefined shapes
     // Match ctest's generate_multi_data_limited(..., 9) by only using the first 9 shapes.
-    dataset0_inputs = {{1, 19, 1024, 2048},  // Shape 1
-                       {10, 3, 32, 32},      // Shape 2
-                       {5, 32, 8, 8},        // Shape 3
-                       {2, 1024, 12, 12},    // Shape 4
-                       {4, 3, 231, 231},     // Shape 5
-                       {8, 3, 227, 227},     // Shape 6
-                       {1, 384, 13, 13},     // Shape 7
-                       {1, 96, 27, 27},      // Shape 8
-                       {2, 160, 7, 7}};      // Shape 9
+    dataset0_inputs = {{1, 19, 1024, 2048}, // Shape 1
+                       {10, 3, 32, 32},     // Shape 2
+                       {5, 32, 8, 8},       // Shape 3
+                       {2, 1024, 12, 12},   // Shape 4
+                       {4, 3, 231, 231},    // Shape 5
+                       {8, 3, 227, 227},    // Shape 6
+                       {1, 384, 13, 13},    // Shape 7
+                       {1, 96, 27, 27},     // Shape 8
+                       {2, 160, 7, 7}};     // Shape 9
 #endif
     std::vector<std::vector<int>> dataset0_lens         = {{2, 2}, {3, 3}};
     std::vector<std::vector<int>> dataset0_strides      = {{2, 2}, {1, 1}};
@@ -64,11 +64,11 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dTestCases()
     // Generate cartesian product for dataset 0
     // This matches the original ctest test_pooling2d behavior (default dataset, dataset_id=0)
     // Filter invalid combinations at generation time instead of skipping at runtime
-    int num_uint16_case         = 0;
-    int num_uint32_case         = 0;
-    int num_uint32_case_imgidx  = 0;
-    int num_uint64_case         = 0;
-    int num_uint64_case_imgidx  = 0;
+    int num_uint16_case        = 0;
+    int num_uint32_case        = 0;
+    int num_uint32_case_imgidx = 0;
+    int num_uint64_case        = 0;
+    int num_uint64_case_imgidx = 0;
 
     for(const auto& input_dims : dataset0_inputs)
     {
@@ -85,8 +85,8 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dTestCases()
                              num_uint32_case_imgidx,
                              num_uint64_case,
                              num_uint64_case_imgidx,
-                             false,  // skip_wide_check=false for Dataset 0
-                             true);  // apply_index_type_limits=true for Dataset 0
+                             false, // skip_wide_check=false for Dataset 0
+                             true); // apply_index_type_limits=true for Dataset 0
     }
 
     // Note: Dataset 1 (asymmetric) and Dataset 2 (wide window) are tested separately
