@@ -48,8 +48,7 @@ namespace ExpressionTreeOrderingTest
         std::set<int> seen;
         for(auto const& node : tree)
         {
-            if(node.priorityOrder < 0
-               || node.priorityOrder >= static_cast<int>(tree.size()))
+            if(node.priorityOrder < 0 || node.priorityOrder >= static_cast<int>(tree.size()))
                 return false;
             if(seen.contains(node.priorityOrder))
                 return false;
@@ -138,8 +137,7 @@ namespace ExpressionTreeOrderingTest
         }
     }
 
-    TEST_CASE("Sethi-Ullman ordering prioritizes heavier subtrees",
-              "[expression][codegen]")
+    TEST_CASE("Sethi-Ullman ordering prioritizes heavier subtrees", "[expression][codegen]")
     {
         auto context = TestContext::ForDefaultTarget();
 
@@ -197,11 +195,11 @@ namespace ExpressionTreeOrderingTest
             //     1   1  1    1       1
             //
 
-            auto inner1    = a + b;           // Add
-            auto inner2    = c - f;           // Subtract
+            auto inner1    = a + b; // Add
+            auto inner2    = c - f; // Subtract
             auto heavy     = inner1 * inner2; // Multiply
-            auto negE      = -e;              // Negate (unary)
-            auto lightSide = d << negE;       // ShiftL
+            auto negE      = -e; // Negate (unary)
+            auto lightSide = d << negE; // ShiftL
             auto expr      = heavy | lightSide; // BitwiseOr
             auto tree      = Expression::consolidateSubExpressions(expr, context.get());
 
@@ -224,19 +222,19 @@ namespace ExpressionTreeOrderingTest
             int pOr  = priorityOf(Expression::BitwiseOr{});
 
             // Dependency checks within heavy subtree
-            CHECK(pAdd < pMul);  // Add before Multiply
-            CHECK(pSub < pMul);  // Subtract before Multiply
+            CHECK(pAdd < pMul); // Add before Multiply
+            CHECK(pSub < pMul); // Subtract before Multiply
 
             // Dependency checks within light subtree
-            CHECK(pNeg < pShl);  // Negate before ShiftL
+            CHECK(pNeg < pShl); // Negate before ShiftL
 
             // Heavy subtree (weight 3) must complete before light subtree (weight 2) starts
-            CHECK(pMul < pNeg);  // Multiply before Negate
-            CHECK(pMul < pShl);  // Multiply before ShiftL
+            CHECK(pMul < pNeg); // Multiply before Negate
+            CHECK(pMul < pShl); // Multiply before ShiftL
 
             // Root comes last
-            CHECK(pShl < pOr);   // ShiftL before BitwiseOr
-            CHECK(pMul < pOr);   // Multiply before BitwiseOr
+            CHECK(pShl < pOr); // ShiftL before BitwiseOr
+            CHECK(pMul < pOr); // Multiply before BitwiseOr
 
             // Within heavy subtree, one inner op completes before the other starts
             bool addFirst = (pAdd < pSub);
@@ -245,8 +243,7 @@ namespace ExpressionTreeOrderingTest
         }
     }
 
-    TEST_CASE("maxConcurrentSubExpressions affects code generation order",
-              "[expression][codegen]")
+    TEST_CASE("maxConcurrentSubExpressions affects code generation order", "[expression][codegen]")
     {
         // Tree structure:
         //
@@ -323,7 +320,7 @@ namespace ExpressionTreeOrderingTest
                && lshiftPos != std::string::npos && rshiftPos != std::string::npos
                && mulPos != std::string::npos)
             {
-                bool leftFirst  = (addPos < lshiftPos) && (addPos < rshiftPos)
+                bool leftFirst = (addPos < lshiftPos) && (addPos < rshiftPos)
                                  && (subPos < lshiftPos) && (subPos < rshiftPos);
                 bool rightFirst = (lshiftPos < addPos) && (lshiftPos < subPos)
                                   && (rshiftPos < addPos) && (rshiftPos < subPos);
