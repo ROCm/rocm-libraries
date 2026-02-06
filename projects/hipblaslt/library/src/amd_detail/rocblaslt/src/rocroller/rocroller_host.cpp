@@ -527,6 +527,20 @@ rocblaslt_status
             break;
 
         index = parametersToIndex(solutionIndexParameter);
+        
+        // Validate problem dimensions match kernel tile requirements before generating kernel
+        // to avoid ocRoller expression evaluation with invalid dimensions
+        if(solutionIndexParameter.workgroupTile.m > 0 && solutionIndexParameter.workgroupTile.n > 0
+           && solutionIndexParameter.workgroupTile.k > 0)
+        {
+            if(prob.m % solutionIndexParameter.workgroupTile.m != 0
+               || prob.n % solutionIndexParameter.workgroupTile.n != 0
+               || prob.k % solutionIndexParameter.workgroupTile.k != 0)
+            {
+                continue;  // Skip this solution entirely
+            }
+        }
+        
         auto existingSolution
             = rocroller_handle->cache.getKernel(kernelType, solutionIndexParameter);
         std::shared_ptr<GemmKernel> kernel;
@@ -656,6 +670,7 @@ rocblaslt_status isRocRollerSolutionSupported(rocblaslt_handle             handl
 
     auto commandArgs = createCommandArguments(kernel, prob, DEFAULT_WGM);
     auto runtimeArgs = commandArgs.runtimeArguments();
+
 
     if(!kernel->commandKernel->matchesPredicates(runtimeArgs, LogLevel::Error))
     {
