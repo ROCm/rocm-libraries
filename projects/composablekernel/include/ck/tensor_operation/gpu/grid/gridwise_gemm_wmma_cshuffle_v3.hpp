@@ -852,8 +852,10 @@ struct GridwiseGemm_wmma_cshuffle_v3
     {
     }; // because std::optional<void> does not exist
 
+    // Constexpr instance of EmptyType to be used as default argument for unused template parameters
     static constexpr auto emptyArgument = EmptyType{};
 
+    // Unified Run<>() function for all regimes (bwd, generic, fwd)
     template <typename AGridDesc_AK0_M_K1,
               typename BGridDesc_BK0_N_K1,
               typename DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock = EmptyType, // bwd, fwd
@@ -869,23 +871,21 @@ struct GridwiseGemm_wmma_cshuffle_v3
               bool CTranspose,                                      // bwd
               TailNumber TailNum,
               typename EpilogueArgument>
-    __device__ static void Run(
-
-        void* p_shared,
-        const AGridDesc_AK0_M_K1 a_grid_desc_ak0_m_ak1,
-        const BGridDesc_BK0_N_K1 b_grid_desc_bk0_n_bk1,
-        const DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock&
-            ds_grid_desc_mblock_mperblock_nblock_nperblock_, // bwd, fwd
-        const EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
-            e_grid_desc_mblock_mperblock_nblock_nperblock, // bwd, fwd
-        const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
-            c_grid_desc_mblock_mperblock_nblock_nperblock, // generic
-        const Block2CTileMapExt& block_2_ctile_map_,       // bwd
-        const ComputePtrOffsetOfBatch& compute_ptr_offset_of_batch,
-        const ComputePtrOffsetOfN& compute_ptr_offset_of_n, // bwd, fwd
-        const index_t num_k_per_block,
-        Argument& karg,
-        EpilogueArgument& epilogue_args)
+    __device__ static void Run(void* p_shared,
+                               const AGridDesc_AK0_M_K1 a_grid_desc_ak0_m_ak1,
+                               const BGridDesc_BK0_N_K1 b_grid_desc_bk0_n_bk1,
+                               const DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock&
+                                   ds_grid_desc_mblock_mperblock_nblock_nperblock_, // bwd, fwd
+                               const EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
+                                   e_grid_desc_mblock_mperblock_nblock_nperblock, // bwd, fwd
+                               const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
+                                   c_grid_desc_mblock_mperblock_nblock_nperblock, // generic
+                               const Block2CTileMapExt& block_2_ctile_map_,       // bwd
+                               const ComputePtrOffsetOfBatch& compute_ptr_offset_of_batch,
+                               const ComputePtrOffsetOfN& compute_ptr_offset_of_n, // bwd, fwd
+                               const index_t num_k_per_block,
+                               Argument& karg,
+                               EpilogueArgument& epilogue_args)
     {
 
         // Resolve the current regime at compile time:
@@ -899,7 +899,7 @@ struct GridwiseGemm_wmma_cshuffle_v3
         constexpr bool is_fwd =
             !std::is_same_v<DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock, EmptyType> &&
             std::is_same_v<Block2CTileMapExt, EmptyType>;
-        // [Question]
+        // [TODO: Question]
         // Shall we rather create an enum class with {BWD, GENERIC, FWD} values instead,
         // for better code robustness and maintenance, instead of relying on indirect variables?
 
@@ -938,6 +938,7 @@ struct GridwiseGemm_wmma_cshuffle_v3
         }();
 
         // ======== Offset ========
+
         // a_batch_offset
         const auto a_batch_offset = [&]() -> long_index_t {
             if constexpr(is_bwd)
