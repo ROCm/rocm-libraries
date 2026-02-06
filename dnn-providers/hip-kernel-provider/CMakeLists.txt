@@ -1,6 +1,11 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+if(BUILD_PLUGIN_AS_DEPENDENCY)
+    message(STATUS "Only standalone build supported for now")
+    return()
+endif()
+
 message(STATUS "Building HIP kernel provider plugin standalone")
 cmake_minimum_required(VERSION 3.25.2)
 add_compile_definitions(__HIP_PLATFORM_AMD__)
@@ -100,6 +105,8 @@ file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 add_library(
     hip_kernel_plugin_impl OBJECT
     EngineManager.cpp
+    HipKernelPlugin.cpp
+    HipKernelPluginPublic.cpp
 )
 target_compile_definitions(
     hip_kernel_plugin_impl PRIVATE COMPONENT_NAME="hip_kernel_plugin"
