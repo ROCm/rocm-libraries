@@ -95,10 +95,8 @@ typedef enum {
   HIPBLASLT_EPILOGUE_GELU_AUX_BIAS = 164,         /**<Output GEMM results after applying bias but before applying GELU transform.*/
   HIPBLASLT_EPILOGUE_DGELU = 192,                 /**<Apply gradient GELU transform. Requires additional auxiliary input. */
   HIPBLASLT_EPILOGUE_DGELU_BGRAD = 208,           /**<Apply gradient GELU transform and bias gradient to the results. Requires additional auxiliary input. */
-
-  HIPBLASLT_EPILOGUE_DRELU = 224,                 /**<Apply gradient RELU transform. Requires additional auxiliary input. */
-  HIPBLASLT_EPILOGUE_DRELU_BGRAD = 228,           /**<Apply gradient RELU transform and bias gradient to the results. Requires additional auxiliary input. */
-
+  HIPBLASLT_EPILOGUE_DRELU = 136,                 /**<Apply gradient RELU transform. Requires additional auxiliary input. */
+  HIPBLASLT_EPILOGUE_DRELU_BGRAD = 152,           /**<Apply gradient RELU transform and bias gradient to the results. Requires additional auxiliary input. */
   HIPBLASLT_EPILOGUE_BGRADA = 256,                /**<Apply bias gradient to A and output GEMM result. */
   HIPBLASLT_EPILOGUE_BGRADB = 512,                /**<Apply bias gradient to B and output GEMM result. */
   HIPBLASLT_EPILOGUE_SIGMOID = 1024,              /**<Apply sigmoid activation function pointwise. */
