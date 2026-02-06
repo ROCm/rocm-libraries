@@ -4,9 +4,11 @@
 #pragma once
 
 #include <functional>
+#include <ostream>
 
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_test_sdk/detail/MatmulPlan.hpp>
 
 namespace hipdnn_test_sdk::detail
@@ -137,24 +139,11 @@ struct MatmulSignatureKey
     }
 };
 
-} // namespace hipdnn_test_sdk::detail
-
-template <>
-struct fmt::formatter<hipdnn_test_sdk::detail::MatmulSignatureKey>
+inline std::ostream& operator<<(std::ostream& os, const MatmulSignatureKey& key)
 {
-    static constexpr auto parse(format_parse_context& ctx)
-    {
-        return ctx.begin();
-    }
+    os << "Matmul(a=" << key.aDataType << ", b=" << key.bDataType << ", c=" << key.cDataType
+       << ", compute=" << key.computeDataType << ")";
+    return os;
+}
 
-    template <typename FormatContext>
-    auto format(const hipdnn_test_sdk::detail::MatmulSignatureKey& key, FormatContext& ctx) const
-    {
-        return fmt::format_to(ctx.out(),
-                              "Matmul(a={}, b={}, c={}, compute={})",
-                              key.aDataType,
-                              key.bDataType,
-                              key.cDataType,
-                              key.computeDataType);
-    }
-};
+} // namespace hipdnn_test_sdk::detail

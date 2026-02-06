@@ -6,7 +6,6 @@
 #include <ostream>
 
 #include <HipdnnStatus.h>
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 
 namespace hipdnn_frontend::detail
 {
@@ -50,19 +49,32 @@ inline const char* toString(hipdnnStatus_t status)
     }
 }
 
-inline std::ostream& operator<<(std::ostream& os, hipdnnStatus_t status)
+/**
+ * @brief Wrapper for streaming hipdnnStatus_t to ostream
+ *
+ * Usage: std::cout << streamStatus(status);
+ * Usage: HIPDNN_LOG_INFO("result: " << streamStatus(status));
+ */
+class StreamStatus
 {
-    return os << toString(status);
+public:
+    explicit StreamStatus(hipdnnStatus_t status)
+        : _status(status)
+    {
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const StreamStatus& wrapper)
+    {
+        return os << toString(wrapper._status);
+    }
+
+private:
+    hipdnnStatus_t _status;
+};
+
+inline StreamStatus streamStatus(hipdnnStatus_t status)
+{
+    return StreamStatus(status);
 }
 
 } // namespace hipdnn_frontend::detail
-
-template <>
-struct fmt::formatter<hipdnnStatus_t> : fmt::formatter<const char*>
-{
-    template <typename FormatContext>
-    auto format(hipdnnStatus_t status, FormatContext& ctx) const
-    {
-        return fmt::formatter<const char*>::format(hipdnn_frontend::detail::toString(status), ctx);
-    }
-};

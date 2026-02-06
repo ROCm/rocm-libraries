@@ -2,13 +2,14 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <spdlog/spdlog.h>
 #include <sstream>
 
 #include <HipdnnStatus.h>
 #include <hipdnn_frontend/detail/BackendLoggingHelpers.hpp>
 
 using namespace hipdnn_frontend::detail;
+
+using hipdnn_frontend::streamStatus;
 
 TEST(TestBackendLoggingHelpers, ToStringAllStatusValues)
 {
@@ -37,24 +38,17 @@ TEST(TestBackendLoggingHelpers, ToStringAllStatusValues)
     EXPECT_STREQ(toString(static_cast<hipdnnStatus_t>(-1)), "HIPDNN_STATUS_UNKNOWN");
 }
 
-TEST(TestBackendLoggingHelpers, OstreamOperator)
+TEST(TestBackendLoggingHelpers, StreamStatusWrapper)
 {
     std::ostringstream oss;
-    oss << HIPDNN_STATUS_SUCCESS;
+    oss << streamStatus(HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(oss.str(), "HIPDNN_STATUS_SUCCESS");
 
     oss.str("");
-    oss << HIPDNN_STATUS_BAD_PARAM;
+    oss << streamStatus(HIPDNN_STATUS_BAD_PARAM);
     EXPECT_EQ(oss.str(), "HIPDNN_STATUS_BAD_PARAM");
 
     oss.str("");
-    oss << static_cast<hipdnnStatus_t>(-1);
+    oss << streamStatus(static_cast<hipdnnStatus_t>(-1));
     EXPECT_EQ(oss.str(), "HIPDNN_STATUS_UNKNOWN");
-}
-
-TEST(TestBackendLoggingHelpers, FmtFormatter)
-{
-    EXPECT_EQ(fmt::format("{}", HIPDNN_STATUS_SUCCESS), "HIPDNN_STATUS_SUCCESS");
-    EXPECT_EQ(fmt::format("{}", HIPDNN_STATUS_BAD_PARAM), "HIPDNN_STATUS_BAD_PARAM");
-    EXPECT_EQ(fmt::format("{}", static_cast<hipdnnStatus_t>(-1)), "HIPDNN_STATUS_UNKNOWN");
 }

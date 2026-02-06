@@ -52,7 +52,7 @@ struct TensorStruct
     {
     }
 
-    TensorStruct(const TensorStruct&) = delete;
+    TensorStruct(const TensorStruct&)            = delete;
     TensorStruct& operator=(const TensorStruct&) = delete;
 
     ~TensorStruct() = default;

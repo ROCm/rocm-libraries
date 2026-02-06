@@ -4,6 +4,7 @@
 #pragma once
 
 #include <functional>
+#include <ostream>
 #include <variant>
 
 #include <hipdnn_test_sdk/detail/BatchnormBwdSignatureKey.hpp>
@@ -70,21 +71,10 @@ struct PlanRegistrySignatureKeyEqual
     }
 };
 
+inline std::ostream& operator<<(std::ostream& os, const PlanRegistrySignatureKey& key)
+{
+    std::visit([&os](const auto& arg) { os << arg; }, key);
+    return os;
 }
 
-template <>
-struct fmt::formatter<hipdnn_test_sdk::detail::PlanRegistrySignatureKey>
-{
-    static constexpr auto parse(format_parse_context& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(const hipdnn_test_sdk::detail::PlanRegistrySignatureKey& key,
-                FormatContext& ctx) const
-    {
-        return std::visit([&ctx](const auto& arg) { return fmt::format_to(ctx.out(), "{}", arg); },
-                          key);
-    }
-};
+} // namespace hipdnn_test_sdk::detail

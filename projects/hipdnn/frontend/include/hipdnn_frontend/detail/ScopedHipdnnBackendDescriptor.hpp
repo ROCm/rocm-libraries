@@ -22,8 +22,8 @@ private:
     {
         std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg;
         hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
-        HIPDNN_FE_LOG_ERROR(
-            "{}: {}. Backend error string: {}", errorString, status, backendErrMsg.data());
+        HIPDNN_FE_LOG_ERROR(errorString << ": " << static_cast<int>(status)
+                                        << ". Backend error string: " << backendErrMsg.data());
     }
 
 public:

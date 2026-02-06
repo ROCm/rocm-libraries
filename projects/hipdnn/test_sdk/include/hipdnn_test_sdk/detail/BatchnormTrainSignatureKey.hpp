@@ -8,6 +8,7 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_test_sdk/detail/BatchnormTrainPlan.hpp>
+#include <ostream>
 
 namespace hipdnn_test_sdk::detail
 {
@@ -160,25 +161,12 @@ struct BatchnormTrainSignatureKey
                                                          ComputeDataTypeEnum>>();
     }
 };
+
+inline std::ostream& operator<<(std::ostream& os, const BatchnormTrainSignatureKey& key)
+{
+    os << "BatchnormTrain(x=" << key.xDataType << ", scale=" << key.scaleBiasDataType
+       << ", y=" << key.outputDataType << ", compute=" << key.computeDataType << ")";
+    return os;
 }
 
-template <>
-struct fmt::formatter<hipdnn_test_sdk::detail::BatchnormTrainSignatureKey>
-{
-    static constexpr auto parse(format_parse_context& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(const hipdnn_test_sdk::detail::BatchnormTrainSignatureKey& key,
-                FormatContext& ctx) const
-    {
-        return fmt::format_to(ctx.out(),
-                              "BatchnormTrain(x={}, scale={}, y={}, compute={})",
-                              key.xDataType,
-                              key.scaleBiasDataType,
-                              key.outputDataType,
-                              key.computeDataType);
-    }
-};
+} // namespace hipdnn_test_sdk::detail

@@ -5,7 +5,6 @@
 
 #include <functional>
 #include <hipdnn_data_sdk/logging/CallbackTypes.h>
-#include <hipdnn_data_sdk/logging/LoggingUtils.hpp>
 #include <mutex>
 #include <spdlog/async.h>
 #include <spdlog/details/null_mutex.h>
@@ -13,7 +12,7 @@
 #include <spdlog/sinks/base_sink.h>
 #include <string>
 
-namespace hipdnn_data_sdk::logging::detail
+namespace hipdnn_plugin_sdk::logging::detail
 {
 
 inline hipdnnSeverity_t spdlogToHipdnnSeverity(spdlog::level::level_enum level)
@@ -77,6 +76,21 @@ private:
 
 using CallbackSinkMt = CallbackSink<std::mutex>;
 
+/**
+ * @brief Generate the spdlog pattern string for callback-based logging
+ *
+ * This pattern includes only the component name prefix in brackets for consistency
+ * with backend logging format. The backend adds timestamp, thread ID, and log level
+ * when receiving the callback message.
+ *
+ * @param componentName The name of the component
+ * @return The spdlog pattern string with bracketed component prefix
+ */
+inline std::string generatePatternString(const std::string& componentName)
+{
+    return "[" + componentName + "] %v";
+}
+
 inline std::shared_ptr<spdlog::logger> createAsyncCallbackLoggerMt(hipdnnCallback_t callback,
                                                                    const std::string& source)
 {
@@ -97,4 +111,4 @@ inline std::shared_ptr<spdlog::logger> createCallbackLoggerMt(hipdnnCallback_t c
     return logger;
 }
 
-} // namespace hipdnn_data_sdk::logging::detail
+} // namespace hipdnn_plugin_sdk::logging::detail
