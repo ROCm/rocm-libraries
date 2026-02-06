@@ -3499,6 +3499,54 @@ namespace TensileLite
         return pp;
     }
 
+    double ContractionSolution::calculateDimensionM(Problem const&  problem) const
+    {
+        double M = 1.0;
+        if(problem.freeIndicesA().size() > 1 || sizeMapping.packBatchDims & 0x1)
+        {
+            std::vector<size_t> packedIndices
+                = generatePackedIndicesA(problem, sizeMapping.packBatchDims);
+            for(auto pi = packedIndices.begin(); pi != packedIndices.end(); pi++)
+                M *= problem.a().sizes()[*pi];
+        }
+        else
+        {
+            M = problem.freeSizeA(0);
+        }
+        return M;
+    }
+
+    double ContractionSolution::calculateDimensionN(Problem const&  problem) const
+    {
+        double N = 1.0;
+        if(problem.freeIndicesB().size() > 1 || sizeMapping.packBatchDims & 0x2)
+        {
+            std::vector<size_t> packedIndices
+                = generatePackedIndicesB(problem, sizeMapping.packBatchDims);
+            for(auto pi = packedIndices.begin(); pi != packedIndices.end(); pi++)
+                N *= problem.b().sizes()[*pi];
+        }
+        else
+            N = problem.freeSizeB(0);
+        return N;
+    }
+
+    double ContractionSolution::calculateNumBatches(Problem const&  problem) const
+    {
+        double NumBatches = 1;
+        if(sizeMapping.packBatchDims == 0)
+        {
+            for(size_t i = 0; i < problem.batchIndices().size(); i++)
+                NumBatches *= problem.batchSize(i);
+        }
+        return NumBatches;
+    }
+
+    origami::data_type_t ContractionSolution::getOrigamiDatatype(Problem const&  problem) const
+    {
+        return datatypeToAnalyticalDatatype(problem.computeInputType());
+    }
+
     std::ostream& operator<<(std::ostream&                                      stream,
                              ContractionSolution::StaticPerformanceModel const& spm)
     {
