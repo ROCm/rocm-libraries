@@ -3,13 +3,15 @@
 
 #pragma once
 
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
-#include <hipdnn_sdk/utilities/json/Graph.hpp>
+#include <hipdnn_data_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/BatchnormFwdInferenceWithVarianceSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionFwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/ConvolutionWrwPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/MatmulPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/PlanBuilderRegistry.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/PointwisePlan.hpp>
 
@@ -26,7 +28,7 @@ public:
                  size_t size,
                  const std::unordered_map<int64_t, void*>& variantPack)
     {
-        auto graphWrap = hipdnn_plugin::GraphWrapper(graphBuffer, size);
+        auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(graphBuffer, size);
 
         std::vector<std::unique_ptr<IGraphNodePlanExecutor>> planExecutors;
 
@@ -37,7 +39,7 @@ public:
             planExecutors.push_back(buildPlanForNode(graphWrap, node));
         }
 
-        std::vector<std::unique_ptr<hipdnn_sdk::utilities::ITensor>> virtualTensors;
+        std::vector<std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> virtualTensors;
         std::unordered_map<int64_t, void*> variantPackWithVirtualTensorsAdded
             = populateVariantPackWithMissingVirtualTensors(
                 variantPack, graphWrap.getTensorMap(), virtualTensors);
@@ -51,9 +53,9 @@ public:
 private:
     static std::unordered_map<int64_t, void*> populateVariantPackWithMissingVirtualTensors(
         const std::unordered_map<int64_t, void*>& variantPack,
-        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap,
-        std::vector<std::unique_ptr<hipdnn_sdk::utilities::ITensor>>& virtualTensors)
+        std::vector<std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>& virtualTensors)
     {
         std::unordered_map<int64_t, void*> updatedVariantPack = variantPack;
 
@@ -70,8 +72,8 @@ private:
     }
 
     std::unique_ptr<IGraphNodePlanExecutor>
-        buildPlanForNode(const hipdnn_plugin::IGraph& graph,
-                         const hipdnn_sdk::data_objects::Node& node)
+        buildPlanForNode(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
+                         const hipdnn_data_sdk::data_objects::Node& node)
     {
         auto key = buildSignatureKey(node, graph.getTensorMap(), node.compute_data_type());
 
@@ -87,27 +89,31 @@ private:
     }
 
     static PlanRegistrySignatureKey buildSignatureKey(
-        const hipdnn_sdk::data_objects::Node& node,
-        const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_data_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap,
-        const hipdnn_sdk::data_objects::DataType computeType)
+        const hipdnn_data_sdk::data_objects::DataType computeType)
     {
         switch(node.attributes_type())
         {
-        case hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
+        case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
             return BatchnormFwdInferenceSignatureKey(node, tensorMap);
-        case hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes:
+        case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+            return BatchnormFwdInferenceWithVarianceSignatureKey(node, tensorMap);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes:
             return PointwiseSignatureKey(node, tensorMap);
-        case hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
+        case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
             return BatchnormBwdSignatureKey(node, tensorMap);
-        case hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes:
+        case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
             return BatchnormTrainSignatureKey(node, tensorMap);
-        case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
+        case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
             return ConvolutionFwdSignatureKey(node, tensorMap, computeType);
-        case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
+        case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
             return ConvolutionBwdSignatureKey(node, tensorMap, computeType);
-        case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
+        case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
             return ConvolutionWrwSignatureKey(node, tensorMap, computeType);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes:
+            return MatmulSignatureKey(node, tensorMap, computeType);
         default:
             throw std::runtime_error("Unsupported node type for signature key generation");
         }

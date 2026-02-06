@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,8 +26,11 @@
 
 #pragma once
 
+#include <atomic>
+
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/Debug.hpp>
+#include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Predicates.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <type_traits>
@@ -55,7 +58,8 @@ namespace TensileLite
     struct ExactLogicLibrary : public SolutionLibrary<MyProblem, MySolution>
     {
         using Row = LibraryRow<MyProblem, MySolution, MyPredicate>;
-        std::vector<Row> rows;
+        std::vector<Row>          rows;
+        mutable std::atomic<bool> lastFindTopRetAll = false;
 
         ExactLogicLibrary() = default;
         ExactLogicLibrary(std::initializer_list<Row> init)
@@ -104,6 +108,9 @@ namespace TensileLite
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
                     continue;
 
+                // Set library context for debug output
+                row.first.setLibrary(row.second);
+
                 if(row.first(problem, hardware))
                 {
                     rv = row.second->findBestSolution(problem, hardware, fitness);
@@ -114,7 +121,14 @@ namespace TensileLite
                         rv->tag = MySolution::MatchingTag::Equal;
 
                     if(rv)
+                    {
+                        if(Debug::Instance().printDeviceSelection())
+                        {
+                            std::cout << "  Solution found: " << rv->name()
+                                      << " [MatchingTag: " << rv->matchingTag() << "]" << std::endl;
+                        }
                         return rv;
+                    }
                 }
             }
 
@@ -129,16 +143,52 @@ namespace TensileLite
         {
             SolutionSet<MySolution> rv;
             const bool              streamK = Debug::Instance().useExperimentalSelection() == 2;
+            const auto&             excludedLib = Debug::Instance().excludedLibFromGetAll();
 
             for(auto const& row : rows)
             {
+                // we want to exclude this lib from getAll
+                if(excludedLib.count(row.first.value->type()))
+                    continue;
+
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
                     continue;
+
+                // Set library context for debug output
+                row.first.setLibrary(row.second);
 
                 if(row.first.value->type() == "AMDGPU" && !row.first(problem, hardware))
                     continue;
 
                 auto rowSolutions = row.second->findAllSolutions(problem, hardware, searchType);
+
+                if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(row.first.value.get()))
+                {
+                    for(auto& sol : rowSolutions)
+                        sol->tag = MySolution::MatchingTag::Equal;
+                }
+                else if(dynamic_cast<Predicates::Contraction::GridBasedMatching*>(row.first.value.get()))
+                {
+                    for(auto& sol : rowSolutions)
+                        sol->tag = MySolution::MatchingTag::GridBased;
+                }
+                else if(dynamic_cast<Predicates::Contraction::RangeMatching*>(row.first.value.get()))
+                {
+                    for(auto& sol : rowSolutions)
+                        sol->tag = MySolution::MatchingTag::Range;
+                }
+                else if(dynamic_cast<Predicates::Contraction::FreeSizeMatching*>(row.first.value.get()))
+                {
+                    for(auto& sol : rowSolutions)
+                        sol->tag = MySolution::MatchingTag::FreeSize;
+                }
+                else if(dynamic_cast<Predicates::Contraction::PredictionMatching*>(row.first.value.get()))
+                {
+                    for(auto& sol : rowSolutions)
+                        sol->tag = MySolution::MatchingTag::Prediction;
+                }
+                // TODO- Experimental?
+
                 rv.insert(rowSolutions.begin(), rowSolutions.end());
             }
 
@@ -179,24 +229,52 @@ namespace TensileLite
             const bool                 streamK = Debug::Instance().useExperimentalSelection() == 2;
             const bool                 predictionLib = Debug::Instance().usePredictionLibrary();
 
+            // false in case of early return;
+            lastFindTopRetAll = false;
+
             for(auto const& row : rows)
             {
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
                     continue;
 
-                if(predictionLib && ((row.first.value->type() == "EqualityMatching") 
+                if(predictionLib && ((row.first.value->type() == "EqualityMatching")
                                      || (row.first.value->type() == "RangeMatching")))
                     continue;
+
+                // Set library context for debug output
+                row.first.setLibrary(row.second);
 
                 if(row.first(problem, hardware))
                 {
                     solutions
                         = row.second->findTopSolutions(problem, hardware, numSolutions - rv.size());
 
-                    if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(
-                           row.first.value.get()))
+                    if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(row.first.value.get()))
+                    {
                         for(auto& sol : solutions)
                             sol->tag = MySolution::MatchingTag::Equal;
+                    }
+                    else if(dynamic_cast<Predicates::Contraction::GridBasedMatching*>(row.first.value.get()))
+                    {
+                        for(auto& sol : solutions)
+                            sol->tag = MySolution::MatchingTag::GridBased;
+                    }
+                    else if(dynamic_cast<Predicates::Contraction::RangeMatching*>(row.first.value.get()))
+                    {
+                        for(auto& sol : solutions)
+                            sol->tag = MySolution::MatchingTag::Range;
+                    }
+                    else if(dynamic_cast<Predicates::Contraction::FreeSizeMatching*>(row.first.value.get()))
+                    {
+                        for(auto& sol : solutions)
+                            sol->tag = MySolution::MatchingTag::FreeSize;
+                    }
+                    else if(dynamic_cast<Predicates::Contraction::PredictionMatching*>(row.first.value.get()))
+                    {
+                        for(auto& sol : solutions)
+                            sol->tag = MySolution::MatchingTag::Prediction;
+                    }
+                    // TODO- Experimental
 
                     rv.insert(std::end(rv), std::begin(solutions), std::end(solutions));
                     if(rv.size() == numSolutions)
@@ -204,7 +282,14 @@ namespace TensileLite
                 }
             }
 
+            // can't reach the requested number, means findTop already done its best
+            lastFindTopRetAll = (rv.size() < numSolutions);
             return rv;
+        }
+
+        virtual bool lastFindTopAlreadyRetAll() const override
+        {
+            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>
@@ -233,6 +318,7 @@ namespace TensileLite
     struct HardwarePredicate
     {
         std::shared_ptr<Predicates::Predicate<Hardware>> value;
+        mutable std::string libraryFileName;
 
         HardwarePredicate() = default;
         HardwarePredicate(std::shared_ptr<Predicates::Predicate<Hardware>> init)
@@ -240,18 +326,33 @@ namespace TensileLite
         {
         }
 
+        template <typename MyProblem, typename MySolution>
+        void setLibrary(std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> lib) const
+        {
+            if(lib)
+                libraryFileName = lib->getLibraryFileName();
+        }
+
         template <typename Any>
         bool operator()(Any const& problem, Hardware const& hardware) const
         {
-            bool debug = Debug::Instance().printDeviceSelection();
+            bool debug  = Debug::Instance().printDeviceSelection();
+            bool rv = (*value)(hardware);
 
             if(debug)
             {
+                // Print library filename if available
+                if(!libraryFileName.empty())
+                {
+                    PredicateDebugger::printLibraryFileBanner(std::cout, libraryFileName);
+                }
+
+                PredicateDebugger::printHeader(std::cout, "ExactLogic: Hardware");
                 value->debugEval(hardware, std::cout);
-                std::cout << std::endl;
+                PredicateDebugger::printFooter(std::cout, rv);
             }
 
-            return (*value)(hardware);
+            return rv;
         }
     };
 
@@ -286,6 +387,7 @@ namespace TensileLite
     struct ProblemPredicate
     {
         std::shared_ptr<Predicates::Predicate<MyProblem>> value;
+        mutable std::string libraryFileName;
 
         ProblemPredicate() = default;
         ProblemPredicate(std::shared_ptr<Predicates::Predicate<MyProblem>> init)
@@ -293,17 +395,32 @@ namespace TensileLite
         {
         }
 
+        template <typename MySolution>
+        void setLibrary(std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> lib) const
+        {
+            if(lib)
+                libraryFileName = lib->getLibraryFileName();
+        }
+
         bool operator()(MyProblem const& problem, Hardware const& hardware) const
         {
-            bool debug = Debug::Instance().printPredicateEvaluation();
+            bool debug  = Debug::Instance().printPredicateEvaluation();
+            bool rv = (*value)(problem);
 
             if(debug)
             {
+                // Print library filename if available
+                if(!libraryFileName.empty())
+                {
+                    PredicateDebugger::printLibraryFileBanner(std::cout, libraryFileName);
+                }
+
+                PredicateDebugger::printHeader(std::cout, "ExactLogic: Problem");
                 value->debugEval(problem, std::cout);
-                std::cout << std::endl;
+                PredicateDebugger::printFooter(std::cout, rv);
             }
 
-            return (*value)(problem);
+            return rv;
         }
     };
 

@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -333,6 +333,7 @@ defaultBenchmarkCommonParameters = [
     {"LdsBlockSizePerPadB": [-1]},
     {"LdsBlockSizePerPadMetadata": [0]},
     {"TransposeLDS": [-1]},
+    {"TransposeLDSMetadata": [-1]},
     {"MaxOccupancy": [40]},
     {"MaxLDS": [-1]},
     {"VectorWidthA": [-1]},
@@ -363,7 +364,7 @@ defaultBenchmarkCommonParameters = [
     {"DirectToVgprA": [False]},
     {"DirectToVgprB": [False]},
     {"DirectToVgprSparseMetadata": [False]},
-    {"DirectToLds": [False]},
+    {"DirectToLds": [0]},
     {"UseSgprForGRO": [-1]},
     {"UseInstOffsetForGRO": [0]},
     {"AssertSummationElementMultiple": [1]},
@@ -423,10 +424,17 @@ defaultBenchmarkCommonParameters = [
     {"LDSTrInst": [False]},
     {"WaveSplitK": [ False ]},
     {"MbskPrefetchMethod": [-1]},
-    {"UseCustomMainLoopSchedule": [1]},
+    {"UseCustomMainLoopSchedule": [-1]},
     {"SpaceFillingAlgo": [[]]},
     {"SFCWGM": [[[1,1],[1,1]]]},
-    {"AdaptiveGemm": [0]}
+    {"AdaptiveGemm": [0]},
+    {"ExtraMiLatencyLeft": [-1]},
+    {"ExtraLatencyForLR": [0]},
+    {"TailloopInNll": [False]},
+    {"SwapGlobalReadOrder": [0]},
+    {"ScheduleGROverBarrier": [-1]},
+    {"DtlPlusLdsBuf": [-1]},
+    {"MinGRIncPerMfma": [-1]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter

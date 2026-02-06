@@ -17,6 +17,8 @@ add_executable(
     IntegrationExecutionPlanApi.cpp
     IntegrationGetLastErrorString.cpp
     IntegrationHandleApi.cpp
+    IntegrationKnobsApi.cpp
+    IntegrationLoggingPipeline.cpp
     IntegrationPluginLoading.cpp
     IntegrationSetPluginPathsExt.cpp
     IntegrationVariantPackApi.cpp
@@ -30,6 +32,7 @@ target_link_libraries(
     GTest::gtest_main
     Threads::Threads
     hipdnn_test_sdk
+    hipdnn_plugin_sdk
     hipdnn_backend
     hip::host
 )
@@ -46,6 +49,8 @@ target_compile_definitions(
             TEST_DUPLICATE_ID_B_PLUGIN_NAME="${TEST_DUPLICATE_ID_B_PLUGIN_NAME}"
             TEST_INCOMPLETE_API_PLUGIN_NAME="${TEST_INCOMPLETE_API_PLUGIN_NAME}"
             TEST_GOOD_DEFAULT_PLUGIN_NAME="${TEST_GOOD_DEFAULT_PLUGIN_NAME}"
+            TEST_KNOBS_PLUGIN_NAME="${TEST_KNOBS_PLUGIN_NAME}"
+            TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME="${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME}"
 )
 
 # Ensure test plugins are built before tests
@@ -59,6 +64,8 @@ add_dependencies(
     test_duplicate_id_a_plugin
     test_duplicate_id_b_plugin
     test_incomplete_api_plugin
+    test_knobs_plugin
+    test_knob_constraint_validation_plugin
 )
 
 clang_tidy_check(public_hipdnn_backend_tests)

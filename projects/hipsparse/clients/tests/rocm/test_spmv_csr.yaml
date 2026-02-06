@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -49,6 +49,22 @@ Tests:
              HIPSPARSE_SPMV_CSR_ALG1,
              HIPSPARSE_SPMV_CSR_ALG2]
 
+# Test transpose operations with default algorithm (tests fix for rocsparse fallback)
+- name: spmv_csr_transpose
+  category: quick
+  function: spmv_csr
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [50]
+  N: [84]
+  alpha: [2.0]
+  alphai: [0.0]
+  beta: [1.0]
+  betai: [0.0]
+  transA: [HIPSPARSE_OPERATION_TRANSPOSE, HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT]
+
 - name: spmv_csr
   category: pre_checkin
   function: spmv_csr
@@ -72,7 +88,6 @@ Tests:
              nos5,
              nos6,
              nos7]
-
 - name: spmv_csr
   category: pre_checkin
   function: spmv_csr
@@ -92,4 +107,11 @@ Tests:
   filename: [Chebyshev4,
              shipsec1,
              bibd_22_8,
-             scircuit]
+             scircuit,
+             rma10,
+             sme3Dc,
+             bmwcra_1,
+             webbase-1M,
+             ASIC_320k,
+             mac_econ_fwd500,
+             mc2depi]

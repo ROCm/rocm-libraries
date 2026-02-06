@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -281,8 +281,8 @@ namespace rocRoller
         }
 
         /**
-	 * @brief Add an Unroll dimension beside the ForLoop dimension.
-	 */
+     * @brief Add an Unroll dimension beside the ForLoop dimension.
+     */
         int addUnrollDimension(KernelGraph& graph, int forLoopDimension, int unrollAmount)
         {
             auto forLoopLocation = graph.coordinates.getLocation(forLoopDimension);
@@ -321,9 +321,8 @@ namespace rocRoller
                         [&](Tile const&) { insertUnrollBesideForLoop(Tile()); },
                         [&](Split const&) { insertUnrollBesideForLoop(Split()); },
                         [&](auto const&) {
-                            AssertFatal(false,
-                                        "Unhandled incoming edge while creating Unroll.",
-                                        ShowValue(input));
+                            Throw<FatalError>("Unhandled incoming edge while creating Unroll.",
+                                              ShowValue(input));
                         },
                     },
                     std::get<CoordinateTransformEdge>(edge));
@@ -362,9 +361,8 @@ namespace rocRoller
                         [&](Flatten const&) { insertUnrollBesideForLoop(Flatten()); },
                         [&](Join const&) { insertUnrollBesideForLoop(Join()); },
                         [&](auto const&) {
-                            AssertFatal(false,
-                                        "Unhandled outgoing edge while creating Unroll.",
-                                        ShowValue(output));
+                            Throw<FatalError>("Unhandled outgoing edge while creating Unroll.",
+                                              ShowValue(output));
                         },
                     },
                     std::get<CoordinateTransformEdge>(edge));
@@ -473,8 +471,7 @@ namespace rocRoller
             // Change the loop increment calculation
             // Multiply the increment amount by the unroll amount
             // Find the ForLoopIcrement calculation
-            // TODO: Handle multiple ForLoopIncrement edges that might be in a different
-            // format, such as ones coming from ComputeIndex.
+            // TODO: Handle multiple ForLoopIncrement edges that might be in a different format.
             auto loopIncrement = graph.control.getOutputNodeIndices<ForLoopIncrement>(tag).only();
             AssertFatal(loopIncrement.has_value(), "Should only have 1 loop increment edge");
             auto loopIncrementOp       = graph.control.getNode<Assign>(loopIncrement.value());
@@ -510,7 +507,7 @@ namespace rocRoller
                 for(auto const& body : toConnect)
                 {
                     graph.control.addElement(Body(), {tag}, {body});
-                    for(auto const& op : findComputeIndexCandidates(graph, body))
+                    for(auto const& op : findIndexAssignmentCandidates(graph, body))
                     {
                         auto pendingOp        = op;
                         auto [required, path] = findAllRequiredCoordinates(op, graph);
@@ -520,11 +517,14 @@ namespace rocRoller
                             {
                                 auto name = getForLoopName(graph, tag);
                                 if(name == rocRoller::XLOOP)
-                                    graph.mapper.connect<Unroll>(op, unrollDimension, 0);
+                                    graph.mapper.connect<Unroll>(
+                                        op, unrollDimension, rocRoller::XLOOP_UNROLL);
                                 else if(name == rocRoller::YLOOP)
-                                    graph.mapper.connect<Unroll>(op, unrollDimension, 1);
+                                    graph.mapper.connect<Unroll>(
+                                        op, unrollDimension, rocRoller::YLOOP_UNROLL);
                                 else if(name == rocRoller::KLOOP)
-                                    graph.mapper.connect<Unroll>(op, unrollDimension, 2);
+                                    graph.mapper.connect<Unroll>(
+                                        op, unrollDimension, rocRoller::KLOOP_UNROLL);
                                 auto setCoord = replaceWith(graph,
                                                             op,
                                                             graph.control.addElement(SetCoordinate(
@@ -631,7 +631,8 @@ namespace rocRoller
                 for(auto ldsLoad : currentLDSLoads)
                 {
                     if(name == rocRoller::KLOOP)
-                        graph.mapper.connect<Unroll>(ldsLoad, unrollDimension, 2);
+                        graph.mapper.connect<Unroll>(
+                            ldsLoad, unrollDimension, rocRoller::KLOOP_UNROLL);
                 }
             }
 
@@ -830,7 +831,7 @@ namespace rocRoller
                 = graph.control.getOutputNodeIndices<Body>(tailLoop).to<std::vector>();
             for(auto const body : bodies)
             {
-                for(auto const op : findComputeIndexCandidates(graph, body))
+                for(auto const op : findIndexAssignmentCandidates(graph, body))
                 {
                     auto [_, path] = findAllRequiredCoordinates(op, graph);
                     if(path.contains(unrollDimension))
@@ -843,7 +844,8 @@ namespace rocRoller
                                                             Expression::literal(coordValue))),
                                                         false);
                             graph.mapper.connect<Unroll>(setCoord, unrollDimension);
-                            graph.mapper.connect<Unroll>(op, unrollDimension, 2);
+                            graph.mapper.connect<Unroll>(
+                                op, unrollDimension, rocRoller::KLOOP_UNROLL);
                             graph.control.chain<Body>(setCoord, op);
                         }
                     }

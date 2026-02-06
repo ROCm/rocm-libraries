@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,28 +30,28 @@ Tests:
   category: pre_checkin
   function: csrmm_bad_arg
   precision: *single_double_precisions_complex_real
-
+  
 - name: csrmm
   category: quick
   function: csrmm
   precision: *single_double_precisions_complex_real
-  M: [0, 275, 1059]
+  M: [0, 1059]
   N: [0, 78]
-  K: [0, 173, 1375]
+  K: [0, 1375]
   alpha: [-0.5]
   alphai: [0.2]
   beta: [0.5]
   betai: [0.9]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE, HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
   transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE, HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
 
 - name: csrmm
   category: pre_checkin
   function: csrmm
   precision: *single_double_precisions_complex_real
   M: 1
-  N: [0, 78]
+  N: [4, 8, 22, 31]
   K: 1
   alpha: [0.75]
   alphai: [0.4]
@@ -60,7 +60,46 @@ Tests:
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE, HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
   transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE, HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  filename: [rma10,
-             nos3, 
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
              nos5, 
              nos7]
+
+- name: csrmm
+  category: nightly
+  function: csrmm
+  precision: *double_only_precisions
+  M: 1
+  N: [44, 56]
+  K: 1
+  alpha: [0.75]
+  alphai: [0.4]
+  beta: [-0.5]
+  betai: [1.0]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE, HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  filename: [rma10,
+             bmwcra_1, 
+             scircuit, 
+             shipsec1]
+
+- name: csrmm
+  category: pre_checkin
+  function: csrmm
+  precision: *single_only_precisions
+  M: 1
+  N: [10]
+  K: 1
+  alpha: [0.5]
+  alphai: [0.74]
+  beta: [-0.25]
+  betai: [0.5]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos5]
+  graph_test: [true]

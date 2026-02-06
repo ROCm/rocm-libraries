@@ -264,6 +264,12 @@ solver::ConvSolution MakeFusedSolution(const struct FusionContext& ctx,
                                        const struct FusionDescription& problem,
                                        const AnyInvokeParams& invoke_params);
 
+namespace debug {
+// For unit tests.
+MIOPEN_INTERNALS_EXPORT std::vector<solver::Id>
+GetAllApplicableFusionSolutions(const FusionContext& ctx, const FusionDescription& fusion_problem);
+} // namespace debug
+
 } // namespace miopen
 MIOPEN_DEFINE_OBJECT(miopenFusionOpDescriptor, miopen::FusionOpDescriptor);
 MIOPEN_DEFINE_OBJECT(miopenOperatorArgs, miopen::OperatorArgs);

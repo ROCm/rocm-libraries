@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -217,12 +217,14 @@ try
         return rocsparse_status_success;
     }
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_sptrsm_get_output(rocsparse_handle        handle,
                                                         rocsparse_sptrsm_descr  sptrsm_descr,
@@ -262,12 +264,14 @@ try
         return status;
     }
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 namespace rocsparse
 {
@@ -429,6 +433,7 @@ namespace rocsparse
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
         case rocsparse_format_bell:
+        case rocsparse_format_sell:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -549,6 +554,7 @@ namespace rocsparse
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
         case rocsparse_format_bell:
+        case rocsparse_format_sell:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -693,6 +699,7 @@ namespace rocsparse
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
         case rocsparse_format_bell:
+        case rocsparse_format_sell:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -814,6 +821,7 @@ namespace rocsparse
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
         case rocsparse_format_bell:
+        case rocsparse_format_sell:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -964,6 +972,7 @@ namespace rocsparse
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
         case rocsparse_format_bell:
+        case rocsparse_format_sell:
         case rocsparse_format_coo_aos:
         {
             // LCOV_EXCL_START
@@ -1208,6 +1217,7 @@ namespace rocsparse
             case rocsparse_format_bsr:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -1404,6 +1414,10 @@ try
     ROCSPARSE_CHECKARG(3, X, (X->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(4, Y, (Y->init == false), rocsparse_status_not_initialized);
     // LCOV_EXCL_STOP
+
+    ROCSPARSE_CHECKARG(2, A, (A->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(3, X, (X->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, Y, (Y->batch_count != 1), rocsparse_status_not_implemented);
 
     const rocsparse_datatype compute_type = sptrsm_descr->get_compute_datatype();
 

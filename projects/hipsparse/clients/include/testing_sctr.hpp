@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_graph.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -47,8 +48,7 @@ void testing_sctr_bad_arg(const Arguments& argus)
 
     hipsparseIndexBase_t idx_base = HIPSPARSE_INDEX_BASE_ZERO;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto dx_val_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * safe_size), device_free};
     auto dx_ind_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
@@ -83,8 +83,7 @@ void testing_sctr(Arguments argus)
     int                  nnz      = argus.nnz;
     hipsparseIndexBase_t idx_base = argus.baseA;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures
     std::vector<int> hx_ind(nnz);
@@ -118,16 +117,14 @@ void testing_sctr(Arguments argus)
     {
         // HIPSPARSE pointer mode host
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-        CHECK_HIPSPARSE_ERROR(hipsparseXsctr(handle, nnz, dx_val, dx_ind, dy, idx_base));
+        CHECK_HIPSPARSE_ERROR(
+            testing::hipsparseXsctr<T>(handle, nnz, dx_val, dx_ind, dy, idx_base));
 
         // copy output from device to CPU
         CHECK_HIP_ERROR(hipMemcpy(hy.data(), dy, sizeof(T) * N, hipMemcpyDeviceToHost));
 
         // CPU
-        for(int i = 0; i < nnz; ++i)
-        {
-            hy_gold[hx_ind[i] - idx_base] = hx_val[i];
-        }
+        host_sctr(nnz, hx_val.data(), hx_ind.data(), hy_gold.data(), idx_base);
         // enable unit check, notice unit check is not invasive, but norm check is,
         // unit check and norm check can not be interchanged their order
         unit_check_general(1, N, 1, hy_gold.data(), hy.data());
@@ -143,7 +140,8 @@ void testing_sctr(Arguments argus)
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseXsctr(handle, nnz, dx_val, dx_ind, dy, idx_base));
+            CHECK_HIPSPARSE_ERROR(
+                testing::hipsparseXsctr<T>(handle, nnz, dx_val, dx_ind, dy, idx_base));
         }
 
         double gpu_time_used = get_time_us();
@@ -151,7 +149,8 @@ void testing_sctr(Arguments argus)
         // Performance run
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseXsctr(handle, nnz, dx_val, dx_ind, dy, idx_base));
+            CHECK_HIPSPARSE_ERROR(
+                testing::hipsparseXsctr<T>(handle, nnz, dx_val, dx_ind, dy, idx_base));
         }
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;

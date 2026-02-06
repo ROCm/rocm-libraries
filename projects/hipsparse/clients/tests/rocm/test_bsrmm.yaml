@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,15 +30,15 @@ Tests:
   category: pre_checkin
   function: bsrmm_bad_arg
   precision: *single_double_precisions_complex_real
-
+  
 - name: bsrmm
   category: quick
   function: bsrmm
   precision: *single_double_precisions_complex_real
   M: [42, 2059]
-  N: [7, 78]
+  N: [5, 7]
   K: [50, 1375]
-  block_dim: [4, 7, 16]
+  block_dim: [4, 7]
   alpha: [-0.5]
   alphai: [0.7]
   beta: [0.5]
@@ -46,27 +46,93 @@ Tests:
   dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
 
 - name: bsrmm
   category: pre_checkin
   function: bsrmm
-  precision: *single_double_precisions_complex_real
+  precision: *single_only_precisions
   M: 1
-  N: [9, 23]
+  N: [4, 9, 23]
   K: 1
-  block_dim: [5]
+  block_dim: [2, 3, 5]
+  alpha: [0.75]
+  alphai: [0.4]
+  beta: [-0.5]
+  betai: [1.0]
+  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7]
+
+- name: bsrmm
+  category: pre_checkin
+  function: bsrmm
+  precision: *double_only_precisions
+  M: 1
+  N: [3, 8, 15]
+  K: 1
+  block_dim: [6, 8, 10]
+  alpha: [0.75]
+  alphai: [0.4]
+  beta: [-0.5]
+  betai: [1.0]
+  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7]
+  graph_test: [true]
+
+- name: bsrmm
+  category: nightly
+  function: bsrmm
+  precision: *double_only_precisions
+  M: 1
+  N: [30, 60]
+  K: 1
+  block_dim: [2]
   alpha: [0.75]
   alphai: [0.4]
   beta: [-0.5]
   betai: [1.0]
   dirA: [HIPSPARSE_DIRECTION_COLUMN]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
-  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   filename: [rma10, 
              scircuit, 
-             nos1, 
-             nos3, 
-             nos5, 
-             nos7]
+             bmwcra_1]
+
+- name: bsrmm
+  category: nightly
+  function: bsrmm
+  precision: *double_only_precisions
+  M: 1
+  N: [41, 57]
+  K: 1
+  block_dim: [9]
+  alpha: [0.75]
+  alphai: [0.4]
+  beta: [-0.5]
+  betai: [1.0]
+  dirA: [HIPSPARSE_DIRECTION_COLUMN]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [mac_econ_fwd500,
+             mc2depi,
+             sme3Dc]

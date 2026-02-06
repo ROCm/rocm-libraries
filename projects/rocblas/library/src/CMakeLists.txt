@@ -164,6 +164,8 @@ set(rocblas_ex_source_no_tensile
     blas_ex/rocblas_trsv_batched_ex.cpp
     blas_ex/rocblas_syrk_ex.cpp
     blas_ex/rocblas_syrk_ex_kernels.cpp
+    blas_ex/rocblas_herk_ex.cpp
+    blas_ex/rocblas_herk_ex_kernels.cpp
 )
 
 set( rocblas_blas3_source_no_tensile

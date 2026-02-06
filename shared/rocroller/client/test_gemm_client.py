@@ -4,7 +4,7 @@
 #
 # MIT License
 #
-# Copyright 2024-2025 AMD ROCm(TM) Software
+# Copyright 2024-2026 AMD ROCm(TM) Software
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -32,11 +32,14 @@ import functools
 import itertools
 import os
 import pathlib
+import shutil
 import subprocess
 from dataclasses import dataclass
 
 import pytest
 import yaml
+
+SOLUTION_NOT_SUPPORTED_ON_ARCH = 3
 
 build = pathlib.Path(__file__).parent.parent / "build"
 if os.getenv("ROCROLLER_BUILD_DIR") is not None:
@@ -108,7 +111,6 @@ def check_returncode(p):
 
     Returns False if the GEMM client returned 0 (ie, OK).
     """
-    SOLUTION_NOT_SUPPORTED_ON_ARCH = 3
     if p.returncode != 0:
         if p.returncode == SOLUTION_NOT_SUPPORTED_ON_ARCH:
             return True
@@ -248,6 +250,8 @@ unroll_x: 0
 unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
 storeLDS_D: true
 prefetch: false
 prefetchInFlight: 0
@@ -274,10 +278,9 @@ types:
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: false
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
 matchMemoryAccess: true
+tailLoops: true
+streamK: None
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false
@@ -313,6 +316,8 @@ unroll_x: 0
 unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
 storeLDS_D: true
 prefetch: false
 prefetchInFlight: 0
@@ -322,6 +327,7 @@ betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeighted
 matchMemoryAccess: true
+tailLoops: true
 types:
   trans_A: N
   trans_B: N
@@ -349,9 +355,7 @@ swizzleTileSize:
   n: 0
   l: 0
 prefetchScale: false
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 ...
 """
 
@@ -377,6 +381,8 @@ unroll_x: 0
 unroll_y: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
+padLDS_A: [0, 0]
+padLDS_B: [0, 0]
 storeLDS_D: true
 prefetch: false
 prefetchInFlight: 0
@@ -386,6 +392,7 @@ betaInFma: true
 scheduler: Priority
 schedulerCost: LinearWeighted
 matchMemoryAccess: true
+tailLoops: true
 types:
   trans_A: N
   trans_B: N
@@ -413,9 +420,7 @@ swizzleTileSize:
   n: 0
   l: 0
 prefetchScale: false
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
+streamK: None
 ...
 """
 
@@ -474,7 +479,7 @@ def build_solution_params():
         # data-parallel gemm, float, params from config file
         ["--config", DP_GEMM],
         # streamk gemm, float, params from command line
-        ["--streamk"],
+        ["--streamK", "Standard"],
     ]
 
     for type, prefetch, scaleA, scaleB in itertools.product(
@@ -705,6 +710,19 @@ def test_gemm_options(tmp_path):
     assert post["load_A"] == "BufferToLDS"
     assert post["load_B"] == "BufferToVGPR"
 
+    post = run_and_load_example_yaml(
+        [
+            gemm,
+            "example",
+            example,
+            "--arch=gfx950",
+            "--padLDS_A=22,33",
+            "--padLDS_B=44,55",
+        ]
+    )
+    assert post["padLDS_A"] == [22, 33]
+    assert post["padLDS_B"] == [44, 55]
+
     # setting mxlds options
     post = run_and_load_example_yaml(
         [gemm, "example", example, "--arch=gfx950", "--mxlds=AB"]
@@ -916,6 +934,123 @@ def test_gemm_wgm(tmp_path, solution_params, problem_params):
         return
 
     gemm_validate_single_stage(tmp_path, solution_params, problem_params)
+
+
+def test_kernel_graph_dot_truncation(tmp_path):
+    """Validate Graphviz DOT rendering succeeds when node labels are truncated.
+    - With truncation enabled (small max label length), kgraph.py should succeed and produce non-empty outputs.
+    - With truncation disabled (0), kgraph.py should report a parse error.
+    """
+    arch = rocm_gfx()
+    if arch is not None and arch.startswith("gfx12"):
+        pytest.skip("Skipping KernelGraph DOT truncation test on gfx12")
+
+    if not gemm.exists():
+        pytest.skip("rocroller-gemm binary not found")
+
+    kgraph = (pathlib.Path(__file__).parent.parent / "scripts" / "kgraph.py").resolve()
+    if not kgraph.exists():
+        pytest.skip("kgraph.py script not found")
+
+    if shutil.which("dot") is None:
+        pytest.skip("Graphviz 'dot' not available in PATH")
+
+    def run_cmd(cmd, env=None, cwd=None):
+        return subprocess.run(cmd, cwd=cwd, env=env, text=True, capture_output=True)
+
+    def assert_non_empty(path: pathlib.Path):
+        assert path.exists(), f"Expected file to exist: {path}"
+        assert path.stat().st_size > 0, f"Expected file to be non-empty: {path}"
+
+    def generate_asm(asm_path: pathlib.Path, extra_env: dict):
+        env = os.environ.copy()
+        env.update(extra_env)
+
+        cmd = [
+            str(gemm),
+            "--workgroupMappingDim=0",
+            "--workgroupMappingValue=6",
+            "generate",
+            "--asm",
+            str(asm_path),
+        ]
+
+        p = run_cmd(cmd, env=env, cwd=tmp_path)
+
+        if p.returncode == SOLUTION_NOT_SUPPORTED_ON_ARCH:
+            pytest.skip("GEMM solution not supported on this architecture")
+
+        assert p.returncode == 0, (
+            "rocroller-gemm failed\n"
+            f"cmd: {cmd}\n"
+            f"stdout:\n{p.stdout}\n"
+            f"stderr:\n{p.stderr}\n"
+        )
+        assert_non_empty(asm_path)
+
+    def run_kgraph(asm_path: pathlib.Path, pdf_path: pathlib.Path):
+        cmd = [str(kgraph), str(asm_path), "-o", str(pdf_path)]
+        p = run_cmd(cmd, env=os.environ.copy(), cwd=tmp_path)
+        combined = (p.stdout or "") + "\n" + (p.stderr or "")
+        return p, combined
+
+    # Case 1 : truncation enabled(should succeed)
+    asm_trunc = tmp_path / "workgroupmapping_truncated5.s"
+    pdf_trunc = tmp_path / "workgroupmapping_truncated5.pdf"
+
+    generate_asm(
+        asm_trunc,
+        {
+            "ROCROLLER_SERIALIZE_KERNEL_GRAPH_DOT": "1",
+            "ROCROLLER_KGRAPH_NODE_LABEL_MAX_LENGTH": "5",
+        },
+    )
+
+    p, combined = run_kgraph(asm_trunc, pdf_trunc)
+    assert p.returncode == 0, (
+        "kgraph.py expected to succeed with truncation enabled\n"
+        f"output:\n{combined}\n"
+    )
+
+    dot_trunc = pdf_trunc.with_suffix(".dot")
+    norm_trunc = pdf_trunc.with_name(pdf_trunc.stem + "_normalized.s")
+    assert_non_empty(dot_trunc)
+    assert_non_empty(pdf_trunc)
+    assert_non_empty(norm_trunc)
+
+    # Case 2 : truncation disabled(should error in kgraph parse)
+    asm_untrunc = tmp_path / "workgroupmapping_untruncated.s"
+    pdf_untrunc = tmp_path / "workgroupmapping_untruncated.pdf"
+
+    generate_asm(
+        asm_untrunc,
+        {
+            "ROCROLLER_SERIALIZE_KERNEL_GRAPH_DOT": "1",
+            "ROCROLLER_KGRAPH_NODE_LABEL_MAX_LENGTH": "0",
+        },
+    )
+
+    p2, combined2 = run_kgraph(asm_untrunc, pdf_untrunc)
+
+    assert (
+        p2.returncode != 0
+        or "syntax error" in combined2
+        or "longer than 16384" in combined2
+    ), (
+        "Expected Graphviz parse error when truncation is disabled\n"
+        f"returncode: {p2.returncode}\n"
+        f"output:\n{combined2}\n"
+    )
+
+    dot_untrunc = pdf_untrunc.with_suffix(".dot")
+    assert_non_empty(dot_untrunc)
+    max_line2 = max(
+        len(line)
+        for line in dot_untrunc.read_text(errors="ignore").splitlines() or [""]
+    )
+    assert (
+        max_line2 >= 16384
+    ), f"Expected an extremely long DOT line without truncation, got max {max_line2}"
 
 
 if __name__ == "__main__":

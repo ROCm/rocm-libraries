@@ -4,13 +4,13 @@
 // This file is part of the test plugin implementation.
 // It contains the API functions for the test plugin.
 
-#include <hipdnn_sdk/plugin/PluginApi.h>
-#include <hipdnn_sdk/plugin/PluginException.hpp>
-#include <hipdnn_sdk/plugin/PluginHelpers.hpp>
+#include <hipdnn_plugin_sdk/PluginApi.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginHelpers.hpp>
 
 #include "PluginApiImpl.hpp"
 
-using namespace hipdnn_plugin;
+using namespace hipdnn_plugin_sdk;
 
 // NOLINTNEXTLINE
 thread_local char PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH] = "";
@@ -26,7 +26,7 @@ static hipdnnCallback_t loggingCallback = nullptr;
 
 extern "C" hipdnnPluginStatus_t hipdnnPluginGetName(const char** name)
 {
-    return hipdnn_plugin::tryCatch([&]() {
+    return hipdnn_plugin_sdk::tryCatch([&]() {
         THROW_IF_NULL(name);
         *name = PLUGIN_NAME;
     });
@@ -34,7 +34,7 @@ extern "C" hipdnnPluginStatus_t hipdnnPluginGetName(const char** name)
 
 extern "C" hipdnnPluginStatus_t hipdnnPluginGetVersion(const char** version)
 {
-    return hipdnn_plugin::tryCatch([&]() {
+    return hipdnn_plugin_sdk::tryCatch([&]() {
         THROW_IF_NULL(version);
         *version = PLUGIN_VERSION;
     });
@@ -42,7 +42,7 @@ extern "C" hipdnnPluginStatus_t hipdnnPluginGetVersion(const char** version)
 
 extern "C" hipdnnPluginStatus_t hipdnnPluginGetType(hipdnnPluginType_t* type)
 {
-    return hipdnn_plugin::tryCatch([&]() {
+    return hipdnn_plugin_sdk::tryCatch([&]() {
         THROW_IF_NULL(type);
         *type = PLUGIN_TYPE;
     });

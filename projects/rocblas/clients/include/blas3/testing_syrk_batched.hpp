@@ -257,7 +257,7 @@ void testing_syrk_batched(const Arguments& arg)
     rocblas_init_matrix(
         hA, arg, rocblas_client_alpha_sets_nan, rocblas_client_general_matrix, true, true);
     rocblas_init_matrix(
-        hC, arg, rocblas_client_beta_sets_nan, rocblas_client_symmetric_matrix, false, true);
+        hC, arg, rocblas_client_beta_sets_nan, rocblas_client_symmetric_matrix, false);
 
     hC_gold.copy_from(hC);
 

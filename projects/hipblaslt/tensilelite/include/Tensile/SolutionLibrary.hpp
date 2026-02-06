@@ -194,12 +194,24 @@ namespace TensileLite
         {
             return SolutionVector<MySolution>();
         }
+
+        virtual bool lastFindTopAlreadyRetAll() const
+        {
+            return true;
+        }
+
         virtual SolutionVector<MySolution>
             findTopSolutionsGroupedGemm(std::vector<MyProblem> const& problems,
                                         Hardware const&               hardware,
                                         int                           numSolutions) const
         {
             return SolutionVector<MySolution>();
+        }
+
+        // Get the library filename for debug output (if available)
+        virtual std::string getLibraryFileName() const
+        {
+            return "";
         }
     };
 

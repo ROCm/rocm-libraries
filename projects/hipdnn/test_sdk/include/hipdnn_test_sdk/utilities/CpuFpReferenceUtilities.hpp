@@ -5,9 +5,9 @@
 
 #include <algorithm>
 #include <array>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <numeric>
 #include <thread>
 #include <tuple>
@@ -109,7 +109,7 @@ struct ParallelTensorFunctorDynamic
             return;
         }
 
-        auto generatedStrides = hipdnn_sdk::utilities::generateStrides(dimensions);
+        auto generatedStrides = hipdnn_data_sdk::utilities::generateStrides(dimensions);
         strides.assign(generatedStrides.begin(), generatedStrides.end());
         totalElements = strides[0] * lengths[0];
     }

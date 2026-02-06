@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <set>
 #include <vector>
 
@@ -46,7 +47,8 @@ namespace TensileLite
     {
         using Element = std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>;
         using Table   = Matching::MatchingTable<MyProblem, Element, std::shared_ptr<MySolution>>;
-        std::shared_ptr<Table> table;
+        std::shared_ptr<Table>    table;
+        mutable std::atomic<bool> lastFindTopRetAll = false;
 
         static std::string Type()
         {
@@ -101,8 +103,6 @@ namespace TensileLite
                              SolutionLibrarySearchType searchType
                              = SolutionLibrarySearchType::DEFAULT) const override
         {
-            bool debug = Debug::Instance().printPropertyEvaluation();
-
             SolutionSet<MySolution> rv;
 
             auto matches = searchType != SolutionLibrarySearchType::DEFAULT
@@ -111,14 +111,8 @@ namespace TensileLite
 
             for(auto const& row : matches)
             {
-                if(debug)
-                    std::cout << row->description() << std::endl;
-
                 auto rowSolutions = row->findAllSolutions(problem, hardware, searchType);
                 rv.insert(rowSolutions.begin(), rowSolutions.end());
-
-                if(debug)
-                    std::cout << std::endl;
             }
 
             return rv;
@@ -130,8 +124,6 @@ namespace TensileLite
                                         SolutionLibrarySearchType     searchType
                                         = SolutionLibrarySearchType::DEFAULT) const override
         {
-            bool debug = Debug::Instance().printPropertyEvaluation();
-
             SolutionSet<MySolution> rv;
 
             auto matches = searchType != SolutionLibrarySearchType::DEFAULT
@@ -140,15 +132,9 @@ namespace TensileLite
 
             for(auto const& row : matches)
             {
-                if(debug)
-                    std::cout << row->description() << std::endl;
-
                 auto rowSolutions
                     = row->findAllSolutionsGroupedGemm(problems, hardware, searchType);
                 rv.insert(rowSolutions.begin(), rowSolutions.end());
-
-                if(debug)
-                    std::cout << std::endl;
             }
 
             return rv;
@@ -176,7 +162,15 @@ namespace TensileLite
                 else
                     std::cout << "No solution found" << std::endl;
             }
+
+            // can't reach the requested number, means findTop already done its best
+            lastFindTopRetAll = (solutions.size() < numSolutions);
             return solutions;
+        }
+
+        virtual bool lastFindTopAlreadyRetAll() const override
+        {
+            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>

@@ -26,8 +26,9 @@
 
 #pragma once
 
-#include <Tensile/SolutionLibrary.hpp>
+#include <atomic>
 
+#include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/PropertyMatching.hpp>
 
 namespace TensileLite
@@ -80,22 +81,19 @@ namespace TensileLite
             bool debug = Debug::Instance().printPropertyEvaluation();
             if(debug)
             {
-                std::cout << type() << " Searching for " << key;
-
                 if(iter == map.end())
                 {
-                    std::cout << " (not found).  Available keys:" << std::endl;
+                    std::cout << "[ProblemMap] No match for: " << key << std::endl;
+                    std::cout << "             Available problem types:" << std::endl;
                     for(auto const& pair : map)
                     {
-                        std::cout << "  " << pair.first << std::endl;
+                        std::cout << "               - " << pair.first << std::endl;
                     }
                 }
                 else
                 {
-                    std::cout << " found " << iter->second->description();
+                    std::cout << "[ProblemMap] Matched: " << key << std::endl;
                 }
-
-                std::cout << std::endl;
             }
 
             if(iter == map.end())
@@ -186,17 +184,28 @@ namespace TensileLite
 
         std::shared_ptr<Property<MyProblem, Key>> property;
         LibraryMap<MyProblem, MySolution, Key>    map;
+        mutable std::atomic<bool>                 lastFindTopRetAll = false;
 
         virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
                                                             Hardware const&  hardware,
                                                             int numSolutions) const override
         {
+            // false in case of early return
+            lastFindTopRetAll = false;
             auto library = lookup(problem, hardware);
 
             if(library == nullptr)
                 return SolutionVector<MySolution>();
 
-            return library->findTopSolutions(problem, hardware, numSolutions);
+            const auto& rv = library->findTopSolutions(problem, hardware, numSolutions);
+            lastFindTopRetAll = library->lastFindTopAlreadyRetAll();
+
+            return rv;
+        }
+
+        virtual bool lastFindTopAlreadyRetAll() const override
+        {
+            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>

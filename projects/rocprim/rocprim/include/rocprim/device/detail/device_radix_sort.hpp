@@ -571,10 +571,12 @@ struct radix_sort_and_scatter_helper
             ::rocprim::syncthreads();
 
             // Update the digit offsets
+            // Note: exclusive_digit_prefix and digit_counts are arrays of size digits_per_thread (=1),
+            // so we must use index 0, not flat_id, to avoid out-of-bounds access.
             if(flat_id < radix_size)
             {
                 storage.digit_offsets[flat_id]
-                    += exclusive_digit_prefix[flat_id] + digit_counts[flat_id];
+                    += exclusive_digit_prefix[0] + digit_counts[0];
             }
         }
     }
@@ -626,17 +628,57 @@ auto compare_nan_sensitive(const T& a, const T& b) ->
     // when making changes to this function.
 
     static constexpr auto sign_bit = ::rocprim::traits::get<T>().float_bit_mask().sign_bit;
-    using bit_key_type             = decltype(sign_bit);
+    using bit_key_type             = std::remove_cv_t<decltype(sign_bit)>;
 
-    auto a_bits = ::rocprim::detail::bit_cast<bit_key_type>(a);
-    auto b_bits = ::rocprim::detail::bit_cast<bit_key_type>(b);
+#if __HIP_NO_HALF_OPERATORS__ || __HIP_NO_HALF_CONVERSIONS__
+    // There are cases where downstream users compile with '__HIP_NO_HALF_OPERATORS__' or
+    // '__HIP_NO_HALF_CONVERSIONS__' set. This means that '__half::operator+' does not work
+    // and we can't apply our trick to convert -0.0 to +0.0. We must fall back to a potentially
+    // slower bit flipping/masking method.
+    //
+    // Ideally we would use C++20 concepts to check if operator+ is valid for this type.
+    // Alternatively we could use some utility provided by libhipcxx. That way, we can catch
+    // other weird cases.
+    constexpr bool has_operator_plus = !std::is_same_v<T, __half>;
+#else
+    constexpr bool has_operator_plus = true;
+#endif
 
-    // convert -0.0 to +0.0
-    a_bits = a_bits == sign_bit ? 0 : a_bits;
-    b_bits = b_bits == sign_bit ? 0 : b_bits;
+    bit_key_type a_bits;
+    bit_key_type b_bits;
+    if constexpr(has_operator_plus)
+    {
+        // Convert -0.0 to +0.0 using floating point trick.
+        // It was concerned that when the flags -fno-signed-zeros or -funsafe-math-optimizations
+        // (or -ffast-math which controls these two) is enabled then it is optimized away, but
+        // the compiler also seems to correctly model this and does not optimize away the addition
+        // when testing with the compile flags.
+        const T zero{0};
+        const T a_plus = a + zero;
+        const T b_plus = b + zero;
+
+        a_bits = ::rocprim::detail::bit_cast<bit_key_type>(a_plus);
+        b_bits = ::rocprim::detail::bit_cast<bit_key_type>(b_plus);
+    }
+    else
+    {
+        a_bits = ::rocprim::detail::bit_cast<bit_key_type>(a);
+        b_bits = ::rocprim::detail::bit_cast<bit_key_type>(b);
+
+        // Convert -0.0 to +0.0 by flipping the sign bit. If value with the flipped signbit
+        // is all zeroes, then we have to return +0.0.
+        // input           : flipped  : bool : result
+        // 0...0000 : +0.0 : 1...0000 : true : 0...0000 : +0.0
+        // 1...0000 : -0.0 : 0...0000 : false: 0...0000 : +0.0
+        // 0...1111 : +x.y : 1...1111 : true : 0...1111 : +x.y
+        // 1...1111 : -x.y : 0...1111 : true : 0...1111 : -x.y
+        a_bits = a_bits == sign_bit ? 0 : a_bits;
+        b_bits = b_bits == sign_bit ? 0 : b_bits;
+    }
+
     // invert negatives, put 1 into sign bit for positives
-    a_bits ^= (sign_bit & a_bits) == 0 ? sign_bit : bit_key_type(-1);
-    b_bits ^= (sign_bit & b_bits) == 0 ? sign_bit : bit_key_type(-1);
+    a_bits ^= (sign_bit & a_bits ? bit_key_type(-1) : 0) | sign_bit;
+    b_bits ^= (sign_bit & b_bits ? bit_key_type(-1) : 0) | sign_bit;
 
     // sort numbers and NaNs according to their bit representation
     return a_bits > b_bits;
@@ -1276,7 +1318,7 @@ struct onesweep_iteration_helper
                 for(unsigned int i = 0; i < ItemsPerThread; ++i)
                 {
                     // It only seems worse on gfx942 in some cases.
-                    if ROCPRIM_AMDGCN_CONSTEXPR(IS_CDNA3())
+                    if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_IS_CDNA3())
                     {
                         const int offset = ranks[i] - x;
                         if(offset >= 0 && offset < static_cast<int>(BlockSize * NKey))
@@ -1369,7 +1411,7 @@ struct onesweep_iteration_helper
                 for(unsigned int i = 0; i < ItemsPerThread; ++i)
                 {
                     // It only seems worse on gfx942 in some cases.
-                    if ROCPRIM_AMDGCN_CONSTEXPR(IS_CDNA3())
+                    if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_IS_CDNA3())
                     {
                         const int offset = ranks[i] - x;
                         if(offset >= 0 && offset < static_cast<int>(BlockSize * NValue))

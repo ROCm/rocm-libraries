@@ -295,7 +295,7 @@ struct ABTransferThreadTiles
                                             BlockDescriptor& block_descriptor,
                                             ABElementwiseOperation& ab_element_op,
                                             const index_t block_mn_id,
-                                            const index_t)
+                                            const index_t k_id)
     {
         constexpr index_t NumABTensor = ABsDataType::Size();
         const index_t mn_block_data_idx_on_grid =
@@ -304,7 +304,7 @@ struct ABTransferThreadTiles
         if constexpr(NumABTensor > 1)
         {
             const auto idx_as_block_begin = generate_tuple(
-                [&](auto) { return make_multi_index(0, mn_block_data_idx_on_grid, 0); },
+                [&](auto) { return make_multi_index(k_id, mn_block_data_idx_on_grid, 0); },
                 Number<NumABTensor>{});
 
             return ThreadGroupTensorSliceTransfer_v7r2<
@@ -357,7 +357,7 @@ struct ABTransferThreadTiles
                 ABThreadTransferSrcResetCoordinateAfterRun,
                 true,
                 GlobalBufferNum>(grid_descriptor[I0],
-                                 make_multi_index(0, mn_block_data_idx_on_grid, 0),
+                                 make_multi_index(k_id, mn_block_data_idx_on_grid, 0),
                                  ab_element_op,
                                  block_descriptor,
                                  make_multi_index(0, 0, 0),
@@ -487,6 +487,19 @@ struct ABTransferThreadTiles
     __device__ static auto GetBuffer(LDSType* p_shared_AB, const IndexType& size)
     {
         return make_dynamic_buffer<AddressSpaceEnum::Lds>(p_shared_AB, size);
+    }
+
+    template <index_t numElements, typename Type>
+    __device__ __forceinline__ static auto get_first_element_workaround(Type& array)
+    {
+        if constexpr(numElements > 1)
+        {
+            return array;
+        }
+        else
+        {
+            return array[I0];
+        }
     }
 };
 

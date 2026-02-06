@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/pooling/solvers.hpp>
 
@@ -31,6 +8,7 @@
 #include <miopen/pooling.hpp>
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/mlo_internal.hpp>
+#include <miopen/solver/implicitgemm_util.hpp>
 
 namespace miopen {
 
@@ -39,10 +17,6 @@ namespace solver {
 namespace pooling {
 
 namespace {
-
-constexpr int top_w_per_work = 1;
-constexpr int top_h_per_work = 4;
-constexpr int top_d_per_work = 2;
 
 struct kernel_params
 {
@@ -90,9 +64,13 @@ std::size_t sizeof_private_memory(const miopen::pooling::ProblemDescription& pro
 {
     const kernel_params kp(problem);
 
-    const std::size_t bot_tile_w = ((top_w_per_work - 1) * kp.stride_w + kp.kernel_sz_w);
-    const std::size_t bot_tile_h = ((top_h_per_work - 1) * kp.stride_h + kp.kernel_sz_h);
-    const std::size_t bot_tile_d = ((top_d_per_work - 1) * kp.stride_d + kp.kernel_sz_d);
+    // safer estimate of memory with max_pix_per_work
+    const std::size_t bot_tile_w =
+        ((PerformanceConfigPoolingNdForward::max_pix_per_work - 1) * kp.stride_w + kp.kernel_sz_w);
+    const std::size_t bot_tile_h =
+        ((PerformanceConfigPoolingNdForward::max_pix_per_work - 1) * kp.stride_h + kp.kernel_sz_h);
+    const std::size_t bot_tile_d =
+        ((PerformanceConfigPoolingNdForward::max_pix_per_work - 1) * kp.stride_d + kp.kernel_sz_d);
 
     const auto sizeof_bot_data =
         sizeof_kernel_FLOAT(problem) * bot_tile_d * bot_tile_h * bot_tile_w;
@@ -115,7 +93,8 @@ bool PoolingForwardNd::IsApplicable(const ExecutionContext& context,
            && problem.GetYDesc().IsPossibleLayout4D5D("NCDHW", strict)                        //
            && problem.GetXDesc().GetType() == problem.GetYDesc().GetType()                    //
            && (problem.GetXDesc().GetType() == miopenFloat                                    //
-               || problem.GetXDesc().GetType() == miopenHalf)                                 //
+               || problem.GetXDesc().GetType() == miopenHalf                                  //
+               || problem.GetXDesc().GetType() == miopenBFloat16)                             //
            && (problem.GetPooling().GetMode() == miopenPoolingMax                             //
                || problem.GetPooling().GetMode() == miopenPoolingAverage                      //
                || problem.GetPooling().GetMode() == miopenPoolingAverageInclusive)            //
@@ -129,7 +108,8 @@ bool PoolingForwardNd::IsApplicable(const ExecutionContext& context,
 }
 
 ConvSolution PoolingForwardNd::GetSolution(const ExecutionContext&,
-                                           const miopen::pooling::ProblemDescription& problem) const
+                                           const miopen::pooling::ProblemDescription& problem,
+                                           const PerformanceConfigPoolingNdForward& config) const
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
@@ -141,6 +121,10 @@ ConvSolution PoolingForwardNd::GetSolution(const ExecutionContext&,
     const int top_d = *(problem.GetYDesc().GetLengths().rbegin() + 2);
     const int top_h = *(problem.GetYDesc().GetLengths().rbegin() + 1);
     const int top_w = *(problem.GetYDesc().GetLengths().rbegin());
+
+    const int top_w_per_work = config.pix_w_per_work;
+    const int top_h_per_work = config.pix_h_per_work;
+    const int top_d_per_work = config.pix_d_per_work;
 
     const int top_blk_w = std::max((top_w + top_w_per_work - 1) / top_w_per_work, 1);
     const int top_blk_h = std::max((top_h + top_h_per_work - 1) / top_h_per_work, 1);
@@ -162,7 +146,7 @@ ConvSolution PoolingForwardNd::GetSolution(const ExecutionContext&,
                                         ? MLO_POOLING_OP_AVE
                                         : MLO_POOLING_OP_AVE_INCLUSIVE);
 
-        const size_t lcl_work = 64;
+        const size_t lcl_work = config.local_size;
         const size_t grp_num  = (activ_work + lcl_work - 1) / lcl_work;
 
         auto build_params = KernelBuildParameters{
@@ -255,6 +239,52 @@ PoolingForwardNd::GetWorkspaceSize(const ExecutionContext&,
     if(problem.GetPooling().GetMode() != miopenPoolingMax)
         return 0;
     return problem.GetYDesc().GetElementSize() * get_data_size(problem.GetPooling().GetIndexType());
+}
+
+bool PerformanceConfigPoolingNdForward::SetNextValue(const miopen::pooling::ProblemDescription&)
+{
+#if !MIOPEN_BACKEND_HIP
+    return false;
+#else
+    if(!NextTwoPower<min_pix_per_work, max_pix_per_work>(pix_w_per_work))
+        return true;
+    if(!NextTwoPower<min_pix_per_work, max_pix_per_work>(pix_h_per_work))
+        return true;
+    if(!NextTwoPower<min_pix_per_work, max_pix_per_work>(pix_d_per_work))
+        return true;
+    if(!NextTwoPower<1, 64>(local_size))
+        return true;
+    return false;
+#endif
+}
+
+bool PerformanceConfigPoolingNdForward::IsValidValue() const
+{
+    if(!IsTwoPower<min_pix_per_work, max_pix_per_work>(pix_w_per_work))
+        return false;
+    if(!IsTwoPower<min_pix_per_work, max_pix_per_work>(pix_h_per_work))
+        return false;
+    if(!IsTwoPower<min_pix_per_work, max_pix_per_work>(pix_d_per_work))
+        return false;
+    if(!IsTwoPower<1, 64>(local_size))
+        return false;
+    return true;
+}
+
+bool PoolingForwardNd::IsValidPerformanceConfig(
+    const ExecutionContext& context,
+    const miopen::pooling::ProblemDescription& problem,
+    const PerformanceConfigPoolingNdForward& config) const
+{
+    return config.IsValid(context, problem);
+}
+
+PerformanceConfigPoolingNdForward PoolingForwardNd::GetDefaultPerformanceConfig(
+    const ExecutionContext&, const miopen::pooling::ProblemDescription& problem) const
+{
+    PerformanceConfigPoolingNdForward config;
+    config.HeuristicInit(problem);
+    return config;
 }
 
 } // namespace pooling

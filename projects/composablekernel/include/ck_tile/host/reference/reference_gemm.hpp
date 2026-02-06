@@ -123,6 +123,139 @@ template <typename ADataType,
           typename BQDataType,
           typename AccDataType,
           typename CDataType,
+          typename AQuantGroupSize,
+          typename BQuantGroupSize,
+          typename AElementOp   = ck_tile::identity,
+          typename BElementOp   = ck_tile::identity,
+          typename ACCElementOp = ck_tile::identity>
+CK_TILE_HOST void reference_gemm_abquant(const HostTensor<ADataType>& a_m_k,
+                                         const HostTensor<AQDataType>& a_q,
+                                         const HostTensor<BDataType>& b_k_n,
+                                         const HostTensor<BQDataType>& b_q,
+                                         HostTensor<CDataType>& c_m_n,
+                                         const AElementOp& a_element_op     = {},
+                                         const BElementOp& b_element_op     = {},
+                                         const ACCElementOp& acc_element_op = {})
+{
+    constexpr auto A_TENSOR_M_DIM = 0;
+    constexpr auto A_TENSOR_K_DIM = 1;
+    constexpr auto B_TENSOR_K_DIM = 0;
+    constexpr auto B_TENSOR_N_DIM = 1;
+
+    const std::size_t M = a_m_k.get_length(A_TENSOR_M_DIM);
+    const std::size_t N = b_k_n.get_length(B_TENSOR_N_DIM);
+    const std::size_t K = a_m_k.get_length(A_TENSOR_K_DIM);
+
+    // Pre-convert A/B tensors to AccData type
+    // This prevents doing slow reconversions for each row/column
+    HostTensor<AccDataType> a_acc(a_m_k.mDesc);
+    HostTensor<AccDataType> b_acc(b_k_n.mDesc);
+
+    a_acc.ForEach([&](auto& self, auto index) {
+        if constexpr(std::is_same_v<ADataType, pk_int4_t> || std::is_same_v<ADataType, pk_fp4_t>)
+        {
+            const ADataType pk_val  = a_element_op(a_m_k(index));
+            const fp32x2_t fp32_val = pk_val.to_fp32x2();
+            self(index)             = (index[A_TENSOR_K_DIM] & 1) ? fp32_val.hi : fp32_val.lo;
+        }
+        else
+        {
+            self(index) = ck_tile::type_convert<AccDataType>(a_element_op(a_m_k(index)));
+        }
+    });
+
+    b_acc.ForEach([&](auto& self, auto index) {
+        if constexpr(std::is_same_v<BDataType, pk_int4_t> || std::is_same_v<BDataType, pk_fp4_t>)
+        {
+            const BDataType pk_val  = b_element_op(b_k_n(index));
+            const fp32x2_t fp32_val = pk_val.to_fp32x2();
+            self(index)             = (index[B_TENSOR_K_DIM] & 1) ? fp32_val.hi : fp32_val.lo;
+        }
+        else if constexpr(std::is_same_v<BDataType, fp8_t>)
+        {
+            self(index) = fp8_to_float_raw(b_element_op(b_k_n(index)));
+        }
+        else
+        {
+            self(index) = ck_tile::type_convert<AccDataType>(b_element_op(b_k_n(index)));
+        }
+    });
+
+    auto f_mn = [&](auto m, auto n) {
+        AccDataType v_acc = 0;
+
+        constexpr std::size_t kGroupK = BQuantGroupSize::kK;
+
+        // ---- a scale loader for a given K-group index ----
+        auto load_scale_a = [&](ck_tile::index_t k_group) -> float {
+            const ck_tile::index_t outer_dim = m / AQuantGroupSize::kM;
+            const ck_tile::index_t inner_dim = k_group;
+
+            if constexpr(std::is_same_v<AQDataType, float>)
+            {
+                return a_q(outer_dim, inner_dim);
+            }
+            else if constexpr(std::is_same_v<AQDataType, ck_tile::fp8_t>)
+            {
+                return fp8_to_float_raw(a_q(outer_dim, inner_dim));
+            }
+            else // QDataType == bf8_t by static_assert above
+            {
+                return bf8_to_float_raw(a_q(outer_dim, inner_dim));
+            }
+        };
+        // ---- b scale loader for a given K-group index ----
+        auto load_scale_b = [&](ck_tile::index_t k_group) -> float {
+            const ck_tile::index_t outer_dim = k_group;
+            const ck_tile::index_t inner_dim = n / BQuantGroupSize::kN;
+
+            if constexpr(std::is_same_v<BQDataType, float>)
+            {
+                return b_q(outer_dim, inner_dim);
+            }
+            else if constexpr(std::is_same_v<BQDataType, ck_tile::fp8_t>)
+            {
+                return fp8_to_float_raw(b_q(outer_dim, inner_dim));
+            }
+            else // QDataType == bf8_t by static_assert above
+            {
+                return bf8_to_float_raw(b_q(outer_dim, inner_dim));
+            }
+        };
+        // ---- Loop over K by groups (full and tail) ----
+        for(std::size_t k_begin = 0; k_begin < K; k_begin += kGroupK)
+        {
+            const std::size_t k_end = std::min<std::size_t>(k_begin + kGroupK, K);
+
+            AccDataType v_block_acc = 0;
+
+            // unscaled accumulation within this K-group
+            for(std::size_t k = k_begin; k < k_end; ++k)
+            {
+                const AccDataType v_a = a_acc(m, k);
+                const AccDataType v_b = b_acc(k, n);
+                v_block_acc += v_a * v_b;
+            }
+
+            const ck_tile::index_t k_group = static_cast<ck_tile::index_t>(k_begin / kGroupK);
+            const float scale_a            = load_scale_a(k_group);
+            const float scale_b            = load_scale_b(k_group);
+
+            v_acc += v_block_acc * scale_a * scale_b;
+        }
+
+        c_m_n(m, n) = ck_tile::type_convert<CDataType>(acc_element_op(v_acc));
+    };
+
+    make_ParallelTensorFunctor(f_mn, M, N)(std::thread::hardware_concurrency());
+}
+
+template <typename ADataType,
+          typename AQDataType,
+          typename BDataType,
+          typename BQDataType,
+          typename AccDataType,
+          typename CDataType,
           typename AElementOp   = ck_tile::identity,
           typename BElementOp   = ck_tile::identity,
           typename ACCElementOp = ck_tile::identity>
@@ -492,6 +625,17 @@ CK_TILE_HOST void reference_mx_gemm(const HostTensor<ADataType>& a_m_k,
                 a_m_k_scaled(m, k)     = a_f4_lo * a_scale;
                 a_m_k_scaled(m, k + 1) = a_f4_hi * a_scale;
             }
+            else if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
+            {
+                if(k % pk_fp6x16_t::packed_size != 0)
+                    continue;
+                auto a_scale = ck_tile::type_convert<AccDataType>(scale_a(m, k / ScaleBlockSize));
+                for(std::size_t k_ = 0; k_ < pk_fp6x16_t::packed_size; k_++)
+                {
+                    a_m_k_scaled(m, k + k_) =
+                        pk_fp6x16_t::fp6_e2m3_to_float(a_m_k(m, k).unpack(k_)) * a_scale;
+                }
+            }
             else
             {
                 a_m_k_scaled(m, k) =
@@ -519,6 +663,17 @@ CK_TILE_HOST void reference_mx_gemm(const HostTensor<ADataType>& a_m_k,
 
                 b_k_n_scaled(k, n)     = b_f4_lo * b_scale;
                 b_k_n_scaled(k + 1, n) = b_f4_hi * b_scale;
+            }
+            else if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
+            {
+                if(k % pk_fp6x16_t::packed_size != 0)
+                    continue;
+                auto b_scale = ck_tile::type_convert<AccDataType>(scale_b(k / ScaleBlockSize, n));
+                for(std::size_t k_ = 0; k_ < pk_fp6x16_t::packed_size; k_++)
+                {
+                    b_k_n_scaled(k + k_, n) =
+                        pk_fp6x16_t::fp6_e2m3_to_float(b_k_n(k, n).unpack(k_)) * b_scale;
+                }
             }
             else
             {

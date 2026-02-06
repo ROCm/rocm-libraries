@@ -55,6 +55,11 @@ namespace TensileLite
         return m_value & 0x10;
     }
 
+    bool Debug::printPredicateEvaluationVerbose() const
+    {
+        return m_value & 0x40000;
+    }
+
     bool Debug::printCodeObjectInfo() const
     {
         return m_value & 0x20;
@@ -163,6 +168,16 @@ namespace TensileLite
     bool Debug::disableStaggerU() const
     {
         return m_disableStaggerU;
+    }
+
+    StringSet Debug::excludedLibFromGetAll() const
+    {
+        return m_excludedFromGetAll;
+    }
+
+    void Debug::setExcludedLibFromGetAll(StringSet& excludedSet)
+    {
+        m_excludedFromGetAll = excludedSet;
     }
 
     Debug::Debug()

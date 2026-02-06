@@ -1,4 +1,4 @@
-// Copyright (C) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -510,28 +510,45 @@ std::string Butterfly::render() const
     return Call{func, args}.render();
 }
 
+static std::string render_statements(const std::vector<Statement>& stmts)
+{
+    std::string r;
+    for(const auto& s : stmts)
+        r += s.render() + "\n";
+    return r;
+}
+
 StatementList::StatementList() {}
 StatementList::StatementList(const std::initializer_list<Statement>& il)
     : statements(il){};
 std::string StatementList::render() const
 {
-    std::string r;
-    for(auto s : statements)
-        r += vrender(s) + "\n";
-    return r;
+    return render_statements(statements);
 }
 
-For::For(const Variable&      var,
-         const Expression&    initial,
-         const Expression&    condition,
-         const Expression&    increment,
-         const StatementList& body,
-         bool                 pragma_unroll)
+For::For(const Variable&               var,
+         const Expression&             initial,
+         const Expression&             condition,
+         const Expression&             increment,
+         const std::vector<Statement>& body,
+         bool                          pragma_unroll)
     : var(var)
     , initial(initial)
     , condition(condition)
     , increment(increment)
     , body(body)
+    , pragma_unroll(pragma_unroll){};
+
+For::For(const Variable&   var,
+         const Expression& initial,
+         const Expression& condition,
+         const Expression& increment,
+         bool              pragma_unroll)
+    : var(var)
+    , initial(initial)
+    , condition(condition)
+    , increment(increment)
+    , body()
     , pragma_unroll(pragma_unroll){};
 
 std::string For::render() const
@@ -553,25 +570,29 @@ std::string For::render() const
     else
         s += var.name + " += " + vrender(increment);
     s += ") {\n ";
-    s += body.render();
+    s += render_statements(body);
     s += "\n}";
     return s;
 }
 
-While::While(const Expression& condition, const StatementList& body)
+While::While(const Expression& condition, const std::vector<Statement>& body)
     : condition(condition)
     , body(body){};
+
+While::While(const Expression& condition)
+    : condition(condition)
+    , body(){};
 std::string While::render() const
 {
     std::string s;
     s += "while(";
     s += vrender(condition) + ") {\n";
-    s += body.render();
+    s += render_statements(body);
     s += "\n}";
     return s;
 }
 
-If::If(const Expression& condition, const StatementList& body)
+If::If(const Expression& condition, const std::vector<Statement>& body)
     : condition(condition)
     , body(body){};
 std::string If::render() const
@@ -580,12 +601,12 @@ std::string If::render() const
     s += "if(";
     s += vrender(condition);
     s += ") {\n";
-    s += body.render();
+    s += render_statements(body);
     s += "\n}\n";
     return s;
 }
 
-ElseIf::ElseIf(const Expression& condition, const StatementList& body)
+ElseIf::ElseIf(const Expression& condition, const std::vector<Statement>& body)
     : condition(condition)
     , body(body){};
 std::string ElseIf::render() const
@@ -594,18 +615,18 @@ std::string ElseIf::render() const
     s += "else if(";
     s += vrender(condition);
     s += ") {\n";
-    s += body.render();
+    s += render_statements(body);
     s += "\n}\n";
     return s;
 }
 
-Else::Else(const StatementList& body)
+Else::Else(const std::vector<Statement>& body)
     : body(body){};
 std::string Else::render() const
 {
     std::string s;
     s += "else {\n";
-    s += body.render();
+    s += render_statements(body);
     s += "\n}\n";
     return s;
 }

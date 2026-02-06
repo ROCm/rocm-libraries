@@ -3,7 +3,7 @@
 
 include(GoogleTest)
 
-if(HIP_DNN_SKIP_TESTS)
+if(HIPDNN_SKIP_TESTS)
     message(STATUS "Skipping HIP-DNN Frontend Unit tests")
     return()
 endif()
@@ -20,7 +20,9 @@ add_executable(
     TestBatchnormBackwardAttributes.cpp
     TestBatchnormBackwardNode.cpp
     TestBatchnormInferenceAttributes.cpp
+    TestBatchnormInferenceAttributesVarianceExt.cpp
     TestBatchnormInferenceNode.cpp
+    TestBatchnormInferenceNodeVarianceExt.cpp
     TestBatchnormNode.cpp
     TestConvolutionDgradAttributes.cpp
     TestConvolutionFwdAttributes.cpp
@@ -32,7 +34,11 @@ add_executable(
     TestGraph.cpp
     TestGraphAttributes.cpp
     TestGraphGenerated.cpp
+    TestGraphSerialization.cpp
     TestINode.cpp
+    TestKnob.cpp
+    TestMatmulAttributes.cpp
+    TestMatmulNode.cpp
     TestNode.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp

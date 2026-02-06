@@ -49,10 +49,12 @@ namespace TensileLite
     TENSILE_API SolutionAdapter::~SolutionAdapter() = default;
 
 #ifdef TENSILE_DEFAULT_SERIALIZATION
+#ifdef TENSILE_MSGPACK
     std::map<int, std::string> LoadLibraryMapping(std::string const& filename)
     {
         return MessagePackLoadLibraryMapping(filename);
     }
+#endif
 
     template <typename MyProblem, typename MySolution>
     std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>

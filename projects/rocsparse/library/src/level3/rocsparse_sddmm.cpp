@@ -464,9 +464,11 @@ try
     ROCSPARSE_CHECKARG_POINTER(3, alpha);
     ROCSPARSE_CHECKARG_POINTER(4, mat_A);
     ROCSPARSE_CHECKARG(4, mat_A, mat_A->init == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(4, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
 
     ROCSPARSE_CHECKARG_POINTER(5, mat_B);
     ROCSPARSE_CHECKARG(5, mat_B, mat_B->init == false, rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(5, mat_B, (mat_B->batch_count != 1), rocsparse_status_not_implemented);
 
     ROCSPARSE_CHECKARG_POINTER(6, beta);
     ROCSPARSE_CHECKARG_POINTER(7, mat_C);

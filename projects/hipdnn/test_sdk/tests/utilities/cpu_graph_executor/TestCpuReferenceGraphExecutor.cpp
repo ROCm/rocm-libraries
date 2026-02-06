@@ -10,35 +10,34 @@
 #include "BatchnormGraphUtils.hpp"
 #include "BatchnormTensorBundles.hpp"
 #include "ConvolutionGraphUtils.hpp"
+#include "MatmulGraphUtils.hpp"
 #include "PointwiseGraphUtils.hpp"
 #include "PointwiseTensorBundles.hpp"
 
-#include <hipdnn_sdk/plugin/EnginePluginApi.h>
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_sdk/utilities/ShallowTensor.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
-#include <hipdnn_sdk/utilities/TensorView.hpp>
-#include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/TensorView.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
+#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_sdk::data_objects;
-using namespace hipdnn_sdk::utilities;
+using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_data_sdk::utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
-using namespace hipdnn_plugin;
+using namespace hipdnn_data_sdk::flatbuffer_utilities;
 
 class TestCpuReferenceGraphExecutor
 {
 public:
-    static void runBatchnormFwdTest(hipdnn_sdk::data_objects::DataType inputDataType,
-                                    hipdnn_sdk::data_objects::DataType scaleBiasDataType,
-                                    hipdnn_sdk::data_objects::DataType meanVarianceDataType,
-                                    hipdnn_sdk::data_objects::DataType computeDataType)
+    static void runBatchnormFwdTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
+                                    hipdnn_data_sdk::data_objects::DataType scaleBiasDataType,
+                                    hipdnn_data_sdk::data_objects::DataType meanVarianceDataType,
+                                    hipdnn_data_sdk::data_objects::DataType computeDataType)
     {
         unsigned int seed = getGlobalTestSeed();
 
@@ -131,8 +130,8 @@ public:
     }
 
     template <typename InputType, typename AccumulatorType>
-    static void runConvolutionFwdTest(hipdnn_sdk::data_objects::DataType inputDataType,
-                                      hipdnn_sdk::data_objects::DataType accumulatorDataType)
+    static void runConvolutionFwdTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
+                                      hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
     {
         std::vector<int64_t> xDims = {1, 1, 2, 2};
         std::vector<int64_t> wDims = {1, 1, 1, 1};
@@ -156,8 +155,8 @@ public:
     }
 
     template <typename InputType, typename AccumulatorType>
-    static void runConvolutionBwdTest(hipdnn_sdk::data_objects::DataType inputDataType,
-                                      hipdnn_sdk::data_objects::DataType accumulatorDataType)
+    static void runConvolutionBwdTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
+                                      hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
     {
         std::vector<int64_t> dxDims = {1, 1, 2, 2};
         std::vector<int64_t> wDims = {1, 1, 1, 1};
@@ -181,8 +180,8 @@ public:
     }
 
     template <typename InputType, typename AccumulatorType>
-    static void runConvolutionWrwTest(hipdnn_sdk::data_objects::DataType inputDataType,
-                                      hipdnn_sdk::data_objects::DataType accumulatorDataType)
+    static void runConvolutionWrwTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
+                                      hipdnn_data_sdk::data_objects::DataType accumulatorDataType)
     {
         std::vector<int64_t> xDims = {1, 1, 2, 2};
         std::vector<int64_t> dwDims = {1, 1, 1, 1};
@@ -192,6 +191,29 @@ public:
 
         auto graphTuple
             = buildConvolutionWrwGraph(tensorBundle, inputDataType, accumulatorDataType);
+
+        auto& graph = std::get<0>(graphTuple);
+        auto& variantPack = std::get<1>(graphTuple);
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+
+        CpuReferenceGraphExecutor().execute(
+            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+    }
+
+    template <typename inputType, typename ComputeType>
+    static void runMatmulTest(hipdnn_data_sdk::data_objects::DataType inputDataType,
+                              hipdnn_data_sdk::data_objects::DataType computeDataType)
+    {
+        std::vector<int64_t> aDims = {2, 5, 3};
+        std::vector<int64_t> bDims = {2, 3, 4};
+        std::vector<int64_t> cDims = {2, 5, 4};
+        MatmulTensorBundle<inputType> tensorBundle(aDims, bDims, cDims, false, false, 1);
+
+        auto graphTuple = buildMatmulGraph(tensorBundle, inputDataType, computeDataType);
 
         auto& graph = std::get<0>(graphTuple);
         auto& variantPack = std::get<1>(graphTuple);
@@ -315,6 +337,20 @@ TEST(TestCpuReferenceGraphExecutor, ConvolutionWrwAllBFloat16)
 {
     TestCpuReferenceGraphExecutor::runConvolutionWrwTest<hip_bfloat16, float>(DataType::BFLOAT16,
                                                                               DataType::FLOAT);
+}
+
+TEST(TestCpuReferenceGraphExecutor, MatmulAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runMatmulTest<float, float>(DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MatmulAllHalfs)
+{
+    TestCpuReferenceGraphExecutor::runMatmulTest<half, float>(DataType::HALF, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MatmulAllBFloat16)
+{
+    TestCpuReferenceGraphExecutor::runMatmulTest<hip_bfloat16, float>(DataType::BFLOAT16,
+                                                                      DataType::FLOAT);
 }
 
 TEST(TestCpuReferenceGraphExecutor, PointwiseBinaryAdd)

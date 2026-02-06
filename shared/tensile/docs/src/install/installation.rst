@@ -68,7 +68,7 @@ Option 1: Install with pip
 
 .. code-block:: bash
 
-  pip3 install git+https://github.com/ROCmSoftwarePlatform/Tensile.git@develop
+  pip3 install git+https://github.com/ROCm/Tensile.git@develop
 
 
 Option 2: Install with git

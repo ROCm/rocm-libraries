@@ -102,12 +102,7 @@ namespace rocRoller
 
                     params->loopOverOutputTilesDimensions = {0, 1};
 
-                    StreamKMode streamKMode = StreamKMode::Standard;
-                    if(solutionParams.streamKTwoTileDPFirst)
-                        streamKMode = StreamKMode::TwoTileDPFirst;
-                    else if(solutionParams.streamKTwoTile)
-                        streamKMode = StreamKMode::TwoTile;
-                    params->streamK = streamKMode;
+                    params->streamK = solutionParams.streamK;
 
                     return params;
                 }

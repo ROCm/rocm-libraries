@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -232,33 +232,6 @@ namespace rocRoller
          *
          */
         RR_EMPTY_STRUCT_WITH_NAME(Barrier);
-
-        /**
-         * @brief Computes offsets and strides between coordinates.
-         *
-         * Offsets and strides into the `target` dimension, based on
-         * incrementing the `increment` dimension.
-         *
-         * Introduced to prevent recomputation (e.g. of an address)
-         *
-         * @param target Target dimension.
-         * @param increment Increment dimension
-         * @param base
-         */
-        struct ComputeIndex
-        {
-            // TODO: might be nicer to have UInt32 for strides; need
-            // to allow user to specify stride types instead of
-            // forcing size_t.
-
-            bool     forward                  = false;
-            bool     isStorePartOfGlobalToLDS = false;
-            DataType valueType                = DataType::Count;
-            DataType offsetType               = DataType::Count;
-            DataType strideType               = DataType::Count;
-
-            std::string name() const;
-        };
 
         /**
          * @brief Deallocates a register tag.

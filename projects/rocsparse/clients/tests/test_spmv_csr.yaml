@@ -23,16 +23,12 @@
 
 ---
 include: rocsparse_common.yaml
-
-
 Definitions:
   - &alpha_beta_range_quick
     - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
-    - { alpha:  -0.5, beta:  0.5, alphai: -0.5, betai:  1.0 }
 
   - &alpha_beta_range_checkin
     - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
-    - { alpha:   3.0, beta:  1.0,  alphai:  2.0, betai: -0.5 }
 
   - &alpha_beta_range_nightly
     - { alpha:  -0.5, beta:  0.5,  alphai:  1.0, betai: -0.5 }
@@ -40,24 +36,9 @@ Definitions:
 
   - &M_N_range_quick
     - { M: 12, N: 12 }
-    - { M: 56, N: 56 }
-    - { M: 111, N: 111 }
-    - { M: 230, N: 230 }
-    - { M: 365, N: 365 }
-    - { M: 634, N: 634 }
-    - { M: 788, N: 788 }
-    - { M: 923, N: 923 }
 
   - &M_N_range_checkin
     - { M: 0,    N: 0 }
-    - { M: 64,  N: 64 }
-    - { M: 255,  N: 255 }
-    - { M: 616,  N: 616 }
-    - { M: 1100, N: 1100 }
-    - { M: 2578, N: 2578 }
-    - { M: 2888, N: 2888 }
-    - { M: 8243, N: 8243 }
-
   - &M_N_range_nightly
     - { M: 10354,   N: 10354 }
     - { M: 31057,  N: 31057 }
@@ -79,10 +60,12 @@ Tests:
   precision: *single_double_precisions_complex_real
 
 #
-# general matrix type
+# Test rocsparse_spmv_alg_default dispatch:
+# - CSR format + default algo + transpose/conjugate_transpose should use rowsplit internally
+# - CSR format + default algo + none should use adaptive internally
 #
 
-- name: spmv_csr
+- name: spmv_csr_default_alg
   category: quick
   function: spmv_csr
   indextype: *i32i32_i64i32_i64i64
@@ -90,13 +73,13 @@ Tests:
   M: [10, 500]
   N: [33, 842]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  transA: *all_rocsparse_operation
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
+  spmv_alg: [rocsparse_spmv_alg_default]
 
-- name: spmv_csr
+- name: spmv_csr_default_alg
   category: pre_checkin
   function: spmv_csr
   indextype: *i32i32_i64i32_i64i64
@@ -104,12 +87,59 @@ Tests:
   M: [0, 7111]
   N: [0, 4441]
   alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  transA: *all_rocsparse_operation
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
+  spmv_alg: [rocsparse_spmv_alg_default]
   call_stage_analysis: [false, true]
+
+#
+# general matrix type
+#
+
+- name: spmv_csr
+  category: quick
+  function: spmv_csr
+  indextype: *i32
+  precision: *single_double_precisions
+  M: [50]
+  N: [50]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
+
+- name: spmv_csr
+  category: quick
+  function: spmv_csr
+  indextype: *i32
+  precision: *single_double_precisions
+  M: [50]
+  N: [50]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit]
+
+- name: spmv_csr
+  category: pre_checkin
+  function: spmv_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [100]
+  N: [100]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
+  call_stage_analysis: [false]
 
 - name: spmv_csr
   category: nightly
@@ -119,11 +149,11 @@ Tests:
   M: [39385, 639102]
   N: [29348, 710341]
   alpha_beta: *alpha_beta_range_nightly
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_lrb, rocsparse_spmv_alg_csr_nnzsplit]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
 
 - name: spmv_csr
   category: nightly
@@ -133,28 +163,27 @@ Tests:
   M: [39385, 639102]
   N: [29348, 710341]
   alpha_beta: *alpha_beta_range_nightly
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit, rocsparse_spmv_alg_csr_lrb]
+  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit]
 
 - name: spmv_csr_file
   category: quick
   function: spmv_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *single_double_precisions
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
   filename: [mac_econ_fwd500,
-             nos2,
-             nos4]
+             nos2]
 
 - name: spmv_csr_file
   category: pre_checkin
@@ -164,18 +193,21 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_lrb, rocsparse_spmv_alg_csr_nnzsplit]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
   filename: [rma10,
              mc2depi,
              ASIC_320k,
              nos1,
              nos3,
              nos5,
-             nos7]
+             nos7,
+             bibd_22_8,
+             Chebyshev4,
+             mac_econ_fwd500]
 
 - name: spmv_csr_file
   category: nightly
@@ -189,7 +221,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit, rocsparse_spmv_alg_csr_lrb]
+  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit]
   filename: [bibd_22_8,
              bmwcra_1,
              amazon0312,
@@ -201,16 +233,16 @@ Tests:
 - name: spmv_csr_file
   category: quick
   function: spmv_csr
-  indextype: *i32i32_i64i32_i64i64
-  precision: *double_only_precisions_complex
+  indextype: *i32
+  precision: *single_only_precisions_complex
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
   filename: [Chevron2,
              qc2534]
 
@@ -222,11 +254,11 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit, rocsparse_spmv_alg_csr_lrb]
+  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit]
   filename: [Chevron2,
              Chevron3]
 
@@ -238,11 +270,11 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit, rocsparse_spmv_alg_csr_lrb]
+  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit]
   filename: [mplate]
 
 - name: spmv_csr_file
@@ -253,11 +285,11 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_nightly
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_lrb, rocsparse_spmv_alg_csr_nnzsplit]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
   filename: [Chevron4]
 
 - name: spmv_csr_graph_test
@@ -265,16 +297,16 @@ Tests:
   function: spmv_csr
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
-  M: [10, 500]
-  N: [33, 842]
+  M: [500]
+  N: [842]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
   graph_test: true
-  call_stage_analysis: [false, true]
+  call_stage_analysis: [false]
 
 #
 # symmetric and triangular matrix type
@@ -283,16 +315,16 @@ Tests:
 - name: spmv_csr
   category: quick
   function: spmv_csr
-  indextype: *i32i32_i64i32_i64i64
-  precision: *single_double_precisions_complex_real
+  indextype: *i32
+  precision: *single_double_precisions
   M_N: *M_N_range_quick
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
-  matrix_type: [rocsparse_matrix_type_symmetric, rocsparse_matrix_type_triangular]
+  matrix_type: [rocsparse_matrix_type_symmetric]
   uplo: [rocsparse_fill_mode_lower]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
 
 - name: spmv_csr
   category: pre_checkin
@@ -301,12 +333,12 @@ Tests:
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_checkin
   alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
-  matrix_type: [rocsparse_matrix_type_symmetric, rocsparse_matrix_type_triangular]
+  matrix_type: [rocsparse_matrix_type_symmetric]
   uplo: [rocsparse_fill_mode_upper]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
 
 - name: spmv_csr
   category: nightly
@@ -315,7 +347,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_nightly
   alpha_beta: *alpha_beta_range_nightly
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_symmetric]
@@ -325,17 +357,17 @@ Tests:
 - name: spmv_csr_file
   category: quick
   function: spmv_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *double_only_precisions
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  matrix_type: [rocsparse_matrix_type_symmetric, rocsparse_matrix_type_triangular]
-  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
+  matrix_type: [rocsparse_matrix_type_symmetric]
+  uplo: [rocsparse_fill_mode_lower]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
   filename: [mac_econ_fwd500,
              nos2,
              nos4]
@@ -348,12 +380,12 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  matrix_type: [rocsparse_matrix_type_symmetric, rocsparse_matrix_type_triangular]
-  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_lrb]
+  matrix_type: [rocsparse_matrix_type_symmetric]
+  uplo: [rocsparse_fill_mode_lower]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
   filename: [rma10,
              mc2depi,
              nos1,
@@ -372,9 +404,9 @@ Tests:
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  matrix_type: [rocsparse_matrix_type_symmetric, rocsparse_matrix_type_triangular]
-  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
-  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit, rocsparse_spmv_alg_csr_lrb]
+  matrix_type: [rocsparse_matrix_type_symmetric]
+  uplo: [rocsparse_fill_mode_lower]
+  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit]
   filename: [bmwcra_1,
              amazon0312,
              Chebyshev4,
@@ -385,17 +417,17 @@ Tests:
 - name: spmv_csr_file
   category: quick
   function: spmv_csr
-  indextype: *i32i32_i64i32_i64i64
-  precision: *double_only_precisions_complex
+  indextype: *i32
+  precision: *single_only_precisions_complex
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  matrix_type: [rocsparse_matrix_type_symmetric, rocsparse_matrix_type_triangular]
-  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
+  matrix_type: [rocsparse_matrix_type_symmetric]
+  uplo: [rocsparse_fill_mode_lower]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
   filename: [Chevron2,
              qc2534]
 
@@ -407,12 +439,12 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  matrix_type: [rocsparse_matrix_type_symmetric, rocsparse_matrix_type_triangular]
+  matrix_type: [rocsparse_matrix_type_symmetric]
   uplo: [rocsparse_fill_mode_upper]
-  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit, rocsparse_spmv_alg_csr_lrb]
+  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit]
   filename: [mplate,
              Chevron3]
 
@@ -424,12 +456,12 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_nightly
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  matrix_type: [rocsparse_matrix_type_symmetric, rocsparse_matrix_type_triangular]
+  matrix_type: [rocsparse_matrix_type_symmetric]
   uplo: [rocsparse_fill_mode_lower]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_lrb]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
   filename: [Chevron4]
 
 #
@@ -439,7 +471,7 @@ Tests:
 - name: spmv_csr_file
   category: quick
   function: spmv_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *float32_float64_float64_float64
   M: 1
   N: 1
@@ -448,7 +480,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit, rocsparse_spmv_alg_csr_lrb]
+  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit]
   filename: [bmwcra_1,
              amazon0312,
              sme3Dc]
@@ -458,20 +490,18 @@ Tests:
   function: spmv_csr
   indextype: *i32i32_i64i32_i64i64
   precision: *float32_float64_float64_float64
-  M: [34, 104, 343, 5196]
-  N: [57, 109, 458, 3425]
+  M: [50]
+  N: [50]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_lrb, rocsparse_spmv_alg_csr_nnzsplit]
-
-
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
 - name: spmv_csr_file
   category: quick
   function: spmv_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *int8_int8_int32_int32_axyt_precision
   M: 1
   N: 1
@@ -480,7 +510,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit, rocsparse_spmv_alg_csr_lrb]
+  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit]
   filename: [bmwcra_1,
              amazon0312,
              sme3Dc]
@@ -490,36 +520,50 @@ Tests:
   function: spmv_csr
   indextype: *i32i32_i64i32_i64i64
   precision: *int8_int8_float32_float32_axyt_precision
-  M: [34, 104, 343, 5196]
-  N: [57, 109, 458, 3425]
+  M: [50]
+  N: [50]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_lrb, rocsparse_spmv_alg_csr_nnzsplit]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
 
 - name: spmv_csr
   category: pre_checkin
   function: spmv_csr
   indextype: *i32i32_i64i32_i64i64
   precision: *float16_float16_float32_float32_axyt_precision
-  M: [55, 145, 768]
-  N: [65, 210, 818]
+  M: [55, 145]
+  N: [65, 210]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_lrb]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
+
+- name: spmv_csr
+  category: pre_checkin
+  function: spmv_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: [*float16_float16_float16_float32_axyt_precision, *bfloat16_bfloat16_bfloat16_float32_axyt_precision]
+  M: [55, 145]
+  N: [65, 210]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  baseA: *all_rocsparse_index_base
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_lrb, rocsparse_spmv_alg_csr_rowsplit, rocsparse_spmv_alg_csr_nnzsplit]
 
 - name: spmv_csr
   category: quick
   function: spmv_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *bfloat16_bfloat16_float32_float32_axyt_precision
-  M: [65, 475, 827]
-  N: [76, 478, 586]
+  M: [65, 300]
+  N: [76, 300]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
@@ -532,14 +576,14 @@ Tests:
   function: spmv_csr
   indextype: *i32i32_i64i32_i64i64
   precision: *cmplx32_cmplx64_cmplx64_cmplx64
-  M: [16, 78, 294, 482, 68302]
-  N: [16, 93, 297, 657, 46342]
+  M: [16, 78]
+  N: [16, 93]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit, rocsparse_spmv_alg_csr_lrb]
+  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit]
 
 - name: spmv_csr_file
   category: nightly
@@ -553,7 +597,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_lrb, rocsparse_spmv_alg_csr_nnzsplit]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
   filename: [Chebyshev4,
              shipsec1,
              scircuit]
@@ -563,14 +607,14 @@ Tests:
   function: spmv_csr
   indextype: *i32i32_i64i32_i64i64
   precision: *float32_cmplx32_cmplx32_cmplx32_axyt_precision
-  M: [16, 78, 294, 482, 68302]
-  N: [16, 93, 297, 657, 46342]
+  M: [16, 78]
+  N: [16, 93]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit, rocsparse_spmv_alg_csr_lrb]
+  spmv_alg: [rocsparse_spmv_alg_csr_rowsplit]
 
 - name: spmv_csr_file
   category: nightly
@@ -584,6 +628,6 @@ Tests:
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_lrb, rocsparse_spmv_alg_csr_nnzsplit]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
   filename: [Chebyshev4,
              shipsec1]

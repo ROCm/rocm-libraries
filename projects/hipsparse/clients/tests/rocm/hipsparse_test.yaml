@@ -32,6 +32,7 @@ include: test_gthrz.yaml
 
 # level2
 include: test_bsrmv.yaml
+include: test_bsrxmv.yaml
 include: test_bsrsv2.yaml
 include: test_csrmv.yaml
 include: test_csrsv2.yaml
@@ -126,4 +127,6 @@ include: test_spsv_coo.yaml
 include: test_spsv_csr.yaml
 include: test_spsm_coo.yaml
 include: test_spsm_csr.yaml
+include: test_spsm_ex_coo.yaml
+include: test_spsm_ex_csr.yaml
 include: test_spvv.yaml

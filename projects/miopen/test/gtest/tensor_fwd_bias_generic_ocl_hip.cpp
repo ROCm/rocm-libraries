@@ -85,7 +85,7 @@ std::vector<TensorsConfig> TensorsConfigs()
 #if PERF_ENABLE
     // Determine a cache-aware cap on total tensor elements for HIP/AMD:
     // 1) Query L2 size via HIP and use 2x L2 as working set
-    // 2) Fallback to per-architecture table (MiB) if L2 is not reported
+    // 2) Fallback to per-architecture table if L2 is not reported
     size_t maxTotalSize = 0;
 
     // 1) HIP L2 cache query
@@ -98,15 +98,14 @@ std::vector<TensorsConfig> TensorsConfigs()
         {
             // Use 2x L2 as a working-set heuristic
             maxTotalSize = 2ul * static_cast<size_t>(L2_bytes);
+            // Convert bytes -> elements of type T
+            maxTotalSize /= sizeof(T);
         }
     }
 
-    // 2) Fallback table by architecture family (MiB)
+    // 2) Fallback table by architecture family
     if(maxTotalSize == 0)
-        maxTotalSize = getCacheSizeLimit(get_handle().GetDeviceName());
-
-    // Convert bytes -> elements of type T
-    maxTotalSize = maxTotalSize / sizeof(T);
+        maxTotalSize = getCacheSizeLimit<T>(get_handle().GetDeviceName());
 
     for(int N = 1; N < maxTotalSize; N *= 4)
     {

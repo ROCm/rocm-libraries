@@ -31,6 +31,7 @@
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 
@@ -126,9 +127,282 @@ class hardware_t {
   /**
    * @brief Map of matrix instruction latencies by architecture.
    *
+   * Inline to prevent ODR violations when included in multiple shared libraries.
+   * This ensures only one definition exists across all translation units. (PR#1862)
    */
-  static const std::unordered_map<architecture_t, std::unordered_map<matrix_instruction, size_t>>
-      INSTRUCTION_MAP;
+  static inline const std::unordered_map<architecture_t,
+                                         std::unordered_map<matrix_instruction, size_t>>
+      INSTRUCTION_MAP = {
+          // clang-format off
+        {architecture_t::gfx90a,
+         {
+             // F32
+             {matrix_instruction(32, 32, 2, data_type_t::Float), 64}, // v_mfma_f32_32x32x2_f32
+             {matrix_instruction(32, 32, 1, data_type_t::Float), 64}, // v_mfma_f32_32x32x1_2b_f32
+             {matrix_instruction(16, 16, 4, data_type_t::Float), 32}, // v_mfma_f32_16x16x4_f32
+             {matrix_instruction(16, 16, 1, data_type_t::Float), 32}, // v_mfma_f32_16x16x1_4b_f32
+             {matrix_instruction(4, 4, 1, data_type_t::Float), 8}, // v_mfma_f32_4x4x1_16b_f32
+
+             // F64
+             {matrix_instruction(16, 16, 4, data_type_t::Double), 32}, // v_mfma_f64_16x16x4_f64
+             {matrix_instruction(4, 4, 4, data_type_t::Double), 16}, // v_mfma_f64_4x4x4_4b_f64
+
+             // TODO ComplexFloat
+             // TODO ComplexDouble
+
+             // F16
+             {matrix_instruction(32, 32, 4, data_type_t::Half), 64}, // v_mfma_f32_32x32x4_2b_f16
+             {matrix_instruction(32, 32, 8, data_type_t::Half), 64}, // v_mfma_f32_32x32x8_f16
+             {matrix_instruction(16, 16, 4, data_type_t::Half), 32}, // v_mfma_f32_16x16x4_4b_f16
+             {matrix_instruction(16, 16, 16, data_type_t::Half), 32}, // v_mfma_f32_16x16x16_f16
+             {matrix_instruction(4, 4, 4, data_type_t::Half), 8}, // v_mfma_f32_4x4x4_16b_f16
+
+             // BF16
+             {matrix_instruction(32, 32, 4, data_type_t::BFloat16), 64}, // v_mfma_f32_32x32x4_2b_bf16
+             {matrix_instruction(32, 32, 8, data_type_t::BFloat16), 32}, // v_mfma_f32_32x32x8_bf16
+             {matrix_instruction(16, 16, 4, data_type_t::BFloat16), 32}, // v_mfma_f32_16x16x4_4b_bf16
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 16}, // v_mfma_f32_16x16x16_bf16
+             {matrix_instruction(4, 4, 4, data_type_t::BFloat16), 8}, // v_mfma_f32_4x4x4_16b_bf16
+
+             // I8
+             {matrix_instruction(32, 32, 8, data_type_t::Int8), 64}, // v_mfma_f32_32x32x16_f8
+             {matrix_instruction(32, 32, 4, data_type_t::Int8), 64}, // v_mfma_i32_32x32x4_2b_i8
+             {matrix_instruction(16, 16, 16, data_type_t::Int8), 32}, // v_mfma_f32_16x16x32_i8
+             {matrix_instruction(16, 16, 4, data_type_t::Int8), 32}, // v_mfma_i32_16x16x4_4b_i8
+             {matrix_instruction(4, 4, 4, data_type_t::Int8), 8}, // v_mfma_i32_4x4x4_16b_i8
+
+             // XF32
+             {matrix_instruction(32, 32, 8, data_type_t::XFloat32), 96}, // v_mfma_f32_32x32x8_bf16 * 3
+             {matrix_instruction(32, 32, 16, data_type_t::XFloat32), 96}, // v_mfma_f32_32x32x16_bf16 * 3
+             {matrix_instruction(16, 16, 16, data_type_t::XFloat32), 48}, // v_mfma_f32_16x16x16_bf16 * 3
+             {matrix_instruction(16, 16, 32, data_type_t::XFloat32), 48}, // v_mfma_f32_16x16x16_bf16 * 3
+         }},
+        {architecture_t::gfx942,
+         {
+             // F32
+             {matrix_instruction(32, 32, 2, data_type_t::Float), 64}, // v_mfma_f32_32x32x2_f32
+             {matrix_instruction(32, 32, 1, data_type_t::Float), 64}, // v_mfma_f32_32x32x1_2b_f32
+             {matrix_instruction(16, 16, 4, data_type_t::Float), 32}, // v_mfma_f32_16x16x4_f32
+             {matrix_instruction(16, 16, 1, data_type_t::Float), 32}, // v_mfma_f32_16x16x1_4b_f32
+             {matrix_instruction(4, 4, 1, data_type_t::Float), 8}, // v_mfma_f32_4x4x1_16b_f32
+
+             // F64
+             {matrix_instruction(16, 16, 4, data_type_t::Double), 32}, // v_mfma_f64_16x16x4_f64
+             {matrix_instruction(4, 4, 4, data_type_t::Double), 16}, // v_mfma_f64_4x4x4_4b_f64
+
+             // TODO ComplexFloat
+             // TODO ComplexDouble
+
+             // F16
+             {matrix_instruction(32, 32, 4, data_type_t::Half), 64}, // v_mfma_f32_32x32x4_2b_f16
+             {matrix_instruction(32, 32, 8, data_type_t::Half), 32}, // v_mfma_f32_32x32x8_f16
+             {matrix_instruction(16, 16, 4, data_type_t::Half), 32}, // v_mfma_f32_16x16x4_4b_f16
+             {matrix_instruction(16, 16, 16, data_type_t::Half), 16}, // v_mfma_f32_16x16x16_f16
+             {matrix_instruction(4, 4, 4, data_type_t::Half), 8}, // v_mfma_f32_4x4x4_16b_f16
+
+             // BF16
+             {matrix_instruction(32, 32, 4, data_type_t::BFloat16), 64}, // v_mfma_f32_32x32x4_2b_bf16
+             {matrix_instruction(32, 32, 8, data_type_t::BFloat16), 32}, // v_mfma_f32_32x32x8_bf16
+             {matrix_instruction(16, 16, 4, data_type_t::BFloat16), 32}, // v_mfma_f32_16x16x4_4b_bf16
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 16}, // v_mfma_f32_16x16x16_bf16
+             {matrix_instruction(4, 4, 4, data_type_t::BFloat16), 8}, // v_mfma_f32_4x4x4_16b_bf16
+
+             // F8
+             {matrix_instruction(32, 32, 16, data_type_t::Float8_fnuz), 32}, // v_mfma_f32_32x32x16_f8
+             {matrix_instruction(16, 16, 32, data_type_t::Float8_fnuz), 16}, // v_mfma_f32_16x16x32_f8
+
+             // BF8
+             {matrix_instruction(32, 32, 16, data_type_t::BFloat8_fnuz), 32}, // v_mfma_f32_32x32x16_bf8
+             {matrix_instruction(16, 16, 32, data_type_t::BFloat8_fnuz), 16}, // v_mfma_f32_16x16x32_bf8
+
+             // F8B8
+             {matrix_instruction(32, 32, 16, data_type_t::Float8BFloat8_fnuz), 32}, // v_mfma_f32_32x32x16_f8_bf8
+             {matrix_instruction(16, 16, 32, data_type_t::Float8BFloat8_fnuz), 16}, // v_mfma_f32_16x16x32_f8_bf8
+
+             // B8F8
+             {matrix_instruction(32, 32, 16, data_type_t::BFloat8Float8_fnuz), 32}, // v_mfma_f32_32x32x16_bf8_f8
+             {matrix_instruction(16, 16, 32, data_type_t::BFloat8Float8_fnuz), 16}, // v_mfma_f32_16x16x32_bf8_f8
+
+             // I8
+             {matrix_instruction(32, 32, 16, data_type_t::Int8), 32}, // v_mfma_f32_32x32x16_f8
+             {matrix_instruction(32, 32, 4, data_type_t::Int8), 64}, // v_mfma_i32_32x32x4_2b_i8
+             {matrix_instruction(16, 16, 32, data_type_t::Int8), 16}, // v_mfma_f32_16x16x32_i8
+             {matrix_instruction(16, 16, 4, data_type_t::Int8), 32}, // v_mfma_i32_16x16x4_4b_i8
+             {matrix_instruction(4, 4, 4, data_type_t::Int8), 8}, // v_mfma_i32_4x4x4_16b_i8
+
+             // XF32
+             {matrix_instruction(32, 32, 4, data_type_t::XFloat32), 32}, // v_mfma_f32_32x32x4_xf32
+             {matrix_instruction(16, 16, 32, data_type_t::XFloat32), 16}, // v_mfma_f32_16x16x8_xf32
+         }},
+        {architecture_t::gfx950,
+         {
+             // F32
+             {matrix_instruction(32, 32, 2, data_type_t::Float), 64}, // v_mfma_f32_32x32x2_f32
+             {matrix_instruction(32, 32, 1, data_type_t::Float), 64}, // v_mfma_f32_32x32x1_2b_f32
+             {matrix_instruction(16, 16, 4, data_type_t::Float), 32}, // v_mfma_f32_16x16x4_f32
+             {matrix_instruction(16, 16, 1, data_type_t::Float), 32}, // v_mfma_f32_16x16x1_4b_f32
+             {matrix_instruction(4, 4, 1, data_type_t::Float), 8}, // v_mfma_f32_4x4x1_16b_f32
+
+             // F64
+             {matrix_instruction(16, 16, 4, data_type_t::Double), 64}, // v_mfma_f64_16x16x4_f64
+             {matrix_instruction(4, 4, 4, data_type_t::Double), 16}, // v_mfma_f64_4x4x4_4b_f64
+
+             // TODO ComplexFloat
+             // TODO ComplexDouble
+
+             // F16
+             {matrix_instruction(32, 32, 8, data_type_t::Half), 32}, // v_mfma_f32_32x32x8_f16
+             {matrix_instruction(32, 32, 16, data_type_t::Half), 32}, // v_mfma_f32_32x32x16_f16
+             {matrix_instruction(16, 16, 16, data_type_t::Half), 16}, // v_mfma_f32_16x16x16_f16
+             {matrix_instruction(16, 16, 32, data_type_t::Half), 16}, // v_mfma_f32_16x16x32_f16
+
+             // BF16
+             {matrix_instruction(32, 32, 8, data_type_t::BFloat16), 32}, // v_mfma_f32_32x32x8_bf16
+             {matrix_instruction(32, 32, 16, data_type_t::BFloat16), 32}, // v_mfma_f32_32x32x16_bf16
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 16}, // v_mfma_f32_16x16x16_bf16
+             {matrix_instruction(16, 16, 32, data_type_t::BFloat16), 16}, // v_mfma_f32_16x16x16_bf16
+
+             // F8
+             {matrix_instruction(32, 32, 64, data_type_t::Float8), 64}, // v_mfma_f32_32x32x64_f8
+             {matrix_instruction(32, 32, 16, data_type_t::Float8), 32}, // v_mfma_f32_32x32x16_f8
+             {matrix_instruction(16, 16, 128, data_type_t::Float8), 32}, // v_mfma_f32_16x16x128_f8
+             {matrix_instruction(16, 16, 32, data_type_t::Float8), 16}, // v_mfma_f32_16x16x32_f8
+
+             // BF8
+             {matrix_instruction(32, 32, 64, data_type_t::BFloat8), 64}, // v_mfma_f32_32x32x64_bf8
+             {matrix_instruction(32, 32, 16, data_type_t::BFloat8), 32}, // v_mfma_f32_32x32x16_bf8
+             {matrix_instruction(16, 16, 128, data_type_t::BFloat8), 32}, // v_mfma_f32_16x16x128_bf8
+             {matrix_instruction(16, 16, 32, data_type_t::BFloat8), 16}, // v_mfma_f32_16x16x32_bf8
+
+             // F8B8
+             {matrix_instruction(32, 32, 64, data_type_t::Float8BFloat8), 64}, // v_mfma_f32_32x32x64_f8_bf8
+             {matrix_instruction(32, 32, 16, data_type_t::Float8BFloat8), 32}, // v_mfma_f32_32x32x16_f8_bf8
+             {matrix_instruction(16, 16, 128, data_type_t::Float8BFloat8), 32}, // v_mfma_f32_16x16x128_f8_bf8
+             {matrix_instruction(16, 16, 32, data_type_t::Float8BFloat8), 16}, // v_mfma_f32_16x16x32_f8_bf8
+
+             // B8F8
+             {matrix_instruction(32, 32, 64, data_type_t::BFloat8Float8), 64}, // v_mfma_f32_32x32x64_bf8_f8
+             {matrix_instruction(32, 32, 16, data_type_t::BFloat8Float8), 32}, // v_mfma_f32_32x32x16_bf8_f8
+             {matrix_instruction(16, 16, 128, data_type_t::BFloat8Float8), 32}, // v_mfma_f32_16x16x128_bf8_f8
+             {matrix_instruction(16, 16, 32, data_type_t::BFloat8Float8), 16}, // v_mfma_f32_16x16x32_bf8_f8
+
+             // I8
+             {matrix_instruction(32, 32, 16, data_type_t::Int8), 32}, // v_mfma_f32_32x32x16_f8
+             {matrix_instruction(32, 32, 4, data_type_t::Int8), 64}, // v_mfma_i32_32x32x4_2b_i8
+             {matrix_instruction(16, 16, 32, data_type_t::Int8), 16}, // v_mfma_f32_16x16x32_i8
+             {matrix_instruction(16, 16, 4, data_type_t::Int8), 32}, // v_mfma_i32_16x16x4_4b_i8
+             {matrix_instruction(4, 4, 4, data_type_t::Int8), 8}, // v_mfma_i32_4x4x4_16b_i8
+
+             // XF32
+             {matrix_instruction(32, 32, 8, data_type_t::XFloat32), 96}, // v_mfma_f32_32x32x8_bf16 * 3
+             {matrix_instruction(32, 32, 16, data_type_t::XFloat32), 96}, // v_mfma_f32_32x32x16_bf16 * 3
+             {matrix_instruction(16, 16, 16, data_type_t::XFloat32), 48}, // v_mfma_f32_16x16x16_bf16 * 3
+             {matrix_instruction(16, 16, 32, data_type_t::XFloat32), 48}, // v_mfma_f32_16x16x16_bf16 * 3
+
+             // F6
+             {matrix_instruction(32, 32, 64, data_type_t::Float6), 32}, // v_mfma_f32_32x32x64_f6
+             {matrix_instruction(16, 16, 128, data_type_t::Float6), 16}, // v_mfma_f32_16x16x128_f6
+
+             // BF6
+             {matrix_instruction(32, 32, 64, data_type_t::BFloat6), 32}, // v_mfma_f32_32x32x64_bf6
+             {matrix_instruction(16, 16, 128, data_type_t::BFloat6), 16}, // v_mfma_f32_16x16x128_bf6
+
+             // F4
+             {matrix_instruction(32, 32, 64, data_type_t::Float4), 32}, // v_mfma_f32_32x32x64_f4
+             {matrix_instruction(16, 16, 128, data_type_t::Float4), 16}, // v_mfma_f32_16x16x128_f4
+
+             // DOT2
+             {matrix_instruction(1, 1, 64, data_type_t::Half), 16}, // V_DOT2_F32_F16
+             {matrix_instruction(1, 1, 64, data_type_t::BFloat16), 16}, // V_DOT2_F32_BF16
+         }},
+        {architecture_t::gfx1201,
+         {
+             // F16
+             {matrix_instruction(16, 16, 16, data_type_t::Half), 16}, // v_wmma_f16_16x16x16_f16/v_wmma_f32_16x16x16_f16
+
+             // BF16
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 16}, // v_wmma_bf16_16x16x16_bf16/v_wmma_f32_16x16x16_bf16
+
+             // F8
+             {matrix_instruction(16, 16, 16, data_type_t::Float8), 8}, // v_wmma_f32_16x16x16_fp8_fp8
+
+             // F8B8
+             {matrix_instruction(16, 16, 16, data_type_t::Float8BFloat8), 8}, // v_wmma_f32_16x16x16_fp8_bf8
+
+             // B8F8
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat8Float8), 8}, // v_wmma_f32_16x16x16_bf8_fp8
+
+             // B8
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat8), 8}, // v_wmma_f32_16x16x16_bf8_bf8
+
+             // I8
+             {matrix_instruction(16, 16, 16, data_type_t::Int8), 8}, // v_wmma_i32_16x16x16_iu8
+
+             // I4
+             {matrix_instruction(16, 16, 16, data_type_t::Int4), 8}, // v_wmma_i32_16x16x16_iu4
+             {matrix_instruction(16, 16, 32, data_type_t::Int4), 8}, // v_wmma_i32_16x16x32_iu4
+         }},
+        {architecture_t::gfx1100,
+         {
+             // F16
+             {matrix_instruction(16, 16, 16, data_type_t::Half), 32}, // v_wmma_f32_16x16x16_f16/v_wmma_f16_16x16x16_f16
+
+             // BF16
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 32}, // v_wmma_f32_16x16x16_bf16/v_wmma_bf16_16x16x16_bf16
+
+             // I8
+             {matrix_instruction(16, 16, 16, data_type_t::Int8), 32}, // v_wmma_i32_16x16x16_iu8
+
+             // I4
+             {matrix_instruction(16, 16, 16, data_type_t::Int4), 16}, // v_wmma_i32_16x16x16_iu4
+         }},
+        {architecture_t::gfx1151,
+         {
+             // F16
+             {matrix_instruction(16, 16, 16, data_type_t::Half), 32}, // v_wmma_f32_16x16x16_f16/v_wmma_f16_16x16x16_f16
+
+             // BF16
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 32}, // v_wmma_f32_16x16x16_bf16/v_wmma_bf16_16x16x16_bf16
+
+             // I8
+             {matrix_instruction(16, 16, 16, data_type_t::Int8), 32}, // v_wmma_i32_16x16x16_iu8
+
+             // I4
+             {matrix_instruction(16, 16, 16, data_type_t::Int4), 16}, // v_wmma_i32_16x16x16_iu4
+         }}};
+  // clang-format on
+
+  /**
+   * @brief Map of main loop efficiency values by architecture and CMS kernel configuration.
+   *
+   */
+  static inline const std::unordered_map<architecture_t, std::unordered_map<CMS_kernel, double>>
+      CMS_MAP = {
+      {hardware_t::architecture_t::gfx950,
+        {
+          // BF16
+          // NT
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 160, 256, 64), 1. / 1.20},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 192, 256, 64), 1. / 1.10},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 208, 256, 64), 1. / 1.20},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 256, 160, 64), 1. / 1.20},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 256, 192, 64), 1. / 1.20},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::T, 256, 256, 64), 1. / 1.15},
+          // NN
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::N, 160, 256, 64), 1. / 1.10},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::N, 208, 256, 64), 1. / 1.10},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::N, 256, 192, 64), 1. / 1.00},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::N, transpose_t::N, 256, 256, 64), 1. / 1.05},
+          // TN
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 160, 256, 64), 1. / 1.10},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 192, 256, 64), 1. / 1.05},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 256,  96, 64), 1. / 1.10},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 256, 192, 64), 1. / 1.10},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 256, 224, 64), 1. / 1.05},
+          {CMS_kernel(data_type_t::BFloat16, transpose_t::T, transpose_t::N, 256, 256, 64), 1. / 1.05},
+        }
+      },
+    };
 
   architecture_t arch;  ///< GPU architecture type
   size_t N_CU;          ///< Number of Compute Units
@@ -172,6 +446,26 @@ class hardware_t {
              std::tuple<double, double, double> mem_bw_per_wg_coefficients);
 
   /**
+   * @brief Construct hardware_t using architecture constants and a clock frequency.
+   *
+   * Computes memory performance ratios from the provided architecture constants
+   * and compute clock, then delegates to the full constructor.
+   *
+   * @param arch GPU architecture type
+   * @param N_CU Number of compute units
+   * @param lds_capacity LDS capacity in bytes
+   * @param constants Architecture-specific constants
+   * @param L2_capacity L2 cache capacity in bytes
+   * @param compute_clock_ghz Compute clock frequency in GHz
+   */
+  hardware_t(architecture_t arch,
+             size_t N_CU,
+             size_t lds_capacity,
+             const architecture_constants& constants,
+             size_t L2_capacity,
+             double compute_clock_ghz);
+
+  /**
    * @brief Construct hardware_t from HIP device properties.
    *
    * Automatically determines architecture and extracts hardware parameters
@@ -209,6 +503,26 @@ class hardware_t {
   static hardware_t get_hardware_for_device(int deviceId);
 
   /**
+   * @brief Create hardware_t instance for a specific architecture with specified parameters.
+   *
+   * Creates a hardware instance using the specified architecture and hardware parameters.
+   * Useful for analytical modeling when actual hardware is not available.
+   *
+   * @param arch Architecture enum value
+   * @param N_CU Number of compute units
+   * @param lds_capacity LDS capacity in bytes
+   * @param L2_capacity L2 cache capacity in bytes
+   * @param compute_clock_khz Compute clock in KHz
+   * @return hardware_t Configured hardware instance
+   * @throws std::runtime_error if architecture is not supported
+   */
+  static hardware_t get_hardware_for_arch(architecture_t arch,
+                                          size_t N_CU,
+                                          size_t lds_capacity,
+                                          size_t L2_capacity,
+                                          int compute_clock_khz);
+
+  /**
    * @brief Check if the hardware described by properties is supported.
    *
    * Determines whether the GPU architecture represented by the device
@@ -236,6 +550,55 @@ class hardware_t {
    * @return size_t Instruction latency in cycles, or 0 if not found
    */
   size_t get_mi_latency(size_t MI_M, size_t MI_N, size_t MI_K, data_type_t mi_input_type) const;
+
+  /**
+   * @brief Get main loop efficiency for a given kernel configuration.
+   *
+   * @param transA Whether matrix A is transposed
+   * @param transB Whether matrix B is transposed
+   * @param MT_M Macro tile M dimension
+   * @param MT_N Macro tile N dimension
+   * @param MT_K Macro tile K dimension
+   * @param mi_input_type Input data type for the matrix instruction
+   * @return double Main loop efficiency value (1.0 if not found)
+   */
+  double get_adjusted_main_loop_efficiency(transpose_t transA,
+                                           transpose_t transB,
+                                           size_t MT_M,
+                                           size_t MT_N,
+                                           size_t MT_K,
+                                           data_type_t mi_input_type) const;
+
+  /**
+   * @brief Get valid matrix instruction dimensions for a given datatype.
+   *
+   * Returns a list of valid matrix instruction dimensions (M, N, K) for
+   * the specified datatype on the current hardware architecture. Multiple
+   * dimensions may be available for the same datatype.
+   *
+   * @param mi_input_type Input data type for the matrix instruction
+   * @return std::vector<dim3_t> List of valid dimensions for the datatype
+   */
+  std::vector<dim3_t> get_valid_matrix_instructions(data_type_t mi_input_type) const;
+
+  /**
+   * @brief Get recommended matrix instruction dimensions for a given datatype.
+   *
+   * Returns the single best matrix instruction dimension for the specified datatype
+   * based on throughput (M*N*K/latency). If multiple instructions are available,
+   * returns the one with the highest throughput.
+   *
+   * @param mi_input_type Input data type for the matrix instruction
+   * @return dim3_t Recommended dimension for the datatype. Returns {0,0,0} if not supported.
+   */
+  dim3_t get_recommended_matrix_instruction(data_type_t mi_input_type) const;
+
+  /**
+   * @brief Check if the architecture has MALL (Memory Attached Last Level).
+   *
+   * @return true if the architecture has MALL, false otherwise
+   */
+  bool has_MALL() const;
 
  private:
   /**
