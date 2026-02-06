@@ -451,166 +451,6 @@ static rocblas_status rocblasCall_trsm_alt(rocblas_handle handle,
 }
 
 template <typename T, typename I>
-static rocblas_status
-    rocblasCall_syrk_herk_mem(I const m, I const n, I const batch_count, size_t* p_size_work)
-{
-    size_t size_A_ptr = sizeof(T*) * batch_count;
-    size_t size_B_ptr = sizeof(T*) * batch_count;
-
-    adjust_for_alignment(size_A_ptr);
-    adjust_for_alignment(size_B_ptr);
-
-    size_t const size_work = size_A_ptr + size_B_ptr;
-
-    *p_size_work = size_work;
-    return (rocblas_status_success);
-}
-
-template <typename T, typename I, typename Istride, typename UA, typename UB, typename S = decltype(std::real(T{}))>
-static rocblas_status rocblasCall_syrk_herk_alt(rocblas_handle handle,
-                                                rocblas_fill const uplo,
-                                                rocblas_operation const trans,
-
-                                                I const m,
-                                                I const n,
-
-                                                S* const alpha,
-
-                                                UA A,
-                                                Istride const shiftA,
-                                                I const lda,
-                                                Istride const strideA,
-
-                                                S* const beta,
-
-                                                UB B,
-                                                Istride const shiftB,
-                                                I const ldb,
-                                                Istride const strideB,
-
-                                                I const batch_count,
-                                                void* const work,
-                                                size_t const size_work)
-{
-    bool constexpr is_pointer_batched_A = IS_POINTER_BATCHED(A, T);
-    bool constexpr is_pointer_batched_B = IS_POINTER_BATCHED(B, T);
-
-    {
-        bool const has_work = (m >= 1) && (n >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return (rocblas_status_success);
-        }
-    }
-
-    rocblas_status istat = rocblas_status_success;
-    hipStream_t stream;
-    {
-        istat = rocblas_get_stream(handle, &stream);
-        bool const isok_get_stream
-            = (istat == rocblas_status_success) || (istat == rocblas_status_continue);
-        if(!isok_get_stream)
-        {
-            return (istat);
-        }
-    }
-
-    std::byte* const pwork = (std::byte*)work;
-    std::byte* pfree = pwork;
-
-    bool constexpr is_both_same_type = (is_pointer_batched_A == is_pointer_batched_B);
-    if constexpr(is_both_same_type)
-    {
-        size_t size_work_arr = sizeof(T*) * batch_count;
-        adjust_for_alignment(size_work_arr);
-
-        T** const work_arr = (T**)pfree;
-        pfree += size_work_arr;
-
-        MEM_CHECK(pfree);
-
-        bool constexpr LBATCHED = is_pointer_batched_A || is_pointer_batched_B;
-        istat = rocblasCall_syrk_herk<LBATCHED, T>(handle, uplo, trans, m, n, alpha,
-
-                                                   A, shiftA, lda, strideA,
-
-                                                   beta,
-
-                                                   B, shiftB, ldb, strideB,
-
-                                                   batch_count, work_arr);
-    }
-    else
-    {
-        T** A_ptr = nullptr;
-        T** B_ptr = nullptr;
-
-        if constexpr(is_pointer_batched_A)
-        {
-            A_ptr = (T**)A;
-        }
-        else
-        {
-            size_t size_A_ptr = sizeof(T*) * batch_count;
-            adjust_for_alignment(size_A_ptr);
-
-            A_ptr = (T**)pfree;
-            pfree += size_A_ptr;
-
-            MEM_CHECK(pfree);
-
-            copy_array_to_ptr<T, I, Istride>(stream, batch_count,
-
-                                             A, shiftA, lda, strideA,
-
-                                             A_ptr);
-        }
-
-        if constexpr(is_pointer_batched_B)
-        {
-            B_ptr = B;
-        }
-        else
-        {
-            size_t size_B_ptr = sizeof(T*) * batch_count;
-            adjust_for_alignment(size_B_ptr);
-
-            B_ptr = (T**)pfree;
-            pfree += size_B_ptr;
-
-            MEM_CHECK(pfree);
-
-            copy_array_to_ptr<T, I, Istride>(stream, batch_count,
-
-                                             B, shiftB, ldb, strideB,
-
-                                             B_ptr);
-        }
-
-        size_t size_work_arr = sizeof(T*) * batch_count;
-        adjust_for_alignment(size_work_arr);
-
-        T** const work_arr = (T**)pfree;
-        pfree += size_work_arr;
-
-        MEM_CHECK(pfree);
-
-        bool constexpr LBATCHED = true;
-        istat = rocblasCall_syrk_herk<LBATCHED, T>(handle, uplo, trans, m, n, alpha,
-
-                                                   A_ptr, shiftA, lda, strideA,
-
-                                                   beta,
-
-                                                   B_ptr, shiftB, ldb, strideB,
-
-                                                   batch_count, work_arr);
-    }
-
-    return (istat);
-}
-
-template <typename T, typename I>
 static void rocsolver_potrf_getMemorySize_max(I const n,
                                               rocblas_fill const uplo,
                                               I const batch_count,
@@ -1446,28 +1286,6 @@ static rocblas_status
         }
     }
 
-    // ----------------------------------
-    // storage for computing  B = A' * A
-    // ----------------------------------
-
-    size_t size_syrk_herk = 0;
-    if constexpr(use_syrk)
-    {
-        istat = rocblasCall_syrk_herk_mem<T>(n, m, batch_count, &size_syrk_herk);
-        adjust_for_alignment(size_syrk_herk);
-
-        bool const isok_syrk_mem
-            = (istat == rocblas_status_continue) || (istat == rocblas_status_success);
-        if(!isok_syrk_mem)
-        {
-            return (istat);
-        }
-
-        size_t size_work_arr = sizeof(T*) * batch_count;
-        adjust_for_alignment(size_work_arr);
-        size_syrk_herk += size_work_arr;
-    }
-
     // ----------------------------------------------
     // storage for Cholesky factorization R = chol(B)
     // ----------------------------------------------
@@ -1507,9 +1325,7 @@ static rocblas_status
         }
     }
 
-    size_t const size_blas = std::max({size_syrk_herk, size_trsm});
-
-    size_work = std::max(size_potrf, size_blas);
+    size_work = std::max(size_potrf, size_trsm);
 
     adjust_for_alignment(size_work);
 
@@ -1757,6 +1573,8 @@ static rocblas_status rocsolver_cholqr1_template(
 
     const T zero = T(0);
     const T one = T(1);
+    const S Szero = S(0);
+    const S Sone = S(1);
 
     hipStream_t stream;
     try
@@ -1809,28 +1627,10 @@ static rocblas_status rocsolver_cholqr1_template(
 
             if constexpr(use_syrk)
             {
-                // -------------------------------
-                // Note output  matrix for SYRK is nn by nn
-                // -------------------------------
-                I const nn = n;
-                I const kk = m;
-                rocblas_fill const uplo = rocblas_fill_upper;
-                S alpha = S(1);
-                S beta = S(0);
-
-                rocblas_operation const trans1 = rocblas_operation_conjugate_transpose;
-
-                istat = rocblasCall_syrk_herk_alt<T>(handle, uplo, trans1, nn, kk,
-
-                                                     &alpha,
-
-                                                     A, shiftA, lda, strideA,
-
-                                                     &beta,
-
-                                                     B, shiftB, ldb, strideB,
-
-                                                     batch_count, (void*)pfree, size_remain);
+                // Note output matrix for SYRK is n by n
+                ROCBLAS_CHECK(rocblasCall_syrk_herk<BATCHED, T>(
+                    handle, rocblas_fill_upper, rocblas_operation_conjugate_transpose, n, m, &Sone,
+                    A, shiftA, lda, strideA, &Szero, B, shiftB, ldb, strideB, batch_count, workArr));
             }
             else
             {
