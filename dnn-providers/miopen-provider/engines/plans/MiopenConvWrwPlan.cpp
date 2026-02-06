@@ -1,10 +1,10 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
@@ -170,21 +170,21 @@ void ConvWrwPlan::execute(const HipdnnEnginePluginHandle& handle,
         if(_executionSettings.debugMode()
            == MiopenExecutionSettings::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
         {
-            HIPDNN_LOG_INFO("Convolution Wrw: Found {} algorithms", returnedAlgoCount);
+            HIPDNN_PLUGIN_LOG_INFO("Convolution Wrw: Found {} algorithms", returnedAlgoCount);
             for(size_t i = 0; i < static_cast<size_t>(returnedAlgoCount); ++i)
             {
-                HIPDNN_LOG_INFO("  Algorithm {}: algorithm={}, time={}, workspace_size={}",
-                                i,
-                                static_cast<int>(perfResults[i].bwd_weights_algo),
-                                perfResults[i].time,
-                                perfResults[i].memory);
+                HIPDNN_PLUGIN_LOG_INFO("  Algorithm {}: algorithm={}, time={}, workspace_size={}",
+                                       i,
+                                       static_cast<int>(perfResults[i].bwd_weights_algo),
+                                       perfResults[i].time,
+                                       perfResults[i].memory);
             }
         }
 
-        HIPDNN_LOG_INFO("Convolution Wrw: Selected algorithm={}, time={}, workspace_size={}",
-                        static_cast<int>(perfResults[0].bwd_weights_algo),
-                        perfResults[0].time,
-                        perfResults[0].memory);
+        HIPDNN_PLUGIN_LOG_INFO("Convolution Wrw: Selected algorithm={}, time={}, workspace_size={}",
+                               static_cast<int>(perfResults[0].bwd_weights_algo),
+                               perfResults[0].time,
+                               perfResults[0].memory);
 
         _algorithm = perfResults[0].bwd_weights_algo;
         // Update workspace size with the actual requirement from the selected algorithm.

@@ -12,11 +12,8 @@
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
-<<<<<<< HEAD
 #include <hipdnn_plugin_sdk/PluginException.hpp>
-=======
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
->>>>>>> develop
 
 namespace miopen_plugin
 {
@@ -64,7 +61,7 @@ void initializeMiopenExecutionSettings(
     }
     else
     {
-        HIPDNN_LOG_WARN("Engine config is invalid");
+        HIPDNN_PLUGIN_LOG_WARN("Engine config is invalid");
     }
 }
 
@@ -168,34 +165,8 @@ void MiopenEngine::initializeExecutionContext(
     const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
-<<<<<<< HEAD
     MiopenExecutionSettings executionSettings;
     initializeMiopenExecutionSettings(engineConfig, executionSettings);
-=======
-    if(engineConfig.isValid())
-    {
-        if(engineConfig.hasKnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME))
-        {
-            const auto& knobSetting
-                = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
-            if(knobSetting.valueType() == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
-            {
-                auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
-                executionContext.setBenchmarkingEnabled(value != 0);
-            }
-            else
-            {
-                HIPDNN_PLUGIN_LOG_WARN(
-                    "Benchmarking knob setting value is not an integer. Type: {}",
-                    hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
-            }
-        }
-    }
-    else
-    {
-        HIPDNN_PLUGIN_LOG_WARN("Engine config is invalid");
-    }
->>>>>>> develop
 
     for(const auto& planBuilder : _planBuilders)
     {
