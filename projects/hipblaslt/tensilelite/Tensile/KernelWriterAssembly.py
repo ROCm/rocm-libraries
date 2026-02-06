@@ -10764,16 +10764,13 @@ class KernelWriterAssembly(KernelWriter):
     else:
       useSize = [False for _ in srdTcList]
 
-    with self.allocTmpSgpr(9) as tmpSgprInfo:
+    # Keep tmp SGPR usage lean for the common path (same as develop).
+    # BAddrInterleave needs additional temporaries for baseCol computation; allocate
+    # those *only when enabled* so marginal kernels don't overflow MaxSgpr.
+    with self.allocTmpSgpr(3) as tmpSgprInfo:
       tmpS0 = tmpSgprInfo.idx
       tmpS1 = tmpS0+1
       wgMT1 = tmpS0+2
-      sRem  = tmpS0+3
-      sNeg  = tmpS0+4
-      sLow  = tmpS0+5
-      sG    = tmpS0+6
-      sMask = tmpS0+7
-      sTiles = tmpS0+8
 
       # Compute and save the element offset for Index1 in output space.
       # Default is wg1*MT1. Interleave (if enabled) replaces this with baseCol:
@@ -10783,43 +10780,51 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SMulI32(dst=sgpr(wgMT1), src0="MT1", src1=sgpr("WorkGroup1"), comment="<- wg1*MT1"))
 
       if kernel["BAddrInterleave"]:
-        labelCase16 = Label(self.labels.getNameInc("BInterleave_storeSrd_case16"), "")
-        labelCase8  = Label(self.labels.getNameInc("BInterleave_storeSrd_case8"), "")
-        labelCase4  = Label(self.labels.getNameInc("BInterleave_storeSrd_case4"), "")
-        labelCase2  = Label(self.labels.getNameInc("BInterleave_storeSrd_case2"), "")
-        labelAfterShift = Label(self.labels.getNameInc("BInterleave_storeSrd_afterShift"), "")
+        with self.allocTmpSgpr(6, tag="BInterleave_storeSrd") as tmpSgprInfo2:
+          sRem  = tmpSgprInfo2.idx
+          sNeg  = sRem+1
+          sLow  = sRem+2
+          sG    = sRem+3
+          sMask = sRem+4
+          sTiles = sRem+5
 
-        module.add(SSubU32(dst=sgpr(sMask), src0=sgpr("BInterleaveG"), src1=1, comment="mask=G-1"))
-        module.add(SAndB32(dst=sgpr(tmpS1), src0=sgpr("WorkGroup1"), src1=sgpr(sMask), comment="phase = wg1 & (G-1)"))
+          labelCase16 = Label(self.labels.getNameInc("BInterleave_storeSrd_case16"), "")
+          labelCase8  = Label(self.labels.getNameInc("BInterleave_storeSrd_case8"), "")
+          labelCase4  = Label(self.labels.getNameInc("BInterleave_storeSrd_case4"), "")
+          labelCase2  = Label(self.labels.getNameInc("BInterleave_storeSrd_case2"), "")
+          labelAfterShift = Label(self.labels.getNameInc("BInterleave_storeSrd_afterShift"), "")
 
-        # super = wg1 >> log2(G) (G in {2,4,8,16})
-        module.add(SMovB32(dst=sgpr(tmpS0), src=sgpr("WorkGroup1"), comment="super = wg1"))
-        module.add(SCmpEQU32(src0=sgpr("BInterleaveG"), src1=16))
-        module.add(SCBranchSCC1(labelName=labelCase16.getLabelName()))
-        module.add(SCmpEQU32(src0=sgpr("BInterleaveG"), src1=8))
-        module.add(SCBranchSCC1(labelName=labelCase8.getLabelName()))
-        module.add(SCmpEQU32(src0=sgpr("BInterleaveG"), src1=4))
-        module.add(SCBranchSCC1(labelName=labelCase4.getLabelName()))
-        module.add(SCmpEQU32(src0=sgpr("BInterleaveG"), src1=2))
-        module.add(SCBranchSCC1(labelName=labelCase2.getLabelName()))
-        module.add(SBranch(labelName=labelAfterShift.getLabelName()))
-        module.add(labelCase16)
-        module.add(SLShiftRightB32(dst=sgpr(tmpS0), src=sgpr(tmpS0), shiftHex=hex(4), comment="super = wg1>>4"))
-        module.add(SBranch(labelName=labelAfterShift.getLabelName()))
-        module.add(labelCase8)
-        module.add(SLShiftRightB32(dst=sgpr(tmpS0), src=sgpr(tmpS0), shiftHex=hex(3), comment="super = wg1>>3"))
-        module.add(SBranch(labelName=labelAfterShift.getLabelName()))
-        module.add(labelCase4)
-        module.add(SLShiftRightB32(dst=sgpr(tmpS0), src=sgpr(tmpS0), shiftHex=hex(2), comment="super = wg1>>2"))
-        module.add(SBranch(labelName=labelAfterShift.getLabelName()))
-        module.add(labelCase2)
-        module.add(SLShiftRightB32(dst=sgpr(tmpS0), src=sgpr(tmpS0), shiftHex=hex(1), comment="super = wg1>>1"))
-        module.add(labelAfterShift)
+          module.add(SSubU32(dst=sgpr(sMask), src0=sgpr("BInterleaveG"), src1=1, comment="mask=G-1"))
+          module.add(SAndB32(dst=sgpr(tmpS1), src0=sgpr("WorkGroup1"), src1=sgpr(sMask), comment="phase = wg1 & (G-1)"))
 
-        # wgMT1 = baseCol = phase + super*(MT1*G)
-        module.add(SMulI32(dst=sgpr(wgMT1), src0=sgpr("BInterleaveG"), src1="MT1", comment="MT1*G"))
-        module.add(SMulI32(dst=sgpr(wgMT1), src0=sgpr(wgMT1), src1=sgpr(tmpS0), comment="super*(MT1*G)"))
-        module.add(SAddU32(dst=sgpr(wgMT1), src0=sgpr(wgMT1), src1=sgpr(tmpS1), comment="baseCol = super*(MT1*G)+phase"))
+          # super = wg1 >> log2(G) (G in {2,4,8,16})
+          module.add(SMovB32(dst=sgpr(tmpS0), src=sgpr("WorkGroup1"), comment="super = wg1"))
+          module.add(SCmpEQU32(src0=sgpr("BInterleaveG"), src1=16))
+          module.add(SCBranchSCC1(labelName=labelCase16.getLabelName()))
+          module.add(SCmpEQU32(src0=sgpr("BInterleaveG"), src1=8))
+          module.add(SCBranchSCC1(labelName=labelCase8.getLabelName()))
+          module.add(SCmpEQU32(src0=sgpr("BInterleaveG"), src1=4))
+          module.add(SCBranchSCC1(labelName=labelCase4.getLabelName()))
+          module.add(SCmpEQU32(src0=sgpr("BInterleaveG"), src1=2))
+          module.add(SCBranchSCC1(labelName=labelCase2.getLabelName()))
+          module.add(SBranch(labelName=labelAfterShift.getLabelName()))
+          module.add(labelCase16)
+          module.add(SLShiftRightB32(dst=sgpr(tmpS0), src=sgpr(tmpS0), shiftHex=hex(4), comment="super = wg1>>4"))
+          module.add(SBranch(labelName=labelAfterShift.getLabelName()))
+          module.add(labelCase8)
+          module.add(SLShiftRightB32(dst=sgpr(tmpS0), src=sgpr(tmpS0), shiftHex=hex(3), comment="super = wg1>>3"))
+          module.add(SBranch(labelName=labelAfterShift.getLabelName()))
+          module.add(labelCase4)
+          module.add(SLShiftRightB32(dst=sgpr(tmpS0), src=sgpr(tmpS0), shiftHex=hex(2), comment="super = wg1>>2"))
+          module.add(SBranch(labelName=labelAfterShift.getLabelName()))
+          module.add(labelCase2)
+          module.add(SLShiftRightB32(dst=sgpr(tmpS0), src=sgpr(tmpS0), shiftHex=hex(1), comment="super = wg1>>1"))
+          module.add(labelAfterShift)
+
+          # wgMT1 = baseCol = phase + super*(MT1*G)
+          module.add(SMulI32(dst=sgpr(wgMT1), src0=sgpr("BInterleaveG"), src1="MT1", comment="MT1*G"))
+          module.add(SMulI32(dst=sgpr(wgMT1), src0=sgpr(wgMT1), src1=sgpr(tmpS0), comment="super*(MT1*G)"))
+          module.add(SAddU32(dst=sgpr(wgMT1), src0=sgpr(wgMT1), src1=sgpr(tmpS1), comment="baseCol = super*(MT1*G)+phase"))
 
       # Overall strategy is to set the SRD to the top-left of the macro-tile.
       # TT offsets are from this base (and include the column)
