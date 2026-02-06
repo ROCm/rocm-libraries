@@ -1,6 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+add_subdirectory(custom_kernels)
+
 add_library(hipblaslt-rocroller OBJECT)
 target_sources(hipblaslt-rocroller
     PRIVATE
@@ -16,7 +18,6 @@ target_sources(hipblaslt-rocroller
 target_compile_features(hipblaslt-rocroller PRIVATE cxx_std_20)
 set_target_properties(hipblaslt-rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(hipblaslt-rocroller PRIVATE roc::origami-headers)
-target_link_libraries(hipblaslt-rocroller PUBLIC hip::host)
 if(TARGET roc::rocroller-interface)
     target_link_libraries(hipblaslt-rocroller PRIVATE roc::rocroller-interface)
 else()
