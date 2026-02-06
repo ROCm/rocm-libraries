@@ -592,7 +592,8 @@ TEST_P(TestGpuMiopenConvFwdBiasActivPlanBuilder, IsApplicableGetWorkspaceSizeAnd
 
     if(_isApplicable)
     {
-        EXPECT_NO_THROW(_planBuilder.getMaxWorkspaceSize(_handle, graph));
+        MiopenExecutionSettings settings;
+        EXPECT_NO_THROW(_planBuilder.getMaxWorkspaceSize(_handle, graph, settings));
 
         HipdnnEnginePluginExecutionContext ctx;
         ASSERT_NO_THROW(_planBuilder.buildPlan(_handle, graph, ctx));
@@ -670,14 +671,16 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForWrongNode
         MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(1));
 
-        EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph),
+        MiopenExecutionSettings settings;
+        EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph, settings),
                      hipdnn_plugin_sdk::HipdnnPluginException);
     }
     {
         MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(4));
 
-        EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph),
+        MiopenExecutionSettings settings;
+        EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph, settings),
                      hipdnn_plugin_sdk::HipdnnPluginException);
     }
 }
@@ -688,7 +691,8 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForUnsupport
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graph),
+    MiopenExecutionSettings settings;
+    EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 

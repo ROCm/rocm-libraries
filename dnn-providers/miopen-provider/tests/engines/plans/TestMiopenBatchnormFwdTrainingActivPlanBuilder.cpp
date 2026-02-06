@@ -91,7 +91,8 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, GetWorkspaceSizeReturnsZe
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_dummyHandle, graph);
+    MiopenExecutionSettings settings;
+    size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings);
 
     EXPECT_EQ(workspaceSize, 0u);
 }

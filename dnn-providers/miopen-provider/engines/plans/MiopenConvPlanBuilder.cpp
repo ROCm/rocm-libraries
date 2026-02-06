@@ -466,7 +466,8 @@ MiopenConvPlanBuilder::WorkspaceSizeRange MiopenConvPlanBuilder::getWorkspaceSiz
 
 size_t MiopenConvPlanBuilder::getMaxWorkspaceSize(
     const HipdnnEnginePluginHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const MiopenExecutionSettings& executionSettings) const
 {
     if(opGraph.nodeCount() != 1)
     {

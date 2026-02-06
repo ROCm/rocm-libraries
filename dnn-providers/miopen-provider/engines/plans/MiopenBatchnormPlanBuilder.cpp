@@ -597,7 +597,8 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
 
 size_t MiopenBatchnormPlanBuilder::getMaxWorkspaceSize(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const MiopenExecutionSettings& executionSettings) const
 {
     //batchnorm plan builder does not require workspace size
     return 0u;

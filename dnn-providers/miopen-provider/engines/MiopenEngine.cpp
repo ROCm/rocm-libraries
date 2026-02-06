@@ -138,18 +138,20 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
 size_t MiopenEngine::getMaxWorkspaceSize(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
+    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
 {
-    size_t workspaceSize = 0;
+    MiopenExecutionSettings executionSettings;
+    initializeMiopenExecutionSettings(engineConfig, executionSettings);
+
     for(const auto& planBuilder : _planBuilders)
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
-            workspaceSize
-                = std::max(workspaceSize, planBuilder->getMaxWorkspaceSize(handle, opGraph));
+            planBuilder->initializeExecutionSettings(handle, opGraph, engineConfig, executionSettings);
+            return planBuilder->getMaxWorkspaceSize(handle, opGraph, executionSettings);
         }
     }
-    return workspaceSize;
+    return 0;
 }
 
 void MiopenEngine::initializeExecutionContext(
@@ -159,11 +161,8 @@ void MiopenEngine::initializeExecutionContext(
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     MiopenExecutionSettings executionSettings;
-
-    // Initialize global knobs (benchmarking)
     initializeMiopenExecutionSettings(engineConfig, executionSettings);
 
-    // Let plan builder add custom knob settings (workspace limit, deterministic, etc.)
     for(const auto& planBuilder : _planBuilders)
     {
         if(planBuilder->isApplicable(handle, opGraph))
@@ -173,10 +172,8 @@ void MiopenEngine::initializeExecutionContext(
         }
     }
 
-    // Set fully initialized settings in execution context
     executionContext.setExecutionSettings(executionSettings);
 
-    // Build the plan
     for(const auto& planBuilder : _planBuilders)
     {
         if(planBuilder->isApplicable(handle, opGraph))
