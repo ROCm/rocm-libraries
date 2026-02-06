@@ -185,10 +185,9 @@ class Executor:
                 torch_sync = None
 
         for _ in range(self._config.benchmark_iters):
-            if gpu_timer:
-                gpu_timer.start()
-
             with Timer() as t:
+                if gpu_timer:
+                    gpu_timer.start()
                 result = self._graph.execute(handle, variant_pack, self._workspace_ptr)
                 if result.is_bad():
                     raise ExecutionError(
@@ -196,12 +195,11 @@ class Executor:
                     )
                 if gpu_timer:
                     gpu_timer.stop()
-                    # elapsed_ms() syncs on the stop event, so E2E includes sync time
-                    kernel_timings.append(gpu_timer.elapsed_ms())
-                elif torch_sync:
-                    # No GPU timer - explicit sync for accurate E2E
+                if torch_sync:
                     torch_sync()
 
+            if gpu_timer:
+                kernel_timings.append(gpu_timer.elapsed_ms())
             e2e_timings.append(t.elapsed_ms)
 
         # Build metadata

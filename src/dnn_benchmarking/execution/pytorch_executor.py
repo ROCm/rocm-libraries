@@ -118,13 +118,12 @@ class PyTorchCudaExecutor:
         gpu_timer = TorchGpuTimer()
 
         for _ in range(self._config.benchmark_iters):
-            gpu_timer.start()
-
             with Timer() as t:
+                gpu_timer.start()
                 self._execute_graph(tensors)
+                gpu_timer.stop()
                 torch.cuda.synchronize()
 
-            gpu_timer.stop()
             kernel_timings.append(gpu_timer.elapsed_ms())
             e2e_timings.append(t.elapsed_ms)
 
