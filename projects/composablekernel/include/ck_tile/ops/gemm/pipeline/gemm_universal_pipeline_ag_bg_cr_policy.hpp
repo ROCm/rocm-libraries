@@ -80,12 +80,19 @@ struct UniversalGemmBasePolicy
     static constexpr bool is_b_load_tr = false;
 #endif
 
+    template <typename T>
+    using has_bcastpolicy_type = decltype(T::BCastPolicy);
+
     template <typename Problem>
     static constexpr bool IsBCastPolicyBeforeLDSWrite_v = [] {
-        if constexpr(has_bcastpolicy<Problem>::value)
+        if constexpr(is_detected<has_bcastpolicy_type, Problem>{})
+        {
             return Problem::BCastPolicy == CastPolicy::BeforeLDSWrite;
+        }
         else
+        {
             return false;
+        }
     }();
 
     static constexpr auto I0 = number<0>{};
