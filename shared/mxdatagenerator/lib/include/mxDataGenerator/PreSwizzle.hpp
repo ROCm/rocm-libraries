@@ -36,15 +36,6 @@
 
 namespace DGen
 {
-    /**
-     * @brief Swizzle mode for scale data
-     */
-    enum class ScaleSwizzleMode
-    {
-        None,      // No swizzle
-        RocRoller, // RocRoller kernel pattern (existing preSwizzle)
-        AITER      // AITER kernel pattern
-    };
 
     /**
      * @brief Helper to compute product of elements in a range

@@ -56,6 +56,8 @@ std::filesystem::path getCoPath()
     return libraryPath;
 }
 
+// Add all custom kernels to the SolutionCache
+// Need to specify the KernelType and SolutionIndexParameters
 void preloadCustomKernels(SolutionCache& cache)
 {
     KernelType mxfp4Kernel;
