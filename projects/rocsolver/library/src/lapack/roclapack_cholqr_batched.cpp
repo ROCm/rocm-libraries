@@ -64,23 +64,27 @@ rocblas_status rocsolver_cholqr_batched_impl(rocblas_handle handle,
 
     // memory workspace sizes:
     size_t size_work = 0;
-    rocsolver_cholqr_getMemorySize<true, false, T>(m, n, batch_count, algo, &size_work);
+    size_t size_workArr;
+    rocsolver_cholqr_getMemorySize<true, false, T>(m, n, batch_count, algo, &size_workArr,
+                                                   &size_work);
 
     if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_set_optimal_device_memory_size(handle, size_work);
+        return rocblas_set_optimal_device_memory_size(handle, size_workArr, size_work);
 
     // memory workspace allocation
-    rocblas_device_malloc mem(handle, size_work);
+    void* workArr;
+    rocblas_device_malloc mem(handle, size_workArr, size_work);
 
     if(!mem)
         return rocblas_status_memory_error;
 
-    void* const work = (void*)mem[0];
+    workArr = mem[0];
+    void* const work = (void*)mem[1];
 
     // execution
     return rocsolver_cholqr_template<true, false, T>(handle, m, n, A, shiftA, lda, strideA, R,
                                                      shiftR, ldr, strideR, sigma, algo, info,
-                                                     batch_count, work, size_work);
+                                                     batch_count, (T**)workArr, work, size_work);
 }
 
 ROCSOLVER_END_NAMESPACE
