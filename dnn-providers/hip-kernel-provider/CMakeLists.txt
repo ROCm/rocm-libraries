@@ -107,6 +107,8 @@ add_library(
     EngineManager.cpp
     HipKernelPlugin.cpp
     HipKernelPluginPublic.cpp
+    HipKernelContainer.cpp
+    engines/HipKernelEngine.cpp
 )
 target_compile_definitions(
     hip_kernel_plugin_impl PRIVATE COMPONENT_NAME="hip_kernel_plugin"
