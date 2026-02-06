@@ -2142,6 +2142,9 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
         if constexpr(DirectLoad) {
             str << "_DirectLoad";
         }
+        if constexpr (NumGroupsToMerge > 1) {
+            str << "_MergedGroups";
+        }
 
         str << "<"
             << BlockSize << ", "
@@ -2161,9 +2164,11 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
             << "BlkGemmPipelineScheduler: "
             << BlkGemmPipelineSchedulerToString[BlkGemmPipeSched] << ", "
             << "BlkGemmPipelineVersion: "
-            << BlkGemmPipelineVersionToString[BlkGemmPipelineVer]  << ", "
-            << NumGroupsToMerge
-            << ">";
+            << BlkGemmPipelineVersionToString[BlkGemmPipelineVer];
+            if constexpr (NumGroupsToMerge > 1) {
+                str   << ", " << NumGroupsToMerge;
+            }
+            str << ">";
         // clang-format on
 
         return str.str();
