@@ -286,9 +286,7 @@ struct device_merge_benchmark_generator
 
     struct create_default_config
     {
-        using default_config =
-            typename rocprim::detail::default_merge_config_base<KeyType, ValueType>::type;
-        using benchmark_struct = device_merge_benchmark<KeyType, ValueType, default_config>;
+        using benchmark_struct = device_merge_benchmark<KeyType, ValueType>;
 
         void operator()(std::vector<std::unique_ptr<primbench::benchmark_interface>>& storage)
         {

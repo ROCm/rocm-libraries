@@ -130,8 +130,8 @@ public:
             total_cache_size += sizeof(T);
         }
         d_buffer.store(data);
-        cache[additional_key] = std::move(d_buffer);
-        return cache[additional_key].get();
+        auto it = cache.emplace(std::string(additional_key), std::move(d_buffer)).first;
+        return it->second.get();
     }
 
     static input_cache& instance()
@@ -141,9 +141,9 @@ public:
     }
 
 private:
-    std::string                                  main_key;
-    std::map<std::string, common::device_ptr<T>> cache;
-    short                                        total_cache_size = 0;
+    std::string                                               main_key;
+    std::map<std::string, common::device_ptr<T>, std::less<>> cache;
+    short                                                     total_cache_size = 0;
 };
 
 template<typename Config>
@@ -155,7 +155,8 @@ auto config_name()
     }
     else
     {
-        auto config = Config();
+        constexpr rocprim::detail::histogram_config_params config = Config();
+
         return primbench::json{}
             .add("bs", config.histogram_config.block_size)
             .add("ipt", config.histogram_config.items_per_thread)
@@ -167,7 +168,7 @@ auto config_name()
     }
 }
 
-int get_entropy_percents(int entropy_reduction)
+inline int get_entropy_percents(int entropy_reduction)
 {
     switch(entropy_reduction)
     {

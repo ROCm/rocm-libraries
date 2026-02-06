@@ -67,7 +67,8 @@ auto config_name()
     }
     else
     {
-        auto config = Config();
+        constexpr rocprim::detail::segmented_radix_sort_config_params config = Config();
+
         return primbench::json{}
             .add("bs", config.kernel_config.block_size)
             .add("ipt", config.kernel_config.items_per_thread)

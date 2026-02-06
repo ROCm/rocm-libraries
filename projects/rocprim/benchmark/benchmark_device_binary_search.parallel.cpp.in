@@ -30,7 +30,7 @@
 
 namespace
 {
-auto unused = primbench::executor::queue_sorted_instance<device_binary_search_benchmark<
+auto unused = primbench::executor::queue<device_binary_search_benchmark<
     @SubAlgorithm@_subalgorithm,
     @ValueType@,
     @OutputType@,

@@ -73,7 +73,8 @@ auto config_name()
     }
     else
     {
-        auto config = Config();
+        constexpr rocprim::detail::radix_sort_onesweep_config_params config = Config();
+
         return primbench::json{}
             .add("histogram",
                  primbench::json{}
@@ -289,7 +290,8 @@ struct device_radix_sort_onesweep_benchmark_generator
             RadixBits,
             false,
             RadixRankAlgorithm,
-            rocprim::identity_decomposer>::storage_type;
+            rocprim::identity_decomposer,
+            rocprim::detail::block_id_wrapper<>>::storage_type;
         return sizeof(sharedmem_storage) < TUNING_SHARED_MEMORY_MAX;
     }
 

@@ -101,7 +101,7 @@ auto config_name()
 
 template<typename DataType,
          typename Config                = rocprim::default_config,
-         typename FlagType              = char,
+         typename FlagType              = int8_t,
          select_probability Probability = select_probability::tuning>
 struct device_select_flag_benchmark : public primbench::benchmark_interface
 {

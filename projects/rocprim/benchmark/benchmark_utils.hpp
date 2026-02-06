@@ -510,7 +510,8 @@ using make_index_range =
 template<typename T, template<T> class Function, T... I, typename... Args>
 void static_for_each_impl(std::integer_sequence<T, I...>, Args&&... args)
 {
-    ((Function<I>{}(std::forward<Args>(args))), ...);
+    int a[] = {(Function<I>{}(std::forward<Args>(args)...), 0)...};
+    static_cast<void>(a);
 }
 
 // call the supplied template with all values of the std::integer_sequence Indices

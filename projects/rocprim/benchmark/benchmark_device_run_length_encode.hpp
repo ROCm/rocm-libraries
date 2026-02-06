@@ -55,7 +55,9 @@ auto config_name()
     }
     else
     {
-        auto config = Config();
+        using ReduceByKeyConfig =
+            typename rocprim::detail::select_reduce_by_key_config<Config>::type;
+        auto config = ReduceByKeyConfig();
         return primbench::json{}
             .add("bs", config.kernel_config.block_size)
             .add("ipt", config.kernel_config.items_per_thread);
@@ -156,12 +158,13 @@ struct device_run_length_encode_benchmark_generator
     {
         void operator()(std::vector<std::unique_ptr<primbench::benchmark_interface>>& storage)
         {
-            using config
-                = rocprim::reduce_by_key_config<BlockSize,
-                                                ItemsPerThread,
-                                                rocprim::block_load_method::block_load_transpose,
-                                                rocprim::block_load_method::block_load_transpose,
-                                                rocprim::block_scan_algorithm::using_warp_scan>;
+            using config = rocprim::run_length_encode_config<
+                rocprim::reduce_by_key_config<BlockSize,
+                                              ItemsPerThread,
+                                              rocprim::block_load_method::block_load_transpose,
+                                              rocprim::block_load_method::block_load_transpose,
+                                              rocprim::block_scan_algorithm::using_warp_scan>,
+                rocprim::default_config>;
 
             storage.emplace_back(
                 std::make_unique<device_run_length_encode_benchmark<T, 10, config>>());

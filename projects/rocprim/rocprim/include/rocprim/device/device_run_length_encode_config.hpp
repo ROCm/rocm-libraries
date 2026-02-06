@@ -98,7 +98,13 @@ struct run_length_encode_config_selector
 template<class Config>
 struct convert_to_non_trivial_config
 {
-    using ReduceByKeyConfig                        = typename Config::reduce_by_key;
+    using type = Config; // identity by default
+};
+
+// Only convert run_length_encode_config
+template<typename ReduceByKeyConfig, typename SelectConfig>
+struct convert_to_non_trivial_config<run_length_encode_config<ReduceByKeyConfig, SelectConfig>>
+{
     static constexpr unsigned int block_size       = ReduceByKeyConfig::block_size;
     static constexpr unsigned int items_per_thread = ReduceByKeyConfig::items_per_thread;
 

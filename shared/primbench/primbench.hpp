@@ -1896,10 +1896,10 @@ static constexpr const char* horizontal_bar          = u8"─";
  * \param family_col_width Width of the family column.
  * \param specialization_count Total number of specializations.
  */
-void print_dry_header(std::string_view algo_name,
-                      size_t           spec_col_width,
-                      size_t           family_col_width,
-                      size_t           specialization_count)
+inline void print_dry_header(std::string_view algo_name,
+                             size_t           spec_col_width,
+                             size_t           family_col_width,
+                             size_t           specialization_count)
 {
     std::string status_header    = "Status of " + std::string(algo_name);
     size_t      status_col_width = status_header.size();
@@ -1924,11 +1924,11 @@ void print_dry_header(std::string_view algo_name,
  * \param specialization_count Total number of specializations.
  * \param noise_timeout_secs Duration before noisy timeout.
  */
-void print_header(std::string_view          algo_name,
-                  size_t                    spec_col_width,
-                  size_t                    family_col_width,
-                  size_t                    specialization_count,
-                  std::chrono::seconds::rep noise_timeout_secs)
+inline void print_header(std::string_view          algo_name,
+                         size_t                    spec_col_width,
+                         size_t                    family_col_width,
+                         size_t                    specialization_count,
+                         std::chrono::seconds::rep noise_timeout_secs)
 {
     std::string status_header = "Status of " + std::string(algo_name);
     std::string noisy_status  = "Noisy timed out after " + std::to_string(noise_timeout_secs) + "s";
@@ -1956,7 +1956,7 @@ void print_header(std::string_view          algo_name,
  * \param gpu_temp Current GPU temperature.
  * \param min_gpu_temp Minimum temperature target.
  */
-void print_warming(uint16_t gpu_temp, uint16_t min_gpu_temp)
+inline void print_warming(uint16_t gpu_temp, uint16_t min_gpu_temp)
 {
     std::cout << clearline << "Warming GPU from " << blue << gpu_temp << "°C" << reset << " to "
               << green << min_gpu_temp << "°C" << reset << std::flush;
@@ -1968,7 +1968,7 @@ void print_warming(uint16_t gpu_temp, uint16_t min_gpu_temp)
  * \param gpu_temp Current GPU temperature.
  * \param max_gpu_temp Maximum temperature target.
  */
-void print_cooling(uint16_t gpu_temp, uint16_t max_gpu_temp)
+inline void print_cooling(uint16_t gpu_temp, uint16_t max_gpu_temp)
 {
     std::cout << clearline << "Cooling GPU from " << red << gpu_temp << "°C" << reset << " to "
               << green << max_gpu_temp << "°C" << reset << std::flush;
@@ -1980,11 +1980,11 @@ void print_cooling(uint16_t gpu_temp, uint16_t max_gpu_temp)
  * Displays only status, specialization and family index.
  * Used when simulating algorithm execution without actually running benchmarks.
  */
-void print_dry_progress(std::string_view specialization,
-                        std::string_view algo_name,
-                        size_t           family_index,
-                        size_t           spec_col_width,
-                        size_t           family_col_width)
+inline void print_dry_progress(std::string_view specialization,
+                               std::string_view algo_name,
+                               size_t           family_index,
+                               size_t           spec_col_width,
+                               size_t           family_col_width)
 {
     std::ostringstream line;
 
@@ -2005,20 +2005,20 @@ void print_dry_progress(std::string_view specialization,
  * Displays bytes per second, temperature, and specialization data.
  * Highlights noisy or timed-out iterations with color-coded output.
  */
-void print_progress(uint64_t         iteration,
-                    double           noise_percent,
-                    double           bytes_per_sec,
-                    std::string_view status_msg,
-                    std::string_view specialization,
-                    std::string_view algo_name,
-                    uint64_t         batch_window_size,
-                    size_t           family_index,
-                    size_t           spec_col_width,
-                    size_t           family_col_width,
-                    double           elapsed_host_secs,
-                    double           noise_timeout_secs,
-                    double           noise_tolerance_percent,
-                    uint16_t         gpu_temp)
+inline void print_progress(uint64_t         iteration,
+                           double           noise_percent,
+                           double           bytes_per_sec,
+                           std::string_view status_msg,
+                           std::string_view specialization,
+                           std::string_view algo_name,
+                           uint64_t         batch_window_size,
+                           size_t           family_index,
+                           size_t           spec_col_width,
+                           size_t           family_col_width,
+                           double           elapsed_host_secs,
+                           double           noise_timeout_secs,
+                           double           noise_tolerance_percent,
+                           uint16_t         gpu_temp)
 {
     std::string status_header = "Status of " + std::string(algo_name);
 
@@ -3331,9 +3331,9 @@ private:
 
 } // namespace detail
 
-constexpr size_t KiB = 1024;
-constexpr size_t MiB = 1024 * KiB;
-constexpr size_t GiB = 1024 * MiB;
+inline constexpr size_t KiB = 1024;
+inline constexpr size_t MiB = 1024 * KiB;
+inline constexpr size_t GiB = 1024 * MiB;
 
 using json  = detail::json;
 using state = detail::state;

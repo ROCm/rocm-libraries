@@ -135,7 +135,7 @@ auto config_name()
 
 template<typename DataType,
          typename Config                   = rocprim::default_config,
-         typename FlagType                 = char,
+         typename FlagType                 = int8_t,
          partition_probability Probability = partition_probability::tuning>
 struct device_partition_flag_benchmark : public primbench::benchmark_interface
 {
@@ -315,7 +315,7 @@ private:
 
 template<typename DataType,
          typename Config                   = rocprim::default_config,
-         typename FlagType                 = char,
+         typename FlagType                 = int8_t,
          partition_probability Probability = partition_probability::tuning>
 struct device_partition_two_way_flag_benchmark : public primbench::benchmark_interface
 {

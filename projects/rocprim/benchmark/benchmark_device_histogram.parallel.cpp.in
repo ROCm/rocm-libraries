@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include "primbench.hpp"
-#include "benchmark_device_multi_histogram_even.hpp"
+#include "benchmark_device_histogram.hpp"
 
 #include <rocprim/types.hpp>
 
