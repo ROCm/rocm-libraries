@@ -63,7 +63,7 @@ rocblas_status rocsolver_cholqr_impl(rocblas_handle handle,
 
     // memory workspace sizes:
     size_t size_work = 0;
-    rocsolver_cholqr_getMemorySize<T, I>(m, n, batch_count, algo, &size_work);
+    rocsolver_cholqr_getMemorySize<false, false, T>(m, n, batch_count, algo, &size_work);
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_work);
@@ -77,9 +77,9 @@ rocblas_status rocsolver_cholqr_impl(rocblas_handle handle,
     void* const work = (void*)mem[0];
 
     // execution
-    return rocsolver_cholqr_template<T, I, rocblas_stride>(handle, m, n, A, shiftA, lda, strideA, R,
-                                                           shiftR, ldr, strideR, sigma, algo, info,
-                                                           batch_count, work, size_work);
+    return rocsolver_cholqr_template<false, false, T>(handle, m, n, A, shiftA, lda, strideA, R,
+                                                      shiftR, ldr, strideR, sigma, algo, info,
+                                                      batch_count, work, size_work);
 }
 
 ROCSOLVER_END_NAMESPACE

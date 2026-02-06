@@ -1383,7 +1383,53 @@ static void set_triangular(rocblas_handle handle,
     }
 }
 
-template <typename T, typename I>
+template <typename T, typename I, typename U, typename S = decltype(std::real(T{}))>
+rocblas_status rocsolver_cholqr_argCheck(rocblas_handle handle,
+                                         const I m,
+                                         const I n,
+                                         U A,
+                                         const I lda,
+                                         const rocblas_stride strideA,
+                                         T* R,
+                                         const I ldr,
+                                         const rocblas_stride strideR,
+                                         S* sigma,
+                                         const rocsolver_cholqr_algo algo,
+                                         I* info,
+                                         const I batch_count = 1)
+{
+    // order is important for unit tests:
+
+    // 1. invalid/non-supported values
+    if(algo != rocsolver_cholqr_cholqr1 && algo != rocsolver_cholqr_cholqr2
+       && algo != rocsolver_cholqr_default && algo != rocsolver_cholqr_cholqr3_compute
+       && algo != rocsolver_cholqr_cholqr3_user)
+        return rocblas_status_invalid_value;
+
+    // 2. invalid size
+    if(m < 0 || n < 0 || lda < m || ldr < n || batch_count < 0)
+        return rocblas_status_invalid_size;
+    // only m >= n is supported
+    if(m > 0 && m < n)
+        return rocblas_status_invalid_size;
+
+    // skip pointer check if querying memory size
+    if(rocblas_is_device_memory_size_query(handle))
+        return rocblas_status_continue;
+
+    // 3. invalid pointers
+    if((m && n && (!A || !R)) || (batch_count > 0 && !info))
+        return rocblas_status_invalid_pointer;
+    // sigma is required for cholqr3 algorithms
+    if(batch_count > 0
+       && (algo == rocsolver_cholqr_cholqr3_compute || algo == rocsolver_cholqr_cholqr3_user)
+       && !sigma)
+        return rocblas_status_invalid_pointer;
+
+    return rocblas_status_continue;
+}
+
+template <bool BATCHED, bool STRIDED, typename T, typename I>
 static rocblas_status
     rocsolver_cholqr1_getMemorySize(I const m, I const n, I const batch_count, size_t* p_size_work)
 {
@@ -1478,7 +1524,7 @@ static rocblas_status
     return (istat);
 }
 
-template <typename T, typename I>
+template <bool BATCHED, bool STRIDED, typename T, typename I>
 static rocblas_status
     rocsolver_cholqr2_getMemorySize(I const m, I const n, I const batch_count, size_t* p_size_work)
 {
@@ -1511,7 +1557,8 @@ static rocblas_status
     // storage for 1st call to cholqr1
     size_t size_cholqr1 = 0;
     {
-        istat = rocsolver_cholqr1_getMemorySize<T>(m, n, batch_count, &size_cholqr1);
+        istat
+            = rocsolver_cholqr1_getMemorySize<BATCHED, STRIDED, T>(m, n, batch_count, &size_cholqr1);
         if(istat != rocblas_status_success)
         {
             return (istat);
@@ -1543,6 +1590,112 @@ static rocblas_status
     return (istat);
 }
 
+template <bool BATCHED, bool STRIDED, typename T, typename I>
+static rocblas_status
+    rocsolver_cholqr3_getMemorySize(I const m, I const n, I const batch_count, size_t* p_size_work)
+{
+    size_t size_work = 0;
+    *p_size_work = 0;
+    {
+        bool const has_work = (m >= 1) && (n >= 1) && (batch_count >= 1);
+        if(!has_work)
+        {
+            return (rocblas_status_success);
+        }
+    }
+
+    size_t size_R1 = 0;
+    {
+        I const ldr = n;
+        size_R1 = sizeof(T) * ldr * n * batch_count;
+        adjust_for_alignment(size_R1);
+    }
+    size_work += size_R1;
+
+    size_t size_iinfo = 0;
+    {
+        size_iinfo = sizeof(I) * batch_count;
+        adjust_for_alignment(size_iinfo);
+    }
+
+    size_work += size_iinfo;
+
+    size_t size_cholqr1 = 0;
+
+    {
+        auto const istat = rocsolver_cholqr1_getMemorySize<BATCHED, STRIDED, T, I>(m, n, batch_count,
+                                                                                   &size_cholqr1);
+        if(istat != rocblas_status_success)
+        {
+            return (istat);
+        }
+
+        adjust_for_alignment(size_cholqr1);
+    }
+
+    size_t size_cholqr2 = 0;
+    {
+        auto const istat = rocsolver_cholqr2_getMemorySize<BATCHED, STRIDED, T, I>(m, n, batch_count,
+                                                                                   &size_cholqr2);
+        if(istat != rocblas_status_success)
+        {
+            return (istat);
+        }
+
+        adjust_for_alignment(size_cholqr2);
+    }
+
+    size_t size_trmm = 0;
+    {
+        size_trmm = sizeof(T*) * batch_count;
+        adjust_for_alignment(size_trmm);
+    }
+
+    size_work += std::max({size_trmm, size_cholqr1, size_cholqr2});
+
+    *p_size_work = size_work;
+    return (rocblas_status_success);
+}
+
+template <bool BATCHED, bool STRIDED, typename T, typename I>
+static rocblas_status rocsolver_cholqr_getMemorySize(I const m,
+                                                     I const n,
+                                                     I const batch_count,
+                                                     rocsolver_cholqr_algo const algo,
+                                                     size_t* p_size_work)
+{
+    size_t size_work = 0;
+    *p_size_work = 0;
+
+    {
+        bool const has_work = (m >= 1) && (n >= 1) && (batch_count >= 1);
+        if(!has_work)
+        {
+            return (rocblas_status_success);
+        }
+    }
+
+    rocblas_status istat = rocblas_status_success;
+    if(algo == rocsolver_cholqr_cholqr1)
+    {
+        istat
+            = rocsolver_cholqr1_getMemorySize<BATCHED, STRIDED, T, I>(m, n, batch_count, &size_work);
+    }
+    else if((algo == rocsolver_cholqr_cholqr2) || (algo == rocsolver_cholqr_default))
+    {
+        istat
+            = rocsolver_cholqr2_getMemorySize<BATCHED, STRIDED, T, I>(m, n, batch_count, &size_work);
+    }
+    else if((algo == rocsolver_cholqr_cholqr3_compute) || (algo == rocsolver_cholqr_cholqr3_user))
+    {
+        istat
+            = rocsolver_cholqr3_getMemorySize<BATCHED, STRIDED, T, I>(m, n, batch_count, &size_work);
+    }
+
+    *p_size_work = size_work;
+    return (rocblas_status_success);
+}
+
 // -------------------------------------------------
 // compute A = Q * R,  using Cholesky factorization
 //
@@ -1554,7 +1707,9 @@ static rocblas_status
 //
 // Q will over-write A
 // -------------------------------------------------
-template <typename T,
+template <bool BATCHED,
+          bool STRIDED,
+          typename T,
           typename I,
           typename Istride,
           typename UA,
@@ -1851,7 +2006,7 @@ static rocblas_status rocsolver_cholqr1_template(
 // Vol 44, p 306-326, 2015.
 // -----------------------------------------------------
 
-template <typename T, typename I, typename Istride, typename UA, typename UR, typename INFO = I>
+template <bool BATCHED, bool STRIDED, typename T, typename I, typename Istride, typename UA, typename UR, typename INFO = I>
 static rocblas_status rocsolver_cholqr2_template(rocblas_handle handle,
                                                  I const m,
                                                  I const n,
@@ -1944,7 +2099,8 @@ static rocblas_status rocsolver_cholqr2_template(rocblas_handle handle,
 
             {
                 size_t size_cholqr1 = 0;
-                istat = rocsolver_cholqr1_getMemorySize<T, I>(m, n, batch_count, &size_cholqr1);
+                istat = rocsolver_cholqr1_getMemorySize<BATCHED, STRIDED, T>(m, n, batch_count,
+                                                                             &size_cholqr1);
 
                 {
                     bool const isok_cholqr1_mem
@@ -1965,17 +2121,17 @@ static rocblas_status rocsolver_cholqr2_template(rocblas_handle handle,
                 }
             }
 
-            istat = rocsolver_cholqr1_template<T, I, Istride>(handle,
+            istat = rocsolver_cholqr1_template<BATCHED, STRIDED, T>(handle,
 
-                                                              m, n,
+                                                                    m, n,
 
-                                                              A, shiftA, lda, strideA,
+                                                                    A, shiftA, lda, strideA,
 
-                                                              R1, shiftR1, ldr1, strideR1,
+                                                                    R1, shiftR1, ldr1, strideR1,
 
-                                                              batch_count, info,
+                                                                    batch_count, info,
 
-                                                              (void*)pfree, size_remain);
+                                                                    (void*)pfree, size_remain);
 
             if(istat != rocblas_status_success)
             {
@@ -2007,17 +2163,17 @@ static rocblas_status rocsolver_cholqr2_template(rocblas_handle handle,
             MEM_CHECK_THROW(pfree);
             size_t const size_remain = (pwork + size_work) - pfree;
 
-            istat = rocsolver_cholqr1_template<T, I, Istride>(handle,
+            istat = rocsolver_cholqr1_template<BATCHED, STRIDED, T>(handle,
 
-                                                              m, n,
+                                                                    m, n,
 
-                                                              Q, shiftQ, ldq, strideQ,
+                                                                    Q, shiftQ, ldq, strideQ,
 
-                                                              R, shiftR, ldr, strideR,
+                                                                    R, shiftR, ldr, strideR,
 
-                                                              batch_count, iinfo,
+                                                                    batch_count, iinfo,
 
-                                                              (void*)pfree, size_remain);
+                                                                    (void*)pfree, size_remain);
 
             if(istat != rocblas_status_success)
             {
@@ -2127,7 +2283,9 @@ static rocblas_status rocsolver_cholqr2_template(rocblas_handle handle,
 // "An improved Shifted CholeskyQR based on columns",
 // by Fan et al, arXiv:2408.06311v4 [math.NA] 07 Feb 2025
 //
-template <typename T,
+template <bool BATCHED,
+          bool STRIDED,
+          typename T,
           typename I,
           typename Istride,
           typename UA,
@@ -2257,17 +2415,18 @@ static rocblas_status rocsolver_cholqr3_template(rocblas_handle handle,
             // -----------------------------
             // perform CholeskQR1 with shift
             // -----------------------------
-            istat = rocsolver_cholqr1_template<T, I, Istride>(handle,
+            istat = rocsolver_cholqr1_template<BATCHED, STRIDED, T>(handle,
 
-                                                              m, n,
+                                                                    m, n,
 
-                                                              A, shiftA, lda, strideA,
+                                                                    A, shiftA, lda, strideA,
 
-                                                              R1, shiftR1, ldr1, strideR1,
+                                                                    R1, shiftR1, ldr1, strideR1,
 
-                                                              batch_count, info,
+                                                                    batch_count, info,
 
-                                                              (void*)pfree, size_remain, sigma_array);
+                                                                    (void*)pfree, size_remain,
+                                                                    sigma_array);
 
             if(istat != rocblas_status_success)
             {
@@ -2294,15 +2453,15 @@ static rocblas_status rocsolver_cholqr3_template(rocblas_handle handle,
 
             size_t const size_remain = (pwork + size_work) - pfree;
 
-            istat = rocsolver_cholqr2_template<T, I, Istride>(handle, m, n,
+            istat = rocsolver_cholqr2_template<BATCHED, STRIDED, T>(handle, m, n,
 
-                                                              Q, shiftQ, ldq, strideQ,
+                                                                    Q, shiftQ, ldq, strideQ,
 
-                                                              R, shiftR, ldr, strideR,
+                                                                    R, shiftR, ldr, strideR,
 
-                                                              batch_count, iinfo,
+                                                                    batch_count, iinfo,
 
-                                                              (void*)pfree, size_remain);
+                                                                    (void*)pfree, size_remain);
 
             if(istat != rocblas_status_success)
             {
@@ -2392,7 +2551,9 @@ static rocblas_status rocsolver_cholqr3_template(rocblas_handle handle,
     }
 }
 
-template <typename T,
+template <bool BATCHED,
+          bool STRIDED,
+          typename T,
           typename I,
           typename Istride,
           typename UA,
@@ -2427,195 +2588,48 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
 
     if(algo == rocsolver_cholqr_cholqr1)
     {
-        istat = rocsolver_cholqr1_template<T, I, Istride>(handle,
+        istat = rocsolver_cholqr1_template<BATCHED, STRIDED, T>(handle,
 
-                                                          m, n,
+                                                                m, n,
 
-                                                          A, shiftA, lda, strideA,
+                                                                A, shiftA, lda, strideA,
 
-                                                          R, shiftR, ldr, strideR,
+                                                                R, shiftR, ldr, strideR,
 
-                                                          batch_count, info,
+                                                                batch_count, info,
 
-                                                          work, size_work);
+                                                                work, size_work);
     }
     else if((algo == rocsolver_cholqr_cholqr2) || (algo == rocsolver_cholqr_default))
     {
-        istat = rocsolver_cholqr2_template<T, I, Istride>(handle, m, n,
+        istat = rocsolver_cholqr2_template<BATCHED, STRIDED, T>(handle, m, n,
 
-                                                          A, shiftA, lda, strideA,
+                                                                A, shiftA, lda, strideA,
 
-                                                          R, shiftR, ldr, strideR,
+                                                                R, shiftR, ldr, strideR,
 
-                                                          batch_count, info,
+                                                                batch_count, info,
 
-                                                          work, size_work);
+                                                                work, size_work);
     }
     else if((algo == rocsolver_cholqr_cholqr3_compute) || (algo == rocsolver_cholqr_cholqr3_user))
     {
         bool const compute_sigma = (algo == rocsolver_cholqr_cholqr3_compute);
 
-        istat = rocsolver_cholqr3_template<T, I>(handle, m, n,
+        istat = rocsolver_cholqr3_template<BATCHED, STRIDED, T>(handle, m, n,
 
-                                                 A, shiftA, lda, strideA,
+                                                                A, shiftA, lda, strideA,
 
-                                                 R, shiftR, ldr, strideR,
+                                                                R, shiftR, ldr, strideR,
 
-                                                 compute_sigma, sigma_array,
+                                                                compute_sigma, sigma_array,
 
-                                                 info, batch_count,
+                                                                info, batch_count,
 
-                                                 work, size_work);
+                                                                work, size_work);
     }
 
     return (istat);
-}
-
-template <typename T, typename I, typename U, typename S = decltype(std::real(T{}))>
-rocblas_status rocsolver_cholqr_argCheck(rocblas_handle handle,
-                                         const I m,
-                                         const I n,
-                                         U A,
-                                         const I lda,
-                                         const rocblas_stride strideA,
-                                         T* R,
-                                         const I ldr,
-                                         const rocblas_stride strideR,
-                                         S* sigma,
-                                         const rocsolver_cholqr_algo algo,
-                                         I* info,
-                                         const I batch_count = 1)
-{
-    // order is important for unit tests:
-
-    // 1. invalid/non-supported values
-    if(algo != rocsolver_cholqr_cholqr1 && algo != rocsolver_cholqr_cholqr2
-       && algo != rocsolver_cholqr_default && algo != rocsolver_cholqr_cholqr3_compute
-       && algo != rocsolver_cholqr_cholqr3_user)
-        return rocblas_status_invalid_value;
-
-    // 2. invalid size
-    if(m < 0 || n < 0 || lda < m || ldr < n || batch_count < 0)
-        return rocblas_status_invalid_size;
-    // only m >= n is supported
-    if(m > 0 && m < n)
-        return rocblas_status_invalid_size;
-
-    // skip pointer check if querying memory size
-    if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_status_continue;
-
-    // 3. invalid pointers
-    if((m && n && (!A || !R)) || (batch_count > 0 && !info))
-        return rocblas_status_invalid_pointer;
-    // sigma is required for cholqr3 algorithms
-    if(batch_count > 0
-       && (algo == rocsolver_cholqr_cholqr3_compute || algo == rocsolver_cholqr_cholqr3_user)
-       && !sigma)
-        return rocblas_status_invalid_pointer;
-
-    return rocblas_status_continue;
-}
-
-template <typename T, typename I>
-static rocblas_status
-    rocsolver_cholqr3_getMemorySize(I const m, I const n, I const batch_count, size_t* p_size_work)
-{
-    size_t size_work = 0;
-    *p_size_work = 0;
-    {
-        bool const has_work = (m >= 1) && (n >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return (rocblas_status_success);
-        }
-    }
-
-    size_t size_R1 = 0;
-    {
-        I const ldr = n;
-        size_R1 = sizeof(T) * ldr * n * batch_count;
-        adjust_for_alignment(size_R1);
-    }
-    size_work += size_R1;
-
-    size_t size_iinfo = 0;
-    {
-        size_iinfo = sizeof(I) * batch_count;
-        adjust_for_alignment(size_iinfo);
-    }
-
-    size_work += size_iinfo;
-
-    size_t size_cholqr1 = 0;
-
-    {
-        auto const istat = rocsolver_cholqr1_getMemorySize<T, I>(m, n, batch_count, &size_cholqr1);
-        if(istat != rocblas_status_success)
-        {
-            return (istat);
-        }
-
-        adjust_for_alignment(size_cholqr1);
-    }
-
-    size_t size_cholqr2 = 0;
-    {
-        auto const istat = rocsolver_cholqr2_getMemorySize<T, I>(m, n, batch_count, &size_cholqr2);
-        if(istat != rocblas_status_success)
-        {
-            return (istat);
-        }
-
-        adjust_for_alignment(size_cholqr2);
-    }
-
-    size_t size_trmm = 0;
-    {
-        size_trmm = sizeof(T*) * batch_count;
-        adjust_for_alignment(size_trmm);
-    }
-
-    size_work += std::max({size_trmm, size_cholqr1, size_cholqr2});
-
-    *p_size_work = size_work;
-    return (rocblas_status_success);
-}
-
-template <typename T, typename I>
-static rocblas_status rocsolver_cholqr_getMemorySize(I const m,
-                                                     I const n,
-                                                     I const batch_count,
-                                                     rocsolver_cholqr_algo const algo,
-                                                     size_t* p_size_work)
-{
-    size_t size_work = 0;
-    *p_size_work = 0;
-
-    {
-        bool const has_work = (m >= 1) && (n >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return (rocblas_status_success);
-        }
-    }
-
-    rocblas_status istat = rocblas_status_success;
-    if(algo == rocsolver_cholqr_cholqr1)
-    {
-        istat = rocsolver_cholqr1_getMemorySize<T, I>(m, n, batch_count, &size_work);
-    }
-    else if((algo == rocsolver_cholqr_cholqr2) || (algo == rocsolver_cholqr_default))
-    {
-        istat = rocsolver_cholqr2_getMemorySize<T, I>(m, n, batch_count, &size_work);
-    }
-    else if((algo == rocsolver_cholqr_cholqr3_compute) || (algo == rocsolver_cholqr_cholqr3_user))
-    {
-        istat = rocsolver_cholqr3_getMemorySize<T, I>(m, n, batch_count, &size_work);
-    }
-
-    *p_size_work = size_work;
-    return (rocblas_status_success);
 }
 
 #undef IS_POINTER_BATCHED
