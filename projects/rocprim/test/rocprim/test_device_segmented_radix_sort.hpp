@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -57,7 +57,8 @@ template<class Key,
          unsigned int EndBit,
          unsigned int MinSegmentLength,
          unsigned int MaxSegmentLength,
-         class Config = rocprim::default_config>
+         bool         UseGraph = false,
+         class Config          = rocprim::default_config>
 struct params
 {
     using key_type                                   = Key;
@@ -67,6 +68,7 @@ struct params
     static constexpr unsigned int end_bit            = EndBit;
     static constexpr unsigned int min_segment_length = MinSegmentLength;
     static constexpr unsigned int max_segment_length = MaxSegmentLength;
+    static constexpr bool         use_graph          = UseGraph;
     using config                                     = Config;
 };
 
@@ -125,6 +127,7 @@ inline void sort_keys()
     using key_type                           = typename TestFixture::params::key_type;
     using config                             = typename TestFixture::params::config;
     static constexpr bool         descending = TestFixture::params::descending;
+    static constexpr bool         use_graphs = TestFixture::params::use_graph;
     static constexpr unsigned int start_bit  = TestFixture::params::start_bit;
     static constexpr unsigned int end_bit    = TestFixture::params::end_bit;
 
@@ -140,6 +143,11 @@ inline void sort_keys()
     common::uniform_int_distribution<size_t> segment_length_dis(
         TestFixture::params::min_segment_length,
         TestFixture::params::max_segment_length);
+
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
@@ -191,6 +199,12 @@ inline void sort_keys()
 
             common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
+            test_utils::GraphHelper gHelper;
+            if(use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
+
             if(descending)
             {
                 HIP_CHECK(rocprim::segmented_radix_sort_keys_desc<config>(d_temporary_storage.get(),
@@ -222,6 +236,11 @@ inline void sort_keys()
                                                                      debug_synchronous));
             }
 
+            if(use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream);
+            }
+
             // Calculate expected results on host
             std::vector<key_type> expected(keys_input);
             for(size_t i = 0; i < segments_count; i++)
@@ -235,6 +254,11 @@ inline void sort_keys()
             const auto keys_output = d_keys_output.load();
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
+
+            if(use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
         }
     }
 }
@@ -251,10 +275,15 @@ inline void sort_keys_empty_data()
     static constexpr bool         descending = TestFixture::params::descending;
     static constexpr unsigned int start_bit  = TestFixture::params::start_bit;
     static constexpr unsigned int end_bit    = TestFixture::params::end_bit;
+    static constexpr bool         use_graphs = TestFixture::params::use_graph;
 
     using offset_type = unsigned int;
 
     hipStream_t stream = 0;
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     const std::vector<size_t> sizes = {0, 1024};
     for(size_t size : sizes)
@@ -297,6 +326,11 @@ inline void sort_keys_empty_data()
 
             common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
+            test_utils::GraphHelper gHelper;
+            if(use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
             if(descending)
             {
                 HIP_CHECK(rocprim::segmented_radix_sort_keys_desc<config>(d_temporary_storage.get(),
@@ -326,10 +360,20 @@ inline void sort_keys_empty_data()
                                                                      stream));
             }
 
+            if(use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream);
+            }
+
             const auto keys_output = d_keys.load();
 
             // Output should not have changed
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_input));
+
+            if(use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
         }
     }
 }
@@ -346,10 +390,15 @@ inline void sort_keys_large_segments()
     constexpr bool         descending = TestFixture::params::descending;
     constexpr unsigned int start_bit  = TestFixture::params::start_bit;
     constexpr unsigned int end_bit    = TestFixture::params::end_bit;
+    static constexpr bool  use_graphs = TestFixture::params::use_graph;
 
     using offset_type = unsigned int;
 
     hipStream_t stream = 0;
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     size_t size           = 1 << 20;
     size_t segments_count = 2;
@@ -393,6 +442,11 @@ inline void sort_keys_large_segments()
 
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
+        test_utils::GraphHelper gHelper;
+        if(use_graphs)
+        {
+            gHelper.startStreamCapture(stream);
+        }
         if(descending)
         {
             HIP_CHECK(rocprim::segmented_radix_sort_keys_desc<config>(d_temporary_storage.get(),
@@ -421,6 +475,10 @@ inline void sort_keys_large_segments()
                                                                  end_bit,
                                                                  stream));
         }
+        if(use_graphs)
+        {
+            gHelper.createAndLaunchGraph(stream);
+        }
 
         bool all_blocks_sorted = true;
         for(size_t s = 0; s < segments_count; ++s)
@@ -431,6 +489,10 @@ inline void sort_keys_large_segments()
                 test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
         }
         ASSERT_TRUE(all_blocks_sorted);
+        if(use_graphs)
+        {
+            gHelper.cleanupGraphHelper();
+        }
     }
 }
 
@@ -446,10 +508,15 @@ inline void sort_keys_unspecified_ranges()
     constexpr bool         descending = TestFixture::params::descending;
     constexpr unsigned int start_bit  = TestFixture::params::start_bit;
     constexpr unsigned int end_bit    = TestFixture::params::end_bit;
+    static constexpr bool  use_graphs = TestFixture::params::use_graph;
 
     using offset_type = unsigned int;
 
     hipStream_t stream = 0;
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     std::random_device         rd;
     std::default_random_engine gen(rd());
@@ -526,6 +593,11 @@ inline void sort_keys_unspecified_ranges()
 
             common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
+            test_utils::GraphHelper gHelper;
+            if(use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
             if(descending)
             {
                 HIP_CHECK(rocprim::segmented_radix_sort_keys_desc<config>(d_temporary_storage.get(),
@@ -554,6 +626,10 @@ inline void sort_keys_unspecified_ranges()
                                                                      end_bit,
                                                                      stream));
             }
+            if(use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream);
+            }
 
             // Calculate expected results on host
             std::vector<key_type> expected(keys_input);
@@ -568,6 +644,10 @@ inline void sort_keys_unspecified_ranges()
             const auto keys_output = d_keys_output.load();
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
+            if(use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
         }
     }
 }
@@ -585,10 +665,15 @@ inline void sort_pairs()
     constexpr bool         descending = TestFixture::params::descending;
     constexpr unsigned int start_bit  = TestFixture::params::start_bit;
     constexpr unsigned int end_bit    = TestFixture::params::end_bit;
+    static constexpr bool  use_graphs = TestFixture::params::use_graph;
 
     using offset_type = unsigned int;
 
     hipStream_t stream = 0;
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     const bool debug_synchronous = false;
 
@@ -659,6 +744,11 @@ inline void sort_pairs()
 
             common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
+            test_utils::GraphHelper gHelper;
+            if(use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
             if(descending)
             {
                 HIP_CHECK(
@@ -694,6 +784,10 @@ inline void sort_pairs()
                                                                       stream,
                                                                       debug_synchronous));
             }
+            if(use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream);
+            }
 
             // Calculate expected results on host
             std::vector<key_value> expected(size);
@@ -724,6 +818,10 @@ inline void sort_pairs()
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
+            if(use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
         }
     }
 }
@@ -741,10 +839,15 @@ inline void sort_pairs_unspecified_ranges()
     constexpr bool         descending = TestFixture::params::descending;
     constexpr unsigned int start_bit  = TestFixture::params::start_bit;
     constexpr unsigned int end_bit    = TestFixture::params::end_bit;
+    static constexpr bool  use_graphs = TestFixture::params::use_graph;
 
     using offset_type = unsigned int;
 
     hipStream_t stream = 0;
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     std::random_device         rd;
     std::default_random_engine gen(rd());
@@ -831,6 +934,11 @@ inline void sort_pairs_unspecified_ranges()
 
             common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
+            test_utils::GraphHelper gHelper;
+            if(use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
             if(descending)
             {
                 HIP_CHECK(
@@ -864,6 +972,10 @@ inline void sort_pairs_unspecified_ranges()
                                                                       end_bit,
                                                                       stream));
             }
+            if(use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream);
+            }
 
             // Calculate expected results on host
             std::vector<key_value> expected(size);
@@ -890,6 +1002,10 @@ inline void sort_pairs_unspecified_ranges()
                 ASSERT_EQ(keys_output[i], expected[i].first);
                 ASSERT_EQ(values_output[i], expected[i].second);
             }
+            if(use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
         }
     }
 }
@@ -906,10 +1022,15 @@ inline void sort_keys_double_buffer()
     constexpr bool         descending = TestFixture::params::descending;
     constexpr unsigned int start_bit  = TestFixture::params::start_bit;
     constexpr unsigned int end_bit    = TestFixture::params::end_bit;
+    static constexpr bool  use_graphs = TestFixture::params::use_graph;
 
     using offset_type = unsigned int;
 
     hipStream_t stream = 0;
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     const bool debug_synchronous = false;
 
@@ -971,6 +1092,11 @@ inline void sort_keys_double_buffer()
 
             common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
+            test_utils::GraphHelper gHelper;
+            if(use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
             if(descending)
             {
                 HIP_CHECK(rocprim::segmented_radix_sort_keys_desc<config>(d_temporary_storage.get(),
@@ -999,6 +1125,10 @@ inline void sort_keys_double_buffer()
                                                                      stream,
                                                                      debug_synchronous));
             }
+            if(use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream);
+            }
 
             // Calculate expected results on host
             std::vector<key_type> expected(keys_input);
@@ -1017,6 +1147,10 @@ inline void sort_keys_double_buffer()
                                 hipMemcpyDeviceToHost));
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
+            if(use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
         }
     }
 }
@@ -1034,10 +1168,15 @@ inline void sort_pairs_double_buffer()
     constexpr bool         descending = TestFixture::params::descending;
     constexpr unsigned int start_bit  = TestFixture::params::start_bit;
     constexpr unsigned int end_bit    = TestFixture::params::end_bit;
+    static constexpr bool  use_graphs = TestFixture::params::use_graph;
 
     using offset_type = unsigned int;
 
     hipStream_t stream = 0;
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     const bool debug_synchronous = false;
 
@@ -1110,6 +1249,11 @@ inline void sort_pairs_double_buffer()
 
             common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
+            test_utils::GraphHelper gHelper;
+            if(use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
             if(descending)
             {
                 HIP_CHECK(
@@ -1140,6 +1284,10 @@ inline void sort_pairs_double_buffer()
                                                                       end_bit,
                                                                       stream,
                                                                       debug_synchronous));
+            }
+            if(use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream);
             }
 
             // Calculate expected results on host
@@ -1180,6 +1328,10 @@ inline void sort_pairs_double_buffer()
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
+            if(use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
         }
     }
 }
