@@ -103,18 +103,11 @@ struct BQuantBlockUniversalGemmAsBsCr
         // 3. i4,  fp8, (fp8/fp32) -> f32
         // 4. i4,  bf8, (fp8/fp32) -> f32
         // 5. bf16, (bf16/bf8/fp4), e8m0 -> f32
-        static_assert(
-            (std::is_same_v<ADataType, fp8_t> || std::is_same_v<ADataType, bf8_t> ||
-             std::is_same_v<ADataType, bf16_t>) &&
-            (std::is_same_v<BDataType, fp8_t> || std::is_same_v<BDataType, bf8_t> ||
-             std::is_same_v<BDataType, ck_tile::pk_int4_t> || std::is_same_v<BDataType, bf16_t> ||
-             std::is_same_v<BDataType, ck_tile::pk_fp4_t>) &&
-            (std::is_same_v<BQDataType, float> || std::is_same_v<BQDataType, ck_tile::fp8_t> ||
-             std::is_same_v<BQDataType, ck_tile::bf8_t> ||
-             std::is_same_v<BQDataType, ck_tile::e8m0_t>) &&
-            (std::is_same_v<ComputeDataType, fp8_t> || std::is_same_v<ComputeDataType, bf8_t> ||
-             std::is_same_v<ComputeDataType, bf16_t>) &&
-            std::is_same_v<CDataType, fp32_t>);
+        static_assert(is_any_of<ADataType, fp8_t, bf8_t, bf16_t>::value &&
+                      is_any_of<BDataType, fp8_t, bf8_t, pk_int4_t, bf16_t, pk_fp4_t>::value &&
+                      is_any_of<BQDataType, float, fp8_t, bf8_t, e8m0_t>::value &&
+                      is_any_of<ComputeDataType, fp8_t, bf8_t, bf16_t>::value &&
+                      std::is_same_v<CDataType, fp32_t>);
 
         static constexpr index_t InterWaveSchedulingMacClusters = 1;
 
@@ -277,17 +270,17 @@ struct BQuantBlockUniversalGemmAsBsCr
             constexpr index_t nelements          = WarpGemm::kK * WarpGemm::kN / warp_size;
             constexpr index_t thread_buffer_size = nelements / UnaryOpSize_;
             const element_wise::DequantPack8 elementwise_op{};
-            using SrcVectorRawType =
-                BDataTypeRaw __attribute__((ext_vector_type(UnaryOpSize_ / BPackedSize)));
-            using DstVectorType = ComputeDataType __attribute__((ext_vector_type(UnaryOpSize_)));
+            using SrcVectorRawType = ext_vector_t<BDataTypeRaw, UnaryOpSize_ / BPackedSize>;
+            using DstVectorType    = ext_vector_t<ComputeDataType, UnaryOpSize_>;
 
             static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
                 static_for<0, Traits::QScalesPerBlockRow, 1>{}([&](auto kQScale) {
                     // B scale register offset
                     constexpr index_t reg_offset = [&]() {
                         if constexpr(GemmTraits::BQuantGroupSize::kN >= (NWarp * WarpGemm::kN))
-                            return (nIter * NWarp * WarpGemm::kN) /
-                                       GemmTraits::BQuantGroupSize::kN * Traits::KQPerBlock +
+                            return ((nIter * NWarp * WarpGemm::kN) /
+                                    GemmTraits::BQuantGroupSize::kN) *
+                                       Traits::KQPerBlock +
                                    kQScale;
                         else
                         {

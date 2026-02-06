@@ -322,8 +322,9 @@ struct MxGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
         }
 
         template <typename TileType, typename CastTileType, typename ScaleTileType>
-        CK_TILE_DEVICE static void
-        ScaleTile(TileType& block_tile, CastTileType& block_tile_cast, ScaleTileType& scale_tile)
+        CK_TILE_DEVICE static void ScaleTile(const TileType& block_tile,
+                                             CastTileType& block_tile_cast,
+                                             const ScaleTileType& scale_tile)
         {
             if constexpr(IsCastBeforeLDS)
             {
@@ -351,8 +352,7 @@ struct MxGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
                     sweep_tile_span(b_block[number<1>{}], [&](auto idx1) {
                         constexpr auto i_j_idx       = make_tuple(idx0, idx1);
                         constexpr auto i_j_idx_scale = make_tuple(idx0, idx1_js);
-                        auto scale                   = scale_tile(i_j_idx_scale);
-                        auto b_scale_uint            = uint32_t(scale.data) << 23;
+                        float scale                  = float(scale_tile[i_j_idx_scale]);
                         if constexpr(std::is_same_v<BDataType, ck_tile::pk_fp4_t>)
                         {
                             if constexpr(idx1.impl_.at(0) % BPackedSize == 0)
@@ -360,20 +360,19 @@ struct MxGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
                                 constexpr auto idx1_lo = tile_distributed_index<idx1.impl_.at(0)>{};
                                 constexpr auto idx1_hi =
                                     tile_distributed_index<idx1.impl_.at(0) + 1>{};
-                                constexpr auto i_j_idx_lo = make_tuple(idx0, idx1_lo);
-                                constexpr auto i_j_idx_hi = make_tuple(idx0, idx1_hi);
-                                auto b_pack               = block_tile(i_j_idx);
-                                auto cvt =
-                                    pk_mxfp4_to_compute_v2(b_pack, bit_cast<float>(b_scale_uint));
+                                constexpr auto i_j_idx_lo   = make_tuple(idx0, idx1_lo);
+                                constexpr auto i_j_idx_hi   = make_tuple(idx0, idx1_hi);
+                                auto b_pack                 = block_tile[i_j_idx];
+                                auto cvt                    = pk_mxfp4_to_compute_v2(b_pack, scale);
                                 block_tile_cast(i_j_idx_lo) = cvt.x;
                                 block_tile_cast(i_j_idx_hi) = cvt.y;
                             }
                         }
                         else
                         {
-                            auto b_pack              = block_tile(i_j_idx);
-                            block_tile_cast(i_j_idx) = type_convert<BDqDataType>(
-                                type_convert<float>(b_pack) * bit_cast<float>(b_scale_uint));
+                            auto b_pack = block_tile[i_j_idx];
+                            block_tile_cast(i_j_idx) =
+                                type_convert<BDqDataType>(type_convert<float>(b_pack) * scale);
                         }
                     });
                 });
@@ -699,9 +698,9 @@ struct MxGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
         ck_tile::ignore = n;
         return PipelineImpl<Scheduler>{}.template operator()<HasHotLoop, TailNum>(
             a_dram_block_window_tmp,
-            [](const ADataType& a) { return a; },
+            identity{},
             b_dram_block_window_tmp,
-            [](const BLDSType& b) { return b; },
+            identity{},
             bq_dram_block_window_tmp,
             num_loop,
             p_smem);
