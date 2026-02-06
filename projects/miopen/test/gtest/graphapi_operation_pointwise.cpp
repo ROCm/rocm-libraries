@@ -514,12 +514,12 @@ protected:
 
             mPointwiseDescriptor = pointwise;
             mPointwiseAttribute  = {pointwise != nullptr,
-                                   "MIOPEN_ATTR_OPERATION_POINTWISE_PW_DESCRIPTOR",
-                                   MIOPEN_ATTR_OPERATION_POINTWISE_PW_DESCRIPTOR,
-                                   MIOPEN_TYPE_BACKEND_DESCRIPTOR,
-                                   MIOPEN_TYPE_CHAR,
-                                   2,
-                                   &mPointwiseDescriptor};
+                                    "MIOPEN_ATTR_OPERATION_POINTWISE_PW_DESCRIPTOR",
+                                    MIOPEN_ATTR_OPERATION_POINTWISE_PW_DESCRIPTOR,
+                                    MIOPEN_TYPE_BACKEND_DESCRIPTOR,
+                                    MIOPEN_TYPE_CHAR,
+                                    2,
+                                    &mPointwiseDescriptor};
             mExecute.descriptor.attributes.push_back(&mPointwiseAttribute);
 
             std::for_each(tensors.begin(), tensors.end(), [this](const auto& tpl) {

@@ -17,7 +17,6 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <spdlog/fmt/fmt.h>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -283,13 +282,3 @@ inline Error getKnobsForEngine(std::vector<Knob>& knobs, hipdnnBackendDescriptor
 } // namespace detail
 
 } // namespace hipdnn_frontend
-
-template <>
-struct fmt::formatter<hipdnn_frontend::Knob> : fmt::formatter<const char*>
-{
-    template <typename FormatContext>
-    auto format(const hipdnn_frontend::Knob& knob, FormatContext& ctx) const
-    {
-        return fmt::formatter<const char*>::format(knob.toString().c_str(), ctx);
-    }
-};
