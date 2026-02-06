@@ -5,6 +5,7 @@
 #include <HipdnnBackendHeuristicType.h>
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
 #include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
@@ -15,6 +16,8 @@
 #include <bitset>
 #include <set>
 #include <spdlog/fmt/fmt.h>
+#include <string>
+#include <variant>
 
 namespace hipdnn_frontend
 {
@@ -107,6 +110,15 @@ enum class BuildPlanPolicy
     ALL // Build all available plans (currently unused)
 };
 typedef BuildPlanPolicy BuildPlanPolicy_t; // NOLINT(readability-identifier-naming)
+
+enum class KnobValueType
+{
+    NOT_SET = 0,
+    INT64 = 1,
+    FLOAT64 = 2,
+    STRING = 3,
+};
+typedef KnobValueType KnobValueType_t; // NOLINT(readability-identifier-naming)
 
 template <typename T>
 DataType getDataTypeEnumFromType()
@@ -521,6 +533,80 @@ inline std::ostream& operator<<(std::ostream& os, const HeuristicMode& mode)
     return os << to_string(mode);
 }
 
+inline hipdnn_data_sdk::data_objects::KnobValue toSdkType(const KnobValueType& type)
+{
+    switch(type)
+    {
+    case KnobValueType::INT64:
+        return hipdnn_data_sdk::data_objects::KnobValue::IntValue;
+    case KnobValueType::FLOAT64:
+        return hipdnn_data_sdk::data_objects::KnobValue::FloatValue;
+    case KnobValueType::STRING:
+        return hipdnn_data_sdk::data_objects::KnobValue::StringValue;
+    default:
+        return hipdnn_data_sdk::data_objects::KnobValue::NONE;
+    }
+}
+
+inline hipdnn_frontend::KnobValueType
+    fromSdkType(const hipdnn_data_sdk::data_objects::KnobValue& type)
+{
+    switch(type)
+    {
+    case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
+        return hipdnn_frontend::KnobValueType::INT64;
+    case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
+        return hipdnn_frontend::KnobValueType::FLOAT64;
+    case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
+        return hipdnn_frontend::KnobValueType::STRING;
+    default:
+        return hipdnn_frontend::KnobValueType::NOT_SET;
+    }
+}
+
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline const char* to_string(const KnobValueType& type)
+{
+    switch(type)
+    {
+    case KnobValueType::INT64:
+        return "int64";
+    case KnobValueType::FLOAT64:
+        return "float64";
+    case KnobValueType::STRING:
+        return "string";
+    default:
+        return "unknown";
+    }
+}
+
+inline std::ostream& operator<<(std::ostream& os, const KnobValueType& type)
+{
+    return os << to_string(type);
+}
+
+// Helper function to get KnobValueType from a variant
+template <typename... Ts>
+inline KnobValueType getKnobValueTypeFromVariant(const std::variant<Ts...>& value)
+{
+    KnobValueType ret = KnobValueType::INT64;
+
+    if(std::holds_alternative<int64_t>(value))
+    {
+        ret = KnobValueType::INT64;
+    }
+    else if(std::holds_alternative<double>(value))
+    {
+        ret = KnobValueType::FLOAT64;
+    }
+    else if(std::holds_alternative<std::string>(value))
+    {
+        ret = KnobValueType::STRING;
+    }
+
+    return ret;
+}
+
 // Frontend functions delegate to SDK for single source of truth
 // Convert frontend PointwiseMode to SDK type and call SDK validation functions
 
@@ -584,5 +670,15 @@ struct fmt::formatter<hipdnn_frontend::HeuristicMode> : fmt::formatter<const cha
     auto format(hipdnn_frontend::HeuristicMode mode, FormatContext& ctx) const
     {
         return fmt::formatter<const char*>::format(hipdnn_frontend::to_string(mode), ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<hipdnn_frontend::KnobValueType> : fmt::formatter<const char*>
+{
+    template <typename FormatContext>
+    auto format(hipdnn_frontend::KnobValueType type, FormatContext& ctx) const
+    {
+        return fmt::formatter<const char*>::format(hipdnn_frontend::to_string(type), ctx);
     }
 };
