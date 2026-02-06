@@ -193,6 +193,7 @@ struct __integer_sequence<index_t, Ints...>
 {
     using seq_type = Sequence<Ints...>;
 };
+
 } // namespace impl
 
 template <index_t N>
@@ -332,13 +333,7 @@ struct arithmetic_sequence_gen
 template <index_t IEnd>
 struct arithmetic_sequence_gen<0, IEnd, 1>
 {
-    template <typename T, T... Ints>
-    struct WrapSequence
-    {
-        using type = Sequence<Ints...>;
-    };
-    // https://reviews.llvm.org/D13786
-    using type = typename __make_integer_seq<WrapSequence, index_t, IEnd>::type;
+    using type = make_index_sequence<IEnd>;
 };
 
 // uniform sequence - optimized using __make_integer_seq
@@ -367,24 +362,59 @@ struct uniform_sequence_gen<0, I>
     using type = Sequence<>;
 };
 
-// reverse inclusive scan (with init) sequence
-template <typename, typename, index_t>
-struct sequence_reverse_inclusive_scan;
+// reverse inclusive scan (with init) sequence - optimized using constexpr computation
+// Achieves O(1) template instantiation depth instead of O(N)
+namespace detail {
 
-template <index_t I, index_t... Is, typename Reduce, index_t Init>
-struct sequence_reverse_inclusive_scan<Sequence<I, Is...>, Reduce, Init>
+// Minimal wrapper to return C-array from constexpr function
+template <index_t N>
+struct scan_data
 {
-    using old_scan = typename sequence_reverse_inclusive_scan<Sequence<Is...>, Reduce, Init>::type;
-
-    static constexpr index_t new_reduce = Reduce{}(I, old_scan{}.Front());
-
-    using type = typename sequence_merge<Sequence<new_reduce>, old_scan>::type;
+    index_t v[N > 0 ? N : 1];
 };
 
-template <index_t I, typename Reduce, index_t Init>
-struct sequence_reverse_inclusive_scan<Sequence<I>, Reduce, Init>
+// Compute reverse inclusive scan result
+template <typename Reduce, index_t Init, index_t... Vs>
+constexpr auto compute_reverse_inclusive_scan()
 {
-    using type = Sequence<Reduce{}(I, Init)>;
+    constexpr index_t N = sizeof...(Vs);
+    scan_data<N> result{};
+    constexpr index_t input[N > 0 ? N : 1] = {Vs...};
+
+    if constexpr(N > 0)
+    {
+        result.v[N - 1] = Reduce{}(input[N - 1], Init);
+        for(index_t i = N - 2; i >= 0; --i)
+        {
+            result.v[i] = Reduce{}(input[i], result.v[i + 1]);
+        }
+    }
+    return result;
+}
+
+// Build result sequence with O(1) instantiation depth
+template <typename Reduce, index_t Init, typename Seq, typename IndexSeq>
+struct build_reverse_inclusive_scan;
+
+template <typename Reduce, index_t Init, index_t... Vs, index_t... Is>
+struct build_reverse_inclusive_scan<Reduce, Init, Sequence<Vs...>, Sequence<Is...>>
+{
+    static constexpr auto result = compute_reverse_inclusive_scan<Reduce, Init, Vs...>();
+
+    using type = Sequence<result.v[Is]...>;
+};
+
+} // namespace detail
+
+// Main interface - O(1) instantiation depth
+template <typename Seq, typename Reduce, index_t Init>
+struct sequence_reverse_inclusive_scan
+{
+    using type = typename detail::build_reverse_inclusive_scan<Reduce,
+                                                               Init,
+                                                               Seq,
+                                                               make_index_sequence<Seq::Size()>>::
+        type;
 };
 
 template <typename Reduce, index_t Init>
@@ -406,28 +436,34 @@ struct sequence_split
     using right_type = decltype(Seq::Extract(range1{}));
 };
 
-// reverse sequence
+// reverse sequence - optimized using direct pack expansion O(1) depth
+namespace detail {
+
+template <typename Seq, typename IndexSeq>
+struct sequence_reverse_impl;
+
+template <index_t... Is, index_t... Idxs>
+struct sequence_reverse_impl<Sequence<Is...>, Sequence<Idxs...>>
+{
+    static constexpr index_t N = sizeof...(Is);
+    // Access elements in reverse order: index (N-1-i) for position i
+    using type = Sequence<Sequence<Is...>::At(Number<N - 1 - Idxs>{})...>;
+};
+
+} // namespace detail
+
 template <typename Seq>
 struct sequence_reverse
 {
-    static constexpr index_t NSize = Seq{}.Size();
-
-    using seq_split = sequence_split<Seq, NSize / 2>;
-    using type      = typename sequence_merge<
-             typename sequence_reverse<typename seq_split::right_type>::type,
-             typename sequence_reverse<typename seq_split::left_type>::type>::type;
+    using type =
+        typename detail::sequence_reverse_impl<Seq, make_index_sequence<Seq::Size()>>::type;
 };
 
-template <index_t I>
-struct sequence_reverse<Sequence<I>>
+// Empty sequence specialization
+template <>
+struct sequence_reverse<Sequence<>>
 {
-    using type = Sequence<I>;
-};
-
-template <index_t I0, index_t I1>
-struct sequence_reverse<Sequence<I0, I1>>
-{
-    using type = Sequence<I1, I0>;
+    using type = Sequence<>;
 };
 
 #if 1
