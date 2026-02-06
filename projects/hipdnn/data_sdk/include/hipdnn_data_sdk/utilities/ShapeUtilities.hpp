@@ -163,6 +163,13 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
     }
 
     // Sort indices by their corresponding stride values (descending; aligns with NC...W layout)
+    // Suppress deprecated-declarations warning: std::stable_sort's libstdc++ implementation uses
+    // std::get_temporary_buffer internally, which was deprecated in C++17. This is a library
+    // implementation detail, not our code.
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     std::stable_sort(
         indices.begin(), indices.end(), [&stridesAreUnique, &strides](size_t a, size_t b) mutable {
             if(strides[a] == strides[b])
@@ -171,6 +178,9 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
             }
             return strides[a] > strides[b];
         });
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
     // Assign order based on sorted stride indices from longest strides to shortest.
     for(size_t i = 0; i < numDims; ++i)
