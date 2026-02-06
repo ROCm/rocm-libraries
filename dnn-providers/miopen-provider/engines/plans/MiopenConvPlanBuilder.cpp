@@ -172,16 +172,18 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
     size_t maxWorkspace = 0;
     for(const auto& solution : solutions)
     {
-        HIPDNN_PLUGIN_LOG_INFO("Convolution Fwd: solution_id={}, algorithm={}, time={}, workspace_size={}",
-                               solution.solution_id,
-                               static_cast<int>(solution.algorithm),
-                               solution.time,
-                               solution.workspace_size);
+        HIPDNN_PLUGIN_LOG_INFO(
+            "Convolution Fwd: solution_id={}, algorithm={}, time={}, workspace_size={}",
+            solution.solution_id,
+            static_cast<int>(solution.algorithm),
+            solution.time,
+            solution.workspace_size);
         minWorkspace = std::min(minWorkspace, solution.workspace_size);
         maxWorkspace = std::max(maxWorkspace, solution.workspace_size);
     }
 
-    HIPDNN_PLUGIN_LOG_INFO("Convolution Fwd: Workspace range: min={}, max={}", minWorkspace, maxWorkspace);
+    HIPDNN_PLUGIN_LOG_INFO(
+        "Convolution Fwd: Workspace range: min={}, max={}", minWorkspace, maxWorkspace);
 
     return {minWorkspace, maxWorkspace};
 }
@@ -227,16 +229,18 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
     size_t maxWorkspace = 0;
     for(const auto& solution : solutions)
     {
-        HIPDNN_PLUGIN_LOG_INFO("Convolution Bwd: solution_id={}, algorithm={}, time={}, workspace_size={}",
-                               solution.solution_id,
-                               static_cast<int>(solution.algorithm),
-                               solution.time,
-                               solution.workspace_size);
+        HIPDNN_PLUGIN_LOG_INFO(
+            "Convolution Bwd: solution_id={}, algorithm={}, time={}, workspace_size={}",
+            solution.solution_id,
+            static_cast<int>(solution.algorithm),
+            solution.time,
+            solution.workspace_size);
         minWorkspace = std::min(minWorkspace, solution.workspace_size);
         maxWorkspace = std::max(maxWorkspace, solution.workspace_size);
     }
 
-    HIPDNN_PLUGIN_LOG_INFO("Convolution Bwd: Workspace range: min={}, max={}", minWorkspace, maxWorkspace);
+    HIPDNN_PLUGIN_LOG_INFO(
+        "Convolution Bwd: Workspace range: min={}, max={}", minWorkspace, maxWorkspace);
 
     return {minWorkspace, maxWorkspace};
 }
@@ -283,16 +287,18 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
     size_t maxWorkspace = 0;
     for(const auto& solution : solutions)
     {
-        HIPDNN_PLUGIN_LOG_INFO("Convolution Wrw: solution_id={}, algorithm={}, time={}, workspace_size={}",
-                               solution.solution_id,
-                               static_cast<int>(solution.algorithm),
-                               solution.time,
-                               solution.workspace_size);
+        HIPDNN_PLUGIN_LOG_INFO(
+            "Convolution Wrw: solution_id={}, algorithm={}, time={}, workspace_size={}",
+            solution.solution_id,
+            static_cast<int>(solution.algorithm),
+            solution.time,
+            solution.workspace_size);
         minWorkspace = std::min(minWorkspace, solution.workspace_size);
         maxWorkspace = std::max(maxWorkspace, solution.workspace_size);
     }
 
-    HIPDNN_PLUGIN_LOG_INFO("Convolution Wrw: Workspace range: min={}, max={}", minWorkspace, maxWorkspace);
+    HIPDNN_PLUGIN_LOG_INFO(
+        "Convolution Wrw: Workspace range: min={}, max={}", minWorkspace, maxWorkspace);
 
     return {minWorkspace, maxWorkspace};
 }

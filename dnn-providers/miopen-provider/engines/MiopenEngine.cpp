@@ -152,7 +152,9 @@ size_t MiopenEngine::getMaxWorkspaceSize(
             MiopenExecutionSettings executionSettings = baseExecutionSettings;
             planBuilder->initializeExecutionSettings(
                 handle, opGraph, engineConfig, executionSettings);
-            workspaceSize = std::max(workspaceSize, planBuilder->getMaxWorkspaceSize(handle, opGraph, executionSettings));
+            workspaceSize
+                = std::max(workspaceSize,
+                           planBuilder->getMaxWorkspaceSize(handle, opGraph, executionSettings));
         }
     }
 
