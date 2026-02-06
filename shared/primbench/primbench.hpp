@@ -1741,9 +1741,9 @@ private:
                                    bool             noise_timeout,
                                    double           noise_percent)
     {
-        m_csv_out << index << ",\"" << name << "\""
-                  << "," << bytes_per_sec << "," << bytes_per_sec / (1024.0 * 1024.0 * 1024.0)
-                  << "," << items_per_sec << "," << noise_timeout << "," << noise_percent << "\n"
+        m_csv_out << index << ",\"" << name << "\"" << "," << bytes_per_sec << ","
+                  << bytes_per_sec / (1024.0 * 1024.0 * 1024.0) << "," << items_per_sec << ","
+                  << noise_timeout << "," << noise_percent << "\n"
                   << std::flush;
     }
 
