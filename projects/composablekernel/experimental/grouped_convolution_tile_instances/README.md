@@ -500,6 +500,7 @@ cmake -D CMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc \
       ..
       
 ninja device_grouped_conv_fwd_tile_instances
+ninja device_grouped_conv_bwd_weight_tile_instances
 ```
 
 ### 3: Run the Profiler
