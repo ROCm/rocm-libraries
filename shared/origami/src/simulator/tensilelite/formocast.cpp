@@ -845,25 +845,27 @@ namespace origami
 
         int getLocalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, int lrStallLatencyBuffer)
         {
-            int finalCycle = currentCycle;
-
-            if (fifo.size() < (16 / numWaves)) {
-                fifo.push(currentCycle);
+            int wavesPerFifo = 16 / numWaves;
+            int finalCycle = currentCycle + lrStallLatencyBuffer;
+            if (fifo.size() < wavesPerFifo) {
+                fifo.push(finalCycle);
+                return currentCycle;
             } else {
                 int oldCycle = fifo.front();
-                if ((currentCycle - oldCycle) >= lrStallLatencyBuffer) {
-                    fifo.pop();
-                    fifo.push(currentCycle);
-                } else {
-                    // stall happens
-                    int wavesPerFifo = 16 / numWaves;
-                    int stallCycles = safe_ceil_div(lrStallLatencyBuffer + 1, wavesPerFifo);
-                    finalCycle = std::max(currentCycle, fifo.back() + stallCycles);
+                if (currentCycle >= oldCycle) {
                     fifo.pop();
                     fifo.push(finalCycle);
+                    return currentCycle;
+                } else {
+                    // stall happens
+                    int stallCycles = safe_ceil_div(lrStallLatencyBuffer, wavesPerFifo);
+                    currentCycle = std::max(currentCycle + stallCycles, oldCycle);
+                    finalCycle = currentCycle + lrStallLatencyBuffer;
+                    fifo.pop();
+                    fifo.push(finalCycle);
+                    return currentCycle;
                 }
             }
-            return finalCycle;
         }
 
         /**

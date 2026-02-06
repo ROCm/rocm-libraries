@@ -411,9 +411,16 @@ namespace rocisa
             {
                 return static_cast<int64_t>(arg);
             }
+            else if constexpr(std::is_same_v<T, std::string>)
+            {
+                if(arg.compare(0, 2, "0x") == 0){
+                    return std::stoll(arg, nullptr, 16);
+                }
+                throw std::runtime_error("unknown handled string: " + arg);
+            }
             else
             {
-                return 0; // fallback for other types
+                throw std::runtime_error("unhandled argument");
             }
         }, input);
     }
@@ -854,16 +861,6 @@ namespace rocisa
                     bpr = 4;
                 }
 
-                //heck LR fifo
-                auto currCycles = cycles + dsReadInst->issueLatency();
-                if(isPreviousLR && bpr >= 4) {
-                    currCycles += dsReadInst->issueLatency();
-                }
-                else if(isPreviousMFMA && rocIsa::getInstance().getKernel().isaVersion == std::array<int, 3>{9, 5, 0}) {
-                    // gfx950 limitation: no DSLoad instruction can be issued in next 4 cycles after MFMA instruction
-                    currCycles += 1;
-                }
-
                 // Determine which bank conflict value to use based on source register
                 double bankConflict = bankConflicts.first; // default to A
                 if(dsReadInst->srcs)
@@ -883,8 +880,22 @@ namespace rocisa
                         bankConflict = 1.0;
                     }
                 }
-
-                cycles = formocast.getLocalReadQueueFullStallCycles(currCycles, hwLRFIFO, bpr, numWaves, true, bankConflict);
+                int stallcycle = formocast.getLocalReadQueueFullStallCycles(cycles, hwLRFIFO, bpr, numWaves, true, bankConflict);
+                if (stallcycle == cycles) {
+                    // no stall
+                    //heck LR fifo
+                    auto currCycles = cycles + dsReadInst->issueLatency();
+                    if(isPreviousLR && bpr >= 4) { // two wave share same lds interface (gfx9)
+                        currCycles += dsReadInst->issueLatency();
+                    }
+                    else if(isPreviousMFMA && rocIsa::getInstance().getKernel().isaVersion == std::array<int, 3>{9, 5, 0}) {
+                        // gfx950 limitation: no DSLoad instruction can be issued in next 4 cycles after MFMA instruction
+                        currCycles += 1;
+                    }
+                    cycles = currCycles;
+                } else {
+                    cycles = stallcycle;
+                }
                 formocast.pushLocalReadWrite(cycles, lgkmLRFIFO, bpr, bankConflict);
             }
             else if(auto rwInst = std::dynamic_pointer_cast<ReadWriteInstruction>(item))
@@ -947,6 +958,10 @@ namespace rocisa
                     isEndOfLoop = true;
                     break;
                 }
+            }
+            else if(auto instruction = std::dynamic_pointer_cast<SBarrier>(item))
+            {
+                cycles += 2;
             }
             else if(auto instruction = std::dynamic_pointer_cast<Instruction>(item))
             {
