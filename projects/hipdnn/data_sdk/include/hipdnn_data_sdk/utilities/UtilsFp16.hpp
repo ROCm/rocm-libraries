@@ -4,7 +4,7 @@
 #pragma once
 
 #include <hip/hip_fp16.h>
-#include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <ostream>
 #include <string>
 
 #define HIPDNN_NAN_FP16 \
@@ -115,12 +115,30 @@ inline __HOST_DEVICE__ half max(half a, half b)
 
 } // namespace std
 
-template <>
-struct fmt::formatter<half> : fmt::formatter<float>
+namespace hipdnn_data_sdk::utilities
 {
-    template <typename FormatContext>
-    auto format(half h, FormatContext& ctx) const
+
+/**
+ * @brief Wrapper for streaming half (fp16) to ostream
+ *
+ * Usage: std::cout << StreamFp16(value);
+ * Usage: HIPDNN_LOG_INFO("value: " << StreamFp16(half_val));
+ */
+class StreamFp16
+{
+public:
+    explicit StreamFp16(half val)
+        : _val(val)
     {
-        return fmt::formatter<float>::format(static_cast<float>(h), ctx);
     }
+
+    friend std::ostream& operator<<(std::ostream& os, const StreamFp16& wrapper)
+    {
+        return os << static_cast<float>(wrapper._val);
+    }
+
+private:
+    half _val;
 };
+
+} // namespace hipdnn_data_sdk::utilities

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -53,21 +53,21 @@ namespace rocRoller
 
             static void mapping(IO& io, AssemblyKernelArgument& arg)
             {
-                iot::mapRequired(io, ".name", arg.name);
-                iot::mapRequired(io, ".size", arg.size);
-                iot::mapRequired(io, ".offset", arg.offset);
+                iot::mapRequired(io, ".name", arg.m_name);
+                iot::mapRequired(io, ".size", arg.m_size);
+                iot::mapRequired(io, ".offset", arg.m_offset);
 
-                iot::mapOptional(io, ".expression", arg.expression);
-                iot::mapOptional(io, ".variableType", arg.variableType);
+                iot::mapOptional(io, ".expression", arg.m_expression);
+                iot::mapOptional(io, ".variableType", arg.m_variableType);
 
                 std::string valueKind = "by_value";
-                if(arg.variableType.isGlobalPointer())
+                if(arg.getVariableType().isGlobalPointer())
                 {
                     valueKind = "global_buffer";
 
                     std::string addressSpace = "global";
                     iot::mapRequired(io, ".address_space", addressSpace);
-                    iot::mapRequired(io, ".actual_access", arg.dataDirection);
+                    iot::mapRequired(io, ".actual_access", arg.m_dataDirection);
                 }
 
                 iot::mapRequired(io, ".value_kind", valueKind);

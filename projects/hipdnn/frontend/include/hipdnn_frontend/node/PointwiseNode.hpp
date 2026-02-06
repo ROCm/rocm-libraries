@@ -92,11 +92,10 @@ public:
 
                 if(tensor->get_dim() == out->get_dim())
                 {
-                    HIPDNN_FE_LOG_INFO(
-                        "PointwiseNode {} inferring stride from input tensor {} for output {}",
-                        attributes.get_name(),
-                        tensor->get_name(),
-                        out->get_name());
+                    HIPDNN_FE_LOG_INFO("PointwiseNode " << attributes.get_name()
+                                                        << " inferring stride from input tensor "
+                                                        << tensor->get_name() << " for output "
+                                                        << out->get_name());
                     out->set_stride(tensor->get_stride());
                     break;
                 }

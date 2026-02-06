@@ -46,9 +46,9 @@ public:
 
     virtual ~PluginBase() = default;
 
-    std::string_view name() const;
-    std::string_view version() const;
-    hipdnnPluginType_t type() const;
+    virtual std::string_view name() const;
+    virtual std::string_view version() const;
+    virtual hipdnnPluginType_t type() const;
 
     static hipdnnPluginType_t getPluginType();
 
@@ -166,14 +166,16 @@ public:
                 }
                 else
                 {
-                    HIPDNN_LOG_WARN("Plugin path '{}' is invalid - expected either a directory "
-                                    "containing plugins or a path to a plugin file",
-                                    path.string());
+                    HIPDNN_BACKEND_LOG_WARN(
+                        "Plugin path '{}' is invalid - expected either a directory "
+                        "containing plugins or a path to a plugin file",
+                        path.string());
                 }
             }
             catch(const std::filesystem::filesystem_error& e)
             {
-                HIPDNN_LOG_ERROR("Error resolving plugin path '{}': {}", path.string(), e.what());
+                HIPDNN_BACKEND_LOG_ERROR(
+                    "Error resolving plugin path '{}': {}", path.string(), e.what());
             }
         }
 
@@ -217,14 +219,15 @@ private:
         }
         catch(const std::filesystem::filesystem_error& e)
         {
-            HIPDNN_LOG_WARN("Error scanning plugin directory {}: {}", dirPath.string(), e.what());
+            HIPDNN_BACKEND_LOG_WARN(
+                "Error scanning plugin directory {}: {}", dirPath.string(), e.what());
         }
     }
 
     void loadPluginFromFile(const std::filesystem::path& filePath)
     {
 
-        HIPDNN_LOG_INFO("Attempting to load plugin from [{}]", filePath.string());
+        HIPDNN_BACKEND_LOG_INFO("Attempting to load plugin from [{}]", filePath.string());
 
         hipdnn_backend::tryCatch(
             [&]() {
@@ -260,12 +263,12 @@ private:
                 _plugins.emplace_back(std::move(plugin));
                 _loadedPluginFiles.insert(libraryPath);
 
-                HIPDNN_LOG_INFO("Plugin loaded successfully: {}", filePath.string());
-                HIPDNN_LOG_INFO("Plugin info: name={}, version={}, type={}({})",
-                                name,
-                                version,
-                                type,
-                                static_cast<int>(type));
+                HIPDNN_BACKEND_LOG_INFO("Plugin loaded successfully: {}", filePath.string());
+                HIPDNN_BACKEND_LOG_INFO("Plugin info: name={}, version={}, type={}({})",
+                                        name,
+                                        version,
+                                        toString(type),
+                                        static_cast<int>(type));
 
                 actionAfterAdding(*_plugins.back());
             },
