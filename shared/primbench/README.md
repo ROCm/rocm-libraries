@@ -388,9 +388,9 @@ Benchmarks can produce a CSV file alongside the JSON output by passing `--csv-ou
 This CSV is a condensed version of the `results.json` file. It includes only index, name, throughput, and noise:
 
 ```
-index,name,bytes_per_second,items_per_second,noise_timeout,noise_percent
-0,"type: char",7.5628e+11,3.7814e+11,0,0.0521193
-1,"type: long long",1.29793e+12,8.11204e+10,0,0.0519677
+index,name,bytes_per_second,gib_per_second,items_per_second,noise_timeout,noise_percent
+0,"type: char",7.5628e+11,704.340,3.7814e+11,0,0.0521193
+1,"type: long long",1.29793e+12,1208.79,8.11204e+10,0,0.0519677
 ```
 
 If you only want CSV output and don't need the JSON file, pass `--json-out /dev/null`.
