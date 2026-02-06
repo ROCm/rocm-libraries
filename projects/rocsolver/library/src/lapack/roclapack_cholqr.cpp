@@ -63,6 +63,7 @@ rocblas_status rocsolver_cholqr_impl(rocblas_handle handle,
 
     // memory workspace sizes:
     size_t size_work = 0;
+    size_t size_R1;
     // size of workspace (for calling TRSM)
     bool optim_mem;
     size_t size_work1, size_work2, size_work3, size_work4;
@@ -72,17 +73,17 @@ rocblas_status rocsolver_cholqr_impl(rocblas_handle handle,
     size_t size_workArr;
     rocsolver_cholqr_getMemorySize<false, false, T>(
         m, n, lda, ldr, batch_count, algo, &size_scalars, &size_work1, &size_work2, &size_work3,
-        &size_work4, &size_pivots, &size_iinfo, &size_workArr, &optim_mem, &size_work);
+        &size_work4, &size_pivots, &size_iinfo, &size_R1, &size_workArr, &optim_mem, &size_work);
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work1, size_work2,
                                                       size_work3, size_work4, size_pivots,
-                                                      size_iinfo, size_workArr, size_work);
+                                                      size_iinfo, size_R1, size_workArr, size_work);
 
     // memory workspace allocation
-    void *scalars, *work1, *work2, *work3, *work4, *pivots, *iinfo, *workArr;
+    void *scalars, *work1, *work2, *work3, *work4, *pivots, *iinfo, *R1, *workArr;
     rocblas_device_malloc mem(handle, size_scalars, size_work1, size_work2, size_work3, size_work4,
-                              size_pivots, size_iinfo, size_workArr, size_work);
+                              size_pivots, size_iinfo, size_R1, size_workArr, size_work);
 
     if(!mem)
         return rocblas_status_memory_error;
@@ -94,16 +95,17 @@ rocblas_status rocsolver_cholqr_impl(rocblas_handle handle,
     work4 = mem[4];
     pivots = mem[5];
     iinfo = mem[6];
-    workArr = mem[7];
-    void* const work = (void*)mem[8];
+    R1 = mem[7];
+    workArr = mem[8];
+    void* const work = (void*)mem[9];
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
     // execution
     return rocsolver_cholqr_template<false, false, T>(
         handle, m, n, A, shiftA, lda, strideA, R, shiftR, ldr, strideR, sigma, algo, info,
-        batch_count, (T*)scalars, work1, work2, work3, work4, (T*)pivots, (I*)iinfo, (T**)workArr,
-        optim_mem, work, size_work);
+        batch_count, (T*)scalars, work1, work2, work3, work4, (T*)pivots, (I*)iinfo, (T*)R1,
+        (T**)workArr, optim_mem, work, size_work);
 }
 
 ROCSOLVER_END_NAMESPACE

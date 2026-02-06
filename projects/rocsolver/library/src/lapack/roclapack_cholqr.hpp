@@ -749,6 +749,7 @@ static rocblas_status rocsolver_cholqr2_getMemorySize(I const m,
                                                       size_t* size_work4,
                                                       size_t* size_pivots,
                                                       size_t* size_iinfo,
+                                                      size_t* size_R1,
                                                       bool* optim_mem,
                                                       size_t* p_size_work)
 {
@@ -767,33 +768,16 @@ static rocblas_status rocsolver_cholqr2_getMemorySize(I const m,
 
     rocblas_status istat = rocblas_status_success;
 
-    // --------------------------------
-    // storage for R1, in computing [Q,R1] = cholqr1(A)
-    // --------------------------------
-    size_t size_R1 = 0;
-    {
-        I const ldr = n;
-        size_t const strideR = static_cast<size_t>(ldr) * n;
-        size_R1 = sizeof(T) * strideR * batch_count;
-        adjust_for_alignment(size_R1);
-    }
-
     // storage for 1st call to cholqr1
     ROCBLAS_CHECK(rocsolver_cholqr1_getMemorySize<BATCHED, STRIDED, T>(
         m, n, lda, ldr, batch_count, size_scalars, size_work1, size_work2, size_work3, size_work4,
         size_pivots, size_iinfo, optim_mem));
 
-    // --------------------------------------------
     // storage for iinfo, intended for 2nd call to cholqr1(A)
-    // --------------------------------------------
-    size_t size_iinfo2 = 0;
-    {
-        size_iinfo2 = sizeof(INFO) * batch_count;
-        adjust_for_alignment(size_iinfo2);
-    }
+    *size_iinfo += sizeof(I) * batch_count;
 
-    size_work += size_R1;
-    size_work += size_iinfo2;
+    // storage for R1, in computing [Q,R1] = cholqr1(A)
+    *size_R1 = sizeof(T) * n * n * batch_count;
 
     *p_size_work = size_work;
 
@@ -813,6 +797,7 @@ static rocblas_status rocsolver_cholqr3_getMemorySize(I const m,
                                                       size_t* size_work4,
                                                       size_t* size_pivots,
                                                       size_t* size_iinfo,
+                                                      size_t* size_R1,
                                                       bool* optim_mem,
                                                       size_t* p_size_work)
 {
@@ -826,22 +811,6 @@ static rocblas_status rocsolver_cholqr3_getMemorySize(I const m,
         }
     }
 
-    size_t size_R1 = 0;
-    {
-        I const ldr = n;
-        size_R1 = sizeof(T) * ldr * n * batch_count;
-        adjust_for_alignment(size_R1);
-    }
-    size_work += size_R1;
-
-    size_t size_iinfo2 = 0;
-    {
-        size_iinfo2 = sizeof(I) * batch_count;
-        adjust_for_alignment(size_iinfo2);
-    }
-
-    size_work += size_iinfo2;
-
     ROCBLAS_CHECK(rocsolver_cholqr1_getMemorySize<BATCHED, STRIDED, T, I>(
         m, n, lda, ldr, batch_count, size_scalars, size_work1, size_work2, size_work3, size_work4,
         size_pivots, size_iinfo, optim_mem));
@@ -850,7 +819,7 @@ static rocblas_status rocsolver_cholqr3_getMemorySize(I const m,
     {
         auto const istat = rocsolver_cholqr2_getMemorySize<BATCHED, STRIDED, T, I>(
             m, n, lda, ldr, batch_count, size_scalars, size_work1, size_work2, size_work3,
-            size_work4, size_pivots, size_iinfo, optim_mem, &size_cholqr2);
+            size_work4, size_pivots, size_iinfo, size_R1, optim_mem, &size_cholqr2);
         if(istat != rocblas_status_success)
         {
             return (istat);
@@ -858,6 +827,9 @@ static rocblas_status rocsolver_cholqr3_getMemorySize(I const m,
 
         adjust_for_alignment(size_cholqr2);
     }
+
+    *size_iinfo += sizeof(I) * batch_count;
+    *size_R1 += sizeof(T) * n * n * batch_count;
 
     size_work += size_cholqr2;
 
@@ -879,6 +851,7 @@ static rocblas_status rocsolver_cholqr_getMemorySize(I const m,
                                                      size_t* size_work4,
                                                      size_t* size_pivots,
                                                      size_t* size_iinfo,
+                                                     size_t* size_R1,
                                                      size_t* size_workArr,
                                                      bool* optim_mem,
                                                      size_t* p_size_work)
@@ -896,10 +869,13 @@ static rocblas_status rocsolver_cholqr_getMemorySize(I const m,
         *size_work4 = 0;
         *size_pivots = 0;
         *size_iinfo = 0;
+        *size_R1 = 0;
         *size_workArr = 0;
         *optim_mem = true;
         return rocblas_status_success;
     }
+
+    *size_R1 = 0;
 
     rocblas_status istat = rocblas_status_success;
     if(algo == rocsolver_cholqr_cholqr1)
@@ -912,13 +888,13 @@ static rocblas_status rocsolver_cholqr_getMemorySize(I const m,
     {
         istat = rocsolver_cholqr2_getMemorySize<BATCHED, STRIDED, T, I>(
             m, n, lda, ldr, batch_count, size_scalars, size_work1, size_work2, size_work3,
-            size_work4, size_pivots, size_iinfo, optim_mem, &size_work);
+            size_work4, size_pivots, size_iinfo, size_R1, optim_mem, &size_work);
     }
     else if((algo == rocsolver_cholqr_cholqr3_compute) || (algo == rocsolver_cholqr_cholqr3_user))
     {
         istat = rocsolver_cholqr3_getMemorySize<BATCHED, STRIDED, T, I>(
             m, n, lda, ldr, batch_count, size_scalars, size_work1, size_work2, size_work3,
-            size_work4, size_pivots, size_iinfo, optim_mem, &size_work);
+            size_work4, size_pivots, size_iinfo, size_R1, optim_mem, &size_work);
     }
 
     if(BATCHED)
@@ -1063,6 +1039,7 @@ static rocblas_status rocsolver_cholqr2_template(rocblas_handle handle,
                                                  void* work4,
                                                  T* pivots,
                                                  I* iinfo,
+                                                 T* R1,
                                                  T** workArr,
                                                  bool optim_mem,
 
@@ -1119,34 +1096,10 @@ static rocblas_status rocsolver_cholqr2_template(rocblas_handle handle,
         std::byte* const pwork = (std::byte*)work;
         std::byte* pfree = pwork;
 
-        // -------------------------
         // (1) [Q,R1] = cholqr1( A )
-        // -------------------------
-        I const ldr1 = n;
-        Istride const strideR1 = Istride{ldr1} * n;
-
-        size_t size_R1 = sizeof(T) * strideR1 * batch_count;
-        adjust_for_alignment(size_R1);
-
-        Istride const shiftR1 = 0;
-
-        T* const R1 = (T*)pfree;
-        pfree += size_R1;
-
-        MEM_CHECK_THROW(pfree);
-
-        {
-            auto const pfree_saved = pfree;
-            MEM_CHECK_THROW(pfree);
-
-            size_t const size_remain = (pwork + size_work) - pfree;
-
-            ROCBLAS_CHECK(rocsolver_cholqr1_template<BATCHED, STRIDED, T>(
-                handle, m, n, A, shiftA, lda, strideA, R1, shiftR1, ldr1, strideR1, batch_count,
-                info, scalars, work1, work2, work3, work4, pivots, iinfo, workArr, optim_mem));
-
-            pfree = pfree_saved;
-        }
+        ROCBLAS_CHECK(rocsolver_cholqr1_template<BATCHED, STRIDED, T>(
+            handle, m, n, A, shiftA, lda, strideA, R1, 0, n, n * n, batch_count, info, scalars,
+            work1, work2, work3, work4, pivots, iinfo, workArr, optim_mem));
 
         // ------------------------
         // (2) [Q,R] = cholqr1( Q )
@@ -1159,24 +1112,9 @@ static rocblas_status rocsolver_cholqr2_template(rocblas_handle handle,
         auto const shiftQ = shiftA;
         auto const ldq = lda;
         auto const strideQ = strideA;
-        {
-            auto const pfree_saved = pfree;
-
-            size_t size_iinfo2 = sizeof(INFO) * batch_count;
-            adjust_for_alignment(size_iinfo2);
-
-            INFO* iinfo2 = (INFO*)pfree;
-            pfree += size_iinfo2;
-
-            MEM_CHECK_THROW(pfree);
-            size_t const size_remain = (pwork + size_work) - pfree;
-
-            ROCBLAS_CHECK(rocsolver_cholqr1_template<BATCHED, STRIDED, T>(
-                handle, m, n, Q, shiftQ, ldq, strideQ, R, shiftR, ldr, strideR, batch_count, iinfo2,
-                scalars, work1, work2, work3, work4, pivots, iinfo, workArr, optim_mem));
-
-            pfree = pfree_saved;
-        }
+        ROCBLAS_CHECK(rocsolver_cholqr1_template<BATCHED, STRIDED, T>(
+            handle, m, n, Q, shiftQ, ldq, strideQ, R, shiftR, ldr, strideR, batch_count, iinfo,
+            scalars, work1, work2, work3, work4, pivots, iinfo + batch_count, workArr, optim_mem));
 
         // --------------
         // (3) R = R * R1
@@ -1206,8 +1144,8 @@ static rocblas_status rocsolver_cholqr2_template(rocblas_handle handle,
         // R <- R * R1
         ROCBLAS_CHECK(rocblasCall_trmm<T>(handle, rocblas_side_right, rocblas_fill_upper,
                                           rocblas_operation_none, rocblas_diagonal_non_unit, n, n,
-                                          &one, 0, R1, shiftR1, ldr1, strideR1, R, shiftR, ldr,
-                                          strideR, batch_count, workArr));
+                                          &one, 0, R1, 0, n, n * n, R, shiftR, ldr, strideR,
+                                          batch_count, workArr));
 
         rocblas_set_pointer_mode(handle, old_mode);
         return (istat);
@@ -1270,6 +1208,7 @@ static rocblas_status rocsolver_cholqr3_template(rocblas_handle handle,
                                                  void* work4,
                                                  T* pivots,
                                                  I* iinfo,
+                                                 T* R1,
                                                  T** workArr,
                                                  bool optim_mem,
 
@@ -1332,22 +1271,6 @@ static rocblas_status rocsolver_cholqr3_template(rocblas_handle handle,
         auto const ldq = lda;
         auto const strideQ = strideA;
 
-        // -----------
-        // allocate R1
-        // -----------
-
-        I const ldr1 = n;
-        Istride const strideR1 = static_cast<Istride>(ldr1) * n;
-        Istride const shiftR1 = 0;
-
-        size_t size_R1 = sizeof(T) * strideR1 * batch_count;
-        adjust_for_alignment(size_R1);
-
-        T* const R1 = (T*)pfree;
-        pfree += size_R1;
-
-        MEM_CHECK_THROW(pfree);
-
         // ---------------------------------------
         // (1)  R1 * R1' = A'*A + sigma * identity
         // ---------------------------------------
@@ -1379,8 +1302,8 @@ static rocblas_status rocsolver_cholqr3_template(rocblas_handle handle,
             // perform CholeskQR1 with shift
             // -----------------------------
             ROCBLAS_CHECK(rocsolver_cholqr1_template<BATCHED, STRIDED, T>(
-                handle, m, n, A, shiftA, lda, strideA, R1, shiftR1, ldr1, strideR1, batch_count,
-                info, scalars, work1, work2, work3, work4, pivots, iinfo, workArr, optim_mem));
+                handle, m, n, A, shiftA, lda, strideA, R1, 0, n, n * n, batch_count, info, scalars,
+                work1, work2, work3, work4, pivots, iinfo, workArr, optim_mem));
 
             pfree = pfree_saved;
         }
@@ -1391,33 +1314,12 @@ static rocblas_status rocsolver_cholqr3_template(rocblas_handle handle,
 
         {
             auto const pfree_saved = pfree;
-
-            size_t size_iinfo2 = sizeof(INFO) * batch_count;
-            adjust_for_alignment(size_iinfo2);
-
-            INFO* iinfo2 = (INFO*)pfree;
-            pfree += size_iinfo2;
-
-            MEM_CHECK_THROW(pfree);
-
             size_t const size_remain = (pwork + size_work) - pfree;
 
-            istat = rocsolver_cholqr2_template<BATCHED, STRIDED, T>(handle, m, n,
-
-                                                                    Q, shiftQ, ldq, strideQ,
-
-                                                                    R, shiftR, ldr, strideR,
-
-                                                                    batch_count, iinfo2, scalars,
-                                                                    work1, work2, work3, work4,
-                                                                    pivots, iinfo, workArr, optim_mem,
-
-                                                                    (void*)pfree, size_remain);
-
-            if(istat != rocblas_status_success)
-            {
-                throw(istat);
-            }
+            ROCBLAS_CHECK(rocsolver_cholqr2_template<BATCHED, STRIDED, T>(
+                handle, m, n, Q, shiftQ, ldq, strideQ, R, shiftR, ldr, strideR, batch_count, iinfo,
+                scalars, work1, work2, work3, work4, pivots, iinfo + batch_count,
+                R1 + n * n * batch_count, workArr, optim_mem, (void*)pfree, size_remain));
 
             pfree = pfree_saved;
         }
@@ -1443,8 +1345,8 @@ static rocblas_status rocsolver_cholqr3_template(rocblas_handle handle,
         // R <- R * R1
         ROCBLAS_CHECK(rocblasCall_trmm<T>(handle, rocblas_side_right, rocblas_fill_upper,
                                           rocblas_operation_none, rocblas_diagonal_non_unit, n, n,
-                                          &one, 0, R1, shiftR1, ldr1, strideR1, R, shiftR, ldr,
-                                          strideR, batch_count, workArr));
+                                          &one, 0, R1, 0, n, n * n, R, shiftR, ldr, strideR,
+                                          batch_count, workArr));
 
         // Finally
 
@@ -1494,6 +1396,7 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
                                                 void* work4,
                                                 T* pivots,
                                                 I* iinfo,
+                                                T* R1,
                                                 T** workArr,
                                                 bool optim_mem,
 
@@ -1537,7 +1440,7 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
 
                                                                 batch_count, info, scalars, work1,
                                                                 work2, work3, work4, pivots, iinfo,
-                                                                workArr, optim_mem,
+                                                                R1, workArr, optim_mem,
 
                                                                 work, size_work);
     }
@@ -1555,7 +1458,7 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
 
                                                                 info, batch_count, scalars, work1,
                                                                 work2, work3, work4, pivots, iinfo,
-                                                                workArr, optim_mem,
+                                                                R1, workArr, optim_mem,
 
                                                                 work, size_work);
     }
