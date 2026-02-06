@@ -493,13 +493,13 @@ namespace rocRoller
 
                     // m_tagD: If conversion is needed, use WAVE (not LDS) since it won't be stored directly
                     auto memoryTypeD = GetMemoryType(solutionParams.storePath);
-                    auto macTileD = KernelGraph::CoordinateGraph::MacroTile(
+                    auto macTileD    = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macM, solutionParams.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {wave_m, wave_n, wave_k, wave_b},
                         (IsLDSStore(solutionParams.storePath) && !needsConversion)
-                        ? memoryTypeD
-                        : MemoryType::WAVE);
+                               ? memoryTypeD
+                               : MemoryType::WAVE);
 
                     params->setDimensionInfo(m_tagA, macTileA);
                     params->setDimensionInfo(m_tagB, macTileB);
