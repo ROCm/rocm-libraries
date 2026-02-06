@@ -222,8 +222,7 @@ std::vector<float> generateData(T                           dgen,
                                 bool                        isTranspose,
                                 bool                        isMatrixA,
                                 std::vector<size_t> const&  preSwizzleTile,
-                                std::vector<size_t> const&  preTile,
-                                bool                        useAITERSwizzle)
+                                std::vector<size_t> const&  preTile)
 {
     using namespace DGen;
 
@@ -240,17 +239,10 @@ std::vector<float> generateData(T                           dgen,
     size_t scaleRows = sizes[0] / elementsPerMXBlock;
     size_t scaleCols = sizes[1];
 
-    if(useAITERSwizzle)
+    if(preSwizzleTile.size() == 3)
     {
-        // Use AITER kernel swizzle pattern
-        // AITER expects scales in M × (K/32) layout, but generator produces (K/32) × M
-        // Swap dimensions for AITER swizzle: {scaleCols, scaleRows} = {M, K/32}
-        scaleBytes = DGen::preSwizzleAITER(scaleBytes, {scaleCols, scaleRows});
-    }
-    else if(preSwizzleTile.size() == 3)
-    {
-        // Use RocRoller swizzle pattern
-        scaleBytes = DGen::preSwizzle(scaleBytes, {scaleRows, scaleCols}, preSwizzleTile, preTile);
+        scaleBytes = DGen::preSwizzleScalesGFX950(scaleBytes, {scaleCols, scaleRows});
+        
     }
 #endif
 
@@ -320,7 +312,6 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                    int const                  scaleBlockRowSize,
                                    int const                  scaleBlockColSize,
                                    bool                       isMatrixA,
-                                   bool                       useAITERSwizzle,
                                    std::string_view const     initMethod,
                                    float                      min_val,
                                    float                      max_val)
@@ -379,8 +370,7 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                                                   isTranspose,
                                                                   isMatrixA,
                                                                   preSwizzleTile,
-                                                                  preTile,
-                                                                  useAITERSwizzle);
+                                                                  preTile);
     }
     else if(dataType == HIP_R_8F_E4M3)
     {
@@ -396,8 +386,7 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                                                   isTranspose,
                                                                   isMatrixA,
                                                                   preSwizzleTile,
-                                                                  preTile,
-                                                                  useAITERSwizzle);
+                                                                  preTile);
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E2M3_EXT)
     {
@@ -413,8 +402,7 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                                                   isTranspose,
                                                                   isMatrixA,
                                                                   preSwizzleTile,
-                                                                  preTile,
-                                                                  useAITERSwizzle);
+                                                                  preTile);
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E3M2_EXT)
     {
@@ -430,8 +418,7 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                                                   isTranspose,
                                                                   isMatrixA,
                                                                   preSwizzleTile,
-                                                                  preTile,
-                                                                  useAITERSwizzle);
+                                                                  preTile);
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_4F_E2M1_EXT)
     {
@@ -447,8 +434,7 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                                                   isTranspose,
                                                                   isMatrixA,
                                                                   preSwizzleTile,
-                                                                  preTile,
-                                                                  useAITERSwizzle);
+                                                                  preTile);
     }
     else
     {

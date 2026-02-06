@@ -57,7 +57,6 @@ struct Arguments
         Vector                  = 2,
         Block_32_UE8M0          = 3,
         Block_32_UE8M0_32_8_EXT = 1001,
-        Block_32_UE8M0_AITER    = 1002,  // AITER kernel swizzle pattern
     };
 
     /*************************************************************************

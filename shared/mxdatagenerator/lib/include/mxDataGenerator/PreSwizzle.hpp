@@ -391,9 +391,9 @@ namespace DGen
     }
 
     /**
-     * @brief Pre-swizzle scale data for AITER kernel.
+     * @brief Pre-swizzle scale data.
      *
-     * This implements the AITER e8m0_shuffle algorithm from:
+     * This implements the e8m0_shuffle algorithm from:
      * https://github.com/ROCm/aiter/blob/main/aiter/utility/fp4_utils.py
      *
      * The algorithm is:
@@ -406,11 +406,11 @@ namespace DGen
      *
      * @param input The input scale data vector (row-major, M x numScaleCols)
      * @param sizes The dimension sizes {numScaleRows, numScaleCols} where numScaleRows = M
-     * @return The AITER-swizzled scale data
+     * @return The swizzled scale data
      */
     template <typename T>
-    inline std::vector<T> preSwizzleAITER(std::vector<T> const&      input,
-                                          std::vector<size_t> const& sizes)
+    inline std::vector<T> preSwizzleScalesGFX950(std::vector<T> const&      input,
+                                                 std::vector<size_t> const& sizes)
     {
         if(sizes.size() != 2)
         {

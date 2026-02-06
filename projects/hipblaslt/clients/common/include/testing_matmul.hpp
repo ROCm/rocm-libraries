@@ -1907,7 +1907,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                                               blockSize(arg.scaleA),
                                               1,
                                               true,
-                                              isAITERScaleSwizzle(arg.scaleA),
                                               hipblaslt_initialization2string(arg.initialization)));
             // Copy data and scale to device buffers
             CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
@@ -1964,7 +1963,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                                               1,
                                               blockSize(arg.scaleB),
                                               false,
-                                              isAITERScaleSwizzle(arg.scaleB),
                                               hipblaslt_initialization2string(arg.initialization)));
             // Copy data and scale to device buffers
             CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count));
@@ -2277,8 +2275,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
             }
-            else if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
-                    || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_AITER)
+            else if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
             {
                 mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
             }
@@ -2310,8 +2307,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
             }
-            else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
-                    || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_AITER)
+            else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
             {
                 mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
             }
