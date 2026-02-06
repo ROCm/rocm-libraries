@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include <miopen/tensor.hpp>
 
 #include <miopen/errors.hpp>
@@ -91,19 +69,17 @@ GetConsistentFlattenedTensorDescriptors(const TDescriptors&... real_descriptor_p
     const auto& length_   = real_descriptors[0]->GetLengths();
     const size_t num_dims = length_.size();
 
-    const auto make_length_and_strides = [&](std::size_t dim) {
+    const auto combine_length_and_strides = [&](std::size_t dim) {
         return std::apply(
-                [&](const auto*... descs) {
-                    return std::make_tuple(
-                        length_[dim],
-                        descs->GetStrides()[dim]...);
-                },
-                real_descriptors);
+            [&](const auto*... descs) {
+                return std::make_tuple(length_[dim], descs->GetStrides()[dim]...);
+            },
+            real_descriptors);
     };
 
-    auto indices = std::views::iota(std::size_t(0), num_dims)
-        | std::views::filter([&](const size_t i){ return length_[i] > 1; });
-    auto non1_length_strides = indices | std::views::transform(make_length_and_strides);
+    auto indices = std::views::iota(std::size_t(0), num_dims) |
+                   std::views::filter([&](const size_t i) { return length_[i] > 1; });
+    auto non1_length_strides = indices | std::views::transform(combine_length_and_strides);
 
     if((is_all_packed && is_all_same_strided) || non1_length_strides.empty())
     {
