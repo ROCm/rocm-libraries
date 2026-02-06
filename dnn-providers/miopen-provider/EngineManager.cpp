@@ -45,10 +45,10 @@ void EngineManager::getEngineDetails(HipdnnEnginePluginHandle& handle,
 
 size_t EngineManager::getMaxWorkspaceSize(
     const HipdnnEnginePluginHandle& handle,
-    int64_t engineId,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
 {
-    auto& engine = getEngine(engineId);
+    auto& engine = getEngine(engineConfig.engineId());
     return engine.getMaxWorkspaceSize(handle, opGraph);
 }
 

@@ -149,12 +149,14 @@ TEST(TestMiopenEngineManager, GetWorkspaceSizeReturnsCorrectValue)
     EXPECT_CALL(*mockEngine, id()).WillRepeatedly(Return(42));
     HipdnnEnginePluginHandle dummyHandle = {};
     MockGraph mockGraph;
+    MockEngineConfig mockEngineConfig;
+    EXPECT_CALL(mockEngineConfig, engineId()).WillRepeatedly(Return(42));
     EXPECT_CALL(*mockEngine, getMaxWorkspaceSize(::testing::_, ::testing::_))
         .WillOnce(Return(4096));
 
     manager.addEngine(std::move(mockEngine));
 
-    size_t workspaceSize = manager.getMaxWorkspaceSize(dummyHandle, 42, mockGraph);
+    size_t workspaceSize = manager.getMaxWorkspaceSize(dummyHandle, mockGraph, mockEngineConfig);
     EXPECT_EQ(workspaceSize, 4096);
 }
 
@@ -163,8 +165,10 @@ TEST(TestMiopenEngineManager, GetWorkspaceSizeThrowsOnInvalidEngineId)
     EngineManager manager;
     HipdnnEnginePluginHandle dummyHandle = {};
     MockGraph mockGraph;
+    MockEngineConfig mockEngineConfig;
+    EXPECT_CALL(mockEngineConfig, engineId()).WillRepeatedly(Return(999));
 
-    EXPECT_THROW(manager.getMaxWorkspaceSize(dummyHandle, 999, mockGraph),
+    EXPECT_THROW(manager.getMaxWorkspaceSize(dummyHandle, mockGraph, mockEngineConfig),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
