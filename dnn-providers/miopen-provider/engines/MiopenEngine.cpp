@@ -140,19 +140,23 @@ size_t MiopenEngine::getMaxWorkspaceSize(
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
 {
-    MiopenExecutionSettings executionSettings;
-    initializeMiopenExecutionSettings(engineConfig, executionSettings);
+    MiopenExecutionSettings baseExecutionSettings;
+    initializeMiopenExecutionSettings(engineConfig, baseExecutionSettings);
+
+    size_t workspaceSize = 0;
 
     for(const auto& planBuilder : _planBuilders)
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
+            MiopenExecutionSettings executionSettings = baseExecutionSettings;
             planBuilder->initializeExecutionSettings(
                 handle, opGraph, engineConfig, executionSettings);
-            return planBuilder->getMaxWorkspaceSize(handle, opGraph, executionSettings);
+            workspaceSize = std::max(workspaceSize, planBuilder->getMaxWorkspaceSize(handle, opGraph, executionSettings));
         }
     }
-    return 0;
+
+    return workspaceSize;
 }
 
 void MiopenEngine::initializeExecutionContext(
