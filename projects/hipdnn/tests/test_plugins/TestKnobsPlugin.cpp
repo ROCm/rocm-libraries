@@ -136,7 +136,7 @@ public:
 
             if(engineId == hipdnn_tests::plugin_constants::engineId<KnobsPlugin>())
             {
-                // Engine A (original engine with 4 unique knobs)
+                // Engine A (4 unique knobs + 1 shared knob)
 
                 // Knob 1: Integer knob with min/max/step constraints
                 knobOffsets.push_back(hipdnn_plugin_sdk::KnobFactory::createIntKnob(
@@ -180,7 +180,7 @@ public:
             }
             else if(engineId == hipdnn_tests::plugin_constants::engineId<KnobsPluginEngineB>())
             {
-                // Engine B (new engine with 2 different knobs)
+                // Engine B (2 different unique knobs + 1 shared knob)
 
                 // Knob 1: Int knob with specific value constraint.
                 knobOffsets.push_back(hipdnn_plugin_sdk::KnobFactory::createIntKnob(
@@ -202,7 +202,7 @@ public:
                     {"direct", "winograd", "fft"}));
             }
 
-            // New shared knob for both enhines
+            // New shared knob for both engines
             knobOffsets.push_back(hipdnn_plugin_sdk::KnobFactory::createIntKnob(
                 builder,
                 "test.shared.deterministic",
