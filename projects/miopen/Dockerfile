@@ -51,11 +51,14 @@ RUN mkdir -p /etc/apt/keyrings && \
     wget -qO - https://dvc.org/deb/iterative.asc | sudo gpg --dearmor -o /etc/apt/keyrings/packages.iterative.gpg && \
     echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/packages.iterative.gpg] https://dvc.org/deb/ stable main" | sudo tee /etc/apt/sources.list.d/dvc.list && \
     chmod 644 /etc/apt/keyrings/packages.iterative.gpg /etc/apt/sources.list.d/dvc.list && \
+    wget -qO - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /etc/apt/keyrings/llvm-snapshot.gpg && \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/llvm-snapshot.gpg] http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main" > /etc/apt/sources.list.d/llvm18.list && \
+    chmod 644 /etc/apt/keyrings/llvm-snapshot.gpg /etc/apt/sources.list.d/llvm18.list && \
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
     build-essential \
     cmake \
-    clang-format-12 \
+    clang-format-18 \
     doxygen \
     gdb \
     git \

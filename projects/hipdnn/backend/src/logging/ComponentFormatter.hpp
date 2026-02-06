@@ -9,23 +9,25 @@
 #include <string>
 #include <vector>
 
-namespace hipdnn_data_sdk::logging
+namespace hipdnn::backend::logging
 {
 
 class ComponentFormatter final : public spdlog::formatter
 {
 public:
     ComponentFormatter()
-        : _passThroughFormatter{std::make_unique<spdlog::pattern_formatter>("%v")}
+        : _callbackReceiverFormatter{
+              std::make_unique<spdlog::pattern_formatter>(generateCallbackReceiverPatternString())}
     {
     }
 
     void format(const spdlog::details::log_msg& msg, spdlog::memory_buf_t& dest) override
     {
-        // The logger "hipdnn_callback_receiver" receives pre-formatted strings from a callback sink
+        // The logger "hipdnn_callback_receiver" receives pre-formatted strings from a callback sink.
+        // The component name is already prepended to the message, so we use a pattern without [component].
         if(msg.logger_name == "hipdnn_callback_receiver")
         {
-            _passThroughFormatter->format(msg, dest);
+            _callbackReceiverFormatter->format(msg, dest);
         }
         else
         {
@@ -41,7 +43,7 @@ public:
     }
 
 private:
-    std::unique_ptr<spdlog::pattern_formatter> _passThroughFormatter;
+    std::unique_ptr<spdlog::pattern_formatter> _callbackReceiverFormatter;
 };
 
-} // namespace hipdnn_data_sdk::logging
+} // namespace hipdnn::backend::logging

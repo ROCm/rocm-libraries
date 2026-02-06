@@ -140,8 +140,8 @@ struct ProblemDescription : ProblemDescriptionBase,
     // This declaration marks pooling as a primitive with tuning enabled.
     // Any tunable solver would be able pick it and fetch a db instance in ExecutePrimitive.
     // It has to be discoverable via ADL from problem description.
-    friend auto GetDb(const ExecutionContext& context, const ProblemDescriptionTag&)
-        -> PerformanceDb;
+    friend auto GetDb(const ExecutionContext& context,
+                      const ProblemDescriptionTag&) -> PerformanceDb;
 
 private:
     Direction direction;
