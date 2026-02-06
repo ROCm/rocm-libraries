@@ -105,7 +105,7 @@ def sendFailureNotifications() {
     //             context: result.context
     //         ])
     //     }
-    }
+    // }
     echo "Done checking for failure patterns..."
     // Send a notification for each matched failure pattern.
     for (patternMap in foundPatterns) {
