@@ -2505,7 +2505,7 @@ rocblas_status rocblasCall_trsm(rocblas_handle handle,
                                 rocblas_stride offset_A,
                                 I lda,
                                 rocblas_stride stride_A,
-                                T* const B[],
+                                T* const* B,
                                 rocblas_stride offset_B,
                                 I ldb,
                                 rocblas_stride stride_B,
@@ -2522,21 +2522,6 @@ rocblas_status rocblasCall_trsm(rocblas_handle handle,
                   "n:", n, "shiftA:", offset_A, "lda:", lda, "shiftB:", offset_B, "ldb:", ldb,
                   "bc:", batch_count);
 
-    {
-        bool const has_work = (m >= 1) && (n >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return (rocblas_status_success);
-        }
-    }
-
-    if(workArr == nullptr)
-    {
-        return (rocblas_status_internal_error);
-    }
-
-    using U = const T* const*;
-
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
@@ -2544,16 +2529,16 @@ rocblas_status rocblasCall_trsm(rocblas_handle handle,
     ROCSOLVER_LAUNCH_KERNEL(get_array, dim3(blocks), dim3(256), 0, stream, workArr, A, stride_A,
                             batch_count);
 
-    U supplied_invA = nullptr;
+    const T* const* supplied_invA = nullptr;
     if constexpr(std::is_same<I, int64_t>::value)
         return rocblas_internal_trsm_batched_template_64(
-            handle, side, uplo, transA, diag, m, n, alpha, cast2constType((U)workArr), offset_A,
-            lda, stride_A, B, offset_B, ldb, stride_B, batch_count, optimal_mem, x_temp, x_temp_arr,
+            handle, side, uplo, transA, diag, m, n, alpha, cast2constType(workArr), offset_A, lda,
+            stride_A, B, offset_B, ldb, stride_B, batch_count, optimal_mem, x_temp, x_temp_arr,
             invA, invA_arr, supplied_invA, 0);
     else
         return rocblas_internal_trsm_batched_template(
-            handle, side, uplo, transA, diag, m, n, alpha, cast2constType((U)workArr), offset_A,
-            lda, stride_A, B, offset_B, ldb, stride_B, batch_count, optimal_mem, x_temp, x_temp_arr,
+            handle, side, uplo, transA, diag, m, n, alpha, cast2constType(workArr), offset_A, lda,
+            stride_A, B, offset_B, ldb, stride_B, batch_count, optimal_mem, x_temp, x_temp_arr,
             invA, invA_arr, supplied_invA, 0);
 }
 
@@ -2571,7 +2556,7 @@ rocblas_status rocblasCall_trsm(rocblas_handle handle,
                                 rocblas_stride offset_A,
                                 I lda,
                                 rocblas_stride stride_A,
-                                T* const B,
+                                T* B,
                                 rocblas_stride offset_B,
                                 I ldb,
                                 rocblas_stride stride_B,
@@ -2588,57 +2573,24 @@ rocblas_status rocblasCall_trsm(rocblas_handle handle,
                   "n:", n, "shiftA:", offset_A, "lda:", lda, "shiftB:", offset_B, "ldb:", ldb,
                   "bc:", batch_count);
 
-    using U = const T* const*;
-
-    {
-        bool const has_work = (m >= 1) && (n >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return (rocblas_status_success);
-        }
-    }
-
-    if(workArr == nullptr)
-    {
-        return (rocblas_status_internal_error);
-    }
-
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    auto const B_ptr = workArr;
-
     I blocks = (batch_count - 1) / 256 + 1;
-    ROCSOLVER_LAUNCH_KERNEL(get_array, dim3(blocks), dim3(256), 0, stream, B_ptr, B, stride_B,
+    ROCSOLVER_LAUNCH_KERNEL(get_array, dim3(blocks), dim3(256), 0, stream, workArr, B, stride_B,
                             batch_count);
 
-    U supplied_invA = nullptr;
-
-    rocblas_status istat = rocblas_status_success;
-
+    const T* const* supplied_invA = nullptr;
     if constexpr(std::is_same<I, int64_t>::value)
-    {
-        istat = rocblas_internal_trsm_batched_template_64(
-            handle, side, uplo, transA, diag, m, n, alpha,
-
-            A, offset_A, lda, stride_A,
-
-            B_ptr, offset_B, ldb, stride_B,
-
-            batch_count, optimal_mem, x_temp, x_temp_arr, invA, invA_arr, supplied_invA, 0);
-    }
+        return rocblas_internal_trsm_batched_template_64(
+            handle, side, uplo, transA, diag, m, n, alpha, A, offset_A, lda, stride_A, workArr,
+            offset_B, ldb, stride_B, batch_count, optimal_mem, x_temp, x_temp_arr, invA, invA_arr,
+            supplied_invA, 0);
     else
-    {
-        istat = rocblas_internal_trsm_batched_template(handle, side, uplo, transA, diag, m, n, alpha,
-
-                                                       A, offset_A, lda, stride_A,
-
-                                                       B_ptr, offset_B, ldb, stride_B,
-
-                                                       batch_count, optimal_mem, x_temp, x_temp_arr,
-                                                       invA, invA_arr, supplied_invA, 0);
-    }
-    return (istat);
+        return rocblas_internal_trsm_batched_template(handle, side, uplo, transA, diag, m, n, alpha,
+                                                      A, offset_A, lda, stride_A, workArr, offset_B,
+                                                      ldb, stride_B, batch_count, optimal_mem, x_temp,
+                                                      x_temp_arr, invA, invA_arr, supplied_invA, 0);
 }
 
 // trtri memory sizes

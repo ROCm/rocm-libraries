@@ -63,27 +63,36 @@ rocblas_status rocsolver_cholqr_impl(rocblas_handle handle,
 
     // memory workspace sizes:
     size_t size_work = 0;
+    bool optim_mem;
+    size_t size_work1, size_work2, size_work3, size_work4;
     size_t size_workArr;
-    rocsolver_cholqr_getMemorySize<false, false, T>(m, n, batch_count, algo, &size_workArr,
-                                                    &size_work);
+    rocsolver_cholqr_getMemorySize<false, false, T>(m, n, lda, ldr, batch_count, algo, &size_work1,
+                                                    &size_work2, &size_work3, &size_work4,
+                                                    &size_workArr, &optim_mem, &size_work);
 
     if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_set_optimal_device_memory_size(handle, size_workArr, size_work);
+        return rocblas_set_optimal_device_memory_size(handle, size_work1, size_work2, size_work3,
+                                                      size_work4, size_workArr, size_work);
 
     // memory workspace allocation
-    void* workArr;
-    rocblas_device_malloc mem(handle, size_workArr, size_work);
+    void *work1, *work2, *work3, *work4, *workArr;
+    rocblas_device_malloc mem(handle, size_work1, size_work2, size_work3, size_work4, size_workArr,
+                              size_work);
 
     if(!mem)
         return rocblas_status_memory_error;
 
-    workArr = mem[0];
-    void* const work = (void*)mem[1];
+    work1 = mem[0];
+    work2 = mem[1];
+    work3 = mem[2];
+    work4 = mem[3];
+    workArr = mem[4];
+    void* const work = (void*)mem[5];
 
     // execution
-    return rocsolver_cholqr_template<false, false, T>(handle, m, n, A, shiftA, lda, strideA, R,
-                                                      shiftR, ldr, strideR, sigma, algo, info,
-                                                      batch_count, (T**)workArr, work, size_work);
+    return rocsolver_cholqr_template<false, false, T>(
+        handle, m, n, A, shiftA, lda, strideA, R, shiftR, ldr, strideR, sigma, algo, info,
+        batch_count, work1, work2, work3, work4, (T**)workArr, optim_mem, work, size_work);
 }
 
 ROCSOLVER_END_NAMESPACE
