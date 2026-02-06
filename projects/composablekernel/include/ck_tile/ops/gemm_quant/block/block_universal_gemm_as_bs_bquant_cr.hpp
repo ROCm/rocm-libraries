@@ -102,6 +102,7 @@ struct BQuantBlockUniversalGemmAsBsCr
         // 2. bf8, bf8, fp32 -> f32
         // 3. i4,  fp8, (fp8/fp32) -> f32
         // 4. i4,  bf8, (fp8/fp32) -> f32
+        // 5. bf16, (bf16/bf8/fp4), e8m0 -> f32
         static_assert(
             (std::is_same_v<ADataType, fp8_t> || std::is_same_v<ADataType, bf8_t> ||
              std::is_same_v<ADataType, bf16_t>) &&
