@@ -12,7 +12,7 @@
 #include "MiopenConvBwdPlan.hpp"
 #include "MiopenUtils.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 ConvBwdParams::ConvBwdParams(
@@ -65,9 +65,15 @@ bool ConvBwdParams::validTensors() const
     return _tensorsValid;
 }
 
-ConvBwdPlan::ConvBwdPlan(const HipdnnEnginePluginHandle& handle, ConvBwdParams&& params)
+ConvBwdPlan::ConvBwdPlan(const HipdnnEnginePluginHandle& handle,
+                         ConvBwdParams&& params,
+                         bool benchmarkingEnabled)
     : _params(std::move(params))
+    , _benchmarkingEnabled(benchmarkingEnabled)
 {
+    // Set tuning policy based on benchmarking flag - RAII ensures restoration
+    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _benchmarkingEnabled);
+
     // MIOpen Find 2.0 API
     miopenProblem_t problem;
     THROW_ON_MIOPEN_FAILURE(miopenCreateConvProblem(
@@ -95,7 +101,8 @@ ConvBwdPlan::ConvBwdPlan(const HipdnnEnginePluginHandle& handle, ConvBwdParams&&
                 auto status = miopenDestroySolution(s);
                 if(status != miopenStatusSuccess)
                 {
-                    HIPDNN_LOG_ERROR("miopenDestroySolution failed in ConvBwdPlan destructor");
+                    HIPDNN_PLUGIN_LOG_ERROR(
+                        "miopenDestroySolution failed in ConvBwdPlan destructor");
                 }
             });
     }
@@ -150,4 +157,4 @@ void ConvBwdPlan::execute(const HipdnnEnginePluginHandle& handle,
                                               workspaceSize));
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

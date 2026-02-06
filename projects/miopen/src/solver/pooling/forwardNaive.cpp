@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/datatype.hpp>
 #include <miopen/kernel_build_params.hpp>
@@ -30,6 +7,7 @@
 #include <miopen/pooling.hpp>
 #include <miopen/pooling/invoke_params.hpp>
 #include <miopen/pooling/solvers.hpp>
+#include <miopen/solver/implicitgemm_util.hpp>
 
 #define WORKAROUND_ISSUE_MIFIN_80 1 // https://github.com/ROCm/MIFin/issues/80
 
@@ -49,6 +27,7 @@ bool IsPower2(T v)
 }
 #endif
 
+#if !WORKAROUND_ISSUE_MIFIN_80
 template <typename T>
 T RoundUpNearestPower2Positive(T v) = delete;
 
@@ -63,6 +42,7 @@ inline uint32_t RoundUpNearestPower2Positive(uint32_t v)
     v |= v >> 16;
     return std::max(++v, 1U); // Shut clang-tidy.
 }
+#endif
 
 } // namespace
 
@@ -74,7 +54,8 @@ bool PoolingForwardNaive::IsApplicable(const ExecutionContext&,
     return problem.GetDirection() == miopen::pooling::Direction::Forward           //
            && problem.GetXDesc().GetType() == problem.GetYDesc().GetType()         //
            && (problem.GetXDesc().GetType() == miopenFloat                         //
-               || problem.GetXDesc().GetType() == miopenHalf)                      //
+               || problem.GetXDesc().GetType() == miopenHalf                       //
+               || problem.GetXDesc().GetType() == miopenBFloat16)                  //
            && (problem.GetPooling().GetMode() == miopenPoolingMax                  //
                || problem.GetPooling().GetMode() == miopenPoolingAverage           //
                || problem.GetPooling().GetMode() == miopenPoolingAverageInclusive) //
@@ -90,8 +71,9 @@ bool PoolingForwardNaive::IsApplicable(const ExecutionContext&,
 }
 
 ConvSolution
-PoolingForwardNaive::GetSolution(const ExecutionContext& context,
-                                 const miopen::pooling::ProblemDescription& problem) const
+PoolingForwardNaive::GetSolution(const ExecutionContext&,
+                                 const miopen::pooling::ProblemDescription& problem,
+                                 const PerformanceConfigPoolingForwardNaive& config) const
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
@@ -188,25 +170,37 @@ PoolingForwardNaive::GetSolution(const ExecutionContext& context,
     /// The workgroup size does not have the restrictions imposed by synchronization between
     /// workitems because the kernel does not require synchronization.
 
-#if WORKAROUND_ISSUE_MIFIN_80
-    const uint32_t wavesize = 64;
-    std::ignore             = context;
-#else
+#if !WORKAROUND_ISSUE_MIFIN_80
     const auto wavesize = static_cast<uint32_t>(context.GetStream().GetWavefrontWidth());
+#if !MIOPEN_NDEBUG
     assert(IsPower2(wavesize));
+#endif
 #endif
 
     const auto is2d_kernel = (top_d == 1); // For 2D + optimize for 3D where the 1st dim is 1.
-    const auto g0          = RoundUpNearestPower2Positive(all_n);
-    const auto g1          = RoundUpNearestPower2Positive(all_c);
-    const auto g2          = RoundUpNearestPower2Positive(is2d_kernel ? top_h : top_d);
+    uint32_t g0, g1, g2, w0, w1, w2;
+#if WORKAROUND_ISSUE_MIFIN_80
+    w0 = static_cast<uint32_t>(config.local_size0);
+    w1 = static_cast<uint32_t>(config.local_size1);
+    w2 = static_cast<uint32_t>(config.local_size2);
 
+    // compute global sizes from local sizes
+    g0 = ((all_n + w0 - 1) / w0) * w0;
+    g1 = ((all_c + w1 - 1) / w1) * w1;
+    g2 = (((is2d_kernel ? top_h : top_d) + w2 - 1) / w2) * w2;
+#else
+    g0 = RoundUpNearestPower2Positive(all_n);
+    g1 = RoundUpNearestPower2Positive(all_c);
+    g2 = RoundUpNearestPower2Positive(is2d_kernel ? top_h : top_d);
+
+    // determine w0, w1, w2 such that w0 * w1 * w2 == wavesize
     auto work_left = wavesize / 1;
-    const auto w0  = (g0 < work_left) ? g0 : work_left;
+    w0             = (g0 < work_left) ? g0 : work_left;
     work_left /= w0;
-    const auto w1 = (g1 < work_left) ? g1 : work_left;
+    w1 = (g1 < work_left) ? g1 : work_left;
     work_left /= w1;
-    const auto w2 = (g2 < work_left) ? g2 : work_left;
+    w2 = (g2 < work_left) ? g2 : work_left;
+#endif
 
     {
         auto kernel = KernelInfo{};
@@ -294,6 +288,120 @@ PoolingForwardNaive::GetWorkspaceSize(const ExecutionContext&,
     if(problem.GetPooling().GetMode() != miopenPoolingMax || !problem.SaveIndex())
         return 0;
     return problem.GetYDesc().GetElementSize() * get_data_size(problem.GetPooling().GetIndexType());
+}
+
+void PerformanceConfigPoolingForwardNaive::Init(const miopen::pooling::ProblemDescription&)
+{
+    // initialize with minimum values
+    local_size0 = 1;
+    local_size1 = 1;
+    local_size2 = 1;
+}
+
+void PerformanceConfigPoolingForwardNaive::HeuristicInit(
+    [[maybe_unused]] const miopen::pooling::ProblemDescription& problem)
+{
+#if MIOPEN_BACKEND_HIP
+    switch(problem.GetXDesc().GetType())
+    {
+    case miopenHalf:
+    case miopenFloat:
+    case miopenBFloat16: Init(problem); break;
+    case miopenDouble:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz:
+    case miopenInt8:
+    case miopenInt32:
+    case miopenInt64:
+    default: MIOPEN_THROW("Unsupported datatype");
+    }
+#endif
+}
+
+bool PerformanceConfigPoolingForwardNaive::SetNextValue(const miopen::pooling::ProblemDescription&)
+{
+#if !MIOPEN_BACKEND_HIP
+    return false;
+#else
+#if WORKAROUND_ISSUE_MIFIN_80
+    constexpr int wavesize = 64;
+    if(!NextTwoPower<1, wavesize>(local_size0))
+        return true;
+    if(!NextTwoPower<1, wavesize>(local_size1))
+        return true;
+    if(!NextTwoPower<1, wavesize>(local_size2))
+        return true;
+    return false;
+#else
+    return false;
+#endif
+#endif
+}
+
+bool PerformanceConfigPoolingForwardNaive::IsValidValue() const
+{
+#if WORKAROUND_ISSUE_MIFIN_80
+    constexpr int wavesize = 64;
+    if(!IsTwoPower<1, wavesize>(local_size0))
+        return false;
+    if(!IsTwoPower<1, wavesize>(local_size1))
+        return false;
+    if(!IsTwoPower<1, wavesize>(local_size2))
+        return false;
+    // block size must be equal to wavesize
+    if(local_size0 * local_size1 * local_size2 != wavesize)
+        return false;
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool PerformanceConfigPoolingForwardNaive::IsValid(
+    const ExecutionContext&,
+    [[maybe_unused]] const miopen::pooling::ProblemDescription& problem) const
+{
+#if !MIOPEN_BACKEND_HIP
+    return false;
+#else
+    switch(problem.GetXDesc().GetType())
+    {
+    case miopenHalf:
+    case miopenFloat:
+    case miopenBFloat16: return IsValidValue();
+    case miopenDouble:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz:
+    case miopenInt8:
+    case miopenInt32:
+    case miopenInt64:
+    default: MIOPEN_THROW("Unsupported datatype");
+    }
+    return false;
+#endif
+}
+
+bool PerformanceConfigPoolingForwardNaive::operator==(
+    const PerformanceConfigPoolingForwardNaive& other) const
+{
+    return local_size0 == other.local_size0 && local_size1 == other.local_size1 &&
+           local_size2 == other.local_size2;
+}
+
+bool PoolingForwardNaive::IsValidPerformanceConfig(
+    const ExecutionContext& context,
+    const miopen::pooling::ProblemDescription& problem,
+    const PerformanceConfigPoolingForwardNaive& config) const
+{
+    return config.IsValid(context, problem);
+}
+
+PerformanceConfigPoolingForwardNaive PoolingForwardNaive::GetDefaultPerformanceConfig(
+    const ExecutionContext&, const miopen::pooling::ProblemDescription& problem) const
+{
+    PerformanceConfigPoolingForwardNaive config;
+    config.HeuristicInit(problem);
+    return config;
 }
 
 } // namespace pooling

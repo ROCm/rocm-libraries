@@ -47,11 +47,11 @@ private:
     friend class EngineCfgBuilder;
 
 public:
-    EngineCfg()                 = default;
-    EngineCfg(const EngineCfg&) = default;
-    EngineCfg(EngineCfg&&)      = default;
+    EngineCfg()                            = default;
+    EngineCfg(const EngineCfg&)            = default;
+    EngineCfg(EngineCfg&&)                 = default;
     EngineCfg& operator=(const EngineCfg&) = default;
-    EngineCfg& operator=(EngineCfg&&) = default;
+    EngineCfg& operator=(EngineCfg&&)      = default;
 
     EngineCfg(const Engine& engine) : mEngine(engine) {}
     EngineCfg(Engine&& engine) : mEngine(std::move(engine)) {}

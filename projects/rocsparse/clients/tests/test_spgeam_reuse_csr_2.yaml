@@ -27,9 +27,7 @@ include: rocsparse_common.yaml
 
 Definitions:
   - &alpha_beta_range_quick
-    - { alpha:   1.0, beta:   1.0, alphai:  1.0, betai: 0.5 }
-    - { alpha:  -0.5, beta:   0.0, alphai: -0.5, betai: 1.0 }
-    - { alpha:   1.0, beta:   0.0, alphai:  0.0, betai: 1.0 }
+    - { alpha:   -1.0, beta:   1.0, alphai:  0.5, betai: -0.5 }
 
   - &alpha_beta_range_checkin
     - { alpha: 0.0, beta:   1.5, alphai:  0.0, betai: 0.3 }
@@ -41,13 +39,15 @@ Definitions:
 
 Tests:
 # C = alpha * A + beta * B
+
+# Quick
 - name: spgeam_mult_reuse_csr_file_2
   category: quick
   function: spgeam_reuse_csr_2
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions
   M: 1
-  N: [78, 897]
+  N: [222]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -57,19 +57,40 @@ Tests:
   baseC: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   spgeam_alg: [rocsparse_spgeam_alg_default]
-  filename: [mac_econ_fwd500,
+  filename: [nos1,
              nos2,
+             nos3,
+             nos4,
+             nos5,
              nos6,
-             scircuit,
-             Chevron2]
+             nos7]
 
+- name: spgeam_mult_reuse_csr_file_2
+  category: quick
+  function: spgeam_reuse_csr_2
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex
+  M: 1
+  N: [167]
+  K: 1
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spgeam_alg: [rocsparse_spgeam_alg_default]
+  filename: [Chevron2]
+
+# Pre-checkin
 - name: spgeam_mult_reuse_csr_file_2
   category: pre_checkin
   function: spgeam_reuse_csr_2
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions
   M: 1
-  N: [3333, 16578]
+  N: [2000]
   K: 1
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
@@ -80,16 +101,49 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   spgeam_alg: [rocsparse_spgeam_alg_default]
   filename: [rma10,
-             mc2depi,
-             ASIC_320k,
-             nos1,
-             nos7,
-             Chevron3]
+             scircuit]
 
+- name: spgeam_mult_reuse_csr_file_2
+  category: pre_checkin
+  function: spgeam_reuse_csr_2
+  indextype: *i64i32
+  precision: *double_only_precisions
+  M: 1
+  N: [1000]
+  K: 1
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spgeam_alg: [rocsparse_spgeam_alg_default]
+  filename: [ASIC_320k]
+
+- name: spgeam_mult_reuse_csr_file_2
+  category: pre_checkin
+  function: spgeam_reuse_csr_2
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex
+  M: 1
+  N: [500]
+  K: 1
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spgeam_alg: [rocsparse_spgeam_alg_default]
+  filename: [mplate]
+
+# Nightly
 - name: spgeam_mult_reuse_csr_file_2
   category: nightly
   function: spgeam_reuse_csr_2
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64
   precision: *single_double_precisions
   M: 1
   N: [46710, 82435]

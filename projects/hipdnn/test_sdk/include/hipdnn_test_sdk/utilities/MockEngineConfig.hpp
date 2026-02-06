@@ -10,7 +10,7 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-class MockEngineConfig : public hipdnn_plugin_sdk::IEngineConfig
+class MockEngineConfig : public hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig
 {
 public:
     MOCK_METHOD(const hipdnn_data_sdk::data_objects::EngineConfig&,
@@ -26,13 +26,10 @@ public:
         (),
         (const, override));
     MOCK_METHOD(const hipdnn_data_sdk::flatbuffer_utilities::IKnobSetting&,
-                getKnobSettingById,
-                (int64_t knobId),
-                (const, override));
-    MOCK_METHOD(const hipdnn_data_sdk::flatbuffer_utilities::IKnobSetting&,
                 getKnobSettingByName,
                 (const std::string& knobName),
                 (const, override));
+    MOCK_METHOD(bool, hasKnobSetting, (const std::string& knobName), (const, override));
 };
 
 }

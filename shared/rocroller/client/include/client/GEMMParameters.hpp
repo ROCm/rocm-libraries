@@ -33,6 +33,7 @@
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
+#include <rocRoller/Parameters/Solution/StreamK.hpp>
 
 #include "client/BenchmarkSolution.hpp"
 #include <mxDataGenerator/DataGenerator.hpp>
@@ -179,6 +180,9 @@ namespace rocRoller
                     Parameters::Solution::LoadPath::BufferToLDSViaVGPR};
                 bool storeLDSD = true;
 
+                std::pair<int, int> padLDSA = {0, 0};
+                std::pair<int, int> padLDSB = {0, 0};
+
                 bool prefetch          = false;
                 int  prefetchInFlight  = 2;
                 int  prefetchLDSFactor = 0;
@@ -193,10 +197,9 @@ namespace rocRoller
                 std::string schedulerCost;
                 bool        matchMemoryAccess;
 
-                // TODO Use StreamKConfig
-                bool streamK               = false;
-                bool streamKTwoTile        = false;
-                bool streamKTwoTileDPFirst = false;
+                bool tailLoops = true;
+
+                StreamKMode streamK = StreamKMode::None;
 
                 std::string version;
 
@@ -225,6 +228,11 @@ namespace rocRoller::Client::GEMMClient::CLI
 {
     constexpr bool PARSE_SUCCESS = true;
     constexpr bool PARSE_FAILURE = false;
+
+    /**
+     * @brief Parse an XxY pair.
+     */
+    bool ParseIntPair(const std::string& arg, std::pair<int, int>& x);
 
     /**
      * @brief Parse an MxNxK or MxNxKxB tuple from a string.

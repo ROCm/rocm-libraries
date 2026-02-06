@@ -180,10 +180,9 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
 
     if(!stridesAreUnique)
     {
-        HIPDNN_LOG_WARN("extractStrideOrder(): Stride lengths {} are not unique, the deduced "
-                        "stride order {} may not be correct",
-                        vecToString(strides),
-                        vecToString(strideOrder));
+        HIPDNN_SDK_LOG_WARN("extractStrideOrder(): Stride lengths "
+                            << vecToString(strides) << " are not unique, the deduced stride order "
+                            << vecToString(strideOrder) << " may not be correct.");
     }
 
     return strideOrder;

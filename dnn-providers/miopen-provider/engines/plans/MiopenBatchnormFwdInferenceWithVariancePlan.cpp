@@ -6,7 +6,7 @@
 
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 // We have made the intentional decision to hardcode the batchnorm mode to miopenBNSpatial
@@ -96,8 +96,9 @@ const std::optional<MiopenTensor>& BatchnormFwdInferenceWithVarianceParams::acti
 }
 
 BatchnormFwdInferenceWithVariancePlan::BatchnormFwdInferenceWithVariancePlan(
-    BatchnormFwdInferenceWithVarianceParams&& inferenceParams)
+    BatchnormFwdInferenceWithVarianceParams&& inferenceParams, bool benchmarkingEnabled)
     : _inferenceParams(std::move(inferenceParams))
+    , _benchmarkingEnabled(benchmarkingEnabled)
 {
 }
 
@@ -113,6 +114,9 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnEnginePluginHand
                                                     uint32_t numDeviceBuffers,
                                                     [[maybe_unused]] void* workspace) const
 {
+    // Set tuning policy based on benchmarking flag - RAII ensures restoration
+    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _benchmarkingEnabled);
+
     // Hardcoded values from bn_driver in miopen
     auto alpha = static_cast<float>(1);
     auto beta = static_cast<float>(0);
@@ -179,4 +183,4 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnEnginePluginHand
     }
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

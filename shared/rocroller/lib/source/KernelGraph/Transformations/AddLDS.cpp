@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -217,6 +217,8 @@ namespace rocRoller
                 auto loadLDSOp  = k.control.addElement(LoadLDSTile(varType));
                 auto storeLDSOp = k.control.addElement(StoreLDSTile(varType.dataType));
 
+                const auto isDirect2LDS = tile.memoryType == MemoryType::WAVE_Direct2LDS;
+
                 // Update tile
                 if(tile.memoryType == MemoryType::WAVE_Direct2LDS)
                     tile.memoryType = MemoryType::WAVE;
@@ -247,6 +249,11 @@ namespace rocRoller
                 k.mapper.connect<LDS>(storeLDSOp, ldsTag);
                 k.mapper.connect<User>(loadLDSOp, userTag);
                 k.mapper.connect<LDS>(loadLDSOp, ldsTag);
+                // Connection to LDS is required as LoadTileDirect2LDS acts as both
+                // LoadTile & StoreLDSTile and this connection is used create pre-operation
+                // barriers to syncronize LDS accesses when dependencies are loop-carried.
+                if(isDirect2LDS)
+                    k.mapper.connect<LDS>(opTag, ldsTag, 0);
 
                 if(isLoad)
                 {

@@ -38,14 +38,9 @@
 #include "csrsv_device.h"
 #include "rocsparse_assign_async.hpp"
 #include "rocsparse_common.h"
-#include "rocsparse_control.hpp"
-#include "rocsparse_csrsv_solve_kernel.hpp"
-#include "rocsparse_utility.hpp"
-#include <map>
 
 #include "rocsparse_csrsv_solve_kernel.hpp"
 #include "rocsparse_determine_indextype.hpp"
-#include <map>
 
 namespace rocsparse
 {
@@ -213,19 +208,26 @@ namespace rocsparse
                              rocsparse_indextype,
                              rocsparse_datatype>;
     // clang-format off
-#define CONFIG(A_,B_,C_,I_, J_, T_)				\
-  {									\
-    tpl_t(A_,B_,C_,I_, J_, T_),				\
-      launch_csrsv_kernel<A_,B_,C_,typename rocsparse::indextype_traits<I_>::type_t, \
-                          typename rocsparse::indextype_traits<J_>::type_t, \
-                          typename rocsparse::datatype_traits<T_>::type_t> \
-      }
+#define CONFIG(A_, B_, C_, I_, J_, T_)                                     \
+    {tpl_t(A_, B_, C_, I_, J_, T_),                                        \
+     launch_csrsv_kernel<A_,                                               \
+                         B_,                                               \
+                         C_,                                               \
+                         typename rocsparse::indextype_traits<I_>::type_t, \
+                         typename rocsparse::indextype_traits<J_>::type_t, \
+                         typename rocsparse::datatype_traits<T_>::type_t>}
     // clang-format on
 #define BLOCKSIZE 1024
     static const std::map<tpl_t, rocsparse::csrsv_launch_kernel_t> s_spmm_template_dispatch{{
 
         CONFIG(BLOCKSIZE,
                64,
+               true,
+               rocsparse_indextype_i32,
+               rocsparse_indextype_i32,
+               rocsparse_datatype_f32_r),
+        CONFIG(BLOCKSIZE,
+               64,
                false,
                rocsparse_indextype_i32,
                rocsparse_indextype_i32,
@@ -235,9 +237,8 @@ namespace rocsparse
                false,
                rocsparse_indextype_i32,
                rocsparse_indextype_i32,
-               rocsparse_datatype_f32_r)
+               rocsparse_datatype_f32_r),
 
-            ,
         CONFIG(BLOCKSIZE,
                64,
                true,
@@ -256,6 +257,7 @@ namespace rocsparse
                rocsparse_indextype_i32,
                rocsparse_indextype_i32,
                rocsparse_datatype_f32_c),
+
         CONFIG(BLOCKSIZE,
                64,
                true,
@@ -273,9 +275,8 @@ namespace rocsparse
                false,
                rocsparse_indextype_i32,
                rocsparse_indextype_i32,
-               rocsparse_datatype_f64_r)
+               rocsparse_datatype_f64_r),
 
-            ,
         CONFIG(BLOCKSIZE,
                64,
                true,
@@ -293,9 +294,8 @@ namespace rocsparse
                false,
                rocsparse_indextype_i32,
                rocsparse_indextype_i32,
-               rocsparse_datatype_f64_c)
+               rocsparse_datatype_f64_c),
 
-            ,
         CONFIG(BLOCKSIZE,
                64,
                true,
@@ -313,9 +313,8 @@ namespace rocsparse
                false,
                rocsparse_indextype_i64,
                rocsparse_indextype_i64,
-               rocsparse_datatype_f32_r)
+               rocsparse_datatype_f32_r),
 
-            ,
         CONFIG(BLOCKSIZE,
                64,
                true,
@@ -334,6 +333,7 @@ namespace rocsparse
                rocsparse_indextype_i64,
                rocsparse_indextype_i64,
                rocsparse_datatype_f32_c),
+
         CONFIG(BLOCKSIZE,
                64,
                true,
@@ -351,9 +351,8 @@ namespace rocsparse
                false,
                rocsparse_indextype_i64,
                rocsparse_indextype_i64,
-               rocsparse_datatype_f64_r)
+               rocsparse_datatype_f64_r),
 
-            ,
         CONFIG(BLOCKSIZE,
                64,
                true,
@@ -371,9 +370,8 @@ namespace rocsparse
                false,
                rocsparse_indextype_i64,
                rocsparse_indextype_i64,
-               rocsparse_datatype_f64_c)
+               rocsparse_datatype_f64_c),
 
-            ,
         CONFIG(BLOCKSIZE,
                64,
                true,
@@ -391,9 +389,8 @@ namespace rocsparse
                false,
                rocsparse_indextype_i32,
                rocsparse_indextype_i64,
-               rocsparse_datatype_f32_r)
+               rocsparse_datatype_f32_r),
 
-            ,
         CONFIG(BLOCKSIZE,
                64,
                true,
@@ -412,6 +409,7 @@ namespace rocsparse
                rocsparse_indextype_i32,
                rocsparse_indextype_i64,
                rocsparse_datatype_f32_c),
+
         CONFIG(BLOCKSIZE,
                64,
                true,
@@ -429,9 +427,8 @@ namespace rocsparse
                false,
                rocsparse_indextype_i32,
                rocsparse_indextype_i64,
-               rocsparse_datatype_f64_r)
+               rocsparse_datatype_f64_r),
 
-            ,
         CONFIG(BLOCKSIZE,
                64,
                true,
@@ -449,9 +446,8 @@ namespace rocsparse
                false,
                rocsparse_indextype_i32,
                rocsparse_indextype_i64,
-               rocsparse_datatype_f64_c)
+               rocsparse_datatype_f64_c),
 
-            ,
         CONFIG(BLOCKSIZE,
                64,
                true,
@@ -469,9 +465,8 @@ namespace rocsparse
                false,
                rocsparse_indextype_i64,
                rocsparse_indextype_i32,
-               rocsparse_datatype_f32_r)
+               rocsparse_datatype_f32_r),
 
-            ,
         CONFIG(BLOCKSIZE,
                64,
                true,
@@ -490,6 +485,7 @@ namespace rocsparse
                rocsparse_indextype_i64,
                rocsparse_indextype_i32,
                rocsparse_datatype_f32_c),
+
         CONFIG(BLOCKSIZE,
                64,
                true,
@@ -507,9 +503,8 @@ namespace rocsparse
                false,
                rocsparse_indextype_i64,
                rocsparse_indextype_i32,
-               rocsparse_datatype_f64_r)
+               rocsparse_datatype_f64_r),
 
-            ,
         CONFIG(BLOCKSIZE,
                64,
                true,

@@ -7,10 +7,10 @@
 #include <ostream>
 
 #include <hip/hip_bfloat16.h>
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <string>
 
-#define HIPDNN_NAN_BF16 ushort_as_bfloat16(static_cast<unsigned short>(0x7FFFU))
+#define HIPDNN_NAN_BF16 \
+    hipdnn_data_sdk::utilities::bfp16::ushort_as_bfloat16(static_cast<unsigned short>(0x7FFFU))
 
 inline __HOST_DEVICE__ hip_bfloat16 operator""_bf(long double value)
 {
@@ -80,12 +80,30 @@ inline __HOST_DEVICE__ hip_bfloat16 max(hip_bfloat16 a, hip_bfloat16 b)
 
 } // namespace std
 
-template <>
-struct fmt::formatter<hip_bfloat16> : fmt::formatter<float>
+namespace hipdnn_data_sdk::utilities
 {
-    template <typename FormatContext>
-    auto format(hip_bfloat16 bf, FormatContext& ctx) const
+
+/**
+ * @brief Wrapper for streaming hip_bfloat16 to ostream
+ *
+ * Usage: std::cout << StreamBfp16(value);
+ * Usage: HIPDNN_LOG_INFO("value: " << StreamBfp16(bf16_val));
+ */
+class StreamBfp16
+{
+public:
+    explicit StreamBfp16(hip_bfloat16 val)
+        : _val(val)
     {
-        return fmt::formatter<float>::format(static_cast<float>(bf), ctx);
     }
+
+    friend std::ostream& operator<<(std::ostream& os, const StreamBfp16& wrapper)
+    {
+        return os << static_cast<float>(wrapper._val);
+    }
+
+private:
+    hip_bfloat16 _val;
 };
+
+} // namespace hipdnn_data_sdk::utilities

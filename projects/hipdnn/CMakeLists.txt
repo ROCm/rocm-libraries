@@ -158,11 +158,13 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL
 )
 
 include(cmake/Dependencies.cmake)
+include(cmake/VersionUtils.cmake)
 include(cmake/CheckToolVersion.cmake)
 include(cmake/ClangCheck.cmake)
 include(cmake/ClangTidy.cmake)
 include(cmake/Sanitizers.cmake)
 include(cmake/Tests.cmake)
+include(cmake/Spdlog.cmake)
 
 # Add global compile options
 set(EXTRA_COMPILE_OPTIONS)
@@ -234,8 +236,8 @@ if(HIPDNN_ENABLE_COVERAGE)
 
     if(HIPDNN_BUILD_PLUGINS)
         set(MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT
-            -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libmiopen_legacy_plugin.so -object
-            ./${CMAKE_INSTALL_BINDIR}/miopen_legacy_plugin_tests
+            -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libmiopen_plugin.so -object
+            ./${CMAKE_INSTALL_BINDIR}/miopen_plugin_tests
         )
     endif()
 
