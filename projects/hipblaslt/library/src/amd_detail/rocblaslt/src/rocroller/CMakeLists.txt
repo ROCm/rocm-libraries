@@ -1,9 +1,10 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+add_library(hipblaslt-rocroller OBJECT)
+
 add_subdirectory(custom_kernels)
 
-add_library(hipblaslt-rocroller OBJECT)
 target_sources(hipblaslt-rocroller
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/custom_kernels.cpp"
