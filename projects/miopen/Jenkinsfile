@@ -78,7 +78,7 @@ def runBuildAndSingleGtestJob(def flags, def build_timeout_minutes=420, def gpu_
 }
 
 def runDockerBuild(String gpuFamily) {
-    node(rocmnode("nogpu")) {
+    node(rocmnode("gfx90a")) {
         try {
             withWorkingDir {
                 utils.getDockerImageWithStatus(gpu_family: gpuFamily)
