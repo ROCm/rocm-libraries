@@ -52,11 +52,11 @@ private:
     friend class ExecutionPlanBuilder;
 
 public:
-    ExecutionPlan()                     = default;
-    ExecutionPlan(const ExecutionPlan&) = default;
-    ExecutionPlan(ExecutionPlan&&)      = default;
+    ExecutionPlan()                                = default;
+    ExecutionPlan(const ExecutionPlan&)            = default;
+    ExecutionPlan(ExecutionPlan&&)                 = default;
     ExecutionPlan& operator=(const ExecutionPlan&) = default;
-    ExecutionPlan& operator=(ExecutionPlan&&) = default;
+    ExecutionPlan& operator=(ExecutionPlan&&)      = default;
 
     miopenHandle_t getHandle() const noexcept { return mHandle; }
     const EngineCfg& getEngineCfg() const noexcept { return mEngineCfg; }

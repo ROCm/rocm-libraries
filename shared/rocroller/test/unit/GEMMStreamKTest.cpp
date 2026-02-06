@@ -248,6 +248,7 @@ namespace GEMMTests
                 ::testing::Values(
                     // ProblemConfig: (dataTypeAB, macM, macN, macK, m, n, k, numWGs)
                     ProblemConfig{rocRoller::DataType::Half, 128, 128, 16, 128, 256, 15936, 128},
+                    ProblemConfig{rocRoller::DataType::Float, 128, 128, 64, 128, 128, 4096, 128},
                     ProblemConfig{rocRoller::DataType::Float,
                                   64,
                                   64,

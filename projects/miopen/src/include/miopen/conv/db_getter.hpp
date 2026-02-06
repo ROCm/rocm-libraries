@@ -50,7 +50,7 @@ class [[nodiscard]] DbGetter final
 public:
     explicit DbGetter(std::function<PerformanceDb()>&& init_);
 
-    DbGetter(const DbGetter&) = delete;
+    DbGetter(const DbGetter&)                    = delete;
     auto operator=(const DbGetter&) -> DbGetter& = delete;
 
     [[nodiscard]] auto operator()() -> PerformanceDb&;

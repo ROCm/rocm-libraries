@@ -153,16 +153,7 @@ void testing_axpby(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hy.data(), dy, sizeof(T) * size, hipMemcpyDeviceToHost));
 
         // CPU
-        for(int64_t i = 0; i < size; ++i)
-        {
-            hy_gold[i] = testing_mult(beta, hy_gold[i]);
-        }
-
-        for(int64_t i = 0; i < nnz; ++i)
-        {
-            hy_gold[hx_ind[i] - idxBase]
-                = testing_fma(alpha, hx_val[i], hy_gold[hx_ind[i] - idxBase]);
-        }
+        host_axpby(size, nnz, alpha, hx_val.data(), hx_ind.data(), beta, hy_gold.data(), idxBase);
 
         // Verify results against host
         unit_check_general(1, size, 1, hy_gold.data(), hy.data());
