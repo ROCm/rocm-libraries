@@ -44,10 +44,8 @@ public:
     static hipdnnPluginStatus_t
         getAllEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t* numEngines)
     {
-        LOG_API_ENTRY("engineIds={:p}, maxEngines={}, numEngines={:p}",
-                      static_cast<void*>(engineIds),
-                      maxEngines,
-                      static_cast<void*>(numEngines));
+        LOG_API_ENTRY("engineIds=" << static_cast<void*>(engineIds) << ", maxEngines=" << maxEngines
+                                   << ", numEngines=" << static_cast<void*>(numEngines));
 
         return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
             if(maxEngines != 0)
@@ -67,7 +65,7 @@ public:
                 engineIds[1] = hipdnn_tests::plugin_constants::engineId<KnobsPluginEngineB>();
             }
 
-            LOG_API_SUCCESS(apiName, "numEngines={}", *numEngines);
+            LOG_API_SUCCESS(apiName, "numEngines=" << *numEngines);
         });
     }
 
@@ -78,12 +76,11 @@ public:
                                                        uint32_t maxEngines,
                                                        uint32_t* numEngines)
     {
-        LOG_API_ENTRY("handle={:p}, opGraph={:p}, engineIds={:p}, maxEngines={}, numEngines={:p}",
-                      static_cast<void*>(handle),
-                      static_cast<const void*>(opGraph),
-                      static_cast<void*>(engineIds),
-                      maxEngines,
-                      static_cast<void*>(numEngines));
+        LOG_API_ENTRY("handle=" << static_cast<void*>(handle)
+                                << ", opGraph=" << static_cast<const void*>(opGraph)
+                                << ", engineIds=" << static_cast<void*>(engineIds)
+                                << ", maxEngines=" << maxEngines
+                                << ", numEngines=" << static_cast<void*>(numEngines));
 
         return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
             hipdnn_plugin_sdk::throwIfNull(handle);
@@ -105,7 +102,7 @@ public:
                 engineIds[1] = hipdnn_tests::plugin_constants::engineId<KnobsPluginEngineB>();
             }
 
-            LOG_API_SUCCESS(apiName, "numEngines={}", *numEngines);
+            LOG_API_SUCCESS(apiName, "numEngines=" << *numEngines);
         });
     }
 
