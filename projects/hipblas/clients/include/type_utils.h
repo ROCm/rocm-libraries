@@ -30,7 +30,9 @@
 #include <cmath>
 #include <complex>
 #include <cstdio>
+#if defined(__x86_64__) || defined(__i386__)
 #include <immintrin.h>
+#endif
 #include <iostream>
 #include <random>
 #include <type_traits>
