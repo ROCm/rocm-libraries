@@ -195,6 +195,9 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_csr]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_csc
   category: quick
@@ -212,6 +215,9 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_csr_row_split]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_csc
   category: quick
@@ -465,6 +471,9 @@ Tests:
   orderC: [rocsparse_order_column]
   filename: [nos2,
              nos5]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_csc
   category: pre_checkin
@@ -685,6 +694,9 @@ Tests:
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
   filename: [scircuit]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_csc
   category: nightly

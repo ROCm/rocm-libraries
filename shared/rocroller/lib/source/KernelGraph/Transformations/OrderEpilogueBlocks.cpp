@@ -213,7 +213,7 @@ namespace rocRoller
                     auto neighbors = graph.control.getOutputNodeIndices<Sequence>(currentNode)
                                          .to<std::vector>();
                     if(std::find(neighbors.begin(), neighbors.end(), nextNode) == neighbors.end())
-                        AssertFatal(false, "Sequence edge not found");
+                        Throw<FatalError>("Sequence edge not found");
 
                     graph.control.deleteElement<Sequence>(std::vector<int>{currentNode},
                                                           std::vector<int>{nextNode});

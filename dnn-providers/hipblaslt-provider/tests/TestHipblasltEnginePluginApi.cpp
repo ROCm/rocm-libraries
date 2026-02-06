@@ -297,8 +297,8 @@ TEST(TestGpuHipblasltEnginePluginApi, GetEngineDetailsValid)
     auto status = hipdnnEnginePluginGetEngineDetailsImpl(
         handle, HIPBLASLT_ENGINE_ID, &opGraph, &engineDetailsOut);
 
-    hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(engineDetailsOut.ptr,
-                                                          engineDetailsOut.size);
+    hipdnn_data_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(
+        engineDetailsOut.ptr, engineDetailsOut.size);
 
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
     EXPECT_EQ(engineDetails.engineId(), HIPBLASLT_ENGINE_ID);

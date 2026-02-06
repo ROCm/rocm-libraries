@@ -1240,12 +1240,14 @@ namespace rocRoller
                     co_yield loadMacroTileWAVECIACCUM(tag, load, coords);
                     break;
                 default:
-                    Throw<FatalError>("Layout type not supported yet for LoadTiled.");
+                    Throw<FatalError>(ShowValue(macTile.layoutType),
+                                      " Layout type not supported yet for LoadTiled.");
                 }
             }
             break;
             default:
-                Throw<FatalError>("Tile affinity type not supported yet for LoadTiled.");
+                Throw<FatalError>(ShowValue(macTile.memoryType),
+                                  " Tile affinity type not supported yet for LoadTiled.");
             }
         }
 

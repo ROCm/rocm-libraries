@@ -43,4 +43,4 @@ protected:
     miopenHandle_t _miopenHandle = nullptr;
 };
 
-} // namespace miopen_legacy_plugin::test_common
+} // namespace test_common

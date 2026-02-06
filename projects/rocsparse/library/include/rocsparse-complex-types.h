@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2019-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -254,12 +254,7 @@ namespace std
     template <typename T>
     __device__ __host__ inline T abs(const rocsparse_complex_num<T>& z)
     {
-        T real = rocsparse_complex_num<T>::abs(z.x);
-        T imag = rocsparse_complex_num<T>::abs(z.y);
-
-        return real > imag ? (imag /= real, real * rocsparse_complex_num<T>::sqrt(imag * imag + 1))
-               : imag      ? (real /= imag, imag * rocsparse_complex_num<T>::sqrt(real * real + 1))
-                           : 0;
+        return std::hypot(z.x, z.y);
     }
 }
 
