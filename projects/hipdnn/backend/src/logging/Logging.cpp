@@ -2,11 +2,12 @@
 // SPDX-License-Identifier:  MIT
 
 #include "Logging.hpp"
+#include "ComponentFormatter.hpp"
 #include "PlatformUtils.hpp"
 
 #include <hipdnn_data_sdk/logging/CallbackTypes.h>
-#include <hipdnn_data_sdk/logging/ComponentFormatter.hpp>
-#include <hipdnn_data_sdk/logging/LoggingUtils.hpp>
+#include <hipdnn_data_sdk/logging/LogLevel.hpp>
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <iostream>
 
@@ -92,8 +93,16 @@ void initialize()
             return;
         }
 
+        // Initialize the log level from environment variable
+        hipdnn_data_sdk::logging::initializeLogLevel();
+
+        // Register the global callback so non-backend components can send logs to the backend
+        hipdnn_data_sdk::logging::registerLoggingCallback(hipdnnLoggingCallback);
+
+        std::string logLevel = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
+
         // It doesn't need to return if logLevel == off, but it avoids unnecessary initialization
-        if(!hipdnn_data_sdk::logging::isLoggingEnabled())
+        if(logLevel == "off")
         {
             s_loggingInitialized = true;
             return;
@@ -104,7 +113,6 @@ void initialize()
             spdlog::init_thread_pool(8192, 1);
         }
 
-        std::string logLevel = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
         std::string logFilePath = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_FILE");
 
         std::shared_ptr<spdlog::sinks::sink> sharedSink;
@@ -124,11 +132,14 @@ void initialize()
         // However, we need one destination sink for thread safety because the mutex is attached to the sink.
         // Therefore, we implement a custom formatter to have distinct formatting for the backend, which does not use a callback sink.
         backendLogger->set_formatter(
-            std::make_unique<hipdnn_data_sdk::logging::ComponentFormatter>());
+            std::make_unique<hipdnn::backend::logging::ComponentFormatter>());
         spdlog::register_logger(backendLogger);
 
         auto callbackReceiverLogger = std::make_shared<spdlog::async_logger>(
             S_CALLBACK_RECEIVER_LOGGER_NAME, sharedSink, spdlog::thread_pool());
+        // Use ComponentFormatter which detects "hipdnn_callback_receiver" and applies appropriate formatting
+        callbackReceiverLogger->set_formatter(
+            std::make_unique<hipdnn::backend::logging::ComponentFormatter>());
         spdlog::register_logger(callbackReceiverLogger);
 
         setLogLevel(logLevel);
