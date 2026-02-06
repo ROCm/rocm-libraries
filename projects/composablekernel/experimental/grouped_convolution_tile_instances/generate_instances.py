@@ -239,19 +239,49 @@ def parse_bwd_weight_instances(instances, problem_name):
             continue
 
         device_op_name = instance.split("<")[0]
-        if device_op_name.find("Explicit") != -1:
-            # Skip the explicit GEMM instances for now.
-            print(f"Skipping instance {instance_id} with device op {device_op_name} since it's not supported yet.")
-            continue
+        start = instance.index('<') + 1
+        end = instance.rindex('>')
+        params_str = instance[start:end]
+        args = parse_instance_string(params_str)
+
+        is_v3_instance = instance.find("Xdl_CShuffleV3") != -1
+        is_two_stage_instance = instance.find("TwoStage") != -1
+        is_explicit_gemm = device_op_name.find("Explicit") != -1
+
+        if is_explicit_gemm:
+            gemm_params = device_op_name = instance.split("<")[2].split(">")[1].split(",")
+            args = [param.split(":")[1].strip() for param in gemm_params]
+
+            spec = "Default"
+            block_size = int(args[0])
+
+            mnk_per_block = args[1].split("x")
+            m_per_block = int(mnk_per_block[0])
+            n_per_block = int(mnk_per_block[1])
+            k_per_block = int(mnk_per_block[2])
+            
+            wave_tile = args[2].split("x")
+            m_per_xdl = int(wave_tile[0])
+            n_per_xdl = int(wave_tile[1])
+
+            wave_map = args[3].split("x")
+            m_xdl_per_wave = int(wave_map[0])
+            n_xdl_per_wave = int(wave_map[1])
+
+            vector_read = args[4].split("x")
+            a_scalar_per_vector = int(vector_read[0])
+            b_scalar_per_vector = int(vector_read[1])
+
+            # Explicit GEMM doesn't need cshuffle for output tensor.
+            # Let's use an invalid value to indicate that.
+            c_scalar_per_vector = -1
+
+            num_groups_to_merge = 1
+
+            # Block GEMM pipeline parameters
+            blk_gemm_pipeline_schduler = args[5]
+            blk_gemm_pipeline_version = args[6]
         else:
-            start = instance.index('<') + 1
-            end = instance.rindex('>')
-            params_str = instance[start:end]
-            args = parse_instance_string(params_str)
-
-            is_v3_instance = instance.find("Xdl_CShuffleV3") != -1
-            is_two_stage_instance = instance.find("TwoStage") != -1
-
             spec = args[11]
             block_size = int(args[12])
             m_per_block = int(args[13])
@@ -291,44 +321,47 @@ def parse_bwd_weight_instances(instances, problem_name):
                 blk_gemm_pipeline_schduler = "Intrawave"
                 blk_gemm_pipeline_version = "v1"
 
-            # Sanity check for Block GEMM pipeline parameters
-            # Scheduler must be either Intrawave or Interwave.
-            # Version must be from v1 to v5
-            if blk_gemm_pipeline_schduler not in ["Intrawave", "Interwave"]:
-                raise RuntimeError(f"Invalid Block GEMM pipeline scheduler: {blk_gemm_pipeline_schduler} in instance: {instance}")
-            if blk_gemm_pipeline_version not in ["v1", "v2", "v3", "v4", "v5"]:
-                raise RuntimeError(f"Invalid Block GEMM pipeline version: {blk_gemm_pipeline_version} in instance: {instance}")
+        # Common part to all solvers.
 
-            split_image = instance.find("Large") != -1
-            double_smem_buffer = blk_gemm_pipeline_version == "v4"
-            num_wave_groups = 2 if blk_gemm_pipeline_version == "v5" else 1
-            scheduler = blk_gemm_pipeline_schduler
-            pipeline_version = blk_gemm_pipeline_version
-   
-            m_warp = int(m_per_block / (m_per_xdl * m_xdl_per_wave))
-            n_warp = int(n_per_block / (n_per_xdl * n_xdl_per_wave))
-            warp_size = 64
-            k_warp = int(block_size / (warp_size * m_warp * n_warp))
-            dtype = get_dtype(problem_name)
-            # TODO: Make it more flexible
-            k_per_xdl = 8 if dtype == "float" else 16
+        # Sanity check for Block GEMM pipeline parameters
+        # Scheduler must be either Intrawave or Interwave.
+        # Version must be from v1 to v5
+        if blk_gemm_pipeline_schduler not in ["Intrawave", "Interwave"]:
+            raise RuntimeError(f"Invalid Block GEMM pipeline scheduler: {blk_gemm_pipeline_schduler} in instance: {instance}")
+        if blk_gemm_pipeline_version not in ["v1", "v2", "v3", "v4", "v5"]:
+            raise RuntimeError(f"Invalid Block GEMM pipeline version: {blk_gemm_pipeline_version} in instance: {instance}")
 
-            conv = ConvInstanceTemplateParams(
-                spec,
-                [m_per_block, n_per_block, k_per_block],
-                [m_warp, n_warp, k_warp],
-                [m_per_xdl, n_per_xdl, k_per_xdl],
-                double_smem_buffer,
-                num_wave_groups,
-                pipeline_version,
-                scheduler,
-                [a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector],
-                num_groups_to_merge,
-                split_image,
-                False, # explicit_gemm
-                instance_id,
-            )
-            convs.append(conv)
+        split_image = instance.find("Large") != -1
+        double_smem_buffer = blk_gemm_pipeline_version == "v4"
+        num_wave_groups = 2 if blk_gemm_pipeline_version == "v5" else 1
+        scheduler = blk_gemm_pipeline_schduler
+        pipeline_version = blk_gemm_pipeline_version
+
+        m_warp = int(m_per_block / (m_per_xdl * m_xdl_per_wave))
+        n_warp = int(n_per_block / (n_per_xdl * n_xdl_per_wave))
+        warp_size = 64
+        k_warp = int(block_size / (warp_size * m_warp * n_warp))
+        dtype = get_dtype(problem_name)
+        # TODO: Make it more flexible
+        k_per_xdl = 8 if dtype == "float" else 16
+
+        conv = ConvInstanceTemplateParams(
+            spec,
+            [m_per_block, n_per_block, k_per_block],
+            [m_warp, n_warp, k_warp],
+            [m_per_xdl, n_per_xdl, k_per_xdl],
+            double_smem_buffer,
+            num_wave_groups,
+            pipeline_version,
+            scheduler,
+            [a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector],
+            num_groups_to_merge,
+            split_image,
+            is_explicit_gemm,
+            instance_id,
+        )
+        convs.append(conv)
+            
     return convs
 
 def parse_bwd_data_instances(instances, problem_name):
