@@ -301,31 +301,15 @@ RUN echo Building for GPU Archs: ${THEROCK_ASIC} && \
     #########################################################################
     ## Determine number of build threads based on CPU cores and RAM
     #########################################################################
-    cpu_threads="$(nproc)" && \
-    mem_limit_bytes="" && \
-    if [ -r /sys/fs/cgroup/memory.max ]; then \
-        mem_limit_bytes="$(cat /sys/fs/cgroup/memory.max)"; \
-    fi && \
-    if [ -n "$mem_limit_bytes" ] && [ "$mem_limit_bytes" != "max" ]; then \
-        mem_bytes="$mem_limit_bytes"; \
-    else \
-        mem_kb="$(awk '/MemTotal/ {print $2}' /proc/meminfo)" && \
-        mem_bytes="$((mem_kb * 1024))"; \
-    fi && \
-    mem_gb="$((mem_bytes / 1024 / 1024 / 1024))" && \
-    if [ "$mem_gb" -lt 200 ]; then \
-        ram_cap=64; \
-    elif [ "$mem_gb" -ge 1024 ]; then \
-        ram_cap=512; \
-    else \
-        ram_cap="$((64 + ((mem_gb - 200) * 192) / 824))"; \
-        [ "$ram_cap" -lt 64 ] && ram_cap=64; \
-        [ "$ram_cap" -gt 256 ] && ram_cap=256; \
-    fi && \
-    num_threads="$cpu_threads" && \
-    [ "$num_threads" -gt "$ram_cap" ] && num_threads="$ram_cap" && \
+    # Calculate optimal build threads based on available memory
+    cpu_cores=$(nproc) && \
+    mem_gb=$(awk '/MemTotal/ {printf "%.0f", $2/1024/1024}' /proc/meminfo) && \
+    # Use 1 thread per ~4GB of RAM, capped by CPU cores
+    mem_threads=$((mem_gb / 4)) && \
+    num_threads=$((mem_threads < cpu_cores ? mem_threads : cpu_cores)) && \
+    # Ensure at least 1 thread
     [ "$num_threads" -lt 1 ] && num_threads=1 && \
-    echo "Detected mem=${mem_gb}GB, nproc=${cpu_threads}, Building CK with -j${num_threads}" && \
+    echo "Building CK with ${num_threads} threads (CPU: ${cpu_cores}, Memory: ${mem_gb}GB)" && \
     #########################################################################
     CXX=/opt/rocm/llvm/bin/amdclang++ cmake \
     -D CMAKE_PREFIX_PATH=/opt/rocm \
