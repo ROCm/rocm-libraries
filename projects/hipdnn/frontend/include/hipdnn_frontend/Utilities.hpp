@@ -13,7 +13,6 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <numeric>
-#include <ranges>
 #include <vector>
 
 #include <hipdnn_frontend/backend/BackendWrapper.hpp>
