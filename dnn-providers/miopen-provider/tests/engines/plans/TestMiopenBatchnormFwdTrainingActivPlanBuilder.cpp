@@ -158,8 +158,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
                                                               builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx),
-                 std::invalid_argument);
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx), std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 
@@ -260,8 +259,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
                                                               builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx),
-                 std::invalid_argument);
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, ctx), std::invalid_argument);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 

@@ -377,8 +377,8 @@ void buildPlanFwd(const HipdnnEnginePluginHandle& handle,
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
     ConvFwdParams params(attr, opGraph.getTensorMap());
-    auto plan = std::make_unique<ConvFwdPlan>(handle, std::move(params),
-                                              executionContext.executionSettings());
+    auto plan = std::make_unique<ConvFwdPlan>(
+        handle, std::move(params), executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -389,8 +389,8 @@ void buildPlanBwd(const HipdnnEnginePluginHandle& handle,
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
     ConvBwdParams params(attr, opGraph.getTensorMap());
-    auto plan = std::make_unique<ConvBwdPlan>(handle, std::move(params),
-                                              executionContext.executionSettings());
+    auto plan = std::make_unique<ConvBwdPlan>(
+        handle, std::move(params), executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -401,8 +401,8 @@ void buildPlanWrw(const HipdnnEnginePluginHandle& handle,
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
     ConvWrwParams params(attr, opGraph.getTensorMap());
-    auto plan = std::make_unique<ConvWrwPlan>(handle, std::move(params),
-                                              executionContext.executionSettings());
+    auto plan = std::make_unique<ConvWrwPlan>(
+        handle, std::move(params), executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -574,10 +574,9 @@ void MiopenConvPlanBuilder::initializeExecutionSettings(
     }
 }
 
-void MiopenConvPlanBuilder::buildPlan(
-    const HipdnnEnginePluginHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    HipdnnEnginePluginExecutionContext& executionContext) const
+void MiopenConvPlanBuilder::buildPlan(const HipdnnEnginePluginHandle& handle,
+                                      const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                                      HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(opGraph.nodeCount() != 1)
     {

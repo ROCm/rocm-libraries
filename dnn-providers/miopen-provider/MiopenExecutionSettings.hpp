@@ -12,8 +12,8 @@ struct MiopenExecutionSettings
 {
     enum class DebugMode
     {
-        NONE,                          // Debug mode disabled (default)
-        LOG_ALL_FOUND_PLAN_ALGORITHMS  // Log all found plan algorithms
+        NONE, // Debug mode disabled (default)
+        LOG_ALL_FOUND_PLAN_ALGORITHMS // Log all found plan algorithms
     };
 
     void setBenchmarkingEnabled(bool enabled)

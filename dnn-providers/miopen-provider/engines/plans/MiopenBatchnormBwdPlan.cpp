@@ -116,7 +116,8 @@ const std::optional<MiopenTensor>& BatchnormBwdParams::optBias() const
     return _optBias;
 }
 
-BatchnormBwdPlan::BatchnormBwdPlan(BatchnormBwdParams&& params, const MiopenExecutionSettings& executionSettings)
+BatchnormBwdPlan::BatchnormBwdPlan(BatchnormBwdParams&& params,
+                                   const MiopenExecutionSettings& executionSettings)
     : _params(std::move(params))
     , _executionSettings(executionSettings)
 {

@@ -136,11 +136,10 @@ void ConvWrwPlan::execute(const HipdnnEnginePluginHandle& handle,
     // The selected algorithm is cached to avoid redundant find calls on subsequent executions.
     if(!_algorithm.has_value())
     {
-        int requestCount
-            = (_executionSettings.debugMode()
-               == MiopenExecutionSettings::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
-                  ? 10
-                  : 1;
+        int requestCount = (_executionSettings.debugMode()
+                            == MiopenExecutionSettings::DebugMode::LOG_ALL_FOUND_PLAN_ALGORITHMS)
+                               ? 10
+                               : 1;
 
         std::vector<miopenConvAlgoPerf_t> perfResults(static_cast<size_t>(requestCount));
         int returnedAlgoCount;

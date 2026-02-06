@@ -28,10 +28,9 @@ public:
                               const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
         = 0;
 
-    virtual size_t
-        getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                            const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                            const MiopenExecutionSettings& executionSettings) const
+    virtual size_t getMaxWorkspaceSize(const HipdnnEnginePluginHandle& handle,
+                                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                                       const MiopenExecutionSettings& executionSettings) const
         = 0;
 
     virtual void initializeExecutionSettings(
@@ -42,8 +41,9 @@ public:
         = 0;
 
     virtual void buildPlan(const HipdnnEnginePluginHandle& handle,
-                          const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                          HipdnnEnginePluginExecutionContext& executionContext) const = 0;
+                           const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                           HipdnnEnginePluginExecutionContext& executionContext) const
+        = 0;
 
     virtual std::vector<hipdnn_data_sdk::data_objects::KnobT>
         getCustomKnobs(const HipdnnEnginePluginHandle& handle,

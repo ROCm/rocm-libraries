@@ -147,7 +147,8 @@ size_t MiopenEngine::getMaxWorkspaceSize(
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
-            planBuilder->initializeExecutionSettings(handle, opGraph, engineConfig, executionSettings);
+            planBuilder->initializeExecutionSettings(
+                handle, opGraph, engineConfig, executionSettings);
             return planBuilder->getMaxWorkspaceSize(handle, opGraph, executionSettings);
         }
     }
@@ -167,7 +168,8 @@ void MiopenEngine::initializeExecutionContext(
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
-            planBuilder->initializeExecutionSettings(handle, opGraph, engineConfig, executionSettings);
+            planBuilder->initializeExecutionSettings(
+                handle, opGraph, engineConfig, executionSettings);
             break;
         }
     }
