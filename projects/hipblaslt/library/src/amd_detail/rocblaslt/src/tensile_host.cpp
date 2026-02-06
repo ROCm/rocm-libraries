@@ -318,10 +318,8 @@ namespace
             return TensileLite::ActivationType::Sigmoid;
         case ROCBLASLT_EPILOGUE_BIAS:
         case ROCBLASLT_EPILOGUE_DEFAULT:
-        case ROCBLASLT_EPILOGUE_DGELU_BGRADA:
-        case ROCBLASLT_EPILOGUE_DGELU_BGRADB:
-        case ROCBLASLT_EPILOGUE_DRELU_BGRADA:
-        case ROCBLASLT_EPILOGUE_DRELU_BGRADB:
+        case ROCBLASLT_EPILOGUE_BGRADA:
+        case ROCBLASLT_EPILOGUE_BGRADB:
             break;
         }
         return TensileLite::ActivationType::None;
@@ -331,16 +329,10 @@ namespace
     {
         switch(epilogue)
         {
-        case ROCBLASLT_EPILOGUE_DGELU_BGRADA:
+        case ROCBLASLT_EPILOGUE_BGRADA:
             return TensileLite::ContractionProblemGemm::TENSOR::A;
             break;
-        case ROCBLASLT_EPILOGUE_DGELU_BGRADB:
-            return TensileLite::ContractionProblemGemm::TENSOR::B;
-            break;
-        case ROCBLASLT_EPILOGUE_DRELU_BGRADA:
-            return TensileLite::ContractionProblemGemm::TENSOR::A;
-            break;
-        case ROCBLASLT_EPILOGUE_DRELU_BGRADB:
+        case ROCBLASLT_EPILOGUE_BGRADB:
             return TensileLite::ContractionProblemGemm::TENSOR::B;
             break;
         default:
@@ -359,10 +351,8 @@ namespace
         case ROCBLASLT_EPILOGUE_DGELU_BGRAD:
         case ROCBLASLT_EPILOGUE_DRELU_BGRAD:
         case ROCBLASLT_EPILOGUE_BIAS:
-        case ROCBLASLT_EPILOGUE_DGELU_BGRADA:
-        case ROCBLASLT_EPILOGUE_DGELU_BGRADB:
-        case ROCBLASLT_EPILOGUE_DRELU_BGRADA:
-        case ROCBLASLT_EPILOGUE_DRELU_BGRADB:
+        case ROCBLASLT_EPILOGUE_BGRADA:
+        case ROCBLASLT_EPILOGUE_BGRADB:
         case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
         case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
             return true;
