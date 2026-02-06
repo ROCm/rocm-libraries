@@ -1645,6 +1645,8 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
 def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
     optSchedule = dict()
     syncCode = []
+    numMfma = 56
+    numCodePaths = 1
 
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     if isTN(kernel) and not useLDSTr and TLDS==1:
@@ -1715,12 +1717,73 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
                     SBarrier(comment=""),
                    ]
         nglshift = nllshift = 11 # vmcnt shift for ngl and nll
+    elif isNT(kernel) and useLDSTr and TLDS == 0:
+        # Global read scheduling:
+        # Each GR has two instructions (addr update + buffer_load), so we list them explicitly as
+        # two adjacent MFMA indices per GR.
+        kernel["SwapGlobalReadOrder"] = True
+        numCodePaths = 2
+
+        syncTable = [
+            # Loop start:
+            # - LRB1 waits previous-iter GRB
+            # - LRA1 waits previous-iter GRA
+            -1, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1/LRB1 before starting main loop"),
+
+            # After early MFMAs (keep prior-iter LR fully fenced)
+            3,  SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1/LRB1 for the remaining main loop"),
+
+            # GRB must wait for LRB0 (interleave LRA0 + GRB safely)
+            15, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete to start GRB"),
+            15, SBarrier(comment=""),
+
+            # GRA must wait for LRA0; LRB1 can be interleaved with GRA after this fence
+            27, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0/GRB to complete to start GRA/LRB1"),
+            27, SBarrier(comment=""),
+
+            # Mid-loop global-read safety fence (GR-to-LDS)
+            30, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Mid-loop fence (wait for outstanding GR-to-LDS)"),
+            30, SBarrier(comment=""),
+
+            # Ensure all GR-to-LDS are complete before LRA1 (next-iter A LDS reads)
+            43, SWaitCnt(dscnt=-1, vlcnt=11-2, vscnt=-1, comment="Wait for all GR-to-LDS to complete before LRA1"),
+            43, SBarrier(comment=""),
+        ]
+
+        optSchedule = {
+            'SYNC'   : [syncTable[::2]],
+            # Swap A/B increments
+            'GRIncB' : [[0, 0, 1, 1, 2, 2, 4, 4, 5]],
+            'GRIncA' : [[5, 6, 6, 7, 7, 8, 8, 9, 9]],
+
+            'LRB0'   : [[0, 1, 2, 3, 4, 5, 6, 7],
+                        [1, 2, 3, 4, 5, 6, 7, 8]],
+            'LRA0'   : [[9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22],
+                        [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]],
+
+            'GRA'    : [[14,15, 17,18, 20,21, 23,24],
+                        [15,16, 18,19, 21,22, 24,25]],
+            'GRB'    : [[28,29, 31,32, 34,35, 37,38, 40,41, 43,44, 46,47],
+                        [29,30, 32,33, 35,36, 38,39, 41,42, 44,45, 45,46]],
+
+            'LRB1'   : [[30, 31, 32, 33, 34, 35, 36, 37],
+                        [31, 32, 33, 34, 35, 36, 37, 38]],
+            'LRA1'   : [[43, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55]],
+
+            'LRSA'   : [[24]],
+            'LRSB'   : [[25]],
+            'LWSA'   : [[48]],
+            'LWSB'   : [[49]],
+            'LCC'    : [[53, 54]],
+        }
+
+        syncCode = syncTable[1::2]
+        nglshift = nllshift = 11
     else:
         return False, None
 
     kernel["MfmaInitCVgprs"] = True
-    numMfma = 56
-    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    opt1 = ScheduleInfo(numCodePaths, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
 @RegisterSchedule(
