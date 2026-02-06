@@ -116,7 +116,7 @@ protected:
         TensorData(TensorData&&)      = default;
 
         TensorData& operator=(const TensorData&) = delete;
-        TensorData& operator=(TensorData&&) = default;
+        TensorData& operator=(TensorData&&)      = default;
 
         ~TensorData() = default;
     };

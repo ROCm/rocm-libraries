@@ -207,9 +207,9 @@ public:
         assert(handle);
     }
 
-    SegmentedGpuBuffer(SegmentedGpuBuffer&)  = delete;
-    SegmentedGpuBuffer(SegmentedGpuBuffer&&) = delete;
-    SegmentedGpuBuffer& operator=(SegmentedGpuBuffer&) = delete;
+    SegmentedGpuBuffer(SegmentedGpuBuffer&)             = delete;
+    SegmentedGpuBuffer(SegmentedGpuBuffer&&)            = delete;
+    SegmentedGpuBuffer& operator=(SegmentedGpuBuffer&)  = delete;
     SegmentedGpuBuffer& operator=(SegmentedGpuBuffer&&) = delete;
 
     miopen::shared<Data_t> operator()(std::size_t size)
@@ -376,9 +376,9 @@ public:
             transpose(*handle);
     }
 
-    ProblemTensorTransposeGroup(ProblemTensorTransposeGroup&)  = delete;
-    ProblemTensorTransposeGroup(ProblemTensorTransposeGroup&&) = delete;
-    ProblemTensorTransposeGroup& operator=(ProblemTensorTransposeGroup&) = delete;
+    ProblemTensorTransposeGroup(ProblemTensorTransposeGroup&)             = delete;
+    ProblemTensorTransposeGroup(ProblemTensorTransposeGroup&&)            = delete;
+    ProblemTensorTransposeGroup& operator=(ProblemTensorTransposeGroup&)  = delete;
     ProblemTensorTransposeGroup& operator=(ProblemTensorTransposeGroup&&) = delete;
 
     ~ProblemTensorTransposeGroup()
@@ -454,10 +454,12 @@ struct TransposingSolver : Base
         return ws_size;
     }
 
-    ConvSolution GetSolution(const ExecutionContext& ctx, const Problem& problem) const override
+    ConvSolution GetSolution(const ExecutionContext& ctx,
+                             const Problem& problem,
+                             const typename Inner::PerformanceConfigType& config) const override
     {
         auto transposed_problem = Transpose(problem);
-        ConvSolution sln        = Inner{}.GetSolution(ctx, transposed_problem);
+        ConvSolution sln        = Inner{}.GetSolution(ctx, transposed_problem, config);
         // NOLINTNEXTLINE (bugprone-unchecked-optional-access)
         auto old_factory             = sln.invoker_factory.value();
         const auto old_kernels_end   = sln.construction_params.size();

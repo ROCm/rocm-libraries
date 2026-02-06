@@ -158,11 +158,13 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL
 )
 
 include(cmake/Dependencies.cmake)
+include(cmake/VersionUtils.cmake)
 include(cmake/CheckToolVersion.cmake)
 include(cmake/ClangCheck.cmake)
 include(cmake/ClangTidy.cmake)
 include(cmake/Sanitizers.cmake)
 include(cmake/Tests.cmake)
+include(cmake/Spdlog.cmake)
 
 # Add global compile options
 set(EXTRA_COMPILE_OPTIONS)

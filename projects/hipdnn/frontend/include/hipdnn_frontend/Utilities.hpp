@@ -8,16 +8,34 @@
 #include <algorithm>
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/logging/CallbackTypes.h>
+#include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
-#include <hipdnn_data_sdk/logging/LoggingUtils.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <numeric>
 #include <ranges>
 #include <vector>
 
+#include <hipdnn_frontend/backend/BackendWrapper.hpp>
+
 namespace hipdnn_frontend
 {
+
+// When an error occurs, get the backend error string and append it to the error_message.
+#define HIPDNN_RETURN_ON_BACKEND_FAILURE(backend_status, error_message)                     \
+    do                                                                                      \
+    {                                                                                       \
+        if((backend_status) != HIPDNN_STATUS_SUCCESS)                                       \
+        {                                                                                   \
+            std::array<char, 1024> backend_err_msg{};                                       \
+            hipdnn_frontend::hipdnnBackend()->getLastErrorString(backend_err_msg.data(),    \
+                                                                 backend_err_msg.size());   \
+            std::string full_error_msg                                                      \
+                = std::string(error_message) + " Backend error: " + backend_err_msg.data(); \
+            return Error(ErrorCode::HIPDNN_BACKEND_ERROR, full_error_msg);                  \
+        }                                                                                   \
+    } while(0)
+
 namespace graph
 {
 // Find common shape from inputs.
@@ -409,7 +427,11 @@ inline Error validateScalarParameter(const std::shared_ptr<TensorAttributes>& pa
 }
 }
 
-inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCallback_ext)
+inline constexpr const char* K_COMPONENT_NAME = "hipdnn_frontend";
+
+// HIPDNN_HIDDEN ensures each shared object has its own copy of the static variable
+HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
+                                                       = hipdnnLoggingCallback_ext)
 {
     if(fn == nullptr)
     {
@@ -417,51 +439,59 @@ inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCall
     }
 
     static bool s_loggingInitialized = false;
-    static bool s_loggingEnabled = hipdnn_data_sdk::logging::isLoggingEnabled();
 
-    if(s_loggingInitialized || !s_loggingEnabled)
+    if(s_loggingInitialized)
     {
         return 0;
     }
 
-#ifdef COMPONENT_NAME
-    hipdnn::logging::initializeCallbackLogging(COMPONENT_NAME, fn);
-#else
-    return -1;
-#endif
+    // Initialize log level from environment variable
+    hipdnn_data_sdk::logging::initializeLogLevel();
+
+    // Register the callback so log messages get routed to the backend
+    hipdnn_data_sdk::logging::registerLoggingCallback(fn);
 
     s_loggingInitialized = true;
-    HIPDNN_LOG_INFO("Frontend logging initialized via callback.");
+
+    // Use this logging macro directly to avoid re-entrant logging call.
+    HIPDNN_SDK_LOG_INFO_WITH_COMPONENT(K_COMPONENT_NAME, "Frontend logging initialized");
 
     return 0;
 }
 
-#define HIPDNN_FE_LOG_INFO(...)                       \
-    do                                                \
-    {                                                 \
-        hipdnn_frontend::initializeFrontendLogging(); \
-        HIPDNN_LOG_INFO(__VA_ARGS__);                 \
+// ============================================================================
+// Frontend Logging Macros (HIPDNN_FE_LOG_*)
+// ============================================================================
+// These macros auto-initialize logging on first use, then log with "hipdnn_frontend"
+// as the component name.
+// Usage: HIPDNN_FE_LOG_INFO("Message " << value);
+
+#define HIPDNN_FE_LOG_INFO(msg)                                                     \
+    do                                                                              \
+    {                                                                               \
+        hipdnn_frontend::initializeFrontendLogging();                               \
+        HIPDNN_SDK_LOG_INFO_WITH_COMPONENT(hipdnn_frontend::K_COMPONENT_NAME, msg); \
     } while(0)
 
-#define HIPDNN_FE_LOG_WARN(...)                       \
-    do                                                \
-    {                                                 \
-        hipdnn_frontend::initializeFrontendLogging(); \
-        HIPDNN_LOG_WARN(__VA_ARGS__);                 \
+#define HIPDNN_FE_LOG_WARN(msg)                                                     \
+    do                                                                              \
+    {                                                                               \
+        hipdnn_frontend::initializeFrontendLogging();                               \
+        HIPDNN_SDK_LOG_WARN_WITH_COMPONENT(hipdnn_frontend::K_COMPONENT_NAME, msg); \
     } while(0)
 
-#define HIPDNN_FE_LOG_ERROR(...)                      \
-    do                                                \
-    {                                                 \
-        hipdnn_frontend::initializeFrontendLogging(); \
-        HIPDNN_LOG_ERROR(__VA_ARGS__);                \
+#define HIPDNN_FE_LOG_ERROR(msg)                                                     \
+    do                                                                               \
+    {                                                                                \
+        hipdnn_frontend::initializeFrontendLogging();                                \
+        HIPDNN_SDK_LOG_ERROR_WITH_COMPONENT(hipdnn_frontend::K_COMPONENT_NAME, msg); \
     } while(0)
 
-#define HIPDNN_FE_LOG_FATAL(...)                      \
-    do                                                \
-    {                                                 \
-        hipdnn_frontend::initializeFrontendLogging(); \
-        HIPDNN_LOG_FATAL(__VA_ARGS__);                \
+#define HIPDNN_FE_LOG_FATAL(msg)                                                     \
+    do                                                                               \
+    {                                                                                \
+        hipdnn_frontend::initializeFrontendLogging();                                \
+        HIPDNN_SDK_LOG_FATAL_WITH_COMPONENT(hipdnn_frontend::K_COMPONENT_NAME, msg); \
     } while(0)
 
 }

@@ -2,6 +2,16 @@
 
 Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).
 
+## hipBLASLt 1.2.2 for ROCm 7.2.1
+
+### Added
+
+* Support for AMD SMI.
+
+### Deprecation
+
+* ROCm SMI is deprecated and dependencies are removed.
+
 ## hipBLASLt 1.2.1 for ROCm 7.2.1
 
 ### Resolved issues

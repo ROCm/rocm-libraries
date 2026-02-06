@@ -112,9 +112,9 @@ private:
 
         if(relativeRmsError > _relativeTolerance)
         {
-            HIPDNN_LOG_ERROR("Validation failed: relative rms error = {}, relative tolerance = {}",
-                             relativeRmsError,
-                             _relativeTolerance);
+            HIPDNN_SDK_LOG_ERROR("Validation failed: relative rms error = "
+                                 << relativeRmsError
+                                 << ", relative tolerance = " << _relativeTolerance);
         }
 
         return relativeRmsError <= _relativeTolerance;

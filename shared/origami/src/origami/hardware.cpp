@@ -35,6 +35,26 @@ hardware_t::hardware_t(architecture_t arch,
     , mem_bw_per_wg_coefficients(mem_bw_per_wg_coefficients)
     , NUM_XCD(NUM_XCD) {}
 
+hardware_t::hardware_t(architecture_t arch,
+                       size_t N_CU,
+                       size_t lds_capacity,
+                       const architecture_constants& constants,
+                       size_t L2_capacity,
+                       double compute_clock_ghz)
+    : hardware_t(arch,
+                 N_CU,
+                 lds_capacity,
+                 constants.num_xcds,
+                 1e9 * constants.mem1_perf_ratio / (compute_clock_ghz * 1e6),
+                 1e9 * constants.mem2_perf_ratio /
+                     ((compute_clock_ghz * 1e6 / constants.mem_clock_ratio) *
+                      constants.mem_clock_ratio),
+                 1e9 * constants.mem3_perf_ratio / (compute_clock_ghz * 1e6 / constants.mem_clock_ratio),
+                 L2_capacity,
+                 compute_clock_ghz,
+                 constants.parallel_mi_cu,
+                 constants.mem_bw_per_wg_coefficients) {}
+
 hardware_t::hardware_t(hipDeviceProp_t properties)
     : hardware_t(get_hardware_for_properties(properties)) {}
 
@@ -61,18 +81,12 @@ hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties) {
         std::string(arch_name));
   }
   auto constants = get_arch_constants(arch_enum);
-  return hardware_t(
-      arch_enum,
-      properties.multiProcessorCount,
-      properties.sharedMemPerBlock,
-      constants.num_xcds,
-      1e9 * constants.mem1_perf_ratio / properties.clockRate,
-      1e9 * constants.mem2_perf_ratio / (properties.memoryClockRate * constants.mem_clock_ratio),
-      1e9 * constants.mem3_perf_ratio / properties.memoryClockRate,
-      properties.l2CacheSize,
-      properties.clockRate / 1e6,
-      constants.parallel_mi_cu,
-      constants.mem_bw_per_wg_coefficients);
+  return hardware_t(arch_enum,
+                    properties.multiProcessorCount,
+                    properties.sharedMemPerBlock,
+                    constants,
+                    properties.l2CacheSize,
+                    properties.clockRate / 1e6);
 }
 
 hardware_t hardware_t::get_hardware_for_device(int deviceId) {
@@ -80,6 +94,25 @@ hardware_t hardware_t::get_hardware_for_device(int deviceId) {
   hipError_t e = hipGetDeviceProperties(&prop, deviceId);
   if (e) { throw std::runtime_error(hipGetErrorString(e)); }
   return get_hardware_for_properties(prop);
+}
+
+hardware_t hardware_t::get_hardware_for_arch(architecture_t arch,
+                                             size_t N_CU,
+                                             size_t lds_capacity,
+                                             size_t L2_capacity,
+                                             int compute_clock_khz) {
+  if (arch == architecture_t::Count) {
+    throw std::runtime_error("Attempting to create hardware for unsupported architecture");
+  }
+
+  auto constants = get_arch_constants(arch);
+
+  return hardware_t(arch,
+                    N_CU,
+                    lds_capacity,
+                    constants,
+                    L2_capacity,
+                    compute_clock_khz / 1e6);
 }
 
 bool hardware_t::is_hardware_supported(hipDeviceProp_t properties) {
