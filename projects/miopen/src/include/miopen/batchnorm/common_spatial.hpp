@@ -79,6 +79,10 @@ inline void GetSpatialMultipleConfig(const miopen::batchnorm::ProblemDescription
                                      size_t& xlocalsize,
                                      size_t& ylocalsize)
 {
+    // Initialize to safe defaults at the start of the function
+    xlocalsize = 1;
+    ylocalsize = 1;
+
     int n, c, h, w;
     std::tie(n, c, h, w)    = tien<4>(problem.GetXDesc().GetLengths());
     unsigned int in_cstride = h * w;
@@ -87,6 +91,7 @@ inline void GetSpatialMultipleConfig(const miopen::batchnorm::ProblemDescription
     {
         if(c % vectorsize != 0)
         {
+            // xlocalsize and ylocalsize already initialized to 1
             return;
         }
         GetLocalConfigNHWC(problem, vectorsize, xlocalsize, ylocalsize);
@@ -95,9 +100,10 @@ inline void GetSpatialMultipleConfig(const miopen::batchnorm::ProblemDescription
     {
         if(in_cstride % vectorsize != 0)
         {
+            // xlocalsize and ylocalsize already initialized to 1
             return;
         }
-        xlocalsize = 1;
+        // xlocalsize stays at 1
         ylocalsize = 1024;
         if(ylocalsize > in_cstride / vectorsize)
         {
@@ -222,6 +228,10 @@ inline void GetVariantFromKernelId(const std::string& kernel_id,
     vectorsize = std::stoi(seglist[1]);
     if(variant != 2)
     {
+        // For variant 0, 1, 3 (spatial single), kernel_id only contains
+        // variant and vectorsize. The workgroup sizes (xlocalsize, ylocalsize,
+        // zlocalsize, nelements) are not stored in kernel_id and must be
+        // computed by the caller based on problem-size heuristics.
         return;
     }
     xlocalsize = std::stoi(seglist[2]);

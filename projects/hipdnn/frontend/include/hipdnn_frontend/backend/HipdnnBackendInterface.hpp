@@ -7,6 +7,7 @@
 #include <mutex>
 
 #include <hipdnn_backend.h>
+#include <hipdnn_data_sdk/Visibility.hpp>
 
 namespace hipdnn_frontend
 {
@@ -54,18 +55,19 @@ public:
                                                    hipdnnPluginLoadingMode_ext_t mode)
         = 0;
 
+    // HIPDNN_HIDDEN on accessor functions ensures each shared object has its own backendInstance
     static inline std::shared_ptr<IHipdnnBackend> backendInstance;
-    static std::shared_ptr<IHipdnnBackend> getInstance()
+    HIPDNN_HIDDEN static std::shared_ptr<IHipdnnBackend> getInstance()
     {
         return backendInstance;
     }
 
-    static void setInstance(std::shared_ptr<IHipdnnBackend> instance)
+    HIPDNN_HIDDEN static void setInstance(std::shared_ptr<IHipdnnBackend> instance)
     {
         backendInstance = std::move(instance);
     }
 
-    static void resetInstance()
+    HIPDNN_HIDDEN static void resetInstance()
     {
         backendInstance.reset();
     }
