@@ -1083,11 +1083,12 @@ bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData
     {
         bool lenExceptionFound = false;
 
+        // Set a different batch cut-off for gfx1201/gfx950 when 
+        // not hitting the excepted lengths in single-precision
         std::vector<std::vector<size_t>> gfx1201LenException = {{52, 64, 64}, {128, 64, 64}};
         lenExceptionFound = find_length(gfx1201LenException, nodeData.length);
         if(get_curr_gcn_arch_name() == "gfx1201" && !lenExceptionFound)
             cutOffBatch = 25;
-
         std::vector<std::vector<size_t>> gfx950LenException = {{52, 64, 64}};
         lenExceptionFound = find_length(gfx950LenException, nodeData.length);
         if(get_curr_gcn_arch_name() == "gfx950" && !lenExceptionFound)
