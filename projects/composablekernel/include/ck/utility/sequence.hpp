@@ -38,7 +38,32 @@ __host__ __device__ constexpr auto sequence_pop_front(Sequence<I, Is...>);
 template <typename Seq>
 __host__ __device__ constexpr auto sequence_pop_back(Seq);
 
-template <index_t... Is>
+namespace detail {
+
+/**
+ * @brief Helper to generate integer sequences with custom Sequence class
+ */
+template <typename T, T... Ints>
+struct __integer_sequence;
+
+template <index_t... Ints>
+struct __integer_sequence<index_t, Ints...>
+{
+    using seq_type = Sequence<Ints...>;
+};
+
+} // namespace detail
+
+/**
+ * @brief Generate a Sequence class with index_t integers from 0 to N-1
+ * @tparam N The size of the sequence to generate
+ */
+template <index_t N>
+using make_index_sequence =
+    typename __make_integer_seq<detail::__integer_sequence, index_t, N>::seq_type;
+
+
+template<index_t... Is>
 struct Sequence
 {
     using Type      = Sequence;
@@ -157,17 +182,38 @@ struct Sequence
         return Sequence<Type::At(Number<Ns>{})...>{};
     }
 
+    /**
+     * @brief Modify the sequence at a specific index with a new value
+     * @tparam I The index of the element to modify
+     * @tparam X The new value to set at index I
+     * @return A new Sequence with the value at index I replaced by X
+     */
     template <index_t I, index_t X>
     __host__ __device__ static constexpr auto Modify(Number<I>, Number<X>)
     {
-        static_assert(I < Size(), "wrong!");
-
-        using seq_split          = sequence_split<Type, I>;
-        constexpr auto seq_left  = typename seq_split::left_type{};
-        constexpr auto seq_right = typename seq_split::right_type{}.PopFront();
-
-        return seq_left.PushBack(Number<X>{}).PushBack(seq_right);
+        // Generate and forward an index sequence that covers all elements
+        static_assert(I >= 0 && I < mSize, "Index I is out of bounds");
+        return modify_impl(make_index_sequence<mSize>{}, Number<I>{}, Number<X>{});
     }
+
+private:
+
+    /**
+     * @brief Helper function to modify the sequence at a specific index
+     * @tparam Idxs Indices of the sequence elements (0, 1, ..., Size-1)
+     * @tparam ModifyIdx The index of the value in the sequence to modify
+     * @tparam NewVal The new value to set at ModifyIdx
+     * @return A new Sequence with the value at ModifyIdx replaced by NewVal
+     */
+    template <index_t... Idxs, index_t ModifyIdx, index_t NewVal>
+    __host__ __device__ static constexpr auto
+    modify_impl(Sequence<Idxs...>, Number<ModifyIdx>, Number<NewVal>)
+    {
+        // For each index: if it equals ModifyIdx, use NewVal; otherwise use original value
+        return Sequence<(Idxs == ModifyIdx ? NewVal : At(Idxs))...>{};
+    }
+
+public:
 
     template <typename F>
     __host__ __device__ static constexpr auto Transform(F f)
@@ -183,22 +229,6 @@ struct Sequence
         printf("}");
     }
 };
-
-namespace impl {
-template <typename T, T... Ints>
-struct __integer_sequence;
-
-template <index_t... Ints>
-struct __integer_sequence<index_t, Ints...>
-{
-    using seq_type = Sequence<Ints...>;
-};
-
-} // namespace impl
-
-template <index_t N>
-using make_index_sequence =
-    typename __make_integer_seq<impl::__integer_sequence, index_t, N>::seq_type;
 
 // merge sequence - optimized to avoid recursive instantiation
 //
@@ -362,31 +392,39 @@ struct uniform_sequence_gen<0, I>
     using type = Sequence<>;
 };
 
-// reverse inclusive scan (with init) sequence - optimized using constexpr computation
-// Achieves O(1) template instantiation depth instead of O(N)
+
 namespace detail {
 
-// Minimal wrapper to return C-array from constexpr function
+/**
+ * @brief A simple fixed-size array to hold intermediate results during constexpr computation
+ * @tparam N The size of the array
+ */
 template <index_t N>
-struct scan_data
+struct index_array
 {
-    index_t v[N > 0 ? N : 1];
+    index_t data[N > 0 ? N : 1];
 };
 
-// Compute reverse inclusive scan result
+/**
+ * @brief Compute the reverse inclusive scan of a sequence at compile time using a constexpr function
+ * @tparam Reduce The binary reduction functor
+ * @tparam Init The initial value for the reduction
+ * @tparam Vs The input sequence values
+ * @return An index_array containing the reverse inclusive scan results
+ */ 
 template <typename Reduce, index_t Init, index_t... Vs>
 constexpr auto compute_reverse_inclusive_scan()
 {
     constexpr index_t N = sizeof...(Vs);
-    scan_data<N> result{};
+    index_array<N> result{};
     constexpr index_t input[N > 0 ? N : 1] = {Vs...};
 
     if constexpr(N > 0)
     {
-        result.v[N - 1] = Reduce{}(input[N - 1], Init);
+        result.data[N - 1] = Reduce{}(input[N - 1], Init);
         for(index_t i = N - 2; i >= 0; --i)
         {
-            result.v[i] = Reduce{}(input[i], result.v[i + 1]);
+            result.data[i] = Reduce{}(input[i], result.data[i + 1]);
         }
     }
     return result;
@@ -401,12 +439,17 @@ struct build_reverse_inclusive_scan<Reduce, Init, Sequence<Vs...>, Sequence<Is..
 {
     static constexpr auto result = compute_reverse_inclusive_scan<Reduce, Init, Vs...>();
 
-    using type = Sequence<result.v[Is]...>;
+    using type = Sequence<result.data[Is]...>;
 };
 
 } // namespace detail
 
-// Main interface - O(1) instantiation depth
+/**
+ * @brief Reverse inclusive scan of a sequence - main interface 
+ * @tparam Seq The input sequence to scan
+ * @tparam Reduce The binary reduction functor
+ * @tparam Init The initial value for the reduction
+ */ 
 template <typename Seq, typename Reduce, index_t Init>
 struct sequence_reverse_inclusive_scan
 {
@@ -417,6 +460,11 @@ struct sequence_reverse_inclusive_scan
         type;
 };
 
+/**
+ * @brief Specialization for empty sequence - returns empty sequence without computation
+ * @tparam Reduce The binary reduction functor
+ * @tparam Init The initial value for the reduction
+ */
 template <typename Reduce, index_t Init>
 struct sequence_reverse_inclusive_scan<Sequence<>, Reduce, Init>
 {
@@ -633,31 +681,50 @@ struct is_valid_sequence_map : is_same<typename arithmetic_sequence_gen<0, SeqMa
 {
 };
 
+// sequence_map_inverse - optimized using constexpr computation
+// Achieves O(1) template instantiation depth instead of O(N)
+namespace detail {
+
+// Compute inverse map at compile time using constexpr
+template <index_t... Is>
+constexpr auto compute_map_inverse(Sequence<Is...>)
+{
+    constexpr index_t N = sizeof...(Is);
+    index_array<N> result{};
+    constexpr index_t input[N > 0 ? N : 1] = {Is...};
+
+    // For each position x, set result[input[x]] = x
+    for(index_t x = 0; x < N; ++x)
+    {
+        result.data[input[x]] = x;
+    }
+    return result;
+}
+
+// Build result sequence with O(1) instantiation depth
+template <typename Seq, typename IndexSeq>
+struct build_map_inverse;
+
+template <index_t... Is, index_t... Idxs>
+struct build_map_inverse<Sequence<Is...>, Sequence<Idxs...>>
+{
+    static constexpr auto result = compute_map_inverse(Sequence<Is...>{});
+    using type                   = Sequence<result.data[Idxs]...>;
+};
+
+} // namespace detail
+
 template <typename SeqMap>
 struct sequence_map_inverse
 {
-    template <typename X2Y, typename WorkingY2X, index_t XBegin, index_t XRemain>
-    struct sequence_map_inverse_impl
-    {
-        static constexpr auto new_y2x =
-            WorkingY2X::Modify(X2Y::At(Number<XBegin>{}), Number<XBegin>{});
-
-        using type =
-            typename sequence_map_inverse_impl<X2Y, decltype(new_y2x), XBegin + 1, XRemain - 1>::
-                type;
-    };
-
-    template <typename X2Y, typename WorkingY2X, index_t XBegin>
-    struct sequence_map_inverse_impl<X2Y, WorkingY2X, XBegin, 0>
-    {
-        using type = WorkingY2X;
-    };
-
     using type =
-        typename sequence_map_inverse_impl<SeqMap,
-                                           typename uniform_sequence_gen<SeqMap::Size(), 0>::type,
-                                           0,
-                                           SeqMap::Size()>::type;
+        typename detail::build_map_inverse<SeqMap, make_index_sequence<SeqMap::Size()>>::type;
+};
+
+template <>
+struct sequence_map_inverse<Sequence<>>
+{
+    using type = Sequence<>;
 };
 
 template <index_t... Xs, index_t... Ys>
