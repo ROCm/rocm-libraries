@@ -412,29 +412,28 @@ CK_TILE_HOST void reference_mx_gemm_bquant(const HostTensor<ADataType>& a_m_k,
 
         for(std::size_t k = 0; k < K; k++)
         {
-            auto b_scale      = type_convert<int32_t>(q((k) / QuantGroupSize::kK, n)) - 127;
-            auto b_scale_fp32 = type_convert<float>(std::pow(2.0f, b_scale));
-            v_a               = ck_tile::type_convert<ComputeType>(a_element_op(a_m_k(m, k)));
+            const auto b_scale = type_convert<float>(q(k / QuantGroupSize::kK, n));
+            v_a                = ck_tile::type_convert<ComputeType>(a_element_op(a_m_k(m, k)));
             if constexpr(std::is_same_v<BDataType, pk_fp4_t>)
             {
-                auto b_pack = type_convert<pk_fp4_t>(b_element_op(b_k_n(k, n)));
+                const auto b_pack = type_convert<pk_fp4_t>(b_element_op(b_k_n(k, n)));
 
                 if(k % 2 == 0)
                 {
-                    auto b_f4_lo = type_convert<pk_fp4_t>(b_pack.unpack(number<0>{}));
-                    v_b          = type_convert<ComputeType>(b_f4_lo);
+                    const auto b_f4_lo = type_convert<pk_fp4_t>(b_pack.unpack(number<0>{}));
+                    v_b                = type_convert<ComputeType>(b_f4_lo);
                 }
                 else
                 {
-                    auto b_f4_hi = type_convert<pk_fp4_t>(b_pack.unpack(number<1>{}));
-                    v_b          = type_convert<ComputeType>(b_f4_hi);
+                    const auto b_f4_hi = type_convert<pk_fp4_t>(b_pack.unpack(number<1>{}));
+                    v_b                = type_convert<ComputeType>(b_f4_hi);
                 }
             }
             else
             {
                 v_b = ck_tile::type_convert<ComputeType>(b_element_op(b_k_n(k, n)));
             }
-            v_b *= b_scale_fp32;
+            v_b *= b_scale;
             v_acc += v_a * v_b;
         }
         c_m_n(m, n) = ck_tile::type_convert<CDataType>(acc_element_op(v_acc));
