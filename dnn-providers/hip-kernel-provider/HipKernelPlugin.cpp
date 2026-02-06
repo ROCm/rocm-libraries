@@ -13,6 +13,7 @@
 #include <hipdnn_plugin_sdk/PluginLastErrorManager.hpp>
 
 #include "EngineManager.hpp"
+#include "HipKernelContainer.hpp"
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 
@@ -25,6 +26,13 @@ using namespace hip_kernel_plugin;
 
 // NOLINTNEXTLINE
 thread_local char PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH] = "";
+
+// Keep a weak pointer to the HipKernelContainer thats made when we create a plugin handle.
+// The original shared_ptr is then stored on the handle so that it can be used for the lifecycle
+// of the handle.  If we create another handle, then we can use the weak pointer to get access
+// to the existing HipKernelContainer.  If all handles are destroyed, then this allows us to properly
+// clean up the container without having to fully unload the plugin.
+std::weak_ptr<HipKernelContainer> hipKernelContainerLifecyclePtr;
 
 extern "C" {
 
@@ -86,6 +94,80 @@ hipdnnPluginStatus_t hipdnnPluginSetLoggingCallbackImpl(hipdnnCallback_t callbac
     return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
         throwIfNull(callback);
         hipdnn::logging::initializeCallbackLogging(pluginName, callback);
+        LOG_API_SUCCESS(apiName, "", "");
+    });
+}
+
+hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIdsImpl(int64_t* engineIds,
+                                                           uint32_t maxEngines,
+                                                           uint32_t* numEngines)
+{
+    LOG_API_ENTRY("engineIds={:p}, maxEngines={}, numEngines={:p}",
+                  static_cast<void*>(engineIds),
+                  maxEngines,
+                  static_cast<void*>(numEngines));
+
+    return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+        if(maxEngines != 0)
+        {
+            throwIfNull(engineIds);
+        }
+        throwIfNull(numEngines);
+
+        auto totalEngines = HipKernelContainer::copyEngineIds(engineIds, maxEngines, *numEngines);
+
+        LOG_API_SUCCESS(apiName, "numEngines={} totalEngines={}", *numEngines, totalEngines);
+    });
+}
+
+hipdnnPluginStatus_t hipdnnEnginePluginCreateImpl(hipdnnEnginePluginHandle_t* handle)
+{
+    LOG_API_ENTRY("handle_ptr={:p}", static_cast<void*>(handle));
+
+    return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+        throwIfNull(handle);
+
+        *handle = new HipdnnEnginePluginHandle();
+
+        auto hipKernelContainerPtr = hipKernelContainerLifecyclePtr.lock();
+        if(hipKernelContainerPtr != nullptr)
+        {
+            (*handle)->hipKernelContainer = hipKernelContainerPtr;
+        }
+        else
+        {
+            static std::mutex s_hipKernelContainerMutex;
+            std::lock_guard<std::mutex> lock(s_hipKernelContainerMutex);
+
+            // if we do have a race condition that results in threads getting locked, we want to
+            // ensure that we only create one instance.  Therefore, the second thread to get
+            // through will just read from the weak pointer rather than create a new instance.
+            hipKernelContainerPtr = hipKernelContainerLifecyclePtr.lock();
+            if(hipKernelContainerPtr != nullptr)
+            {
+                (*handle)->hipKernelContainer = hipKernelContainerPtr;
+            }
+            else
+            {
+                (*handle)->hipKernelContainer = std::make_shared<HipKernelContainer>();
+                hipKernelContainerLifecyclePtr = (*handle)->hipKernelContainer;
+            }
+        }
+
+        LOG_API_SUCCESS(apiName, "createdHandle={:p}", static_cast<void*>(*handle));
+    });
+}
+
+hipdnnPluginStatus_t hipdnnEnginePluginDestroyImpl(hipdnnEnginePluginHandle_t handle)
+{
+    LOG_API_ENTRY("handle={:p}", static_cast<void*>(handle));
+
+    return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+        throwIfNull(handle);
+
+        delete handle;
+        handle = nullptr;
+
         LOG_API_SUCCESS(apiName, "", "");
     });
 }

@@ -18,6 +18,14 @@ void hipdnnPluginGetLastErrorStringImpl(const char** errorStr);
 
 hipdnnPluginStatus_t hipdnnPluginSetLoggingCallbackImpl(hipdnnCallback_t callback);
 
+hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIdsImpl(int64_t* engineIds,
+                                                           uint32_t maxEngines,
+                                                           uint32_t* numEngines);
+
+hipdnnPluginStatus_t hipdnnEnginePluginCreateImpl(hipdnnEnginePluginHandle_t* handle);
+
+hipdnnPluginStatus_t hipdnnEnginePluginDestroyImpl(hipdnnEnginePluginHandle_t handle);
+
 hipdnnPluginStatus_t hipdnnEnginePluginSetStreamImpl(hipdnnEnginePluginHandle_t handle,
                                                      hipStream_t stream);
 

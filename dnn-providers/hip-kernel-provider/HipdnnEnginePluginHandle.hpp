@@ -29,7 +29,6 @@ public:
         return _stream;
     }
 
-    std::shared_ptr<hip_kernel_plugin::HipKernelContainer> hipKernelContainer;
     hip_kernel_plugin::EngineManager& getEngineManager()
     {
         return hipKernelContainer->getEngineManager();
@@ -59,6 +58,8 @@ public:
                             ptr);
         }
     }
+
+    std::shared_ptr<hip_kernel_plugin::HipKernelContainer> hipKernelContainer;
 
 private:
     hipStream_t _stream = nullptr;
