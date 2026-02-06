@@ -199,7 +199,7 @@ PoolingForwardNaive::GetSolution(const ExecutionContext&,
     work_left /= w0;
     w1 = (g1 < work_left) ? g1 : work_left;
     work_left /= w1;
-    w2                     = (g2 < work_left) ? g2 : work_left;
+    w2 = (g2 < work_left) ? g2 : work_left;
 #endif
 
     {

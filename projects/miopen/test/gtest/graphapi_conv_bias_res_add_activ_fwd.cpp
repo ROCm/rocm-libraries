@@ -133,7 +133,7 @@ class GPU_ConvBiasResAddActivation_fwd
         TensorData(TensorData&&)      = default;
 
         TensorData& operator=(const TensorData&) = delete;
-        TensorData& operator=(TensorData&&) = default;
+        TensorData& operator=(TensorData&&)      = default;
 
         ~TensorData() = default;
     };
@@ -189,7 +189,7 @@ class GPU_ConvBiasResAddActivation_fwd
         GraphTensorAllocator(GraphTensorAllocator&&)      = default;
 
         GraphTensorAllocator& operator=(const GraphTensorAllocator&) = delete;
-        GraphTensorAllocator& operator=(GraphTensorAllocator&&) = default;
+        GraphTensorAllocator& operator=(GraphTensorAllocator&&)      = default;
 
         ~GraphTensorAllocator() = default;
     };

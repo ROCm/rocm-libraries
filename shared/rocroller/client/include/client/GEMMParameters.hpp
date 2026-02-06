@@ -33,6 +33,7 @@
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
+#include <rocRoller/Parameters/Solution/StreamK.hpp>
 
 #include "client/BenchmarkSolution.hpp"
 #include <mxDataGenerator/DataGenerator.hpp>
@@ -198,10 +199,7 @@ namespace rocRoller
 
                 bool tailLoops = true;
 
-                // TODO Use StreamKConfig
-                bool streamK               = false;
-                bool streamKTwoTile        = false;
-                bool streamKTwoTileDPFirst = false;
+                StreamKMode streamK = StreamKMode::None;
 
                 std::string version;
 
