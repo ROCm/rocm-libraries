@@ -107,7 +107,7 @@ int run_gemm_example_with_layouts_universal(ck_tile::ArgParser& arg_parser,
         ck_tile::HostTensor<CDataType> c_m_n_ref(ck_tile::host_tensor_descriptor(
             M, N, stride_C, ck_tile::bool_constant<is_c_row_major>{}));
         c_m_n_ref.SetZero();
-        ck_tile::reference_gemm<ADataTypeBuf, BDataTypeBuf, AccDataType, CDataType>(
+        ck_tile::reference_gemm<ADataTypeCompute, BDataTypeCompute, AccDataType, CDataType>(
             a_m_k, b_k_n, c_m_n_ref);
 
         // Verify results
