@@ -413,10 +413,11 @@ class TestCustomScheduleBF16:
         "transA, transB, lds_tr_inst,  tr_lds", [
         (  True,  False,       False,       1),  # TN
         ( False,   True,        True,       0),  # NT
+        ( False,  False,        True,       1),  # NN
         # fmt: on
         ])
     def test_schedule_224x128x64_16bit(self, transA, transB, lds_tr_inst, tr_lds):
-        """Tests the 224x128x64 16-bit schedules (TN and NT)."""
+        """Tests the 224x128x64 16-bit schedules (TN/NT/NN)."""
         NT = (not transA and transB)
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
