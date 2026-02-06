@@ -18,8 +18,13 @@ if(GPU_TARGETS MATCHES "gfx9")
   endif()
 
   # Find cpp files and create lib for instances
-  file(GLOB_RECURSE GROUPED_CONV_FWD_TILE "instances/*.cpp")
+  file(GLOB_RECURSE GROUPED_CONV_FWD_TILE "instances/forward/*.cpp")
   add_instance_library(device_grouped_conv_fwd_tile_instances ${GROUPED_CONV_FWD_TILE})
   target_include_directories(device_grouped_conv_fwd_tile_instances PRIVATE
+        "${PROJECT_SOURCE_DIR}/experimental/builder/test/utils")
+
+  file(GLOB_RECURSE GROUPED_CONV_BWD_WEIGHT_TILE "instances/backward_weight/*.cpp")
+  add_instance_library(device_grouped_conv_bwd_weight_tile_instances ${GROUPED_CONV_BWD_WEIGHT_TILE})
+  target_include_directories(device_grouped_conv_bwd_weight_tile_instances PRIVATE
         "${PROJECT_SOURCE_DIR}/experimental/builder/test/utils")
 endif()
