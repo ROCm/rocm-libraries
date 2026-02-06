@@ -780,11 +780,14 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
             }
         }
 
+        // Total workgroup size for final kernel - reused in condition and array declarations
+        constexpr auto grp_final_total = MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL;
+
         if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
-                     (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
+                     (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1 ||
+                     (grp_final_total < 64))
         {
-            __shared__ FpAccumCType
-                lcl_data[2 * MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL];
+            __shared__ FpAccumCType lcl_data[2 * grp_final_total];
 
             miopen::reduction::lds_reduce2_2d(mean,
                                               variance,
@@ -797,11 +800,12 @@ struct MIOpenBatchNormFwdTrainSpatialImplVar2
         }
         else
         {
+            // C++17 idiomatic: ensure array size is never zero using constexpr ternary
+            constexpr auto lds_gcn_array_size = grp_final_total >= 64 ? grp_final_total / 64 : 1;
+
             commitID = 64;
-            __shared__ FpAccumCType
-                lcl_data_x[MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL / 64];
-            __shared__ FpAccumCType
-                lcl_data_y[MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL / 64];
+            __shared__ FpAccumCType lcl_data_x[lds_gcn_array_size];
+            __shared__ FpAccumCType lcl_data_y[lds_gcn_array_size];
             miopen::reduction::gcn_reduce2(
                 mean, variance, INHW, lcl_data_x, lcl_data_y, ylid + zlid * ygrp_sz);
         }
