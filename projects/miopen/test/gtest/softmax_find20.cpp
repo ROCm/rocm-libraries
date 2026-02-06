@@ -139,7 +139,7 @@ public:
             auto out_gpu = handle.Write(yTensor.data);
 
             miopenTensorArgumentId_t names[numTensors]       = {miopenTensorSoftmaxX,
-                                                          miopenTensorSoftmaxY};
+                                                                miopenTensorSoftmaxY};
             void* buffers[numTensors]                        = {in_gpu.get(), out_gpu.get()};
             miopenTensorDescriptor_t descriptors[numTensors] = {x_desc, y_desc};
 

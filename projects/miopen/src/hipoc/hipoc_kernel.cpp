@@ -97,7 +97,7 @@ void HIPOCKernelInvoke::run(void* args, std::size_t size) const
                       &size,
                       // NOLINTNEXTLINE cppcoreguidelines-pro-type-cstyle-cast
                       HIP_LAUNCH_PARAM_END};
-    if(callback)
+       if(callback)
     {
         start = make_hip_event();
         stop  = make_hip_event();

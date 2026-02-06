@@ -117,8 +117,9 @@ miopenStatus_t try_(F f, bool output = true)
 }
 
 template <class T>
-auto deref(T&& x, [[maybe_unused]] miopenStatus_t err = miopenStatusBadParm)
-    -> decltype((x == nullptr), get_object(*x))
+auto deref(T&& x,
+           [[maybe_unused]] miopenStatus_t err = miopenStatusBadParm) -> decltype((x == nullptr),
+                                                                                  get_object(*x))
 {
     if(x == nullptr)
     {

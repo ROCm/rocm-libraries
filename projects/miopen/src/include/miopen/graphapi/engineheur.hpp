@@ -48,10 +48,10 @@ private:
     friend class EngineHeurBuilder;
 
 public:
-    EngineHeur() noexcept             = default;
-    EngineHeur(const EngineHeur&)     = default;
-    EngineHeur(EngineHeur&&) noexcept = default;
-    EngineHeur& operator=(const EngineHeur&) = default;
+    EngineHeur() noexcept                        = default;
+    EngineHeur(const EngineHeur&)                = default;
+    EngineHeur(EngineHeur&&) noexcept            = default;
+    EngineHeur& operator=(const EngineHeur&)     = default;
     EngineHeur& operator=(EngineHeur&&) noexcept = default;
 
     OpGraph* getOpgraph() const noexcept { return mOpGraph; }
@@ -98,7 +98,7 @@ private:
         OwnedEngineCfgDescriptor(const OwnedEngineCfgDescriptor& other)     = default;
         OwnedEngineCfgDescriptor(OwnedEngineCfgDescriptor&& other) noexcept = default;
         ;
-        OwnedEngineCfgDescriptor& operator=(const OwnedEngineCfgDescriptor& other) = default;
+        OwnedEngineCfgDescriptor& operator=(const OwnedEngineCfgDescriptor& other)     = default;
         OwnedEngineCfgDescriptor& operator=(OwnedEngineCfgDescriptor&& other) noexcept = default;
     };
 
