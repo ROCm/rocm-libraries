@@ -444,10 +444,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 1
-    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_STA_BH_SABV_UserArgs_MT128x64x128_MI16x16x1_SN_LDSB0_GRVWB16_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB512_MIWT2_4_NLCA2_SU8_SUM0_SUS128_VWB4_WG64_4_1_WGM1_WGMXCC8_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_STA_BH_SABV_UserArgs_MT128x64x128_MI16x16x1_SN_LDSB0_GRVWB16_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB512_MIWT2_4_NLCA2_SU8_SUM1_SUS128_VWB4_WG64_4_1_WGM1_WGMXCC8_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 8
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 128
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -1304,10 +1304,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 5
-    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_STA_BH_SABV_UserArgs_MT64x16x256_MI16x16x1_SN_LDSB0_GRVWB16_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB256_MIWT1_1_NLCA4_SU8_SUM0_SUS256_VWB1_WG64_4_1_WGM1_WGMXCC8_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_STA_BH_SABV_UserArgs_MT64x16x256_MI16x16x1_SN_LDSB0_GRVWB16_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB256_MIWT1_1_NLCA4_SU8_SUM1_SUS256_VWB1_WG64_4_1_WGM1_WGMXCC8_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 8
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -1949,10 +1949,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 8
-    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_STA_BH_SABV_UserArgs_MT64x16x256_MI16x16x1_SN_LDSB0_GRVWB16_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB256_MIWT1_1_NLCA4_SU8_SUM0_SUS256_VWB1_WG64_4_1_WGM8_WGMXCC8_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_STA_BH_SABV_UserArgs_MT64x16x256_MI16x16x1_SN_LDSB0_GRVWB16_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB256_MIWT1_1_NLCA4_SU8_SUM1_SUS256_VWB1_WG64_4_1_WGM8_WGMXCC8_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 8
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -2379,10 +2379,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 10
-    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_STA_BH_SABV_UserArgs_MT64x32x256_MI16x16x1_SN_LDSB0_GRVWB16_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB512_MIWT1_2_NLCA4_SU8_SUM0_SUS256_VWB2_WG64_4_1_WGM6_WGMXCC8_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_STA_BH_SABV_UserArgs_MT64x32x256_MI16x16x1_SN_LDSB0_GRVWB16_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB512_MIWT1_2_NLCA4_SU8_SUM1_SUS256_VWB2_WG64_4_1_WGM6_WGMXCC8_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 8
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -3024,10 +3024,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 13
-    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_STA_BH_SABV_UserArgs_MT128x48x256_MI16x16x1_SN_LDSB0_GRVWB16_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB256_MIWT2_3_NLCA4_SU8_SUM0_SUS256_VWB1_WG64_4_1_WGM6_WGMXCC8_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_STA_BH_SABV_UserArgs_MT128x48x256_MI16x16x1_SN_LDSB0_GRVWB16_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB256_MIWT2_3_NLCA4_SU8_SUM1_SUS256_VWB1_WG64_4_1_WGM6_WGMXCC8_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 8
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -3239,10 +3239,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 14
-    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_STA_BH_SABV_UserArgs_MT128x64x256_MI16x16x1_SN_LDSB1_GRVWB16_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB1024_MIWT2_4_NLCA4_SU8_SUM0_SUS256_VWB4_WG64_4_1_WGM1_WGMXCC8_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_STA_BH_SABV_UserArgs_MT128x64x256_MI16x16x1_SN_LDSB1_GRVWB16_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB1024_MIWT2_4_NLCA4_SU8_SUM1_SUS256_VWB4_WG64_4_1_WGM1_WGMXCC8_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 8
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -4314,10 +4314,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 19
-    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_STA_BH_SABV_UserArgs_MT64x16x512_MI16x16x1_SN_LDSB0_GRVWB16_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB512_MIWT1_1_NLCA8_SU8_SUM0_SUS512_VWB1_WG64_4_1_WGM8_WGMXCC8_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_STA_BH_SABV_UserArgs_MT64x16x512_MI16x16x1_SN_LDSB0_GRVWB16_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB512_MIWT1_1_NLCA8_SU8_SUM1_SUS512_VWB1_WG64_4_1_WGM8_WGMXCC8_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 8
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 512
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0

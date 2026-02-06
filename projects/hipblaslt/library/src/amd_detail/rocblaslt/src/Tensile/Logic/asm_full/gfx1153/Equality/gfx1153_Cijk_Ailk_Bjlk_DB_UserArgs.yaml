@@ -197,7 +197,7 @@
     SolutionNameMin: Cijk_Ailk_Bjlk_DB_UserArgs_MT8x8x8_SN_GSU1_SU32_SUM0_SUS256_TT1_1_WGM1
     SourceSwap: false
     StaggerU: 32
-    StaggerUMapping: 1
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -367,7 +367,7 @@
     SolutionNameMin: Cijk_Ailk_Bjlk_DB_UserArgs_MT16x16x8_SN_GSU1_SU32_SUM0_SUS256_TT2_2_WGM1
     SourceSwap: false
     StaggerU: 32
-    StaggerUMapping: 1
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -537,7 +537,7 @@
     SolutionNameMin: Cijk_Ailk_Bjlk_DB_UserArgs_MT8x8x16_SN_GSU1_SU32_SUM0_SUS256_TT1_1_WGM1
     SourceSwap: false
     StaggerU: 32
-    StaggerUMapping: 1
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -707,7 +707,7 @@
     SolutionNameMin: Cijk_Ailk_Bjlk_DB_UserArgs_MT16x16x16_SN_GSU1_SU32_SUM0_SUS256_TT2_2_WGM1
     SourceSwap: false
     StaggerU: 32
-    StaggerUMapping: 1
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0

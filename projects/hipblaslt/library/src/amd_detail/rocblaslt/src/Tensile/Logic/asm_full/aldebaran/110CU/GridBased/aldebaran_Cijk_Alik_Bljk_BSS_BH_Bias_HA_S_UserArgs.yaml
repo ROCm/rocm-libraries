@@ -248,7 +248,7 @@
     SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 32
-    StaggerUMapping: 1
+    StaggerUMapping: 0
     StaggerUStride: 2048
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -493,7 +493,7 @@
     SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 32
-    StaggerUMapping: 1
+    StaggerUMapping: 0
     StaggerUStride: 2048
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -738,7 +738,7 @@
     SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 32
-    StaggerUMapping: 1
+    StaggerUMapping: 0
     StaggerUStride: 2048
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -983,7 +983,7 @@
     SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 32
-    StaggerUMapping: 1
+    StaggerUMapping: 0
     StaggerUStride: 2048
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -1228,7 +1228,7 @@
     SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 32
-    StaggerUMapping: 1
+    StaggerUMapping: 0
     StaggerUStride: 2048
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0

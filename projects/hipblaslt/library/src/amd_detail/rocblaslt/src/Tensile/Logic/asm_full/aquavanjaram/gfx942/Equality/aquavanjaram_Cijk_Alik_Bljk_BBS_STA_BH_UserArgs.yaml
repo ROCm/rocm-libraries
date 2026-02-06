@@ -1306,10 +1306,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 5
-    SolutionNameMin: Cijk_Alik_Bljk_BBS_STA_BH_UserArgs_MT64x16x128_MI16x16x1_SN_LDSB0_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB256_MIWT1_1_NLCA4_SU8_SUM0_SUS256_VWB1_WG64_4_1_WGM8_WGMXCC8_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bljk_BBS_STA_BH_UserArgs_MT64x16x128_MI16x16x1_SN_LDSB0_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB256_MIWT1_1_NLCA4_SU8_SUM1_SUS256_VWB1_WG64_4_1_WGM8_WGMXCC8_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 8
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -1521,10 +1521,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 6
-    SolutionNameMin: Cijk_Alik_Bljk_BBS_STA_BH_UserArgs_MT64x32x128_MI16x16x1_SN_LDSB0_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB512_MIWT1_2_NLCA4_SU8_SUM0_SUS256_VWB2_WG64_4_1_WGM6_WGMXCC8_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bljk_BBS_STA_BH_UserArgs_MT64x32x128_MI16x16x1_SN_LDSB0_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB512_MIWT1_2_NLCA4_SU8_SUM1_SUS256_VWB2_WG64_4_1_WGM6_WGMXCC8_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 8
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -1736,10 +1736,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 7
-    SolutionNameMin: Cijk_Alik_Bljk_BBS_STA_BH_UserArgs_MT64x48x128_MI16x16x1_SN_LDSB0_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB256_MIWT1_3_NLCA4_SU8_SUM0_SUS256_VWB1_WG64_4_1_WGM8_WGMXCC8_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bljk_BBS_STA_BH_UserArgs_MT64x48x128_MI16x16x1_SN_LDSB0_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB256_MIWT1_3_NLCA4_SU8_SUM1_SUS256_VWB1_WG64_4_1_WGM8_WGMXCC8_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 8
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -1951,10 +1951,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 8
-    SolutionNameMin: Cijk_Alik_Bljk_BBS_STA_BH_UserArgs_MT128x48x128_MI16x16x1_SN_LDSB0_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB256_MIWT2_3_NLCA4_SU8_SUM0_SUS256_VWB1_WG64_4_1_WGM6_WGMXCC8_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bljk_BBS_STA_BH_UserArgs_MT128x48x128_MI16x16x1_SN_LDSB0_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB256_MIWT2_3_NLCA4_SU8_SUM1_SUS256_VWB1_WG64_4_1_WGM6_WGMXCC8_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 8
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -2166,10 +2166,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 9
-    SolutionNameMin: Cijk_Alik_Bljk_BBS_STA_BH_UserArgs_MT320x48x128_MI16x16x1_SN_LDSB0_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB256_MIWT5_3_NLCA4_SU8_SUM0_SUS256_VWB1_WG64_4_1_WGM6_WGMXCC8_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bljk_BBS_STA_BH_UserArgs_MT320x48x128_MI16x16x1_SN_LDSB0_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB256_MIWT5_3_NLCA4_SU8_SUM1_SUS256_VWB1_WG64_4_1_WGM6_WGMXCC8_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 8
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -3671,10 +3671,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 16
-    SolutionNameMin: Cijk_Alik_Bljk_BBS_STA_BH_UserArgs_MT64x16x256_MI16x16x1_SN_LDSB0_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB512_MIWT1_1_NLCA8_SU8_SUM0_SUS512_VWB1_WG64_4_1_WGM8_WGMXCC8_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bljk_BBS_STA_BH_UserArgs_MT64x16x256_MI16x16x1_SN_LDSB0_GRVWB8_GSU1_GSUAMB_GSUC0_GSUWGMRR0_K1_LBSPPB512_MIWT1_1_NLCA8_SU8_SUM1_SUS512_VWB1_WG64_4_1_WGM8_WGMXCC8_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 8
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 512
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
