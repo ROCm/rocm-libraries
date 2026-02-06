@@ -298,8 +298,14 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
 }
 
 size_t getMaxWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
-                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
+                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                              const MiopenExecutionSettings& executionSettings)
 {
+    if(executionSettings.workspaceSizeLimit().has_value())
+    {
+        return executionSettings.workspaceSizeLimit().value();
+    }
+
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes>();
     ConvFwdParams params(attr, opGraph.getTensorMap());
@@ -315,8 +321,14 @@ size_t getMaxWorkspaceSizeFwd(const HipdnnEnginePluginHandle& handle,
 }
 
 size_t getMaxWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
-                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
+                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                              const MiopenExecutionSettings& executionSettings)
 {
+    if(executionSettings.workspaceSizeLimit().has_value())
+    {
+        return executionSettings.workspaceSizeLimit().value();
+    }
+
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes>();
     ConvBwdParams params(attr, opGraph.getTensorMap());
@@ -334,8 +346,14 @@ size_t getMaxWorkspaceSizeBwd(const HipdnnEnginePluginHandle& handle,
 }
 
 size_t getMaxWorkspaceSizeWrw(const HipdnnEnginePluginHandle& handle,
-                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph)
+                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                              const MiopenExecutionSettings& executionSettings)
 {
+    if(executionSettings.workspaceSizeLimit().has_value())
+    {
+        return executionSettings.workspaceSizeLimit().value();
+    }
+
     const auto& attr = opGraph.getNodeWrapper(0)
                            .attributesAs<hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes>();
     ConvWrwParams params(attr, opGraph.getTensorMap());
@@ -467,7 +485,7 @@ MiopenConvPlanBuilder::WorkspaceSizeRange MiopenConvPlanBuilder::getWorkspaceSiz
 size_t MiopenConvPlanBuilder::getMaxWorkspaceSize(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const MiopenExecutionSettings& executionSettings) const
+    const MiopenExecutionSettings& executionSettings) const
 {
     if(opGraph.nodeCount() != 1)
     {
@@ -482,11 +500,11 @@ size_t MiopenConvPlanBuilder::getMaxWorkspaceSize(
     switch(node.attributes_type())
     {
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
-        return getMaxWorkspaceSizeFwd(handle, opGraph);
+        return getMaxWorkspaceSizeFwd(handle, opGraph, executionSettings);
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
-        return getMaxWorkspaceSizeBwd(handle, opGraph);
+        return getMaxWorkspaceSizeBwd(handle, opGraph, executionSettings);
     case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
-        return getMaxWorkspaceSizeWrw(handle, opGraph);
+        return getMaxWorkspaceSizeWrw(handle, opGraph, executionSettings);
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
