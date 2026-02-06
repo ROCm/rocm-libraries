@@ -3,40 +3,25 @@
 
 #include <cstdint>
 #include <cstring>
+#include <array>
 #include <bit>
 #include <random>
-#include <type_traits>
 
 #include <miopen/unique_path.hpp>
 
 namespace {
 
-template <typename T = uint64_t, typename G = std::mt19937_64>
-requires std::is_integral_v<T>
-static void generate_random_data_block(void* buf, size_t len)
+using DataBlock = std::array<uint64_t, 2>;
+
+static void generate_random_data_block(DataBlock& buf)
 {
     std::random_device rd;
-    G gen(rd());
-    std::uniform_int_distribution<T> distrib(0);
-    size_t pos{0};
-    T* pBuffer{std::bit_cast<T*>(buf)};
+    std::mt19937_64 gen(rd());
+    std::uniform_int_distribution<std::remove_reference_t<decltype(buf[0])>> distrib(0);
 
-    while(pos < len)
+    for(size_t i = 0; i < buf.size(); ++i)
     {
-        const T random_value{distrib(gen)};
-        const size_t remaining_size{len - pos};
-
-        if(sizeof(T) <= remaining_size)
-        {
-            *pBuffer++ = random_value;
-            pos += sizeof(T);
-        }
-        else
-        {
-            // Copy remaining bytes manually, in case 'len' is not an exact multiple of 'sizeof(T)'.
-            memcpy(pBuffer, &random_value, remaining_size);
-            pos += remaining_size;
-        }
+        buf[i] = distrib(gen);
     }
 }
 
@@ -55,11 +40,11 @@ namespace miopen {
 fs::path unique_path(fs::path const& model)
 {
     fs::path::string_type s(model.native());
+    DataBlock ran;
 
-    char ran[16] = {}; // init to avoid clang static analyzer message
-
-    const constexpr unsigned int max_nibbles = 2u * sizeof(ran); // 4-bits per nibble
-    unsigned int nibbles_used                = max_nibbles;
+    const constexpr unsigned int max_nibbles =
+        2u * ran.size() * sizeof(ran[0]); // 4-bits per nibble
+    unsigned int nibbles_used = max_nibbles;
 
     for(auto& sch : s)
     {
@@ -67,11 +52,11 @@ fs::path unique_path(fs::path const& model)
         {
             if(nibbles_used == max_nibbles)
             {
-                generate_random_data_block(ran, sizeof(ran));
+                generate_random_data_block(ran);
                 nibbles_used = 0;
             }
 
-            unsigned int c = ran[nibbles_used / 2u];
+            unsigned int c = std::bit_cast<const uint8_t*>(ran.data())[nibbles_used / 2u];
             c >>= 4u * (nibbles_used++ & 1u); // if odd, shift right 1 nibble
             sch = hex[c & 0xf];               // convert to hex digit and replace
         }
