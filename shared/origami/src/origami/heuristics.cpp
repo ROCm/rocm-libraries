@@ -17,40 +17,27 @@ namespace origami {
 // ============================================================================
 
 void heuristic_params_t::merge_with(const heuristic_params_t& other) {
-  // Only override with non-default values from other
-  // We compare against default values and check if they differ
-
-  using defaults = heuristic_defaults_t;
-
   // Latency component weights
-  if (other.weight_mem_l2 != defaults::WEIGHT_MEM_L2) weight_mem_l2 = other.weight_mem_l2;
-  if (other.weight_mem_mall != defaults::WEIGHT_MEM_MALL) weight_mem_mall = other.weight_mem_mall;
-  if (other.weight_mem_dram != defaults::WEIGHT_MEM_DRAM) weight_mem_dram = other.weight_mem_dram;
-  if (other.weight_compute != defaults::WEIGHT_COMPUTE) weight_compute = other.weight_compute;
-  if (other.weight_memory != defaults::WEIGHT_MEMORY) weight_memory = other.weight_memory;
-  if (other.weight_wg_setup != defaults::WEIGHT_WG_SETUP) weight_wg_setup = other.weight_wg_setup;
-  if (other.weight_prologue != defaults::WEIGHT_PROLOGUE) weight_prologue = other.weight_prologue;
-  if (other.weight_epilogue != defaults::WEIGHT_EPILOGUE) weight_epilogue = other.weight_epilogue;
-  if (other.weight_loop_overhead != defaults::WEIGHT_LOOP_OVERHEAD)
-    weight_loop_overhead = other.weight_loop_overhead;
-  if (other.weight_tile_total != defaults::WEIGHT_TILE_TOTAL)
-    weight_tile_total = other.weight_tile_total;
+  weight_mem_l2        = other.weight_mem_l2;
+  weight_mem_mall      = other.weight_mem_mall;
+  weight_mem_dram      = other.weight_mem_dram;
+  weight_compute       = other.weight_compute;
+  weight_memory        = other.weight_memory;
+  weight_wg_setup      = other.weight_wg_setup;
+  weight_prologue      = other.weight_prologue;
+  weight_epilogue      = other.weight_epilogue;
+  weight_loop_overhead = other.weight_loop_overhead;
+  weight_tile_total    = other.weight_tile_total;
 
   // Empirical constants
-  if (other.l2_min_hit_rate_default != defaults::L2_MIN_HIT_RATE)
-    l2_min_hit_rate_default = other.l2_min_hit_rate_default;
-  if (other.main_memory_load_latency != defaults::MAIN_MEMORY_LOAD_LATENCY)
-    main_memory_load_latency = other.main_memory_load_latency;
-  if (other.occupancy_decay_base != defaults::OCCUPANCY_DECAY_BASE)
-    occupancy_decay_base = other.occupancy_decay_base;
-  if (other.k_split_reduction_overhead != defaults::K_SPLIT_REDUCTION_OVERHEAD)
-    k_split_reduction_overhead = other.k_split_reduction_overhead;
-  if (other.k_padding_penalty != defaults::K_PADDING_PENALTY)
-    k_padding_penalty = other.k_padding_penalty;
+  l2_min_hit_rate_default    = other.l2_min_hit_rate_default;
+  main_memory_load_latency   = other.main_memory_load_latency;
+  occupancy_decay_base       = other.occupancy_decay_base;
+  k_split_reduction_overhead = other.k_split_reduction_overhead;
+  k_padding_penalty          = other.k_padding_penalty;
 
   // Main loop efficiency
-  if (other.main_loop_efficiency != defaults::MAIN_LOOP_EFFICIENCY)
-    main_loop_efficiency = other.main_loop_efficiency;
+  main_loop_efficiency = other.main_loop_efficiency;
 }
 
 // ============================================================================
@@ -184,6 +171,9 @@ static void apply_tf32_heuristics(heuristic_params_t& params,
 heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,
                                                  const hardware_t& hardware,
                                                  const config_t& config) const {
+  // When heuristics are disabled, always return default parameters (no overrides).
+  if (!origami::runtime_options().get().heuristics_enabled) { return default_params_; }
+
   // Start with default parameters
   heuristic_params_t result = default_params_;
 
