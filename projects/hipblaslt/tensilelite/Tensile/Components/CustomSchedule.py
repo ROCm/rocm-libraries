@@ -527,9 +527,9 @@ class RegisterSchedule:
                 return ScheduleMatchStatus.NO_MATCH, None
 
             MT0, MT1, DU = kernel["MacroTile0"], kernel["MacroTile1"], kernel["DepthU"]
-            PGR, PLR, DTL, DPB = kernel["PrefetchGlobalRead"], kernel["PrefetchLocalRead"], kernel["DirectToLds"], kernel["DtlPlusLdsBuf "]
+            PGR, PLR, DTL, DPLB = kernel["PrefetchGlobalRead"], kernel["PrefetchLocalRead"], kernel["DirectToLds"], kernel["DtlPlusLdsBuf"]
             WSGRA, WSGRB = kernel["WaveSeparateGlobalReadA"], kernel["WaveSeparateGlobalReadB"]
-            kernel_tile_config = TileConfig(MT0, MT1, DU, PGR, PLR, DTL, DPB, WSGRA, WSGRB)
+            kernel_tile_config = TileConfig(MT0, MT1, DU, PGR, PLR, DTL, DPLB, WSGRA, WSGRB)
             if self.tile_config != kernel_tile_config:
                 return ScheduleMatchStatus.NO_MATCH, None
 
