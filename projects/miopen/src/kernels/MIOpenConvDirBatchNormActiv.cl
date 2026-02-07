@@ -387,8 +387,8 @@ MIOpenConvUniBatchNormActiv(
     uint y_tile_blk = iDiv_legacy(grp_id0, MLO_N_OUT_TILE_BLOCKS0);
     uint x_tile_blk = iMod(grp_id0, y_tile_blk, MLO_N_OUT_TILE_BLOCKS0);
 #else
-    uint y_tile_blk       = grp_id0 / MLO_N_OUT_TILE_BLOCKS0;
-    uint x_tile_blk       = grp_id0 & (MLO_N_OUT_TILE_BLOCKS0 - 1);
+    uint y_tile_blk = grp_id0 / MLO_N_OUT_TILE_BLOCKS0;
+    uint x_tile_blk = grp_id0 & (MLO_N_OUT_TILE_BLOCKS0 - 1);
 #endif
     uint o_pack = get_group_id(1); // block of outputs
     uint b_pack = get_group_id(2); // batch block
@@ -398,13 +398,13 @@ MIOpenConvUniBatchNormActiv(
     uint stack        = 0;
     uint alu_stack_id = lcl_id;
 #elif MLO_ALUTILES_STACK_SZ & (MLO_ALUTILES_STACK_SZ - 1)
-    uint stack            = iDiv_legacy(lcl_id, MLO_ALUTILES_STACK_SZ); // stack
-    uint alu_stack_id     = iMod(lcl_id, stack, MLO_ALUTILES_STACK_SZ); // alu index in stack
+    uint stack        = iDiv_legacy(lcl_id, MLO_ALUTILES_STACK_SZ); // stack
+    uint alu_stack_id = iMod(lcl_id, stack, MLO_ALUTILES_STACK_SZ); // alu index in stack
 #else
     uint stack        = lcl_id / MLO_ALUTILES_STACK_SZ;       // stack
     uint alu_stack_id = lcl_id & (MLO_ALUTILES_STACK_SZ - 1); // alu index in stack
 #if MLO_ALUTILES_STACK_SZ >= 64
-    stack             = uniform(stack);
+    stack = uniform(stack);
 #endif
 #endif
 // ALU plane inside stack
@@ -413,7 +413,7 @@ MIOpenConvUniBatchNormActiv(
     uint alu_out_id       = iMod(
         alu_stack_id, alu_out_plane_id, MLO_ALU_TILE_SZ); // alu index inside an ALU output plane
 #else
-    uint alu_out_plane_id = alu_stack_id / MLO_ALU_TILE_SZ;             // alu output plane index
+    uint alu_out_plane_id = alu_stack_id / MLO_ALU_TILE_SZ; // alu output plane index
     uint alu_out_id = alu_stack_id & (MLO_ALU_TILE_SZ - 1); // alu index inside an ALU output plane
 #endif
 // pos inside ALU tile
@@ -421,8 +421,8 @@ MIOpenConvUniBatchNormActiv(
     uint alu_tl1 = iDiv_legacy(alu_out_id, MLO_ALU_VTILE0);
     uint alu_tl0 = iMod(alu_out_id, alu_tl1, MLO_ALU_VTILE0);
 #else
-    uint alu_tl1    = alu_out_id / MLO_ALU_VTILE0;
-    uint alu_tl0    = alu_out_id & (MLO_ALU_VTILE0 - 1);
+    uint alu_tl1 = alu_out_id / MLO_ALU_VTILE0;
+    uint alu_tl0 = alu_out_id & (MLO_ALU_VTILE0 - 1);
 #endif
 
     uint o_map_plane =
@@ -442,7 +442,7 @@ MIOpenConvUniBatchNormActiv(
     uint wave_id     = lcl_id / MLO_N_READ_PROCS;
     uint wave_lcl_id = lcl_id & (MLO_N_READ_PROCS - 1);
 #if MLO_N_READ_PROCS >= 64
-    wave_id          = uniform(wave_id);
+    wave_id = uniform(wave_id);
 #endif
 #endif
 #endif
@@ -457,14 +457,14 @@ MIOpenConvUniBatchNormActiv(
     uint x_in_lcl = alu_tl0 * MLO_OUT_TILE0 * MLO_FILTER_STRIDE0;
     uint y_in_lcl = alu_tl1 * MLO_OUT_TILE1 * MLO_FILTER_STRIDE1;
 #else
-    uint x_grp      = x_tile_blk * (MLO_IN_TILE0 / MLO_FILTER_STRIDE0);
-    uint y_grp      = y_tile_blk * (MLO_IN_TILE1 / MLO_FILTER_STRIDE1);
+    uint x_grp = x_tile_blk * (MLO_IN_TILE0 / MLO_FILTER_STRIDE0);
+    uint y_grp = y_tile_blk * (MLO_IN_TILE1 / MLO_FILTER_STRIDE1);
 #if MLO_LARGE_MAP == 1
-    uint x_in_grp   = x_grp - (MLO_FILTER_PAD0 / MLO_FILTER_STRIDE0);
-    uint y_in_grp   = y_grp - (MLO_FILTER_PAD1 / MLO_FILTER_STRIDE1);
+    uint x_in_grp = x_grp - (MLO_FILTER_PAD0 / MLO_FILTER_STRIDE0);
+    uint y_in_grp = y_grp - (MLO_FILTER_PAD1 / MLO_FILTER_STRIDE1);
 #endif
-    uint x_in_lcl   = alu_tl0 * (MLO_OUT_TILE0 / MLO_FILTER_STRIDE0);
-    uint y_in_lcl   = alu_tl1 * (MLO_OUT_TILE1 / MLO_FILTER_STRIDE1);
+    uint x_in_lcl = alu_tl0 * (MLO_OUT_TILE0 / MLO_FILTER_STRIDE0);
+    uint y_in_lcl = alu_tl1 * (MLO_OUT_TILE1 / MLO_FILTER_STRIDE1);
 #endif
 
     // base offset to read data from local input data
@@ -475,7 +475,7 @@ MIOpenConvUniBatchNormActiv(
 #if MLO_DIR_FORWARD == 1
     uint wei_off = mul24(o_map_plane, (uint)(MLO_N_INPUTS * MLO_FILTER_SZ));
 #else
-    uint wei_off    = mul24(o_map_plane, (uint)MLO_FILTER_SZ);
+    uint wei_off = mul24(o_map_plane, (uint)MLO_FILTER_SZ);
 #endif
 
 #if MLO_LARGE_MAP == 0
@@ -562,8 +562,8 @@ MIOpenConvUniBatchNormActiv(
             uint i_b = iDiv_legacy(i, MLO_N_IN_TILES_PERSTACK);
             uint i_c = iMod(i, i_b, MLO_N_IN_TILES_PERSTACK);
 #else
-            uint i_b   = i / MLO_N_IN_TILES_PERSTACK;
-            uint i_c   = i & (MLO_N_IN_TILES_PERSTACK - 1);
+            uint i_b = i / MLO_N_IN_TILES_PERSTACK;
+            uint i_c = i & (MLO_N_IN_TILES_PERSTACK - 1);
 #endif
 
             bool vis = true;
@@ -582,13 +582,13 @@ MIOpenConvUniBatchNormActiv(
             uint lcl_p_stride = MLO_N_READ_PROCS;
             uint lcl_base     = 0;
 #if MLO_DIR_FORWARD == 1
-            uint lcl_y        = MLO_FILTER_PAD1;
-            uint lcl_x        = MLO_FILTER_PAD0;
+            uint lcl_y = MLO_FILTER_PAD1;
+            uint lcl_x = MLO_FILTER_PAD0;
 #else
             uint lcl_y = (MLO_FILTER_PAD1 / MLO_FILTER_STRIDE0);
             uint lcl_x = (MLO_FILTER_PAD0 / MLO_FILTER_STRIDE1);
 #endif
-            uint gbl_base     = in_off2;
+            uint gbl_base = in_off2;
 
             readData(elem_id,
                      (MLO_IN_HEIGHT * MLO_IN_WIDTH),
@@ -692,8 +692,8 @@ MIOpenConvUniBatchNormActiv(
     uint y_out_grp = y_tile_blk * MLO_IN_TILE1;
 #endif
 #else
-    uint x_out_grp  = x_grp * MLO_FILTER_STRIDE0;
-    uint y_out_grp  = y_grp * MLO_FILTER_STRIDE1;
+    uint x_out_grp = x_grp * MLO_FILTER_STRIDE0;
+    uint y_out_grp = y_grp * MLO_FILTER_STRIDE1;
 #endif
     uint x_out_lcl = alu_tl0 * MLO_OUT_TILE0;
     uint y_out_lcl = alu_tl1 * MLO_OUT_TILE1;
@@ -781,7 +781,7 @@ MIOpenConvUniBatchNormActiv(
 #ifdef NO_BN
                             bn_res = conv_res;
 #else
-                                bn_res     = pscale * (conv_res - pmean) * pinvVariance + pbias;
+                                bn_res = pscale * (conv_res - pmean) * pinvVariance + pbias;
 #endif
 
 #if(MIOPEN_NRN_OP_ID > 0)
