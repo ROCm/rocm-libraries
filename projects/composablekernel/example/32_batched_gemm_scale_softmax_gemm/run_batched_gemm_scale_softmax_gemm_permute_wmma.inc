@@ -24,7 +24,7 @@ int run(int argc, char* argv[])
     ck::index_t G0 = 7;
     ck::index_t G1 = 13;
 
-    float alpha = 1;
+    double alpha = 1;
 
     bool input_permute  = false;
     bool output_permute = true;
@@ -52,7 +52,7 @@ int run(int argc, char* argv[])
         G0 = std::stoi(argv[8]);
         G1 = std::stoi(argv[9]);
 
-        alpha = std::stof(argv[10]);
+        alpha = std::stod(argv[10]);
 
         input_permute  = std::stoi(argv[11]);
         output_permute = std::stoi(argv[12]);

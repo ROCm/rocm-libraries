@@ -56,7 +56,7 @@ struct DeviceSparseEmbeddingsForwardLayernorm : public BaseOperator
                  const BetaDataType* p_beta,
                  const ck::index_t EmbeddingDim,
                  const ck::index_t IndexLength,
-                 const AccDataType epsilon,
+                 double epsilon,
                  const EmbElementwiseOperation emb_elementwise_op)
             : p_out_(p_out),
               p_embs_(p_embs),
@@ -65,7 +65,7 @@ struct DeviceSparseEmbeddingsForwardLayernorm : public BaseOperator
               p_beta_(p_beta),
               EmbeddingDim_(EmbeddingDim),
               IndexLength_(IndexLength),
-              epsilon_(epsilon),
+              epsilon_(static_cast<AccDataType>(epsilon)),
               emb_elementwise_op_(emb_elementwise_op)
         {
             grid_size_ = (IndexLength + DimClusterSize - 1) / DimClusterSize;
@@ -92,7 +92,7 @@ struct DeviceSparseEmbeddingsForwardLayernorm : public BaseOperator
                         const void* p_beta,
                         ck::index_t EmbeddingDim,
                         ck::index_t IndexLength,
-                        const AccDataType epsilon,
+                        double epsilon,
                         const EmbElementwiseOperation emb_elementwise_op)
     {
         return std::make_unique<Argument>(reinterpret_cast<OutType*>(p_out),

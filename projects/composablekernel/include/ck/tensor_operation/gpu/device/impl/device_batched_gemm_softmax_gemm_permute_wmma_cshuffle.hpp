@@ -806,7 +806,7 @@ struct DeviceBatchedGemmSoftmaxGemmPermute_Wmma_CShuffle
                index_t O,
                index_t G0,
                index_t G1,
-               float alpha,
+               double alpha,
                bool input_permute,
                bool output_permute)
             : p_a_grid_{p_a_grid},
@@ -819,7 +819,7 @@ struct DeviceBatchedGemmSoftmaxGemmPermute_Wmma_CShuffle
               O_{O},
               G0_{G0},
               G1_{G1},
-              alpha_{alpha},
+              alpha_{static_cast<float>(alpha)},
               input_permute_{input_permute},
               output_permute_{output_permute}
         {
@@ -852,7 +852,7 @@ struct DeviceBatchedGemmSoftmaxGemmPermute_Wmma_CShuffle
                              index_t O,
                              index_t G0,
                              index_t G1,
-                             float alpha,
+                             double alpha,
                              bool input_permute,
                              bool output_permute)
     {
@@ -1019,14 +1019,14 @@ struct DeviceBatchedGemmSoftmaxGemmPermute_Wmma_CShuffle
                     index_t sequence_length,
                     index_t head_count,
                     index_t head_size,
-                    float alpha)
+                    double alpha)
             : p_qkv_grid_{p_qkv_grid},
               p_out_grid_{p_out_grid},
               batch_size_{batch_size},
               sequence_length_{sequence_length},
               head_count_{head_count},
               head_size_{head_size},
-              alpha_{alpha}
+              alpha_{static_cast<float>(alpha)}
         {
         }
         // Pointers
@@ -1047,7 +1047,7 @@ struct DeviceBatchedGemmSoftmaxGemmPermute_Wmma_CShuffle
                                      index_t sequence_length,
                                      index_t head_count,
                                      index_t head_size,
-                                     float alpha)
+                                     double alpha)
     {
         return SelfAttnArg{
             p_qkv_grid, p_out_grid, batch_size, sequence_length, head_count, head_size, alpha};
@@ -1063,7 +1063,7 @@ struct DeviceBatchedGemmSoftmaxGemmPermute_Wmma_CShuffle
                      index_t kv_sequence_length,
                      index_t head_count,
                      index_t head_size,
-                     float alpha)
+                     double alpha)
             : p_q_grid_{p_q_grid},
               p_kv_grid_{p_kv_grid},
               p_out_grid_{p_out_grid},
@@ -1072,7 +1072,7 @@ struct DeviceBatchedGemmSoftmaxGemmPermute_Wmma_CShuffle
               kv_sequence_length_{kv_sequence_length},
               head_count_{head_count},
               head_size_{head_size},
-              alpha_{alpha}
+              alpha_{static_cast<float>(alpha)}
         {
         }
         // Pointers
@@ -1097,7 +1097,7 @@ struct DeviceBatchedGemmSoftmaxGemmPermute_Wmma_CShuffle
                                       index_t kv_sequence_length,
                                       index_t head_count,
                                       index_t head_size,
-                                      float alpha)
+                                      double alpha)
     {
         return CrossAttnArg{p_q_grid,
                             p_kv_grid,

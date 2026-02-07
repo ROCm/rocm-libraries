@@ -544,7 +544,7 @@ struct DeviceGroupedQueryAttentionForward_Wmma
                index_t O,
                index_t G0,
                index_t G1,
-               float alpha,
+               double alpha,
                bool input_permute,
                bool output_permute)
             : p_a_grid_{p_a_grid},
@@ -557,7 +557,7 @@ struct DeviceGroupedQueryAttentionForward_Wmma
               O_{O},
               G0_{G0},
               G1_{G1},
-              alpha_{alpha},
+              alpha_{static_cast<float>(alpha)},
               input_permute_{input_permute},
               output_permute_{output_permute}
         {
@@ -590,7 +590,7 @@ struct DeviceGroupedQueryAttentionForward_Wmma
                              index_t O,
                              index_t G0,
                              index_t G1,
-                             float alpha,
+                             double alpha,
                              bool input_permute,
                              bool output_permute)
     {

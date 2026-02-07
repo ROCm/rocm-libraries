@@ -23,7 +23,7 @@ int run(int argc, char* argv[])
     ck::index_t batch_size = 2;
     ck::index_t head_num   = 8;
 
-    float alpha         = 1;
+    double alpha        = 1;
     bool input_permute  = true;
     bool output_permute = true;
 
@@ -49,7 +49,7 @@ int run(int argc, char* argv[])
         batch_size         = std::stoi(argv[7]);
         head_num           = std::stoi(argv[8]);
 
-        alpha = std::stof(argv[9]);
+        alpha = std::stod(argv[9]);
     }
     else
     {

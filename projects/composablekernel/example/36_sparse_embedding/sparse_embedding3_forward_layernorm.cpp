@@ -65,7 +65,7 @@ int main(int argc, char* argv[])
     constexpr auto dims           = ck::Sequence<256, 512, 768, 1024, 1536, 2048, 4096, 8192>{};
     ck::index_t index_length      = 2048;
     ck::index_t dim_mask          = 0xffff;
-    constexpr AccDataType epsilon = 1e-4;
+    constexpr double epsilon = 1e-4;
 
     auto f_host_tensor_desc_1d = [](std::size_t len_) { return HostTensorDescriptor({len_}); };
 
