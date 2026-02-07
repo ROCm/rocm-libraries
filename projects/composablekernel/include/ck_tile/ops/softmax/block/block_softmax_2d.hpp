@@ -54,7 +54,7 @@ struct BlockSoftmax2D
 
         // compute row sum
         using Y = remove_cvref_t<decltype(y)>;
-        BlockReduce2D<Y> reduce_row_max{y, DataType{0}}
+        BlockReduce2D<Y> reduce_row_sum{y, DataType{0}};
 #if _BLOCK_SOFTMAX_USE_UNPACK2
         auto row_sum = reduce_row_sum(f_sum3, f_sum, sequence<1, 2>{});
 #else
