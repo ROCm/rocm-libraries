@@ -27,7 +27,9 @@
 
 #include "gtsv_nopivot_device.h"
 
-#define LAUNCH_GTSV_NOPIVOT_CR_POW2_SHARED(block_size)            \
+#include <map>
+
+#define LAUNCH_GTSV_NOPIVOT_CR_POW2_SHARED(block_size)               \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                              \
         (rocsparse::gtsv_nopivot_cr_pow2_shared_kernel<block_size>), \
         dim3(n),                                                     \
@@ -42,7 +44,7 @@
         du,                                                          \
         B);
 
-#define LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(block_size)            \
+#define LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(block_size)               \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
         (rocsparse::gtsv_nopivot_pcr_pow2_shared_kernel<block_size>), \
         dim3(n),                                                      \
@@ -66,103 +68,66 @@
 
 
 
-#define LAUNCH_GTSV_NOPIVOT_2x2_CRAMERS_RULE(BLOCKSIZE)            \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                     \
-        (rocsparse::gtsv_nopivot_2x2_kernel<BLOCKSIZE>), \
-        dim3((n - 1) / BLOCKSIZE + 1),                                            \
-        dim3(BLOCKSIZE),                                             \
-        0,                                                            \
-        handle->stream,                                               \
-        n,                                                            \
-        ldb,                                                          \
-        dl,                                                           \
-        d,                                                            \
-        du,                                                           \
-        B);
 
-#define LAUNCH_GTSV_NOPIVOT_3x3_THOMAS(BLOCKSIZE)            \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                     \
-        (rocsparse::gtsv_nopivot_3x3_kernel<BLOCKSIZE>), \
-        dim3((n - 1) / BLOCKSIZE + 1),                                            \
-        dim3(BLOCKSIZE),                                             \
-        0,                                                            \
-        handle->stream,                                               \
-        n,                                                            \
-        ldb,                                                          \
-        dl,                                                           \
-        d,                                                            \
-        du,                                                           \
-        B);
 
-#define LAUNCH_GTSV_NOPIVOT_4x4_THOMAS(BLOCKSIZE)            \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                     \
-        (rocsparse::gtsv_nopivot_4x4_kernel<BLOCKSIZE>), \
-        dim3((n - 1) / BLOCKSIZE + 1),                                            \
-        dim3(BLOCKSIZE),                                             \
-        0,                                                            \
-        handle->stream,                                               \
-        n,                                                            \
-        ldb,                                                          \
-        dl,                                                           \
-        d,                                                            \
-        du,                                                           \
-        B);
 
-#define LAUNCH_GTSV_NOPIVOT_5x5_THOMAS(BLOCKSIZE)            \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                     \
-        (rocsparse::gtsv_nopivot_5x5_kernel<BLOCKSIZE>), \
-        dim3((n - 1) / BLOCKSIZE + 1),                                            \
-        dim3(BLOCKSIZE),                                             \
-        0,                                                            \
-        handle->stream,                                               \
-        n,                                                            \
-        ldb,                                                          \
-        dl,                                                           \
-        d,                                                            \
-        du,                                                           \
-        B);
 
-#define LAUNCH_GTSV_NOPIVOT_6x6_THOMAS(BLOCKSIZE)            \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                     \
-        (rocsparse::gtsv_nopivot_6x6_kernel<BLOCKSIZE>), \
-        dim3((n - 1) / BLOCKSIZE + 1),                                            \
-        dim3(BLOCKSIZE),                                             \
-        0,                                                            \
-        handle->stream,                                               \
-        n,                                                            \
-        ldb,                                                          \
-        dl,                                                           \
-        d,                                                            \
-        du,                                                           \
-        B);
 
-#define LAUNCH_GTSV_NOPIVOT_7x7_THOMAS(BLOCKSIZE)            \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                     \
-        (rocsparse::gtsv_nopivot_7x7_kernel<BLOCKSIZE>), \
-        dim3((n - 1) / BLOCKSIZE + 1),                                            \
-        dim3(BLOCKSIZE),                                             \
-        0,                                                            \
-        handle->stream,                                               \
-        n,                                                            \
-        ldb,                                                          \
-        dl,                                                           \
-        d,                                                            \
-        du,                                                           \
-        B);
 
-#define LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED_SMALL(BLOCKSIZE, M)            \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                     \
-        (rocsparse::gtsv_nopivot_pcr_pow2_shared_small_kernel<BLOCKSIZE, M>), \
-        dim3((n - 1) / (BLOCKSIZE / M) + 1),                                            \
-        dim3(BLOCKSIZE),                                             \
-        0,                                                            \
-        handle->stream,                                               \
-        n,                                                            \
-        ldb,                                                          \
-        dl,                                                           \
-        d,                                                            \
-        du,                                                           \
-        B);
+
+
+
+#define LAUNCH_GTSV_NOPIVOT_5x5_THOMAS(BLOCKSIZE)                                       \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_5x5_kernel<BLOCKSIZE>), \
+                                       dim3((n - 1) / BLOCKSIZE + 1),                   \
+                                       dim3(BLOCKSIZE),                                 \
+                                       0,                                               \
+                                       handle->stream,                                  \
+                                       n,                                               \
+                                       ldb,                                             \
+                                       dl,                                              \
+                                       d,                                               \
+                                       du,                                              \
+                                       B);
+
+#define LAUNCH_GTSV_NOPIVOT_6x6_THOMAS(BLOCKSIZE)                                       \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_6x6_kernel<BLOCKSIZE>), \
+                                       dim3((n - 1) / BLOCKSIZE + 1),                   \
+                                       dim3(BLOCKSIZE),                                 \
+                                       0,                                               \
+                                       handle->stream,                                  \
+                                       n,                                               \
+                                       ldb,                                             \
+                                       dl,                                              \
+                                       d,                                               \
+                                       du,                                              \
+                                       B);
+
+#define LAUNCH_GTSV_NOPIVOT_7x7_THOMAS(BLOCKSIZE)                                       \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_7x7_kernel<BLOCKSIZE>), \
+                                       dim3((n - 1) / BLOCKSIZE + 1),                   \
+                                       dim3(BLOCKSIZE),                                 \
+                                       0,                                               \
+                                       handle->stream,                                  \
+                                       n,                                               \
+                                       ldb,                                             \
+                                       dl,                                              \
+                                       d,                                               \
+                                       du,                                              \
+                                       B);
+
+#define LAUNCH_GTSV_NOPIVOT_THOMAS(BLOCKSIZE, M)                                              \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_thomas_kernel<BLOCKSIZE, M>), \
+                                       dim3((n - 1) / BLOCKSIZE + 1),                         \
+                                       dim3(BLOCKSIZE),                                       \
+                                       0,                                                     \
+                                       handle->stream,                                        \
+                                       n,                                                     \
+                                       ldb,                                                   \
+                                       dl,                                                    \
+                                       d,                                                     \
+                                       du,                                                    \
+                                       B);
 
 
 
@@ -180,7 +145,7 @@
 
 
 
-#define LAUNCH_GTSV_NOPIVOT_CRPCR_POW2_SHARED(block_size, pcr_size)            \
+#define LAUNCH_GTSV_NOPIVOT_CRPCR_POW2_SHARED(block_size, pcr_size)               \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                           \
         (rocsparse::gtsv_nopivot_crpcr_pow2_shared_kernel<block_size, pcr_size>), \
         dim3(n),                                                                  \
@@ -195,7 +160,7 @@
         du,                                                                       \
         B);
 
-#define LAUNCH_GTSV_NOPIVOT_PCR_SHARED(block_size)                                           \
+#define LAUNCH_GTSV_NOPIVOT_PCR_SHARED(block_size)                                              \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_pcr_shared_kernel<block_size>), \
                                        dim3(n),                                                 \
                                        dim3(block_size),                                        \
@@ -280,6 +245,98 @@ rocsparse_status rocsparse::gtsv_no_pivot_buffer_size_template(rocsparse_handle 
 namespace rocsparse
 {
     template <typename T>
+    rocsparse_status launch_cramer_rule_kernel(rocsparse_handle handle,
+                                               rocsparse_int    n,
+                                               rocsparse_int    ldb,
+                                               const T*         dl,
+                                               const T*         d,
+                                               const T*         du,
+                                               T*               B)
+    {
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_2x2_kernel<256>),
+                                           dim3((n - 1) / 256 + 1),
+                                           dim3(256),
+                                           0,
+                                           handle->stream,
+                                           n,
+                                           ldb,
+                                           dl,
+                                           d,
+                                           du,
+                                           B);
+        return rocsparse_status_success;
+    }
+
+    template <typename T>
+    rocsparse_status launch_thomas_kernel_3(rocsparse_handle handle,
+                                            rocsparse_int    n,
+                                            rocsparse_int    ldb,
+                                            const T*         dl,
+                                            const T*         d,
+                                            const T*         du,
+                                            T*               B)
+    {
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_3x3_kernel<256>),
+                                           dim3((n - 1) / 256 + 1),
+                                           dim3(256),
+                                           0,
+                                           handle->stream,
+                                           n,
+                                           ldb,
+                                           dl,
+                                           d,
+                                           du,
+                                           B);
+        return rocsparse_status_success;
+    }
+
+    template <typename T>
+    rocsparse_status launch_thomas_kernel_4(rocsparse_handle handle,
+                                            rocsparse_int    n,
+                                            rocsparse_int    ldb,
+                                            const T*         dl,
+                                            const T*         d,
+                                            const T*         du,
+                                            T*               B)
+    {
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_4x4_kernel<256>),
+                                           dim3((n - 1) / 256 + 1),
+                                           dim3(256),
+                                           0,
+                                           handle->stream,
+                                           n,
+                                           ldb,
+                                           dl,
+                                           d,
+                                           du,
+                                           B);
+        return rocsparse_status_success;
+    }
+
+    template <uint32_t M, typename T>
+    rocsparse_status launch_thomas_kernel_m(rocsparse_handle handle,
+                                            rocsparse_int    n,
+                                            rocsparse_int    ldb,
+                                            const T*         dl,
+                                            const T*         d,
+                                            const T*         du,
+                                            T*               B)
+    {
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_thomas_kernel<256, M>),
+                                           dim3((n - 1) / 256 + 1),
+                                           dim3(256),
+                                           0,
+                                           handle->stream,
+                                           n,
+                                           ldb,
+                                           dl,
+                                           d,
+                                           du,
+                                           B);
+        return rocsparse_status_success;
+    }
+
+    template <typename T>
     rocsparse_status gtsv_no_pivot_small_template(rocsparse_handle handle,
                                                   rocsparse_int    m,
                                                   rocsparse_int    n,
@@ -294,58 +351,178 @@ namespace rocsparse
 
         rocsparse_host_assert(m <= 512, "This function is designed for m <= 512.");
 
-        if(m <= 7)
-        {
-            if(m == 2)
-            {
-                LAUNCH_GTSV_NOPIVOT_2x2_CRAMERS_RULE(256);
-            }
-            else if(m == 3)
-            {
-                LAUNCH_GTSV_NOPIVOT_3x3_THOMAS(256);
-            }
-            else if(m == 4)
-            {
-                LAUNCH_GTSV_NOPIVOT_4x4_THOMAS(256);
-            }
-            else if(m == 5)
-            {
-                LAUNCH_GTSV_NOPIVOT_5x5_THOMAS(256);
-            }
-            else if(m == 6)
-            {
-                LAUNCH_GTSV_NOPIVOT_6x6_THOMAS(256);
-            }
-            else if(m == 7)
-            {
-                LAUNCH_GTSV_NOPIVOT_7x7_THOMAS(256);
-            }
+        // Define function pointer type for kernel dispatch
+        using KernelFuncPtr = rocsparse_status (*)(
+            rocsparse_handle, rocsparse_int, rocsparse_int, const T*, const T*, const T*, T*);
 
+        // Kernel dispatch table for small matrix sizes
+        static const std::map<int, KernelFuncPtr> s_kernel_dispatch = {
+            {2, launch_cramer_rule_kernel<T>},   {3, launch_thomas_kernel_3<T>},
+            {4, launch_thomas_kernel_4<T>},      {5, launch_thomas_kernel_m<5, T>},
+            {6, launch_thomas_kernel_m<6, T>},   {7, launch_thomas_kernel_m<7, T>},
+            {8, launch_thomas_kernel_m<8, T>},   {9, launch_thomas_kernel_m<9, T>},
+            {10, launch_thomas_kernel_m<10, T>}, {11, launch_thomas_kernel_m<11, T>},
+            {12, launch_thomas_kernel_m<12, T>}, {13, launch_thomas_kernel_m<13, T>},
+            {14, launch_thomas_kernel_m<14, T>}, {14, launch_thomas_kernel_m<15, T>},
+            {16, launch_thomas_kernel_m<16, T>}, {17, launch_thomas_kernel_m<17, T>},
+            {18, launch_thomas_kernel_m<18, T>}, {19, launch_thomas_kernel_m<19, T>},
+            {20, launch_thomas_kernel_m<20, T>}, {21, launch_thomas_kernel_m<21, T>},
+            {22, launch_thomas_kernel_m<22, T>}, {23, launch_thomas_kernel_m<23, T>},
+            {24, launch_thomas_kernel_m<24, T>}, {25, launch_thomas_kernel_m<25, T>},
+            {26, launch_thomas_kernel_m<26, T>}, {27, launch_thomas_kernel_m<27, T>},
+            {28, launch_thomas_kernel_m<28, T>}, {29, launch_thomas_kernel_m<29, T>},
+            {30, launch_thomas_kernel_m<30, T>}, {31, launch_thomas_kernel_m<31, T>},
+            {32, launch_thomas_kernel_m<32, T>},
+
+            // {33, launch_thomas_kernel_m<33, T>}, {34, launch_thomas_kernel_m<34, T>},
+            // {35, launch_thomas_kernel_m<35, T>}, {36, launch_thomas_kernel_m<36, T>},
+            // {37, launch_thomas_kernel_m<37, T>}, {38, launch_thomas_kernel_m<38, T>},
+            // {39, launch_thomas_kernel_m<39, T>}, {40, launch_thomas_kernel_m<40, T>},
+            // {41, launch_thomas_kernel_m<41, T>}, {42, launch_thomas_kernel_m<42, T>},
+            // {43, launch_thomas_kernel_m<43, T>}, {44, launch_thomas_kernel_m<44, T>},
+            // {45, launch_thomas_kernel_m<45, T>}, {46, launch_thomas_kernel_m<46, T>},
+            // {47, launch_thomas_kernel_m<47, T>}, {48, launch_thomas_kernel_m<48, T>},
+            // {49, launch_thomas_kernel_m<49, T>}, {50, launch_thomas_kernel_m<50, T>},
+            // {51, launch_thomas_kernel_m<51, T>}, {52, launch_thomas_kernel_m<52, T>},
+            // {53, launch_thomas_kernel_m<53, T>}, {54, launch_thomas_kernel_m<54, T>},
+            // {55, launch_thomas_kernel_m<55, T>}, {56, launch_thomas_kernel_m<56, T>},
+            // {57, launch_thomas_kernel_m<57, T>}, {58, launch_thomas_kernel_m<58, T>},
+            // {59, launch_thomas_kernel_m<59, T>}, {60, launch_thomas_kernel_m<60, T>},
+            // {61, launch_thomas_kernel_m<61, T>}, {62, launch_thomas_kernel_m<62, T>},
+            // {63, launch_thomas_kernel_m<63, T>}, {64, launch_thomas_kernel_m<64, T>},
+        };
+
+        // if(m == 32 && n == 32)
+        // {
+        //     constexpr uint32_t WF_SIZE = 32;
+        //     constexpr uint32_t NUM_ELEMENTS = 32;
+        //     constexpr uint32_t SUB_GROUP_SIZE = 32;
+        //     std::vector<T> htemp(WF_SIZE * NUM_ELEMENTS, 0);
+        //     for(int i = 0; i < WF_SIZE * NUM_ELEMENTS; i++)
+        //     {
+        //         htemp[i] = i;
+        //     }
+
+        //     std::cout << "Before transpose htemp" << std::endl;
+        //     for(int i = 0; i < NUM_ELEMENTS; i++)
+        //     {
+        //         for(int j = 0; j < WF_SIZE; j++)
+        //         {
+        //             std::cout << htemp[WF_SIZE * i + j] << " ";
+        //         }
+        //         std::cout << "" << std::endl;
+        //     }
+        //     std::cout << "" << std::endl;
+
+        //     T* dtemp = nullptr;
+        //     RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp, sizeof(T) * WF_SIZE * NUM_ELEMENTS));
+        //     RETURN_IF_HIP_ERROR(
+        //         hipMemcpy(dtemp, htemp.data(), sizeof(T) * WF_SIZE * NUM_ELEMENTS, hipMemcpyHostToDevice));
+
+        //     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+        //         (rocsparse::gtsv_nopivot_thomas_transpose_kernel<32, WF_SIZE, NUM_ELEMENTS, SUB_GROUP_SIZE>),
+        //         dim3((n - 1) / 32 + 1),
+        //         dim3(32),
+        //         0,
+        //         handle->stream,
+        //         m,
+        //         n,
+        //         ldb,
+        //         dl,
+        //         d,
+        //         du,
+        //         B,
+        //         dtemp);
+
+        //     RETURN_IF_HIP_ERROR(
+        //         hipMemcpy(htemp.data(), dtemp, sizeof(T) * WF_SIZE * NUM_ELEMENTS, hipMemcpyDeviceToHost));
+
+        //     std::cout << "After transpose htemp" << std::endl;
+        //     for(int i = 0; i < NUM_ELEMENTS; i++)
+        //     {
+        //         for(int j = 0; j < WF_SIZE; j++)
+        //         {
+        //             std::cout << htemp[WF_SIZE * i + j] << " ";
+        //         }
+        //         std::cout << "" << std::endl;
+        //     }
+        //     std::cout << "" << std::endl;
+
+        //     RETURN_IF_HIP_ERROR(hipFree(dtemp));
+
+        //     return rocsparse_status_success;
+        // }
+
+
+        // if(m == 32)
+        // {
+        //     constexpr uint32_t WF_SIZE = 32;
+        //     constexpr uint32_t NUM_ELEMENTS = 32;
+        //     constexpr uint32_t SUB_GROUP_SIZE = 32;
+        //     T* dtemp = nullptr;
+        //     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+        //         (rocsparse::gtsv_nopivot_thomas_transpose_kernel<256, WF_SIZE, NUM_ELEMENTS, SUB_GROUP_SIZE>),
+        //         dim3((n - 1) / 256 + 1),
+        //         dim3(256),
+        //         0,
+        //         handle->stream,
+        //         m,
+        //         n,
+        //         ldb,
+        //         dl,
+        //         d,
+        //         du,
+        //         B,
+        //         dtemp);
+        //     return rocsparse_status_success;
+        // }
+        if(m == 8)
+        {
+            //std::cout << "AAAA" << std::endl;
+            constexpr uint32_t WF_SIZE = 32;
+            constexpr uint32_t TILE_X = 8;
+            T* dtemp = nullptr;
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::thomas_shared_transpose_kernel<256, WF_SIZE, TILE_X>),
+                dim3((n - 1) / 256 + 1),
+                dim3(256),
+                0,
+                handle->stream,
+                m,
+                n,
+                ldb,
+                dl,
+                d,
+                du,
+                B,
+                dtemp);
             return rocsparse_status_success;
+        }
+
+
+
+
+        // Thomas algorithm good up to m=64
+        if(m <= 32)
+        {
+            auto it = s_kernel_dispatch.find(m);
+
+            if(it != s_kernel_dispatch.end())
+            {
+                return it->second(handle, n, ldb, dl, d, du, B);
+            }
+            else
+            {
+                // Handle error: m not in dispatch table
+            }
         }
 
         // Run special algorithm if m is power of 2
         if((m & (m - 1)) == 0)
         {
-            if(m == 8)
-            {
-                //LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(8);
-                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED_SMALL(256, 8);
-            }
-            else if(m == 16)
-            {
-                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(16);
-                // LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED_SMALL(256, 16);
-            }
-            else if(m == 32)
-            {
-                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(32);
-                // LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED_SMALL(256, 32);
-            }
-            else if(m == 64)
+            if(m == 64)
             {
                 LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(64);
-                // LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED_SMALL(256, 64);
             }
             else if(m == 128)
             {
@@ -362,15 +539,7 @@ namespace rocsparse
         }
         else
         {
-            if(m <= 16)
-            {
-                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(16);
-            }
-            else if(m <= 32)
-            {
-                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(32);
-            }
-            else if(m <= 64)
+            if(m <= 64)
             {
                 LAUNCH_GTSV_NOPIVOT_PCR_SHARED(64);
             }

@@ -26,6 +26,8 @@
 
 #include "rocsparse_common.hpp"
 
+#include <vector>
+
 namespace rocsparse
 {
     // Small sized problems
@@ -254,6 +256,8 @@ namespace rocsparse
 
 
 
+
+
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_nopivot_2x2_kernel(rocsparse_int n,
@@ -297,11 +301,11 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_nopivot_3x3_kernel(rocsparse_int n,
-                                     rocsparse_int ldb,
-                                     const T* __restrict__ dl,
-                                     const T* __restrict__ d,
-                                     const T* __restrict__ du,
-                                     T* __restrict__ B)
+                                 rocsparse_int ldb,
+                                 const T* __restrict__ dl,
+                                 const T* __restrict__ d,
+                                 const T* __restrict__ du,
+                                 T* __restrict__ B)
     {
         const int tid = hipThreadIdx_x;
         const int bid = hipBlockIdx_x;
@@ -325,18 +329,18 @@ namespace rocsparse
 
             // Forward elimination with FMA
             // First row
-            const T c0_prime = c0 / b0;
+            const T c0_prime   = c0 / b0;
             const T rhs0_prime = rhs0 / b0;
 
             // Second row: denom1 = b1 - a1 * c0_prime
-            const T denom1 = rocsparse::fma(-a1, c0_prime, b1);
+            const T denom1     = rocsparse::fma(-a1, c0_prime, b1);
             const T inv_denom1 = static_cast<T>(1) / denom1;
-            const T c1_prime = c1 * inv_denom1;
+            const T c1_prime   = c1 * inv_denom1;
             // rhs1_prime = (rhs1 - a1 * rhs0_prime) / denom1
             const T rhs1_prime = rocsparse::fma(-a1, rhs0_prime, rhs1) * inv_denom1;
 
             // Third row: denom2 = b2 - a2 * c1_prime
-            const T denom2 = rocsparse::fma(-a2, c1_prime, b2);
+            const T denom2     = rocsparse::fma(-a2, c1_prime, b2);
             const T inv_denom2 = static_cast<T>(1) / denom2;
             // rhs2_prime = (rhs2 - a2 * rhs1_prime) / denom2
             const T rhs2_prime = rocsparse::fma(-a2, rhs1_prime, rhs2) * inv_denom2;
@@ -398,26 +402,26 @@ namespace rocsparse
             const T rhs3 = B[ldb * gid + 3];
 
             // Forward elimination (Thomas algorithm)
-            
+
             // First row: normalize by b0
-            const T inv_b0 = static_cast<T>(1) / b0;
-            const T c0_prime = c0 * inv_b0;
+            const T inv_b0     = static_cast<T>(1) / b0;
+            const T c0_prime   = c0 * inv_b0;
             const T rhs0_prime = rhs0 * inv_b0;
 
             // Second row: eliminate a1
-            const T denom1 = rocsparse::fma(-a1, c0_prime, b1);
+            const T denom1     = rocsparse::fma(-a1, c0_prime, b1);
             const T inv_denom1 = static_cast<T>(1) / denom1;
-            const T c1_prime = c1 * inv_denom1;
+            const T c1_prime   = c1 * inv_denom1;
             const T rhs1_prime = rocsparse::fma(-a1, rhs0_prime, rhs1) * inv_denom1;
 
             // Third row: eliminate a2
-            const T denom2 = rocsparse::fma(-a2, c1_prime, b2);
+            const T denom2     = rocsparse::fma(-a2, c1_prime, b2);
             const T inv_denom2 = static_cast<T>(1) / denom2;
-            const T c2_prime = c2 * inv_denom2;
+            const T c2_prime   = c2 * inv_denom2;
             const T rhs2_prime = rocsparse::fma(-a2, rhs1_prime, rhs2) * inv_denom2;
 
             // Fourth row: eliminate a3
-            const T denom3 = rocsparse::fma(-a3, c2_prime, b3);
+            const T denom3     = rocsparse::fma(-a3, c2_prime, b3);
             const T inv_denom3 = static_cast<T>(1) / denom3;
             const T rhs3_prime = rocsparse::fma(-a3, rhs2_prime, rhs3) * inv_denom3;
 
@@ -483,32 +487,32 @@ namespace rocsparse
             const T rhs4 = B[ldb * gid + 4];
 
             // Forward elimination (Thomas algorithm)
-            
+
             // First row: normalize by b0
-            const T inv_b0 = static_cast<T>(1) / b0;
-            const T c0_prime = c0 * inv_b0;
+            const T inv_b0     = static_cast<T>(1) / b0;
+            const T c0_prime   = c0 * inv_b0;
             const T rhs0_prime = rhs0 * inv_b0;
 
             // Second row: eliminate a1
-            const T denom1 = rocsparse::fma(-a1, c0_prime, b1);
+            const T denom1     = rocsparse::fma(-a1, c0_prime, b1);
             const T inv_denom1 = static_cast<T>(1) / denom1;
-            const T c1_prime = c1 * inv_denom1;
+            const T c1_prime   = c1 * inv_denom1;
             const T rhs1_prime = rocsparse::fma(-a1, rhs0_prime, rhs1) * inv_denom1;
 
             // Third row: eliminate a2
-            const T denom2 = rocsparse::fma(-a2, c1_prime, b2);
+            const T denom2     = rocsparse::fma(-a2, c1_prime, b2);
             const T inv_denom2 = static_cast<T>(1) / denom2;
-            const T c2_prime = c2 * inv_denom2;
+            const T c2_prime   = c2 * inv_denom2;
             const T rhs2_prime = rocsparse::fma(-a2, rhs1_prime, rhs2) * inv_denom2;
 
             // Fourth row: eliminate a3
-            const T denom3 = rocsparse::fma(-a3, c2_prime, b3);
+            const T denom3     = rocsparse::fma(-a3, c2_prime, b3);
             const T inv_denom3 = static_cast<T>(1) / denom3;
-            const T c3_prime = c3 * inv_denom3;
+            const T c3_prime   = c3 * inv_denom3;
             const T rhs3_prime = rocsparse::fma(-a3, rhs2_prime, rhs3) * inv_denom3;
 
             // Fifth row: eliminate a4
-            const T denom4 = rocsparse::fma(-a4, c3_prime, b4);
+            const T denom4     = rocsparse::fma(-a4, c3_prime, b4);
             const T inv_denom4 = static_cast<T>(1) / denom4;
             const T rhs4_prime = rocsparse::fma(-a4, rhs3_prime, rhs4) * inv_denom4;
 
@@ -581,38 +585,38 @@ namespace rocsparse
             const T rhs5 = B[ldb * gid + 5];
 
             // Forward elimination (Thomas algorithm)
-            
+
             // First row: normalize by b0
-            const T inv_b0 = static_cast<T>(1) / b0;
-            const T c0_prime = c0 * inv_b0;
+            const T inv_b0     = static_cast<T>(1) / b0;
+            const T c0_prime   = c0 * inv_b0;
             const T rhs0_prime = rhs0 * inv_b0;
 
             // Second row: eliminate a1
-            const T denom1 = rocsparse::fma(-a1, c0_prime, b1);
+            const T denom1     = rocsparse::fma(-a1, c0_prime, b1);
             const T inv_denom1 = static_cast<T>(1) / denom1;
-            const T c1_prime = c1 * inv_denom1;
+            const T c1_prime   = c1 * inv_denom1;
             const T rhs1_prime = rocsparse::fma(-a1, rhs0_prime, rhs1) * inv_denom1;
 
             // Third row: eliminate a2
-            const T denom2 = rocsparse::fma(-a2, c1_prime, b2);
+            const T denom2     = rocsparse::fma(-a2, c1_prime, b2);
             const T inv_denom2 = static_cast<T>(1) / denom2;
-            const T c2_prime = c2 * inv_denom2;
+            const T c2_prime   = c2 * inv_denom2;
             const T rhs2_prime = rocsparse::fma(-a2, rhs1_prime, rhs2) * inv_denom2;
 
             // Fourth row: eliminate a3
-            const T denom3 = rocsparse::fma(-a3, c2_prime, b3);
+            const T denom3     = rocsparse::fma(-a3, c2_prime, b3);
             const T inv_denom3 = static_cast<T>(1) / denom3;
-            const T c3_prime = c3 * inv_denom3;
+            const T c3_prime   = c3 * inv_denom3;
             const T rhs3_prime = rocsparse::fma(-a3, rhs2_prime, rhs3) * inv_denom3;
 
             // Fifth row: eliminate a4
-            const T denom4 = rocsparse::fma(-a4, c3_prime, b4);
+            const T denom4     = rocsparse::fma(-a4, c3_prime, b4);
             const T inv_denom4 = static_cast<T>(1) / denom4;
-            const T c4_prime = c4 * inv_denom4;
+            const T c4_prime   = c4 * inv_denom4;
             const T rhs4_prime = rocsparse::fma(-a4, rhs3_prime, rhs4) * inv_denom4;
 
             // Sixth row: eliminate a5
-            const T denom5 = rocsparse::fma(-a5, c4_prime, b5);
+            const T denom5     = rocsparse::fma(-a5, c4_prime, b5);
             const T inv_denom5 = static_cast<T>(1) / denom5;
             const T rhs5_prime = rocsparse::fma(-a5, rhs4_prime, rhs5) * inv_denom5;
 
@@ -692,44 +696,44 @@ namespace rocsparse
             const T rhs6 = B[ldb * gid + 6];
 
             // Forward elimination (Thomas algorithm)
-            
+
             // First row: normalize by b0
-            const T inv_b0 = static_cast<T>(1) / b0;
-            const T c0_prime = c0 * inv_b0;
+            const T inv_b0     = static_cast<T>(1) / b0;
+            const T c0_prime   = c0 * inv_b0;
             const T rhs0_prime = rhs0 * inv_b0;
 
             // Second row: eliminate a1
-            const T denom1 = rocsparse::fma(-a1, c0_prime, b1);
+            const T denom1     = rocsparse::fma(-a1, c0_prime, b1);
             const T inv_denom1 = static_cast<T>(1) / denom1;
-            const T c1_prime = c1 * inv_denom1;
+            const T c1_prime   = c1 * inv_denom1;
             const T rhs1_prime = rocsparse::fma(-a1, rhs0_prime, rhs1) * inv_denom1;
 
             // Third row: eliminate a2
-            const T denom2 = rocsparse::fma(-a2, c1_prime, b2);
+            const T denom2     = rocsparse::fma(-a2, c1_prime, b2);
             const T inv_denom2 = static_cast<T>(1) / denom2;
-            const T c2_prime = c2 * inv_denom2;
+            const T c2_prime   = c2 * inv_denom2;
             const T rhs2_prime = rocsparse::fma(-a2, rhs1_prime, rhs2) * inv_denom2;
 
             // Fourth row: eliminate a3
-            const T denom3 = rocsparse::fma(-a3, c2_prime, b3);
+            const T denom3     = rocsparse::fma(-a3, c2_prime, b3);
             const T inv_denom3 = static_cast<T>(1) / denom3;
-            const T c3_prime = c3 * inv_denom3;
+            const T c3_prime   = c3 * inv_denom3;
             const T rhs3_prime = rocsparse::fma(-a3, rhs2_prime, rhs3) * inv_denom3;
 
             // Fifth row: eliminate a4
-            const T denom4 = rocsparse::fma(-a4, c3_prime, b4);
+            const T denom4     = rocsparse::fma(-a4, c3_prime, b4);
             const T inv_denom4 = static_cast<T>(1) / denom4;
-            const T c4_prime = c4 * inv_denom4;
+            const T c4_prime   = c4 * inv_denom4;
             const T rhs4_prime = rocsparse::fma(-a4, rhs3_prime, rhs4) * inv_denom4;
 
             // Sixth row: eliminate a5
-            const T denom5 = rocsparse::fma(-a5, c4_prime, b5);
+            const T denom5     = rocsparse::fma(-a5, c4_prime, b5);
             const T inv_denom5 = static_cast<T>(1) / denom5;
-            const T c5_prime = c5 * inv_denom5;
+            const T c5_prime   = c5 * inv_denom5;
             const T rhs5_prime = rocsparse::fma(-a5, rhs4_prime, rhs5) * inv_denom5;
 
             // Seventh row: eliminate a6
-            const T denom6 = rocsparse::fma(-a6, c5_prime, b6);
+            const T denom6     = rocsparse::fma(-a6, c5_prime, b6);
             const T inv_denom6 = static_cast<T>(1) / denom6;
             const T rhs6_prime = rocsparse::fma(-a6, rhs5_prime, rhs6) * inv_denom6;
 
@@ -753,88 +757,833 @@ namespace rocsparse
         }
     }
 
-    // Parallel cyclic reduction algorithm using shared memory
+    // Thomas algorithm kernel for solving multiple tridiagonal systems in parallel
+    //
+    // This kernel implements the Thomas algorithm (a specialized form of Gaussian elimination
+    // for tridiagonal systems) where each thread independently solves one tridiagonal system.
+    //
+    // Algorithm Overview:
+    // ------------------
+    // Solves Ax = b where A is an M×M tridiagonal matrix of the form:
+    //
+    //   [ d[0]  du[0]   0      0    ...    0   ]   [ x[0]   ]   [ b[0]   ]
+    //   [ dl[1] d[1]   du[1]   0    ...    0   ]   [ x[1]   ]   [ b[1]   ]
+    //   [ 0     dl[2]  d[2]   du[2] ...    0   ] × [ x[2]   ] = [ b[2]   ]
+    //   [ ...   ...    ...    ...   ...   ...  ]   [ ...    ]   [ ...    ]
+    //   [ 0     0      0      0    dl[M-1] d[M-1]] [ x[M-1] ]   [ b[M-1] ]
+    //
+    // where:
+    //   - dl: lower diagonal (M elements, dl[0] unused)
+    //   - d:  main diagonal (M elements)
+    //   - du: upper diagonal (M elements, du[M-1] unused)
+    //   - B:  right-hand side vectors (n systems of size M, stored column-major with stride ldb)
+    //
+    // Two-Phase Approach:
+    // -------------------
+    // 1. Forward Sweep (Forward Elimination):
+    //    Eliminates the lower diagonal by computing modified upper diagonal and RHS:
+    //      du'[0] = du[0] / d[0]
+    //      du'[i] = du[i] / (d[i] - dl[i] * du'[i-1])  for i = 1..M-2
+    //
+    //      B'[0] = B[0] / d[0]
+    //      B'[i] = (B[i] - dl[i] * B'[i-1]) / (d[i] - dl[i] * du'[i-1])  for i = 1..M-1
+    //
+    // 2. Backward Sweep (Back Substitution):
+    //    Solves for x using the modified system:
+    //      x[M-1] = B'[M-1]
+    //      x[i] = B'[i] - du'[i] * x[i+1]  for i = M-2..0
+    //
+    // Parallelization:
+    // ----------------
+    // - Each thread processes one independent tridiagonal system (one column of B)
+    // - Thread gid solves the system using B[ldb*gid : ldb*gid+M-1] as RHS
+    // - No inter-thread communication required since systems are independent
+    // - Optimal for n >> M where n is the number of systems
+    //
+    // Template Parameters:
+    // --------------------
+    // - BLOCKSIZE: Number of threads per block
+    // - M: Size of each tridiagonal system (must be known at compile time)
+    // - T: Data type (float, double, or complex types)
+    //
+    // Note: This is a "no pivot" algorithm assuming the matrix is diagonally dominant
+    //       or otherwise numerically stable without pivoting
     template <uint32_t BLOCKSIZE, uint32_t M, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void gtsv_nopivot_pcr_pow2_shared_small_kernel(rocsparse_int n,
-                                                   rocsparse_int ldb,
-                                                   const T* __restrict__ dl,
-                                                   const T* __restrict__ d,
-                                                   const T* __restrict__ du,
-                                                   T* __restrict__ B)
+    void gtsv_nopivot_thomas_kernel(rocsparse_int n,
+                                    rocsparse_int ldb,
+                                    const T* __restrict__ dl,
+                                    const T* __restrict__ d,
+                                    const T* __restrict__ du,
+                                    T* __restrict__ B)
     {
-        const int bid = hipBlockIdx_x;
         const int tid = hipThreadIdx_x;
-        const int lid = tid & (M - 1);
-        const int wid = tid / M;
+        const int bid = hipBlockIdx_x;
+        const int gid = BLOCKSIZE * bid + tid;
 
-        int iter   = static_cast<int>(rocsparse::log2(M / 2));
-        int stride = 1;
-
-        // Parallel cyclic reduction shared memory
-        __shared__ T sa[M];
-        __shared__ T sb[M];
-        __shared__ T sc[M];
-        __shared__ T srhs[BLOCKSIZE];
-        __shared__ T sx[BLOCKSIZE];
-
-        // Fill parallel cyclic reduction shared memory
-        if(tid < M)
+        if(gid < n)
         {
-            sa[tid]   = dl[tid];
-            sb[tid]   = d[tid];
-            sc[tid]   = du[tid];
+            T du_prime[M];
+            T B_prime[M];
+
+            // Forward sweep
+            du_prime[0] = du[0] / d[0];
+            for(int i = 1; i < M - 1; i++)
+            {
+                T num       = du[i];
+                T denom     = d[i] - dl[i] * du_prime[i - 1];
+                du_prime[i] = num / denom;
+            }
+
+            B_prime[0] = B[ldb * gid + 0] / d[0];
+            for(int i = 1; i < M; i++)
+            {
+                T num      = B[ldb * gid + i] - dl[i] * B_prime[i - 1];
+                T denom    = d[i] - dl[i] * du_prime[i - 1];
+                B_prime[i] = num / denom;
+            }
+
+            // Backward sweep
+            B[ldb * gid + M - 1] = B_prime[M - 1];
+            for(int i = M - 2; i >= 0; i--)
+            {
+                B[ldb * gid + i] = B_prime[i] - du_prime[i] * B[ldb * gid + i + 1];
+            }
         }
-        srhs[M * wid + lid] = B[ldb * ((BLOCKSIZE / M) * bid + wid) + lid];
-
-        //__syncthreads();
-
-        for(int j = 0; j < iter; j++)
-        {
-            int right = lid + stride;
-            if(right >= M)
-                right = M - 1;
-
-            int left = lid - stride;
-            if(left < 0)
-                left = 0;
-
-            T k1 = sa[lid] / sb[left];
-            T k2 = sc[lid] / sb[right];
-
-            T tb   = sb[lid] - sc[left] * k1 - sa[right] * k2;
-            T trhs = srhs[M * wid + lid] - srhs[M * wid + left] * k1 - srhs[M * wid + right] * k2;
-            T ta   = -sa[left] * k1;
-            T tc   = -sc[right] * k2;
-
-            //__syncthreads();
-
-            sb[lid]   = tb;
-            srhs[M * wid + lid] = trhs;
-            sa[lid]   = ta;
-            sc[lid]   = tc;
-
-            stride <<= 1; //stride *= 2;
-
-            //__syncthreads();
-        }
-
-        if(lid < M / 2)
-        {
-            // Solve 2x2 systems
-            int i = lid;
-            int j = lid + stride;
-            T det = rocsparse::fma(sb[j], sb[i], -sc[i] * sa[j]);
-            det   = static_cast<T>(1) / det;
-
-            sx[M * wid + i] = (rocsparse::fma(sb[j], srhs[M * wid + i], -sc[i] * srhs[M * wid + j])) * det;
-            sx[M * wid + j] = (rocsparse::fma(srhs[M * wid + j], sb[i], -srhs[M * wid + i] * sa[j])) * det;
-        }
-
-        //__syncthreads();
-
-        B[ldb * ((BLOCKSIZE / M) * bid + wid) + lid] = sx[M * wid + lid];
     }
+
+    template <uint32_t WF_SIZE, int NUM_ELEMENTS = 8, int SUB_GROUP_SIZE = 8>
+    __device__ void wavefront_transpose(float* row)
+    {
+        static constexpr int NUM_STAGES = rocsparse::log2_pow2<SUB_GROUP_SIZE>::value;
+
+        // laneId within the WF_SIZE-thread warp (0-WF_SIZE-1)
+        int laneId = threadIdx.x % WF_SIZE;
+        
+        // Each thread only swaps with partners within its own 8-lane segment
+        // Group 0: 0-7, Group 1: 8-15, etc.        
+        for(int i = 0; i < NUM_STAGES; ++i)
+        {
+            int mask = 1 << i;
+
+            for(int j = 0; j < NUM_ELEMENTS; ++j)
+            {
+                // The logic here mimics your square transpose but localized
+                if((j & mask) == 0)
+                {
+                    int  regA   = j;
+                    int  regB   = j | mask;
+                    
+                    // Determine if this specific thread is the 'high' or 'low' partner
+                    bool bitSet = (laneId & mask) != 0;
+
+                    float val        = bitSet ? row[regA] : row[regB];
+                    
+                    // __shfl_xor restricted to the 8-thread sub-group
+                    float partnerVal = __shfl_xor(val, mask, SUB_GROUP_SIZE);
+
+                    if(bitSet)
+                        row[regA] = partnerVal;
+                    else
+                        row[regB] = partnerVal;
+                }
+            }
+        }
+    }
+
+#if ROCSPARSE_USE_MOVE_DPP
+    // DPP-based wavefront transpose (same semantics as shuffle version).
+    // Uses __hip_move_dpp for XOR lane exchange: mask 1 -> 0x142, mask 2 -> 0x143, mask 4 -> 0x130.
+    template <uint32_t WF_SIZE, int NUM_ELEMENTS = 8, int SUB_GROUP_SIZE = 8>
+    __device__ void wavefront_transpose_dpp(float* row)
+    {
+        static constexpr int NUM_STAGES = rocsparse::log2_pow2<SUB_GROUP_SIZE>::value;
+        int                  laneId   = threadIdx.x % WF_SIZE;
+
+        typedef union
+        {
+            float    f;
+            uint32_t u32;
+        } flt_u32;
+
+        for(int i = 0; i < NUM_STAGES; ++i)
+        {
+            int mask = 1 << i;
+            // DPP control: 0x142 = quad swap (XOR 1), 0x143 = quad swap (XOR 2), 0x130 = row_ror:4 (XOR 4)
+            int dpp_ctrl = (mask == 1) ? 0x142 : (mask == 2) ? 0x143 : 0x130;
+
+            for(int j = 0; j < NUM_ELEMENTS; ++j)
+            {
+                if((j & mask) == 0)
+                {
+                    int  regA   = j;
+                    int  regB   = j | mask;
+                    bool bitSet = (laneId & mask) != 0;
+
+                    flt_u32 val;
+                    val.f = bitSet ? row[regA] : row[regB];
+
+                    flt_u32 partner;
+                    partner.u32 = __hip_move_dpp(val.u32, dpp_ctrl, 0xf, 0xf, false);
+
+                    if(bitSet)
+                        row[regA] = partner.f;
+                    else
+                        row[regB] = partner.f;
+                }
+            }
+        }
+    }
+
+    template <uint32_t WF_SIZE, int NUM_ELEMENTS = 8, int SUB_GROUP_SIZE = 8>
+    __device__ void wavefront_transpose_dpp(double* row)
+    {
+        static constexpr int NUM_STAGES = rocsparse::log2_pow2<SUB_GROUP_SIZE>::value;
+        int                  laneId   = threadIdx.x % WF_SIZE;
+
+        typedef union
+        {
+            double   d;
+            uint32_t u32[2];
+        } dbl_u32;
+
+        for(int i = 0; i < NUM_STAGES; ++i)
+        {
+            int mask     = 1 << i;
+            int dpp_ctrl = (mask == 1) ? 0x142 : (mask == 2) ? 0x143 : 0x130;
+
+            for(int j = 0; j < NUM_ELEMENTS; ++j)
+            {
+                if((j & mask) == 0)
+                {
+                    int  regA   = j;
+                    int  regB   = j | mask;
+                    bool bitSet = (laneId & mask) != 0;
+
+                    dbl_u32 val;
+                    val.d = bitSet ? row[regA] : row[regB];
+
+                    dbl_u32 partner;
+                    partner.u32[0] = __hip_move_dpp(val.u32[0], dpp_ctrl, 0xf, 0xf, false);
+                    partner.u32[1] = __hip_move_dpp(val.u32[1], dpp_ctrl, 0xf, 0xf, false);
+
+                    if(bitSet)
+                        row[regA] = partner.d;
+                    else
+                        row[regB] = partner.d;
+                }
+            }
+        }
+    }
+
+    template <uint32_t WF_SIZE, int NUM_ELEMENTS = 8, int SUB_GROUP_SIZE = 8>
+    __device__ void wavefront_transpose_dpp(rocsparse_float_complex* row)
+    {
+        static constexpr int NUM_STAGES = rocsparse::log2_pow2<SUB_GROUP_SIZE>::value;
+        int                  laneId   = threadIdx.x % WF_SIZE;
+
+        typedef union
+        {
+            float    f;
+            uint32_t u32;
+        } flt_u32;
+
+        for(int i = 0; i < NUM_STAGES; ++i)
+        {
+            int mask     = 1 << i;
+            int dpp_ctrl = (mask == 1) ? 0x142 : (mask == 2) ? 0x143 : 0x130;
+
+            for(int j = 0; j < NUM_ELEMENTS; ++j)
+            {
+                if((j & mask) == 0)
+                {
+                    int  regA   = j;
+                    int  regB   = j | mask;
+                    bool bitSet = (laneId & mask) != 0;
+
+                    flt_u32 valRe, valIm;
+                    valRe.f = bitSet ? std::real(row[regA]) : std::real(row[regB]);
+                    valIm.f = bitSet ? std::imag(row[regA]) : std::imag(row[regB]);
+
+                    flt_u32 partnerRe, partnerIm;
+                    partnerRe.u32 = __hip_move_dpp(valRe.u32, dpp_ctrl, 0xf, 0xf, false);
+                    partnerIm.u32 = __hip_move_dpp(valIm.u32, dpp_ctrl, 0xf, 0xf, false);
+
+                    if(bitSet)
+                        row[regA] = rocsparse_float_complex(partnerRe.f, partnerIm.f);
+                    else
+                        row[regB] = rocsparse_float_complex(partnerRe.f, partnerIm.f);
+                }
+            }
+        }
+    }
+
+    template <uint32_t WF_SIZE, int NUM_ELEMENTS = 8, int SUB_GROUP_SIZE = 8>
+    __device__ void wavefront_transpose_dpp(rocsparse_double_complex* row)
+    {
+        static constexpr int NUM_STAGES = rocsparse::log2_pow2<SUB_GROUP_SIZE>::value;
+        int                  laneId   = threadIdx.x % WF_SIZE;
+
+        typedef union
+        {
+            double   d;
+            uint32_t u32[2];
+        } dbl_u32;
+
+        for(int i = 0; i < NUM_STAGES; ++i)
+        {
+            int mask     = 1 << i;
+            int dpp_ctrl = (mask == 1) ? 0x142 : (mask == 2) ? 0x143 : 0x130;
+
+            for(int j = 0; j < NUM_ELEMENTS; ++j)
+            {
+                if((j & mask) == 0)
+                {
+                    int  regA   = j;
+                    int  regB   = j | mask;
+                    bool bitSet = (laneId & mask) != 0;
+
+                    dbl_u32 valRe, valIm;
+                    valRe.d = bitSet ? std::real(row[regA]) : std::real(row[regB]);
+                    valIm.d = bitSet ? std::imag(row[regA]) : std::imag(row[regB]);
+
+                    dbl_u32 partnerRe, partnerIm;
+                    partnerRe.u32[0] = __hip_move_dpp(valRe.u32[0], dpp_ctrl, 0xf, 0xf, false);
+                    partnerRe.u32[1] = __hip_move_dpp(valRe.u32[1], dpp_ctrl, 0xf, 0xf, false);
+                    partnerIm.u32[0] = __hip_move_dpp(valIm.u32[0], dpp_ctrl, 0xf, 0xf, false);
+                    partnerIm.u32[1] = __hip_move_dpp(valIm.u32[1], dpp_ctrl, 0xf, 0xf, false);
+
+                    if(bitSet)
+                        row[regA] = rocsparse_double_complex(partnerRe.d, partnerIm.d);
+                    else
+                        row[regB] = rocsparse_double_complex(partnerRe.d, partnerIm.d);
+                }
+            }
+        }
+    }
+#endif /* ROCSPARSE_USE_MOVE_DPP */
+
+    template <uint32_t WF_SIZE, int NUM_ELEMENTS = 8, int SUB_GROUP_SIZE = 8>
+    __device__ void wavefront_transpose(double* row)
+    {
+        static constexpr int NUM_STAGES = rocsparse::log2_pow2<SUB_GROUP_SIZE>::value;
+
+        // laneId within the WF_SIZE-thread warp (0-WF_SIZE-1)
+        int laneId = threadIdx.x % WF_SIZE;
+        
+        // Each thread only swaps with partners within its own 8-lane segment
+        // Group 0: 0-7, Group 1: 8-15, etc.        
+        for(int i = 0; i < NUM_STAGES; ++i)
+        {
+            int mask = 1 << i;
+
+            for(int j = 0; j < NUM_ELEMENTS; ++j)
+            {
+                // The logic here mimics your square transpose but localized
+                if((j & mask) == 0)
+                {
+                    int  regA   = j;
+                    int  regB   = j | mask;
+                    
+                    // Determine if this specific thread is the 'high' or 'low' partner
+                    bool bitSet = (laneId & mask) != 0;
+
+                    double val        = bitSet ? row[regA] : row[regB];
+                    
+                    // __shfl_xor restricted to the 8-thread sub-group
+                    double partnerVal = __shfl_xor(val, mask, SUB_GROUP_SIZE);
+
+                    if(bitSet)
+                        row[regA] = partnerVal;
+                    else
+                        row[regB] = partnerVal;
+                }
+            }
+        }
+    }
+
+    template <uint32_t WF_SIZE, int NUM_ELEMENTS = 8, int SUB_GROUP_SIZE = 8>
+    __device__ void wavefront_transpose(rocsparse_float_complex* row)
+    {
+        static constexpr int NUM_STAGES = rocsparse::log2_pow2<SUB_GROUP_SIZE>::value;
+
+        // laneId within the WF_SIZE-thread warp (0-WF_SIZE-1)
+        int laneId = threadIdx.x % WF_SIZE;
+        
+        // Each thread only swaps with partners within its own 8-lane segment
+        // Group 0: 0-7, Group 1: 8-15, etc.        
+        for(int i = 0; i < NUM_STAGES; ++i)
+        {
+            int mask = 1 << i;
+
+            for(int j = 0; j < NUM_ELEMENTS; ++j)
+            {
+                // The logic here mimics your square transpose but localized
+                if((j & mask) == 0)
+                {
+                    int  regA   = j;
+                    int  regB   = j | mask;
+                    
+                    // Determine if this specific thread is the 'high' or 'low' partner
+                    bool bitSet = (laneId & mask) != 0;
+
+                    float valRe     = bitSet ? std::real(row[regA]) : std::real(row[regB]);
+                    float valIm     = bitSet ? std::imag(row[regA]) : std::imag(row[regB]);
+                    float partnerRe = __shfl_xor(valRe, mask, SUB_GROUP_SIZE);
+                    float partnerIm = __shfl_xor(valIm, mask, SUB_GROUP_SIZE);
+
+                    if(bitSet)
+                        row[regA] = rocsparse_float_complex(partnerRe, partnerIm);
+                    else
+                        row[regB] = rocsparse_float_complex(partnerRe, partnerIm);
+                }
+            }
+        }
+    }
+
+    template <uint32_t WF_SIZE, int NUM_ELEMENTS = 8, int SUB_GROUP_SIZE = 8>
+    __device__ void wavefront_transpose(rocsparse_double_complex* row)
+    {
+        static constexpr int NUM_STAGES = rocsparse::log2_pow2<SUB_GROUP_SIZE>::value;
+
+        // laneId within the WF_SIZE-thread warp (0-WF_SIZE-1)
+        int laneId = threadIdx.x & (WF_SIZE - 1);
+        
+        // Each thread only swaps with partners within its own 8-lane segment
+        // Group 0: 0-7, Group 1: 8-15, etc.        
+        for(int i = 0; i < NUM_STAGES; ++i)
+        {
+            int mask = 1 << i;
+
+            for(int j = 0; j < NUM_ELEMENTS; ++j)
+            {
+                // The logic here mimics your square transpose but localized
+                if((j & mask) == 0)
+                {
+                    int  regA   = j;
+                    int  regB   = j | mask;
+                    
+                    // Determine if this specific thread is the 'high' or 'low' partner
+                    bool bitSet = (laneId & mask) != 0;
+
+                    double valRe     = bitSet ? std::real(row[regA]) : std::real(row[regB]);
+                    double valIm     = bitSet ? std::imag(row[regA]) : std::imag(row[regB]);
+                    double partnerRe = __shfl_xor(valRe, mask, SUB_GROUP_SIZE);
+                    double partnerIm = __shfl_xor(valIm, mask, SUB_GROUP_SIZE);
+
+                    if(bitSet)
+                        row[regA] = rocsparse_double_complex(partnerRe, partnerIm);
+                    else
+                        row[regB] = rocsparse_double_complex(partnerRe, partnerIm);
+                }
+            }
+        }
+    }
+
+
+
+    // // WF_SIZE must be power of 2 (2, 4, 8, 16, 32). Uses rocsparse::log2_pow2<WF_SIZE> for stages.
+    // template <uint32_t WF_SIZE>
+    // ROCSPARSE_DEVICE_ILF void wavefront_transpose(float* row)
+    // {
+    //     static constexpr int NUM_STAGES = rocsparse::log2_pow2<WF_SIZE>::value;
+    //     int                  laneId    = threadIdx.x % WF_SIZE;
+
+    //     for(int i = 0; i < NUM_STAGES; ++i)
+    //     {
+    //         int mask = 1 << i;
+
+    //         for(int j = 0; j < WF_SIZE; ++j)
+    //         {
+    //             if((j & mask) == 0)
+    //             {
+    //                 int  regA   = j;
+    //                 int  regB   = j | mask;
+    //                 bool bitSet = (laneId & mask) != 0;
+
+    //                 float val         = bitSet ? row[regA] : row[regB];
+    //                 float partnerVal  = __shfl_xor(val, mask, WF_SIZE);
+
+    //                 if(bitSet)
+    //                     row[regA] = partnerVal;
+    //                 else
+    //                     row[regB] = partnerVal;
+    //             }
+    //         }
+    //     }
+    // }
+
+    // template <uint32_t WF_SIZE>
+    // ROCSPARSE_DEVICE_ILF void wavefront_transpose(double* row)
+    // {
+    //     static constexpr int NUM_STAGES = rocsparse::log2_pow2<WF_SIZE>::value;
+    //     int                  laneId    = threadIdx.x % WF_SIZE;
+
+    //     for(int i = 0; i < NUM_STAGES; ++i)
+    //     {
+    //         int mask = 1 << i;
+
+    //         for(int j = 0; j < WF_SIZE; ++j)
+    //         {
+    //             if((j & mask) == 0)
+    //             {
+    //                 int  regA   = j;
+    //                 int  regB   = j | mask;
+    //                 bool bitSet = (laneId & mask) != 0;
+
+    //                 double val         = bitSet ? row[regA] : row[regB];
+    //                 double partnerVal  = __shfl_xor(val, mask, WF_SIZE);
+
+    //                 if(bitSet)
+    //                     row[regA] = partnerVal;
+    //                 else
+    //                     row[regB] = partnerVal;
+    //             }
+    //         }
+    //     }
+    // }
+
+    // template <uint32_t WF_SIZE>
+    // ROCSPARSE_DEVICE_ILF void wavefront_transpose(
+    //     rocsparse_float_complex* row)
+    // {
+    //     static constexpr int NUM_STAGES = rocsparse::log2_pow2<WF_SIZE>::value;
+    //     int                  laneId    = threadIdx.x % WF_SIZE;
+
+    //     for(int i = 0; i < NUM_STAGES; ++i)
+    //     {
+    //         int mask = 1 << i;
+
+    //         for(int j = 0; j < WF_SIZE; ++j)
+    //         {
+    //             if((j & mask) == 0)
+    //             {
+    //                 int  regA   = j;
+    //                 int  regB   = j | mask;
+    //                 bool bitSet = (laneId & mask) != 0;
+
+    //                 float valRe     = bitSet ? std::real(row[regA]) : std::real(row[regB]);
+    //                 float valIm     = bitSet ? std::imag(row[regA]) : std::imag(row[regB]);
+    //                 float partnerRe = __shfl_xor(valRe, mask, WF_SIZE);
+    //                 float partnerIm = __shfl_xor(valIm, mask, WF_SIZE);
+
+    //                 if(bitSet)
+    //                     row[regA] = rocsparse_float_complex(partnerRe, partnerIm);
+    //                 else
+    //                     row[regB] = rocsparse_float_complex(partnerRe, partnerIm);
+    //             }
+    //         }
+    //     }
+    // }
+
+    // template <uint32_t WF_SIZE>
+    // ROCSPARSE_DEVICE_ILF void wavefront_transpose(
+    //     rocsparse_double_complex* row)
+    // {
+    //     static constexpr int NUM_STAGES = rocsparse::log2_pow2<WF_SIZE>::value;
+    //     int                  laneId    = threadIdx.x % WF_SIZE;
+
+    //     for(int i = 0; i < NUM_STAGES; ++i)
+    //     {
+    //         int mask = 1 << i;
+
+    //         for(int j = 0; j < WF_SIZE; ++j)
+    //         {
+    //             if((j & mask) == 0)
+    //             {
+    //                 int   regA   = j;
+    //                 int   regB   = j | mask;
+    //                 bool  bitSet = (laneId & mask) != 0;
+
+    //                 double valRe     = bitSet ? std::real(row[regA]) : std::real(row[regB]);
+    //                 double valIm     = bitSet ? std::imag(row[regA]) : std::imag(row[regB]);
+    //                 double partnerRe = __shfl_xor(valRe, mask, WF_SIZE);
+    //                 double partnerIm = __shfl_xor(valIm, mask, WF_SIZE);
+
+    //                 if(bitSet)
+    //                     row[regA] = rocsparse_double_complex(partnerRe, partnerIm);
+    //                 else
+    //                     row[regB] = rocsparse_double_complex(partnerRe, partnerIm);
+    //             }
+    //         }
+    //     }
+    // }
+
+
+    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t TILE_X, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE) 
+    void thomas_shared_transpose_kernel(rocsparse_int m,
+                                        rocsparse_int n,
+                                        rocsparse_int ldb,
+                                        const T* __restrict__ dl,
+                                        const T* __restrict__ d,
+                                        const T* __restrict__ du,
+                                        T* __restrict__ B,
+                                        T* __restrict__ temp) 
+    {
+        const int tid = threadIdx.x;
+        const int bid = blockIdx.x;
+
+        const int lid = tid & (WF_SIZE - 1); // 0..WF_SIZE-1
+        const int wid = tid / WF_SIZE;  // 0..7
+
+        const int lid_x = lid & (TILE_X - 1); // 0..TILE_X-1
+        const int wid_x = lid / TILE_X; // 0..3
+
+        __shared__ T total_shared[(BLOCKSIZE / WF_SIZE) * TILE_X * WF_SIZE];
+        T* shared = &total_shared[TILE_X * WF_SIZE * wid];
+
+        int B_offset = ldb * WF_SIZE * ((BLOCKSIZE / WF_SIZE) * bid + wid);
+
+        // Loop over TILE_X and load 8x4=32 elements from B each iteration. 
+        // In total this will load 8x(4*TILE_X) elements from B
+        for(int i = 0; i < TILE_X; i++)
+        {
+            shared[WF_SIZE * i + TILE_X * wid_x + lid_x] = B[B_offset + WF_SIZE * i + TILE_X * wid_x + lid_x];
+        }
+        __syncthreads();
+
+        T B_local[TILE_X];
+
+        for(int i = 0; i < TILE_X; i++)
+        {
+            B_local[i] = shared[TILE_X * lid + i];
+        }
+
+        T du_prime[TILE_X];
+        T B_prime[TILE_X];
+
+        // Forward sweep
+        du_prime[0] = du[0] / d[0];
+        for(int i = 1; i < TILE_X - 1; i++)
+        {
+            T num       = du[i];
+            T denom     = d[i] - dl[i] * du_prime[i - 1];
+            du_prime[i] = num / denom;
+        }
+
+        B_prime[0] = B_local[0] / d[0];
+        for(int i = 1; i < TILE_X; i++)
+        {
+            T num      = B_local[i] - dl[i] * B_prime[i - 1];
+            T denom    = d[i] - dl[i] * du_prime[i - 1];
+            B_prime[i] = num / denom;
+        }
+
+        // Backward sweep
+        B_local[TILE_X - 1] = B_prime[TILE_X - 1];
+        for(int i = TILE_X - 2; i >= 0; i--)
+        {
+            B_local[i] = B_prime[i] - du_prime[i] * B_local[i + 1];
+        }
+
+        __syncthreads();
+        for(int i = 0; i < TILE_X; i++)
+        {
+           shared[TILE_X * lid + i] = B_local[i];
+        }
+        __syncthreads();
+        
+        for(int i = 0; i < TILE_X; i++)
+        {
+           B[B_offset + WF_SIZE * i + TILE_X * wid_x + lid_x] = shared[WF_SIZE * i + TILE_X * wid_x + lid_x];
+        }
+        // for(int i = 0; i < TILE_X; i++)
+        // {
+        //     B[B_offset + TILE_X * lid + i] = B_local[i];
+        // }
+    }
+
+    /*template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t TILE_X, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE) 
+    void thomas_shared_transpose_kernel2(rocsparse_int m,
+                                        rocsparse_int n,
+                                        rocsparse_int ldb,
+                                        const T* __restrict__ dl,
+                                        const T* __restrict__ d,
+                                        const T* __restrict__ du,
+                                        T* __restrict__ B,
+                                        T* __restrict__ temp) 
+    {
+        const int tid = threadIdx.x;
+        const int bid = blockIdx.x;
+
+        const int lid = tid & (WF_SIZE - 1); // 0..WF_SIZE-1
+        const int wid = tid / WF_SIZE;  // 0..7
+
+        const int lid_x = lid & (TILE_X - 1); // 0..TILE_X-1
+        const int wid_x = lid / TILE_X; // 0..3
+
+        __shared__ T total_shared[(BLOCKSIZE / WF_SIZE) * TILE_X * WF_SIZE];
+        T* shared = &total_shared[TILE_X * WF_SIZE * wid];
+
+        int B_offset = ldb * WF_SIZE * ((BLOCKSIZE / WF_SIZE) * bid + wid);
+
+        T du_prime[512];
+        T B_prime[512];
+
+        for()
+        {
+            // Loop over TILE_X and load 8x4=32 elements from B each iteration. 
+            // In total this will load 8x(4*TILE_X) elements from B
+            for(int i = 0; i < TILE_X; i++)
+            {
+                shared[WF_SIZE * i + TILE_X * wid_x + lid_x] = B[B_offset + WF_SIZE * i + TILE_X * wid_x + lid_x];
+            }
+
+            __syncthreads();
+
+            T B_local[TILE_X];
+
+            for(int i = 0; i < TILE_X; i++)
+            {
+                B_local[i] = shared[TILE_X * lid + i];
+            }
+
+            T du_prime_local[TILE_X];
+            T B_prime_local[TILE_X];
+
+            // Forward sweep
+            du_prime_local[0] = du[0] / d[0];
+            for(int i = 1; i < TILE_X - 1; i++)
+            {
+                T num       = du[i];
+                T denom     = d[i] - dl[i] * du_prime_local[i - 1];
+                du_prime_local[i] = num / denom;
+            }
+
+            B_prime_local[0] = B_local[0] / d[0];
+            for(int i = 1; i < TILE_X; i++)
+            {
+                T num      = B_local[i] - dl[i] * B_prime_local[i - 1];
+                T denom    = d[i] - dl[i] * du_prime_local[i - 1];
+                B_prime_local[i] = num / denom;
+            }
+
+            // Write du_prime_local and B_prime_local to local memory arrays
+            for()
+            {
+                du_prime[] = du_prime_local[];
+                B_prime[] = B_prime[];
+            }
+
+            __syncthreads();
+
+        }
+
+        // Backward sweep
+        for()
+        {
+            // Read du_prime and B_prime
+
+
+            T B_local[TILE_X];
+
+            B_local[TILE_X - 1] = B_prime[TILE_X - 1];
+            for(int i = TILE_X - 2; i >= 0; i--)
+            {
+                B_local[i] = B_prime[i] - du_prime[i] * B_local[i + 1];
+            }
+        }
+
+        // Backward sweep
+        // B_local[TILE_X - 1] = B_prime[TILE_X - 1];
+        // for(int i = TILE_X - 2; i >= 0; i--)
+        // {
+        //     B_local[i] = B_prime[i] - du_prime[i] * B_local[i + 1];
+        // }
+        // __syncthreads();
+
+        for(int i = 0; i < TILE_X; i++)
+        {
+            shared[TILE_X * lid + i] = B_local[i];
+        }
+
+        __syncthreads();
+        
+        for(int i = 0; i < TILE_X; i++)
+        {
+            B[B_offset + WF_SIZE * i + TILE_X * wid_x + lid_x] = shared[WF_SIZE * i + TILE_X * wid_x + lid_x];
+        }
+    }*/
+
+
+    
+    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t NUM_ELEMENTS, uint32_t SUB_GROUP_SIZE, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void gtsv_nopivot_thomas_transpose_kernel(rocsparse_int m,
+                                              rocsparse_int n,
+                                              rocsparse_int ldb,
+                                              const T* __restrict__ dl,
+                                              const T* __restrict__ d,
+                                              const T* __restrict__ du,
+                                              T* __restrict__ B,
+                                              T* __restrict__ temp)
+    {
+        const int tid = hipThreadIdx_x;
+        const int bid = hipBlockIdx_x;
+
+        const int lid = tid & (WF_SIZE - 1);
+        const int wid = tid / WF_SIZE;
+
+        T B_local[NUM_ELEMENTS];
+
+        // Each thread loads one column of the WF_SIZExNUM_ELEMENTS block (thread lid has column lid)
+        for(int i = 0; i < NUM_ELEMENTS; i++)
+        {
+            //B_local[i]
+            //    = temp[WF_SIZE * NUM_ELEMENTS * ((BLOCKSIZE / WF_SIZE) * bid + wid) + WF_SIZE * i + lid];
+            B_local[i]
+                = B[WF_SIZE * NUM_ELEMENTS * ((BLOCKSIZE / WF_SIZE) * bid + wid) + WF_SIZE * i + lid];
+            // B_local[i]
+                // = B[WF_SIZE * NUM_ELEMENTS * ((BLOCKSIZE / WF_SIZE) * bid + wid) + WF_SIZE * lid + i];
+        }
+
+        wavefront_transpose<WF_SIZE, NUM_ELEMENTS, SUB_GROUP_SIZE>(B_local);
+
+        T du_prime[WF_SIZE];
+        T B_prime[WF_SIZE];
+
+        // Forward sweep
+        du_prime[0] = du[0] / d[0];
+        for(int i = 1; i < WF_SIZE - 1; i++)
+        {
+            T num       = du[i];
+            T denom     = d[i] - dl[i] * du_prime[i - 1];
+            du_prime[i] = num / denom;
+        }
+
+        B_prime[0] = B_local[0] / d[0];
+        for(int i = 1; i < WF_SIZE; i++)
+        {
+            T num      = B_local[i] - dl[i] * B_prime[i - 1];
+            T denom    = d[i] - dl[i] * du_prime[i - 1];
+            B_prime[i] = num / denom;
+        }
+
+        // Backward sweep
+        B_local[WF_SIZE - 1] = B_prime[WF_SIZE - 1];
+        for(int i = WF_SIZE - 2; i >= 0; i--)
+        {
+            B_local[i] = B_prime[i] - du_prime[i] * B_local[i + 1];
+        }
+
+        wavefront_transpose<WF_SIZE, NUM_ELEMENTS, SUB_GROUP_SIZE>(B_local);
+
+        for(int i = 0; i < NUM_ELEMENTS; i++)
+        {
+            // temp[WF_SIZE * NUM_ELEMENTS * ((BLOCKSIZE / WF_SIZE) * bid + wid) + WF_SIZE * i + lid] = B_local[i];
+            B[WF_SIZE * NUM_ELEMENTS * ((BLOCKSIZE / WF_SIZE) * bid + wid) + WF_SIZE * i + lid] = B_local[i];
+            // B[WF_SIZE * NUM_ELEMENTS * ((BLOCKSIZE / WF_SIZE) * bid + wid) + WF_SIZE * lid + i] = B_local[i];
+        }
+    }
+
+
+
+
+
+
+
 
 
 

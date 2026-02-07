@@ -87,7 +87,7 @@ void testing_gtsv_no_pivot(const Arguments& arg)
 {
     rocsparse_int m   = arg.M;
     rocsparse_int n   = arg.N;
-    rocsparse_int ldb = arg.denseld;
+    rocsparse_int ldb = arg.M;//arg.denseld;
 
     // Create rocsparse handle
     rocsparse_local_handle handle(arg);
@@ -125,7 +125,7 @@ void testing_gtsv_no_pivot(const Arguments& arg)
     {
         for(rocsparse_int i = 0; i < m; ++i)
         {
-            hB[j * ldb + i] = random_cached_generator<T>(-10, 10);
+            hB[j * ldb + i] = j * ldb + i;//random_cached_generator<T>(-10, 10);
         }
     }
 
@@ -174,6 +174,20 @@ void testing_gtsv_no_pivot(const Arguments& arg)
                                        + hdu[i] * hB[ldb * j + i + 1];
             }
         }
+
+        // std::cout << "hB" << std::endl;
+        // for(size_t i = 0; i < hB.size(); i++)
+        // {
+        //     std::cout << hB[i] << " ";
+        // }
+        // std::cout << "" << std::endl;
+
+        // std::cout << "hresult" << std::endl;
+        // for(size_t i = 0; i < hresult.size(); i++)
+        // {
+        //     std::cout << hresult[i] << " ";
+        // }
+        // std::cout << "" << std::endl;
 
         near_check_segments<T>(ldb * n, hB_original.data(), hresult.data());
     }
