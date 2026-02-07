@@ -899,123 +899,128 @@ namespace ExpressionTest
 
     TEST_CASE("Expression result types", "[expression]")
     {
-        auto context = TestContext::ForDefaultTarget();
+        auto   context    = TestContext::ForDefaultTarget();
+        size_t valueCount = 1;
 
         auto vgprFloat = Register::Value::Placeholder(
-                             context.get(), Register::Type::Vector, DataType::Float, 1)
+                             context.get(), Register::Type::Vector, DataType::Float, valueCount)
                              ->expression();
         auto vgprDouble = Register::Value::Placeholder(
-                              context.get(), Register::Type::Vector, DataType::Double, 1)
+                              context.get(), Register::Type::Vector, DataType::Double, valueCount)
                               ->expression();
         auto vgprInt32 = Register::Value::Placeholder(
-                             context.get(), Register::Type::Vector, DataType::Int32, 1)
+                             context.get(), Register::Type::Vector, DataType::Int32, valueCount)
                              ->expression();
         auto vgprInt64 = Register::Value::Placeholder(
-                             context.get(), Register::Type::Vector, DataType::Int64, 1)
+                             context.get(), Register::Type::Vector, DataType::Int64, valueCount)
                              ->expression();
         auto vgprUInt32 = Register::Value::Placeholder(
-                              context.get(), Register::Type::Vector, DataType::UInt32, 1)
+                              context.get(), Register::Type::Vector, DataType::UInt32, valueCount)
                               ->expression();
         auto vgprUInt64 = Register::Value::Placeholder(
-                              context.get(), Register::Type::Vector, DataType::UInt64, 1)
+                              context.get(), Register::Type::Vector, DataType::UInt64, valueCount)
                               ->expression();
-        auto vgprHalf
-            = Register::Value::Placeholder(context.get(), Register::Type::Vector, DataType::Half, 1)
-                  ->expression();
+        auto vgprHalf = Register::Value::Placeholder(
+                            context.get(), Register::Type::Vector, DataType::Half, valueCount)
+                            ->expression();
         auto vgprHalfx2 = Register::Value::Placeholder(
-                              context.get(), Register::Type::Vector, DataType::Halfx2, 1)
+                              context.get(), Register::Type::Vector, DataType::Halfx2, valueCount)
                               ->expression();
         auto vgprBool32 = Register::Value::Placeholder(
-                              context.get(), Register::Type::Vector, DataType::Bool32, 1)
+                              context.get(), Register::Type::Vector, DataType::Bool32, valueCount)
                               ->expression();
-        auto vgprBool
-            = Register::Value::Placeholder(context.get(), Register::Type::Vector, DataType::Bool, 1)
-                  ->expression();
+        auto vgprBool = Register::Value::Placeholder(
+                            context.get(), Register::Type::Vector, DataType::Bool, valueCount)
+                            ->expression();
 
         auto sgprFloat = Register::Value::Placeholder(
-                             context.get(), Register::Type::Scalar, DataType::Float, 1)
+                             context.get(), Register::Type::Scalar, DataType::Float, valueCount)
                              ->expression();
         auto sgprDouble = Register::Value::Placeholder(
-                              context.get(), Register::Type::Scalar, DataType::Double, 1)
+                              context.get(), Register::Type::Scalar, DataType::Double, valueCount)
                               ->expression();
         auto sgprInt32 = Register::Value::Placeholder(
-                             context.get(), Register::Type::Scalar, DataType::Int32, 1)
+                             context.get(), Register::Type::Scalar, DataType::Int32, valueCount)
                              ->expression();
         auto sgprInt64 = Register::Value::Placeholder(
-                             context.get(), Register::Type::Scalar, DataType::Int64, 1)
+                             context.get(), Register::Type::Scalar, DataType::Int64, valueCount)
                              ->expression();
         auto sgprUInt32 = Register::Value::Placeholder(
-                              context.get(), Register::Type::Scalar, DataType::UInt32, 1)
+                              context.get(), Register::Type::Scalar, DataType::UInt32, valueCount)
                               ->expression();
         auto sgprUInt64 = Register::Value::Placeholder(
-                              context.get(), Register::Type::Scalar, DataType::UInt64, 1)
+                              context.get(), Register::Type::Scalar, DataType::UInt64, valueCount)
                               ->expression();
-        auto sgprHalf
-            = Register::Value::Placeholder(context.get(), Register::Type::Scalar, DataType::Half, 1)
-                  ->expression();
+        auto sgprHalf = Register::Value::Placeholder(
+                            context.get(), Register::Type::Scalar, DataType::Half, valueCount)
+                            ->expression();
         auto sgprHalfx2 = Register::Value::Placeholder(
-                              context.get(), Register::Type::Scalar, DataType::Halfx2, 1)
+                              context.get(), Register::Type::Scalar, DataType::Halfx2, valueCount)
                               ->expression();
         auto sgprBool64 = Register::Value::Placeholder(
-                              context.get(), Register::Type::Scalar, DataType::Bool64, 1)
+                              context.get(), Register::Type::Scalar, DataType::Bool64, valueCount)
                               ->expression();
         auto sgprBool32 = Register::Value::Placeholder(
-                              context.get(), Register::Type::Scalar, DataType::Bool32, 1)
+                              context.get(), Register::Type::Scalar, DataType::Bool32, valueCount)
                               ->expression();
-        auto sgprBool
-            = Register::Value::Placeholder(context.get(), Register::Type::Scalar, DataType::Bool, 1)
-                  ->expression();
+        auto sgprBool = Register::Value::Placeholder(
+                            context.get(), Register::Type::Scalar, DataType::Bool, valueCount)
+                            ->expression();
         auto sgprWavefrontSized
             = Register::Value::Placeholder(context.get(),
                                            Register::Type::Scalar,
                                            context.get()->kernel()->wavefront_size() == 64
                                                ? DataType::Bool64
                                                : DataType::Bool32,
-                                           1)
+                                           valueCount)
                   ->expression();
 
-        auto agprFloat = Register::Value::Placeholder(
-                             context.get(), Register::Type::Accumulator, DataType::Float, 1)
-                             ->expression();
-        auto agprDouble = Register::Value::Placeholder(
-                              context.get(), Register::Type::Accumulator, DataType::Double, 1)
-                              ->expression();
+        auto agprFloat
+            = Register::Value::Placeholder(
+                  context.get(), Register::Type::Accumulator, DataType::Float, valueCount)
+                  ->expression();
+        auto agprDouble
+            = Register::Value::Placeholder(
+                  context.get(), Register::Type::Accumulator, DataType::Double, valueCount)
+                  ->expression();
 
         auto litInt32  = Expression::literal<int32_t>(5);
         auto litInt64  = Expression::literal<int64_t>(5);
         auto litFloat  = Expression::literal(5.0f);
         auto litDouble = Expression::literal(5.0);
 
-        Expression::ResultType rVgprFloat{Register::Type::Vector, DataType::Float};
-        Expression::ResultType rVgprDouble{Register::Type::Vector, DataType::Double};
-        Expression::ResultType rVgprInt32{Register::Type::Vector, DataType::Int32};
-        Expression::ResultType rVgprInt64{Register::Type::Vector, DataType::Int64};
-        Expression::ResultType rVgprUInt32{Register::Type::Vector, DataType::UInt32};
-        Expression::ResultType rVgprUInt64{Register::Type::Vector, DataType::UInt64};
-        Expression::ResultType rVgprHalf{Register::Type::Vector, DataType::Half};
-        Expression::ResultType rVgprHalfx2{Register::Type::Vector, DataType::Halfx2};
-        Expression::ResultType rVgprBool32{Register::Type::Vector, DataType::Bool32};
+        Expression::ResultType rVgprFloat{Register::Type::Vector, DataType::Float, valueCount};
+        Expression::ResultType rVgprDouble{Register::Type::Vector, DataType::Double, valueCount};
+        Expression::ResultType rVgprInt32{Register::Type::Vector, DataType::Int32, valueCount};
+        Expression::ResultType rVgprInt64{Register::Type::Vector, DataType::Int64, valueCount};
+        Expression::ResultType rVgprUInt32{Register::Type::Vector, DataType::UInt32, valueCount};
+        Expression::ResultType rVgprUInt64{Register::Type::Vector, DataType::UInt64, valueCount};
+        Expression::ResultType rVgprHalf{Register::Type::Vector, DataType::Half, valueCount};
+        Expression::ResultType rVgprHalfx2{Register::Type::Vector, DataType::Halfx2, valueCount};
+        Expression::ResultType rVgprBool32{Register::Type::Vector, DataType::Bool32, valueCount};
 
-        Expression::ResultType rSgprFloat{Register::Type::Scalar, DataType::Float};
-        Expression::ResultType rSgprDouble{Register::Type::Scalar, DataType::Double};
-        Expression::ResultType rSgprInt32{Register::Type::Scalar, DataType::Int32};
-        Expression::ResultType rSgprInt64{Register::Type::Scalar, DataType::Int64};
-        Expression::ResultType rSgprUInt32{Register::Type::Scalar, DataType::UInt32};
-        Expression::ResultType rSgprUInt64{Register::Type::Scalar, DataType::UInt64};
-        Expression::ResultType rSgprHalf{Register::Type::Scalar, DataType::Half};
-        Expression::ResultType rSgprHalfx2{Register::Type::Scalar, DataType::Halfx2};
-        Expression::ResultType rSgprBool32{Register::Type::Scalar, DataType::Bool32};
-        Expression::ResultType rSgprBool64{Register::Type::Scalar, DataType::Bool64};
-        Expression::ResultType rSgprBool{Register::Type::Scalar, DataType::Bool};
+        Expression::ResultType rSgprFloat{Register::Type::Scalar, DataType::Float, valueCount};
+        Expression::ResultType rSgprDouble{Register::Type::Scalar, DataType::Double, valueCount};
+        Expression::ResultType rSgprInt32{Register::Type::Scalar, DataType::Int32, valueCount};
+        Expression::ResultType rSgprInt64{Register::Type::Scalar, DataType::Int64, valueCount};
+        Expression::ResultType rSgprUInt32{Register::Type::Scalar, DataType::UInt32, valueCount};
+        Expression::ResultType rSgprUInt64{Register::Type::Scalar, DataType::UInt64, valueCount};
+        Expression::ResultType rSgprHalf{Register::Type::Scalar, DataType::Half, valueCount};
+        Expression::ResultType rSgprHalfx2{Register::Type::Scalar, DataType::Halfx2, valueCount};
+        Expression::ResultType rSgprBool32{Register::Type::Scalar, DataType::Bool32, valueCount};
+        Expression::ResultType rSgprBool64{Register::Type::Scalar, DataType::Bool64, valueCount};
+        Expression::ResultType rSgprBool{Register::Type::Scalar, DataType::Bool, valueCount};
         Expression::ResultType rSgprWavefrontSized{
             Register::Type::Scalar,
-            context.get()->kernel()->wavefront_size() == 64 ? DataType::Bool64 : DataType::Bool32};
+            context.get()->kernel()->wavefront_size() == 64 ? DataType::Bool64 : DataType::Bool32,
+            valueCount};
 
-        Expression::ResultType rVCC{Register::Type::VCC, DataType::Bool32};
-        Expression::ResultType rSCC{Register::Type::SCC, DataType::Bool};
+        Expression::ResultType rVCC{Register::Type::VCC, DataType::Bool32, valueCount};
+        Expression::ResultType rSCC{Register::Type::SCC, DataType::Bool, valueCount};
 
-        Expression::ResultType rAgprFloat{Register::Type::Accumulator, DataType::Float};
-        Expression::ResultType rAgprDouble{Register::Type::Accumulator, DataType::Double};
+        Expression::ResultType rAgprFloat{Register::Type::Accumulator, DataType::Float, valueCount};
+        Expression::ResultType rAgprDouble{
+            Register::Type::Accumulator, DataType::Double, valueCount};
 
         SECTION("Value expressions")
         {
