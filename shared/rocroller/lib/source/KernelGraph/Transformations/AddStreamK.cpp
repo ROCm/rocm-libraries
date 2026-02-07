@@ -1061,7 +1061,6 @@ namespace rocRoller
             for(auto d : loopInfo.dimensionIndices)
                 numTotalTiles = numTotalTiles * argInfo.numTiles.at(d);
             numTotalTiles = simplify(numTotalTiles);
-            enableDivideBy(numTotalTiles, context);
 
             auto numTilesVarType = resultType(numTotalTiles).varType;
             auto one             = Expression::literal(1, numTilesVarType);
@@ -1652,8 +1651,6 @@ namespace rocRoller
                                                            numTilesDT,
                                                            DataDirection::ReadOnly,
                                                            argInfo.numTileArgExprs[d]}));
-                if(d > 0)
-                    enableDivideBy(argInfo.numTiles.back(), context);
             }
 
             argInfo.numTiles.push_back(k->addArgument({"numTilesAcc",

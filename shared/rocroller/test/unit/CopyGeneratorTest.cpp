@@ -543,7 +543,7 @@ namespace CopyGeneratorTest
         auto outputTag  = command->allocateTag();
         auto output_arg = command->allocateArgument(floatPtr, outputTag, ArgumentType::Value);
         auto sizeTag    = command->allocateTag();
-        auto size_arg   = command->allocateArgument(uintVal, sizeTag, ArgumentType::Limit);
+        auto size_arg   = command->allocateArgument(uintVal, sizeTag, ArgumentType::Size);
 
         auto input_exp  = std::make_shared<Expression::Expression>(input_arg);
         auto output_exp = std::make_shared<Expression::Expression>(output_arg);
@@ -621,7 +621,7 @@ namespace CopyGeneratorTest
         CommandArguments commandArgs = command->createArguments();
         commandArgs.setArgument(outputTag, ArgumentType::Value, output_ptr.get());
         commandArgs.setArgument(inputTag, ArgumentType::Value, input_ptr.get());
-        commandArgs.setArgument(sizeTag, ArgumentType::Limit, size);
+        commandArgs.setArgument(sizeTag, ArgumentType::Size, (unsigned int)size);
 
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
