@@ -477,7 +477,8 @@ class TileConfig:
     depth_u: int
     prefetch_global_read: int
     prefetch_local_read: int
-    direct_to_lds: bool
+    direct_to_lds: int
+    dtl_plus_lds_buf: bool
     wave_separate_global_read_a: int
     wave_separate_global_read_b: int
 
@@ -488,7 +489,7 @@ class RegisterSchedule:
     
     Usage:
         @RegisterSchedule(
-            tile_config=TileConfig(256, 96, 64, 2, 1, True, 0, 0),
+            tile_config=TileConfig(256, 96, 64, 2, 1, 1, False, 0, 0),
             dtype_predicate=is16bit,
             vector_widths=[8, 8, 8],
             matrix_inst=[16, 16, 32, 1],
@@ -526,9 +527,9 @@ class RegisterSchedule:
                 return ScheduleMatchStatus.NO_MATCH, None
 
             MT0, MT1, DU = kernel["MacroTile0"], kernel["MacroTile1"], kernel["DepthU"]
-            PGR, PLR, DTL = kernel["PrefetchGlobalRead"], kernel["PrefetchLocalRead"], kernel["DirectToLds"]
+            PGR, PLR, DTL, DPB = kernel["PrefetchGlobalRead"], kernel["PrefetchLocalRead"], kernel["DirectToLds"], kernel["DtlPlusLdsBuf "]
             WSGRA, WSGRB = kernel["WaveSeparateGlobalReadA"], kernel["WaveSeparateGlobalReadB"]
-            kernel_tile_config = TileConfig(MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB)
+            kernel_tile_config = TileConfig(MT0, MT1, DU, PGR, PLR, DTL, DPB, WSGRA, WSGRB)
             if self.tile_config != kernel_tile_config:
                 return ScheduleMatchStatus.NO_MATCH, None
 
@@ -559,7 +560,7 @@ class RegisterSchedule:
 
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 96, 64, 2, 1, True, 0, 0),
+    tile_config=TileConfig(256, 96, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -623,7 +624,7 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(192, 256, 64, 2, 1, True, 0, 0),
+    tile_config=TileConfig(192, 256, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -762,7 +763,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 192, 64, 2, 1, True, 0, 0),
+    tile_config=TileConfig(256, 192, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -900,7 +901,7 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 256, 128, 2, 0, True, 0, 0),
+    tile_config=TileConfig(256, 256, 128, 2, 0, 1, False, 0, 0),
     dtype_predicate=is8bit,
     vector_widths=[16, 16, 16],
     matrix_inst=[16, 16, 128, 1],
@@ -954,7 +955,7 @@ def _get_schedule_256x256x128_8bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 256, 64, 2, 1, True, 0, 0),
+    tile_config=TileConfig(256, 256, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -1102,7 +1103,7 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(160, 256, 64, 2, 1, True, 0, 0),
+    tile_config=TileConfig(160, 256, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -1232,7 +1233,7 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 160, 64, 2, 1, True, 0, 0),
+    tile_config=TileConfig(256, 160, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -1314,7 +1315,7 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 240, 64, 2, 1, True, 0, 0),
+    tile_config=TileConfig(256, 240, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 2, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -1419,7 +1420,7 @@ def _get_schedule_256x240x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 208, 64, 2, 1, True, 0, 0),
+    tile_config=TileConfig(256, 208, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 2, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -1538,7 +1539,7 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(224, 128, 64, 2, 1, True, 0, 0),
+    tile_config=TileConfig(224, 128, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -1581,7 +1582,7 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(224, 256, 64, 2, 1, True, 0, 0),
+    tile_config=TileConfig(224, 256, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -1637,7 +1638,7 @@ def _get_schedule_224x256x64_16bit(kernel, userLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(192, 320, 64, 2, 1, True, 0, 0),
+    tile_config=TileConfig(192, 320, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -1764,7 +1765,7 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 224, 64, 2, 1, True, 0, 0),
+    tile_config=TileConfig(256, 224, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -1823,7 +1824,7 @@ def _get_schedule_256x224x64_16bit(kernel, userLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(320, 192, 64, 2, 1, True, 0, 0),
+    tile_config=TileConfig(320, 192, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -1920,7 +1921,7 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(240, 256, 64, 2, 1, True, 0, 0),
+    tile_config=TileConfig(240, 256, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[2, 8, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -2037,7 +2038,7 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(208, 256, 64, 2, 1, True, 0, 0),
+    tile_config=TileConfig(208, 256, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[2, 8, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -2159,7 +2160,7 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(128, 224, 64, 2, 1, True, 0, 0),
+    tile_config=TileConfig(128, 224, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=is16bit,
     vector_widths=[8, 8, 8],
     matrix_inst=[16, 16, 32, 1],
@@ -2263,7 +2264,7 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(128, 192, 32, 2, 0, True, 0, 0),
+    tile_config=TileConfig(128, 192, 32, 2, 0, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -2331,7 +2332,7 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(192, 256, 32, 2, 0, True, 0, 0),
+    tile_config=TileConfig(192, 256, 32, 2, 0, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -2665,7 +2666,7 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 192, 32, 2, 0, True, 0, 0),
+    tile_config=TileConfig(256, 192, 32, 2, 0, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -2769,7 +2770,7 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(256, 256, 32, 2, 0, True, 0, 0),
+    tile_config=TileConfig(256, 256, 32, 2, 0, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -2909,7 +2910,7 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(192, 128, 32, 2, 0, True, 0, 0),
+    tile_config=TileConfig(192, 128, 32, 2, 0, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -2997,7 +2998,7 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
-    tile_config=TileConfig(128, 128, 64, 2, 1, True, 0, 0),
+    tile_config=TileConfig(128, 128, 64, 2, 1, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
@@ -3090,7 +3091,7 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
 
 
 @RegisterSchedule(
-    tile_config=TileConfig(128, 256, 32, 2, 0, True, 0, 0),
+    tile_config=TileConfig(128, 256, 32, 2, 0, 1, False, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
     matrix_inst=[16, 16, 32, 1],
