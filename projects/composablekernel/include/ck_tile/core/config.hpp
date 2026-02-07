@@ -50,8 +50,9 @@
 
 // implementing the "memory address space" attribute
 // https://llvm.org/docs/AMDGPUUsage.html#amdgpu-address-spaces-table
-// WA for https://github.com/ROCm/composable_kernel/issues/1946
-#if 0
+// Address space attributes are only valid for the AMDGCN device target,
+// not the host (x86_64) target, so guard with __HIP_DEVICE_COMPILE__.
+#ifdef __HIP_DEVICE_COMPILE__
 #define CK_TILE_GENERIC_ADDR __attribute__((address_space(0)))
 #define CK_TILE_GLOBAL_ADDR __attribute__((address_space(1)))
 #define CK_TILE_LDS_ADDR __attribute__((address_space(3)))
