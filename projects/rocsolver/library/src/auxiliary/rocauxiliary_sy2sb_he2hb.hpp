@@ -33,6 +33,8 @@
  #include "rocsolver/rocsolver.h"
  #include "laset.hpp"
 
+#include "print_matrix.hpp"
+
 ROCSOLVER_BEGIN_NAMESPACE
 
 #if 0 // moved to laset.hpp for now
@@ -118,11 +120,11 @@ rocblas_status rocsolver_sy2sb_he2hb_argCheck(
     const rocblas_int n,
     const rocblas_int kd,
     const rocblas_int nb,
-    T A,
+    T* A,
     const rocblas_int lda,
-    T Aband,
+    T* Aband,
     const rocblas_int ldab,
-    T tau,
+    T* tau,
     const rocblas_int batch_count = 1)
 {
     // order is important for unit tests:
@@ -178,6 +180,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
     ROCSOLVER_ENTER("sy2sb_he2hb", "n:", n, "kd", kd, "nb:", nb,
                     "shiftA:", shiftA, "lda:", lda, "ldab:", ldab,
                     "bc:", batch_count);
+    printf( "he2hb n %d, kd %d, nb %d, lda %d, ldab %d\n", n, kd, nb, lda, ldab );
 
     using S = decltype(std::real(T{}));
 
@@ -199,6 +202,16 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
     T const neghalf = -0.5;
     T const negone = -1;
     S const rone = 1;
+
+    printf( "A=%p\n", A );
+    print_matrix( "A_in", n, n, A, lda );
+    laset(
+        handle, 'g',
+        ldab, n, zero, zero,
+        Aband, idx2D( 0, 0, ldab ), ldab, strideAb,
+        batch_count );
+    printf( "Aband=%p\n", Aband );
+    print_matrix( "Aband_in", ldab, n, Aband, ldab );
 
     rocblas_stride strideD = ldd*nb;
     rocblas_stride strideV = ldv*nb;
@@ -235,14 +248,16 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             dim3(cpy_mblks, cpy_nblks, batch_count), dim3(32, 32), 0, stream,
             n-j, jb_rnd,
             A, idx2D( j, j, lda ) + shiftA, lda, strideA,  // Aj
-            V, idx2D( j, j, ldv ), ldv, strideA );         // Vj
+            V, idx2D( j, 0, ldv ), ldv, strideA );         // Vj
+
+print_matrix( "Vj", n, nb, V, ldv, 3, stream );
 
         // Loop over inner blocking sub-panels to reach bandwidth.
         assert( i == j );
         while (i < jend)
         {
             rocblas_int qm = n - i - kd;
-            rocblas_int qn = std::min( nb, qm );
+            rocblas_int qn = std::min( kd, qm );
 
             printf( "-----\ni = %d, qm = %d, qn = %d\n", i, qm, qn );
 
@@ -277,6 +292,9 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
                 &tau[ i ], strideTau,                      // tau_i
                 batch_count, scalars, work, D, Z, workArr );
 
+print_matrix( "Vi (R)", n, nb, V, ldv, 3, stream );
+//print_matrix( "Vi (R)", n, kd, V + idx2D( 0, i-j, ldv ), ldv, 3, stream );
+
             // Copy band of A (diag tile and R) to Aband.
             // Copies some "don't care" entries from below bandwidth kd.
             // Using ldab-1 converts dense to band format.
@@ -289,6 +307,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
                 V, idx2D( i, i-j, ldv ), ldv, strideV,
                 Aband, idx2D( idiag, i, ldab ), ldab-1, strideAb );
 
+print_matrix( "Aband_i", ldab, n, Aband, ldab, 3, stream );
+
             // Set upper triangle of Vi to identity.
             T const offdiag = zero;
             T const diag    = one;
@@ -297,6 +317,9 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
                 qn, qn, offdiag, diag,
                 V, idx2D( i+kd, i-j, ldv ), ldv, strideV,  // Vi
                 batch_count );
+
+print_matrix( "Vi (I)", n, nb, V, ldv, 3, stream );
+//print_matrix( "Vi (I)", n, kd, V + idx2D( 0, i-j, ldv ), ldv, 3, stream );
 
             // Form corresponding matrix Ti = larft( Vi, tau_i ), stored above Vi.
             // todo: why does T not have shift? Is just adding okay? Why not add everywher?
@@ -476,6 +499,9 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
         n-i, n-i,
         A,     idx2D( i, i, lda  ) + shiftA, lda,    strideA,     // Aii
         Aband, idx2D( idiag, i, ldab ),      ldab-1, strideAb );  // Aband_ii
+								  //
+    print_matrix( "A", n, n, A, lda );
+    print_matrix( "Aband", ldab, n, Aband, ldab );
 
     rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;

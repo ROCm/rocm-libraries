@@ -35,100 +35,98 @@
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
 
+#include "print_matrix.hpp"
+
+#include <stdlib.h>  // rand
+
+//------------------------------------------------------------------------------
+// todo: Including rocblas_utility.hpp seems like it should define these,
+// but `using rocsolver::conj` complains and calling `conj` complains.
+
+namespace foo {
+
+// Conjugate a value. For most types, simply return argument; for
+// rocblas_float_complex and rocblas_double_complex, return std::conj(z)
+template <typename T, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
+__device__ __host__ inline T conjugate(const T& z)
+{
+    return z;
+}
+
+template <typename T, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
+__device__ __host__ inline T conjugate(const T& z)
+{
+    return std::conj(z);
+}
+
+}  // namespace foo
+
 //------------------------------------------------------------------------------
 // todo: Can dA and hA have different lda? Or does lda apply only to hA? Weird argument order.
 template <bool CPU,
           bool GPU,
           typename T,
           typename Td,
-          typename Th,
-          std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
+          typename Th>
+          //std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
 void sy2sb_he2hb_initData(const rocblas_handle handle,
                           const rocblas_int n,
-                          const rocblas_int kd,
+                          const rocblas_int kd,  // unused
                           Td& dA,
                           const rocblas_int lda,
                           Th& hA)
 {
+printf( "%s( n %d, kd %d )\n", __func__, n, kd );
+    using std::real, foo::conjugate;
+    using S = decltype( std::real( T() ) );
+
+    const S half = 0.5;
+
     if(CPU)
     {
-        rocblas_init<T>(hA, true);
+        srand( 0x12345678 );
+        for (int j = 0; j < n; ++j)
+        {
+            for (int i = j; i < n; ++i)  // lower
+            {
+                if constexpr (rocblas_is_complex<T>) {
+                    hA[0][i + j*lda] = T( 2 * (rand() / S(RAND_MAX) - half),
+                                          2 * (rand() / S(RAND_MAX) - half) );
+                }
+                else {
+                    hA[0][i + j*lda] = 2 * (rand() / S(RAND_MAX) - half);
+                }
+            }
+        }
+        //rocblas_init<T>(hA, true);
+        //print_matrix( "hA_0", n, n, hA[0], lda );
 
         // scale band of size kd of A to avoid singularities
         // todo: remove. no need to scale.
-        for(rocblas_int i = 0; i < n; i++)
-        {
-            for(rocblas_int j = 0; j < n; j++)
-            {
-                if(i <= j + kd && i >= j - kd)
-                    hA[0][i + j * lda] += 400;
-                else
-                    hA[0][i + j * lda] -= 4;
-            }
-        }
+        // for(rocblas_int i = 0; i < n; i++)
+        // {
+        //     for(rocblas_int j = 0; j < n; j++)
+        //     {
+        //         if(i <= j + kd && i >= j - kd)
+        //             hA[0][i + j * lda] += 400;
+        //         else
+        //             hA[0][i + j * lda] -= 4;
+        //     }
+        // }
 
-        // Symmetrize matrix.
+        // Symmetrize matrix and make diagonal real.
         // todo: should this be in he2hb, where it (may) be needed,
         // and should be timed?
-        for(rocblas_int i = 0; i < n; i++)
+        // LAPACK does not need this, only rocSolver does.
+        for(rocblas_int j = 0; j < n; ++j)
         {
-            for(rocblas_int j = i+1; j < n; j++)
-                hA[0][i + j * lda] = hA[0][j + i * lda];
-        }
-    }
-
-    if(GPU)
-    {
-        // now copy to the GPU
-        CHECK_HIP_ERROR(dA.transfer_from(hA));
-    }
-}
-
-//------------------------------------------------------------------------------
-// todo: why is a complex version needed?
-// - Use different conj, not std::conj.
-// - Making diagonal real. Use real(x) instead of x.real().
-// Anything else?
-template <bool CPU,
-          bool GPU,
-          typename T,
-          typename Td,
-          typename Th,
-          std::enable_if_t<rocblas_is_complex<T>, int> = 0>
-void sy2sb_he2hb_initData(const rocblas_handle handle,
-                          const rocblas_int n,
-                          const rocblas_int kd,
-                          Td& dA,
-                          const rocblas_int lda,
-                          Th& hA)
-{
-    if(CPU)
-    {
-        rocblas_init<T>(hA, true);
-
-        // scale band of size kd of A to avoid singularities
-        // todo: remove. no need to scale.
-        for(rocblas_int i = 0; i < n; i++)
-        {
-            for(rocblas_int j = 0; j < n; j++)
+            hA[0][j + j*lda] = real( hA[0][j + j*lda] );
+            for(rocblas_int i = 0; i < j; ++i)  // upper
             {
-                if(i == j)
-                    hA[0][i + j * lda] = hA[0][i + j * lda].real() + 400;
-                if(i <= j + kd && i >= j - kd)
-                    hA[0][i + j * lda] += 400;
-                else
-                    hA[0][i + j * lda] -= 4;
+                hA[0][i + j*lda] = conjugate( hA[0][j + i*lda] );
             }
         }
-
-        // Symmetrize matrix.
-        // todo: should this be in he2hb, where it (may) be needed,
-        // and should be timed?
-        for(rocblas_int i = 0; i < n; i++)
-        {
-            for(rocblas_int j = i+1; j < n; j++)
-                hA[0][i + j * lda] = std::conj(hA[0][j + i * lda]);
-        }
+        //print_matrix( "hA_sym", n, n, hA[0], lda );
     }
 
     if(GPU)
@@ -142,32 +140,41 @@ void sy2sb_he2hb_initData(const rocblas_handle handle,
 // n        -- matrix dimension
 // kd       -- desired bandwidth
 // nb       -- outer blocksize to use
+//
 // dA       -- matrix on GPU, lda-by-n, lda >= n
 // dAband   -- output band matrix on GPU, ldab-by-n, ldab >= 3 kd (size needed for 2nd stage)
+// dTau     -- output vector on GPU, length n-kd
+//
+// hARes    -- output matrix on CPU to copy GPU result, lda-by-n, lda >= n
+// hAbandRes-- output band matrix on CPU to copy GPU result, ldab-by-n
+// hTauRes  -- output vector on CPU to copy GPU result, length n-kd
+//
 // hA       -- matrix on CPU, lda-by-n, lda >= n
-// hAres    -- output matrix on CPU to copy GPU result, lda-by-n, lda >= n
-//              hmm... can I reuse this for copying dAband?
-// hTau     -- output vector on CPU, length n.
 // hAband   -- output band matrix on CPU, ldab-by-n, ldab >= kd+1
+// hTau     -- output vector on CPU, length n-kd
 //
 template <typename T, typename Td, typename Th>
 void sy2sb_he2hb_getError(const rocblas_handle handle,
                     const rocblas_int n,
                     const rocblas_int kd,
                     const rocblas_int nb,
+
                     Td& dA,
                     const rocblas_int lda,
                     Td& dAband,
                     const rocblas_int ldab,
                     Td& dTau,
+
                     Th& hARes,
                     Th& hAbandRes,
                     Th& hTauRes,
+
                     Th& hA,
                     Th& hAband,
                     Th& hTau,
                     double* max_err)
 {
+printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
     // lwork for LAPACK hetrd_he2hb
     size_t lwork = n * kd + n * std::max(kd, 128) + 2 * kd * kd;
     std::vector<T> hwork(lwork);
@@ -201,10 +208,27 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
     // (THIS DOES NOT ACCOUNT FOR NUMERICAL REPRODUCIBILITY
     // ISSUES. IT MIGHT BE REVISITED IN THE FUTURE)
 
+    printf( "LAPACK\n" );
+    print_matrix( "hA",     n,    n, hA[0],     lda  );
+    print_matrix( "hAband", ldab, n, hAband[0], ldab );
+    print_matrix( "hTau",   1, n-kd, hTau[0],   1    );
+
+    printf( "rocSolver\n" );
+    print_matrix( "dA",     n,    n, dA[0],     lda  );
+    print_matrix( "dAband", ldab, n, dAband[0], ldab );
+    print_matrix( "dTau",   1, n-kd, dTau[0],   1    );
+
+    printf( "rocSolver result\n" );
+    print_matrix( "hARes",     n,    n, hARes[0],     lda  );
+    print_matrix( "hAbandRes", ldab, n, hAbandRes[0], ldab );
+    print_matrix( "hTauRes",   1, n-kd, hTauRes[0],   1    );
+
     // todo: report all errors (A, V).
-    double err = 0;
+    double err;
     *max_err = 0;
-    err = norm_error('F', kd+1, n, ldab, hAband[0], hAbandRes[0]);
+    err = norm_error('F', kd+1, n, ldab, hAband[0], hAbandRes[0] + kd - 1);
+    *max_err = std::max( err, *max_err );
+    err = norm_error('F', 1, n-kd, 1, hTau[0], hTauRes[0]);
     *max_err = std::max( err, *max_err );
 
     // TODO: Check V and tau. Check orthogonality of Q using unmtr/ungtr.
@@ -235,6 +259,7 @@ void sy2sb_he2hb_getPerfData(const rocblas_handle handle,
                        const bool profile_kernels,
                        const bool perf)
 {
+printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
     if(!perf)
     {
         // cpu-lapack performance (only if not in perf mode)
@@ -293,12 +318,13 @@ void testing_sy2sb_he2hb(Arguments& argus)
     // get arguments
     rocblas_local_handle handle;
     rocblas_int n = argus.get<rocblas_int>("n");
-    rocblas_int kd = argus.get<rocblas_int>("kd", 1);
+    rocblas_int kd = argus.get<rocblas_int>("k", 1);  // todo: add kd arg
     rocblas_int nb = argus.get<rocblas_int>("nb", kd);
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
     // rocSolver 2nd stage needs 3*kd. LAPACK needs kd+1.
     // todo: get ldab from argus?
     rocblas_int ldab = 3*kd;  //kd + 1;
+printf( "%s( n %d, kd %d, nb %d )\n", __func__, n, kd, nb );
 
     rocblas_int hot_calls = argus.iters;
 
