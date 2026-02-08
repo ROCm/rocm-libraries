@@ -56,6 +56,10 @@
 - changed-files:
   - any-glob-to-any-file: 'dnn-providers/miopen-provider/**/*'
 
+"project: hip-kernel-provider":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/**/*'
+
 "project: none":
 - changed-files:
   - all-globs-to-all-files: ['!dnn-providers/**/*', '!projects/**/*', '!shared/**/*']
