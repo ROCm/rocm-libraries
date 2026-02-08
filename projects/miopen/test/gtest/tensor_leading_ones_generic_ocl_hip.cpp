@@ -221,9 +221,9 @@ protected:
             alpha1,
             beta,
             work_per_wg,
-            0LL, // Aoffset
-            0LL, // Boffset
-            0LL, // Coffset
+            0L, // Aoffset
+            0L, // Boffset
+            0L, // Coffset
             num_wg,
             bitmap);
 
@@ -252,9 +252,9 @@ protected:
                     alpha1,
                     beta,
                     work_per_wg,
-                    0LL,
-                    0LL,
-                    0LL,
+                    0L,
+                    0L,
+                    0L,
                     num_wg,
                     bitmap);
 #endif
@@ -277,17 +277,14 @@ protected:
         handle.AddKernel(
             kernel_name, network_config_hip, program_name, kernel_name, vld, vgd, params)(
             tensA_dev.get(),
-            uint64_t(0),                // Aoffset
             tensorsConfig.acstrides[0], // a_nstride
             tensorsConfig.acstrides[1], // a_cstride
             tensorsConfig.acstrides[2], // a_hstride
             tensB_dev.get(),
-            uint64_t(0),               // Boffset
             tensorsConfig.bstrides[0], // b_nstride
             tensorsConfig.bstrides[1], // b_cstride
             tensorsConfig.bstrides[2], // b_hstride
             tensC_dev.get(),
-            uint64_t(0),                // Coffset
             tensorsConfig.aclens[1],    // c_c
             tensorsConfig.aclens[2],    // c_h
             tensorsConfig.aclens[3],    // c_w
@@ -297,8 +294,11 @@ protected:
             alpha0,
             alpha1,
             beta,
-            num_wg,
             work_per_wg,
+            0L, // Aoffset
+            0L, // Boffset
+            0L, // Coffset
+            num_wg,
             bitmap);
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
@@ -308,17 +308,14 @@ protected:
                     kernel_name,
                     network_config_hip,
                     tensA_dev.get(),
-                    uint64_t(0),
                     tensorsConfig.acstrides[0],
                     tensorsConfig.acstrides[1],
                     tensorsConfig.acstrides[2],
                     tensB_dev.get(),
-                    uint64_t(0),
                     tensorsConfig.bstrides[0],
                     tensorsConfig.bstrides[1],
                     tensorsConfig.bstrides[2],
                     tensC_dev.get(),
-                    uint64_t(0),
                     tensorsConfig.aclens[1],
                     tensorsConfig.aclens[2],
                     tensorsConfig.aclens[3],
@@ -328,8 +325,11 @@ protected:
                     alpha0,
                     alpha1,
                     beta,
-                    num_wg,
                     work_per_wg,
+                    0L,
+                    0L,
+                    0L,
+                    num_wg,
                     bitmap);
 #endif
     }
@@ -337,7 +337,7 @@ protected:
     void verify() // verify if the output tensors are same
     {
         auto error = miopen::rms_range(tensC_ocl, tensC_hip);
-        EXPECT_NEAR(error, 0, 0.1) << "GPU outputs do not match each other. Error: " << error;
+        EXPECT_NEAR(error, 0, 0.001) << "GPU outputs do not match each other. Error: " << error;
     }
 
     void TearDown() override
