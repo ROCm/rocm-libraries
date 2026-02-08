@@ -4,8 +4,8 @@
 #include <string>
 #include <tuple>
 
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlan.hpp"
@@ -163,7 +163,7 @@ auto getNodeAttrsLogErrors(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& 
     }
     catch(const std::exception& e)
     {
-        HIPDNN_LOG_INFO(e.what());
+        HIPDNN_PLUGIN_LOG_INFO(e.what());
         return {};
     }
 }
@@ -323,7 +323,7 @@ bool nodeAttrsCheckTensorsLogErrors(
     }
     catch(const std::exception& e)
     {
-        HIPDNN_LOG_INFO(e.what());
+        HIPDNN_PLUGIN_LOG_INFO(e.what());
         return false;
     }
 }
@@ -382,7 +382,7 @@ bool checkComputeTypesLogErrors(
     }
     catch(const std::exception& e)
     {
-        HIPDNN_LOG_INFO(e.what());
+        HIPDNN_PLUGIN_LOG_INFO(e.what());
         return false;
     }
 }
@@ -425,7 +425,7 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(
     }
     catch(const std::exception& e)
     {
-        HIPDNN_LOG_INFO(e.what());
+        HIPDNN_PLUGIN_LOG_INFO(e.what());
         return false;
     }
 }

@@ -102,6 +102,12 @@ class ABMatrixInfo(MatrixInfo):
   numVgprLocalWriteSwapAddr: int  = -1
   startVgprLocalWriteSwapAddr: int= -1
   numSgprGlobalReadIncs: int     = -1
+  numPackCvt: int                = 0
+  TF32EmuUseTransposeCode: bool  = False
+  TF32EmuInterleaveTreg: bool    = False
+  useDirect32XEmulation: bool    = False
+  numVgprEmu: int                = -1
+  startVgprCvt: int              = -1
 
   gNLCPermBlock: int             = -1
   gNLCPerpStride: int            = -1
@@ -225,7 +231,6 @@ class StateValues:
   startVgprAddressDbg: int               = -1
   startVgprAlphaTmp: int                 = -1
   startVgprSerial: int                   = -1
-  startVgprCvt: int                      = -1
   startVgprIdentityMatrix: int           = -1 
 
   numSgprSizesSum: int                   = 0
@@ -290,7 +295,6 @@ class StateValues:
   numLocalWriteModPerMfma: int           = 0
   HHH_WMMA: bool                         = False
   tmpvgpr: List[int]                     = field(init=False) # vgpr dict for localread
-  numPackCvt: int                        = 0
   packDTVA: bool                         = False
   packDTVB: bool                         = False
 
@@ -578,6 +582,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   def _packItemsConditional(numPack, srcPackItems, dstPackItems, searchStrings):
     numPacked = 0
+    final = False
+    finalStr = "pack final end"
     if numPack == 0:
       numPack = 999
     for n in range(numPack):
@@ -588,8 +594,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         itemStr = str(item.comment)
         for string in searchStrings:
           if string in itemStr:
-            return numPacked
-    return numPacked
+            final = finalStr in itemStr
+            return numPacked, final
+    return numPacked, final
 
   ##############################################################################
   # Schedule work into the each unroll loop iteration
@@ -943,6 +950,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       packItemsA = []
       packItemsB = []
       packItemsM = []
+      scheduleTF32Emu = kernel["UseF32XEmulation"]
       for iui in range(kernel["InnerUnroll"]):
         packINtems = [ [] for j in range(max(self.states.numReadsIterCoalescedA,self.states.numReadsIterCoalescedB,self.states.numReadsIterCoalescedMetadata)) ]
         packINtemsA = packINtems
@@ -995,18 +1003,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
               for n in range(instPerPackB):
                 packINtemsB[j].append(packBItems.pop(0))
 
-        scheduleTF32Emu = kernel["UseF32XEmulation"]
         if scheduleTF32Emu:
-          if kernel["UseDirect32XEmulation"]:
-            # none needed for direct
-            instPerPackA = 0
-            instPerPackB = 0
-          else:
-            instPerPackA = self.states.numPackCvt
-            instPerPackB = self.states.numPackCvt
+          instPerPackA = 0
+          instPerPackB = 0
+          # Gather A, B conversion code based on scheduling order
+          # scheduleCvtBEveryMiwtIter case, put A0,B0 first, then put remaining A in the first MIWTA(*3) iteration.
+          # Then, put remaining B at every MIWTA(*3) iteration
+          # A0,B0,A1,A2,,,B1,B2,.
           while packAItems or packBItems:
             KernelWriter._packItemsConditional(instPerPackA, packAItems, packItems, ["__TF32_1", "__TF32_2"])
             KernelWriter._packItemsConditional(instPerPackB, packBItems, packItems, ["__TF32_1", "__TF32_2"])
+
         else:
           while packAItems:
             if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeA"].isAnyFloat8():
@@ -1165,6 +1172,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         return numLoops, newItemCounter
 
       itemCounter = 0
+      finalCountA = 0
+      finalCountB = 0
       for i in range(numMfmaPerIter):
         mfmaIndex = iteration * numMfmaPerIter + i
         insertInst = countInstruction(iterCode)
@@ -1205,7 +1214,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 readLeftLREven = numReadsInst / (numMfmaPerIter - i)
             # if there are too many localreads, change strategy to even.
             readLeft = checkLocalReadFIFOFull(mfmaIndex, self.localReadThisLoopFIFO, localReadItemsThisLoop, readLeftLROPT, readLeftLREven)
-          elif kernel["EnableMatrixInstruction"] and self.do["OptimizeNumItersPLR0"]:
+          elif kernel["EnableMatrixInstruction"] and self.do["OptimizeNumItersPLR0"] and not scheduleTF32Emu:
             # if numItersPLR == 0, try to schedule local reads with instruction level prefetch.
             mfmas = getMFMAs(macIterCode)
             if i + 1 != numMfmaPerIter:
@@ -1416,7 +1425,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         ####
         # scheduled wait localReads
         ####
-        if self.states.numItersPLR == 0 and kernel["EnableMatrixInstruction"] and self.do["OptimizeNumItersPLR0"]:
+        if self.states.numItersPLR == 0 and kernel["EnableMatrixInstruction"] and self.do["OptimizeNumItersPLR0"] and not scheduleTF32Emu:
           dscnt = -1
           mfmas = getMFMAs(macIterCode)
           ## To support do["MAC"] is False
@@ -1492,11 +1501,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
             iterCode.addComment0("pack scheduling: packAIdx:%u, packBIdx:%u" %(packAIdx,packBIdx))
 
           if not schedulePackConsiderMetadata:
+              insertABcount = 0
+              final = False
               if kernel["UseF32XEmulation"]:
-                tmp = []
-                curPackIdx += KernelWriter._packItemsConditional(instPerPackA, packItems, tmp, ["__TF32_1_A", "__TF32_2_A"])
-                for n in tmp:
-                  iterCode.add(n)
+                if finalCountA < kernel["MIWaveTileA"] // kernel["numSubTiles"]:
+                  tmp = []
+                  num, final = KernelWriter._packItemsConditional(instPerPackA, packItems, tmp, ["__TF32_1_A", "__TF32_2_A"])
+                  if num > 0:
+                    insertABcount += 1
+                  curPackIdx += num
+                  if final:
+                    finalCountA += 1
+                  for n in tmp:
+                    iterCode.add(n)
               else:
                 # we put 2 pack in each mfma
                 for j in range(instPerPackA):
@@ -1509,10 +1526,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
                     iterCode.add(packItems.pop(0))
                     curPackIdx += 1
               if kernel["UseF32XEmulation"]:
-                tmp = []
-                curPackIdx += KernelWriter._packItemsConditional(instPerPackB, packItems, tmp, ["__TF32_1_B", "__TF32_2_B"])
-                for n in tmp:
-                  iterCode.add(n)
+                if finalCountB < kernel["MIWaveTileB"] // kernel["numSubTiles"]:
+                  tmp = []
+                  num, final = KernelWriter._packItemsConditional(instPerPackB, packItems, tmp, ["__TF32_1_B", "__TF32_2_B"])
+                  if num > 0:
+                    insertABcount += 1
+                    curPackIdx += num
+                    if final:
+                      finalCountB += 1
+                  for n in tmp:
+                    iterCode.add(n)
               else:
                 for j in range(instPerPackB):
                   if packItems:
@@ -1520,7 +1543,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                     curPackIdx += 1
               # since packed register need to wait 2 quad cycle to finish packing
               # we insert pack instruction if we can, or s_nop
-              while curPackIdx < numPack+2:
+              while curPackIdx < numPack+2 and not kernel["UseF32XEmulation"]:
                 if packItems:
                   iterCode.add(packItems.pop(0))
                   curPackIdx += 1
@@ -1531,8 +1554,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
               if kernel["UseF32XEmulation"]:
                 # HACK add dummy waits btween swap and mfmas. TODO: improve pack scheduling to avoid this
                 numDummy = 0 if kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16 else 1
-                for numd in range(numDummy):
-                  iterCode.add(SNop(waitState=0, comment="VALU packing writes to be consumed by matrix instruction"))
+                if kernel["UseMFMAF32XEmulation"] and not final:
+                  # only one side remaining case, add dummy by 2 sicne we do not interleave PackA and PackB
+                  if insertABcount == 1:
+                    numDummy += 2
+                #for numd in range(numDummy):
+                iterCode.add(SNop(waitState=numDummy - 1, comment="VALU packing writes to be consumed by matrix instruction (HACK)"))
           else:
 
             desiredPack = instPerPackA + instPerPackB + ceil(instPerPackM)
@@ -3365,6 +3392,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.inTailLoop = True
       module.addComment2("Tail Loop")
 
+      # F32XEmu case, need to disable index transpose and generate transpose code for wider local read
+      # Also, need to enable TF32EmuInterleaveTreg to have separate buffer for T0,T1,...
+      if kernel["UseF32XEmulation"]:
+        if self.states.lrvwTileA > 1 and self.states.a.useDirect32XEmulation:
+          self.states.a.TF32EmuUseTransposeCode = True
+          self.states.a.TF32EmuInterleaveTreg = True
+        if self.states.lrvwTileB > 1 and self.states.b.useDirect32XEmulation:
+          self.states.b.TF32EmuUseTransposeCode = True
+          self.states.b.TF32EmuInterleaveTreg = True
+
       # need to unroll tail loop for the following cases
       mEnd = 1
       if kernel["ProblemType"]["Sparse"] and kernel["DirectToVgprSparseMetadata"]:
@@ -3556,6 +3593,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         tailLoopInnerUnroll = kernel["InnerUnroll"]
 
       shiftK = Module()
+      self.states.SubTileIdx = 0 # reset SubTileIdx before TailLoop local read
       for mValue in range(mEnd):
         if mEnd > 1:
           # print tail loop counter if mEnd>1 (means do tail loop unroll)
@@ -3571,24 +3609,26 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if mValue < mEnd and mValue % self.states.numReadsIterCoalescedA == 0:
             # Reading 16-bit data from LDS requires packing when ECC enabled
             module.addComment1("local read a")
-            localReadCodeA, packCodeA = self.localReadDo(kernel, bufIdxA*self.states.numIterPerCoalescedReadA, iui*self.states.numIterPerCoalescedReadA, 0, tensorParametersA)
+            localReadCodeA, packCodeA, packPreA = self.localReadDo(kernel, bufIdxA*self.states.numIterPerCoalescedReadA, iui*self.states.numIterPerCoalescedReadA, 0, tensorParametersA)
             module.add(localReadCodeA)
             if kernel["UseF32XEmulation"]:
               shiftK.add(packCodeA)
+              pack[0].add(packPreA)
             else:
               pack[0].add(packCodeA)
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             if mValue*self.states.numIterPerCoalescedReadMetadata < mEnd:
               module.addComment1("local read metadata")
-              localReadCodeM, packCodeM = self.localReadDo(kernel, bufIdx*self.states.numIterPerCoalescedReadMetadata, iui*self.states.numReadsIterCoalescedMetadata, 0, tPM)
+              localReadCodeM, packCodeM, _ = self.localReadDo(kernel, bufIdx*self.states.numIterPerCoalescedReadMetadata, iui*self.states.numReadsIterCoalescedMetadata, 0, tPM)
               module.add(localReadCodeM)
               pack[0].add(packCodeM)
           if mValue < mEnd and mValue % self.states.numReadsIterCoalescedB == 0:
             module.addComment1("local read b")
-            localReadCodeB, packCodeB = self.localReadDo(kernel, bufIdxB*self.states.numIterPerCoalescedReadB, iui*self.states.numIterPerCoalescedReadB, 0, tensorParametersB)
+            localReadCodeB, packCodeB, packPreB = self.localReadDo(kernel, bufIdxB*self.states.numIterPerCoalescedReadB, iui*self.states.numIterPerCoalescedReadB, 0, tensorParametersB)
             module.add(localReadCodeB)
             if kernel["UseF32XEmulation"]:
               shiftK.add(packCodeB)
+              pack[0].add(packPreB)
             else:
               pack[0].add(packCodeB)
           # adjustment for DirectToLds case
@@ -3605,6 +3645,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module.addComment1("local read inc b")
             module.add(self.localReadInc(kernel, iuiParam, tensorParametersB))
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, -1, 0, "4wait for local read"))
+        self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
 
         module.add(pack[0])
         pack[0] = Module()
@@ -3912,8 +3953,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       vwm = kernel["GlobalReadVectorWidthMetadata"]
 
     # force lrvwTile = 1 for numBytes >= 4 + MIInputPerThread > 1
+    # Enabled lrvwTile>1 for UseF32XEmulation except for UseCustomMainLoopSchedule (TODO: enable for CMS)
     # TODO: implement extra logic to swap vgprs after local read to suport lrvwTile > 1 for umBytes >= 4 + MIInputPerThread > 1
-    forceLrvwTile1 = kernel["ProblemType"]["DataType"].numBytes() >= 4 and (kernel["EnableMatrixInstruction"] and kernel["MIInputPerThread"] > 1)
+    #       (except for UseF32XEmulation)
+    forceLrvwTile1 = kernel["ProblemType"]["DataType"].numBytes() >= 4 and \
+      (kernel["EnableMatrixInstruction"] and kernel["MIInputPerThread"] > 1 and (not kernel["UseF32XEmulation"]))
     if not kernel["UnrollMajorLDSA"] and not forceLrvwTile1:
       self.states.lrvwTileA = kernel["VectorWidthA"]
     else:
@@ -4959,21 +5003,133 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.b.startVgprLocalWriteSwapAddr = vgprIdx
       vgprIdx += 1
 
+    # X32F Emulation initializations
+    # meaning of variables
+    # useDirect32XEmulation (separate values for A and B):
+    #   True: allocate extra buffer (either full (tranpose only) or interleave) to eliminate extra v_mov
+    #   False: use temp Treg only for conversion (need some v_mov)
+    # TF32EmuUseTransposeCode (separate values for A and B. For wider local read(lrvwTile>1) only):
+    #   True: Generate extra transpose code (with v_swap)
+    #   False: Use index tranpose and no tranpose code
+    #          This is for cvt + sub only (means not dot2, not mfma)
+    # TF32EmuInterleaveTreg:
+    #   True: Allocate T reg with interleaving X regs for dest of local read
+    #            T0-3
+    #            X4-7
+    #            T4-7
+    #            X8-11
+    #            ....
+    #         This works with useDirect32XEmulation=Trie
+    #         Wider local read case, we need TransposeCode=True
+    #   False: Does not use interleave layout
+    #         ider local read + index transpose case, this needs to be False
+    self.states.a.useDirect32XEmulation = kernel["UseDirect32XEmulation"]
+    self.states.b.useDirect32XEmulation = kernel["UseDirect32XEmulation"]
+    self.states.a.TF32EmuUseTransposeCode = False
+    self.states.b.TF32EmuUseTransposeCode = False
+    self.states.a.TF32EmuInterleaveTreg = False
+    self.states.b.TF32EmuInterleaveTreg = False
+
+    def initTF32Emu(sAorB: ABMatrixInfo, lrvwTile):
+      # number of Vreg for interleaveTreg. Half of ValuA or B. Need same block number as Valu
+      numVForInterleave = sAorB.numVgprValu // 2
+      # reg layout setting
+      if sAorB.useDirect32XEmulation:
+        # enable TF32EmuInterleaveTreg
+        sAorB.TF32EmuInterleaveTreg = True
+        numV = numVForInterleave
+        if lrvwTile > 1:
+          # useDirect32XEmulation case
+          # Use wider local read + transpose (with transpose code or without tranpose code (means vreg index tranpose))
+          if kernel["UseDot2F32XEmulation"] or kernel["UseMFMAF32XEmulation"]:
+            # use Transpose code(instead of vreg index tranpose) for dot2 or MFMA (dst needs to be same as src)
+            sAorB.TF32EmuUseTransposeCode = True
+          else:
+            # use vreg index tranpose
+            sAorB.TF32EmuUseTransposeCode = False
+            # disable TF32EmuInterleaveTreg
+            sAorB.TF32EmuInterleaveTreg = False
+            # We need to allocate numVgprValuPerBlock (only T0 needed. Use same reg for T1,..)
+            # However, we need to use interleave Treg at TailLoop
+            # Use larger number
+            numV = max(sAorB.numVgprValuPerBlock, numVForInterleave)
+      else:
+         # no useDirect32XEmulation case, use temp T reg version
+         numV = adjustNumVForTF32Emu(sAorB, lrvwTile)
+      return numV
+
+    def adjustNumVForTF32Emu(sAorB: ABMatrixInfo, lrvwTile):
+      if lrvwTile > 1:
+        # use tranpose code for wider local read
+        sAorB.TF32EmuUseTransposeCode = True
+      # allocate temp vgpr as T reg
+      # need half of MIInputPerThread
+      # numV = kernel["MIInputPerThread"] // 2 # so far, only 4 = 8 // 2 works
+      numV = 0
+      # disable TF32EmuInterleaveTreg
+      sAorB.TF32EmuInterleaveTreg = False
+      sAorB.useDirect32XEmulation = False
+      return numV
+
+    def checkVregOverflowTF32Emu(vgprIdx, numV):
+      # Do not allow adjustment for CMS
+      if kernel["UseCustomMainLoopSchedule"]:
+        return False
+      # We need to consider 2 more vreg (Serial tmp)
+      # Looks like we need more tmp vreg at tailloop
+      # So far, max 32 tmp vregs might be used.
+      # set 2 + 32 as buffer (tentative)
+      # MFMA case, need 2 more
+      bufferVregNum = 2 + 32
+      if kernel["UseMFMAF32XEmulation"]:
+        bufferVregNum += 2
+      return vgprIdx + bufferVregNum + numV > self.states.regCaps["MaxVgpr"]
+
+    # initial TF32Emu setting
+    numVgprsEmuA = initTF32Emu(self.states.a, self.states.lrvwTileA)
+    numVgprsEmuB = initTF32Emu(self.states.b, self.states.lrvwTileB)
+    # numVreg adjustment
+    # step 1 Adjustment for lrvwTileA/B==1
+    #   start from B
+    needAdjustment = checkVregOverflowTF32Emu(vgprIdx, numVgprsEmuA + numVgprsEmuB)
+    if needAdjustment and self.states.lrvwTileB == 1:
+      numVgprsEmuB = adjustNumVForTF32Emu(self.states.b, self.states.lrvwTileB)
+    #   then, check A
+    needAdjustment = checkVregOverflowTF32Emu(vgprIdx, numVgprsEmuA + numVgprsEmuB)
+    if needAdjustment and self.states.lrvwTileA == 1:
+      numVgprsEmuA = adjustNumVForTF32Emu(self.states.a, self.states.lrvwTileA)
+    # step 2 Adjustment for lrvwTileA/B>1
+    #   start from B
+    needAdjustment = checkVregOverflowTF32Emu(vgprIdx, numVgprsEmuA + numVgprsEmuB)
+    if needAdjustment and self.states.lrvwTileB > 1:
+      numVgprsEmuB = adjustNumVForTF32Emu(self.states.b, self.states.lrvwTileB)
+    #   then, checkA
+    needAdjustment = checkVregOverflowTF32Emu(vgprIdx, numVgprsEmuA + numVgprsEmuB)
+    if needAdjustment and self.states.lrvwTileA > 1:
+      numVgprsEmuA = adjustNumVForTF32Emu(self.states.a, self.states.lrvwTileA)
+    # final adjustment
+    # disable UseMFMAF32XEmulation and save 2 vregs
+    if kernel["UseMFMAF32XEmulation"]:
+      if checkVregOverflowTF32Emu(vgprIdx, numVgprsEmuA + numVgprsEmuB):
+        # disable UseMFMAF32XEmulation and use Dot2 instead
+        kernel["UseMFMAF32XEmulation"] = False
+        kernel["UseDot2F32XEmulation"] = True
+
+    # vreg allocation for UseMFMAF32XEmulation
     if kernel["UseMFMAF32XEmulation"]:
       vgprIdx = ((vgprIdx+1)//2)*2 #align 64 bit
       self.states.startVgprIdentityMatrix = vgprIdx
       vgprIdx+=2
-      
-    if kernel["UseDirect32XEmulation"]:
-      numVgprsEmu = (self.states.a.numVgprValu + self.states.b.numVgprValu) // 2
-      if (vgprIdx >= (self.states.regCaps["MaxVgpr"] - numVgprsEmu)):
-        kernel["UseDirect32XEmulation"] = False
-        kernel["UseDot2F32XEmulation"] = True
-      else:
-        #align 64 bit
-        vgprIdx = ((vgprIdx+1)//2)*2
-        self.states.startVgprCvt = vgprIdx
-        vgprIdx += numVgprsEmu # for vgpr 32XEmulation
+    numVgprsEmu = numVgprsEmuA + numVgprsEmuB
+    self.states.a.numVgprEmu = numVgprsEmuA
+    self.states.b.numVgprEmu = numVgprsEmuB
+    if numVgprsEmu > 0:
+      #align 64 bit
+      vgprIdx = ((vgprIdx+1)//2)*2
+      self.states.a.startVgprCvt = vgprIdx
+      vgprIdx += numVgprsEmuA # for vgpr 32XEmulation A
+      self.states.b.startVgprCvt = vgprIdx
+      vgprIdx += numVgprsEmuB # for vgpr 32XEmulation B
 
     # TODO: Serial is always the first/last register in the pool so the store
     # code doesn't have to deal with fragmentation

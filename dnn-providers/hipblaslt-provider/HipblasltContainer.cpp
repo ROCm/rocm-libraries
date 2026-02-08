@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "EngineManager.hpp"
 #include "HipblasltContainer.hpp"
@@ -14,7 +14,7 @@ namespace hipblaslt_plugin
 
 HipblasltContainer::HipblasltContainer()
 {
-    HIPDNN_LOG_INFO("Creating HipblasltContainer");
+    HIPDNN_PLUGIN_LOG_INFO("Creating HipblasltContainer");
 
     auto hipblasltEngine
         = std::make_unique<HipblasltEngine>(hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
@@ -28,7 +28,7 @@ HipblasltContainer::HipblasltContainer()
 
 HipblasltContainer::~HipblasltContainer()
 {
-    HIPDNN_LOG_INFO("Destroying HipblasltContainer");
+    HIPDNN_PLUGIN_LOG_INFO("Destroying HipblasltContainer");
 }
 
 EngineManager& HipblasltContainer::getEngineManager()
