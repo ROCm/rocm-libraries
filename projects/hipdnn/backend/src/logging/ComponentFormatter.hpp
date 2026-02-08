@@ -15,12 +15,14 @@ namespace hipdnn::backend::logging
 class ComponentFormatter final : public spdlog::formatter
 {
 public:
+    // NOLINTNEXTLINE(modernize-use-equals-default) - not trivial, has member initializer
     ComponentFormatter()
         : _callbackReceiverFormatter{
               std::make_unique<spdlog::pattern_formatter>(generateCallbackReceiverPatternString())}
     {
     }
 
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static) - virtual override
     void format(const spdlog::details::log_msg& msg, spdlog::memory_buf_t& dest) override
     {
         // The logger "hipdnn_callback_receiver" receives pre-formatted strings from a callback sink.
@@ -37,6 +39,7 @@ public:
         }
     }
 
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static) - virtual override
     std::unique_ptr<spdlog::formatter> clone() const override
     {
         return std::make_unique<ComponentFormatter>();
