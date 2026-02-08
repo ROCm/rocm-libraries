@@ -1,3 +1,6 @@
+# build artifacts
+build*/
+
 # Compiled Object files
 *.slo
 *.lo
@@ -66,7 +69,6 @@ _doxygen/
 # JetBrains IDE
 .idea/
 cmake-build*/
-build*/
 CMakeUserPresets.json
 
 # Python virtualenv
@@ -79,4 +81,5 @@ __pycache__/
 # Python egg
 *.egg-info/
 
+# Profiling data files
 *.profraw
