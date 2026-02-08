@@ -197,9 +197,6 @@ spdlog::level::level_enum toSpdlogLevel(hipdnnSeverity_t severity)
 
 void logMessage(hipdnnSeverity_t severity, const std::string& message)
 {
-    // // Ensure logging is initialized
-    // initialize();
-
     // Check log level using data_sdk infrastructure
     if(!hipdnn_data_sdk::logging::isLogLevelEnabled(severity))
     {
