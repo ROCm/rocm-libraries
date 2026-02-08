@@ -1149,19 +1149,40 @@ struct GroupedConvolutionForwardKernel
             // allocate LDS
             __shared__ char smem_ptr[GetSmemSize()];
 
-            RunGemm(a_ptr,
-                    b_ptr,
-                    ds_ptr_with_offsets,
-                    c_ptr,
-                    smem_ptr,
-                    a_desc,
-                    b_desc,
-                    c_desc,
-                    kargs.GemmK,
-                    kargs.k_batch,
-                    i_m,
-                    i_n,
-                    kargs.elfunc);
+            if constexpr(GemmPipeline_::Async)
+            {
+#if defined(__gfx950__)
+                RunGemm(a_ptr,
+                        b_ptr,
+                        ds_ptr_with_offsets,
+                        c_ptr,
+                        smem_ptr,
+                        a_desc,
+                        b_desc,
+                        c_desc,
+                        kargs.GemmK,
+                        kargs.k_batch,
+                        i_m,
+                        i_n,
+                        kargs.elfunc);
+#endif
+            }
+            else
+            {
+                RunGemm(a_ptr,
+                        b_ptr,
+                        ds_ptr_with_offsets,
+                        c_ptr,
+                        smem_ptr,
+                        a_desc,
+                        b_desc,
+                        c_desc,
+                        kargs.GemmK,
+                        kargs.k_batch,
+                        i_m,
+                        i_n,
+                        kargs.elfunc);
+            }
         }
     }
 };
