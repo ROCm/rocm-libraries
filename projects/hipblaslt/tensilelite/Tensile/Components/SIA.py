@@ -263,6 +263,9 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
     # final index definition
     writer.states.numMfmaForNextLoopLR = min(writer.states.numMfmaForNextLoopLR,numMfmaPerIter-1)
     writer.states.syncPlrMfmaIndex = numMfmaPerIter*(kernel["LoopIters"]-writer.states.numItersPLR+1) - writer.states.numMfmaForNextLoopLR - 1 if writer.states.numItersPLR else 0
+    if writer.states.doPackPreSchedulingNextLoop:
+        # doPackPreSchedulingNextLoop only case (not doFullPackCodePrefetch), move syncPlrMfmaIndex to the top of 
+        writer.states.syncPlrMfmaIndex = numMfmaPerIter*(kernel["LoopIters"]-writer.states.numItersPLR)
 
     if kernel["ForceUnrollSubIter"]:
         if ( kernel["ProblemType"]["DataType"].isComplex()):
@@ -301,10 +304,13 @@ def getLocalWriteMFMAStart(writer, kernel, tensorParametersA, tensorParametersB,
             # we have enough vgprBuffer to schedule localReads in the front of loop
             numMfmaForCurrentLoopLR = 1
             latencyLeft = writer.states.miLatencyLeft
-            for u in range(kernel["LoopIters"] - writer.states.numItersPLR):
-                doReadA = (u < kernel["LoopIters"] // writer.states.numIterPerCoalescedReadA - writer.states.numItersPLR) and not kernel["DirectToVgprA"]
-                doReadB = (u < kernel["LoopIters"] // writer.states.numIterPerCoalescedReadB - writer.states.numItersPLR) and not kernel["DirectToVgprB"]
-                doReadM = (u < kernel["LoopIters"] // writer.states.numIterPerCoalescedReadMetadata - writer.states.numItersPLR)
+            subIter = kernel["ForceUnrollSubIter"]
+            # subIter case, LoopIters is increased to 4, but we should use 1 for latency calculation
+            lookRange = 1 if subIter else kernel["LoopIters"] - writer.states.numItersPLR
+            for u in range(lookRange):
+                doReadA = ((u < kernel["LoopIters"] // writer.states.numIterPerCoalescedReadA - writer.states.numItersPLR) and not kernel["DirectToVgprA"]) or subIter
+                doReadB = ((u < kernel["LoopIters"] // writer.states.numIterPerCoalescedReadB - writer.states.numItersPLR) and not kernel["DirectToVgprB"]) or subIter
+                doReadM = ((u < kernel["LoopIters"] // writer.states.numIterPerCoalescedReadMetadata - writer.states.numItersPLR))
                 doReadM = doReadM and (kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"])
 
                 def calculateLatencyLeft(numReads, localReadBlockWidth, localReadLatency):
@@ -332,6 +338,9 @@ def getLocalWriteMFMAStart(writer, kernel, tensorParametersA, tensorParametersB,
                         calculateLatencyLeft((writer.states.numReadsPerIterMetadata//kernel["InnerUnroll"] - writer.states.numReadsPerUnrollMetadata) * doReadM, tPM["localReadInstruction"].blockWidth, tPM["localReadInstruction"].issueLatency)
                     # ds_read[B][1:]
                     calculateLatencyLeft((writer.states.numReadsPerIterB//kernel["InnerUnroll"] - writer.states.numReadsPerUnrollB) * doReadB, tensorParametersB["localReadInstruction"].blockWidth, tensorParametersB["localReadInstruction"].issueLatency)
+                    if subIter:
+                        # subIter case, number of local read for ThisLoop is a half
+                        numMfmaForCurrentLoopLR //= 2
             lwStartMfmaIndex = numMfmaForCurrentLoopLR
         else:
             lwStartMfmaIndex = numMfmaPerIter * (kernel["LoopIters"] - 1 - writer.states.numItersPLR) + writer.states.numMfmaForLR

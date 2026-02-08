@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -145,10 +145,7 @@ class LocalReadVALU(LocalRead):
                         elif kernel["ProblemType"]["DataType"].isSingle():
                             localReadCode.add(writer.assert_eq( dbgVgpr, 1.0) )
 
-        if writer.states.inTailLoop:
-            return imod, pack, Module()
-        else:
-            return imod, pack
+        return imod, pack, Module()
 
 class LocalReadMFMA(LocalRead):
     kernel = {"EnableMatrixInstruction": True}
@@ -361,7 +358,10 @@ class LocalReadMFMA(LocalRead):
                 done.append(idx)
                 continue
             vDst = self.getVgprForEmu(writer, kernel, tc, bufferIdx, iui, newIdx, 1, localRead=True)
-            module.add(VSwapB32(dst=vDst, src=vSrc, comment="swap %d and %d"%(newIdx, idx)))
+            commentStr = ""
+            if idx == last - 1:
+                commentStr = "__PACK_PRE_" + tc + "_I%d__"%(iui)
+            module.add(VSwapB32(dst=vDst, src=vSrc, comment="swap %d and %d"%(newIdx, idx) + commentStr))
             done.append(idx)
             done.append(newIdx)
 
@@ -406,7 +406,7 @@ class LocalReadMFMA(LocalRead):
     """
     def __call__(self, writer, kernel, bufferIdx, iui, epsi, tP):
         imod = Module("LocalReadDo%s_I%s" % (tP["tensorChar"],iui))
-        subTileIdx = writer.states.SubTileIdx
+        subTileIdx = writer.states.SubTileIdx if kernel["ForceUnrollSubIter"] else 0 # use SubTileIdx only for ForceUnrollSubIter
 
         tc = tP["tensorChar"]
         if tc == "A":
@@ -471,8 +471,7 @@ class LocalReadMFMA(LocalRead):
         needPack |= (kernel["ConvertAfterDS"] and (tP["bpe"] != tP["bpeDS"]))
         needPack |= kernel["UseF32XEmulation"]
         pack     = Module("pack%s_I%s"%(tc,iui))
-        if writer.states.inTailLoop and kernel["UseF32XEmulation"]:
-            packPre = Module("pack%s_I%s pre for F32XEmu"%(tc,iui))
+        packPre = Module("pack%s_I%s Pre"%(tc,iui))
 
         needTransposeCode = writer.states.a.TF32EmuUseTransposeCode if tc == "A" else writer.states.b.TF32EmuUseTransposeCode
         interleaveTreg = writer.states.a.TF32EmuInterleaveTreg if tc == "A" else writer.states.b.TF32EmuInterleaveTreg
@@ -555,6 +554,7 @@ class LocalReadMFMA(LocalRead):
                     localReadCode = imod.add(Module("LocalRead%s Valu%u"%(tc,valuiIdx)))
                     if needPack or numSplitMetadata:
                         packCode = pack.add(Module("packCode"))
+                        packCodePre = packPre.add(Module("packCodePre"))
 
                     tmpvgpr = []
                     for rIdx in range(0, numReadsPerUnroll):
@@ -566,10 +566,7 @@ class LocalReadMFMA(LocalRead):
                         isHigh16Bits = (blockWidth == 0.25) and ( ((rIdx % 4) //2) == 1) # 2,3
 
                         packCodeT = Module() # Allocate temporary module for pack code
-                        if (not writer.states.inTailLoop) and kernel["UseF32XEmulation"]:
-                            # non TailLoop case, store packPre (transpose) in packCodeT
-                            # TailLoop case, we need to store transpose code separately to schedule it before ShiftK
-                            packPre = packCodeT
+                        packCodePreT = Module() # Allocate temporary module for pack code Pre
                         localReadCodeT = Module()
 
                         if needPack or numSplitMetadata:
@@ -586,7 +583,7 @@ class LocalReadMFMA(LocalRead):
 
                                 if (valuiIdx % swapBlockSizeSub) == 0 and needTransposeCode:
                                     # generate Tranpose code (with v_swap) for wider local read + needTransposeCode
-                                    self.transposeLRVregs(kernel, packPre, tc, bufferIdx, iui, writer, lrvwTile, swapBlockSizeSub, subTileIdx)
+                                    self.transposeLRVregs(kernel, packCodePreT, tc, bufferIdx, iui, writer, lrvwTile, swapBlockSizeSub, subTileIdx)
                                 # For every 8 read vgprs of fp32, pack high bits of bf16 into first 4 vgprs
                                 commentForSchedule1 = "__TF32_1_" + tc + "_%d"%(baseValuiIdx//8)
                                 if valuiIdx % 8 == 0:
@@ -685,17 +682,15 @@ class LocalReadMFMA(LocalRead):
                                             packCodeT.add(VSubF32(dst=v0t, src0=v0t, src1=vgpr(tmp)))
                                             packCodeT.add(VCvtBF16toFP32(dst=vgpr(tmp), src=vHi0, vgprMask=None, vi=1))
                                             packCodeT.add(VSubF32(dst=v1t, src0=v1t, src1=vgpr(tmp)))
-                                        if kernel["UseDot2F32XEmulation"]:
+                                        if kernel["UseDot2F32XEmulation"] and (valuiIdx % 8) == 0:
                                             packCodeT.add(VDot2CF32BF16(dst=v2t, src0=hex(0x8000bf80), src1=vHi1))
+                                            packCodeT.add(VDot2CF32BF16(dst=v3t, src0=hex(0xbf800000), src1=vHi1))
                                         else:
+                                            # We use cvt+sub pair since dot2 requires adding 4 wait states.
                                             packCodeT.add(PVCvtBF16toFP32(dst=vgpr(tmp), src=vHi1))
                                             packCodeT.add(VSubF32(dst=v2t, src0=v2t, src1=vgpr(tmp)))
-                                        # We use cvt+sub pair since dot2 requires adding 4 wait states.
-                                        packCodeT.add(VCvtBF16toFP32(dst=vgpr(tmp), src=vHi1, vgprMask=None, vi=1))
-                                        packCodeT.add(VSubF32(dst=v3t, src0=v3t, src1=vgpr(tmp), comment="end"))
-                                        if kernel["UseDot2F32XEmulation"]:
-                                            packCodeT.add(VMovB32(dst=vgpr(tmp), src=0))
-                                            packCodeT.add(VMovB32(dst=vgpr(tmp), src=0))
+                                            packCodeT.add(VCvtBF16toFP32(dst=vgpr(tmp), src=vHi1, vgprMask=None, vi=1))
+                                            packCodeT.add(VSubF32(dst=v3t, src0=v3t, src1=vgpr(tmp), comment="end"))
                                     writer.vgprPool.checkIn(tmp)
                                     # on last iteration, store lower bits in last 4 registers
                                     if valuiIdx % 8 == 4 and (not indexTranpose):
@@ -720,7 +715,7 @@ class LocalReadMFMA(LocalRead):
                                             # we still need s_nop in main loop, NGLL, NLL if number MIWaveTileA/B are different.
                                             # s_nop insertion is handled in makeSubIterSchedule for main loop and NGLL/NLL
                                             nopSrc = 0
-                                            if writer.states.inTailLoop or kernel["UsePLRPack"]:
+                                            if kernel["UseCustomMainLoopSchedule"]:
                                                 nopSrc = 4
                                             if kernel["UseMFMAF32XEmulation"] and nopSrc:
                                                 # 5 wait states needed before the following CVT instructions
@@ -1183,6 +1178,7 @@ class LocalReadMFMA(LocalRead):
                         if addPackLR:
                             if needPack or numSplitMetadata:
                                 packCode.add(packCodeT)
+                                packCodePre.add(packCodePreT)
                             localReadCode.add(localReadCodeT)
 
                         subIterLoadCount += 1
@@ -1208,11 +1204,4 @@ class LocalReadMFMA(LocalRead):
                 tmp = tmpvgprFP32.pop()
                 writer.vgprPool.checkIn(tmp)
 
-        if writer.states.inTailLoop:
-            if kernel["UseF32XEmulation"]:
-                # TailLoop + F32XEmu case, return packPre (including transpose code) separately
-                return imod, pack, packPre
-            else:
-                return imod, pack, Module()
-        else:
-            return imod, pack
+        return imod, pack, packPre

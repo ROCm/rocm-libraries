@@ -109,5 +109,6 @@ def getRequiredParametersMin() -> set:
         'WavefrontSize',
         'WorkGroup',
         'DtlPlusLdsBuf',
-        'MinGRIncPerMfma'
+        'MinGRIncPerMfma',
+        'UsePLRPack'
     })
