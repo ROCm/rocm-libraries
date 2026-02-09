@@ -215,8 +215,7 @@ namespace FastDivisionTest
                          {DataType::Int32, PointerType::Value}, aTag, ArgumentType::Value)
                      ->expression();
 
-        a = context->kernel()->addArgument(
-            {.name = "arg", .variableType = DataType::Int32, .expression = a});
+        a = context->kernel()->addArgument({"arg", DataType::Int32, DataDirection::ReadOnly, a});
 
         auto argsBefore = context->kernel()->arguments();
 

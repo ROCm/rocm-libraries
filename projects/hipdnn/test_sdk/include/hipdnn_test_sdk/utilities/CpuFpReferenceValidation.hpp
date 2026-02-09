@@ -55,18 +55,13 @@ public:
             if(absDiff > threshold)
             {
                 // Log error and mark as failed
-                HIPDNN_LOG_ERROR("Validation failed at indices {}: reference value = {}, "
-                                 "implementation value = {}, "
-                                 "absolute difference = {}, threshold = {}, "
-                                 "difference - threshold = {}, (atol={}, rtol={})",
-                                 indices,
-                                 refValue,
-                                 implValue,
-                                 absDiff,
-                                 threshold,
-                                 absDiff - threshold,
-                                 _absoluteTolerance,
-                                 _relativeTolerance);
+                HIPDNN_SDK_LOG_ERROR(
+                    "Validation failed at indices "
+                    << StreamVec(indices) << ": reference value = " << refValue
+                    << ", implementation value = " << implValue
+                    << ", absolute difference = " << absDiff << ", threshold = " << threshold
+                    << ", difference - threshold = " << (absDiff - threshold)
+                    << ", (atol=" << _absoluteTolerance << ", rtol=" << _relativeTolerance << ")");
                 result.store(false, std::memory_order_relaxed);
             }
             return result.load(std::memory_order_relaxed);
@@ -116,14 +111,10 @@ public:
             if(absDiff > 0)
             {
                 // Log error and mark as failed
-                HIPDNN_LOG_ERROR("Validation failed for integer values at indices {}: ",
-                                 "reference value = {}, "
-                                 "implementation value = {}, "
-                                 "absolute difference = {}",
-                                 indices,
-                                 refValue,
-                                 implValue,
-                                 absDiff);
+                HIPDNN_SDK_LOG_ERROR("Validation failed for integer values at indices "
+                                     << StreamVec(indices) << ": reference value = " << refValue
+                                     << ", implementation value = " << implValue
+                                     << ", absolute difference = " << absDiff);
                 result.store(false, std::memory_order_relaxed);
             }
             return result.load(std::memory_order_relaxed);
