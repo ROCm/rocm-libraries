@@ -56,8 +56,13 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                                       const CDEElementwiseOperation cde_element_op)
 {
 #if defined(__gfx11__) || defined(__gfx12__)
-    __shared__ char p_shared[GridwiseGemm::template GetSharedMemoryNumberOfByte<
-        typename GridwiseGemm::EpilogueCShuffle>()];
+    using EpilogueType = typename std::conditional<GridwiseGemm::IsBWaveTransferApplicable &&
+                                                       GridwiseGemm::UseDirectStore,
+                                                   typename GridwiseGemm::EpilogueDirectStore,
+                                                   typename GridwiseGemm::EpilogueCShuffle>::type;
+
+    constexpr index_t LDS_size = GridwiseGemm::template GetSharedMemoryNumberOfByte<EpilogueType>();
+    __shared__ char p_shared[LDS_size];
 
     const index_t KBatch = 1;
 
@@ -133,13 +138,13 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             const auto block_2_etile_map =
                 GroupedGemmBlock2ETileMap(local_b2e_tile_map, BlockStart, id_off);
 
-            auto epilogue_args = typename GridwiseGemm::EpilogueCShuffle{};
+            auto epilogue_args = EpilogueType{};
 
             GridwiseGemm::template Run<HasMainKBlockLoop,
                                        EGlobalMemoryDataOperation,
                                        TailNum,
                                        decltype(block_2_etile_map),
-                                       decltype(epilogue_args),
+                                       EpilogueType,
                                        1,
                                        2>(
                 p_as_grid_,
