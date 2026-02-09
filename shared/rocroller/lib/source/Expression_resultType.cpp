@@ -271,12 +271,12 @@ namespace rocRoller
                        || inputVarType == DataType::Bool32 //
                        || inputVarType == DataType::Bool64)
                     {
-                        return {Register::Type::Scalar, inputVarType};
+                        return {Register::Type::Scalar, inputVarType, valueCount};
                     }
                 case Register::Type::Literal:
                 {
                     if(inputVarType == DataType::Bool)
-                        return {inputRegType, inputVarType};
+                        return {inputRegType, inputVarType, valueCount};
                 }
                 default:
                     break;

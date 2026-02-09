@@ -1458,6 +1458,7 @@ namespace ExpressionTest
 
         SECTION("Arguments")
         {
+            size_t       valueCount = 1;
             VariableType doubleVal{DataType::Double, PointerType::Value};
             auto         ca = std::make_shared<CommandArgument>(nullptr, doubleVal, 0);
             auto         cb = std::make_shared<CommandArgument>(nullptr, doubleVal, 8);
@@ -1476,7 +1477,7 @@ namespace ExpressionTest
             } args;
             RuntimeArguments runtimeArgs((uint8_t*)&args, sizeof(args));
 
-            Expression::ResultType expected{Register::Type::Literal, DataType::Double};
+            Expression::ResultType expected{Register::Type::Literal, DataType::Double, valueCount};
             CHECK(expected == resultType(expr2));
             CHECK(6.0 == std::get<double>(evaluate(expr2, runtimeArgs)));
 
@@ -1498,6 +1499,7 @@ namespace ExpressionTest
 
     TEST_CASE("Expression test evaluate mixed types", "[expression]")
     {
+        size_t valueCount = 1;
         using Expression::literal;
         auto one          = literal(1.0);
         auto two          = literal(2.0f);
@@ -1551,9 +1553,9 @@ namespace ExpressionTest
         auto eight75Half = convert(DataType::Half, eightPoint75);
         CHECK(Half(8.75) == std::get<Half>(evaluate(eight75Half)));
 
-        Expression::ResultType litDouble{Register::Type::Literal, DataType::Double};
-        Expression::ResultType litFloat{Register::Type::Literal, DataType::Float};
-        Expression::ResultType litBool{Register::Type::Literal, DataType::Bool};
+        Expression::ResultType litDouble{Register::Type::Literal, DataType::Double, valueCount};
+        Expression::ResultType litFloat{Register::Type::Literal, DataType::Float, valueCount};
+        Expression::ResultType litBool{Register::Type::Literal, DataType::Bool, valueCount};
 
         CHECK(litDouble == resultType(exprSix));
         // Result type not (yet?) defined for mixed integral/floating point types.
