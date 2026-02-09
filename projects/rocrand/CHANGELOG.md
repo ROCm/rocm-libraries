@@ -7,13 +7,13 @@ Documentation for rocRAND is available at
 
 ### Added
 
-* Occupancy-based tooling for benchmark workload increase.
+* Occupancy-based tooling for `benchmark_rocrand_device_api` workload increase.
 * New `provision` command-line parameter for `benchmark_rocrand_device_api` - a multiplier for automatic block computation.
 
 ### Changed
 
 * Updated `benchmark_rocrand_device_api` to use occupancy-based tooling to increase benchmark workloads.
-
+* Changed input size for `benchmark_rocrand_host_api` to increase it's workload.
 
 ## rocRAND 4.2.0 for ROCm 7.2
 

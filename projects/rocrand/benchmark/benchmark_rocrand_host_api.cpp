@@ -32,7 +32,7 @@
 #include <vector>
 
 #ifndef DEFAULT_RAND_N
-const size_t DEFAULT_RAND_N = 1024 * 1024 * 128;
+const size_t DEFAULT_RAND_N = 1024 * 1024 * 512;
 #endif
 
 typedef rocrand_rng_type rng_type_t;
