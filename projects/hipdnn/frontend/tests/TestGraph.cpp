@@ -4453,8 +4453,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithMultipleKnobs)
 
     // Mock execution plan descriptor creation
     auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
-    EXPECT_CALL(*_mockBackend,
-                backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
         .WillOnce([&executionPlanDesc](hipdnnBackendDescriptorType_t,
                                        hipdnnBackendDescriptor_t* descriptor) {
             *descriptor = executionPlanDesc;
@@ -4574,8 +4573,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithEmptySettings)
 
     // Mock execution plan descriptor creation
     auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
-    EXPECT_CALL(*_mockBackend,
-                backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
         .WillOnce([&executionPlanDesc](hipdnnBackendDescriptorType_t,
                                        hipdnnBackendDescriptor_t* descriptor) {
             *descriptor = executionPlanDesc;
@@ -4722,8 +4720,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtIgnoresUnsupportedKnobs)
 
     // Mock execution plan descriptor creation
     auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
-    EXPECT_CALL(*_mockBackend,
-                backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
         .WillOnce([&executionPlanDesc](hipdnnBackendDescriptorType_t,
                                        hipdnnBackendDescriptor_t* descriptor) {
             *descriptor = executionPlanDesc;
@@ -4733,7 +4730,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtIgnoresUnsupportedKnobs)
     // Create settings with one supported and one unsupported knob
     std::vector<KnobSetting> settings;
     settings.emplace_back("global.deterministic", static_cast<int64_t>(1)); // Supported
-    settings.emplace_back("unsupported.knob", static_cast<int64_t>(999));   // Not supported
+    settings.emplace_back("unsupported.knob", static_cast<int64_t>(999)); // Not supported
 
     auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
