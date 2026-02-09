@@ -656,6 +656,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param("max-workspace-size",       globalParameters["MaxWorkspaceSize"])
         param("PrintWinnersOnly",         globalParameters["PrintWinnersOnly"])
         param("granularity-threshold",    globalParameters["GranularityThreshold"])
+        param("prediction-threshold",     globalParameters["PredictionThreshold"])
         param("pristine-on-gpu",          globalParameters["PristineOnGPU"])
 
         param("library-update-file",      globalParameters["LibraryUpdateFile"])
