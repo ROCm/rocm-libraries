@@ -56,8 +56,8 @@ reduce2(FloatAccum& x, FloatAccum& y, FloatAccum scale, unsigned int lid)
 
         if(BlockSize <= static_cast<unsigned int>(warpSize))
         {
-            x = __shfl(x, 0) * scale;
-            y = __shfl(y, 0) * scale;
+            x = __shfl_down_sync(detail::FULL_MASK, x, 0) * scale;
+            y = __shfl_down_sync(detail::FULL_MASK, y, 0) * scale;
             return;
         }
 
