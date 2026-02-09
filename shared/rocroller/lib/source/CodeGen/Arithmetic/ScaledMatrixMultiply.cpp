@@ -134,12 +134,13 @@ namespace rocRoller
                 auto N = miSizes.n;
                 auto K = miSizes.k;
 
-                AssertFatal((M == 16 && N == 16 && K == 128) || (M == 32 && N == 32 && K == 64),
-                            "Invalid wavetile {}x{}x{} for scaled MFMA instruction for {}.",
-                            M,
-                            N,
-                            K,
-                            arch.target().toString());
+                AssertFatal(
+                    (M == 16 && N == 16 && K == 128) || (M == 32 && N == 32 && K == 64),
+                    fmt::format("Invalid wavetile {}x{}x{} for scaled MFMA instruction for {}.",
+                                M,
+                                N,
+                                K,
+                                arch.target().toString()));
 
                 if(maybeScaleBlockSize)
                 {

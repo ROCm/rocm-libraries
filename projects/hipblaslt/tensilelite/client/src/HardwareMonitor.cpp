@@ -24,27 +24,25 @@
  *
  *******************************************************************************/
 
-#include "HardwareMonitor.hpp"
-
 #include <chrono>
 #include <cstddef>
 #include <iomanip>
 #include <unistd.h>
 
+#include <Tensile/hip/HipUtils.hpp>
 #include <hip/hip_runtime.h>
 
-#include <Tensile/hip/HipUtils.hpp>
-
+#include "HardwareMonitor.hpp"
 #include "ResultReporter.hpp"
 
-#define RSMI_CHECK_EXC(expr)                                                                      \
+#define AMDSMI_CHECK_EXC(expr)                                                                    \
     do                                                                                            \
     {                                                                                             \
-        rsmi_status_t e = (expr);                                                                 \
+        amdsmi_status_t e = (expr);                                                               \
         if(e)                                                                                     \
         {                                                                                         \
             const char* errName = nullptr;                                                        \
-            rsmi_status_string(e, &errName);                                                      \
+            amdsmi_status_code_to_string(e, &errName);                                            \
             std::ostringstream msg;                                                               \
             msg << "Error " << e << "(" << errName << ") " << __FILE__ << ":" << __LINE__ << ": " \
                 << std::endl                                                                      \
@@ -57,9 +55,9 @@ namespace TensileLite
 {
     namespace Client
     {
-        uint32_t HardwareMonitor::GetROCmSMIIndex(int hipDeviceIndex)
+        uint32_t HardwareMonitor::GetAMDSMIIndex(int hipDeviceIndex)
         {
-            InitROCmSMI();
+            InitAMDSMI();
 
             hipDeviceProp_t props;
 
@@ -75,32 +73,43 @@ namespace TensileLite
             }
 #endif
 
-            uint64_t hipPCIID = 0;
-            // hipPCIID |= props.pciDeviceID & 0xFF;
-            // hipPCIID |= ((props.pciBusID & 0xFF) << 8);
-            // hipPCIID |= (props.pciDomainID) << 16;
-
+            uint64_t hipPCIID{};
             hipPCIID |= (((uint64_t)props.pciDomainID & 0xffffffff) << 32);
             hipPCIID |= ((props.pciBusID & 0xff) << 8);
             hipPCIID |= ((props.pciDeviceID & 0x1f) << 3);
 
-            uint32_t smiCount = 0;
+            uint32_t smiSocketCount{};
+            AMDSMI_CHECK_EXC(amdsmi_get_socket_handles(&smiSocketCount, nullptr));
 
-            RSMI_CHECK_EXC(rsmi_num_monitor_devices(&smiCount));
+            m_socketHandles.resize(smiSocketCount);
+            AMDSMI_CHECK_EXC(amdsmi_get_socket_handles(&smiSocketCount, &m_socketHandles[0]));
 
             std::ostringstream msg;
             msg << "PCI IDs: [" << std::endl;
 
-            for(uint32_t smiIndex = 0; smiIndex < smiCount; smiIndex++)
+            for(uint32_t device = 0; device < smiSocketCount; device++)
             {
-                uint64_t rsmiPCIID = 0;
+                uint32_t deviceCount{};
+                AMDSMI_CHECK_EXC(
+                    amdsmi_get_processor_handles(m_socketHandles[device], &deviceCount, nullptr));
+                m_processorHandles.resize(deviceCount);
 
-                RSMI_CHECK_EXC(rsmi_dev_pci_id_get(smiIndex, &rsmiPCIID));
+                AMDSMI_CHECK_EXC(amdsmi_get_processor_handles(
+                    m_socketHandles[device], &deviceCount, &m_processorHandles[0]));
 
-                msg << smiIndex << ": " << rsmiPCIID << std::endl;
+                for(uint32_t smiIndex = 0; smiIndex < deviceCount; smiIndex++)
+                {
+                    uint64_t amdSMIPCIID{};
+                    AMDSMI_CHECK_EXC(
+                        amdsmi_get_gpu_bdf_id(m_processorHandles[smiIndex], &amdSMIPCIID));
 
-                if(hipPCIID == rsmiPCIID)
-                    return smiIndex;
+                    msg << smiIndex << ": " << amdSMIPCIID << std::endl;
+
+                    if(hipPCIID == amdSMIPCIID)
+                    {
+                        return smiIndex;
+                    }
+                }
             }
 
             msg << "]" << std::endl;
@@ -108,7 +117,7 @@ namespace TensileLite
                 = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
             msg << std::put_time(gmtime(&now), "%F %T %z");
 
-            throw std::runtime_error(concatenate("RSMI Can't find a device with PCI ID ",
+            throw std::runtime_error(concatenate("AMDSMI Can't find a device with PCI ID ",
                                                  hipPCIID,
                                                  "(",
                                                  props.pciDomainID,
@@ -120,10 +129,10 @@ namespace TensileLite
                                                  msg.str()));
         }
 
-        void HardwareMonitor::InitROCmSMI()
+        void HardwareMonitor::InitAMDSMI()
         {
-            static rsmi_status_t status = rsmi_init(0);
-            RSMI_CHECK_EXC(status);
+            static amdsmi_status_t status = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+            AMDSMI_CHECK_EXC(status);
         }
 
         HardwareMonitor::HardwareMonitor(int hipDeviceIndex, clock::duration minPeriod)
@@ -132,14 +141,14 @@ namespace TensileLite
             , m_dataPoints(0)
             , m_XCDCount(1)
         {
-            InitROCmSMI();
-            m_smiDeviceIndex = GetROCmSMIIndex(hipDeviceIndex);
+            InitAMDSMI();
+            m_smiDeviceIndex = GetAMDSMIIndex(hipDeviceIndex);
             initThread();
 
-#if rocm_smi_VERSION_MAJOR >= 7
-            auto status2 = rsmi_dev_metrics_xcd_counter_get(m_smiDeviceIndex, &m_XCDCount);
-
-            if(status2 != RSMI_STATUS_SUCCESS || m_XCDCount == 0)
+#if AMDSMI_LIB_VERSION_MAJOR >= 25
+            auto status
+                = amdsmi_get_gpu_xcd_counter(m_processorHandles[m_smiDeviceIndex], &m_XCDCount);
+            if(status != AMDSMI_STATUS_SUCCESS || m_XCDCount == 0)
             {
                 m_XCDCount = 1;
             }
@@ -152,14 +161,15 @@ namespace TensileLite
             , m_dataPoints(0)
             , m_XCDCount(1)
         {
-            InitROCmSMI();
-            m_smiDeviceIndex = GetROCmSMIIndex(hipDeviceIndex);
+            InitAMDSMI();
+            m_smiDeviceIndex = GetAMDSMIIndex(hipDeviceIndex);
             initThread();
 
-#if rocm_smi_VERSION_MAJOR >= 7
-            auto status2 = rsmi_dev_metrics_xcd_counter_get(m_smiDeviceIndex, &m_XCDCount);
+#if AMDSMI_LIB_VERSION_MAJOR >= 25
+            auto status
+                = amdsmi_get_gpu_xcd_counter(m_processorHandles[m_smiDeviceIndex], &m_XCDCount);
 
-            if(status2 != RSMI_STATUS_SUCCESS || m_XCDCount == 0)
+            if(status != AMDSMI_STATUS_SUCCESS || m_XCDCount == 0)
             {
                 m_XCDCount = 1;
             }
@@ -182,8 +192,8 @@ namespace TensileLite
             m_thread = std::thread([this]() { this->runLoop(); });
         }
 
-        void HardwareMonitor::addTempMonitor(rsmi_temperature_type_t   sensorType,
-                                             rsmi_temperature_metric_t metric)
+        void HardwareMonitor::addTempMonitor(amdsmi_temperature_type_t   sensorType,
+                                             amdsmi_temperature_metric_t metric)
         {
             assertNotActive();
 
@@ -191,7 +201,7 @@ namespace TensileLite
             m_tempValues.resize(m_tempMetrics.size());
         }
 
-        void HardwareMonitor::addClockMonitor(rsmi_clk_type_t clockType)
+        void HardwareMonitor::addClockMonitor(amdsmi_clk_type_t clockType)
         {
             assertNotActive();
 
@@ -207,13 +217,15 @@ namespace TensileLite
             m_fanValues.resize(m_fanMetrics.size());
         }
 
-        double HardwareMonitor::getAverageTemp(rsmi_temperature_type_t   sensorType,
-                                               rsmi_temperature_metric_t metric)
+        double HardwareMonitor::getAverageTemp(amdsmi_temperature_type_t   sensorType,
+                                               amdsmi_temperature_metric_t metric)
         {
             assertNotActive();
 
             if(m_dataPoints == 0)
+            {
                 throw std::runtime_error("No data points collected!");
+            }
 
             for(size_t i = 0; i < m_tempMetrics.size(); i++)
             {
@@ -231,12 +243,14 @@ namespace TensileLite
                 "Can't read temp value that wasn't requested: ", sensorType, " - ", metric));
         }
 
-        double HardwareMonitor::getAverageClock(rsmi_clk_type_t clockType)
+        double HardwareMonitor::getAverageClock(amdsmi_clk_type_t clockType)
         {
             assertNotActive();
 
             if(m_dataPoints == 0)
+            {
                 throw std::runtime_error("No data points collected!");
+            }
 
             for(size_t i = 0; i < m_clockMetrics.size(); i++)
             {
@@ -246,7 +260,7 @@ namespace TensileLite
                     if(rawValue == std::numeric_limits<uint64_t>::max())
                         return std::numeric_limits<double>::quiet_NaN();
 
-                    if(m_clockMetrics[i] == RSMI_CLK_TYPE_SYS)
+                    if(m_clockMetrics[i] == AMDSMI_CLK_TYPE_SYS)
                     {
                         return static_cast<double>(rawValue) / (1e6 * m_dataPoints * m_XCDCount);
                     }
@@ -266,7 +280,9 @@ namespace TensileLite
             assertNotActive();
 
             if(m_dataPoints == 0)
+            {
                 throw std::runtime_error("No data points collected!");
+            }
 
             for(size_t i = 0; i < m_fanMetrics.size(); i++)
             {
@@ -292,7 +308,6 @@ namespace TensileLite
         void HardwareMonitor::stop()
         {
             assertActive();
-
             m_stop = true;
         }
 
@@ -304,7 +319,6 @@ namespace TensileLite
         void HardwareMonitor::runBetweenEvents(hipEvent_t startEvent, hipEvent_t stopEvent)
         {
             assertNotActive();
-
             {
                 std::unique_lock<std::mutex> lock(m_mutex);
 
@@ -324,12 +338,9 @@ namespace TensileLite
         {
             m_dataPoints = 0;
 
-            for(auto& v : m_tempValues)
-                v = 0;
-            for(auto& v : m_clockValues)
-                v = 0;
-            for(auto& v : m_fanValues)
-                v = 0;
+            std::fill(m_tempValues.begin(), m_tempValues.end(), 0);
+            std::fill(m_clockValues.begin(), m_clockValues.end(), 0);
+            std::fill(m_fanValues.begin(), m_fanValues.end(), 0);
 
             m_lastCollection = clock::time_point();
             m_nextCollection = clock::time_point();
@@ -347,36 +358,45 @@ namespace TensileLite
             {
                 // if an error occurred previously, don't overwrite it.
                 if(m_tempValues[i] == std::numeric_limits<int64_t>::max())
+                {
                     continue;
+                }
 
-                rsmi_temperature_type_t   sensorType;
-                rsmi_temperature_metric_t metric;
+                amdsmi_temperature_type_t   sensorType;
+                amdsmi_temperature_metric_t metric;
                 std::tie(sensorType, metric) = m_tempMetrics[i];
 
-                int64_t newValue = 0;
-                auto    status
-                    = rsmi_dev_temp_metric_get(m_smiDeviceIndex, sensorType, metric, &newValue);
-                if(status != RSMI_STATUS_SUCCESS)
+                int64_t newValue{};
+                auto    status = amdsmi_get_temp_metric(
+                    m_processorHandles[m_smiDeviceIndex], sensorType, metric, &newValue);
+                if(status != AMDSMI_STATUS_SUCCESS)
+                {
                     m_tempValues[i] = std::numeric_limits<int64_t>::max();
+                }
                 else
+                {
                     m_tempValues[i] += newValue;
+                }
             }
 
             for(int i = 0; i < m_clockMetrics.size(); i++)
             {
                 // if an error occurred previously, don't overwrite it.
                 if(m_clockValues[i] == std::numeric_limits<uint64_t>::max())
-                    continue;
-
-                rsmi_frequencies_t freq;
-
-                if(m_clockMetrics[i] == RSMI_CLK_TYPE_SYS)
                 {
-#if rocm_smi_VERSION_MAJOR >= 7
-                    rsmi_gpu_metrics_t gpuMetrics;
+                    continue;
+                }
+
+                amdsmi_frequencies_t freq;
+
+                if(m_clockMetrics[i] == AMDSMI_CLK_TYPE_SYS)
+                {
+#if AMDSMI_LIB_VERSION_MAJOR >= 25
+                    amdsmi_gpu_metrics_t gpuMetrics;
                     // multi_XCD
-                    auto status1 = rsmi_dev_gpu_metrics_info_get(m_smiDeviceIndex, &gpuMetrics);
-                    if(status1 == RSMI_STATUS_SUCCESS)
+                    auto status = amdsmi_get_gpu_metrics_info(m_processorHandles[m_smiDeviceIndex],
+                                                              &gpuMetrics);
+                    if(status == AMDSMI_STATUS_SUCCESS)
                     {
                         uint64_t sysclkSum = 0;
                         for(uint32_t xcd = 0; xcd < m_XCDCount; xcd++)
@@ -390,9 +410,9 @@ namespace TensileLite
                     }
 #else
                     // XCD0
-                    auto status
-                        = rsmi_dev_gpu_clk_freq_get(m_smiDeviceIndex, m_clockMetrics[i], &freq);
-                    if(status != RSMI_STATUS_SUCCESS)
+                    auto status = amdsmi_get_clk_freq(
+                        m_processorHandles[m_smiDeviceIndex], m_clockMetrics[i], &freq);
+                    if(status != AMDSMI_STATUS_SUCCESS)
                     {
                         m_clockValues[i] = std::numeric_limits<uint64_t>::max();
                     }
@@ -404,9 +424,10 @@ namespace TensileLite
                 }
                 else
                 {
-                    auto status
-                        = rsmi_dev_gpu_clk_freq_get(m_smiDeviceIndex, m_clockMetrics[i], &freq);
-                    if(status != RSMI_STATUS_SUCCESS)
+                    auto status = amdsmi_get_clk_freq(
+                        m_processorHandles[m_smiDeviceIndex], m_clockMetrics[i], &freq);
+
+                    if(status != AMDSMI_STATUS_SUCCESS)
                     {
                         m_clockValues[i] = std::numeric_limits<uint64_t>::max();
                     }
@@ -421,32 +442,38 @@ namespace TensileLite
             {
                 // if an error occurred previously, don't overwrite it.
                 if(m_fanValues[i] == std::numeric_limits<int64_t>::max())
+                {
                     continue;
-
-                rsmi_frequencies_t freq;
+                }
 
                 int64_t newValue = 0;
-                auto status = rsmi_dev_fan_rpms_get(m_smiDeviceIndex, m_fanMetrics[i], &newValue);
-                if(status != RSMI_STATUS_SUCCESS)
+                auto    status   = amdsmi_get_gpu_fan_rpms(
+                    m_processorHandles[m_smiDeviceIndex], m_fanMetrics[i], &newValue);
+
+                if(status != AMDSMI_STATUS_SUCCESS)
+                {
                     m_fanValues[i] = std::numeric_limits<int64_t>::max();
+                }
                 else
+                {
                     m_fanValues[i] += newValue;
+                }
             }
 
             // Retrieves the maximum hardware supported frequency.
-            rsmi_frequencies_t freqs;
-            const int          MAX_RETRY  = 10;
-            const int          SLEEP_TIME = 100; // sleep time in milliseconds
-            bool               success    = false;
+            amdsmi_frequencies_t freqs;
+            const int            MAX_RETRY  = 10;
+            const int            SLEEP_TIME = 100; // sleep time in milliseconds
+            bool                 success    = false;
 
             if(!has_maxFreqValues && !m_hasInvalidGpuFreqStatus)
             {
                 for(int retry = 0; retry < MAX_RETRY; ++retry)
                 {
-                    auto status
-                        = rsmi_dev_gpu_clk_freq_get(m_smiDeviceIndex, RSMI_CLK_TYPE_SYS, &freqs);
+                    auto status = amdsmi_get_clk_freq(
+                        m_processorHandles[m_smiDeviceIndex], AMDSMI_CLK_TYPE_SYS, &freqs);
 
-                    if(status == RSMI_STATUS_SUCCESS)
+                    if(status == AMDSMI_STATUS_SUCCESS)
                     {
                         success = true;
                         break;
@@ -500,10 +527,14 @@ namespace TensileLite
             while(!m_exit)
             {
                 while(!m_task.valid() && !m_exit)
+                {
                     m_cv.wait(lock);
+                }
 
                 if(m_exit)
+                {
                     return;
+                }
 
                 m_task();
                 m_task = std::move(Task());
@@ -515,7 +546,9 @@ namespace TensileLite
             clearValues();
 
             if(startEvent != nullptr)
+            {
                 HIP_CHECK_EXC(hipEventSynchronize(startEvent));
+            }
 
             do
             {
@@ -523,17 +556,23 @@ namespace TensileLite
                 sleepIfNecessary();
 
                 if(stopEvent != nullptr && hipEventQuery(stopEvent) == hipSuccess)
+                {
                     return;
+                }
             } while(!m_stop && !m_exit);
         }
 
         void HardwareMonitor::wait()
         {
             if(!m_future.valid())
+            {
                 return;
+            }
 
             if(!m_hasStopEvent && !m_stop)
+            {
                 throw std::runtime_error("Waiting for monitoring to stop with no end condition.");
+            }
 
             m_future.wait();
             m_future = std::move(std::future<void>());
@@ -542,13 +581,17 @@ namespace TensileLite
         void HardwareMonitor::assertActive()
         {
             if(!m_future.valid())
+            {
                 throw std::runtime_error("Monitor is not active.");
+            }
         }
 
         void HardwareMonitor::assertNotActive()
         {
             if(m_future.valid())
+            {
                 throw std::runtime_error("Monitor is active.");
+            }
         }
 
     } // namespace Client

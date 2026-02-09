@@ -34,11 +34,20 @@ template <typename GemmConfig,
 float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::stream_config& s)
 {
     static_assert(std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor>);
-    constexpr bool transpose_c =
-        GemmConfig::TransposeC; // QuantMode == ck_tile::QuantType::ABQuantGrouped;
+    constexpr bool IS_FP8BLOCKSCALE =
+        QuantMode == ck_tile::QuantType::ABQuantGrouped && BQuantGroupSize::kN == 128 &&
+        (std::is_same_v<typename TypeConfig::ADataType, ck_tile::fp8_t> ||
+         std::is_same_v<typename TypeConfig::ADataType, ck_tile::bf8_t>) &&
+        (std::is_same_v<typename TypeConfig::BDataType, ck_tile::fp8_t> ||
+         std::is_same_v<typename TypeConfig::BDataType, ck_tile::bf8_t>);
+    constexpr bool transpose_c = GemmConfig::TransposeC;
+    constexpr bool eight_warps =
+        IS_FP8BLOCKSCALE && BQuantGroupSize::kN == 128 &&
+        (GemmConfig::M_Warp * GemmConfig::N_Warp * GemmConfig::K_Warp == 8) &&
+        GemmConfig::K_Warp_Tile == 128;
 
-    // Use automatically determined compute type from
-    using ComputeDataType = void;
+    using ComputeDataType =
+        std::conditional_t<IS_FP8BLOCKSCALE, typename TypeConfig::ADataType, void>;
 
     using GemmShape = ck_tile::TileGemmShape<
         ck_tile::sequence<GemmConfig::M_Tile, GemmConfig::N_Tile, GemmConfig::K_Tile>,
@@ -71,19 +80,22 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
                                                                  ComputeDataType>;
 
     // Base pipeline selection based on quant mode and preshuffle settings
-    using BaseGemmPipeline = std::conditional_t<
-        GemmConfig::PreshuffleB == true,
-        ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<GemmPipelineProblem>,
-        std::conditional_t<
-            QuantMode == ck_tile::QuantType::AQuantGrouped && GemmConfig::APreshuffleQuant == true,
-            ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>,
-            std::conditional_t<
-                QuantMode == ck_tile::QuantType::AQuantGrouped,
-                ck_tile::BaseGemmPipelineAgBgCrMem<GemmPipelineProblem>,
-                std::conditional_t<
-                    QuantMode == ck_tile::QuantType::ABQuantGrouped,
-                    ck_tile::BaseGemmPipelineAgBgCrMem<GemmPipelineProblem>,
-                    ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<GemmPipelineProblem>>>>>;
+    constexpr auto base_gemm_pipeline = []() {
+        if constexpr(eight_warps)
+            return ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>{};
+        else if constexpr(GemmConfig::PreshuffleB)
+            return ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<GemmPipelineProblem>{};
+        else if constexpr(QuantMode == ck_tile::QuantType::AQuantGrouped &&
+                          GemmConfig::APreshuffleQuant)
+            return ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>{};
+        else if constexpr(QuantMode == ck_tile::QuantType::AQuantGrouped || IS_FP8BLOCKSCALE)
+            return ck_tile::BaseGemmPipelineAgBgCrMem<GemmPipelineProblem>{};
+        else if constexpr(QuantMode == ck_tile::QuantType::ABQuantGrouped)
+            return ck_tile::BaseGemmPipelineAgBgCrMem<GemmPipelineProblem>{};
+        else
+            return ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<GemmPipelineProblem>{};
+    }();
+    using BaseGemmPipeline = std::decay_t<decltype(base_gemm_pipeline)>;
 
     const ck_tile::index_t K_split  = ck_tile::integer_least_multiple(args.K, GemmConfig::K_Tile);
     const ck_tile::index_t num_loop = TilePartitioner::GetLoopNum(K_split);
@@ -163,10 +175,12 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
                 ck_tile::MxFp4GemmPipelineAgBgCrCompV3<PipelineProblem>,
                 ck_tile::BQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>>;
 
-        using ABQuantPipeline =
+        using ABQuantPipeline = std::conditional_t<
+            eight_warps,
+            ck_tile::ABQuantGemmPipelineAgBgCrAsync<PipelineProblem>,
             std::conditional_t<GemmConfig::DoubleSmemBuffer && GemmConfig::PreshuffleB,
                                ck_tile::WPABQuantBPipelineAgBgCrV2<PipelineProblem>,
-                               ck_tile::ABQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>;
+                               ck_tile::ABQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>>;
 
         using GemmPipeline = std::conditional_t<
             QuantMode == ck_tile::QuantType::RowColQuant ||
@@ -185,7 +199,6 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
             printf(
                 "TiledPermuteN: %d (QuantGroupSize::kN=%d)\n", TiledPermuteN, BQuantGroupSize::kN);
         }
-
         using GemmEpilogue = ck_tile::CShuffleEpilogue<
             ck_tile::CShuffleEpilogueProblem<typename PipelineProblem::ComputeDataType,
                                              typename PipelineProblem::ComputeDataType,
@@ -215,11 +228,8 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
         const dim3 grids  = Kernel::GridSize(args.M, args.N, args.k_batch);
         const dim3 blocks = Kernel::BlockSize();
 
-        if(args.k_batch != 1)
-        {
-            throw std::runtime_error("split-k is not supported yet!");
-        }
-
+        // Split-K validation is handled by Kernel::IsSupportedArgument
+        // Split-K is only supported for BQuantGrouped without preshuffle
         if(!Kernel::IsSupportedArgument(kargs))
         {
             throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm!\n");
@@ -661,182 +671,6 @@ int run_gemm_example_with_layouts(const ck_tile::ArgParser& arg_parser,
             }
         }
     }
-    else if(init_method == 3)
-    {
-        if constexpr(QuantMode == ck_tile::QuantType::BQuantGrouped)
-        {
-            ck_tile::FillConstant<ADataType>{static_cast<ADataType>(0x38)}(a_m_k);
-            ck_tile::FillConstant<BDataType>{static_cast<BDataType>(0x22)}(b_k_n);
-            ck_tile::FillConstant<BQDataType>{static_cast<BQDataType>(0.5f)}(*bq_tensor_ptr);
-        }
-        else if constexpr(QuantMode == ck_tile::QuantType::ABQuantGrouped)
-        {
-            ck_tile::FillConstant<ADataType>{static_cast<ADataType>(0x38)}(a_m_k);
-            ck_tile::FillConstant<BDataType>{static_cast<BDataType>(0x22)}(b_k_n);
-            ck_tile::FillConstant<AQDataType>{static_cast<AQDataType>(0.5f)}(*aq_tensor_ptr);
-            ck_tile::FillConstant<BQDataType>{static_cast<BQDataType>(0.5f)}(*bq_tensor_ptr);
-        }
-        else
-        {
-            ck_tile::FillConstant<ADataType>{static_cast<ADataType>(0x22)}(a_m_k);
-            ck_tile::FillConstant<AQDataType>{static_cast<AQDataType>(2.0f)}(*aq_tensor_ptr);
-            ck_tile::FillConstant<BDataType>{static_cast<BDataType>(0x38)}(b_k_n);
-
-            if constexpr(QuantMode == ck_tile::QuantType::RowColQuant)
-            {
-                ck_tile::FillConstant<BQDataType>{static_cast<BQDataType>(0.5f)}(*bq_tensor_ptr);
-            }
-        }
-    }
-    else if(init_method == 4)
-    {
-        if constexpr(QuantMode == ck_tile::QuantType::BQuantGrouped)
-        {
-            if constexpr(std::is_same_v<BDataType, ck_tile::pk_int4_t>)
-            {
-                ck_tile::FillUniformDistribution<ck_tile::pk_int4_t>{-5.0f, 5.0f, fill_seed(gen)}(
-                    b_k_n);
-                ck_tile::FillUniformDistribution<BQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
-                    *bq_tensor_ptr);
-            }
-            else if constexpr(std::is_same_v<BDataType, ck_tile::pk_fp4_raw_t>)
-            {
-                ck_tile::FillUniformDistribution<BDataType>{-5.0f, 5.0f, fill_seed(gen)}(b_k_n);
-                ck_tile::FillUniformDistribution<BQDataType>{125.f, 130.f, fill_seed(gen)}(
-                    *bq_tensor_ptr);
-            }
-            else
-            {
-                ck_tile::FillUniformDistribution<BDataType>{-2.0f, 3.0f, fill_seed(gen)}(b_k_n);
-                ck_tile::FillUniformDistribution<BQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
-                    *bq_tensor_ptr);
-            }
-
-            ck_tile::FillUniformDistribution<ADataType>{-5.0f, 5.0f, fill_seed(gen)}(a_m_k);
-        }
-        else if constexpr(QuantMode == ck_tile::QuantType::AQuantGrouped)
-        {
-            if constexpr(std::is_same_v<ADataType, ck_tile::pk_int4_t>)
-            {
-                ck_tile::FillUniformDistribution<ck_tile::pk_int4_t>{-5.0f, 5.0f, fill_seed(gen)}(
-                    a_m_k);
-            }
-            else
-            {
-                ck_tile::FillUniformDistribution<ADataType>{-2.0f, 3.0f, fill_seed(gen)}(a_m_k);
-            }
-            ck_tile::FillUniformDistribution<AQDataType>{2.0f, 2.0f, fill_seed(gen)}(
-                *aq_tensor_ptr);
-            ck_tile::FillUniformDistribution<BDataType>{-5.0f, 5.0f, fill_seed(gen)}(b_k_n);
-        }
-        else if constexpr(QuantMode == ck_tile::QuantType::ABQuantGrouped)
-        {
-            if constexpr(std::is_same_v<ADataType, ck_tile::pk_int4_t> ||
-                         std::is_same_v<ADataType, ck_tile::pk_fp4_t>)
-            {
-                ck_tile::FillUniformDistribution<ADataType>{-5.0f, 5.0f, fill_seed(gen)}(a_m_k);
-                ck_tile::FillUniformDistribution<BDataType>{-5.0f, 5.0f, fill_seed(gen)}(b_k_n);
-            }
-            else
-            {
-                ck_tile::FillUniformDistribution<ADataType>{-2.0f, 3.0f, fill_seed(gen)}(a_m_k);
-                ck_tile::FillUniformDistribution<BDataType>{-2.0f, 3.0f, fill_seed(gen)}(b_k_n);
-            }
-            ck_tile::FillUniformDistribution<AQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
-                *aq_tensor_ptr);
-            ck_tile::FillUniformDistribution<BQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
-                *bq_tensor_ptr);
-        }
-        else
-        {
-            ck_tile::FillUniformDistribution<ADataType>{-2.0f, 2.0f, fill_seed(gen)}(a_m_k);
-            ck_tile::FillUniformDistribution<BDataType>{-2.0f, 2.0f, fill_seed(gen)}(b_k_n);
-            ck_tile::FillUniformDistribution<AQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
-                *aq_tensor_ptr);
-            ck_tile::FillUniformDistribution<BQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
-                *bq_tensor_ptr);
-        }
-    }
-    else if(init_method == 5)
-    {
-        if constexpr(QuantMode == ck_tile::QuantType::BQuantGrouped)
-        {
-            if constexpr(std::is_same_v<BDataType, ck_tile::pk_int4_t>)
-            {
-                ck_tile::FillUniformDistribution<ck_tile::pk_int4_t>{-5.0f, 5.0f, fill_seed(gen)}(
-                    b_k_n);
-                ck_tile::FillUniformDistribution<BQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
-                    *bq_tensor_ptr);
-            }
-            else if constexpr(std::is_same_v<BDataType, ck_tile::pk_fp4_raw_t>)
-            {
-                ck_tile::FillUniformDistribution<BDataType>{-5.0f, 5.0f, fill_seed(gen)}(b_k_n);
-                ck_tile::FillUniformDistribution<BQDataType>{125.f, 130.f, fill_seed(gen)}(
-                    *bq_tensor_ptr);
-            }
-            else
-            {
-                ck_tile::FillUniformDistribution<BDataType>{-2.0f, 3.0f, fill_seed(gen)}(b_k_n);
-                ck_tile::FillUniformDistribution<BQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
-                    *bq_tensor_ptr);
-            }
-
-            ck_tile::FillUniformDistribution<ADataType>{-5.0f, 5.0f, fill_seed(gen)}(a_m_k);
-        }
-        else if constexpr(QuantMode == ck_tile::QuantType::AQuantGrouped)
-        {
-            if constexpr(std::is_same_v<ADataType, ck_tile::pk_int4_t>)
-            {
-                ck_tile::FillUniformDistribution<ck_tile::pk_int4_t>{-5.0f, 5.0f, fill_seed(gen)}(
-                    a_m_k);
-            }
-            else
-            {
-                ck_tile::FillUniformDistribution<ADataType>{1.0f, 1.0f, fill_seed(gen)}(a_m_k);
-            }
-            // Fill aquant such that column j has value 2^j (1, 2, 4, 8, ...)
-            for(ck_tile::index_t row = 0;
-                row < static_cast<ck_tile::index_t>(aq_tensor_ptr->get_length(0));
-                ++row)
-            {
-                for(ck_tile::index_t col = 0;
-                    col < static_cast<ck_tile::index_t>(aq_tensor_ptr->get_length(1));
-                    ++col)
-                {
-                    (*aq_tensor_ptr)(row, col) = static_cast<AQDataType>(col + 1);
-                }
-            }
-            // std::cout << "aq_tensor_ptr: " << *aq_tensor_ptr << std::endl;
-            ck_tile::FillUniformDistribution<BDataType>{1.0f, 1.0f, fill_seed(gen)}(b_k_n);
-        }
-        else if constexpr(QuantMode == ck_tile::QuantType::ABQuantGrouped)
-        {
-            if constexpr(std::is_same_v<ADataType, ck_tile::pk_int4_t> ||
-                         std::is_same_v<ADataType, ck_tile::pk_fp4_t>)
-            {
-                ck_tile::FillUniformDistribution<ADataType>{-5.0f, 5.0f, fill_seed(gen)}(a_m_k);
-                ck_tile::FillUniformDistribution<BDataType>{-5.0f, 5.0f, fill_seed(gen)}(b_k_n);
-            }
-            else
-            {
-                ck_tile::FillUniformDistribution<ADataType>{-2.0f, 3.0f, fill_seed(gen)}(a_m_k);
-                ck_tile::FillUniformDistribution<BDataType>{-2.0f, 3.0f, fill_seed(gen)}(b_k_n);
-            }
-            ck_tile::FillUniformDistribution<AQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
-                *aq_tensor_ptr);
-            ck_tile::FillUniformDistribution<BQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
-                *bq_tensor_ptr);
-        }
-        else
-        {
-            ck_tile::FillUniformDistribution<ADataType>{-2.0f, 2.0f, fill_seed(gen)}(a_m_k);
-            ck_tile::FillUniformDistribution<BDataType>{-2.0f, 2.0f, fill_seed(gen)}(b_k_n);
-            ck_tile::FillUniformDistribution<AQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
-                *aq_tensor_ptr);
-            ck_tile::FillUniformDistribution<BQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
-                *bq_tensor_ptr);
-        }
-    }
     else
     {
         a_m_k.SetZero();
@@ -1136,20 +970,27 @@ int run_gemm_example_prec_type(const ck_tile::ArgParser& arg_parser)
     {
         std::string a_layout = arg_parser.get_str("a_layout");
         std::string b_layout = arg_parser.get_str("b_layout");
-
         if(a_layout == "R" && b_layout == "C")
         {
-            return run_gemm_example_with_layouts<GemmConfig,
-                                                 TypeConfig,
-                                                 AQuantGroupSize,
-                                                 BQuantGroupSize,
-                                                 QuantMode>(
-                arg_parser, Row{}, Row{}, Col{}, Col{}, Row{});
+            if constexpr(QuantMode == ck_tile::QuantType::ABQuantGrouped &&
+                         !GemmConfig::APreshuffleQuant && BQuantGroupSize::kN == 128 &&
+                         (GemmConfig::M_Warp * GemmConfig::N_Warp * GemmConfig::K_Warp == 8))
+                return run_gemm_example_with_layouts<GemmConfig,
+                                                     TypeConfig,
+                                                     AQuantGroupSize,
+                                                     BQuantGroupSize,
+                                                     QuantMode>(
+                    arg_parser, Row{}, Col{}, Col{}, Col{}, Row{});
+            else
+                return run_gemm_example_with_layouts<GemmConfig,
+                                                     TypeConfig,
+                                                     AQuantGroupSize,
+                                                     BQuantGroupSize,
+                                                     QuantMode>(
+                    arg_parser, Row{}, Row{}, Col{}, Col{}, Row{});
         }
 
-        if constexpr((QuantMode == ck_tile::QuantType::AQuantGrouped ||
-                      QuantMode == ck_tile::QuantType::ABQuantGrouped) &&
-                     !GemmConfig::APreshuffleQuant && !GemmConfig::PreshuffleB)
+        if constexpr(QuantMode == ck_tile::QuantType::AQuantGrouped)
         {
             if(a_layout == "R" && b_layout == "R")
             {

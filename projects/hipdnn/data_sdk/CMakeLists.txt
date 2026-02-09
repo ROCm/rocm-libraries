@@ -101,26 +101,12 @@ add_library(hipdnn_data_sdk INTERFACE)
 # Generate version header
 hipdnn_generate_version_header(hipdnn_data_sdk)
 
-# Add generated include directory for build interface
-target_include_directories(
-    hipdnn_data_sdk INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-)
-
 # Add includes from dependency targets
 hipdnn_add_dependency_includes(hipdnn_data_sdk flatbuffers::flatbuffers)
-hipdnn_add_dependency_includes(hipdnn_data_sdk spdlog::spdlog_header_only)
 hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
 
 target_link_libraries(hipdnn_data_sdk INTERFACE hip::host)
 target_compile_definitions(hipdnn_data_sdk INTERFACE __HIP_PLATFORM_AMD__)
-
-if (fmt_FOUND)
-    message(STATUS "Found fmt: using system fmt")
-    hipdnn_add_dependency_includes(hipdnn_data_sdk fmt::fmt COMPILE_DEFINITIONS SPDLOG_FMT_EXTERNAL)
-else()
-    message(STATUS "Not found fmt: using bundled fmt from spdlog")
-endif()
-target_compile_definitions(hipdnn_data_sdk INTERFACE FMT_HEADER_ONLY)
 
 target_include_directories(
     hipdnn_data_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_DATA_SDK_INCLUDE_DIR}>

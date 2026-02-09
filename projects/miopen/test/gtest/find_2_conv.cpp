@@ -290,8 +290,7 @@ GetFind2ConvTestCaseName(const testing::TestParamInfo<GPU_Find2Conv_FP32::ParamT
     std::ostringstream os;
     os << tc;
     std::string name = os.str();
-    std::replace_if(
-        name.begin(), name.end(), [](char c) { return !std::isalnum(c); }, '_');
+    std::replace_if(name.begin(), name.end(), [](char c) { return !std::isalnum(c); }, '_');
     return name;
 }
 

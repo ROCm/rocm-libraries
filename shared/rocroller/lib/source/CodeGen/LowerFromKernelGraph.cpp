@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -287,15 +287,14 @@ namespace rocRoller
                                 auto arg = m_context->kernel()->findArgument(argName);
 
                                 msg += fmt::format(
-                                    "\n\t- {}: {}\n", argName, toString(arg.expression));
+                                    "\n\t- {}: {}\n", argName, toString(arg.getExpression()));
                             }
 
-                            AssertFatal(false,
-                                        msg,
-                                        ShowValue(expectedArgs),
-                                        ShowValue(extraArgs),
-                                        ShowValue(m_context->kernel()->arguments()),
-                                        ShowValue(operation));
+                            Throw<FatalError>(msg,
+                                              ShowValue(expectedArgs),
+                                              ShowValue(extraArgs),
+                                              ShowValue(m_context->kernel()->arguments()),
+                                              ShowValue(operation));
                         }
 
                         if(!extraArgs.empty())
