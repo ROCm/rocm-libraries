@@ -1078,7 +1078,7 @@ TEST_CASE("Heuristics: Default parameters", "[heuristics]") {
   REQUIRE(defaults.l2_min_hit_rate_default == 0.5);
   REQUIRE(defaults.main_memory_load_latency == 200.0);
   REQUIRE(defaults.occupancy_decay_base == 0.95);
-  REQUIRE(defaults.ksplit_reduction_overhead == 10000.0);
+  REQUIRE(defaults.k_split_reduction_overhead == 10000.0);
   REQUIRE(defaults.k_padding_penalty == 50000.0);
 
   // Check default main loop efficiency
@@ -1232,12 +1232,12 @@ TEST_CASE("Heuristics: Optimized kernel efficiency lookup", "[heuristics]") {
   auto problem  = make_problem(1024, 1024, 1024);
   auto config   = make_config(256, 256, 64, 16, 16, 16);
 
-  problem.a_dtype            = origami::data_type_t::BFloat16;
-  problem.b_dtype            = origami::data_type_t::BFloat16;
-  problem.mi_dtype           = origami::data_type_t::BFloat16;
-  problem.a_transpose        = origami::transpose_t::N;
-  problem.b_transpose        = origami::transpose_t::T;
-  config.optimized_main_loop = true;
+  problem.a_dtype                 = origami::data_type_t::BFloat16;
+  problem.b_dtype                 = origami::data_type_t::BFloat16;
+  problem.mi_dtype                = origami::data_type_t::BFloat16;
+  problem.a_transpose             = origami::transpose_t::N;
+  problem.b_transpose             = origami::transpose_t::T;
+  config.hand_optimized_main_loop = true;
 
   auto params = db.lookup(problem, hardware, config);
 
@@ -1306,13 +1306,13 @@ TEST_CASE("Heuristics: TF32 emulation - compute bound", "[heuristics]") {
 }
 
 TEST_CASE("Heuristics: Helper functions - make_kernel_variant_key", "[heuristics]") {
-  auto key = origami::make_kernel_variant_key(origami::hardware_t::architecture_t::gfx950,
-                                              origami::data_type_t::BFloat16,
-                                              origami::transpose_t::N,
-                                              origami::transpose_t::T,
-                                              256,
-                                              256,
-                                              64);
+  auto key = origami::make_hand_optimized_kernel_key(origami::hardware_t::architecture_t::gfx950,
+                                                     origami::data_type_t::BFloat16,
+                                                     origami::transpose_t::N,
+                                                     origami::transpose_t::T,
+                                                     256,
+                                                     256,
+                                                     64);
 
   REQUIRE(key.arch.has_value());
   REQUIRE(key.arch.value() == origami::hardware_t::architecture_t::gfx950);
@@ -1328,8 +1328,8 @@ TEST_CASE("Heuristics: Helper functions - make_kernel_variant_key", "[heuristics
   REQUIRE(key.mt_n.value() == 256);
   REQUIRE(key.mt_k.has_value());
   REQUIRE(key.mt_k.value() == 64);
-  REQUIRE(key.optimized_main_loop.has_value());
-  REQUIRE(key.optimized_main_loop.value() == true);
+  REQUIRE(key.hand_optimized_main_loop.has_value());
+  REQUIRE(key.hand_optimized_main_loop.value() == true);
 }
 
 TEST_CASE("Heuristics: Helper functions - make_tile_key", "[heuristics]") {
@@ -1362,12 +1362,12 @@ TEST_CASE("Heuristics: get_heuristic_params integration", "[heuristics]") {
   auto problem  = make_problem(1024, 1024, 1024);
   auto config   = make_config(256, 256, 64, 16, 16, 16);
 
-  problem.a_dtype            = origami::data_type_t::BFloat16;
-  problem.b_dtype            = origami::data_type_t::BFloat16;
-  problem.mi_dtype           = origami::data_type_t::BFloat16;
-  problem.a_transpose        = origami::transpose_t::N;
-  problem.b_transpose        = origami::transpose_t::T;
-  config.optimized_main_loop = true;
+  problem.a_dtype                 = origami::data_type_t::BFloat16;
+  problem.b_dtype                 = origami::data_type_t::BFloat16;
+  problem.mi_dtype                = origami::data_type_t::BFloat16;
+  problem.a_transpose             = origami::transpose_t::N;
+  problem.b_transpose             = origami::transpose_t::T;
+  config.hand_optimized_main_loop = true;
 
   // Test the main entry point function
   auto params = origami::get_heuristic_params(problem, hardware, config);
