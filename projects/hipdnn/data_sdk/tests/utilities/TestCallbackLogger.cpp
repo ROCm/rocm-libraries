@@ -4,8 +4,6 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <mutex>
-#include <regex>
-#include <spdlog/spdlog.h>
 #include <string>
 #include <thread>
 #include <vector>
@@ -13,46 +11,41 @@
 #include <hipdnn_data_sdk/logging/CallbackTypes.h>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 
-static std::vector<std::string> s_capturedLogs; //NOLINT
+static std::vector<std::pair<hipdnnSeverity_t, std::string>> s_capturedLogs; //NOLINT
 static std::mutex s_logMutex; //NOLINT
 
-// Custom callback for testing. It doesn't fully simulate the real logging behavior,
-// but the backend tests use the true callback function. The test could use the backend callback, but then it has to link against the backend.
-void testLoggingCallback([[maybe_unused]] hipdnnSeverity_t severity, const char* msg)
+// Custom callback for testing.
+void testLoggingCallback(hipdnnSeverity_t severity, const char* msg)
 {
     std::lock_guard<std::mutex> lock(s_logMutex);
     if(msg != nullptr)
     {
-        s_capturedLogs.emplace_back(msg);
+        s_capturedLogs.emplace_back(severity, msg);
     }
 }
 
 class TestCallbackLogger : public ::testing::Test
 {
 protected:
-    const std::string _testLoggerName = COMPONENT_NAME;
-
     void SetUp() override
     {
+        std::lock_guard<std::mutex> lock(s_logMutex);
         s_capturedLogs.clear();
 
-        spdlog::drop_all();
-
-        hipdnn::logging::initializeCallbackLogging(_testLoggerName, testLoggingCallback);
-
-        auto testLogger = spdlog::get(_testLoggerName);
-        ASSERT_NE(testLogger, nullptr);
-        testLogger->set_level(spdlog::level::trace);
+        // Reset logging and register our test callback
+        hipdnn_data_sdk::logging::resetLogging();
+        hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_INFO);
+        hipdnn_data_sdk::logging::registerLoggingCallback(testLoggingCallback);
     }
 
     void TearDown() override
     {
-        spdlog::shutdown();
+        hipdnn_data_sdk::logging::resetLogging();
     }
 
-    static std::vector<std::string> getCapturedLogs()
+    static std::vector<std::pair<hipdnnSeverity_t, std::string>> getCapturedLogs()
     {
-        spdlog::shutdown(); // block until async queue is fully processed
+        std::lock_guard<std::mutex> lock(s_logMutex);
         return s_capturedLogs;
     }
 };
@@ -60,88 +53,88 @@ protected:
 TEST_F(TestCallbackLogger, InfoMessageIsCorrectlyPassedToCallback)
 {
     std::string testMessage = "Test info message";
-    HIPDNN_LOG_INFO(testMessage);
+    HIPDNN_SDK_LOG_INFO(testMessage);
 
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 1);
-    EXPECT_NE(logs[0].find(testMessage), std::string::npos);
+    EXPECT_EQ(logs[0].first, HIPDNN_SEV_INFO);
+    EXPECT_NE(logs[0].second.find(testMessage), std::string::npos);
 }
 
 TEST_F(TestCallbackLogger, WarnMessageIsCorrectlyPassedToCallback)
 {
     std::string testMessage = "Test warning message";
-    HIPDNN_LOG_WARN(testMessage);
+    HIPDNN_SDK_LOG_WARN(testMessage);
 
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 1);
-    EXPECT_NE(logs[0].find(testMessage), std::string::npos);
+    EXPECT_EQ(logs[0].first, HIPDNN_SEV_WARN);
+    EXPECT_NE(logs[0].second.find(testMessage), std::string::npos);
 }
 
 TEST_F(TestCallbackLogger, ErrorMessageIsCorrectlyPassedToCallback)
 {
     std::string testMessage = "Test error message";
-    HIPDNN_LOG_ERROR(testMessage);
+    HIPDNN_SDK_LOG_ERROR(testMessage);
 
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 1);
-    EXPECT_NE(logs[0].find(testMessage), std::string::npos);
+    EXPECT_EQ(logs[0].first, HIPDNN_SEV_ERROR);
+    EXPECT_NE(logs[0].second.find(testMessage), std::string::npos);
 }
 
-TEST_F(TestCallbackLogger, FormattedMessagesAreCorrectlyPassed)
+TEST_F(TestCallbackLogger, StreamFormattedMessagesAreCorrectlyPassed)
 {
     int value = 42;
     std::string text = "formatted";
-    HIPDNN_LOG_INFO("Test {} message with value {}", text, value);
+    HIPDNN_SDK_LOG_INFO("Test " << text << " message with value " << value);
 
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 1);
-    EXPECT_NE(logs[0].find("Test formatted message with value 42"), std::string::npos);
+    EXPECT_NE(logs[0].second.find("Test formatted message with value 42"), std::string::npos);
 }
 
 TEST_F(TestCallbackLogger, LogLevelsAreRespected)
 {
-    auto testLogger = spdlog::get(_testLoggerName);
-    ASSERT_NE(testLogger, nullptr);
-
     // Set level to error so info and warn should be ignored
-    testLogger->set_level(spdlog::level::err);
+    hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_ERROR);
 
-    HIPDNN_LOG_INFO("This info should not appear");
-    HIPDNN_LOG_WARN("This warning should not appear");
-    HIPDNN_LOG_ERROR("This error should appear");
+    HIPDNN_SDK_LOG_INFO("This info should not appear");
+    HIPDNN_SDK_LOG_WARN("This warning should not appear");
+    HIPDNN_SDK_LOG_ERROR("This error should appear");
 
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 1);
-    EXPECT_NE(logs[0].find("This error should appear"), std::string::npos);
+    EXPECT_NE(logs[0].second.find("This error should appear"), std::string::npos);
 }
 
 TEST_F(TestCallbackLogger, MultipleMessagesAreLogged)
 {
-    HIPDNN_LOG_INFO("First message");
-    HIPDNN_LOG_WARN("Second message");
-    HIPDNN_LOG_ERROR("Third message");
+    HIPDNN_SDK_LOG_INFO("First message");
+    HIPDNN_SDK_LOG_WARN("Second message");
+    HIPDNN_SDK_LOG_ERROR("Third message");
 
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 3);
-    EXPECT_NE(logs[0].find("First message"), std::string::npos);
-    EXPECT_NE(logs[1].find("Second message"), std::string::npos);
-    EXPECT_NE(logs[2].find("Third message"), std::string::npos);
+    EXPECT_NE(logs[0].second.find("First message"), std::string::npos);
+    EXPECT_NE(logs[1].second.find("Second message"), std::string::npos);
+    EXPECT_NE(logs[2].second.find("Third message"), std::string::npos);
 }
 
-TEST_F(TestCallbackLogger, CallbackReceivesFormattedPattern)
+TEST_F(TestCallbackLogger, MessageContainsComponentName)
 {
-    std::string testMessage = "Pattern check";
-    HIPDNN_LOG_INFO(testMessage);
+    std::string testMessage = "Component check";
+    HIPDNN_SDK_LOG_INFO(testMessage);
 
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 1);
 
-    std::regex pattern(R"(\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\] \[tid \d+\] \[info\] \[)"
-                       + _testLoggerName + R"(\] )" + testMessage);
-
-    EXPECT_TRUE(std::regex_search(logs[0], pattern))
-        << "Log message did not match expected pattern.\n"
-        << "Actual log: " << logs[0];
+    // The message should contain the SDK component name
+    std::string componentName = hipdnn_data_sdk::logging::K_COMPONENT_NAME;
+    EXPECT_NE(logs[0].second.find(componentName), std::string::npos)
+        << "Log message did not contain component name.\n"
+        << "Expected to find: " << componentName << "\n"
+        << "Actual log: " << logs[0].second;
 }
 
 TEST_F(TestCallbackLogger, ParamsAreNotExpandedIfLogLevelIsDisabled)
@@ -160,24 +153,54 @@ TEST_F(TestCallbackLogger, ParamsAreNotExpandedIfLogLevelIsDisabled)
     };
 
     // Set level to error so info and warn should be ignored
-    auto testLogger = spdlog::get(_testLoggerName);
-    testLogger->set_level(spdlog::level::err);
+    hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_ERROR);
 
-    HIPDNN_LOG_INFO(trackingLambda(wasCalledForInfo, infoMessage));
-    HIPDNN_LOG_WARN(trackingLambda(wasCalledForWarn, warnMessage));
-    HIPDNN_LOG_ERROR(trackingLambda(wasCalledForError, errorMessage));
-    HIPDNN_LOG_FATAL(trackingLambda(wasCalledForFatal, fatalMessage));
+    HIPDNN_SDK_LOG_INFO(trackingLambda(wasCalledForInfo, infoMessage));
+    HIPDNN_SDK_LOG_WARN(trackingLambda(wasCalledForWarn, warnMessage));
+    HIPDNN_SDK_LOG_ERROR(trackingLambda(wasCalledForError, errorMessage));
+    HIPDNN_SDK_LOG_FATAL(trackingLambda(wasCalledForFatal, fatalMessage));
 
     auto logs = getCapturedLogs();
     ASSERT_EQ(logs.size(), 2);
-    EXPECT_THAT(logs[0], ::testing::Not(::testing::EndsWith(infoMessage)));
-    EXPECT_THAT(logs[1], ::testing::Not(::testing::EndsWith(infoMessage)));
-    EXPECT_THAT(logs[0], ::testing::Not(::testing::EndsWith(warnMessage)));
-    EXPECT_THAT(logs[1], ::testing::Not(::testing::EndsWith(warnMessage)));
-    EXPECT_THAT(logs[0], ::testing::EndsWith(errorMessage));
-    EXPECT_THAT(logs[1], ::testing::EndsWith(fatalMessage));
-    EXPECT_FALSE(wasCalledForInfo);
-    EXPECT_FALSE(wasCalledForWarn);
-    EXPECT_TRUE(wasCalledForError);
-    EXPECT_TRUE(wasCalledForFatal);
+
+    // Info and warn lambdas should not have been called due to lazy evaluation
+    EXPECT_FALSE(wasCalledForInfo) << "Info lambda should not have been called";
+    EXPECT_FALSE(wasCalledForWarn) << "Warn lambda should not have been called";
+    EXPECT_TRUE(wasCalledForError) << "Error lambda should have been called";
+    EXPECT_TRUE(wasCalledForFatal) << "Fatal lambda should have been called";
+
+    // Check that the logged messages are the error and fatal ones
+    EXPECT_NE(logs[0].second.find(errorMessage), std::string::npos);
+    EXPECT_NE(logs[1].second.find(fatalMessage), std::string::npos);
+}
+
+TEST_F(TestCallbackLogger, LogLevelOffDisablesAllLogs)
+{
+    hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_OFF);
+
+    HIPDNN_SDK_LOG_INFO("Info");
+    HIPDNN_SDK_LOG_WARN("Warn");
+    HIPDNN_SDK_LOG_ERROR("Error");
+    HIPDNN_SDK_LOG_FATAL("Fatal");
+
+    auto logs = getCapturedLogs();
+    ASSERT_EQ(logs.size(), 0) << "No logs should be captured when log level is OFF";
+}
+
+TEST_F(TestCallbackLogger, SeverityLevelsAreCorrect)
+{
+    hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_INFO);
+
+    HIPDNN_SDK_LOG_INFO("Info message");
+    HIPDNN_SDK_LOG_WARN("Warn message");
+    HIPDNN_SDK_LOG_ERROR("Error message");
+    HIPDNN_SDK_LOG_FATAL("Fatal message");
+
+    auto logs = getCapturedLogs();
+    ASSERT_EQ(logs.size(), 4);
+
+    EXPECT_EQ(logs[0].first, HIPDNN_SEV_INFO);
+    EXPECT_EQ(logs[1].first, HIPDNN_SEV_WARN);
+    EXPECT_EQ(logs[2].first, HIPDNN_SEV_ERROR);
+    EXPECT_EQ(logs[3].first, HIPDNN_SEV_FATAL);
 }
