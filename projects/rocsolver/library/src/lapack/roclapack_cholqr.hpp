@@ -442,9 +442,7 @@ static rocblas_status cal_sigma(hipStream_t stream,
                                 I const lda,
                                 Istride const strideA,
 
-                                S* const sigma_array,
-                                void* work,
-                                size_t const size_work)
+                                S* const sigma_array)
 {
     // -----------------
     // compute square of gnorm
@@ -780,19 +778,8 @@ static rocblas_status rocsolver_cholqr3_getMemorySize(I const m,
                                                       size_t* size_pivots,
                                                       size_t* size_iinfo,
                                                       size_t* size_R1,
-                                                      bool* optim_mem,
-                                                      size_t* p_size_work)
+                                                      bool* optim_mem)
 {
-    size_t size_work = 0;
-    *p_size_work = 0;
-    {
-        bool const has_work = (m >= 1) && (n >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return (rocblas_status_success);
-        }
-    }
-
     ROCBLAS_CHECK(rocsolver_cholqr1_getMemorySize<BATCHED, STRIDED, T, I>(
         m, n, lda, ldr, batch_count, size_scalars, size_work1, size_work2, size_work3, size_work4,
         size_pivots, size_iinfo, optim_mem));
@@ -804,8 +791,7 @@ static rocblas_status rocsolver_cholqr3_getMemorySize(I const m,
     *size_iinfo += sizeof(I) * batch_count;
     *size_R1 += sizeof(T) * n * n * batch_count;
 
-    *p_size_work = size_work;
-    return (rocblas_status_success);
+    return rocblas_status_success;
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename I>
@@ -865,7 +851,7 @@ static rocblas_status rocsolver_cholqr_getMemorySize(I const m,
     {
         istat = rocsolver_cholqr3_getMemorySize<BATCHED, STRIDED, T, I>(
             m, n, lda, ldr, batch_count, size_scalars, size_work1, size_work2, size_work3,
-            size_work4, size_pivots, size_iinfo, size_R1, optim_mem, &size_work);
+            size_work4, size_pivots, size_iinfo, size_R1, optim_mem);
     }
 
     if(BATCHED)
@@ -1061,7 +1047,6 @@ template <bool BATCHED,
           bool STRIDED,
           typename T,
           typename I,
-          typename Istride,
           typename UA,
           typename UR,
           typename INFO = I,
@@ -1069,23 +1054,18 @@ template <bool BATCHED,
 static rocblas_status rocsolver_cholqr3_template(rocblas_handle handle,
                                                  I const m,
                                                  I const n,
-
                                                  UA A,
-                                                 Istride const shiftA,
+                                                 rocblas_stride const shiftA,
                                                  I const lda,
-                                                 Istride strideA,
-
+                                                 rocblas_stride strideA,
                                                  UR R,
-                                                 Istride const shiftR,
+                                                 rocblas_stride const shiftR,
                                                  I const ldr,
-                                                 Istride strideR,
-
+                                                 rocblas_stride strideR,
                                                  bool const compute_sigma,
                                                  S* const sigma_array,
-
                                                  INFO* const info,
                                                  I const batch_count,
-
                                                  T* scalars,
                                                  void* work1,
                                                  void* work2,
@@ -1095,22 +1075,12 @@ static rocblas_status rocsolver_cholqr3_template(rocblas_handle handle,
                                                  I* iinfo,
                                                  T* R1,
                                                  T** workArr,
-                                                 bool optim_mem,
-
-                                                 void* work,
-                                                 size_t const size_work)
+                                                 bool optim_mem)
 {
-    bool constexpr is_pointer_batched_A = IS_POINTER_BATCHED(A, T);
-    bool constexpr is_pointer_batched_R = IS_POINTER_BATCHED(R, T);
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
 
-    {
-        bool const has_work = (m >= 1) && (n >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return (rocblas_status_success);
-        }
-    }
-
+    const T zero = T(0);
     const T one = T(1);
 
     // everything must be executed with scalars on the host
@@ -1118,131 +1088,38 @@ static rocblas_status rocsolver_cholqr3_template(rocblas_handle handle,
     rocblas_get_pointer_mode(handle, &old_mode);
     rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
 
-    rocblas_status istat = rocblas_status_success;
-
-    hipStream_t stream;
-    try
+    // (1)  R1 * R1' = A'*A + sigma * identity
+    // Note: paper suggests
+    // T const sigma = 11 * (m * n * ueps + (n + 1) * (n * ueps)) * gnorm
+    if(compute_sigma)
     {
-        {
-            istat = rocblas_get_stream(handle, &stream);
-            bool const isok_get_stream
-                = (istat == rocblas_status_success) || (istat == rocblas_status_continue);
-            if(!isok_get_stream)
-            {
-                throw(istat);
-            }
-        }
-
-        {
-            // ----------
-            // reset info
-            // ----------
-            auto const istat_hip = hipMemsetAsync(info, 0, sizeof(INFO) * batch_count, stream);
-            if(istat_hip != hipSuccess)
-            {
-                istat = rocblas_status_internal_error;
-                throw(istat);
-            }
-        }
-
-        std::byte* const pwork = (std::byte*)work;
-        std::byte* pfree = pwork;
-
-        // -----------------------------
-        // Note: matrix Q over-writes matrix A
-        // -----------------------------
-        auto const Q = A;
-        auto const shiftQ = shiftA;
-        auto const ldq = lda;
-        auto const strideQ = strideA;
-
-        // ---------------------------------------
-        // (1)  R1 * R1' = A'*A + sigma * identity
-        // ---------------------------------------
-
-        {
-            auto const pfree_saved = pfree;
-
-            size_t const size_remain = (pwork + size_work) - pfree;
-
-            if(compute_sigma)
-            {
-                istat = cal_sigma<T, I>(stream, m, n, batch_count,
-
-                                        A, shiftA, lda, strideA,
-
-                                        sigma_array, (void*)pfree, size_remain);
-                if(istat != rocblas_status_success)
-                {
-                    throw(istat);
-                }
-            }
-
-            // -------------------------------------------------------------------
-            // Note: paper suggests
-            // T const sigma = 11 * (m * n * ueps + (n + 1) * (n * ueps)) * gnorm
-            // -------------------------------------------------------------------
-
-            // -----------------------------
-            // perform CholeskQR1 with shift
-            // -----------------------------
-            ROCBLAS_CHECK(rocsolver_cholqr1_template<BATCHED, STRIDED, T>(
-                handle, m, n, A, shiftA, lda, strideA, R1, 0, n, n * n, batch_count, info, scalars,
-                work1, work2, work3, work4, pivots, iinfo, workArr, optim_mem));
-
-            pfree = pfree_saved;
-        }
-
-        // ----------------
-        // (2)   CholQR2(Q)
-        // ----------------
-
-        {
-            auto const pfree_saved = pfree;
-            size_t const size_remain = (pwork + size_work) - pfree;
-
-            ROCBLAS_CHECK(rocsolver_cholqr2_template<BATCHED, STRIDED, T>(
-                handle, m, n, Q, shiftQ, ldq, strideQ, R, shiftR, ldr, strideR, batch_count, iinfo,
-                scalars, work1, work2, work3, work4, pivots, iinfo + batch_count,
-                R1 + n * n * batch_count, workArr, optim_mem));
-
-            pfree = pfree_saved;
-        }
-
-        // -------------------------------
-        // compute R <- R * R1, using TRMM
-        // -------------------------------
-
-        {
-            // ----------------------------------------------------
-            // (i)  set strictly lower triangular part of R be zero
-            // ----------------------------------------------------
-
-            char const uplo = 'L';
-            T const alpha = 0;
-            set_triangular(handle, uplo, n, n, alpha,
-
-                           R, shiftR, ldr, strideR,
-
-                           batch_count);
-        }
-
-        // R <- R * R1
-        ROCBLAS_CHECK(rocblasCall_trmm<T>(handle, rocblas_side_right, rocblas_fill_upper,
-                                          rocblas_operation_none, rocblas_diagonal_non_unit, n, n,
-                                          &one, 0, R1, 0, n, n * n, R, shiftR, ldr, strideR,
-                                          batch_count, workArr));
-
-        // Finally
-
-        rocblas_set_pointer_mode(handle, old_mode);
-        return (istat);
+        ROCBLAS_CHECK(
+            cal_sigma<T, I>(stream, m, n, batch_count, A, shiftA, lda, strideA, sigma_array));
     }
-    catch(rocblas_status const istat)
-    {
-        rocblas_set_pointer_mode(handle, old_mode);
-        return (istat);
-    }
+
+    // perform CholeskQR1 with shift
+    ROCBLAS_CHECK(rocsolver_cholqr1_template<BATCHED, STRIDED, T>(
+        handle, m, n, A, shiftA, lda, strideA, R1, 0, n, n * n, batch_count, info, scalars, work1,
+        work2, work3, work4, pivots, iinfo, workArr, optim_mem));
+
+    // (2)   CholQR2(Q)
+    // Note: matrix Q is stored in matrix A
+    ROCBLAS_CHECK(rocsolver_cholqr2_template<BATCHED, STRIDED, T>(
+        handle, m, n, A, shiftA, lda, strideA, R, shiftR, ldr, strideR, batch_count, iinfo, scalars,
+        work1, work2, work3, work4, pivots, iinfo + batch_count, R1 + n * n * batch_count, workArr,
+        optim_mem));
+
+    // (i) set strictly lower triangular part of R be zero
+    set_triangular(handle, 'L', n, n, zero, R, shiftR, ldr, strideR, batch_count);
+
+    // R <- R * R1
+    ROCBLAS_CHECK(rocblasCall_trmm<T>(handle, rocblas_side_right, rocblas_fill_upper,
+                                      rocblas_operation_none, rocblas_diagonal_non_unit, n, n, &one,
+                                      0, R1, 0, n, n * n, R, shiftR, ldr, strideR, batch_count,
+                                      workArr));
+
+    rocblas_set_pointer_mode(handle, old_mode);
+    return rocblas_status_success;
 }
 
 template <bool BATCHED,
@@ -1325,19 +1202,10 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
     {
         bool const compute_sigma = (algo == rocsolver_cholqr_cholqr3_compute);
 
-        istat = rocsolver_cholqr3_template<BATCHED, STRIDED, T>(handle, m, n,
-
-                                                                A, shiftA, lda, strideA,
-
-                                                                R, shiftR, ldr, strideR,
-
-                                                                compute_sigma, sigma_array,
-
-                                                                info, batch_count, scalars, work1,
-                                                                work2, work3, work4, pivots, iinfo,
-                                                                R1, workArr, optim_mem,
-
-                                                                work, size_work);
+        istat = rocsolver_cholqr3_template<BATCHED, STRIDED, T>(
+            handle, m, n, A, shiftA, lda, strideA, R, shiftR, ldr, strideR, compute_sigma,
+            sigma_array, info, batch_count, scalars, work1, work2, work3, work4, pivots, iinfo, R1,
+            workArr, optim_mem);
     }
 
     return (istat);
