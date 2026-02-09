@@ -183,63 +183,40 @@ inline void sort_keys()
 
             common::device_ptr<offset_type> d_offsets(offsets);
 
-            size_t temporary_storage_bytes = 0;
-            HIP_CHECK(rocprim::segmented_radix_sort_keys<config>(nullptr,
-                                                                 temporary_storage_bytes,
-                                                                 d_keys_input.get(),
-                                                                 d_keys_output.get(),
-                                                                 size,
-                                                                 segments_count,
-                                                                 d_offsets.get(),
-                                                                 d_offsets.get() + 1,
-                                                                 start_bit,
-                                                                 end_bit));
-
-            ASSERT_GT(temporary_storage_bytes, 0U);
-
-            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
-
-            test_utils::GraphHelper gHelper;
-            if(use_graphs)
-            {
-                gHelper.startStreamCapture(stream);
-            }
-
-            if(descending)
-            {
-                HIP_CHECK(rocprim::segmented_radix_sort_keys_desc<config>(d_temporary_storage.get(),
-                                                                          temporary_storage_bytes,
-                                                                          d_keys_input.get(),
-                                                                          d_keys_output.get(),
-                                                                          size,
-                                                                          segments_count,
-                                                                          d_offsets.get(),
-                                                                          d_offsets.get() + 1,
-                                                                          start_bit,
-                                                                          end_bit,
-                                                                          stream,
-                                                                          debug_synchronous));
-            }
-            else
-            {
-                HIP_CHECK(rocprim::segmented_radix_sort_keys<config>(d_temporary_storage.get(),
-                                                                     temporary_storage_bytes,
-                                                                     d_keys_input.get(),
-                                                                     d_keys_output.get(),
-                                                                     size,
-                                                                     segments_count,
-                                                                     d_offsets.get(),
-                                                                     d_offsets.get() + 1,
-                                                                     start_bit,
-                                                                     end_bit,
-                                                                     stream,
-                                                                     debug_synchronous));
-            }
-
-            if(use_graphs)
-            {
-                gHelper.createAndLaunchGraph(stream);
-            }
+            test_utils::test_kernel_wrapper(
+                [&](void* d_temporary_storage, auto& temporary_storage_bytes)
+                {
+                    if(descending)
+                    {
+                        return rocprim::segmented_radix_sort_keys_desc<config>(
+                            d_temporary_storage,
+                            temporary_storage_bytes,
+                            d_keys_input.get(),
+                            d_keys_output.get(),
+                            size,
+                            segments_count,
+                            d_offsets.get(),
+                            d_offsets.get() + 1,
+                            start_bit,
+                            end_bit,
+                            stream,
+                            debug_synchronous);
+                    }
+                    return rocprim::segmented_radix_sort_keys<config>(d_temporary_storage,
+                                                                      temporary_storage_bytes,
+                                                                      d_keys_input.get(),
+                                                                      d_keys_output.get(),
+                                                                      size,
+                                                                      segments_count,
+                                                                      d_offsets.get(),
+                                                                      d_offsets.get() + 1,
+                                                                      start_bit,
+                                                                      end_bit,
+                                                                      stream,
+                                                                      debug_synchronous);
+                },
+                stream,
+                use_graphs);
 
             // Calculate expected results on host
             std::vector<key_type> expected(keys_input);
@@ -254,11 +231,6 @@ inline void sort_keys()
             const auto keys_output = d_keys_output.load();
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
-
-            if(use_graphs)
-            {
-                gHelper.cleanupGraphHelper();
-            }
         }
     }
 }
@@ -310,30 +282,27 @@ inline void sort_keys_empty_data()
 
             common::device_ptr<offset_type> d_offsets(offsets);
 
-            size_t temporary_storage_bytes = 0;
-            HIP_CHECK(rocprim::segmented_radix_sort_keys<config>(nullptr,
-                                                                 temporary_storage_bytes,
-                                                                 d_keys.get(),
-                                                                 d_keys.get(),
-                                                                 size,
-                                                                 segments_count,
-                                                                 d_offsets.get(),
-                                                                 d_offsets.get() + 1,
-                                                                 start_bit,
-                                                                 end_bit));
-
-            ASSERT_GT(temporary_storage_bytes, 0U);
-
-            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
-
-            test_utils::GraphHelper gHelper;
-            if(use_graphs)
-            {
-                gHelper.startStreamCapture(stream);
-            }
-            if(descending)
-            {
-                HIP_CHECK(rocprim::segmented_radix_sort_keys_desc<config>(d_temporary_storage.get(),
+            test_utils::test_kernel_wrapper(
+                [&](void* d_temporary_storage, auto& temporary_storage_bytes)
+                {
+                    if constexpr(descending)
+                    {
+                        return rocprim::segmented_radix_sort_keys_desc<config>(
+                            d_temporary_storage,
+                            temporary_storage_bytes,
+                            d_keys.get(),
+                            d_keys.get(),
+                            size,
+                            segments_count,
+                            d_offsets.get(),
+                            d_offsets.get() + 1,
+                            start_bit,
+                            end_bit,
+                            stream);
+                    }
+                    else
+                    {
+                        return rocprim::segmented_radix_sort_keys<config>(d_temporary_storage,
                                                                           temporary_storage_bytes,
                                                                           d_keys.get(),
                                                                           d_keys.get(),
@@ -343,37 +312,16 @@ inline void sort_keys_empty_data()
                                                                           d_offsets.get() + 1,
                                                                           start_bit,
                                                                           end_bit,
-                                                                          stream));
-            }
-            else
-            {
-                HIP_CHECK(rocprim::segmented_radix_sort_keys<config>(d_temporary_storage.get(),
-                                                                     temporary_storage_bytes,
-                                                                     d_keys.get(),
-                                                                     d_keys.get(),
-                                                                     size,
-                                                                     segments_count,
-                                                                     d_offsets.get(),
-                                                                     d_offsets.get() + 1,
-                                                                     start_bit,
-                                                                     end_bit,
-                                                                     stream));
-            }
-
-            if(use_graphs)
-            {
-                gHelper.createAndLaunchGraph(stream);
-            }
+                                                                          stream);
+                    }
+                },
+                stream,
+                use_graphs);
 
             const auto keys_output = d_keys.load();
 
             // Output should not have changed
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_input));
-
-            if(use_graphs)
-            {
-                gHelper.cleanupGraphHelper();
-            }
         }
     }
 }
@@ -426,30 +374,26 @@ inline void sort_keys_large_segments()
 
         common::device_ptr<offset_type> d_offsets(offsets);
 
-        size_t temporary_storage_bytes = 0;
-        HIP_CHECK(rocprim::segmented_radix_sort_keys<config>(nullptr,
-                                                             temporary_storage_bytes,
-                                                             d_keys_input.get(),
-                                                             d_keys_output.get(),
-                                                             size,
-                                                             segments_count,
-                                                             d_offsets.get(),
-                                                             d_offsets.get() + 1,
-                                                             start_bit,
-                                                             end_bit));
-
-        ASSERT_GT(temporary_storage_bytes, 0U);
-
-        common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
-
-        test_utils::GraphHelper gHelper;
-        if(use_graphs)
-        {
-            gHelper.startStreamCapture(stream);
-        }
-        if(descending)
-        {
-            HIP_CHECK(rocprim::segmented_radix_sort_keys_desc<config>(d_temporary_storage.get(),
+        test_utils::test_kernel_wrapper(
+            [&](void* d_temporary_storage, auto& temporary_storage_bytes)
+            {
+                if constexpr(descending)
+                {
+                    return rocprim::segmented_radix_sort_keys_desc<config>(d_temporary_storage,
+                                                                           temporary_storage_bytes,
+                                                                           d_keys_input.get(),
+                                                                           d_keys_output.get(),
+                                                                           size,
+                                                                           segments_count,
+                                                                           d_offsets.get(),
+                                                                           d_offsets.get() + 1,
+                                                                           start_bit,
+                                                                           end_bit,
+                                                                           stream);
+                }
+                else
+                {
+                    return rocprim::segmented_radix_sort_keys<config>(d_temporary_storage,
                                                                       temporary_storage_bytes,
                                                                       d_keys_input.get(),
                                                                       d_keys_output.get(),
@@ -459,26 +403,11 @@ inline void sort_keys_large_segments()
                                                                       d_offsets.get() + 1,
                                                                       start_bit,
                                                                       end_bit,
-                                                                      stream));
-        }
-        else
-        {
-            HIP_CHECK(rocprim::segmented_radix_sort_keys<config>(d_temporary_storage.get(),
-                                                                 temporary_storage_bytes,
-                                                                 d_keys_input.get(),
-                                                                 d_keys_output.get(),
-                                                                 size,
-                                                                 segments_count,
-                                                                 d_offsets.get(),
-                                                                 d_offsets.get() + 1,
-                                                                 start_bit,
-                                                                 end_bit,
-                                                                 stream));
-        }
-        if(use_graphs)
-        {
-            gHelper.createAndLaunchGraph(stream);
-        }
+                                                                      stream);
+                }
+            },
+            stream,
+            use_graphs);
 
         bool all_blocks_sorted = true;
         for(size_t s = 0; s < segments_count; ++s)
@@ -489,10 +418,6 @@ inline void sort_keys_large_segments()
                 test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
         }
         ASSERT_TRUE(all_blocks_sorted);
-        if(use_graphs)
-        {
-            gHelper.cleanupGraphHelper();
-        }
     }
 }
 
@@ -589,18 +514,27 @@ inline void sort_keys_unspecified_ranges()
                                                                  start_bit,
                                                                  end_bit));
 
-            ASSERT_GT(temporary_storage_bytes, 0U);
-
-            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
-
-            test_utils::GraphHelper gHelper;
-            if(use_graphs)
-            {
-                gHelper.startStreamCapture(stream);
-            }
-            if(descending)
-            {
-                HIP_CHECK(rocprim::segmented_radix_sort_keys_desc<config>(d_temporary_storage.get(),
+            test_utils::test_kernel_wrapper(
+                [&](void* d_temporary_storage, auto& temporary_storage_bytes)
+                {
+                    if constexpr(descending)
+                    {
+                        return rocprim::segmented_radix_sort_keys_desc<config>(
+                            d_temporary_storage,
+                            temporary_storage_bytes,
+                            d_keys_input.get(),
+                            d_keys_output.get(),
+                            size,
+                            segments_count,
+                            d_offsets_begin.get(),
+                            d_offsets_end.get(),
+                            start_bit,
+                            end_bit,
+                            stream);
+                    }
+                    else
+                    {
+                        return rocprim::segmented_radix_sort_keys<config>(d_temporary_storage,
                                                                           temporary_storage_bytes,
                                                                           d_keys_input.get(),
                                                                           d_keys_output.get(),
@@ -610,26 +544,11 @@ inline void sort_keys_unspecified_ranges()
                                                                           d_offsets_end.get(),
                                                                           start_bit,
                                                                           end_bit,
-                                                                          stream));
-            }
-            else
-            {
-                HIP_CHECK(rocprim::segmented_radix_sort_keys<config>(d_temporary_storage.get(),
-                                                                     temporary_storage_bytes,
-                                                                     d_keys_input.get(),
-                                                                     d_keys_output.get(),
-                                                                     size,
-                                                                     segments_count,
-                                                                     d_offsets_begin.get(),
-                                                                     d_offsets_end.get(),
-                                                                     start_bit,
-                                                                     end_bit,
-                                                                     stream));
-            }
-            if(use_graphs)
-            {
-                gHelper.createAndLaunchGraph(stream);
-            }
+                                                                          stream);
+                    }
+                },
+                stream,
+                use_graphs);
 
             // Calculate expected results on host
             std::vector<key_type> expected(keys_input);
@@ -644,10 +563,6 @@ inline void sort_keys_unspecified_ranges()
             const auto keys_output = d_keys_output.load();
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
-            if(use_graphs)
-            {
-                gHelper.cleanupGraphHelper();
-            }
         }
     }
 }
@@ -726,68 +641,47 @@ inline void sort_pairs()
 
             using key_value = std::pair<key_type, value_type>;
 
-            size_t temporary_storage_bytes = 0;
-            HIP_CHECK(rocprim::segmented_radix_sort_pairs<config>(nullptr,
-                                                                  temporary_storage_bytes,
-                                                                  d_keys_input.get(),
-                                                                  d_keys_output.get(),
-                                                                  d_values_input.get(),
-                                                                  d_values_output.get(),
-                                                                  size,
-                                                                  segments_count,
-                                                                  d_offsets.get(),
-                                                                  d_offsets.get() + 1,
-                                                                  start_bit,
-                                                                  end_bit));
-
-            ASSERT_GT(temporary_storage_bytes, 0U);
-
-            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
-
-            test_utils::GraphHelper gHelper;
-            if(use_graphs)
-            {
-                gHelper.startStreamCapture(stream);
-            }
-            if(descending)
-            {
-                HIP_CHECK(
-                    rocprim::segmented_radix_sort_pairs_desc<config>(d_temporary_storage.get(),
-                                                                     temporary_storage_bytes,
-                                                                     d_keys_input.get(),
-                                                                     d_keys_output.get(),
-                                                                     d_values_input.get(),
-                                                                     d_values_output.get(),
-                                                                     size,
-                                                                     segments_count,
-                                                                     d_offsets.get(),
-                                                                     d_offsets.get() + 1,
-                                                                     start_bit,
-                                                                     end_bit,
-                                                                     stream,
-                                                                     debug_synchronous));
-            }
-            else
-            {
-                HIP_CHECK(rocprim::segmented_radix_sort_pairs<config>(d_temporary_storage.get(),
-                                                                      temporary_storage_bytes,
-                                                                      d_keys_input.get(),
-                                                                      d_keys_output.get(),
-                                                                      d_values_input.get(),
-                                                                      d_values_output.get(),
-                                                                      size,
-                                                                      segments_count,
-                                                                      d_offsets.get(),
-                                                                      d_offsets.get() + 1,
-                                                                      start_bit,
-                                                                      end_bit,
-                                                                      stream,
-                                                                      debug_synchronous));
-            }
-            if(use_graphs)
-            {
-                gHelper.createAndLaunchGraph(stream);
-            }
+            test_utils::test_kernel_wrapper(
+                [&](void* d_temporary_storage, auto& temporary_storage_bytes)
+                {
+                    if constexpr(descending)
+                    {
+                        return rocprim::segmented_radix_sort_pairs_desc<config>(
+                            d_temporary_storage,
+                            temporary_storage_bytes,
+                            d_keys_input.get(),
+                            d_keys_output.get(),
+                            d_values_input.get(),
+                            d_values_output.get(),
+                            size,
+                            segments_count,
+                            d_offsets.get(),
+                            d_offsets.get() + 1,
+                            start_bit,
+                            end_bit,
+                            stream,
+                            debug_synchronous);
+                    }
+                    else
+                    {
+                        return rocprim::segmented_radix_sort_pairs<config>(d_temporary_storage,
+                                                                           temporary_storage_bytes,
+                                                                           d_keys_input.get(),
+                                                                           d_keys_output.get(),
+                                                                           d_values_input.get(),
+                                                                           d_values_output.get(),
+                                                                           size,
+                                                                           segments_count,
+                                                                           d_offsets.get(),
+                                                                           d_offsets.get() + 1,
+                                                                           start_bit,
+                                                                           end_bit,
+                                                                           stream,
+                                                                           debug_synchronous);
+                    }
+                },
+                stream,
+                use_graphs);
 
             // Calculate expected results on host
             std::vector<key_value> expected(size);
@@ -818,10 +712,6 @@ inline void sort_pairs()
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
-            if(use_graphs)
-            {
-                gHelper.cleanupGraphHelper();
-            }
         }
     }
 }
@@ -916,66 +806,45 @@ inline void sort_pairs_unspecified_ranges()
 
             using key_value = std::pair<key_type, value_type>;
 
-            size_t temporary_storage_bytes = 0;
-            HIP_CHECK(rocprim::segmented_radix_sort_pairs<config>(nullptr,
-                                                                  temporary_storage_bytes,
-                                                                  d_keys_input.get(),
-                                                                  d_keys_output.get(),
-                                                                  d_values_input.get(),
-                                                                  d_values_output.get(),
-                                                                  size,
-                                                                  segments_count,
-                                                                  d_offsets_begin.get(),
-                                                                  d_offsets_end.get(),
-                                                                  start_bit,
-                                                                  end_bit));
-
-            ASSERT_GT(temporary_storage_bytes, 0U);
-
-            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
-
-            test_utils::GraphHelper gHelper;
-            if(use_graphs)
-            {
-                gHelper.startStreamCapture(stream);
-            }
-            if(descending)
-            {
-                HIP_CHECK(
-                    rocprim::segmented_radix_sort_pairs_desc<config>(d_temporary_storage.get(),
-                                                                     temporary_storage_bytes,
-                                                                     d_keys_input.get(),
-                                                                     d_keys_output.get(),
-                                                                     d_values_input.get(),
-                                                                     d_values_output.get(),
-                                                                     size,
-                                                                     segments_count,
-                                                                     d_offsets_begin.get(),
-                                                                     d_offsets_end.get(),
-                                                                     start_bit,
-                                                                     end_bit,
-                                                                     stream));
-            }
-            else
-            {
-                HIP_CHECK(rocprim::segmented_radix_sort_pairs<config>(d_temporary_storage.get(),
-                                                                      temporary_storage_bytes,
-                                                                      d_keys_input.get(),
-                                                                      d_keys_output.get(),
-                                                                      d_values_input.get(),
-                                                                      d_values_output.get(),
-                                                                      size,
-                                                                      segments_count,
-                                                                      d_offsets_begin.get(),
-                                                                      d_offsets_end.get(),
-                                                                      start_bit,
-                                                                      end_bit,
-                                                                      stream));
-            }
-            if(use_graphs)
-            {
-                gHelper.createAndLaunchGraph(stream);
-            }
+            test_utils::test_kernel_wrapper(
+                [&](void* d_temporary_storage, auto& temporary_storage_bytes)
+                {
+                    if constexpr(descending)
+                    {
+                        return rocprim::segmented_radix_sort_pairs_desc<config>(
+                            d_temporary_storage,
+                            temporary_storage_bytes,
+                            d_keys_input.get(),
+                            d_keys_output.get(),
+                            d_values_input.get(),
+                            d_values_output.get(),
+                            size,
+                            segments_count,
+                            d_offsets_begin.get(),
+                            d_offsets_end.get(),
+                            start_bit,
+                            end_bit,
+                            stream);
+                    }
+                    else
+                    {
+                        return rocprim::segmented_radix_sort_pairs<config>(d_temporary_storage,
+                                                                           temporary_storage_bytes,
+                                                                           d_keys_input.get(),
+                                                                           d_keys_output.get(),
+                                                                           d_values_input.get(),
+                                                                           d_values_output.get(),
+                                                                           size,
+                                                                           segments_count,
+                                                                           d_offsets_begin.get(),
+                                                                           d_offsets_end.get(),
+                                                                           start_bit,
+                                                                           end_bit,
+                                                                           stream);
+                    }
+                },
+                stream,
+                use_graphs);
 
             // Calculate expected results on host
             std::vector<key_value> expected(size);
@@ -1001,10 +870,6 @@ inline void sort_pairs_unspecified_ranges()
             {
                 ASSERT_EQ(keys_output[i], expected[i].first);
                 ASSERT_EQ(values_output[i], expected[i].second);
-            }
-            if(use_graphs)
-            {
-                gHelper.cleanupGraphHelper();
             }
         }
     }
@@ -1077,29 +942,27 @@ inline void sort_keys_double_buffer()
 
             rocprim::double_buffer<key_type> d_keys(d_keys_input.get(), d_keys_output.get());
 
-            size_t temporary_storage_bytes = 0;
-            HIP_CHECK(rocprim::segmented_radix_sort_keys<config>(nullptr,
-                                                                 temporary_storage_bytes,
-                                                                 d_keys,
-                                                                 size,
-                                                                 segments_count,
-                                                                 d_offsets.get(),
-                                                                 d_offsets.get() + 1,
-                                                                 start_bit,
-                                                                 end_bit));
-
-            ASSERT_GT(temporary_storage_bytes, 0U);
-
-            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
-
-            test_utils::GraphHelper gHelper;
-            if(use_graphs)
-            {
-                gHelper.startStreamCapture(stream);
-            }
-            if(descending)
-            {
-                HIP_CHECK(rocprim::segmented_radix_sort_keys_desc<config>(d_temporary_storage.get(),
+            test_utils::test_kernel_wrapper(
+                [&](void* d_temporary_storage, auto& temporary_storage_bytes)
+                {
+                    if constexpr(descending)
+                    {
+                        return rocprim::segmented_radix_sort_keys_desc<config>(
+                            d_temporary_storage,
+                            temporary_storage_bytes,
+                            d_keys,
+                            size,
+                            segments_count,
+                            d_offsets.get(),
+                            d_offsets.get() + 1,
+                            start_bit,
+                            end_bit,
+                            stream,
+                            debug_synchronous);
+                    }
+                    else
+                    {
+                        return rocprim::segmented_radix_sort_keys<config>(d_temporary_storage,
                                                                           temporary_storage_bytes,
                                                                           d_keys,
                                                                           size,
@@ -1109,26 +972,11 @@ inline void sort_keys_double_buffer()
                                                                           start_bit,
                                                                           end_bit,
                                                                           stream,
-                                                                          debug_synchronous));
-            }
-            else
-            {
-                HIP_CHECK(rocprim::segmented_radix_sort_keys<config>(d_temporary_storage.get(),
-                                                                     temporary_storage_bytes,
-                                                                     d_keys,
-                                                                     size,
-                                                                     segments_count,
-                                                                     d_offsets.get(),
-                                                                     d_offsets.get() + 1,
-                                                                     start_bit,
-                                                                     end_bit,
-                                                                     stream,
-                                                                     debug_synchronous));
-            }
-            if(use_graphs)
-            {
-                gHelper.createAndLaunchGraph(stream);
-            }
+                                                                          debug_synchronous);
+                    }
+                },
+                stream,
+                use_graphs);
 
             // Calculate expected results on host
             std::vector<key_type> expected(keys_input);
@@ -1147,10 +995,6 @@ inline void sort_keys_double_buffer()
                                 hipMemcpyDeviceToHost));
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
-            if(use_graphs)
-            {
-                gHelper.cleanupGraphHelper();
-            }
         }
     }
 }
@@ -1245,50 +1089,43 @@ inline void sort_pairs_double_buffer()
                                                                   start_bit,
                                                                   end_bit));
 
-            ASSERT_GT(temporary_storage_bytes, 0U);
-
-            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
-
-            test_utils::GraphHelper gHelper;
-            if(use_graphs)
-            {
-                gHelper.startStreamCapture(stream);
-            }
-            if(descending)
-            {
-                HIP_CHECK(
-                    rocprim::segmented_radix_sort_pairs_desc<config>(d_temporary_storage.get(),
-                                                                     temporary_storage_bytes,
-                                                                     d_keys,
-                                                                     d_values,
-                                                                     size,
-                                                                     segments_count,
-                                                                     d_offsets.get(),
-                                                                     d_offsets.get() + 1,
-                                                                     start_bit,
-                                                                     end_bit,
-                                                                     stream,
-                                                                     debug_synchronous));
-            }
-            else
-            {
-                HIP_CHECK(rocprim::segmented_radix_sort_pairs<config>(d_temporary_storage.get(),
-                                                                      temporary_storage_bytes,
-                                                                      d_keys,
-                                                                      d_values,
-                                                                      size,
-                                                                      segments_count,
-                                                                      d_offsets.get(),
-                                                                      d_offsets.get() + 1,
-                                                                      start_bit,
-                                                                      end_bit,
-                                                                      stream,
-                                                                      debug_synchronous));
-            }
-            if(use_graphs)
-            {
-                gHelper.createAndLaunchGraph(stream);
-            }
+            test_utils::test_kernel_wrapper(
+                [&](void* d_temporary_storage, auto& temporary_storage_bytes)
+                {
+                    if constexpr(descending)
+                    {
+                        return rocprim::segmented_radix_sort_pairs_desc<config>(
+                            d_temporary_storage,
+                            temporary_storage_bytes,
+                            d_keys,
+                            d_values,
+                            size,
+                            segments_count,
+                            d_offsets.get(),
+                            d_offsets.get() + 1,
+                            start_bit,
+                            end_bit,
+                            stream,
+                            debug_synchronous);
+                    }
+                    else
+                    {
+                        return rocprim::segmented_radix_sort_pairs<config>(d_temporary_storage,
+                                                                           temporary_storage_bytes,
+                                                                           d_keys,
+                                                                           d_values,
+                                                                           size,
+                                                                           segments_count,
+                                                                           d_offsets.get(),
+                                                                           d_offsets.get() + 1,
+                                                                           start_bit,
+                                                                           end_bit,
+                                                                           stream,
+                                                                           debug_synchronous);
+                    }
+                },
+                stream,
+                use_graphs);
 
             // Calculate expected results on host
             std::vector<key_value> expected(size);
@@ -1328,10 +1165,6 @@ inline void sort_pairs_double_buffer()
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
-            if(use_graphs)
-            {
-                gHelper.cleanupGraphHelper();
-            }
         }
     }
 }
