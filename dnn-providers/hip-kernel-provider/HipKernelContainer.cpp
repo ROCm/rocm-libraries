@@ -89,7 +89,7 @@ uint32_t
 
 HipKernelContainer::HipKernelContainer()
 {
-    HIPDNN_LOG_INFO("Creating HipKernelContainer");
+    HIPDNN_PLUGIN_LOG_INFO("Creating HipKernelContainer");
 
     _engineManager = std::make_unique<EngineManager>();
 
@@ -101,7 +101,7 @@ HipKernelContainer::HipKernelContainer()
 
 HipKernelContainer::~HipKernelContainer()
 {
-    HIPDNN_LOG_INFO("Destroying HipKernelContainer");
+    HIPDNN_PLUGIN_LOG_INFO("Destroying HipKernelContainer");
 }
 
 EngineManager& HipKernelContainer::getEngineManager()
