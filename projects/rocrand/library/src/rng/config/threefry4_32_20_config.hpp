@@ -34,7 +34,8 @@ namespace rocrand_impl::host
 template<class T>
 struct generator_config_selector<ROCRAND_RNG_PSEUDO_THREEFRY4_32_20, T>
 {
-    __host__ __device__ static constexpr unsigned int get_threads(const target_arch arch)
+    __host__ __device__
+    static constexpr unsigned int get_threads(const target_arch arch)
     {
         switch(arch)
         {
@@ -53,7 +54,8 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_THREEFRY4_32_20, T>
         }
     }
 
-    __host__ __device__ static constexpr unsigned int get_blocks(const target_arch arch)
+    __host__ __device__
+    static constexpr unsigned int get_blocks(const target_arch arch)
     {
         switch(arch)
         {

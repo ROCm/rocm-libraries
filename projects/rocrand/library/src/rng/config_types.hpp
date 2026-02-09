@@ -287,12 +287,14 @@ struct generator_config_defaults
 template<rocrand_rng_type GeneratorType, class T>
 struct generator_config_selector
 {
-    __host__ __device__ static constexpr unsigned int get_threads(const target_arch /*arch*/)
+    __host__ __device__
+    static constexpr unsigned int get_threads(const target_arch /*arch*/)
     {
         return generator_config_defaults<GeneratorType, T>::threads;
     }
 
-    __host__ __device__ static constexpr unsigned int get_blocks(const target_arch /*arch*/)
+    __host__ __device__
+    static constexpr unsigned int get_blocks(const target_arch /*arch*/)
     {
         return generator_config_defaults<GeneratorType, T>::blocks;
     }
@@ -306,7 +308,8 @@ struct generator_config
     unsigned int blocks;
     // When adding a new member variable, consider updating the operator< with that.
 
-    __host__ __device__ constexpr bool operator<(const generator_config& other) const
+    __host__ __device__
+    constexpr bool operator<(const generator_config& other) const
     {
         // In order to store the configs in a \ref std::map, we must define an ordering.
         return (blocks != other.blocks) ? (blocks < other.blocks) : (threads < other.threads);
@@ -315,20 +318,23 @@ struct generator_config
 
 /// @brief Returns whether the provided ordering allows the architecture-dependent
 /// selection of kernel launch parameters.
-__host__ __device__ constexpr bool is_ordering_dynamic(const rocrand_ordering ordering)
+__host__ __device__
+constexpr bool is_ordering_dynamic(const rocrand_ordering ordering)
 {
     return ordering == ROCRAND_ORDERING_PSEUDO_DYNAMIC
            || ordering == ROCRAND_ORDERING_QUASI_DEFAULT;
 }
 
 /// @brief Returns whether this ordering is applicable to pseudo-random number generators.
-__host__ __device__ constexpr bool is_ordering_pseudo(const rocrand_ordering ordering)
+__host__ __device__
+constexpr bool is_ordering_pseudo(const rocrand_ordering ordering)
 {
     return ordering != ROCRAND_ORDERING_QUASI_DEFAULT;
 }
 
 /// @brief Returns whether this ordering is applicable to quasi-random number generators.
-__host__ __device__ constexpr bool is_ordering_quasi(const rocrand_ordering ordering)
+__host__ __device__
+constexpr bool is_ordering_quasi(const rocrand_ordering ordering)
 {
     return ordering == ROCRAND_ORDERING_QUASI_DEFAULT;
 }

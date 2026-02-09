@@ -1,4 +1,4 @@
-# Changelog for rocRAND
+#Changelog for rocRAND
 
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
@@ -9,7 +9,6 @@ Documentation for rocRAND is available at
 ### Added
 
 * gfx1150,gfx1152 and gfx1153 support
-
 
 ## rocRAND 4.2.0 for ROCm 7.2
 
@@ -111,8 +110,8 @@ Documentation for rocRAND is available at
 
 * Added host generator for MT19937
 * Support for `rocrand_generate_poisson` in hipGraphs
-* Added engine, distribution, mode, throughput_gigabytes_per_second, and lambda columns for the csv format in 
-  `benchmark_rocrand_host_api` and `benchmark_rocrand_device_api`. To see these new columns, set `--benchmark_format=csv` 
+* Added engine, distribution, mode, throughput_gigabytes_per_second, and lambda columns for the csv format in
+  `benchmark_rocrand_host_api` and `benchmark_rocrand_device_api`. To see these new columns, set `--benchmark_format=csv`
   or `--benchmark_out_format=csv --benchmark_out="outName.csv"`.
 
 ### Changed

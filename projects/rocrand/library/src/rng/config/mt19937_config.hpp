@@ -34,7 +34,8 @@ namespace rocrand_impl::host
 template<class T>
 struct generator_config_selector<ROCRAND_RNG_PSEUDO_MT19937, T>
 {
-    __host__ __device__ static constexpr unsigned int get_threads(const target_arch arch)
+    __host__ __device__
+    static constexpr unsigned int get_threads(const target_arch arch)
     {
         switch(arch)
         {
@@ -46,12 +47,12 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_MT19937, T>
             case target_arch::gfx908: return 512;
             case target_arch::gfx1150: return 128;
             case target_arch::gfx1201: return 64;
-            default:
-                return generator_config_defaults<ROCRAND_RNG_PSEUDO_MT19937, T>::threads;
+            default: return generator_config_defaults<ROCRAND_RNG_PSEUDO_MT19937, T>::threads;
         }
     }
 
-    __host__ __device__ static constexpr unsigned int get_blocks(const target_arch arch)
+    __host__ __device__
+    static constexpr unsigned int get_blocks(const target_arch arch)
     {
         switch(arch)
         {
@@ -63,12 +64,12 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_MT19937, T>
             case target_arch::gfx908: return 64;
             case target_arch::gfx1150: return 256;
             case target_arch::gfx1201: return 512;
-            default:
-                return generator_config_defaults<ROCRAND_RNG_PSEUDO_MT19937, T>::blocks;
+            default: return generator_config_defaults<ROCRAND_RNG_PSEUDO_MT19937, T>::blocks;
         }
     }
 };
 
-} // end namespace rocrand_host::detail
+} // namespace rocrand_impl::host
 
 #endif // ROCRAND_RNG_CONFIG_MT19937_HPP_
+
