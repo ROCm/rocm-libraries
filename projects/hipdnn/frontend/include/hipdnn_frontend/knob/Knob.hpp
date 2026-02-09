@@ -17,7 +17,6 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <spdlog/fmt/fmt.h>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -32,96 +31,74 @@ class Knob
 {
 public:
     // Factory function to create from flatbuffer
-    static Knob fromFlatbuffer(const hipdnn_data_sdk::data_objects::Knob* fbKnob)
+    static Knob fromFlatbuffer(hipdnnBackendFlatbufferData_t fbData)
     {
-        if(fbKnob == nullptr)
+        if(fbData.ptr == nullptr || fbData.size == 0)
         {
-            throw std::invalid_argument("Null flatbuffer Knob pointer");
+            throw std::invalid_argument("Flatbuffer data is nullptr or has zero size");
         }
 
-        // Extract default value based on type
+        hipdnn_data_sdk::flatbuffer_utilities::KnobWrapper knobWrapper(fbData.ptr, fbData.size);
+
+        if(!knobWrapper.isValid())
+        {
+            throw std::invalid_argument("Knob flatbuffer failed verification");
+        }
+
+        auto fbKnob = &knobWrapper.getKnob();
+
+        // Unpack to native KnobT - all conversions done automatically by FlatBuffers
+        std::unique_ptr<hipdnn_data_sdk::data_objects::KnobT> knobT(fbKnob->UnPack());
+
+        // Extract default value from the union
         KnobValueVariant defaultValue;
-        switch(fbKnob->default_value_type())
+        switch(knobT->default_value.type)
         {
         case hipdnn_data_sdk::data_objects::KnobValue::IntValue:
-        {
-            auto intVal = fbKnob->default_value_as_IntValue();
-            defaultValue = intVal != nullptr ? intVal->value() : 0;
+            defaultValue = knobT->default_value.AsIntValue()->value;
             break;
-        }
         case hipdnn_data_sdk::data_objects::KnobValue::FloatValue:
-        {
-            auto floatVal = fbKnob->default_value_as_FloatValue();
-            defaultValue = floatVal != nullptr ? floatVal->value() : 0.0;
+            defaultValue = knobT->default_value.AsFloatValue()->value;
             break;
-        }
         case hipdnn_data_sdk::data_objects::KnobValue::StringValue:
-        {
-            auto stringVal = fbKnob->default_value_as_StringValue();
-            defaultValue = stringVal != nullptr && stringVal->value() != nullptr
-                               ? stringVal->value()->str()
-                               : std::string("");
+            defaultValue = knobT->default_value.AsStringValue()->value; // Already std::string
             break;
-        }
         default:
             throw std::invalid_argument("Unknown knob value type");
         }
 
-        // Create the knob
-        Knob knob(fbKnob->knob_id() != nullptr ? fbKnob->knob_id()->str() : "",
-                  fbKnob->description() != nullptr ? fbKnob->description()->str() : "",
-                  defaultValue,
-                  fbKnob->deprecated());
+        // Create the knob - strings are already std::string in KnobT
+        Knob knob(std::move(knobT->knob_id),
+                  std::move(knobT->description),
+                  std::move(defaultValue),
+                  knobT->deprecated);
 
-        // Set constraint if present
-        switch(fbKnob->constraint_type())
+        // Handle constraints using the native union types
+        switch(knobT->constraint.type)
         {
         case hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint:
         {
-            auto fbConstraint = fbKnob->constraint_as_IntConstraint();
-            if(fbConstraint != nullptr)
-            {
-                std::unordered_set<int64_t> validValues;
-                if(fbConstraint->valid_values() != nullptr)
-                {
-                    validValues.insert(fbConstraint->valid_values()->begin(),
-                                       fbConstraint->valid_values()->end());
-                }
-
-                knob._constraint = std::make_unique<IntConstraint>(fbConstraint->min_value(),
-                                                                   fbConstraint->max_value(),
-                                                                   fbConstraint->step(),
-                                                                   std::move(validValues));
-            }
+            auto* c = knobT->constraint.AsIntConstraint();
+            // c->valid_values is already std::vector<int64_t>
+            std::unordered_set<int64_t> validValues(c->valid_values.begin(), c->valid_values.end());
+            knob._constraint = std::make_unique<IntConstraint>(
+                c->min_value, c->max_value, c->step, std::move(validValues));
             break;
         }
         case hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint:
         {
-            auto fbConstraint = fbKnob->constraint_as_FloatConstraint();
-            if(fbConstraint != nullptr)
-            {
-                knob._constraint = std::make_unique<FloatConstraint>(fbConstraint->min_value(),
-                                                                     fbConstraint->max_value());
-            }
+            auto* c = knobT->constraint.AsFloatConstraint();
+            knob._constraint = std::make_unique<FloatConstraint>(c->min_value, c->max_value);
             break;
         }
         case hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint:
         {
-            auto fbConstraint = fbKnob->constraint_as_StringConstraint();
-            if(fbConstraint != nullptr)
-            {
-                std::unordered_set<std::string> validValues;
-                if(fbConstraint->valid_values() != nullptr)
-                {
-                    std::transform(fbConstraint->valid_values()->begin(),
-                                   fbConstraint->valid_values()->end(),
-                                   std::inserter(validValues, validValues.end()),
-                                   [](const flatbuffers::String* str) { return str->str(); });
-                }
-
-                knob._constraint = std::make_unique<StringConstraint>(fbConstraint->max_length(),
-                                                                      std::move(validValues));
-            }
+            auto* c = knobT->constraint.AsStringConstraint();
+            // c->valid_values is already std::vector<std::string>
+            std::unordered_set<std::string> validValues(c->valid_values.begin(),
+                                                        c->valid_values.end());
+            knob._constraint
+                = std::make_unique<StringConstraint>(c->max_length, std::move(validValues));
             break;
         }
         case hipdnn_data_sdk::data_objects::KnobConstraint::NONE:
@@ -282,23 +259,9 @@ inline Error getKnobsForEngine(std::vector<Knob>& knobs, hipdnnBackendDescriptor
 
     for(size_t i = 0; i < static_cast<size_t>(actualCount); ++i)
     {
-        const auto& fbData = flatbufferDataArray[i];
-        if(fbData.ptr == nullptr || fbData.size == 0)
-        {
-            return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                    "Invalid flatbuffer data for knob at index " + std::to_string(i)};
-        }
-
-        hipdnn_data_sdk::flatbuffer_utilities::KnobWrapper knobWrapper(fbData.ptr, fbData.size);
-
-        if(!knobWrapper.isValid())
-        {
-            return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                    "Knob flatbuffer failed verification at index " + std::to_string(i)};
-        }
         try
         {
-            knobs.emplace_back(Knob::fromFlatbuffer(&knobWrapper.getKnob()));
+            knobs.emplace_back(Knob::fromFlatbuffer(flatbufferDataArray[i]));
             if(!usedKnobIds.insert(knobs.back().knobId()).second)
             {
                 return {ErrorCode::INVALID_VALUE,
@@ -308,7 +271,8 @@ inline Error getKnobsForEngine(std::vector<Knob>& knobs, hipdnnBackendDescriptor
         catch(const std::exception& e)
         {
             return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                    std::string("Failed to create Knob from flatbuffer: ") + e.what()};
+                    std::string("Failed to create Knob from flatbuffer at index ")
+                        + std::to_string(i) + ": " + e.what()};
         }
     }
 
@@ -318,13 +282,3 @@ inline Error getKnobsForEngine(std::vector<Knob>& knobs, hipdnnBackendDescriptor
 } // namespace detail
 
 } // namespace hipdnn_frontend
-
-template <>
-struct fmt::formatter<hipdnn_frontend::Knob> : fmt::formatter<const char*>
-{
-    template <typename FormatContext>
-    auto format(const hipdnn_frontend::Knob& knob, FormatContext& ctx) const
-    {
-        return fmt::formatter<const char*>::format(knob.toString().c_str(), ctx);
-    }
-};

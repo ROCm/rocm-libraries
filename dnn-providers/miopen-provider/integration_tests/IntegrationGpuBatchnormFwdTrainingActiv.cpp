@@ -68,7 +68,7 @@ protected:
     {
         const auto& [bnTestCase, activTestCase] = this->GetParam();
 
-        HIPDNN_LOG_INFO("Test is using {} for its random seed", bnTestCase.seed);
+        HIPDNN_PLUGIN_LOG_INFO("Test is using {} for its random seed", bnTestCase.seed);
 
         hipdnn_frontend::graph::Graph graphObj;
         graphObj.set_name("BatchnormFwdTrainingActivTest");

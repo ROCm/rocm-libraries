@@ -4294,11 +4294,11 @@ TEST_F(TestGraph, CreateExecutionPlanWithInt64Knobs)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    // Use the compatibility method with int64 map
-    std::unordered_map<KnobType_t, int64_t> settings;
-    settings["global.deterministic"] = 1;
+    // Use the new API with vector of KnobSetting
+    std::vector<KnobSetting> settings;
+    settings.emplace_back("global.deterministic", static_cast<int64_t>(1));
 
-    auto result = graph.create_execution_plan(engineId, settings);
+    auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -4453,7 +4453,8 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithMultipleKnobs)
 
     // Mock execution plan descriptor creation
     auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
-    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
+    EXPECT_CALL(*_mockBackend,
+                backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
         .WillOnce([&executionPlanDesc](hipdnnBackendDescriptorType_t,
                                        hipdnnBackendDescriptor_t* descriptor) {
             *descriptor = executionPlanDesc;
@@ -4573,7 +4574,8 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithEmptySettings)
 
     // Mock execution plan descriptor creation
     auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
-    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
+    EXPECT_CALL(*_mockBackend,
+                backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
         .WillOnce([&executionPlanDesc](hipdnnBackendDescriptorType_t,
                                        hipdnnBackendDescriptor_t* descriptor) {
             *descriptor = executionPlanDesc;
@@ -4582,7 +4584,6 @@ TEST_F(TestGraph, CreateExecutionPlanExtWithEmptySettings)
 
     // Empty settings - should not call backendSetAttribute for knobs
     std::vector<KnobSetting> settings;
-
     auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
@@ -4721,7 +4722,8 @@ TEST_F(TestGraph, CreateExecutionPlanExtIgnoresUnsupportedKnobs)
 
     // Mock execution plan descriptor creation
     auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
-    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
+    EXPECT_CALL(*_mockBackend,
+                backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
         .WillOnce([&executionPlanDesc](hipdnnBackendDescriptorType_t,
                                        hipdnnBackendDescriptor_t* descriptor) {
             *descriptor = executionPlanDesc;
@@ -4730,8 +4732,8 @@ TEST_F(TestGraph, CreateExecutionPlanExtIgnoresUnsupportedKnobs)
 
     // Create settings with one supported and one unsupported knob
     std::vector<KnobSetting> settings;
-    settings.emplace_back("global.deterministic", static_cast<int64_t>(1));
-    settings.emplace_back("unsupported.knob", static_cast<int64_t>(999)); // Not supported
+    settings.emplace_back("global.deterministic", static_cast<int64_t>(1)); // Supported
+    settings.emplace_back("unsupported.knob", static_cast<int64_t>(999));   // Not supported
 
     auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();

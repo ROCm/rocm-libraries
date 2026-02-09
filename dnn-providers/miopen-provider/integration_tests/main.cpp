@@ -16,8 +16,8 @@ int main(int argc, char** argv)
     ::testing::InitGoogleTest(&argc, argv);
 
     hipdnn_frontend::initializeFrontendLogging();
-    hipdnn::logging::initializeCallbackLogging("miopen_legacy_plugin",
-                                               hipdnn_test_sdk::utilities::testLoggingCallback);
+    hipdnn_data_sdk::logging::registerLoggingCallback(
+        hipdnn_test_sdk::utilities::testLoggingCallback);
 
     // Register HipErrorHandler to check and clear HIP errors after each test
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();

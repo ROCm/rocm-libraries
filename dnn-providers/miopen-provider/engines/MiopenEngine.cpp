@@ -6,10 +6,10 @@
 
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace miopen_plugin
 {
@@ -25,7 +25,7 @@ int64_t MiopenEngine::id() const
 }
 
 bool MiopenEngine::isApplicable(HipdnnEnginePluginHandle& handle,
-                                const hipdnn_plugin_sdk::IGraph& opGraph) const
+                                const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     // This is wrong if we ever have more than 1 plan builder thats applicable.
     // If this is the case, we should split plan builders accross multiple engines.
@@ -40,7 +40,7 @@ bool MiopenEngine::isApplicable(HipdnnEnginePluginHandle& handle,
 }
 
 void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
-                              const hipdnn_plugin_sdk::IGraph& opGraph,
+                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                               hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
@@ -83,8 +83,9 @@ void MiopenEngine::getDetails(HipdnnEnginePluginHandle& handle,
     handle.storeEngineDetailsDetachedBuffer(detailsOut.ptr, std::move(detachedBuffer));
 }
 
-size_t MiopenEngine::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
-                                      const hipdnn_plugin_sdk::IGraph& opGraph) const
+size_t MiopenEngine::getWorkspaceSize(
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     size_t workspaceSize = 0;
     for(const auto& planBuilder : _planBuilders)
@@ -99,8 +100,8 @@ size_t MiopenEngine::getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
 
 void MiopenEngine::initializeExecutionContext(
     const HipdnnEnginePluginHandle& handle,
-    const hipdnn_plugin_sdk::IGraph& opGraph,
-    const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
     if(engineConfig.isValid())
@@ -116,7 +117,7 @@ void MiopenEngine::initializeExecutionContext(
             }
             else
             {
-                HIPDNN_LOG_WARN(
+                HIPDNN_PLUGIN_LOG_WARN(
                     "Benchmarking knob setting value is not an integer. Type: {}",
                     hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType()));
             }
@@ -124,7 +125,7 @@ void MiopenEngine::initializeExecutionContext(
     }
     else
     {
-        HIPDNN_LOG_WARN("Engine config is invalid");
+        HIPDNN_PLUGIN_LOG_WARN("Engine config is invalid");
     }
 
     for(const auto& planBuilder : _planBuilders)

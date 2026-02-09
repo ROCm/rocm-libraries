@@ -34,7 +34,6 @@
 #include <hipdnn_data_sdk/utilities/json/Graph.hpp>
 #endif
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
-#include <spdlog/fmt/ranges.h>
 
 namespace hipdnn_frontend::graph
 {
@@ -97,13 +96,14 @@ private:
 
             if(!found)
             {
-                HIPDNN_FE_LOG_WARN(
-                    "Preferred engine id {} not found, using top engine config instead.",
-                    _preferredEngineId.value());
+                HIPDNN_FE_LOG_WARN("Preferred engine id "
+                                   << _preferredEngineId.value()
+                                   << " not found, using top engine config instead.");
             }
         }
 
-        HIPDNN_FE_LOG_INFO("Selected engine id {} for execution plan.", engineIds[selectedIndex]);
+        HIPDNN_FE_LOG_INFO("Selected engine id " << engineIds[selectedIndex]
+                                                 << " for execution plan.");
         _engineConfigDesc = std::move(engineConfigs[selectedIndex]);
 
         return {ErrorCode::OK, ""};
@@ -139,7 +139,6 @@ private:
         }
 
         _engineConfigDesc = std::move(engineConfigDesc);
-
         return {ErrorCode::OK, ""};
     }
 
@@ -547,7 +546,7 @@ public:
 
     Error validate()
     {
-        HIPDNN_FE_LOG_INFO("Validating graph {}", graph_attributes.get_name());
+        HIPDNN_FE_LOG_INFO("Validating graph " << graph_attributes.get_name());
 
         auto [inputTensors, remainingTensors] = getGraphInputTensorAttributesAndRemainder();
 
@@ -669,7 +668,7 @@ public:
 
     Error build_operation_graph(hipdnnHandle_t handle) // NOLINT(readability-identifier-naming)
     {
-        HIPDNN_FE_LOG_INFO("Building operation graph {}", graph_attributes.get_name());
+        HIPDNN_FE_LOG_INFO("Building operation graph " << graph_attributes.get_name());
 
         auto serializedGraph = buildFlatbufferOperationGraph();
         _graphDesc = std::make_unique<ScopedHipdnnBackendDescriptor>(serializedGraph.data(),
@@ -752,7 +751,7 @@ public:
     Error create_execution_plans(const std::vector<HeuristicMode>& modes
                                  = {HeuristicMode::FALLBACK})
     {
-        HIPDNN_FE_LOG_INFO("Creating execution plans for graph {}", graph_attributes.get_name());
+        HIPDNN_FE_LOG_INFO("Creating execution plans for graph " << graph_attributes.get_name());
 
         if(!_graphDesc || !_graphDesc->valid())
         {
@@ -779,27 +778,11 @@ public:
         return {ErrorCode::OK, ""};
     }
 
-    // Create execution plan with int64 knobs (compatibility method)
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    Error create_execution_plan(int64_t engineId,
-                                const std::unordered_map<KnobType_t, int64_t>& settings)
-    {
-        std::vector<KnobSetting> knobSettings;
-
-        knobSettings.reserve(settings.size());
-        for(const auto& [knobId, knobValue] : settings)
-        {
-            knobSettings.emplace_back(knobId, knobValue);
-        }
-
-        return create_execution_plan_ext(engineId, knobSettings);
-    }
-
     // Create execution plan with typed knob settings
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error create_execution_plan_ext(int64_t engineId, const std::vector<KnobSetting>& settings)
     {
-        HIPDNN_FE_LOG_INFO("Creating execution plans for graph {}", graph_attributes.get_name());
+        HIPDNN_FE_LOG_INFO("Creating execution plans for graph " << graph_attributes.get_name());
 
         if(!_graphDesc || !_graphDesc->valid())
         {
@@ -818,10 +801,10 @@ public:
             auto knobIt = existingKnobs.find(setting.knobId());
             if(knobIt == existingKnobs.end())
             {
-                HIPDNN_FE_LOG_WARN("Ignoring knob {} when creating execution plan for graph {}.  "
-                                   "Engine doesn't support chosen knob.",
-                                   setting.knobId(),
-                                   graph_attributes.get_name());
+                HIPDNN_FE_LOG_WARN("Ignoring knob " << setting.knobId()
+                                                    << " when creating execution plan for graph "
+                                                    << graph_attributes.get_name()
+                                                    << ".  Engine doesn't support chosen knob.");
                 continue;
             }
 
@@ -829,7 +812,7 @@ public:
 
             if(knob.isDeprecated())
             {
-                HIPDNN_FE_LOG_WARN("Knob {} has been marked as deprecated.", knob.knobId());
+                HIPDNN_FE_LOG_WARN("Knob " << knob.knobId() << " has been marked as deprecated.");
             }
 
             HIPDNN_CHECK_ERROR(knob.validate(setting));
@@ -889,8 +872,8 @@ public:
 
     Error check_support() // NOLINT(readability-identifier-naming)
     {
-        HIPDNN_FE_LOG_INFO("Checking execution plan support for graph {}",
-                           graph_attributes.get_name());
+        HIPDNN_FE_LOG_INFO("Checking execution plan support for graph "
+                           << graph_attributes.get_name());
 
         if(!_executionPlanDesc || !_executionPlanDesc->valid())
         {
@@ -1047,7 +1030,7 @@ public:
 
     Error build_plans() // NOLINT(readability-identifier-naming)
     {
-        HIPDNN_FE_LOG_INFO("Building plans for graph {}", graph_attributes.get_name());
+        HIPDNN_FE_LOG_INFO("Building plans for graph " << graph_attributes.get_name());
 
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
             hipdnnBackend()->backendSetAttribute(_executionPlanDesc->get(),
@@ -1071,11 +1054,11 @@ public:
                 [[maybe_unused]] bool do_multithreaded_builds = false)
     // NOLINTEND(readability-identifier-naming)
     {
-        HIPDNN_FE_LOG_INFO("BUILD with handle for graph '{}', policy: {}, modes: [{}]",
-                           graph_attributes.get_name().empty() ? "unnamed"
-                                                               : graph_attributes.get_name(),
-                           policy,
-                           fmt::join(modes, ", "));
+        auto graphName
+            = graph_attributes.get_name().empty() ? "unnamed" : graph_attributes.get_name();
+        HIPDNN_FE_LOG_INFO("BUILD with handle for graph '"
+                           << graphName << "', policy: " << static_cast<int>(policy)
+                           << ", modes count: " << modes.size());
 
         HIPDNN_CHECK_ERROR(validate());
         HIPDNN_CHECK_ERROR(build_operation_graph(handle));
@@ -1083,9 +1066,7 @@ public:
         HIPDNN_CHECK_ERROR(check_support());
         HIPDNN_CHECK_ERROR(build_plans());
 
-        HIPDNN_FE_LOG_INFO("BUILD ALL OK for graph {}",
-                           graph_attributes.get_name().empty() ? "unnamed"
-                                                               : graph_attributes.get_name());
+        HIPDNN_FE_LOG_INFO("BUILD ALL OK for graph " << graphName);
         return {ErrorCode::OK, ""};
     }
 
@@ -1129,7 +1110,7 @@ public:
                   std::unordered_map<int64_t, void*>& variantPack,
                   void* workspace) const
     {
-        HIPDNN_FE_LOG_INFO("Executing graph {}", graph_attributes.get_name());
+        HIPDNN_FE_LOG_INFO("Executing graph " << graph_attributes.get_name());
 
         auto variantPackDesc = std::make_unique<ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
@@ -1592,7 +1573,7 @@ public:
         auto engineId = hipdnn_data_sdk::utilities::engineNameToId(engineName);
         _preferredEngineId = engineId;
 
-        HIPDNN_FE_LOG_INFO("Engine name '{}' mapped to ID: {}", engineName, engineId);
+        HIPDNN_FE_LOG_INFO("Engine name '" << engineName << "' mapped to ID: " << engineId);
         return *this;
     }
 

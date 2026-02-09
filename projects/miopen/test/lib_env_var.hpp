@@ -53,8 +53,8 @@ template <class T>
 constexpr bool is_type_str_r = (std::is_same_v<T, std::string>);
 
 template <class T>
-constexpr bool is_type_str_w = (std::is_same_v<T, std::string> ||
-                                std::is_same_v<T, std::string_view>);
+constexpr bool is_type_str_w =
+    (std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view>);
 
 template <class T>
 constexpr bool is_type_char_ptr =
