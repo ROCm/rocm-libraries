@@ -110,3 +110,24 @@ using GPU_conv_2d_FP32 = conv2d_test<float>;
 TEST_P(GPU_conv_2d_FP32, TestFP32) { this->Run(); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_conv_2d_FP32, ::testing::ValuesIn(GetDataset()));
+
+template <class T>
+struct conv_for_implicit_gemm_test : miopen::test::conv::conv_test_base<T>
+{
+    void SetUp() override
+    {
+        miopen::test::conv::conv_test_base<T>::SetUp();
+        // Force Implicit GEMM
+        setenv("MIOPEN_DEBUG_CONV_WINOGRAD", "0", 1);
+        setenv("MIOPEN_DEBUG_CONV_GEMM", "0", 1);
+        setenv("MIOPEN_DEBUG_CONV_DIRECT", "0", 1);
+        setenv("MIOPEN_DEBUG_CONV_IMPLICIT_GEMM", "1", 1);
+        setenv("MIOPEN_DEBUG_CONV_FFT", "0", 1);
+    }
+};
+
+using GPU_conv_for_implicit_gemm_FP32 = conv_for_implicit_gemm_test<float>;
+
+TEST_P(GPU_conv_for_implicit_gemm_FP32, TestFP32) { this->Run(); }
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_conv_for_implicit_gemm_FP32, ::testing::ValuesIn(GetDataset()));
