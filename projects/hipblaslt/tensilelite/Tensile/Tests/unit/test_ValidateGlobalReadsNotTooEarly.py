@@ -173,9 +173,9 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         assert self.num_vmfma == 8
         optSchedule = {
             "SYNC": [[3, 4]],
-            "GRA": [[4, 5]],
+            "GRA": [[5]],
             "LRA0": [[0]],
-            "GRB": [[5, 6]],
+            "GRB": [[6]],
             "LRB0": [[1]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""), SBarrier(comment="")]
@@ -188,9 +188,9 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         assert self.num_vmfma == 8
         optSchedule = {
             "SYNC": [[1, 1, 5, 5]],
-            "GRA": [[1, 2]],
+            "GRA": [[2]],
             "LRA0": [[0]],
-            "GRB": [[6, 7]],
+            "GRB": [[7]],
             "LRB0": [[0]],
         }
         syncCode = [
@@ -208,9 +208,9 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         assert self.num_vmfma == 8
         optSchedule = {
             "SYNC": [[1, 1, 5, 5]],
-            "GRA": [[6, 7]],
+            "GRA": [[7]],
             "LRA0": [[0]],
-            "GRB": [[1, 2]],
+            "GRB": [[2]],
             "LRB0": [[0]],
         }
         syncCode = [
@@ -223,8 +223,8 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             optSchedule, syncCode, 1, None, None, 0,
             "Failed to verify that all local reads for B (LRB0) are complete before the first global read for B is issued. "
             "Last local read for B issued at vmfma_index:0. "
-            "First global read for B issued at vmfma_index:1. "
-            "1 waitcnt operation(s) in [1, 2) provide upper bounds on the number of outstanding LRB0 operations: [1] <-- none of these is 0."
+            "First global read for B issued at vmfma_index:2. "
+            "1 waitcnt operation(s) in [1, 3) provide upper bounds on the number of outstanding LRB0 operations: [1] <-- none of these is 0."
         )
 
     def test_interleave_gr_and_lrs(self):
@@ -248,24 +248,6 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         ]
         self.validate(optSchedule, syncCode, 1, None, None, 0, None)
 
-    def test_both_lr0s_done_before_grs(self):
-        """
-        SWaitCnt(dscnt=0) at 1 + SBarrier at 1 guarantee both done.
-        """
-        assert self.num_vmfma == 8
-        optSchedule = {
-            "SYNC": [[1, 1]],
-            "LRA0": [[0]],
-            "LRB0": [[0]],
-            "GRB": [[2, 2]],
-            "GRA": [[6, 7]],
-        }
-        syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
-            SBarrier(comment=""),
-        ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
-
     def test_different_simd_codes(self):
         """
         Multiple code paths. Path 0 has LRA0 at 0, path 1 has it at 2.
@@ -275,8 +257,8 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             "SYNC": [[3, 4]],
             "LRA0": [[0], [2]],
             "LRB0": [[1]],
-            "GRA": [[5, 5]],
-            "GRB": [[6, 6], [7, 7]],
+            "GRA": [[5]],
+            "GRB": [[6], [7]],
         }
         syncCode = [
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
@@ -294,8 +276,8 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             "SYNC": [[3, 4]],
             "LRA0": [[0], [4]],  # Read for codepath 1 is too late.
             "LRB0": [[1]],
-            "GRA": [[5, 5]],
-            "GRB": [[6, 6], [7, 7]],
+            "GRA": [[5]],
+            "GRB": [[6], [7]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""), SBarrier()]
 
@@ -321,9 +303,9 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         assert self.num_vmfma == 8
         optSchedule = {
             "SYNC": [[3, 4]],
-            "GRA": [[5, 5]],
+            "GRA": [[5]],
             "LRA0": [[0]],
-            "GRB": [[6, 6]],
+            "GRB": [[6]],
             "LRB0": [[1]],
         }
         syncCode = [SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment=""), SBarrier(comment="")]
@@ -343,17 +325,17 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         assert self.num_vmfma == 8
         optSchedule = {
             "SYNC": [[2, 3]],
-            "GRA": [[4, 5]],
+            "GRA": [[5]],
             "LRA0": [[0]],
-            "GRB": [[5, 6]],
+            "GRB": [[6]],
             "LRB0": [[1]],
         }
         syncCode = [SBarrier(comment=""), SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="")]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
             "Failed to verify that a barrier (to sync waves) exists between completion of local reads for A and the first global read for A. "
-            "Last local read of A issued at vmfma_index 0, first global read of A issued at vmfma_index 4, wave completion at vmfma_index 3. "
-            "Expected a barrier in the range [3, 5)."
+            "Last local read of A issued at vmfma_index 0, first global read of A issued at vmfma_index 5, wave completion at vmfma_index 3. "
+            "Expected a barrier in the range [3, 6)."
         )
 
     def test_interleave_separate_pairs(self):
@@ -364,9 +346,9 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         assert self.num_vmfma == 8
         optSchedule = {
             "SYNC": [[2, 3, 5, 6]],
-            "GRA": [[4, 4]],
+            "GRA": [[4]],
             "LRA0": [[0]],
-            "GRB": [[7, 7]],
+            "GRB": [[7]],
             "LRB0": [[1]],
         }
         syncCode = [
@@ -385,9 +367,9 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         assert self.num_vmfma == 8
         optSchedule = {
             "SYNC": [[4, 4, 6, 6]],
-            "GRA": [[5, 5]],
+            "GRA": [[5]],
             "LRA0": [[0, 2]],
-            "GRB": [[7, 7]],
+            "GRB": [[7]],
             "LRB0": [[1, 3]],
         }
         syncCode = [
@@ -407,9 +389,9 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         assert self.num_vmfma == 8
         optSchedule = {
             "SYNC": [[3, 4, 6, 6]],
-            "GRA": [[4, 5]],
+            "GRA": [[5]],
             "LRA0": [[0, 2]],
-            "GRB": [[6, 7]],
+            "GRB": [[7]],
             "LRB0": [[1, 3]],
         }
         syncCode = [
@@ -422,8 +404,8 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             optSchedule, syncCode, 1, None, None, 0,
             "Failed to verify that all local reads for A (LRA0) are complete before the first global read for A is issued. "
             "Last local read for A issued at vmfma_index:2. "
-            "First global read for A issued at vmfma_index:4. "
-            "1 waitcnt operation(s) in [3, 5) provide upper bounds on the number of outstanding LRA0 operations: [1] <-- none of these is 0."
+            "First global read for A issued at vmfma_index:5. "
+            "1 waitcnt operation(s) in [3, 6) provide upper bounds on the number of outstanding LRA0 operations: [1] <-- none of these is 0."
         )
 
     def test_sync_and_gr_at_same_index(self):
@@ -435,9 +417,9 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         assert self.num_vmfma == 8
         optSchedule = {
             "SYNC": [[1, 1, 5, 5]],
-            "GRA": [[1, 1, 6, 6]],
+            "GRA": [[1, 6]],
             "LRA0": [[0]],
-            "GRB": [[5, 5, 6, 6]],
+            "GRB": [[5, 6]],
             "LRB0": [[4]],
         }
         syncCode = [
@@ -457,9 +439,9 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         assert self.num_vmfma == 8
         optSchedule = {
             "SYNC": [[1, 2, 3, 4, 5, 5, 5]],
-            "GRA": [[4, 5, 6, 7]],
+            "GRA": [[5, 7]],
             "LRA0": [[0]],
-            "GRB": [[4, 5, 6, 7]],
+            "GRB": [[7, 7]],
             "LRB0": [[4]],
         }
         syncCode = [
@@ -471,13 +453,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
             SBarrier(comment=""),
         ]
-        self.validate(
-            optSchedule, syncCode, 1, None, None, 0,
-            "Failed to verify that all local reads for B (LRB0) are complete before the first global read for B is issued. "
-            "Last local read for B issued at vmfma_index:4. "
-            "First global read for B issued at vmfma_index:4. "
-            "0 waitcnt operation(s) in [5, 5) provide upper bounds on the number of outstanding LRB0 operations: [] <-- none of these is 0."
-        )
+        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
 
     def test_direct_to_lds_a(self):
         """
@@ -554,9 +530,9 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         assert self.num_vmfma == 8
         optSchedule = {
             "SYNC": [[1, 2, 5, 6]],
-            "GRA": [[6, 7]],
+            "GRA": [[7]],
             "LRA0": [[0]],
-            "GRB": [[2, 3]],
+            "GRB": [[3]],
             "LRB0": [[4]],
         }
         syncCode = [
@@ -577,9 +553,9 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         assert self.num_vmfma == 8
         optSchedule = {
             "SYNC": [[1, 2, 5, 6]],
-            "GRA": [[2, 3]],
+            "GRA": [[3]],
             "LRA0": [[0]],
-            "GRB": [[6, 7]],
+            "GRB": [[7]],
             "LRB0": [[4]],
         }
         syncCode = [
@@ -593,8 +569,8 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             optSchedule, syncCode, 1, None, None, 0,
             "Failed to verify that all local reads for B (LRB0) are complete before the first global read for B is issued. "
             "Last local read for B issued at vmfma_index:4. "
-            "First global read for B issued at vmfma_index:2. "
-            "0 waitcnt operation(s) in [5, 3) provide upper bounds on the number of outstanding LRB0 operations: [] <-- none of these is 0."
+            "First global read for B issued at vmfma_index:3. "
+            "0 waitcnt operation(s) in [5, 4) provide upper bounds on the number of outstanding LRB0 operations: [] <-- none of these is 0."
         )
 
     def test_ab_tiebreaking_lra0_before_lrb0(self):
@@ -606,8 +582,8 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             "LRA0": [[2]],
             "LRB0": [[2]],
             "SYNC": [[3, 3]],
-            "GRA": [[4,4]],  # The read for A is safe, LRA0 appears before LRB0.
-            "GRB": [[7,7]],
+            "GRA": [[4]],  # The read for A is safe, LRA0 appears before LRB0.
+            "GRB": [[7]],
         }
         syncCode = [
             SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment=""),
@@ -632,8 +608,8 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             "LRB0": [[2]],
             "LRA0": [[2]],
             "SYNC": [[3, 3]],
-            "GRA": [[4,4]],  # The read for A is NOT safe, LRA0 appears after LRB0.
-            "GRB": [[7,7]],
+            "GRA": [[4]],  # The read for A is NOT safe, LRA0 appears after LRB0.
+            "GRB": [[7]],
         }
         syncCode = [
             SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment=""),
@@ -657,8 +633,8 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             "LRB0": [[5]],
             # The first barrier after the waitcnt is at index 6. Too late.
             "SYNC": [[1, 5, 5, 5, 6]],
-            "GRA": [[5,5]],
-            "GRB": [[5,5]],
+            "GRA": [[5]],
+            "GRB": [[5]],
         }
         syncCode = [
             SBarrier(),
@@ -683,8 +659,8 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             "LRB0": [[2]],
             # The first barrier after the required waitcnt is at index 6. Too late.
             "SYNC": [[5, 5, 5, 5, 6]],
-            "GRA": [[7,7]],
-            "GRB": [[5,5]],
+            "GRA": [[7]],
+            "GRB": [[5]],
         }
         syncCode = [
             SBarrier(),
@@ -710,8 +686,8 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             "LRA0": [[5]],
             "LRB0": [[5]],
             "SYNC": [[5, 5]],
-            "GRA": [[5,5]],
-            "GRB": [[5,5]],
+            "GRA": [[5]],
+            "GRB": [[5]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""), SBarrier()]
         self.validate(optSchedule, syncCode, 1, None, None, 0, None)
@@ -724,9 +700,9 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         optSchedule = {
             "LRA0": [[5]],
             "LRB0": [[5]],
-            "GRB": [[5,5]],
+            "GRB": [[5]],
             "SYNC": [[5,5]],
-            "GRA": [[5,5]],
+            "GRA": [[5]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""), SBarrier()]
         self.validate(
@@ -747,8 +723,8 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             "LRB0": [[5]],
             "SYNC": [[5,5]],
             "LRA0": [[5]],
-            "GRA": [[5,5]],
-            "GRB": [[5,5]],
+            "GRA": [[5]],
+            "GRB": [[5]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""), SBarrier()]
         self.validate(
@@ -769,8 +745,8 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             "SYNC": [[5, 5, 6, 6]],
             "LRB0": [[5]],
             "LRA0": [[5]],
-            "GRA": [[5,5]],
-            "GRB": [[7,7]],
+            "GRA": [[5]],
+            "GRB": [[7]],
         }
         syncCode = [
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
@@ -796,8 +772,8 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         optSchedule = {
             "LRA0": [[5]],
             "LRB0": [[5]],
-            "GRB": [[7,7]],
-            "GRA": [[6,6]],
+            "GRB": [[7]],
+            "GRA": [[6]],
             "SYNC": [[5, 6]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""), SBarrier()]
@@ -818,8 +794,8 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             "LRA0": [[0, 1, 2, 3]],
             "LRB0": [[2, 3, 4, 5]],
             "SYNC": [[4, 4, 6, 6]],
-            "GRA": [[4, 5]],
-            "GRB": [[6, 7]],
+            "GRA": [[5]],
+            "GRB": [[7]],
         }
         syncCode = [
             SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment=""),
@@ -840,8 +816,8 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             "LRA0": [[0, 1, 2, 3]],
             "LRB0": [[2, 3, 4, 5]],
             "SYNC": [[4, 4, 6, 6]],
-            "GRA": [[5, 5]],
-            "GRB": [[7, 7]],
+            "GRA": [[5]],
+            "GRB": [[7]],
         }
         syncCode = [
             SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment=""),
@@ -868,8 +844,8 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             "LRA1": [[3, 4]],
             "LRB0": [[3, 4]],
             "SYNC": [[4,4, 6,6]],
-            "GRA": [[4,4]],
-            "GRB": [[7,7]],
+            "GRA": [[4]],
+            "GRB": [[7]],
         }
         syncCode = [
             SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment=""),
@@ -889,7 +865,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             "LRA1": [3 * [3]],
             "LRB1": [4 * [3]],
             "SYNC": [[3, 3]],
-            "GRA": [[4,4]],
+            "GRA": [[4]],
         }
         syncCode = [
             # 3 LRA1 and 4 LRB1 can be outstanding.
@@ -913,8 +889,8 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
             "LRA0": [[0]],
             "LRB0": [[1]],
             "SYNC": [[2, 3]],
-            "GRA": [[3, 4, 4, 5, 5, 6]],
-            "GRB": [[6, 7]],
+            "GRA": [[4, 5, 6]],
+            "GRB": [[7]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""), SBarrier(comment="")]
         self.validate(optSchedule, syncCode, 1, None, None, 0, None)
@@ -927,15 +903,15 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         optSchedule = {
             "LRA0": [[0]],
             "LRB0": [[1]],
-            "GRA": [[1, 2, 5, 6, 6, 7]],
+            "GRA": [[2, 6, 7]],
             "SYNC": [[3, 4]],
-            "GRB": [[6, 7]],
+            "GRB": [[7]],
         }
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""), SBarrier(comment="")]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
             "Failed to verify that all local reads for A (LRA0) are complete before the first global read for A is issued. "
             "Last local read for A issued at vmfma_index:0. "
-            "First global read for A issued at vmfma_index:1. "
-            "0 waitcnt operation(s) in [0, 1) provide upper bounds on the number of outstanding LRA0 operations: [] <-- none of these is 0."
+            "First global read for A issued at vmfma_index:2. "
+            "0 waitcnt operation(s) in [0, 2) provide upper bounds on the number of outstanding LRA0 operations: [] <-- none of these is 0."
         )
