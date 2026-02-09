@@ -91,7 +91,7 @@ namespace libhipcxx
 }
 
 // Returns true if the current ROCm version is at least major.minor.patch
-#define LIBHIPCXX_ROCM_VERSION_GE(major, minor, patch) \
+#define LIBHIPCXX_ROCM_VERSION_GE3(major, minor, patch) \
     (defined(ROCM_VERSION_MAJOR) && \
      defined(ROCM_VERSION_MINOR) && \
      defined(ROCM_VERSION_PATCH) && \
@@ -100,19 +100,19 @@ namespace libhipcxx
      (ROCM_VERSION_MAJOR == (major) && ROCM_VERSION_MINOR == (minor) && ROCM_VERSION_PATCH >= (patch)))
 
 // Returns true if the current ROCm version is at least major.minor the patch value is ignored
-#define LIBHIPCXX_ROCM_VERSION_GE(major, minor) \
+#define LIBHIPCXX_ROCM_VERSION_GE2(major, minor) \
     (defined(ROCM_VERSION_MAJOR) && \
      defined(ROCM_VERSION_MINOR) && \
      (ROCM_VERSION_MAJOR > (major)) || \
      (ROCM_VERSION_MAJOR == (major) && ROCM_VERSION_MINOR >= (minor)))
 
 // Returns true if the current ROCm version is at least major the minor and patch value is ignored
-#define LIBHIPCXX_ROCM_VERSION_GE(major) \
+#define LIBHIPCXX_ROCM_VERSION_GE1(major) \
     (defined(ROCM_VERSION_MAJOR) && \
      (ROCM_VERSION_MAJOR >= (major)))
 
 // Returns true if the current ROCm version is at most major.minor.patch (i.e. >=)
-#define LIBHIPCXX_ROCM_VERSION_LE(major, minor, patch) \
+#define LIBHIPCXX_ROCM_VERSION_LE3(major, minor, patch) \
     (defined(ROCM_VERSION_MAJOR) && \
      defined(ROCM_VERSION_MINOR) && \
      defined(ROCM_VERSION_PATCH) && \
@@ -121,25 +121,32 @@ namespace libhipcxx
      (ROCM_VERSION_MAJOR == (major) && ROCM_VERSION_MINOR == (minor) && ROCM_VERSION_PATCH <= (patch)))
 
 // Returns true if the current ROCm version is at most major.minor (i.e. >=) the patch value is ignored
-#define LIBHIPCXX_ROCM_VERSION_LE(major, minor) \
+#define LIBHIPCXX_ROCM_VERSION_LE2(major, minor) \
     (defined(ROCM_VERSION_MAJOR) && \
      defined(ROCM_VERSION_MINOR) && \
      (ROCM_VERSION_MAJOR < (major)) || \
      (ROCM_VERSION_MAJOR == (major) && ROCM_VERSION_MINOR <= (minor)))
 
 // Returns true if the current ROCm version is at most major (i.e. >=) the patch and minor value is ignored
-#define LIBHIPCXX_ROCM_VERSION_LE(major) \
+#define LIBHIPCXX_ROCM_VERSION_LE1(major) \
     (defined(ROCM_VERSION_MAJOR) && \
      (ROCM_VERSION_MAJOR <= (major)))
 
 // Returns true if the current ROCm version matches exactly major.minor.patch
-#define LIBHIPCXX_ROCM_VERSION_EQ(major, minor, patch) \
+#define LIBHIPCXX_ROCM_VERSION_EQ3(major, minor, patch) \
      ROCM_VERSION_MAJOR == (major) && ROCM_VERSION_MINOR == (minor) && ROCM_VERSION_PATCH == (patch)
 
 // Returns true if the current ROCm version matches exactly major.minor (ignoring patch release)
-#define LIBHIPCXX_ROCM_VERSION_EQ(major, minor) \
+#define LIBHIPCXX_ROCM_VERSION_EQ2(major, minor) \
      ROCM_VERSION_MAJOR == (major) && ROCM_VERSION_MINOR == (minor)
 
 // Returns true if the current ROCm version matches exactly major (ignoring minor and patch release)
-#define LIBHIPCXX_ROCM_VERSION_EQ(major) \
+#define LIBHIPCXX_ROCM_VERSION_EQ1(major) \
      ROCM_VERSION_MAJOR == (major) && ROCM_VERSION_MINOR == (minor)
+
+#define LIBHIPCXX_GET_MACRO(_1, _2, _3, name, ...)    name
+#define LIBHIPCXX_ROCM_VERSION_GE(...)     LIBHIPCXX_GET_MACRO(__VA_ARGS__, LIBHIPCXX_ROCM_VERSION_GE3, LIBHIPCXX_ROCM_VERSION_GE2, LIBHIPCXX_ROCM_VERSION_GE1)(__VA_ARGS__)
+
+#define LIBHIPCXX_ROCM_VERSION_LE(...)     LIBHIPCXX_GET_MACRO(__VA_ARGS__, LIBHIPCXX_ROCM_VERSION_LE3, LIBHIPCXX_ROCM_VERSION_LE2, LIBHIPCXX_ROCM_VERSION_LE1)(__VA_ARGS__)
+
+#define LIBHIPCXX_ROCM_VERSION_EQ(...)     LIBHIPCXX_GET_MACRO(__VA_ARGS__, LIBHIPCXX_ROCM_VERSION_EQ3, LIBHIPCXX_ROCM_VERSION_EQ2, LIBHIPCXX_ROCM_VERSION_EQ1)(__VA_ARGS__)
