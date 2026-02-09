@@ -11,9 +11,8 @@ import sys
 from pathlib import Path
 from collections import defaultdict
 import argparse
-import os
 import tempfile
-import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Configuration
 CXX_COMPILER = "/opt/rocm/bin/hipcc"
@@ -111,7 +110,7 @@ def find_instance_files(instances_dir: Path, direction: str = "backward_weight")
     
     return files_by_subdir
 
-def main():
+def parse_args():
     parser = argparse.ArgumentParser(description="Check which convolution instances compile")
     parser.add_argument("--direction", default="backward_weight", 
                         choices=["forward", "backward_weight", "backward_data"],
@@ -128,8 +127,21 @@ def main():
                         help="Project root directory (auto-detected if not specified)")
     parser.add_argument("--instance", type=int, default=None,
                         help="Only check a single instance by its index in the config file.")
+    parser.add_argument(
+        "--parallel-jobs",
+        "-j",
+        type=int,
+        default=1,
+        help="Number of parallel compilation jobs (default: 1)",
+    )
     
     args = parser.parse_args()
+
+    return args
+
+def main():
+    
+    args = parse_args()
     
     # Find project root
     if args.project_root:
@@ -199,27 +211,55 @@ def main():
         if args.max_files:
             files_to_check = cpp_files[:args.max_files]
         
-        for cpp_file in files_to_check:
-            checked += 1
-            filename = cpp_file.name
-            
-            if args.verbose:
-                print(f"  [{checked}/{total_files}] {filename}...", end=" ", flush=True)
-            else:
-                print(f"  [{checked}/{total_files}] {filename}...", end=" ", flush=True)
-            
-            success, error = compile_single_file(cpp_file, project_root, args.verbose)
-            
-            if success:
-                print("OK")
-                all_successes[subdir_name].append(filename)
-            else:
-                key_error = extract_key_error(error)
-                print(f"FAILED")
+        if args.parallel_jobs > 1:
+            # Parallel compilation
+            with ThreadPoolExecutor(max_workers=args.parallel_jobs) as executor:
+                # Submit all compilation jobs
+                futures = {
+                    executor.submit(compile_single_file, cpp_file, project_root, args.verbose): cpp_file
+                    for cpp_file in files_to_check
+                }
+                
+                # Process results as they complete
+                for future in as_completed(futures):
+                    cpp_file = futures[future]
+                    filename = cpp_file.name
+                    checked += 1
+                    success, error = future.result()
+                    
+                    if success:
+                        print(f"  [{checked}/{total_files}] {filename}... OK")
+                        all_successes[subdir_name].append(filename)
+                    else:
+                        key_error = extract_key_error(error)
+                        print(f"  [{checked}/{total_files}] {filename}... FAILED")
+                        if args.verbose:
+                            print(f"    Error: {key_error}")
+                        all_failures[subdir_name].append((filename, key_error))
+                        error_types[key_error].add(f"{subdir_name}/{filename}")
+        else:
+            # Sequential compilation
+            for cpp_file in files_to_check:
+                checked += 1
+                filename = cpp_file.name
+                
                 if args.verbose:
-                    print(f"    Error: {key_error}")
-                all_failures[subdir_name].append((filename, key_error))
-                error_types[key_error].add(f"{subdir_name}/{filename}")
+                    print(f"  [{checked}/{total_files}] {filename}...", end=" ", flush=True)
+                else:
+                    print(f"  [{checked}/{total_files}] {filename}...", end=" ", flush=True)
+                
+                success, error = compile_single_file(cpp_file, project_root, args.verbose)
+                
+                if success:
+                    print("OK")
+                    all_successes[subdir_name].append(filename)
+                else:
+                    key_error = extract_key_error(error)
+                    print(f"FAILED")
+                    if args.verbose:
+                        print(f"    Error: {key_error}")
+                    all_failures[subdir_name].append((filename, key_error))
+                    error_types[key_error].add(f"{subdir_name}/{filename}")
     
     # Print summary
     print("\n" + "=" * 60)
