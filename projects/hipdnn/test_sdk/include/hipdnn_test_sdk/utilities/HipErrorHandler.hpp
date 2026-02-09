@@ -26,9 +26,9 @@ public:
         auto hipError = hipGetLastError();
 
         // Special case: hipErrorNoDevice cannot be cleared and persists even after
-        // hipGetLastError() is called. When tests are skipped in non-GPU environments,
-        // we should not fail the test for this specific error.
-        if(testInfo.result()->Skipped() && hipError == hipErrorNoDevice)
+        // hipGetLastError() is called. In non-GPU environments, we should not fail
+        // the test for this specific error.
+        if(hipError == hipErrorNoDevice)
         {
             return;
         }
