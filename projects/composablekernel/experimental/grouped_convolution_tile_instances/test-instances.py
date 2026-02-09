@@ -285,50 +285,6 @@ def main():
             for filename, error in sorted_failures:
                 print(f"    - {filename}")
     
-    # Print error categories
-    # if error_types:
-    #     print("\n" + "=" * 60)
-    #     print("ERROR CATEGORIES")
-    #     print("=" * 60)
-    #     for error, files in sorted(error_types.items(), key=lambda x: -len(x[1])):
-    #         print(f"\n[{len(files)} files] {error[:100]}...")
-    #         if args.verbose:
-    #             for f in sorted(files)[:5]:
-    #                 print(f"    - {f}")
-    #             if len(files) > 5:
-    #                 print(f"    ... and {len(files) - 5} more")
-    
-    # Generate blacklist
-    # if all_failures:
-    #     print("\n" + "=" * 60)
-    #     print("CMAKE BLACKLIST")
-    #     print("=" * 60)
-        
-    #     blacklist_lines = []
-    #     for subdir_name in sorted(all_failures.keys()):
-    #         failures = all_failures[subdir_name]
-    #         total_in_subdir = len(files_by_subdir.get(subdir_name, []))
-            
-    #         # If all files in subdir failed, use wildcard
-    #         if len(failures) == total_in_subdir:
-    #             pattern = f'"{subdir_name}/.*\\\\.cpp$"'
-    #             blacklist_lines.append(f"    {pattern}  # All {len(failures)} files fail")
-    #         else:
-    #             # List individual files
-    #             for filename, _ in failures:
-    #                 # Escape dots in filename for regex
-    #                 escaped = filename.replace(".", "\\\\.")
-    #                 pattern = f'"{subdir_name}/{escaped}$"'
-    #                 blacklist_lines.append(f"    {pattern}")
-        
-    #     blacklist_content = "set(BWD_WEIGHT_BLACKLIST\n" + "\n".join(blacklist_lines) + "\n)"
-    #     print(blacklist_content)
-        
-    #     if args.output:
-    #         with open(args.output, 'w') as f:
-    #             f.write(blacklist_content)
-    #         print(f"\nBlacklist written to: {args.output}")
-    
     # Return exit code based on failures
     total_failures = sum(len(f) for f in all_failures.values())
     if total_failures > 0:
