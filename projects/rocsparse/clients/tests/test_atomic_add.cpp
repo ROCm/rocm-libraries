@@ -137,21 +137,21 @@ void test_atomic_add_accuracy(int size, int num_adds, int target_idx)
 // =============================================================================
 // Test classes using the template function
 // =============================================================================
-class AtomicAddF16Test : public ::testing::TestWithParam<std::tuple<int, int, int>>
+class atomic_add_f16_pre_checkin : public ::testing::TestWithParam<std::tuple<int, int, int>>
 {
 };
 
-class AtomicAddBF16Test : public ::testing::TestWithParam<std::tuple<int, int, int>>
+class atomic_add_bf16_pre_checkin : public ::testing::TestWithParam<std::tuple<int, int, int>>
 {
 };
 
-TEST_P(AtomicAddF16Test, Accuracy)
+TEST_P(atomic_add_f16_pre_checkin, Accuracy)
 {
     auto [size, num_adds, target_idx] = GetParam();
     test_atomic_add_accuracy<_Float16>(size, num_adds, target_idx);
 }
 
-TEST_P(AtomicAddBF16Test, Accuracy)
+TEST_P(atomic_add_bf16_pre_checkin, Accuracy)
 {
     auto [size, num_adds, target_idx] = GetParam();
     test_atomic_add_accuracy<rocsparse_bfloat16>(size, num_adds, target_idx);
@@ -201,5 +201,5 @@ static const auto atomic_add_test_values = ::testing::Values(
     std::make_tuple(2, 64, 1),
     std::make_tuple(2, 256, 1));
 
-INSTANTIATE_TEST_SUITE_P(Float16AtomicAdd, AtomicAddF16Test, atomic_add_test_values);
-INSTANTIATE_TEST_SUITE_P(BFloat16AtomicAdd, AtomicAddBF16Test, atomic_add_test_values);
+INSTANTIATE_TEST_SUITE_P(Float16, atomic_add_f16_pre_checkin, atomic_add_test_values);
+INSTANTIATE_TEST_SUITE_P(BFloat16, atomic_add_bf16_pre_checkin, atomic_add_test_values);
