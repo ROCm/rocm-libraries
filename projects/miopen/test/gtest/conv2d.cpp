@@ -1,59 +1,121 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
-
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright (c) 2023 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
 #include "conv_common_gtest.hpp"
 
 namespace {
 
-auto GenFullCases()
+template <typename T>
+std::vector<T> generate_data_limited(const std::vector<T>& dims, int limit_multiplier, T single)
+{
+    // In GTest, we simulate the 'full_set' (all) and 'limit_set' (MIOPEN_TEST_LIMIT)
+    // To match CTest's --all behavior with default limit 2:
+    const bool full_set = true; 
+    const int limit_set = 2;
+
+    if(full_set)
+    {
+        if(limit_set > 0)
+        {
+            auto endpoint = std::min(static_cast<int>(dims.size()), limit_set * limit_multiplier);
+            return std::vector<T>(dims.cbegin(), dims.cbegin() + endpoint);
+        }
+        else
+            return dims;
+    }
+    else
+    {
+        return {single};
+    }
+}
+
+template <typename T>
+std::vector<T> generate_data(const std::vector<T>& dims)
+{
+    const bool full_set = true;
+    if(full_set)
+        return dims;
+    else
+        return {dims.front()};
+}
+
+auto GetDataset()
 {
     std::vector<miopen::test::conv::conv_test_input> cases{};
-    
-    // Get the standard parameter lists from the header
-    auto batch_sizes = miopen::test::conv::get_batch_sizes();
-    auto spatial_dims = miopen::test::conv::get_2d_spatial_dims();
-    auto filter_dims = miopen::test::conv::get_2d_filter_dims();
-    auto in_channels = miopen::test::conv::get_input_channels();
-    auto out_channels = miopen::test::conv::get_output_channels();
-    auto psd = miopen::test::conv::get_2d_pads_strides_dilations();
 
-    // combinatorial generation with a limit to keep it under control
-    // (Similar to how CTest uses MIOPEN_TEST_LIMIT)
-    size_t count = 0;
-    const size_t limit = 50; // Adjust this to increase/decrease test time
+    auto batch_sizes            = generate_data_limited(miopen::test::conv::get_batch_sizes(), 1, std::size_t{1});
+    auto input_channels         = generate_data_limited(miopen::test::conv::get_input_channels(), 1, std::size_t{32});
+    auto output_channels        = generate_data_limited(miopen::test::conv::get_output_channels(), 1, std::size_t{64});
+    auto spatial_dim_elements   = generate_data_limited(miopen::test::conv::get_2d_spatial_dims(), 1, std::vector<std::size_t>{28, 28});
+    auto filter_dims            = generate_data_limited(miopen::test::conv::get_2d_filter_dims(), 2, std::vector<std::size_t>{3, 3});
+    auto pads_strides_dilations = generate_data_limited(miopen::test::conv::get_2d_pads_strides_dilations(), 2, std::vector<int>{1, 1, 1, 1, 1, 1});
+    auto trans_output_pads      = generate_data(miopen::test::conv::get_2d_trans_output_pads());
+    auto in_layouts             = generate_data(std::vector<std::string>{"NCHW"});
+    auto fil_layouts            = generate_data(std::vector<std::string>{"NCHW"});
+    auto out_layouts            = generate_data(std::vector<std::string>{"NCHW"});
+    auto deterministics         = generate_data(std::vector<bool>{false});
+    auto tensor_vects           = generate_data(std::vector<std::size_t>{0});
+    auto vector_lengths         = generate_data(std::vector<std::size_t>{1});
+    // Only valid for int8 input and weights
+    auto output_types           = generate_data(std::vector<std::string>{"int32"});
+    auto int8_vectorizes        = generate_data(std::vector<bool>{false});
 
-    for (auto b : batch_sizes) {
-        for (auto s : spatial_dims) {
-            for (auto f : filter_dims) {
-                for (auto ic : in_channels) {
-                    for (auto oc : out_channels) {
-                        for (auto p : psd) {
-                            miopen::test::conv::conv_test_input input{};
-                            input.batch_size = b;
-                            input.input_channels = ic;
-                            input.output_channels = oc;
-                            input.spatial_dim_elements = s;
-                            input.filter_dims = f;
-                            input.pads_strides_dilations = p;
-                            input.trans_output_pads = {0, 0};
-                            input.in_layout = "NCHW";
-                            input.fil_layout = "NCHW";
-                            input.out_layout = "NCHW";
-                            input.conv_mode = "CONV";
-                            input.pad_mode = "DEFAULT";
-                            input.deterministic = false;
-                            input.tensor_vect = 0U;
-                            input.vector_length = 1U;
-                            
-                            cases.push_back(input);
-                            
-                            if (++count >= limit) return cases;
-                        }
-                    }
-                }
-            }
-        }
-    }
+    for(auto b : batch_sizes)
+        for(auto ic : input_channels)
+            for(auto oc : output_channels)
+                for(auto s : spatial_dim_elements)
+                    for(auto f : filter_dims)
+                        for(auto p : pads_strides_dilations)
+                            for(auto tp : trans_output_pads)
+                                for(auto il : in_layouts)
+                                    for(auto fl : fil_layouts)
+                                        for(auto ol : out_layouts)
+                                            for(auto d : deterministics)
+                                                for(auto tv : tensor_vects)
+                                                    for(auto vl : vector_lengths)
+                                                        for(auto ot : output_types)
+                                                            for(auto iv : int8_vectorizes)
+                                                            {
+                                                                miopen::test::conv::conv_test_input input{};
+                                                                input.batch_size             = b;
+                                                                input.input_channels         = ic;
+                                                                input.output_channels        = oc;
+                                                                input.spatial_dim_elements   = s;
+                                                                input.filter_dims            = f;
+                                                                input.pads_strides_dilations = p;
+                                                                input.trans_output_pads      = tp;
+                                                                input.in_layout              = il;
+                                                                input.fil_layout             = fl;
+                                                                input.out_layout             = ol;
+                                                                input.deterministic          = d;
+                                                                input.tensor_vect            = tv;
+                                                                input.vector_length          = vl;
+                                                                input.output_type            = ot;
+                                                                input.int8_vectorize         = iv;
+                                                                cases.push_back(input);
+                                                            }
     return cases;
 }
 
@@ -66,7 +128,6 @@ struct conv2d_test : miopen::test::conv::conv_test_base<T>
 
 using GPU_conv_2d_FP32 = conv2d_test<float>;
 
-TEST_P(GPU_conv_2d_FP32, TestFP32) { Run(); }
+TEST_P(GPU_conv_2d_FP32, TestFP32) { this->Run(); }
 
-// Instantiate with the larger dataset
-INSTANTIATE_TEST_SUITE_P(Full, GPU_conv_2d_FP32, ::testing::ValuesIn(GenFullCases()));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_conv_2d_FP32, ::testing::ValuesIn(GetDataset()));
