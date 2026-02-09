@@ -180,7 +180,10 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
     ROCSOLVER_ENTER("sy2sb_he2hb", "n:", n, "kd", kd, "nb:", nb,
                     "shiftA:", shiftA, "lda:", lda, "ldab:", ldab,
                     "bc:", batch_count);
-    printf( "he2hb n %d, kd %d, nb %d, lda %d, ldab %d\n", n, kd, nb, lda, ldab );
+
+    const bool debug_ = false;
+    if (debug_)
+        printf( "he2hb n %d, kd %d, nb %d, lda %d, ldab %d\n", n, kd, nb, lda, ldab );
 
     using S = decltype(std::real(T{}));
 
@@ -203,15 +206,15 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
     T const negone = -1;
     S const rone = 1;
 
-    printf( "A=%p\n", A );
-    print_matrix( "A_in", n, n, A, lda );
+    if (debug_)
+        print_matrix( "A_in", n, n, A, lda );
     laset(
         handle, 'g',
         ldab, n, zero, zero,
         Aband, idx2D( 0, 0, ldab ), ldab, strideAb,
         batch_count );
-    printf( "Aband=%p\n", Aband );
-    print_matrix( "Aband_in", ldab, n, Aband, ldab );
+    if (debug_)
+        print_matrix( "Aband_in", ldab, n, Aband, ldab );
 
     rocblas_stride strideD = ldd*nb;
     rocblas_stride strideV = ldv*nb;
@@ -233,7 +236,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
         rocblas_int jb = std::min( nb, jm );  // width  of outer panel
         rocblas_int jend = j + jb;
 
-        printf( "----------\nj = %d, jb = %d, jend = %d, jm = %d\n", j, jb, jend, jm );
+        if (debug_)
+            printf( "----------\nj = %d, jb = %d, jend = %d, jm = %d\n", j, jb, jend, jm );
 
         // Copy panel to factor, to preserve A for hemm.
         // For copying purposes, round up to full kd.
@@ -250,7 +254,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(
             A, idx2D( j, j, lda ) + shiftA, lda, strideA,  // Aj
             V, idx2D( j, 0, ldv ), ldv, strideA );         // Vj
 
-print_matrix( "Vj", n, nb, V, ldv, 3, stream );
+        if (debug_)
+            print_matrix( "Vj", n, nb, V, ldv, 3, stream );
 
         // Loop over inner blocking sub-panels to reach bandwidth.
         assert( i == j );
@@ -259,7 +264,8 @@ print_matrix( "Vj", n, nb, V, ldv, 3, stream );
             rocblas_int qm = n - i - kd;
             rocblas_int qn = std::min( kd, qm );
 
-            printf( "-----\ni = %d, qm = %d, qn = %d\n", i, qm, qn );
+            if (debug_)
+                printf( "-----\ni = %d, qm = %d, qn = %d\n", i, qm, qn );
 
             if (i > j)
             {
@@ -292,8 +298,10 @@ print_matrix( "Vj", n, nb, V, ldv, 3, stream );
                 &tau[ i ], strideTau,                      // tau_i
                 batch_count, scalars, work, D, Z, workArr );
 
-print_matrix( "Vi (R)", n, nb, V, ldv, 3, stream );
-//print_matrix( "Vi (R)", n, kd, V + idx2D( 0, i-j, ldv ), ldv, 3, stream );
+            if (debug_) {
+                print_matrix( "Vi (R)", n, nb, V, ldv, 3, stream );
+                //print_matrix( "Vi (R)", n, kd, V + idx2D( 0, i-j, ldv ), ldv, 3, stream );
+            }
 
             // Copy band of A (diag tile and R) to Aband.
             // Copies some "don't care" entries from below bandwidth kd.
@@ -307,7 +315,8 @@ print_matrix( "Vi (R)", n, nb, V, ldv, 3, stream );
                 V, idx2D( i, i-j, ldv ), ldv, strideV,
                 Aband, idx2D( idiag, i, ldab ), ldab-1, strideAb );
 
-print_matrix( "Aband_i", ldab, n, Aband, ldab, 3, stream );
+            if (debug_)
+                print_matrix( "Aband_i", ldab, n, Aband, ldab, 3, stream );
 
             // Set upper triangle of Vi to identity.
             T const offdiag = zero;
@@ -318,8 +327,10 @@ print_matrix( "Aband_i", ldab, n, Aband, ldab, 3, stream );
                 V, idx2D( i+kd, i-j, ldv ), ldv, strideV,  // Vi
                 batch_count );
 
-print_matrix( "Vi (I)", n, nb, V, ldv, 3, stream );
-//print_matrix( "Vi (I)", n, kd, V + idx2D( 0, i-j, ldv ), ldv, 3, stream );
+            if (debug_) {
+                print_matrix( "Vi (I)", n, nb, V, ldv, 3, stream );
+                //print_matrix( "Vi (I)", n, kd, V + idx2D( 0, i-j, ldv ), ldv, 3, stream );
+            }
 
             // Form corresponding matrix Ti = larft( Vi, tau_i ), stored above Vi.
             // todo: why does T not have shift? Is just adding okay? Why not add everywher?
@@ -491,17 +502,43 @@ print_matrix( "Vi (I)", n, nb, V, ldv, 3, stream );
 
     // Copy last, lower triangular block of band of A to Aband.
     // Using ldab-1 converts dense to band format.
-    // todo: currently copies square block. Confirm that's okay, or copy only lower.
     cpy_mblks = ceildiv( n-i, 32 );
     ROCSOLVER_LAUNCH_KERNEL(
         copy_mat<T>,
         dim3(cpy_mblks, cpy_mblks, batch_count), dim3(32, 32), 0, stream,
         n-i, n-i,
-        A,     idx2D( i, i, lda  ) + shiftA, lda,    strideA,     // Aii
-        Aband, idx2D( idiag, i, ldab ),      ldab-1, strideAb );  // Aband_ii
-								  //
-    print_matrix( "A", n, n, A, lda );
-    print_matrix( "Aband", ldab, n, Aband, ldab );
+        A,     idx2D( i, i, lda  ) + shiftA, lda,    strideA,   // Aii
+        Aband, idx2D( idiag, i, ldab ),      ldab-1, strideAb,  // Aband_ii
+        no_mask{}, rocblas_fill_lower );
+
+    // Clear lower triangle of last block.
+    // Ack -- need the other lower triangle. For n=16, kd=2,
+    // "." indicates structural zero outside matrix.
+    //  Aband = [
+    //      . . 2 2 2 2 2 2 2 2 2 2 2 2 2 2
+    //      . 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+    //      d d d d d d d d d d d d d d d d
+    //      1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 .  \ zero this triangle
+    //      2 2 2 2 2 2 2 2 2 2 2 2 2 2 . .  /
+    //      3 3 3 3 3 3 3 3 3 3 3 3 . . . .  \ zero these rows?
+    //      4 4 4 4 4 4 4 4 4 4 4 . . . . .  /
+    //
+    // Likely, this kernel doesn't need to clear these. The tester could clear
+    // these. As long as the hb2st kernel doesn't access them, which it
+    // shouldn't because they are outside the matrix. Maybe they should be NaN.
+    //
+    // todo: can we be more careful with copies above to not need to clear here?
+    // todo: do we need to clear rows 2*kd:3*kd? Those will be fill in hb2st.
+    // laset(
+    //     handle, 'l',
+    //     ldab, n, zero, zero,
+    //     Aband, idx2D( kd, n-kd, ldab ), ldab, strideAb,
+    //     batch_count );
+
+    if (debug_) {
+        print_matrix( "A", n, n, A, lda );
+        print_matrix( "Aband", ldab, n, Aband, ldab );
+    }
 
     rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
