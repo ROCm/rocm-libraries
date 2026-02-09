@@ -183,7 +183,7 @@ def main():
         
 
     if args.subdir:
-        if args.instance is not None:
+        if args.instance is not None and args.subdir not in files_by_subdir:
             print(f"Instance index {args.instance} was not found in subdirectory '{args.subdir}'")
             sys.exit(1)
         elif args.subdir not in files_by_subdir:
@@ -240,6 +240,7 @@ def main():
                         error_types[key_error].add(f"{subdir_name}/{filename}")
         else:
             # Sequential compilation
+            print(f"  Compiling {len(files_to_check)} files sequentially...")
             for cpp_file in files_to_check:
                 checked += 1
                 filename = cpp_file.name
