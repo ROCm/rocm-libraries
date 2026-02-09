@@ -29,7 +29,7 @@ TEST(TestFillTensorFromFile, InvalidPath)
 TEST(TestFillTensorFromFile, PathToDirectory)
 {
     Tensor<float> tensor({1});
-    hipdnn_test_sdk::utilities::ScopedDirectory dir("oijaweorij33");
+    ScopedDirectory dir("oijaweorij33");
     EXPECT_THROW(fillTensorFromFile(tensor, dir.path()), std::runtime_error);
 }
 
@@ -46,8 +46,7 @@ void writeVectorToFile(const std::filesystem::path& filename, const std::vector<
 TEST(TestFillTensorFromFile, Valid)
 {
     std::filesystem::path filename = "SimpleTensor0123.bin";
-    hipdnn_test_sdk::detail::ScopedExecute fileDeleter(
-        [filename]() { std::filesystem::remove(filename); });
+    ScopedExecute fileDeleter([filename]() { std::filesystem::remove(filename); });
 
     std::vector<int> values{0, 1, 2, 3};
     writeVectorToFile(filename, values);
@@ -68,7 +67,7 @@ TEST(TestLoadGraphAndTensors, Valid)
     SKIP_IF_NO_DEVICES();
 
     std::filesystem::path filepath
-        = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
+        = getCurrentExecutableDirectory()
           / "../lib/hipdnn_reference_data/BatchnormFwdInference/nchw/fp32/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed
@@ -111,7 +110,7 @@ TEST(TestLoadGraphAndTensors, Valid)
 TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
 {
     std::filesystem::path filepath
-        = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
+        = getCurrentExecutableDirectory()
           / "../lib/hipdnn_reference_data/BatchnormFwdInference/nchw/fp32/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed

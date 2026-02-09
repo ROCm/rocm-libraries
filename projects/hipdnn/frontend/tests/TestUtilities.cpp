@@ -57,8 +57,8 @@ TEST(TestUtilities, InitializeFrontendLoggingReturnsCorrectly)
 {
     ScopedEnvironmentVariableSetter guard("HIPDNN_LOG_LEVEL", "info");
 
-    EXPECT_EQ(hipdnn_frontend::initializeFrontendLogging(nullptr), -1);
-    EXPECT_EQ(hipdnn_frontend::initializeFrontendLogging(), 0);
+    EXPECT_EQ(initializeFrontendLogging(nullptr), -1);
+    EXPECT_EQ(initializeFrontendLogging(), 0);
 }
 
 // ============================================================================
