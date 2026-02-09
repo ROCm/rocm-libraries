@@ -1,7 +1,6 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "rocRoller/InstructionValues/Register_impl.hpp"
 #include <algorithm>
 #include <numeric>
 #include <queue>
@@ -592,20 +591,20 @@ namespace rocRoller
                 std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.r1hs, expr.r2hs};
 
                 co_yield prepareSourceOperands(results, schedulerLockCount, subExprs);
-                auto regType    = promoteRegisterTypes(results);
-                auto valueCount = Register::broadcastValueCount(results);
+                auto resType = resultType(expr);
 
-                if(valueCount > 1 && regType == Register::Type::Accumulator)
+                if(resType.valueCount > 1 && resType.regType == Register::Type::Accumulator)
                 {
                     const auto& arch = m_context->targetArchitecture();
                     AssertFatal(arch.HasCapability(GPUCapability::HasAccCD),
                                 concatenate("Architecture",
                                             arch.target().toString(),
                                             "does not use Accumulator registers."));
-                    regType = Register::Type::Vector;
+                    resType.regType = Register::Type::Vector;
                     for(int i = 0; i < results.size(); ++i)
                     {
-                        co_yield m_context->copier()->ensureType(results[i], results[i], regType);
+                        co_yield m_context->copier()->ensureType(
+                            results[i], results[i], resType.regType);
                     }
                 }
 
@@ -613,10 +612,10 @@ namespace rocRoller
 
                 if(!dest)
                 {
-                    dest = resultPlaceholder({regType, varType, valueCount}, true);
+                    dest = resultPlaceholder(resType, true);
                 }
 
-                for(size_t k = 0; k < valueCount; ++k)
+                for(size_t k = 0; k < resType.valueCount; ++k)
                 {
                     auto lhsVal  = results[0]->regType() == Register::Type::Literal
                                           || results[0]->valueCount() == 1
@@ -649,27 +648,26 @@ namespace rocRoller
                 std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.r1hs, expr.r2hs};
 
                 co_yield prepareSourceOperands(results, schedulerLockCount, subExprs);
-                auto regType    = promoteRegisterTypes(results);
-                auto valueCount = Register::broadcastValueCount(results);
+                auto resType = resultType(expr);
 
-                if(regType == Register::Type::Accumulator)
+                if(resType.regType == Register::Type::Accumulator)
                 {
                     const auto& arch = m_context->targetArchitecture();
                     AssertFatal(arch.HasCapability(GPUCapability::HasAccCD),
                                 concatenate("Architecture",
                                             arch.target().toString(),
                                             "does not use Accumulator registers."));
-                    regType = Register::Type::Vector;
+                    resType.regType = Register::Type::Vector;
                     for(int i = 0; i < results.size(); ++i)
                     {
-                        co_yield m_context->copier()->ensureType(results[i], results[i], regType);
+                        co_yield m_context->copier()->ensureType(
+                            results[i], results[i], resType.regType);
                     }
                 }
 
                 if(!dest)
                 {
-                    auto varType = promoteVariableTypes(results);
-                    dest         = resultPlaceholder({regType, varType, valueCount}, true);
+                    dest = resultPlaceholder(resType, true);
                 }
 
                 //If dest, results have multiple elements, handled inside generateOp
@@ -691,16 +689,14 @@ namespace rocRoller
                 co_yield prepareSourceOperands(results, schedulerLockCount, subExprs);
                 auto cond = results[0];
                 results.erase(results.begin());
-                auto regType    = promoteRegisterTypes(results);
-                auto valueCount = Register::broadcastValueCount(results);
+                auto resType = resultType(expr);
 
                 if(dest == nullptr)
                 {
-                    auto varType = promoteVariableTypes(results);
-                    dest         = resultPlaceholder({regType, varType, valueCount}, true);
+                    dest = resultPlaceholder(resType, true);
                 }
 
-                for(size_t k = 0; k < valueCount; ++k)
+                for(size_t k = 0; k < resType.valueCount; ++k)
                 {
                     auto lhs    = results[0];
                     auto rhs    = results[1];
@@ -801,7 +797,7 @@ namespace rocRoller
                     }
                     else
                     {
-                        for(size_t i = 0; i < dest->valueCount(); i++)
+                        for(size_t i = 0; i < destType.valueCount; i++)
                         {
                             Register::ValuePtr arg;
                             if(argInfo.packing < destInfo.packing)
