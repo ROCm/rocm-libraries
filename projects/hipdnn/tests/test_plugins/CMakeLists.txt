@@ -40,13 +40,12 @@ function(add_test_plugin target_name)
     endif()
 
     set_target_properties(
-        ${target_name} PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
-    )
-    set_target_properties(
-        ${target_name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
-    )
-    set_target_properties(
-        ${target_name} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
+        ${target_name}
+        PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
+            RUNTIME_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
+            ARCHIVE_OUTPUT_DIRECTORY "${${target_name}_OUTPUT_DIR}"
+            THEROCK_INSTALL_RPATH_ORIGIN "${${target_name}_INSTALL_DIR}"
     )
 
     install(TARGETS ${target_name} LIBRARY DESTINATION "${${target_name}_INSTALL_DIR}"
