@@ -24,7 +24,6 @@
 
 #include "ir/asm/StinkyAsmIR.hpp"
 #include "isa/ArchHelper.hpp"
-#include "isa/gfx/GfxIsa.hpp"
 
 #include <mutex>
 

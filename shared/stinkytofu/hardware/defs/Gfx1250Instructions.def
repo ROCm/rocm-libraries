@@ -84,42 +84,12 @@ DEF_T(BufferLoadD16HiB16Inst, "buffer_load_d16_hi_b16",
     .flags = {MUBUFLoad}
 )
 
-DEF_T(BufferLoadShortD16HiInst, "buffer_load_short_d16_hi",
+DEF_T(BufferLoadD16HiI8Inst, "buffer_load_d16_hi_i8",
     .format = MUBUF,
     .flags = {MUBUFLoad}
 )
 
-DEF_T(BufferLoadD16HiU8Inst, "buffer_load_d16_hi_u8",
-    .format = MUBUF,
-    .flags = {MUBUFLoad}
-)
-
-DEF_T(BufferLoadD16U8Inst, "buffer_load_d16_u8",
-    .format = MUBUF,
-    .flags = {MUBUFLoad}
-)
-
-DEF_T(BufferLoadDwordInst, "buffer_load_dword",
-    .format = MUBUF,
-    .flags = {MUBUFLoad}
-)
-
-DEF_T(BufferLoadDwordx2Inst, "buffer_load_dwordx2",
-    .format = MUBUF,
-    .flags = {MUBUFLoad}
-)
-
-DEF_T(BufferLoadDwordx3Inst, "buffer_load_dwordx3",
-    .format = MUBUF,
-    .flags = {MUBUFLoad}
-)
-
-DEF_T(BufferLoadDwordx4Inst, "buffer_load_dwordx4",
-    .format = MUBUF,
-    .flags = {MUBUFLoad}
-)
-
-DEF_T(BufferLoadSbyteInst, "buffer_load_sbyte",
+DEF_T(BufferLoadI8Inst, "buffer_load_i8",
     .format = MUBUF,
     .cost = {12, 104},
     .flags = {MUBUFLoad}
@@ -137,31 +107,31 @@ DEF_T(BufferLoadSbyteD16HiInst, "buffer_load_sbyte_d16_hi",
     .flags = {MUBUFLoad}
 )
 
-DEF_T(BufferLoadSshortInst, "buffer_load_sshort",
+DEF_T(BufferLoadI16Inst, "buffer_load_i16",
     .format = MUBUF,
     .cost = {12, 104},
     .flags = {MUBUFLoad}
 )
 
-DEF_T(BufferLoadUbyteInst, "buffer_load_ubyte",
+DEF_T(BufferLoadU8Inst, "buffer_load_u8",
     .format = MUBUF,
     .cost = {12, 108},
     .flags = {MUBUFLoad}
 )
 
-DEF_T(BufferLoadUbyteD16Inst, "buffer_load_ubyte_d16",
+DEF_T(BufferLoadU8D16Inst, "buffer_load_d16_u8",
     .format = MUBUF,
     .cost = {12, 108},
     .flags = {MUBUFLoad}
 )
 
-DEF_T(BufferLoadUbyteD16HiInst, "buffer_load_ubyte_d16_hi",
+DEF_T(BufferLoadU8D16HiInst, "buffer_load_d16_hi_u8",
     .format = MUBUF,
     .cost = {12, 104},
     .flags = {MUBUFLoad}
 )
 
-DEF_T(BufferLoadUshortInst, "buffer_load_ushort",
+DEF_T(BufferLoadU16Inst, "buffer_load_u16",
     .format = MUBUF,
     .cost = {12, 108},
     .flags = {MUBUFLoad}
@@ -446,52 +416,52 @@ DEF_T(FlatLoadDwordx4Inst, "flat_load_dwordx4",
     .flags = {FLATLoad}
 )
 
-DEF_T(FlatLoadSbyteInst, "flat_load_sbyte",
+DEF_T(FlatLoadI8Inst, "flat_load_i8",
     .format = FLAT,
     .flags = {FLATLoad}
 )
 
-DEF_T(FlatLoadSbyteD16Inst, "flat_load_sbyte_d16",
+DEF_T(FlatLoadI8D16Inst, "flat_load_d16_i8",
     .format = FLAT,
     .flags = {FLATLoad}
 )
 
-DEF_T(FlatLoadSbyteD16HiInst, "flat_load_sbyte_d16_hi",
+DEF_T(FlatLoadI8D16HiInst, "flat_load_d16_hi_i8",
     .format = FLAT,
     .flags = {FLATLoad}
 )
 
-DEF_T(FlatLoadShortD16Inst, "flat_load_short_d16",
+DEF_T(FlatLoadB16D16Inst, "flat_load_d16_b16",
     .format = FLAT,
     .flags = {FLATLoad}
 )
 
-DEF_T(FlatLoadShortD16HiInst, "flat_load_short_d16_hi",
+DEF_T(FlatLoadB16D16HiInst, "flat_load_d16_hi_b16",
     .format = FLAT,
     .flags = {FLATLoad}
 )
 
-DEF_T(FlatLoadSshortInst, "flat_load_sshort",
+DEF_T(FlatLoadI16Inst, "flat_load_i16",
     .format = FLAT,
     .flags = {FLATLoad}
 )
 
-DEF_T(FlatLoadUbyteInst, "flat_load_ubyte",
+DEF_T(FlatLoadU8Inst, "flat_load_u8",
     .format = FLAT,
     .flags = {FLATLoad}
 )
 
-DEF_T(FlatLoadUbyteD16Inst, "flat_load_ubyte_d16",
+DEF_T(FlatLoadU8D16Inst, "flat_load_d16_u8",
     .format = FLAT,
     .flags = {FLATLoad}
 )
 
-DEF_T(FlatLoadUbyteD16HiInst, "flat_load_ubyte_d16_hi",
+DEF_T(FlatLoadU8D16HiInst, "flat_load_d16_hi_u8",
     .format = FLAT,
     .flags = {FLATLoad}
 )
 
-DEF_T(FlatLoadUshortInst, "flat_load_ushort",
+DEF_T(FlatLoadU16Inst, "flat_load_u16",
     .format = FLAT,
     .flags = {FLATLoad}
 )
@@ -516,12 +486,12 @@ DEF_T(FlatStoreB96Inst, "flat_store_b96",
     .flags = {FLATStore}
 )
 
-DEF_T(FlatStoreByteInst, "flat_store_byte",
+DEF_T(FlatStoreByteInst, "flat_store_b8",
     .format = FLAT,
     .flags = {FLATStore}
 )
 
-DEF_T(FlatStoreByteD16HiInst, "flat_store_byte_d16_hi",
+DEF_T(FlatStoreByteD16HiInst, "flat_store_d16_hi_b8",
     .format = FLAT,
     .flags = {FLATStore}
 )
@@ -546,12 +516,12 @@ DEF_T(FlatStoreDwordx4Inst, "flat_store_dwordx4",
     .flags = {FLATStore}
 )
 
-DEF_T(FlatStoreShortInst, "flat_store_short",
+DEF_T(FlatStoreB16Inst, "flat_store_b16",
     .format = FLAT,
     .flags = {FLATStore}
 )
 
-DEF_T(FlatStoreShortD16HiInst, "flat_store_short_d16_hi",
+DEF_T(FlatStoreB16D16HiInst, "flat_store_d16_hi_b16",
     .format = FLAT,
     .flags = {FLATStore}
 )
@@ -636,12 +606,12 @@ DEF_T(DsLoadU8Inst, "ds_load_u8",
     .flags = {DSRead}
 )
 
-DEF_T(DsRead2B32Inst, "ds_read2_b32",
+DEF_T(DsRead2B32Inst, "ds_load_2addr_b32",
     .format = DS,
     .flags = {DSRead}
 )
 
-DEF_T(DsRead2B64Inst, "ds_read2_b64",
+DEF_T(DsRead2B64Inst, "ds_load_2addr_b64",
     .format = DS,
     .flags = {DSRead}
 )
@@ -766,12 +736,12 @@ DEF_T(DsStoreB96Inst, "ds_store_b96",
     .flags = {DSStore}
 )
 
-DEF_T(DsWrite2B32Inst, "ds_write2_b32",
+DEF_T(DsWrite2B32Inst, "ds_store_2addr_b32",
     .format = DS,
     .flags = {DSStore}
 )
 
-DEF_T(DsWrite2B64Inst, "ds_write2_b64",
+DEF_T(DsWrite2B64Inst, "ds_store_2addr_b64",
     .format = DS,
     .flags = {DSStore}
 )
@@ -1932,12 +1902,22 @@ DEF_T(VPermB32Inst, "v_perm_b32",
     .flags = {VALU}
 )
 
+DEF_T(VPkAddF16Inst, "v_pk_add_f16",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
 DEF_T(VPkAddF32Inst, "v_pk_add_f32",
     .format = VOP2,
     .flags = {VALU}
 )
 
 DEF_T(VPkFmaF16Inst, "v_pk_fma_f16",
+    .format = VOP2,
+    .flags = {VALU}
+)
+
+DEF_T(VPkMulF16Inst, "v_pk_mul_f16",
     .format = VOP2,
     .flags = {VALU}
 )

@@ -205,7 +205,7 @@ namespace stinkytofu
 
 ### Step 4: Create ArchInfo Class
 
-#### 1. Create `src/hardware/Gfx942ArchInfo.hpp`
+#### 1. Create `hardware/include/Gfx942.hpp`
 
 **Template:** Copy from an existing ArchInfo file.
 
@@ -213,7 +213,6 @@ namespace stinkytofu
 
 ```cpp
 #include "isa/ArchHelper.hpp"
-#include "isa/gfx/GfxIsa.hpp"
 
 namespace
 {
@@ -260,19 +259,19 @@ struct Gfx942ArchInfo : public ArchHelper::ArchInfo
 **Example (how Gfx942 is included):**
 
 ```cpp
-/* Begin architecture-specific ArchInfo headers */
+/* Architecture-specific headers (GfxXXX.hpp defines GfxXXXArchInfo) */
 
-// GFX942
 #ifdef STINKYTOFU_ARCH_GFX942
-#include "Gfx942ArchInfo.hpp"    // <-- CDNA3/MI300 (existing example)
+#include "Gfx942.hpp"    // <-- CDNA3/MI300 (existing example)
 #endif
 
-// GFX950 (your new architecture would be added here)
 #ifdef STINKYTOFU_ARCH_GFX950
-#include "Gfx950ArchInfo.hpp"
+#include "Gfx950.hpp"
 #endif
 
-/* End of architecture-specific ArchInfo headers */
+#ifdef STINKYTOFU_ARCH_GFX1250
+#include "Gfx1250.hpp"
+#endif
 ```
 
 ### Step 5: Create Rocisa-related header
@@ -343,7 +342,7 @@ When adding a new architecture, follow the Gfx942 pattern:
   - [ ] Set logical-to-arch mappings (`setGfxYourArchLogicalToArchMap`)
   - [ ] Set Rocisa conversion mappings (`setGfxYourArchConversionMap`)
 - [ ] Add to `hardware/CMakeLists.txt` in `GFX_SOURCES`
-- [ ] Create `src/hardware/GfxYourArchArchInfo.hpp` (copy from similar arch)
+- [ ] Create `hardware/include/GfxYourArch.hpp` (copy from similar arch)
 - [ ] Update `src/hardware/ArchHelper.cpp` to include new header
 - [ ] Create `src/ir/rocisa/GfxYourArchRocisaArchInfo.hpp` (copy from similar arch)
 - [ ] Update `src/ir/rocisa/RocisaArchHelper.cpp` to include new header
@@ -359,5 +358,5 @@ When adding a new architecture, follow the Gfx942 pattern:
 ```bash
 # Example: Copy Gfx942 and replace 942 -> YourArch
 sed -i 's/942/YourArch/g' hardware/src/gfx/GfxYourArch.cpp
-sed -i 's/9, 4, 2/X, Y, Z/g' src/hardware/GfxYourArchArchInfo.hpp
+sed -i 's/9, 4, 2/X, Y, Z/g' hardware/include/GfxYourArch.hpp
 ```

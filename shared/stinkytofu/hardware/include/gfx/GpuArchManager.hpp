@@ -49,6 +49,7 @@ namespace stinkytofu
         void addArch(const std::string&            arch,
                      std::function<void(GpuArch&)> defineInsts,
                      std::function<void(GpuArch&)> setLogicalToArchMap,
+                     std::function<void(GpuArch&)> setRocisaToArchMap,
                      std::function<void(GpuArch&)> setRocisaConversionMap);
 
         void enumAllOpcodes();

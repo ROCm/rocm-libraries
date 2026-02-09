@@ -4,7 +4,23 @@ This guide shows you how to add a new instruction from bottom (Assembly IR) to t
 
 **Note**: Python API is decoupled via a separate wrapper layer and is not directly affected by these changes.
 
-**Instruction definitions and costs** use the [DEF_T system](../design/instruction-def-t-system.md): they live in `hardware/defs/GfxXXXInstructions.def` (and optionally `GfxXXXFormats.def`). Tablegen generates `*_init.inc` and `*_costs.inc`; the architecture `.cpp` files only include those. Do not add DEF_T or cost tables manually in the `.cpp`.
+**Instruction definitions and costs** use the [DEF_T system](../design/instruction-def-t-system.md): they live in `hardware/defs/GfxXXXInstructions.def` (and optionally `GfxXXXFormats.def`). Tablegen generates `*_init.inc`, `*_costs.inc`, and `*_operands.inc`; the architecture `.cpp`/`.hpp` files only include those. Do not add DEF_T or cost tables manually in the `.cpp`.
+
+---
+
+## Quick checklist: adding an instruction (as few edits as possible)
+
+| Goal | What to do |
+|------|------------|
+| **Assembly-only instruction** | 1. Add one `DEF_T(Class, "mnemonic", .format = X, .flags = {...}, .cost = {...})` in `hardware/defs/GfxXXXInstructions.def`. 2. Rebuild. |
+| **Used from Logical IR** | Same as above, plus: add entry in `tools/tablegen/LogicalInstructionDefs.inc` and add `{"LogicalName", "mnemonic"}` in `setGfxXXXLogicalToArchMap()` in `hardware/src/gfx/GfxXXX.cpp`. |
+| **Used from Rocisa** | Same as above; the LogicalToArch map is what Rocisa uses. Optionally add conversion in `setGfxXXXConversionMap()` if needed. |
+| **Non-default cost** | Add `.cost = {cycle, latency}` to the same `DEF_T` in the .def. No .cpp edit. |
+| **Operand requirements** (e.g. 4 SGPRs, 8 SGPRs) | Add `.operand_widths = { {0, 4, false, S}, {1, 8, false, S} }` to the same `DEF_T` in the .def. Tablegen generates `*_operands.inc`; GfxXXX.hpp already includes and applies it. No manual .hpp edit. |
+| **New flag or format** | Add flag in `include/isa/gfx/Flags.def` and/or format in `hardware/defs/GfxXXXFormats.def`; then use in DEF_T. |
+| **Custom instruction class** (optional) | Add struct in `hardware/include/gfx/CommonInstsDSL.hpp` and reference via flags. |
+
+**Single place to add a normal instruction:** `hardware/defs/GfxXXXInstructions.def` (one DEF_T). Rebuild. If it must be visible to Logical IR, also add the Logical def and the LogicalToArch mapping in the .cpp.
 
 ---
 
@@ -15,10 +31,9 @@ To add a new StinkyTofu assembly IR, you'll need to access the following files:
 ```bash
 hardware/include/gfx/CommonInstsDSL.hpp    # Common instruction structures (optional)
 include/isa/gfx/Flags.def                  # Instruction flags (optional)
-hardware/defs/GfxXXXInstructions.def       # Instruction definitions + costs (DEF_T)
+hardware/defs/GfxXXXInstructions.def       # Instruction definitions + costs + .operand_widths (DEF_T)
 hardware/defs/GfxXXXFormats.def            # Format definitions (if new format needed)
 hardware/src/gfx/GfxXXX.cpp                # Rocisa LogicalToArch map only
-src/hardware/GfxXXXArchInfo.hpp            # Operand requirements (register width/type)
 ```
 
 Here we will add the instruction `s_wait_tensorcnt` step by step.
@@ -136,34 +151,21 @@ Do **not** add cost entries to any array in `GfxXXX.cpp`; they are generated fro
 
 #### 6b. Add Operand Requirements (Optional)
 
-If your instruction has specific register width or type requirements (e.g., `tensor_load_to_lds` requires 4 SGPRs for src0, 8 SGPRs for src1), add them in `src/hardware/GfxXXXArchInfo.hpp` (e.g. `Gfx1250ArchInfo.hpp`).
+If your instruction has specific register width or type requirements (e.g., `tensor_load_to_lds` requires 4 SGPRs for src0, 8 SGPRs for src1), add them **in the same DEF_T** in `hardware/defs/GfxXXXInstructions.def` using `.operand_widths`. Tablegen generates `GfxXXX_operands.inc`; each `GfxXXX.hpp` already includes it and applies requirements to the MCID table. **You do not edit the .hpp.**
 
-```cpp
-// In getMCIDTable() method:
+Example in `Gfx1250Instructions.def`:
 
-// 1. Define operand requirements (before the instRequirements table)
-static constexpr HwInstDesc::OperandWidth myInstructionReqs[] = {
-    {0, 4, false, RegType::S},  // src[0]: 4 SGPRs
-    {1, 8, false, RegType::S},  // src[1]: 8 SGPRs
-};
-
-// 2. Add to the instRequirements table
-static constexpr InstRequirement instRequirements[] = {
-    {"tensor_load_to_lds", tensorLoadToLdsReqs},
-    {"my_instruction", myInstructionReqs},  // Add your instruction
-};
+```c
+DEF_T(TensorLoadToLdsInst, "tensor_load_to_lds",
+    .format = TENSOR,
+    .flags = {TENSORLoadToLds},
+    .operand_widths = { {0, 4, false, S}, {1, 8, false, S} }
+)
 ```
 
-**Operand Width Fields**:
-- `operandIndex`: 0-based operand index
-- `width`: Number of consecutive registers (4 = 4 registers)
-- `isDest`: `true` for destination operand, `false` for source
-- `expectedType`: Register type (`RegType::S` for SGPR, `RegType::V` for VGPR, `RegType::A` for AGPR)
+**Operand width tuple**: `{operandIndex, width, isDest, regType}` -- `operandIndex` 0-based; `width` = number of consecutive registers; `isDest` true for dest, false for source; `regType` = `S`, `V`, or `A` (SGPR, VGPR, AGPR).
 
-**When to Add Requirements**:
-- ? Instruction requires specific register counts (e.g., 4 or 8 consecutive registers)
-- ? Instruction requires specific register types (must be SGPR/VGPR/AGPR)
-- ? Instruction uses single registers with no constraints (verifier will skip these)
+**When to add**: Instruction requires specific register counts or types for the IR verifier. Single-register instructions usually need no `.operand_widths`.
 
 ### Step 7: Run Tablegen
 
@@ -198,7 +200,7 @@ Instruction **definitions** and **costs** live in `.def` files; tablegen generat
 | **Formats** (optional) | `hardware/defs/GfxXXXFormats.def` | Add `DEF_FORMAT` if needed |
 | **Generated** (do not edit) | `hardware/generated/GfxXXX_init.inc`, `GfxXXX_costs.inc` | Produced by tablegen from .def |
 | **Rocisa LogicalToArch map** | `hardware/src/gfx/GfxXXX.cpp` | `setGfxXXXLogicalToArchMap()` |
-| **Operand requirements** | `src/hardware/GfxXXXArchInfo.hpp` | `getMCIDTable()` / operand tables |
+| **Operand requirements** | `hardware/defs/GfxXXXInstructions.def` | Add `.operand_widths = { ... }` to DEF_T; tablegen -> `*_operands.inc` (included by GfxXXX.hpp) |
 
 ### Gfx1250, Gfx942, Gfx950
 

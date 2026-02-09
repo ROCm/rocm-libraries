@@ -22,25 +22,21 @@
  * ************************************************************************ */
 #pragma once
 
+#include "ir/asm/StinkyAsmIR.hpp"
 #include "isa/ArchHelper.hpp"
-#include "isa/gfx/GfxIsa.hpp"
+
+#include <mutex>
 
 //===============================================================================
 // INSTRUCTION METADATA FOR GFX942
 //===============================================================================
 //
 // This file contains:
-//   - Operand REQUIREMENTS (register width/type) - see getMCIDTable() below
-//
-// Related metadata in other files:
-//   - Instruction COSTS (cycle, latency) -> hardware/src/gfx/Gfx942.cpp
-//   - Instruction DEFINITIONS (DEF_T calls) -> hardware/src/gfx/Gfx942.cpp
+//   - Operand REQUIREMENTS (from .operand_widths in .def, applied in getMCIDTable())
 //
 // To modify an instruction:
-//   - Update requirements: Add .operand_widths in hardware/defs/Gfx942Instructions.def
-//     (see Gfx1250Instructions.def tensor_load_to_lds) and use generated Gfx942_operands.inc
-//   - Update costs: Open hardware/src/gfx/Gfx942.cpp (GFX942_COSTS[])
-//   - Update definition: hardware/src/gfx/Gfx942.cpp (DEF_T calls)
+//   - Definitions, costs, operand requirements: edit hardware/defs/Gfx942Instructions.def
+//     (DEF_T with .format, .flags, .cost, .operand_widths); rebuild.
 //
 //===============================================================================
 
@@ -70,9 +66,23 @@ struct Gfx942ArchInfo : public ArchHelper::ArchInfo
     {
 #define GET_ISAINFO_HWINSTDESC_TABLE
 #include "hardware/Gfx942Isa.inc"
+#include "hardware/generated/Gfx942_operands.inc"
 
-        // Currently no operand requirements for Gfx942 instructions
-        // Add .operand_widths in hardware/defs/Gfx942Instructions.def when needed
+        static std::once_flag once;
+        std::call_once(once, [] {
+            for(const auto& req : instRequirements)
+            {
+                for(size_t i = 0; i < sizeof(MCIDTable) / sizeof(MCIDTable[0]); ++i)
+                {
+                    if(MCIDTable[i].mnemonic && std::string(MCIDTable[i].mnemonic) == req.mnemonic)
+                    {
+                        const_cast<HwInstDesc&>(MCIDTable[i]).operandWidths = req.requirements;
+                        break;
+                    }
+                }
+            }
+        });
+
         return MCIDTable;
     }
 

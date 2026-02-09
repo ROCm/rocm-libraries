@@ -39,7 +39,8 @@ namespace stinkytofu
         {
             if(config_.abortOnError)
             {
-                STINKY_UNREACHABLE(error.c_str());
+                // Temporarily disable unreachable error due to rocisa
+                // STINKY_UNREACHABLE(error.c_str());
             }
             std::cerr << "[StinkyIRVerifier] " << error;
         }

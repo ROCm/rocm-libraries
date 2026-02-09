@@ -30,29 +30,19 @@
 #include <string>
 #include <vector>
 
+#include "ir/LogicalToAsmMappings_generated.inc"
+
 namespace
 {
     using namespace stinkytofu;
 
     /**
-     * @brief Get assembly mnemonic for a logical IR instruction name
+     * @brief Get assembly mnemonic for a logical IR instruction on the given arch (per-arch map only).
      */
-    std::string getIRMnemonic(const char* logicalName)
+    std::string getIRMnemonic(const char* logicalName, GfxArchID arch)
     {
-        std::string mnemonic;
-
-        // Auto-generated mappings from TableGen
-        if(false)
-        {
-            // Placeholder for generated code
-        }
-#include "ir/IRMnemonics_generated.inc"
-        else
-        {
-            return "";
-        }
-
-        return mnemonic;
+        const char* m = getMnemonicForLogicalOnArch(logicalName, arch);
+        return m ? std::string(m) : "";
     }
 
     /// Implementation of the CompositeInstructionLoweringPass using unified Pass infrastructure
@@ -235,7 +225,7 @@ namespace
 
         bool isInstructionSupported(const std::string& logicalName, GfxArchID arch) const
         {
-            std::string mnemonic = getIRMnemonic(logicalName.c_str());
+            std::string mnemonic = getIRMnemonic(logicalName.c_str(), arch);
             if(mnemonic.empty())
             {
                 return false;

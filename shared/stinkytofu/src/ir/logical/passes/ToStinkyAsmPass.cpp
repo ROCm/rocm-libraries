@@ -29,6 +29,9 @@
 #include "stinkytofu.hpp"
 #include "support/Casting.hpp"
 
+// Per-arch logical name -> ASM mnemonic (same data as Rocisa LogicalToArchMap; gives correct ds_read vs ds_load etc.)
+#include "ir/LogicalToAsmMappings_generated.inc"
+
 // For ArchHelper access
 using namespace stinkytofu;
 #include <string>
@@ -167,18 +170,22 @@ namespace
                 = generateMXMFMAMnemonic(data->m, data->n, data->k, data->block, data->instType);
         }
         // ====================================================================
-        // Regular instructions: Use auto-generated mappings
+        // Regular instructions: per-arch map only (LogicalToAsmMappings_generated.inc)
+        // Every lowering for each arch must be in the map; no fallback.
         // ====================================================================
-        else if(false)
-        {
-            // Placeholder for generated code
-        }
-#include "ir/IRMnemonics_generated.inc"
         else
         {
-            STINKY_UNREACHABLE(
-                ("ToStinkyAsmPass: Unknown IR instruction: " + std::string(logicalName)).c_str());
-            return nullptr;
+            const char* archMnemonic = getMnemonicForLogicalOnArch(logicalName, arch);
+            if(!archMnemonic)
+            {
+                STINKY_UNREACHABLE(
+                    ("ToStinkyAsmPass: No mapping for logical instruction '"
+                     + std::string(logicalName)
+                     + "' on this architecture; add to per-arch LogicalToArchMap (Gfx*.cpp).")
+                        .c_str());
+                return nullptr;
+            }
+            mnemonic = archMnemonic;
         }
 
         // Get the ISA opcode for this mnemonic on the target architecture
