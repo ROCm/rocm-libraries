@@ -1,149 +1,119 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2024 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
-#include "../conv2d.hpp"
-#include <miopen/miopen.h>
-#include <gtest/gtest_common.hpp>
-#include <gtest/gtest.h>
-#include "get_handle.hpp"
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
-namespace conv_group {
-void GetArgs(const std::string& param, std::vector<std::string>& tokens)
+#include "conv_common_gtest.hpp"
+
+namespace {
+
+template <typename T>
+std::vector<T> generate_data_limited(const std::vector<T>& dims, int limit_multiplier, T single)
 {
-    std::stringstream ss(param);
-    std::istream_iterator<std::string> begin(ss);
-    std::istream_iterator<std::string> end;
-    while(begin != end)
-        tokens.push_back(*begin++);
+    const bool full_set = true; 
+    const int limit_set = 2;
+
+    if(full_set)
+    {
+        if(limit_set > 0)
+        {
+            auto endpoint = std::min(static_cast<int>(dims.size()), limit_set * limit_multiplier);
+            return std::vector<T>(dims.cbegin(), dims.cbegin() + endpoint);
+        }
+        else
+            return dims;
+    }
+    else
+    {
+        return {single};
+    }
 }
 
-std::vector<std::string> GetTestCases(const std::string& precision)
+template <typename T>
+std::vector<T> generate_data(const std::vector<T>& dims)
 {
-    std::string cmd_v = "test_conv2d --verbose " + precision;
-
-    // clang-format off
-    return std::vector<std::string>{
-        {cmd_v + " --input	16	128	56	56	--weights	256	4	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	32"},
-        {cmd_v + " --input	16	256	56	56	--weights	512	8	3	3	--pads_strides_dilations	1	1	2	2	1	1	--group-count	32"},
-        {cmd_v + " --input	16	256	28	28	--weights	512	8	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	32"},
-        {cmd_v + " --input	16	512	28	28	--weights	1024	16	3	3	--pads_strides_dilations	1	1	2	2	1	1	--group-count	32"},
-        {cmd_v + " --input	16	512	14	14	--weights	1024	16	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	32"},
-        {cmd_v + " --input	16	1024	14	14	--weights	2048	32	3	3	--pads_strides_dilations	1	1	2	2	1	1	--group-count	32"},
-        {cmd_v + " --input	16	1024	7	7	--weights	2048	32	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	32"},
-        {cmd_v + " --input	32	128	56	56	--weights	256	4	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	32"},
-        {cmd_v + " --input	32	256	56	56	--weights	512	8	3	3	--pads_strides_dilations	1	1	2	2	1	1	--group-count	32"},
-        //
-        // Workaround for "Memory access fault by GPU node" during "HIP Release All" - WrW disabled.
-        {cmd_v + " --input	32	256	28	28	--weights	512	8	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	32 --disable-backward-weights"},
-        {cmd_v + " --input	32	512	28	28	--weights	1024	16	3	3	--pads_strides_dilations	1	1	2	2	1	1	--group-count	32"},
-        {cmd_v + " --input	32	512	14	14	--weights	1024	16	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	32"},
-        {cmd_v + " --input	32	1024	14	14	--weights	2048	32	3	3	--pads_strides_dilations	1	1	2	2	1	1	--group-count	32"},
-        {cmd_v + " --input	32	1024	7	7	--weights	2048	32	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	32"},
-        {cmd_v + " --input	4	4	161	700	--weights	32	1	5	20	--pads_strides_dilations	0	0	2	2	1	1	--group-count	4"},
-        {cmd_v + " --input	8	2	161	700	--weights	32	1	5	20	--pads_strides_dilations	0	0	2	2	1	1	--group-count	2"},
-        {cmd_v + " --input	16	4	161	700	--weights	32	1	5	20	--pads_strides_dilations	0	0	2	2	1	1	--group-count	4"},
-        {cmd_v + " --input	32	2	161	700	--weights	32	1	5	20	--pads_strides_dilations	0	0	2	2	1	1	--group-count	2"},
-        {cmd_v + " --input	4	32	79	341	--weights	32	16	5	10	--pads_strides_dilations	0	0	2	2	1	1	--group-count	2"},
-        {cmd_v + " --input	8	32	79	341	--weights	32	16	5	10	--pads_strides_dilations	0	0	2	2	1	1	--group-count	2"},
-        {cmd_v + " --input	16	32	79	341	--weights	32	16	5	10	--pads_strides_dilations	0	0	2	2	1	1	--group-count	2"},
-        {cmd_v + " --input	32	32	79	341	--weights	32	16	5	10	--pads_strides_dilations	0	0	2	2	1	1	--group-count	2"},
-        {cmd_v + " --input	16	4	48	480	--weights	16	1	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	4"},
-        {cmd_v + " --input	16	16	24	240	--weights	32	1	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	16"},
-        {cmd_v + " --input	16	32	12	120	--weights	64	8	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	4"},
-        {cmd_v + " --input	16	64	6	60	--weights	128	16	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	4"},
-        {cmd_v + " --input	8	3	108	108	--weights	63	1	3	3	--pads_strides_dilations	1	1	2	2	1	1	--group-count	3"},
-        {cmd_v + " --input	8	64	54	54	--weights	64	8	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	8"},
-        {cmd_v + " --input	8	128	27	27	--weights	128	16	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	8"},
-        {cmd_v + " --input	8	3	224	224	--weights	63	1	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	3"},
-        {cmd_v + " --input	8	64	112	112	--weights	128	32	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	2"},
-        {cmd_v + " --input	16	9	224	224	--weights	63	3	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	3"},
-        //
-        // Workaround for "Memory access fault by GPU node" during "FP32 gfx908 Hip Release All subset" - WrW disabled.
-        {cmd_v + " --input	16	64	112	112	--weights	128	16	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	4 --disable-backward-weights"},
-        {cmd_v + " --input	16	3	224	224	--weights	63	1	7	7	--pads_strides_dilations	3	3	2	2	1	1	--group-count	3"},
-        {cmd_v + " --input	16	192	28	28	--weights	32	12	5	5	--pads_strides_dilations	2	2	1	1	1	1	--group-count	16"},
-        {cmd_v + " --input	16	832	7	7	--weights	128	52	5	5	--pads_strides_dilations	2	2	1	1	1	1	--group-count	16"},
-        {cmd_v + " --input	16	192	28	28	--weights	32	24	1	1	--pads_strides_dilations	0	0	1	1	1	1	--group-count	8"},
-        {cmd_v + " --input	16	832	7	7	--weights	128	104	1	1	--pads_strides_dilations	0	0	1	1	1	1	--group-count	8"},
-        {cmd_v + " --input	11	23	161	700	--weights	46	1	7	7	--pads_strides_dilations	1	1	2	2	1	1	--group-count	23"},
-        {cmd_v + " --input	8	7	224	224	--weights	63	1	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	7"},
-        {cmd_v + " --input	8	7	224	224	--weights	63	1	3	3	--pads_strides_dilations	0	0	1	1	1	1	--group-count	7"},
-        {cmd_v + " --input	8	7	224	224	--weights	63	1	3	3	--pads_strides_dilations	0	0	2	2	1	1	--group-count	7"},
-        {cmd_v + " --input	8	7	224	224	--weights	63	1	3	3	--pads_strides_dilations	1	1	2	2	1	1	--group-count	7"},
-        {cmd_v + " --input	8	7	224	224	--weights	63	1	3	3	--pads_strides_dilations	2	2	2	2	1	1	--group-count	7"},
-        {cmd_v + " --input	8	3	108	108	--weights	63	1	3	3	--pads_strides_dilations	1	1	1	1	1	1	--group-count	3"},
-        {cmd_v + " --input	8	3	108	108	--weights	63	1	3	3	--pads_strides_dilations	0	0	1	1	1	1	--group-count	3"},
-        {cmd_v + " --input	8	3	108	108	--weights	63	1	3	3	--pads_strides_dilations	0	0	2	2	1	1	--group-count	3"},
-        {cmd_v + " --input	8	3	108	108	--weights	63	1	3	3	--pads_strides_dilations	1	1	2	2	1	1	--group-count	3"},
-        {cmd_v + " --input	8	3	108	108	--weights	63	1	3	3	--pads_strides_dilations	2	2	2	2	1	1	--group-count	3"}
-    };
-    // clang-format on
+    const bool full_set = true;
+    if(full_set)
+        return dims;
+    else
+        return {dims.front()};
 }
 
-using TestCase = decltype(GetTestCases(std::string{}))::value_type;
-
-class GPU_ConvGroup_FP32 : public testing::TestWithParam<std::vector<TestCase>>
+auto GetDataset()
 {
-    MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
+    std::vector<miopen::test::conv::conv_test_input> cases{};
+
+    auto batch_sizes            = generate_data_limited(miopen::test::conv::get_batch_sizes(), 1, std::size_t{1});
+    auto input_channels         = generate_data_limited(miopen::test::conv::get_input_channels(), 1, std::size_t{32});
+    auto output_channels        = generate_data_limited(miopen::test::conv::get_output_channels(), 1, std::size_t{64});
+    auto spatial_dim_elements   = generate_data_limited(miopen::test::conv::get_2d_spatial_dims(), 1, std::vector<std::size_t>{28, 28});
+    auto filter_dims            = generate_data_limited(miopen::test::conv::get_2d_filter_dims(), 2, std::vector<std::size_t>{3, 3});
+    auto pads_strides_dilations = generate_data_limited(miopen::test::conv::get_2d_pads_strides_dilations(), 2, std::vector<int>{1, 1, 1, 1, 1, 1});
+    auto trans_output_pads      = generate_data(miopen::test::conv::get_2d_trans_output_pads());
+    auto in_layouts             = generate_data(std::vector<std::string>{"NCHW"});
+    auto fil_layouts            = generate_data(std::vector<std::string>{"NCHW"});
+    auto out_layouts            = generate_data(std::vector<std::string>{"NCHW"});
+    auto deterministics         = generate_data(std::vector<bool>{false});
+    auto tensor_vects           = generate_data(std::vector<std::size_t>{0});
+    auto vector_lengths         = generate_data(std::vector<std::size_t>{1});
+    // Only valid for int8 input and weights
+    auto output_types           = generate_data(std::vector<std::string>{"int32"});
+    auto int8_vectorizes        = generate_data(std::vector<bool>{false});
+    auto group_counts           = generate_data(std::vector<int>{2, 4, 8}); // Standard group counts for test_conv_group
+
+    for(auto b : batch_sizes)
+        for(auto ic : input_channels)
+            for(auto oc : output_channels)
+                for(auto s : spatial_dim_elements)
+                    for(auto f : filter_dims)
+                        for(auto p : pads_strides_dilations)
+                            for(auto tp : trans_output_pads)
+                                for(auto il : in_layouts)
+                                    for(auto fl : fil_layouts)
+                                        for(auto ol : out_layouts)
+                                            for(auto d : deterministics)
+                                                for(auto tv : tensor_vects)
+                                                    for(auto vl : vector_lengths)
+                                                        for(auto ot : output_types)
+                                                            for(auto iv : int8_vectorizes)
+                                                                for(auto gc : group_counts)
+                                                                {
+                                                                    // Group count must divide input and output channels
+                                                                    if(ic % gc != 0 || oc % gc != 0)
+                                                                        continue;
+
+                                                                    miopen::test::conv::conv_test_input input{};
+                                                                    input.batch_size             = b;
+                                                                    input.input_channels         = ic;
+                                                                    input.output_channels        = oc;
+                                                                    input.spatial_dim_elements   = s;
+                                                                    input.filter_dims            = f;
+                                                                    input.pads_strides_dilations = p;
+                                                                    input.trans_output_pads      = tp;
+                                                                    input.in_layout              = il;
+                                                                    input.fil_layout             = fl;
+                                                                    input.out_layout             = ol;
+                                                                    input.deterministic          = d;
+                                                                    input.tensor_vect            = tv;
+                                                                    input.vector_length          = vl;
+                                                                    input.output_type            = ot;
+                                                                    input.int8_vectorize         = iv;
+                                                                    input.groupCount             = gc;
+                                                                    input.do_forward             = true;
+                                                                    input.do_backward_data       = true;
+                                                                    input.do_backward_weights    = true;
+                                                                    cases.push_back(input);
+                                                                }
+    return cases;
+}
+
+} // namespace
+
+template <class T>
+struct conv_group_test : miopen::test::conv::conv_test_base<T>
+{
 };
 
-bool IsTestSupportedForDevice()
-{
-    using namespace miopen::debug;
-    using e_mask = enabled<Gpu::gfx94X, Gpu::gfx103X, Gpu::gfx110X>;
-    using d_mask = disabled<Gpu::Default>;
-    return ::IsTestSupportedForDevMask<d_mask, e_mask>();
-}
+using GPU_conv_group_FP32 = conv_group_test<float>;
 
-void Run2dDriver(void)
-{
-    if(!IsTestSupportedForDevice())
-    {
-        GTEST_SKIP();
-    }
-    std::vector<std::string> params = GPU_ConvGroup_FP32::GetParam();
+TEST_P(GPU_conv_group_FP32, TestFP32) { this->Run(); }
 
-    for(const auto& test_value : params)
-    {
-        std::vector<std::string> tokens;
-        GetArgs(test_value, tokens);
-        std::vector<const char*> ptrs;
-
-        std::transform(tokens.begin(), tokens.end(), std::back_inserter(ptrs), [](const auto& str) {
-            return str.data();
-        });
-        testing::internal::CaptureStderr();
-        test_drive<conv2d_driver>(ptrs.size(), ptrs.data());
-        auto capture = testing::internal::GetCapturedStderr();
-        std::cout << capture;
-    }
-};
-
-} // namespace conv_group
-using namespace conv_group;
-
-TEST_P(GPU_ConvGroup_FP32, FloatTest_conv_group) { Run2dDriver(); };
-
-INSTANTIATE_TEST_SUITE_P(Full, GPU_ConvGroup_FP32, testing::Values(GetTestCases("--float")));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_conv_group_FP32, ::testing::ValuesIn(GetDataset()));
