@@ -25,7 +25,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// NOTE(HIP/AMD): Currently we do not guarentee bitwise equivalence for fp16
+// NOTE(HIP/AMD): Currently we do not guarantee bitwise equivalence for fp16
 // UNSUPPORTED: nvrtc, hiprtc, hipcc, nvcc-11, nvcc-12.0, nvcc-12.1
 
 #include <cuda/std/cmath>
