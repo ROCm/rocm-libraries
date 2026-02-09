@@ -52,11 +52,11 @@ public:
         restore = ClearValue();
     }
 
-    ScopedEnvironment()                         = delete;
-    ScopedEnvironment(const ScopedEnvironment&) = delete;
-    ScopedEnvironment(ScopedEnvironment&&)      = delete;
+    ScopedEnvironment()                                    = delete;
+    ScopedEnvironment(const ScopedEnvironment&)            = delete;
+    ScopedEnvironment(ScopedEnvironment&&)                 = delete;
     ScopedEnvironment& operator=(const ScopedEnvironment&) = delete;
-    ScopedEnvironment& operator=(ScopedEnvironment&&) = delete;
+    ScopedEnvironment& operator=(ScopedEnvironment&&)      = delete;
 
     ~ScopedEnvironment()
     {
