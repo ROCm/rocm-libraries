@@ -207,7 +207,6 @@ inline std::vector<int> get_gru_hidden_size() { return {67}; }
 
 inline std::vector<std::vector<int>> generate_batchSeq(const int batchSize, const int seqLength)
 {
-
     static constexpr int modval = 3;
 
     int currentval = batchSize;

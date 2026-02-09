@@ -23,94 +23,40 @@
  *
  *******************************************************************************/
 
-#include "lstm_test.hpp"
+#include "lstm.hpp"
 #include <hip/hip_runtime.h>
-#include <gtest/gtest_common.hpp>
 
-namespace lstm_dropout {
-
-auto GetTestCases()
+struct GPU_LSTM_dropout_FP32 : LSTM_test<float>, testing::TestWithParam<std::tuple<int, int>>
 {
-    int batchSize{17};
-    int seqLength{25};
-    int inVecLen{17};
-    int hiddenSize{67};
-    int numLayers{3};
-    int useDropout{1};
-    int usePadding{0};
-    int flatBatchFill{1};
-    int inputMode{0};
-    int biasMode{0};
-    int dirMode{0};
-    int algoMode{0};
-    std::vector<int> batchSeq = generate_batchSeq(batchSize, seqLength)[0];
-
-    return std::make_tuple(batchSize,
-                           seqLength,
-                           inVecLen,
-                           hiddenSize,
-                           numLayers,
-                           useDropout,
-                           usePadding,
-                           flatBatchFill,
-                           inputMode,
-                           biasMode,
-                           dirMode,
-                           algoMode,
-                           batchSeq);
-}
-
-struct GPU_Test_dropout_FP32 : testing::TestWithParam<decltype(GetTestCases())>, LSTM_test<float>
-{
-    int device_count{0};
-
-    void SetUp() override
-    {
-        if(hipGetDeviceCount(&device_count) != hipSuccess)
-            device_count = 0;
-    }
 };
 
-} // namespace lstm_dropout
-
-using namespace lstm_dropout;
-
-TEST_P(GPU_Test_dropout_FP32, FloatTest_lstm_dropout)
+TEST_P(GPU_LSTM_dropout_FP32, FloatTest)
 {
-    if(device_count == 0)
+    int device_count{0};
+    if((hipGetDeviceCount(&device_count) != hipSuccess) or (device_count == 0))
     {
         GTEST_SKIP() << "No HIP devices available for testing";
     }
 
-    auto [batchSize,
-          seqLength,
-          inVecLen,
-          hiddenSize,
-          numLayers,
-          useDropout,
-          usePadding,
-          flatBatchFill,
-          inputMode,
-          biasMode,
-          dirMode,
-          algoMode,
-          batchSeq] = GetParam();
+    int batchSize{17};
+    int seqLength{25};
+    int useDropout{1};
 
+    auto [flatBatchFill, dirMode] = GetParam();
+
+    this->useDropout    = useDropout;
     this->batchSize     = batchSize;
     this->seqLength     = seqLength;
-    this->inVecLen      = inVecLen;
-    this->hiddenSize    = hiddenSize;
-    this->numLayers     = numLayers;
-    this->useDropout    = useDropout;
-    this->usePadding    = usePadding;
+    this->inVecLen      = batchSize;
+    this->hiddenSize    = 67;
+    this->numLayers     = 3;
+    this->batchSeq      = generate_batchSeq(batchSize, seqLength)[0];
     this->flatBatchFill = flatBatchFill;
-    this->inputMode     = inputMode;
-    this->biasMode      = biasMode;
     this->dirMode       = dirMode;
-    this->algoMode      = algoMode;
-    this->batchSeq      = batchSeq;
 
     RunTest();
 }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Test_dropout_FP32, testing::Values(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_LSTM_dropout_FP32,
+                         testing::Combine(testing::Values(0, 1), testing::Values(0, 1)));

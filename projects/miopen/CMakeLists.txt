@@ -346,7 +346,7 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
                 OUTPUT_VARIABLE _match
             )
             if(_match)
-                message(STATUS "Found composablekernel in requirements.txt: ${COMPOSABLE_KERNEL_HASH}")
+                message(STATUS "Found composablekernel in requirements.txt")
             else()
                 message(FATAL_ERROR "Could not find composablekernel in requirements.txt")
             endif()

@@ -23,94 +23,45 @@
  *
  *******************************************************************************/
 
-#include "lstm_test.hpp"
+#include "lstm.hpp"
 #include <hip/hip_runtime.h>
-#include <gtest/gtest_common.hpp>
 
-namespace lstm {
-
-auto GetTestCases()
+struct GPU_LSTM_FP32 : LSTM_test<float>, testing::TestWithParam<std::tuple<int, int, int, int, int>>
 {
-    int batchSize{17};
-    int seqLength{2};
-    int inVecLen{17};
-    int hiddenSize{67};
-    int numLayers{1};
-    int useDropout{0};
-    int usePadding{0};
-    int flatBatchFill{0};
-    int inputMode{0};
-    int biasMode{0};
-    int dirMode{0};
-    int algoMode{0};
-    std::vector<int> batchSeq = generate_batchSeq(batchSize, seqLength)[0];
-
-    return std::make_tuple(batchSize,
-                           seqLength,
-                           inVecLen,
-                           hiddenSize,
-                           numLayers,
-                           useDropout,
-                           usePadding,
-                           flatBatchFill,
-                           inputMode,
-                           biasMode,
-                           dirMode,
-                           algoMode,
-                           batchSeq);
-}
-
-struct GPU_Test_FP32 : testing::TestWithParam<decltype(GetTestCases())>, LSTM_test<float>
-{
-    int device_count{0};
-
-    void SetUp() override
-    {
-        if(hipGetDeviceCount(&device_count) != hipSuccess)
-            device_count = 0;
-    }
 };
 
-} // namespace lstm
-
-using namespace lstm;
-
-TEST_P(GPU_Test_FP32, FloatTest_lstm)
+TEST_P(GPU_LSTM_FP32, FloatTest)
 {
-    if(device_count == 0)
+    int device_count{0};
+    if((hipGetDeviceCount(&device_count) != hipSuccess) or (device_count == 0))
     {
         GTEST_SKIP() << "No HIP devices available for testing";
     }
 
-    auto [batchSize,
-          seqLength,
-          inVecLen,
-          hiddenSize,
-          numLayers,
-          useDropout,
-          usePadding,
-          flatBatchFill,
-          inputMode,
-          biasMode,
-          dirMode,
-          algoMode,
-          batchSeq] = GetParam();
+    int batchSize{17};
+    int seqLength{2};
 
-    this->batchSize     = batchSize;
-    this->seqLength     = seqLength;
-    this->inVecLen      = inVecLen;
-    this->hiddenSize    = hiddenSize;
-    this->numLayers     = numLayers;
-    this->useDropout    = useDropout;
-    this->usePadding    = usePadding;
-    this->flatBatchFill = flatBatchFill;
-    this->inputMode     = inputMode;
-    this->biasMode      = biasMode;
-    this->dirMode       = dirMode;
-    this->algoMode      = algoMode;
-    this->batchSeq      = batchSeq;
+    auto [usePadding, inputMode, biasMode, dirMode, algoMode] = GetParam();
+
+    this->batchSize  = batchSize;
+    this->seqLength  = seqLength;
+    this->inVecLen   = batchSize;
+    this->hiddenSize = 67;
+    this->numLayers  = 1;
+    this->batchSeq   = generate_batchSeq(batchSize, seqLength)[0];
+    this->usePadding = usePadding;
+    this->inputMode  = inputMode;
+    this->biasMode   = biasMode;
+    this->dirMode    = dirMode;
+    this->algoMode   = algoMode;
 
     RunTest();
 }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Test_FP32, testing::Values(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_LSTM_FP32,
+                         testing::Combine(testing::Values(0, 1),
+                                          testing::Values(0, 1),
+                                          testing::Values(0, 1),
+                                          testing::Values(0, 1),
+                                          testing::Values(0, 1)));
