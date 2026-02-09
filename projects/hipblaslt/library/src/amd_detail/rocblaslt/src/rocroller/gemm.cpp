@@ -685,6 +685,28 @@ size_t workspaceRequired(std::shared_ptr<GemmKernel> gemm, const RocblasltContra
     return gemm->commandKernel->scratchSpaceRequired(Operations::ScratchPolicy::None, runtimeArgs);
 }
 
+bool isSupportedProblem(std::shared_ptr<GemmKernel> gemm, const RocblasltContractionProblem& prob)
+{
+    auto workSpaceRequired = workspaceRequired(gemm, prob);
+
+    if(workSpaceRequired > prob.workspaceSize)
+        return false;
+
+    if (gemm->isCustomKernel())
+    {
+        return (prob.m % gemm->params->workgroupTile.m == 0 &&
+                prob.n % gemm->params->workgroupTile.n == 0 &&
+                prob.k % gemm->params->workgroupTile.k == 0);
+    }
+    else
+    {
+        auto commandArgs = createCommandArguments(gemm, prob, DEFAULT_WGM);
+        auto runtimeArgs = commandArgs.runtimeArguments();
+
+        return gemm->commandKernel->matchesPredicates(runtimeArgs, LogLevel::Error);
+    }
+}
+
 CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
                                         const RocblasltContractionProblem& prob,
                                         int                                wgm)

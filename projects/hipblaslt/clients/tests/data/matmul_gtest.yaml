@@ -2330,7 +2330,7 @@ Tests:
   unit_check: 0
   norm_check: 1
   algo_method: [2]
-  solution_index: 0x82840408  # Workgroup tile size = 128x128x256
+  solution_index: 0x82880808  # Workgroup tile size = 256X256x256
   gpu_arch: '950'
 
 - name: matmul_relu_clamp_useE

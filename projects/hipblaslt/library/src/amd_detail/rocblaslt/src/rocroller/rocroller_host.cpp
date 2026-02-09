@@ -671,16 +671,7 @@ rocblaslt_status isRocRollerSolutionSupported(rocblaslt_handle             handl
     if(status != rocblaslt_status_success)
         return status;
 
-    auto workSpaceRequired = workspaceRequired(kernel, prob);
-
-    if(workSpaceRequired > prob.workspaceSize)
-        return rocblaslt_status_invalid_value;
-
-    auto commandArgs = createCommandArguments(kernel, prob, DEFAULT_WGM);
-    auto runtimeArgs = commandArgs.runtimeArguments();
-
-
-    if(!kernel->commandKernel->matchesPredicates(runtimeArgs, LogLevel::Error))
+    if(!isSupportedProblem(kernel, prob))
     {
         return rocblaslt_status_invalid_value;
     }

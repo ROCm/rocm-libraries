@@ -153,6 +153,11 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
 size_t workspaceRequired(std::shared_ptr<GemmKernel> gemm, const RocblasltContractionProblem& prob);
 
 /**
+ * @brief Return whether or not kernel can be used for a specific problem.
+ */
+bool isSupportedProblem(std::shared_ptr<GemmKernel> gemm, const RocblasltContractionProblem& prob);
+
+/**
  * @brief Set the arguments to call a rocRoller kernel
  *
  * @param gemm
