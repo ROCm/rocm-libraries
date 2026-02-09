@@ -210,7 +210,7 @@
     SolutionNameMin: Cijk_Ailk_Bljk_HF8N_HHS_BH_Bias_HAS_SAB_SAV_MT16x16x128_MI16x16x1_SN_GSU8_LBSPPA256_LPA16_LPB16_MIWT1_1_WG16_4_1_WGM1
     SourceSwap: 0
     StaggerU: 4
-    StaggerUMapping: 2
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -394,7 +394,7 @@
     SolutionNameMin: Cijk_Ailk_Bljk_HF8N_HHS_BH_Bias_HAS_SAB_SAV_MT16x32x128_MI16x16x1_SN_GSU8_LBSPPA256_LPA16_LPB16_MIWT1_1_WG16_8_1_WGM1
     SourceSwap: 0
     StaggerU: 4
-    StaggerUMapping: 2
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -578,7 +578,7 @@
     SolutionNameMin: Cijk_Ailk_Bljk_HF8N_HHS_BH_Bias_HAS_SAB_SAV_MT16x64x128_MI16x16x1_SN_GSU8_LBSPPA256_LPA16_LPB16_MIWT1_1_WG16_16_1_WGM1
     SourceSwap: 0
     StaggerU: 4
-    StaggerUMapping: 2
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -762,7 +762,7 @@
     SolutionNameMin: Cijk_Ailk_Bljk_HF8N_HHS_BH_Bias_HAS_SAB_SAV_MT32x16x128_MI16x16x1_SN_GSU8_LBSPPA512_LPA16_LPB16_MIWT1_1_WG32_4_1_WGM1
     SourceSwap: 0
     StaggerU: 4
-    StaggerUMapping: 2
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -946,7 +946,7 @@
     SolutionNameMin: Cijk_Ailk_Bljk_HF8N_HHS_BH_Bias_HAS_SAB_SAV_MT64x16x128_MI16x16x1_SN_GSU8_LBSPPA1024_LPA16_LPB16_MIWT1_1_WG64_4_1_WGM1
     SourceSwap: 0
     StaggerU: 4
-    StaggerUMapping: 2
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -1130,7 +1130,7 @@
     SolutionNameMin: Cijk_Ailk_Bljk_HF8N_HHS_BH_Bias_HAS_SAB_SAV_MT32x32x128_MI32x32x1_SN_GSU8_LBSPPA128_LPA4_LPB8_MIWT1_1_WG32_2_1_WGM1
     SourceSwap: 0
     StaggerU: 4
-    StaggerUMapping: 2
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -1314,7 +1314,7 @@
     SolutionNameMin: Cijk_Ailk_Bljk_HF8N_HHS_BH_Bias_HAS_SAB_SAV_MT32x64x128_MI32x32x1_SN_GSU8_LBSPPA128_LPA4_LPB8_MIWT1_1_WG32_4_1_WGM1
     SourceSwap: 0
     StaggerU: 4
-    StaggerUMapping: 2
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -1498,7 +1498,7 @@
     SolutionNameMin: Cijk_Ailk_Bljk_HF8N_HHS_BH_Bias_HAS_SAB_SAV_MT64x32x128_MI32x32x1_SN_GSU8_LBSPPA128_LPA4_LPB8_MIWT1_1_WG64_2_1_WGM1
     SourceSwap: 0
     StaggerU: 4
-    StaggerUMapping: 2
+    StaggerUMapping: 0
     StaggerUStride: 256
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0

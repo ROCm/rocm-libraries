@@ -225,10 +225,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 0
-    SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_UserArgs_MT16x64x64_MI16x16x1_SN_CLR1_GRVWA2_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB128_LPA16_LPB16_LRVW8_MIWT1_1_PLR1_SU0_SUM0_SUS0_VWB1_WG16_16_1_WGM1_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_UserArgs_MT16x64x64_MI16x16x1_SN_CLR1_GRVWA2_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB128_LPA16_LPB16_LRVW8_MIWT1_1_PLR1_SU0_SUM1_SUS0_VWB1_WG16_16_1_WGM1_WGMXCC1_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 0
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0

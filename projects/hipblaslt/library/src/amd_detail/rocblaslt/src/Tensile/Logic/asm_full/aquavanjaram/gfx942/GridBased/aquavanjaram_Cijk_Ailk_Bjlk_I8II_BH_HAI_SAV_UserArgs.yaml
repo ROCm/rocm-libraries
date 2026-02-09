@@ -209,10 +209,10 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 0
-    SolutionNameMin: Cijk_Ailk_Bjlk_I8II_BH_HAI_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_LDSB0_GRVWA1_GRVWB1_GSU1_LBSPPA256_LBSPPB256_LPA16_LPB16_MIWT1_1_SU0_SUM0_SUS0_SVW1_VWA1_VWB1_WGM8
+    SolutionNameMin: Cijk_Ailk_Bjlk_I8II_BH_HAI_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_LDSB0_GRVWA1_GRVWB1_GSU1_LBSPPA256_LBSPPB256_LPA16_LPB16_MIWT1_1_SU0_SUM1_SUS0_SVW1_VWA1_VWB1_WGM8
     SourceSwap: 1
     StaggerU: 0
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 0
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
@@ -392,7 +392,7 @@
     SolutionNameMin: Cijk_Ailk_Bjlk_I8II_BH_HAI_SAV_MT32x32x64_MI16x16x1_SN_LDSB0_AFC1_GRVWB8_GSU1_LPA16_LPB16_MIWT1_1_PGR1_PLR1_WG32_8_1
     SourceSwap: 1
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -571,7 +571,7 @@
     SolutionNameMin: Cijk_Ailk_Bjlk_I8II_BH_HAI_SAV_MT32x32x64_MI32x32x1_SN_LDSB0_AFC1_GRVWB8_GSU1_LPA0_LPB0_MIWT1_1_PGR2_PLR1_WG32_2_1
     SourceSwap: 1
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -750,7 +750,7 @@
     SolutionNameMin: Cijk_Ailk_Bjlk_I8II_BH_HAI_SAV_MT64x64x64_MI32x32x1_SN_LDSB0_AFC1_GRVWB8_GSU1_LPA0_LPB0_MIWT1_1_PGR2_PLR1_WG64_4_1
     SourceSwap: 1
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -929,7 +929,7 @@
     SolutionNameMin: Cijk_Ailk_Bjlk_I8II_BH_HAI_SAV_MT128x128x64_MI32x32x1_SN_LDSB0_AFC1_GRVWB8_GSU1_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
     SourceSwap: 1
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
@@ -1108,7 +1108,7 @@
     SolutionNameMin: Cijk_Ailk_Bjlk_I8II_BH_HAI_SAV_MT128x128x64_MI32x32x1_SN_LDSB1_AFC1_GRVWB8_GSU1_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
     SourceSwap: 1
     StaggerU: 32
-    StaggerUMapping: 0
+    StaggerUMapping: 1
     StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
