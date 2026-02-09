@@ -214,7 +214,6 @@ jobs:
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
 
-
   therock_ci_summary:
     name: TheRock CI Summary
     if: always()
