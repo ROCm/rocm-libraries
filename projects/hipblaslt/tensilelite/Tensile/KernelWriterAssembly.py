@@ -612,8 +612,9 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["PrefetchGlobalRead"] >= 2 and isDTVAorB:
         # PGR2 + DTVA or B (only 1 side), need separate StaggerUIter for DTV load
         module.add(self.defineSgpr("StaggerUIterDTV", 1))  # stagger loop iterations, used for various iter counts in the code
-      module.add(self.defineSgpr("WrapUA", 2))  # Bytes to add to SrdA to reset address from N-1 iter to AddressA
-      module.add(self.defineSgpr("WrapUB", 2))  # Bytes to add to SrdB to reset address from N-1 iter to AddressB
+      wrapUAlignment = 2 if self.states.asmCaps["s_sub_u64"] else 1
+      module.add(self.defineSgpr("WrapUA", 2, wrapUAlignment))  # Bytes to add to SrdA to reset address from N-1 iter to AddressA
+      module.add(self.defineSgpr("WrapUB", 2, wrapUAlignment))  # Bytes to add to SrdB to reset address from N-1 iter to AddressB
       if kernel["ProblemType"]["Sparse"]:
         module.add(self.defineSgpr("WrapUMetadata", 2))  # Bytes to add to SrdMetadata to reset address from N-1 iter to AddressMetadata
       self.addSgprVarToPool("WrapUA")
