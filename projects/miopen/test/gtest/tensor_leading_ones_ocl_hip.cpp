@@ -92,12 +92,12 @@ std::vector<TensorsConfig> TensorsConfigs()
     C = 4;
     H = 8;
     W = 8;
-    // insertTestCase(N, C, H, W);
+    insertTestCase(N, C, H, W);
     N = 2048;
     C = 4;
     H = 16;
     W = 16;
-    // insertTestCase(N, C, H, W);
+    insertTestCase(N, C, H, W);
 #endif
     return configs;
 }
@@ -244,10 +244,6 @@ protected:
             bitmap);
 
         tensC_ocl.data = handle.Read<T>(tensC_dev, tensC_ocl.data.size());
-        std::cout << "OpenCL data:\n";
-        for(int i = 0; i < 16; ++i)
-            std::cout << tensC_ocl.data[i] << ' ';
-        std::cout << '\n';
 
 #if PERF_ENABLE
         ph.perfTest(handle,
@@ -308,10 +304,6 @@ protected:
             bitmap);
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
-        std::cout << "HIP data:\n";
-        for(int i = 0; i < 16; ++i)
-            std::cout << tensC_hip.data[i] << ' ';
-        std::cout << '\n';
 
 #if PERF_ENABLE
         ph.perfTest(handle,
@@ -398,7 +390,7 @@ protected:
     PerfHelper ph;
 #endif
 };
-/*
+
 using GPU_OpTensorLeadingOnesTest_FP16 = OpTensorLeadingOnesTest<half_float::half>;
 
 TEST_P(GPU_OpTensorLeadingOnesTest_FP16, PortTest)
@@ -414,14 +406,14 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(1.0),
                                           testing::Values(1.0),
                                           testing::Values(0.0, 1.0)));
-*/
+
 using GPU_OpTensorLeadingOnesTest_FP32 = OpTensorLeadingOnesTest<float>;
 
 TEST_P(GPU_OpTensorLeadingOnesTest_FP32, PortTest)
 {
     runOCL();
     runHIP();
-    // verify();
+    verify();
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -430,7 +422,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(1.0),
                                           testing::Values(1.0),
                                           testing::Values(0.0, 1.0)));
-/*
+
 using GPU_OpTensorLeadingOnesTest_FP64 = OpTensorLeadingOnesTest<double>;
 
 TEST_P(GPU_OpTensorLeadingOnesTest_FP64, PortTest)
@@ -446,4 +438,4 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(1.0),
                                           testing::Values(1.0),
                                           testing::Values(0.0, 1.0)));
-*/
+
