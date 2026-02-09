@@ -7,9 +7,9 @@
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend/Graph.hpp>
-#include <hipdnn_frontend/knob/Knob.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_frontend/knob/Knob.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
@@ -273,8 +273,7 @@ private:
     {
         int64_t tensorId = tensorAttr->get_uid();
 
-        if(tensorAttr->get_is_virtual()
-           || bundle.tensors.find(tensorId) != bundle.tensors.end())
+        if(tensorAttr->get_is_virtual() || bundle.tensors.find(tensorId) != bundle.tensors.end())
         {
             return false;
         }

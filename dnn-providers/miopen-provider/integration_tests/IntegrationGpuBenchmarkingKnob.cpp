@@ -26,8 +26,8 @@ struct OperationTypeNameGenerator
 /// Test fixture for benchmarking knob integration tests
 /// Inherits from IntegrationGraphVerificationHarness for SetUp/TearDown
 class IntegrationGpuBenchmarkingKnob
-    : public miopen_plugin::test_utilities::
-          IntegrationGraphVerificationHarness<float, OperationType>
+    : public miopen_plugin::test_utilities::IntegrationGraphVerificationHarness<float,
+                                                                                OperationType>
 {
 };
 
