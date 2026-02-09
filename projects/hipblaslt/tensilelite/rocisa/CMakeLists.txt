@@ -17,6 +17,8 @@ target_include_directories(rocisa-cpp
 )
 
 if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
+    find_package(hip REQUIRED)
+
     include(FetchContent)
     FetchContent_Declare(
       nanobind
@@ -59,6 +61,11 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
                             ${ROCISAINST_SOURCE}
                             ${ROCISAPASS_SOURCE}
                             ${ROCISAFUNC_SOURCE})
-    target_include_directories(rocisa PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include")
+    target_include_directories(rocisa PRIVATE 
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/origami/include"
+    )
+    target_link_libraries(rocisa PUBLIC roc::origami)
+    target_link_libraries(rocisa PRIVATE hip::host)
     set_target_properties(rocisa PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib")
 endif()

@@ -550,27 +550,33 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - select_workgroup_mapping unit test") {
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(4096, 4096, 8192);
-      auto config   = make_config(256, 256, 32, 32, 32, 8, false, 1, 6, 4, 5);
+      auto config   = make_config(256, 256, 32, 32, 32, 8, false, 1, 6, 0, 0);
       auto skGrid   = (4096 + 256 - 1) / 256 * (4096 + 256 - 1) / 256;
+      size_t numMT_M = (problem.size.m + config.mt.m - 1) / config.mt.m;
+      size_t numMT_N = (problem.size.n + config.mt.n - 1) / config.mt.n;
 
       // Default values
       size_t default_wgmxccchunk = 0;
-      size_t default_wgmxcc = hardware.NUM_XCD;
+      size_t default_wgmxcc      = hardware.NUM_XCD;
+      size_t chunk_size          = std::min((numMT_M * numMT_N + hardware.NUM_XCD - 1) / hardware.NUM_XCD, 
+                                            (hardware.N_CU + hardware.NUM_XCD - 1) / hardware.NUM_XCD);
 
       // Test 1: Test non-temporal cache hints (nta > 3, ntb < 4; nta < 4, ntb > 3; both > 3)
+      config.cache_hints_a = 4;
+      config.cache_hints_b = 3;
       auto out_wgm_1 =
-          origami::select_workgroup_mapping(problem, hardware, config, skGrid);  // nta < 4, ntb > 3
-      REQUIRE(out_wgm_1.wgmxccchunk == default_wgmxccchunk);
+          origami::select_workgroup_mapping(problem, hardware, config, skGrid);  // nta > 3, ntb < 4
+      REQUIRE(out_wgm_1.wgmxccchunk == chunk_size);
       REQUIRE(out_wgm_1.wgmxcc == default_wgmxcc);
-      REQUIRE(out_wgm_1.wgm == 1);
+      REQUIRE(out_wgm_1.wgm == numMT_N);
 
       config.cache_hints_a = 3;
       config.cache_hints_b = 4;
       auto out_wgm_2 =
           origami::select_workgroup_mapping(problem, hardware, config, skGrid);  // nta < 4, ntb > 3
-      REQUIRE(out_wgm_2.wgmxccchunk == default_wgmxccchunk);
+      REQUIRE(out_wgm_2.wgmxccchunk == chunk_size);
       REQUIRE(out_wgm_2.wgmxcc == default_wgmxcc);
-      REQUIRE(out_wgm_2.wgm == -1);
+      REQUIRE(out_wgm_2.wgm == -numMT_M);
 
       config.cache_hints_a = 4;
       config.cache_hints_b = 4;

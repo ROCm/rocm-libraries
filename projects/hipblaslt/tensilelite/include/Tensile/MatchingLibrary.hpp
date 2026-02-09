@@ -103,8 +103,6 @@ namespace TensileLite
                              SolutionLibrarySearchType searchType
                              = SolutionLibrarySearchType::DEFAULT) const override
         {
-            bool debug = Debug::Instance().printPropertyEvaluation();
-
             SolutionSet<MySolution> rv;
 
             auto matches = searchType != SolutionLibrarySearchType::DEFAULT
@@ -113,14 +111,8 @@ namespace TensileLite
 
             for(auto const& row : matches)
             {
-                if(debug)
-                    std::cout << row->description() << std::endl;
-
                 auto rowSolutions = row->findAllSolutions(problem, hardware, searchType);
                 rv.insert(rowSolutions.begin(), rowSolutions.end());
-
-                if(debug)
-                    std::cout << std::endl;
             }
 
             return rv;
@@ -132,8 +124,6 @@ namespace TensileLite
                                         SolutionLibrarySearchType     searchType
                                         = SolutionLibrarySearchType::DEFAULT) const override
         {
-            bool debug = Debug::Instance().printPropertyEvaluation();
-
             SolutionSet<MySolution> rv;
 
             auto matches = searchType != SolutionLibrarySearchType::DEFAULT
@@ -142,15 +132,9 @@ namespace TensileLite
 
             for(auto const& row : matches)
             {
-                if(debug)
-                    std::cout << row->description() << std::endl;
-
                 auto rowSolutions
                     = row->findAllSolutionsGroupedGemm(problems, hardware, searchType);
                 rv.insert(rowSolutions.begin(), rowSolutions.end());
-
-                if(debug)
-                    std::cout << std::endl;
             }
 
             return rv;

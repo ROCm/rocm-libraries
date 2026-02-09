@@ -102,7 +102,7 @@ void BackendOperationReshapeDescriptor::setAttribute(miopenBackendAttributeName_
         MIOPEN_THROW(miopenStatusNotInitialized);
     }
 
-    using Setter = OperationReshapeBuilder& (OperationReshapeBuilder::*)(Tensor * tensor);
+    using Setter = OperationReshapeBuilder& (OperationReshapeBuilder::*)(Tensor* tensor);
 
     auto callSetter = [=](Setter setter, miopenBackendDescriptor_t& outDescriptor) {
         if(attributeType == MIOPEN_TYPE_BACKEND_DESCRIPTOR && elementCount == 1)
