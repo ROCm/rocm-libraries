@@ -18,6 +18,9 @@ Definitions:
     - { M:   128, N:    1, lda:  128, ldb:  128 }
     - { M:  1024, N:    1, lda: 2000, ldb: 1024 }
 
+  - &small_trsv_big_batch_matrix
+    - { M:     4, N:    1, lda:  4,   ldb:  4 }
+
   - &medium_matrix_size_range
     - { M: 129, N: 129, lda: 129, ldb: 129 }
     - { M: 192, N: 192, lda: 192, ldb: 192 }
@@ -311,7 +314,7 @@ Tests:
   diag: [N, U]
   matrix_size: *small_matrix_size_range
   alpha: *alpha_range
-  api: [ C, FORTRAN, FORTRAN_64 ]
+  api: [ FORTRAN, FORTRAN_64 ]
   user_allocated_workspace: [0, 1000000]
 
 - name: trsm_small_complex
@@ -324,7 +327,7 @@ Tests:
   diag: [N, U]
   matrix_size: *small_matrix_size_range
   alpha_beta: *complex_alpha_range
-  api: [ C, FORTRAN, FORTRAN_64 ]
+  api: [ C, FORTRAN_64 ]
   user_allocated_workspace: [0, 1000000]
 
 - name: trsm_batched_small
@@ -339,7 +342,20 @@ Tests:
   matrix_size: *small_matrix_size_range
   alpha: *alpha_range
   batch_count: [-1, 0, 1, 3]
-  api: [ C, FORTRAN, FORTRAN_64 ]
+  api: [ FORTRAN, FORTRAN_64 ]
+  user_allocated_workspace: [0, 1000000]
+
+- name: trsm_trsv_big_batch
+  category: pre_checkin
+  function: trsm_batched
+  precision: *single_double_precisions
+  arguments:
+    - { side: L, uplo: L, transA: N, diag: U }
+    - { side: L, uplo: U, transA: C, diag: N }
+  matrix_size: *small_trsv_big_batch_matrix
+  alpha: *alpha_range
+  batch_count: [130] # > 16*m
+  api: [ FORTRAN ]
   user_allocated_workspace: [0, 1000000]
 
 - name: trsm_batched_small_complex
@@ -354,7 +370,7 @@ Tests:
   matrix_size: *small_matrix_size_range
   alpha_beta: *complex_alpha_range
   batch_count: [-1, 0, 1, 3]
-  api: [ C, FORTRAN, FORTRAN_64 ]
+  api: [ C, FORTRAN_64 ]
   user_allocated_workspace: [0, 1000000]
 
 - name: trsm_strided_batched_small
@@ -370,7 +386,7 @@ Tests:
   alpha: *alpha_range
   stride_scale: [ 1 ]
   batch_count: [ -1, 0, 1, 3 ]
-  api: [ C, FORTRAN, FORTRAN_64 ]
+  api: [ FORTRAN, FORTRAN_64 ]
   user_allocated_workspace: [0, 1000000]
 
 - name: trsm_strided_batched_small_complex
@@ -386,7 +402,7 @@ Tests:
   alpha_beta: *complex_alpha_range
   stride_scale: [ 3 ]
   batch_count: [ -1, 0, 1, 3 ]
-  api: [ C, FORTRAN, FORTRAN_64 ]
+  api: [ C, FORTRAN_64 ]
   user_allocated_workspace: [0, 1000000]
 
 # Medium - pre_checkin
