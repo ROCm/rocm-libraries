@@ -9,6 +9,7 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <numeric>
 #include <vector>
 
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
