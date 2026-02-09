@@ -22,8 +22,10 @@
  * ************************************************************************ */
 #pragma once
 
+#include "ir/asm/StinkyAsmIR.hpp"
 #include "isa/ArchHelper.hpp"
-#include "isa/gfx/GfxIsa.hpp"
+
+#include <mutex>
 
 //===============================================================================
 // INSTRUCTION METADATA FOR GFX950
@@ -37,8 +39,7 @@
 //   - Instruction DEFINITIONS (DEF_T calls) -> hardware/src/gfx/Gfx950.cpp
 //
 // To modify an instruction:
-//   - Update requirements: Add .operand_widths in hardware/defs/Gfx950Instructions.def
-//     (see Gfx1250Instructions.def tensor_load_to_lds) and use generated Gfx950_operands.inc
+//   - Definitions, costs, operand requirements: edit hardware/defs/Gfx950Instructions.def; rebuild.
 //   - Update costs: Open hardware/src/gfx/Gfx950.cpp (GFX950_COSTS[])
 //   - Update definition: hardware/src/gfx/Gfx950.cpp (DEF_T calls)
 //
@@ -72,8 +73,22 @@ struct Gfx950ArchInfo : public ArchHelper::ArchInfo
 #define GET_ISAINFO_HWINSTDESC_TABLE
 #include "hardware/Gfx950Isa.inc"
 
-        // Currently no operand requirements for Gfx950 instructions
-        // Add .operand_widths in hardware/defs/Gfx950Instructions.def when needed
+#include "hardware/generated/Gfx950_operands.inc"
+
+        static std::once_flag once;
+        std::call_once(once, [] {
+            for(const auto& req : instRequirements)
+            {
+                for(size_t i = 0; i < sizeof(MCIDTable) / sizeof(MCIDTable[0]); ++i)
+                {
+                    if(MCIDTable[i].mnemonic && std::string(MCIDTable[i].mnemonic) == req.mnemonic)
+                    {
+                        const_cast<HwInstDesc&>(MCIDTable[i]).operandWidths = req.requirements;
+                        break;
+                    }
+                }
+            }
+        });
         return MCIDTable;
     }
 

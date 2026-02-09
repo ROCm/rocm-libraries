@@ -131,8 +131,10 @@ namespace stinkytofu
 
         GfxInstDef* getInst(const std::string& name);
 
-        // mapping from logical instruction name to architecture-specific instruction name
+        // mapping from logical instruction name to architecture-specific instruction name (StinkyTofu Logical IR)
         std::unordered_map<std::string, std::string> logicalToArchMap;
+        // mapping from Rocisa (tensilelite) type name to architecture-specific mnemonic; used for RocisaGfx*Mappings.inc
+        std::unordered_map<std::string, std::string> rocisaToArchMap;
         std::unordered_map<std::string, std::string> rocisaConversionMap;
 
     public:
@@ -224,6 +226,16 @@ namespace stinkytofu
         const std::unordered_map<std::string, std::string>& getLogicalToArchMap() const
         {
             return logicalToArchMap;
+        }
+
+        void setRocisaToArchMap(const std::unordered_map<std::string, std::string>&& map)
+        {
+            rocisaToArchMap = std::move(map);
+        }
+
+        const std::unordered_map<std::string, std::string>& getRocisaToArchMap() const
+        {
+            return rocisaToArchMap;
         }
 
         void setRocisaConversionMap(const std::unordered_map<std::string, std::string>&& map)

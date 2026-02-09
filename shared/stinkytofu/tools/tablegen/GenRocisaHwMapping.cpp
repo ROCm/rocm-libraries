@@ -149,12 +149,12 @@ namespace stinkytofu
 
         for(auto archName : manager.getRegisteredArchNames())
         {
-            const GpuArch* arch = manager.getArch(archName);
-            success &= genRocisaMappings(manager,
-                                         archName,
-                                         outdir,
-                                         arch->getLogicalToArchMap(),
-                                         arch->getRocisaConversionMap());
+            const GpuArch* arch      = manager.getArch(archName);
+            const auto&    rocisaMap = arch->getRocisaToArchMap();
+            const auto&    mapForRocisaInc
+                = rocisaMap.empty() ? arch->getLogicalToArchMap() : rocisaMap;
+            success &= genRocisaMappings(
+                manager, archName, outdir, mapForRocisaInc, arch->getRocisaConversionMap());
         }
 
         return success;

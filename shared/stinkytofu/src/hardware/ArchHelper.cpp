@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,24 +32,19 @@ namespace
 #include "hardware/gfxIsa.inc"
 }
 
-/* Begin architecture-specific ArchInfo headers */
+/* Architecture-specific headers (GfxXXX.hpp defines GfxXXXArchInfo) */
 
-// GFX942
 #ifdef STINKYTOFU_ARCH_GFX942
-#include "Gfx942ArchInfo.hpp"
+#include "Gfx942.hpp"
 #endif
 
-// GFX950
 #ifdef STINKYTOFU_ARCH_GFX950
-#include "Gfx950ArchInfo.hpp"
+#include "Gfx950.hpp"
 #endif
 
-// GFX1250
 #ifdef STINKYTOFU_ARCH_GFX1250
-#include "Gfx1250ArchInfo.hpp"
+#include "Gfx1250.hpp"
 #endif
-
-/* End of architecture-specific ArchInfo headers */
 
 namespace stinkytofu
 {

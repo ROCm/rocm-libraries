@@ -42,7 +42,8 @@ GfxXXX.cpp  ->  defineGfxXXXInsts() includes _init.inc, applies _costs.inc
 DEF_T(SomeInstClass, "mnemonic",
     .format = FORMAT_NAME,        // optional; inherits unit, flags from format
     .flags = {Flag1, Flag2},     // optional; merged with format flags
-    .cost = {cycle, latency}     // optional; omit to use arch default
+    .cost = {cycle, latency},    // optional; omit to use arch default
+    .operand_widths = { {0, 4, false, S}, {1, 8, false, S} }  // optional; for IR verifier
 )
 ```
 
@@ -51,6 +52,7 @@ DEF_T(SomeInstClass, "mnemonic",
 - **.format**: Must match a `DEF_FORMAT` name in the same arch's `GfxXXXFormats.def`.
 - **.flags**: Flag names from `include/isa/gfx/Flags.def`, used without the `IF_` prefix (e.g. VALU, SALU, MUBUFLoad, WaitTensorCnt). Format flags and instruction flags are merged. The generator maps flags to a C++ class (e.g. SALU, VALU, WaitCntInst, GfxInstDef) when emitting _init.inc.
 - **.cost**: Override cycle and latency for this instruction only. If omitted, the architecture default (set in `GfxXXX.cpp`) is used.
+- **.operand_widths**: Optional list of `{operandIndex, width, isDest, regType}` for the IR verifier (register width/type requirements). `regType` is `S`, `V`, or `A`. Tablegen emits `*_operands.inc`; each `GfxXXX.hpp` includes it and applies requirements to the MCID table. Adding this field is the only change needed--no .hpp edit.
 
 ## Format Inheritance
 

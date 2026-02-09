@@ -452,8 +452,8 @@ LogicalInstruction* createTestInstruction(logical::Opcode opcode)
         return FlatLoadB128(vgpr(0), vgpr(1));
     case logical::FlatStoreB8:
         return FlatStoreB8(vgpr(0), vgpr(1), vgpr(2));
-    case logical::FlatStoreD16HIU8:
-        return FlatStoreD16HIU8(vgpr(0), vgpr(1), vgpr(2));
+    case logical::FlatStoreD16HIB8:
+        return FlatStoreD16HIB8(vgpr(0), vgpr(1), vgpr(2));
     case logical::FlatStoreB16:
         return FlatStoreB16(vgpr(0), vgpr(1), vgpr(2));
     case logical::FlatStoreD16HIB16:
@@ -699,7 +699,7 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures)
         // TensorLoadToLds: Now works via generic createAsmFromIR (gfx1250 only)
     };
 
-    // Architecture-specific instructions
+    // Architecture-specific instructions (only test on this arch)
     std::map<logical::Opcode, std::tuple<int, int, int>> ARCH_SPECIFIC = {
         {logical::TensorLoadToLds, {12, 5, 0}}, // gfx1250 only
     };

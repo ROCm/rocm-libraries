@@ -30,22 +30,22 @@
  *
  * Each instruction is defined as an IRInstDef with the following parameters:
  *   1. className    - C++ class name (e.g., "VAddF32")
- *   2. mnemonic     - Assembly mnemonic (e.g., "v_add_f32")
- *   3. comment      - Instruction description
- *   4. numSrcs      - Number of source operands
- *   5. hasDest      - Whether it has a destination operand
- *   6. category     - Instruction category (e.g., "Vector Arithmetic")
- *   7. supportsDPP  - Whether it supports DPP modifiers
- *   8. supportsSDWA - Whether it supports SDWA modifiers
- *   9. hasDS        - Whether it has DS (LDS) modifiers
- *   10. isCommutative - Whether src0 and src1 can be swapped (optional)
+ *   2. comment      - Instruction description
+ *   3. numSrcs      - Number of source operands
+ *   4. hasDest      - Whether it has a destination operand
+ *   5. category     - Instruction category (e.g., "Vector Arithmetic")
+ *   6. supportsDPP  - Whether it supports DPP modifiers
+ *   7. supportsSDWA - Whether it supports SDWA modifiers
+ *   8. hasDS        - Whether it has DS (LDS) modifiers
+ *   9. flags        - Instruction flags (optional 10th: numRequiredSrcs)
+ *
+ * Logical IR has no mnemonics; ASM mnemonic is per-arch (LogicalToAsmMappings_generated.inc).
  *
  * This file is included by getIRInstructions() in GenHighLevelIR.cpp.
  * Do not include this file directly elsewhere.
  */
 
                                     {"VAddU32",
-             "v_add_u32",
              "VAddU32",
              2,
              true,
@@ -56,7 +56,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMulF32",
-             "v_mul_f32",
              "VMulF32",
              2,
              true,
@@ -67,7 +66,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VAddF16",
-             "v_add_f16",
              "VAddF16",
              2,
              true,
@@ -78,7 +76,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VAddF32",
-             "v_add_f32",
              "VAddF32",
              2,
              true,
@@ -89,7 +86,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VAddF64",
-             "v_add_f64",
              "VAddF64",
              2,
              true,
@@ -100,7 +96,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VAddI32",
-             "v_add_i32",
              "VAddI32",
              2,
              true,
@@ -111,7 +106,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VAddCOU32",
-             "v_add_c_o_u32",
              "VAddCOU32",
              2,
              true,
@@ -122,7 +116,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VAddCCOU32",
-             "v_add_c_c_o_u32",
              "VAddCCOU32",
              2,
              true,
@@ -133,7 +126,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VAddPKF16",
-             "v_add_p_k_f16",
              "VAddPKF16",
              2,
              true,
@@ -144,7 +136,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VAdd3U32",
-             "v_add3_u32",
              "VAdd3U32",
              2,
              true,
@@ -155,7 +146,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VSubF32",
-             "v_sub_f32",
              "VSubF32",
              2,
              true,
@@ -166,7 +156,6 @@
              "IF_VALU"},
 
                                     {"VSubI32",
-             "v_sub_i32",
              "VSubI32",
              2,
              true,
@@ -177,7 +166,6 @@
              "IF_VALU"},
 
                                     {"VSubU32",
-             "v_sub_u32",
              "VSubU32",
              2,
              true,
@@ -188,7 +176,6 @@
              "IF_VALU"},
 
                                     {"VSubCoU32",
-             "v_sub_co_u32",
              "VSubCoU32",
              2,
              true,
@@ -199,7 +186,6 @@
              "IF_VALU"},
 
                                     {"VMulF16",
-             "v_mul_f16",
              "VMulF16",
              2,
              true,
@@ -210,7 +196,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMulF64",
-             "v_mul_f64",
              "VMulF64",
              2,
              true,
@@ -221,7 +206,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMulPKF16",
-             "v_mul_p_k_f16",
              "VMulPKF16",
              2,
              true,
@@ -232,7 +216,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMulPKF32S",
-             "v_mul_p_k_f32_s",
              "VMulPKF32S",
              2,
              true,
@@ -243,7 +226,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMulLOU32",
-             "v_mul_l_o_u32",
              "VMulLOU32",
              2,
              true,
@@ -254,7 +236,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMulHII32",
-             "v_mul_h_i_i32",
              "VMulHII32",
              2,
              true,
@@ -265,7 +246,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMulHIU32",
-             "v_mul_h_i_u32",
              "VMulHIU32",
              2,
              true,
@@ -276,7 +256,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMulI32I24",
-             "v_mul_i32_i24",
              "VMulI32I24",
              2,
              true,
@@ -287,7 +266,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMulU32U24",
-             "v_mul_u32_u24",
              "VMulU32U24",
              2,
              true,
@@ -298,7 +276,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMacF32",
-             "v_mac_f32",
              "VMacF32",
              2,
              true,
@@ -309,7 +286,6 @@
              "IF_VALU"},
 
                                     {"VFmaF16",
-             "v_fma_f16",
              "VFmaF16",
              3,
              true,
@@ -320,7 +296,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VFmaF32",
-             "v_fma_f32",
              "VFmaF32",
              3,
              true,
@@ -331,7 +306,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VFmaF64",
-             "v_fma_f64",
              "VFmaF64",
              3,
              true,
@@ -342,7 +316,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VFmaPKF16",
-             "v_fma_p_k_f16",
              "VFmaPKF16",
              3,
              true,
@@ -353,7 +326,6 @@
              "IF_Commutative|IF_VALU"},
 
                                                 {"VFmaMixF32",
-             "v_fma_mix_f32",
              "VFmaMixF32",
              3,
              true,
@@ -364,7 +336,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMadI32I24",
-             "v_mad_i32_i24",
              "VMadI32I24",
              3,
              true,
@@ -375,7 +346,6 @@
              "IF_VALU"},
 
                                     {"VMadU32U24",
-             "v_mad_u32_u24",
              "VMadU32U24",
              3,
              true,
@@ -386,7 +356,6 @@
              "IF_VALU"},
 
                                     {"VMadMixF32",
-             "v_mad_mix_f32",
              "VMadMixF32",
              3,
              true,
@@ -397,7 +366,6 @@
              "IF_VALU"},
 
                                     {"VDot2CF32F16",
-             "v_dot2_c_f32_f16",
              "VDot2CF32F16",
              3,
              true,
@@ -408,7 +376,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VDot2F32F16",
-             "v_dot2_f32_f16",
              "VDot2F32F16",
              3,
              true,
@@ -419,7 +386,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VDot2F32BF16",
-             "v_dot2_f32_b_f16",
              "VDot2F32BF16",
              3,
              true,
@@ -430,7 +396,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VDot2CF32BF16",
-             "v_dot2_c_f32_b_f16",
              "VDot2CF32BF16",
              3,
              true,
@@ -441,7 +406,6 @@
              "IF_Commutative|IF_VALU"},
 
                                                 {"VExpF16",
-             "v_exp_f16",
              "VExpF16",
              1,
              true,
@@ -452,7 +416,6 @@
              "IF_Transcendental|IF_VALU"},
 
                                                 {"VExpF32",
-             "v_exp_f32",
              "VExpF32",
              1,
              true,
@@ -463,7 +426,6 @@
              "IF_Transcendental|IF_VALU"},
 
                                                 {"VRcpF16",
-             "v_rcp_f16",
              "VRcpF16",
              1,
              true,
@@ -474,7 +436,6 @@
              "IF_Transcendental|IF_VALU"},
 
                                                 {"VRcpF32",
-             "v_rcp_f32",
              "VRcpF32",
              1,
              true,
@@ -485,7 +446,6 @@
              "IF_Transcendental|IF_VALU"},
 
                                                 {"VRcpIFlagF32",
-             "v_rcp_i_flag_f32",
              "VRcpIFlagF32",
              1,
              true,
@@ -496,7 +456,6 @@
              "IF_Transcendental|IF_VALU"},
 
                                                 {"VRsqF16",
-             "v_rsq_f16",
              "VRsqF16",
              1,
              true,
@@ -507,7 +466,6 @@
              "IF_Transcendental|IF_VALU"},
 
                                                 {"VRsqF32",
-             "v_rsq_f32",
              "VRsqF32",
              1,
              true,
@@ -518,7 +476,6 @@
              "IF_Transcendental|IF_VALU"},
 
                                                 {"VRsqIFlagF32",
-             "v_rsq_i_flag_f32",
              "VRsqIFlagF32",
              1,
              true,
@@ -529,7 +486,6 @@
              "IF_Transcendental|IF_VALU"},
 
                                     {"VRndneF32",
-             "v_rndne_f32",
              "VRndneF32",
              1,
              true,
@@ -540,7 +496,6 @@
              "IF_VALU"},
 
                                     {"VMaxF16",
-             "v_max_f16",
              "VMaxF16",
              2,
              true,
@@ -551,7 +506,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMaxF32",
-             "v_max_f32",
              "VMaxF32",
              2,
              true,
@@ -562,7 +516,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMaxF64",
-             "v_max_f64",
              "VMaxF64",
              2,
              true,
@@ -573,7 +526,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMaxI32",
-             "v_max_i32",
              "VMaxI32",
              2,
              true,
@@ -584,7 +536,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMaxPKF16",
-             "v_max_p_k_f16",
              "VMaxPKF16",
              2,
              true,
@@ -595,7 +546,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMinF16",
-             "v_min_f16",
              "VMinF16",
              2,
              true,
@@ -606,7 +556,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMinF32",
-             "v_min_f32",
              "VMinF32",
              2,
              true,
@@ -617,7 +566,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMinF64",
-             "v_min_f64",
              "VMinF64",
              2,
              true,
@@ -628,7 +576,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMinI32",
-             "v_min_i32",
              "VMinI32",
              2,
              true,
@@ -639,7 +586,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMed3I32",
-             "v_med3_i32",
              "VMed3I32",
              3,
              true,
@@ -650,7 +596,6 @@
              "IF_VALU"},
 
                                     {"VMed3F32",
-             "v_med3_f32",
              "VMed3F32",
              3,
              true,
@@ -661,7 +606,6 @@
              "IF_VALU"},
 
                                     {"VAndB32",
-             "v_and_b32",
              "VAndB32",
              2,
              true,
@@ -672,7 +616,6 @@
              "IF_Commutative|IF_VALU"},
 
                                                 {"VAndOrB32",
-             "v_and_or_b32",
              "VAndOrB32",
              3,
              true,
@@ -683,7 +626,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VOrB32",
-             "v_or_b32",
              "VOrB32",
              2,
              true,
@@ -694,7 +636,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VXorB32",
-             "v_xor_b32",
              "VXorB32",
              2,
              true,
@@ -705,7 +646,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VNotB32",
-             "v_not_b32",
              "VNotB32",
              1,
              true,
@@ -716,7 +656,6 @@
              "IF_VALU"},
 
                                     {"VPrngB32",
-             "v_prng_b32",
              "VPrngB32",
              1,
              true,
@@ -727,7 +666,6 @@
              "IF_VALU"},
 
                                     {"VCndMaskB32",
-             "v_cnd_mask_b32",
              "VCndMaskB32",
              2,
              true,
@@ -738,7 +676,6 @@
              "IF_VALU"},
 
                                     {"VLShiftLeftB16",
-             "v_l_shift_left_b16",
              "VLShiftLeftB16",
              2,
              true,
@@ -749,7 +686,6 @@
              "IF_VALU"},
 
                                     {"VLShiftLeftB32",
-             "v_l_shift_left_b32",
              "VLShiftLeftB32",
              2,
              true,
@@ -760,7 +696,6 @@
              "IF_VALU"},
 
                                     {"VLShiftRightB32",
-             "v_l_shift_right_b32",
              "VLShiftRightB32",
              2,
              true,
@@ -771,7 +706,6 @@
              "IF_VALU"},
 
                                     {"VLShiftLeftB64",
-             "v_l_shift_left_b64",
              "VLShiftLeftB64",
              2,
              true,
@@ -782,7 +716,6 @@
              "IF_VALU"},
 
                                     {"VLShiftRightB64",
-             "v_l_shift_right_b64",
              "VLShiftRightB64",
              2,
              true,
@@ -793,7 +726,6 @@
              "IF_VALU"},
 
                                     {"VAShiftRightI32",
-             "v_a_shift_right_i32",
              "VAShiftRightI32",
              2,
              true,
@@ -804,7 +736,6 @@
              "IF_VALU"},
 
                                     {"VMovB32",
-             "v_mov_b32",
              "VMovB32",
              1,
              true,
@@ -815,7 +746,6 @@
              "IF_VALU"},
 
                                     {"VSwapB32",
-             "v_swap_b32",
              "VSwapB32",
              1,
              true,
@@ -826,7 +756,6 @@
              "IF_VALU"},
 
                                     {"VPackF16toB32",
-             "v_pack_f16to_b32",
              "VPackF16toB32",
              2,
              true,
@@ -837,7 +766,6 @@
              "IF_VALU"},
 
                                     {"VPermB32",
-             "v_perm_b32",
              "VPermB32",
              3,
              true,
@@ -848,7 +776,6 @@
              "IF_VALU"},
 
                                     {"VBfeI32",
-             "v_bfe_i32",
              "VBfeI32",
              3,
              true,
@@ -859,7 +786,6 @@
              "IF_VALU"},
 
                                     {"VBfeU32",
-             "v_bfe_u32",
              "VBfeU32",
              3,
              true,
@@ -870,7 +796,6 @@
              "IF_VALU"},
 
                                     {"VBfiB32",
-             "v_bfi_b32",
              "VBfiB32",
              3,
              true,
@@ -881,7 +806,6 @@
              "IF_VALU"},
 
                                     {"VAccvgprReadB32",
-             "v_accvgpr_read_b32",
              "VAccvgprReadB32",
              1,
              true,
@@ -892,7 +816,6 @@
              "IF_VALU"},
 
                                     {"VAccvgprWrite",
-             "v_accvgpr_write",
              "VAccvgprWrite",
              1,
              true,
@@ -903,7 +826,6 @@
              "IF_VALU"},
 
                                     {"VAccvgprWriteB32",
-             "v_accvgpr_write_b32",
              "VAccvgprWriteB32",
              1,
              true,
@@ -914,7 +836,6 @@
              "IF_VALU"},
 
                                     {"VReadfirstlaneB32",
-             "v_readfirstlane_b32",
              "VReadfirstlaneB32",
              1,
              true,
@@ -925,7 +846,6 @@
              "IF_VALU"},
 
                                     {"SCmpEQI32",
-             "s_cmp_e_q_i32",
              "SCmpEQI32",
              2,
              false,
@@ -936,7 +856,6 @@
              "IF_SALU"},
 
                                     {"SCmpEQU32",
-             "s_cmp_e_q_u32",
              "SCmpEQU32",
              2,
              false,
@@ -947,7 +866,6 @@
              "IF_SALU"},
 
                                     {"SCmpEQU64",
-             "s_cmp_e_q_u64",
              "SCmpEQU64",
              2,
              false,
@@ -958,7 +876,6 @@
              "IF_SALU"},
 
                                     {"SCmpGeI32",
-             "s_cmp_ge_i32",
              "SCmpGeI32",
              2,
              false,
@@ -969,7 +886,6 @@
              "IF_SALU"},
 
                                     {"SCmpGeU32",
-             "s_cmp_ge_u32",
              "SCmpGeU32",
              2,
              false,
@@ -980,7 +896,6 @@
              "IF_SALU"},
 
                                     {"SCmpGtI32",
-             "s_cmp_gt_i32",
              "SCmpGtI32",
              2,
              false,
@@ -991,7 +906,6 @@
              "IF_SALU"},
 
                                     {"SCmpGtU32",
-             "s_cmp_gt_u32",
              "SCmpGtU32",
              2,
              false,
@@ -1002,7 +916,6 @@
              "IF_SALU"},
 
                                     {"SCmpLeI32",
-             "s_cmp_le_i32",
              "SCmpLeI32",
              2,
              false,
@@ -1013,7 +926,6 @@
              "IF_SALU"},
 
                                     {"SCmpLeU32",
-             "s_cmp_le_u32",
              "SCmpLeU32",
              2,
              false,
@@ -1024,7 +936,6 @@
              "IF_SALU"},
 
                                     {"SCmpLgU32",
-             "s_cmp_lg_u32",
              "SCmpLgU32",
              2,
              false,
@@ -1035,7 +946,6 @@
              "IF_SALU"},
 
                                     {"SCmpLgI32",
-             "s_cmp_lg_i32",
              "SCmpLgI32",
              2,
              false,
@@ -1046,7 +956,6 @@
              "IF_SALU"},
 
                                     {"SCmpLgU64",
-             "s_cmp_lg_u64",
              "SCmpLgU64",
              2,
              false,
@@ -1057,7 +966,6 @@
              "IF_SALU"},
 
                                     {"SCmpLtI32",
-             "s_cmp_lt_i32",
              "SCmpLtI32",
              2,
              false,
@@ -1068,7 +976,6 @@
              "IF_SALU"},
 
                                     {"SCmpLtU32",
-             "s_cmp_lt_u32",
              "SCmpLtU32",
              2,
              false,
@@ -1079,7 +986,6 @@
              "IF_SALU"},
 
                                     {"SBitcmp1B32",
-             "s_bitcmp1_b32",
              "SBitcmp1B32",
              2,
              false,
@@ -1090,7 +996,6 @@
              "IF_SALU"},
 
                                     {"VCmpEQF32",
-             "v_cmp_e_q_f32",
              "VCmpEQF32",
              2,
              true,
@@ -1101,7 +1006,6 @@
              "IF_VALU"},
 
                                     {"VCmpEQF64",
-             "v_cmp_e_q_f64",
              "VCmpEQF64",
              2,
              true,
@@ -1112,7 +1016,6 @@
              "IF_VALU"},
 
                                     {"VCmpEQU32",
-             "v_cmp_e_q_u32",
              "VCmpEQU32",
              2,
              true,
@@ -1123,7 +1026,6 @@
              "IF_VALU"},
 
                                     {"VCmpEQI32",
-             "v_cmp_e_q_i32",
              "VCmpEQI32",
              2,
              true,
@@ -1134,7 +1036,6 @@
              "IF_VALU"},
 
                                     {"VCmpGEF16",
-             "v_cmp_g_e_f16",
              "VCmpGEF16",
              2,
              true,
@@ -1145,7 +1046,6 @@
              "IF_VALU"},
 
                                     {"VCmpGTF16",
-             "v_cmp_g_t_f16",
              "VCmpGTF16",
              2,
              true,
@@ -1156,7 +1056,6 @@
              "IF_VALU"},
 
                                     {"VCmpGEF32",
-             "v_cmp_g_e_f32",
              "VCmpGEF32",
              2,
              true,
@@ -1167,7 +1066,6 @@
              "IF_VALU"},
 
                                     {"VCmpGTF32",
-             "v_cmp_g_t_f32",
              "VCmpGTF32",
              2,
              true,
@@ -1178,7 +1076,6 @@
              "IF_VALU"},
 
                                     {"VCmpGEF64",
-             "v_cmp_g_e_f64",
              "VCmpGEF64",
              2,
              true,
@@ -1189,7 +1086,6 @@
              "IF_VALU"},
 
                                     {"VCmpGTF64",
-             "v_cmp_g_t_f64",
              "VCmpGTF64",
              2,
              true,
@@ -1200,7 +1096,6 @@
              "IF_VALU"},
 
                                     {"VCmpGEI32",
-             "v_cmp_g_e_i32",
              "VCmpGEI32",
              2,
              true,
@@ -1211,7 +1106,6 @@
              "IF_VALU"},
 
                                     {"VCmpGTI32",
-             "v_cmp_g_t_i32",
              "VCmpGTI32",
              2,
              true,
@@ -1222,7 +1116,6 @@
              "IF_VALU"},
 
                                     {"VCmpGEU32",
-             "v_cmp_g_e_u32",
              "VCmpGEU32",
              2,
              true,
@@ -1233,7 +1126,6 @@
              "IF_VALU"},
 
                                     {"VCmpGtU32",
-             "v_cmp_gt_u32",
              "VCmpGtU32",
              2,
              true,
@@ -1244,7 +1136,6 @@
              "IF_VALU"},
 
                                     {"VCmpLeU32",
-             "v_cmp_le_u32",
              "VCmpLeU32",
              2,
              true,
@@ -1255,7 +1146,6 @@
              "IF_VALU"},
 
                                     {"VCmpLeI32",
-             "v_cmp_le_i32",
              "VCmpLeI32",
              2,
              true,
@@ -1266,7 +1156,6 @@
              "IF_VALU"},
 
                                     {"VCmpLtI32",
-             "v_cmp_lt_i32",
              "VCmpLtI32",
              2,
              true,
@@ -1277,7 +1166,6 @@
              "IF_VALU"},
 
                                     {"VCmpLtU32",
-             "v_cmp_lt_u32",
              "VCmpLtU32",
              2,
              true,
@@ -1288,7 +1176,6 @@
              "IF_VALU"},
 
                                     {"VCmpUF32",
-             "v_cmp_u_f32",
              "VCmpUF32",
              2,
              true,
@@ -1299,7 +1186,6 @@
              "IF_VALU"},
 
                                     {"VCmpNeI32",
-             "v_cmp_ne_i32",
              "VCmpNeI32",
              2,
              true,
@@ -1310,7 +1196,6 @@
              "IF_VALU"},
 
                                     {"VCmpNeU32",
-             "v_cmp_ne_u32",
              "VCmpNeU32",
              2,
              true,
@@ -1321,7 +1206,6 @@
              "IF_VALU"},
 
                                     {"VCmpNeU64",
-             "v_cmp_ne_u64",
              "VCmpNeU64",
              2,
              true,
@@ -1332,7 +1216,6 @@
              "IF_VALU"},
 
                                     {"VCmpClassF32",
-             "v_cmp_class_f32",
              "VCmpClassF32",
              2,
              true,
@@ -1343,7 +1226,6 @@
              "IF_VALU"},
 
                                     {"VCmpXClassF32",
-             "v_cmp_x_class_f32",
              "VCmpXClassF32",
              2,
              true,
@@ -1354,7 +1236,6 @@
              "IF_VALU"},
 
                                     {"VCmpXEqU32",
-             "v_cmp_x_eq_u32",
              "VCmpXEqU32",
              2,
              true,
@@ -1365,7 +1246,6 @@
              "IF_VALU"},
 
                                     {"VCmpXGeU32",
-             "v_cmp_x_ge_u32",
              "VCmpXGeU32",
              2,
              true,
@@ -1376,7 +1256,6 @@
              "IF_VALU"},
 
                                     {"VCmpXGtU32",
-             "v_cmp_x_gt_u32",
              "VCmpXGtU32",
              2,
              true,
@@ -1387,7 +1266,6 @@
              "IF_VALU"},
 
                                     {"VCmpXLeU32",
-             "v_cmp_x_le_u32",
              "VCmpXLeU32",
              2,
              true,
@@ -1398,7 +1276,6 @@
              "IF_VALU"},
 
                                     {"VCmpXLeI32",
-             "v_cmp_x_le_i32",
              "VCmpXLeI32",
              2,
              true,
@@ -1409,7 +1286,6 @@
              "IF_VALU"},
 
                                     {"VCmpXLtF32",
-             "v_cmp_x_lt_f32",
              "VCmpXLtF32",
              2,
              true,
@@ -1420,7 +1296,6 @@
              "IF_VALU"},
 
                                     {"VCmpXLtI32",
-             "v_cmp_x_lt_i32",
              "VCmpXLtI32",
              2,
              true,
@@ -1431,7 +1306,6 @@
              "IF_VALU"},
 
                                     {"VCmpXLtU32",
-             "v_cmp_x_lt_u32",
              "VCmpXLtU32",
              2,
              true,
@@ -1442,7 +1316,6 @@
              "IF_VALU"},
 
                                     {"VCmpXLtU64",
-             "v_cmp_x_lt_u64",
              "VCmpXLtU64",
              2,
              true,
@@ -1453,7 +1326,6 @@
              "IF_VALU"},
 
                                     {"VCmpXNeU16",
-             "v_cmp_x_ne_u16",
              "VCmpXNeU16",
              2,
              true,
@@ -1464,7 +1336,6 @@
              "IF_VALU"},
 
                                     {"VCmpXNeU32",
-             "v_cmp_x_ne_u32",
              "VCmpXNeU32",
              2,
              true,
@@ -1475,7 +1346,6 @@
              "IF_VALU"},
 
                                     {"VCvtF16toF32",
-             "v_cvt_f16to_f32",
              "VCvtF16toF32",
              1,
              true,
@@ -1486,7 +1356,6 @@
              "IF_VALU"},
 
                                     {"VCvtF32toF16",
-             "v_cvt_f32to_f16",
              "VCvtF32toF16",
              1,
              true,
@@ -1497,7 +1366,6 @@
              "IF_VALU"},
 
                                     {"VCvtF32toU32",
-             "v_cvt_f32to_u32",
              "VCvtF32toU32",
              1,
              true,
@@ -1508,7 +1376,6 @@
              "IF_VALU"},
 
                                     {"VCvtU32toF32",
-             "v_cvt_u32to_f32",
              "VCvtU32toF32",
              1,
              true,
@@ -1519,7 +1386,6 @@
              "IF_VALU"},
 
                                     {"VCvtI32toF32",
-             "v_cvt_i32to_f32",
              "VCvtI32toF32",
              1,
              true,
@@ -1530,7 +1396,6 @@
              "IF_VALU"},
 
                                     {"VCvtF32toI32",
-             "v_cvt_f32to_i32",
              "VCvtF32toI32",
              1,
              true,
@@ -1541,7 +1406,6 @@
              "IF_VALU"},
 
                                     {"VCvtFP8toF32",
-             "v_cvt_f_p8to_f32",
              "VCvtFP8toF32",
              1,
              true,
@@ -1552,7 +1416,6 @@
              "IF_VALU"},
 
                                     {"VCvtBF8toF32",
-             "v_cvt_b_f8to_f32",
              "VCvtBF8toF32",
              1,
              true,
@@ -1563,7 +1426,6 @@
              "IF_VALU"},
 
                                     {"VCvtPkFP8toF32",
-             "v_cvt_pk_f_p8to_f32",
              "VCvtPkFP8toF32",
              1,
              true,
@@ -1574,7 +1436,6 @@
              "IF_VALU"},
 
                                     {"VCvtPkBF8toF32",
-             "v_cvt_pk_b_f8to_f32",
              "VCvtPkBF8toF32",
              1,
              true,
@@ -1585,7 +1446,6 @@
              "IF_VALU"},
 
                                     {"VCvtPkF32toFP8",
-             "v_cvt_pk_f32to_f_p8",
              "VCvtPkF32toFP8",
              2,
              true,
@@ -1596,7 +1456,6 @@
              "IF_VALU"},
 
                                     {"VCvtPkF32toBF8",
-             "v_cvt_pk_f32to_b_f8",
              "VCvtPkF32toBF8",
              2,
              true,
@@ -1607,7 +1466,6 @@
              "IF_VALU"},
 
                                     {"VCvtSRF32toFP8",
-             "v_cvt_s_r_f32to_f_p8",
              "VCvtSRF32toFP8",
              2,
              true,
@@ -1618,7 +1476,6 @@
              "IF_VALU"},
 
                                     {"VCvtSRF32toBF8",
-             "v_cvt_s_r_f32to_b_f8",
              "VCvtSRF32toBF8",
              2,
              true,
@@ -1629,7 +1486,6 @@
              "IF_VALU"},
 
                                     {"VCvtScalePkFP8toF16",
-             "v_cvt_scale_pk_f_p8to_f16",
              "VCvtScalePkFP8toF16",
              2,
              true,
@@ -1640,7 +1496,6 @@
              "IF_VALU"},
 
                                     {"VCvtScalePkBF8toF16",
-             "v_cvt_scale_pk_b_f8to_f16",
              "VCvtScalePkBF8toF16",
              2,
              true,
@@ -1651,7 +1506,6 @@
              "IF_VALU"},
 
                                     {"VCvtScaleFP8toF16",
-             "v_cvt_scale_f_p8to_f16",
              "VCvtScaleFP8toF16",
              2,
              true,
@@ -1662,7 +1516,6 @@
              "IF_VALU"},
 
                                     {"VCvtScalePkF16toFP8",
-             "v_cvt_scale_pk_f16to_f_p8",
              "VCvtScalePkF16toFP8",
              2,
              true,
@@ -1673,7 +1526,6 @@
              "IF_VALU"},
 
                                     {"VCvtScalePkF16toBF8",
-             "v_cvt_scale_pk_f16to_b_f8",
              "VCvtScalePkF16toBF8",
              2,
              true,
@@ -1684,7 +1536,6 @@
              "IF_VALU"},
 
                                     {"VCvtScaleSRF16toFP8",
-             "v_cvt_scale_s_r_f16to_f_p8",
              "VCvtScaleSRF16toFP8",
              2,
              true,
@@ -1695,7 +1546,6 @@
              "IF_VALU"},
 
                                     {"VCvtScaleSRF16toBF8",
-             "v_cvt_scale_s_r_f16to_b_f8",
              "VCvtScaleSRF16toBF8",
              2,
              true,
@@ -1706,7 +1556,6 @@
              "IF_VALU"},
 
                                     {"VCvtPkF32toBF16",
-             "v_cvt_pk_f32to_b_f16",
              "VCvtPkF32toBF16",
              2,
              true,
@@ -1717,7 +1566,6 @@
              "IF_VALU"},
 
                                     {"DSBPermuteB32",
-             "d_s_b_permute_b32",
              "DSBPermuteB32",
              1,
              true,
@@ -1729,7 +1577,6 @@
 
             // DS (Local Data Share) Load instructions
                                     {"DSLoadU8",
-             "ds_load_u8",
              "DSLoadU8",
              1,
              true,
@@ -1739,7 +1586,6 @@
              false,
              "IF_DSRead"},
                                     {"DSLoadI8",
-             "ds_load_i8",
              "DSLoadI8",
              1,
              true,
@@ -1749,7 +1595,6 @@
              false,
              "IF_DSRead"},
                                     {"DSLoadU16",
-             "ds_load_u16",
              "DSLoadU16",
              1,
              true,
@@ -1759,7 +1604,6 @@
              false,
              "IF_DSRead"},
                                     {"DSLoadI16",
-             "ds_load_i16",
              "DSLoadI16",
              1,
              true,
@@ -1769,7 +1613,6 @@
              false,
              "IF_DSRead"},
                                     {"DSLoadB32",
-             "ds_load_b32",
              "DSLoadB32",
              1,
              true,
@@ -1779,7 +1622,6 @@
              false,
              "IF_DSRead"},
                                     {"DSLoadB64",
-             "ds_load_b64",
              "DSLoadB64",
              1,
              true,
@@ -1789,7 +1631,6 @@
              false,
              "IF_DSRead"},
                                     {"DSLoadB96",
-             "ds_load_b96",
              "DSLoadB96",
              1,
              true,
@@ -1799,7 +1640,6 @@
              false,
              "IF_DSRead"},
                                     {"DSLoadB128",
-             "ds_load_b128",
              "DSLoadB128",
              1,
              true,
@@ -1809,7 +1649,6 @@
              false,
              "IF_DSRead"},
                                     {"DSLoad2B32",
-             "ds_load_2_b32",
              "DSLoad2B32",
              2,
              true,
@@ -1819,7 +1658,6 @@
              false,
              "IF_DSRead"},
                                     {"DSLoad2B64",
-             "ds_load_2_b64",
              "DSLoad2B64",
              2,
              true,
@@ -1831,7 +1669,6 @@
 
             // DS (Local Data Share) Store instructions
                                     {"DSStoreB8",
-             "ds_store_b8",
              "DSStoreB8",
              2,
              false,
@@ -1841,7 +1678,6 @@
              false,
              "IF_DSStore"},
                                     {"DSStoreB16",
-             "ds_store_b16",
              "DSStoreB16",
              2,
              false,
@@ -1851,7 +1687,6 @@
              false,
              "IF_DSStore"},
                                     {"DSStoreB32",
-             "ds_store_b32",
              "DSStoreB32",
              2,
              false,
@@ -1861,7 +1696,6 @@
              false,
              "IF_DSStore"},
                                     {"DSStoreB64",
-             "ds_store_b64",
              "DSStoreB64",
              2,
              false,
@@ -1871,7 +1705,6 @@
              false,
              "IF_DSStore"},
                                     {"DSStoreB96",
-             "ds_store_b96",
              "DSStoreB96",
              2,
              false,
@@ -1881,7 +1714,6 @@
              false,
              "IF_DSStore"},
                                     {"DSStoreB128",
-             "ds_store_b128",
              "DSStoreB128",
              2,
              false,
@@ -1891,7 +1723,6 @@
              false,
              "IF_DSStore"},
                                     {"DSStore2B32",
-             "ds_store_2_b32",
              "DSStore2B32",
              3,
              false,
@@ -1901,7 +1732,6 @@
              false,
              "IF_DSStore"},
                                     {"DSStore2B64",
-             "ds_store_2_b64",
              "DSStore2B64",
              3,
              false,
@@ -1912,7 +1742,6 @@
              "IF_DSStore"},
 
                                     {"BufferLoadU8",
-             "buffer_load_u8",
              "BufferLoadU8",
              1,
              true,
@@ -1923,7 +1752,6 @@
              "IF_MUBUFLoad"},
 
                                     {"BufferLoadI8",
-             "buffer_load_i8",
              "BufferLoadI8",
              1,
              true,
@@ -1934,7 +1762,6 @@
              "IF_MUBUFLoad"},
 
                                     {"BufferLoadU16",
-             "buffer_load_u16",
              "BufferLoadU16",
              1,
              true,
@@ -1945,7 +1772,6 @@
              "IF_MUBUFLoad"},
 
                                     {"BufferLoadI16",
-             "buffer_load_i16",
              "BufferLoadI16",
              1,
              true,
@@ -1956,7 +1782,6 @@
              "IF_MUBUFLoad"},
 
                                     {"BufferLoadB32",
-             "buffer_load_b32",
              "BufferLoadB32",
              1,
              true,
@@ -1967,7 +1792,6 @@
              "IF_MUBUFLoad"},
 
                                     {"BufferLoadB64",
-             "buffer_load_b64",
              "BufferLoadB64",
              1,
              true,
@@ -1978,7 +1802,6 @@
              "IF_MUBUFLoad"},
 
                                     {"BufferLoadB96",
-             "buffer_load_b96",
              "BufferLoadB96",
              1,
              true,
@@ -1989,7 +1812,6 @@
              "IF_MUBUFLoad"},
 
                                     {"BufferLoadB128",
-             "buffer_load_b128",
              "BufferLoadB128",
              1,
              true,
@@ -2000,7 +1822,6 @@
              "IF_MUBUFLoad"},
 
                                     {"BufferLoadD16U8",
-             "buffer_load_d16_u8",
              "BufferLoadD16U8",
              1,
              true,
@@ -2011,7 +1832,6 @@
              "IF_MUBUFLoad"},
 
                                     {"BufferLoadD16HIU8",
-             "buffer_load_d16_h_i_u8",
              "BufferLoadD16HIU8",
              1,
              true,
@@ -2022,7 +1842,6 @@
              "IF_MUBUFLoad"},
 
                                     {"BufferLoadD16I8",
-             "buffer_load_d16_i8",
              "BufferLoadD16I8",
              1,
              true,
@@ -2033,7 +1852,6 @@
              "IF_MUBUFLoad"},
 
                                     {"BufferLoadD16HII8",
-             "buffer_load_d16_h_i_i8",
              "BufferLoadD16HII8",
              1,
              true,
@@ -2044,7 +1862,6 @@
              "IF_MUBUFLoad"},
 
                                     {"BufferLoadD16B16",
-             "buffer_load_d16_b16",
              "BufferLoadD16B16",
              1,
              true,
@@ -2055,7 +1872,6 @@
              "IF_MUBUFLoad"},
 
                                     {"BufferLoadD16HIB16",
-             "buffer_load_d16_h_i_b16",
              "BufferLoadD16HIB16",
              1,
              true,
@@ -2066,7 +1882,6 @@
              "IF_MUBUFLoad"},
 
                                     {"BufferStoreB8",
-             "buffer_store_b8",
              "BufferStoreB8",
              2,
              true,
@@ -2077,7 +1892,6 @@
              "IF_MUBUFStore"},
 
                                     {"BufferStoreD16HIU8",
-             "buffer_store_d16_h_i_u8",
              "BufferStoreD16HIU8",
              2,
              true,
@@ -2088,7 +1902,6 @@
              "IF_MUBUFStore"},
 
                                     {"BufferStoreB16",
-             "buffer_store_b16",
              "BufferStoreB16",
              2,
              true,
@@ -2099,7 +1912,6 @@
              "IF_MUBUFStore"},
 
                                     {"BufferStoreD16HIB16",
-             "buffer_store_d16_h_i_b16",
              "BufferStoreD16HIB16",
              2,
              true,
@@ -2110,7 +1922,6 @@
              "IF_MUBUFStore"},
 
                                     {"BufferStoreB32",
-             "buffer_store_b32",
              "BufferStoreB32",
              2,
              true,
@@ -2121,7 +1932,6 @@
              "IF_MUBUFStore"},
 
                                     {"BufferStoreB64",
-             "buffer_store_b64",
              "BufferStoreB64",
              2,
              true,
@@ -2132,7 +1942,6 @@
              "IF_MUBUFStore"},
 
                                     {"BufferStoreB96",
-             "buffer_store_b96",
              "BufferStoreB96",
              2,
              true,
@@ -2143,7 +1952,6 @@
              "IF_MUBUFStore"},
 
                                     {"BufferStoreB128",
-             "buffer_store_b128",
              "BufferStoreB128",
              2,
              true,
@@ -2154,7 +1962,6 @@
              "IF_MUBUFStore"},
 
                                     {"BufferAtomicAddF32",
-             "buffer_atomic_add_f32",
              "BufferAtomicAddF32",
              1,
              true,
@@ -2165,7 +1972,6 @@
              "IF_MUBUFAtomic"},
 
                                     {"BufferAtomicCmpswapB32",
-             "buffer_atomic_cmpswap_b32",
              "BufferAtomicCmpswapB32",
              2,
              true,
@@ -2176,7 +1982,6 @@
              "IF_MUBUFAtomic"},
 
                                     {"BufferAtomicCmpswapB64",
-             "buffer_atomic_cmpswap_b64",
              "BufferAtomicCmpswapB64",
              2,
              true,
@@ -2187,7 +1992,6 @@
              "IF_MUBUFAtomic"},
 
                                     {"FlatLoadU8",
-             "flat_load_u8",
              "FlatLoadU8",
              1,
              true,
@@ -2198,7 +2002,6 @@
              "IF_FLATLoad"},
 
                                     {"FlatLoadI8",
-             "flat_load_i8",
              "FlatLoadI8",
              1,
              true,
@@ -2209,7 +2012,6 @@
              "IF_FLATLoad"},
 
                                     {"FlatLoadU16",
-             "flat_load_u16",
              "FlatLoadU16",
              1,
              true,
@@ -2220,7 +2022,6 @@
              "IF_FLATLoad"},
 
                                     {"FlatLoadI16",
-             "flat_load_i16",
              "FlatLoadI16",
              1,
              true,
@@ -2231,7 +2032,6 @@
              "IF_FLATLoad"},
 
                                     {"FlatLoadD16U8",
-             "flat_load_d16_u8",
              "FlatLoadD16U8",
              1,
              true,
@@ -2242,7 +2042,6 @@
              "IF_FLATLoad"},
 
                                     {"FlatLoadD16HIU8",
-             "flat_load_d16_h_i_u8",
              "FlatLoadD16HIU8",
              1,
              true,
@@ -2253,7 +2052,6 @@
              "IF_FLATLoad"},
 
                                     {"FlatLoadD16I8",
-             "flat_load_d16_i8",
              "FlatLoadD16I8",
              1,
              true,
@@ -2264,7 +2062,6 @@
              "IF_FLATLoad"},
 
                                     {"FlatLoadD16HII8",
-             "flat_load_d16_h_i_i8",
              "FlatLoadD16HII8",
              1,
              true,
@@ -2275,7 +2072,6 @@
              "IF_FLATLoad"},
 
                                     {"FlatLoadD16B16",
-             "flat_load_d16_b16",
              "FlatLoadD16B16",
              1,
              true,
@@ -2286,7 +2082,6 @@
              "IF_FLATLoad"},
 
                                     {"FlatLoadD16HIB16",
-             "flat_load_d16_h_i_b16",
              "FlatLoadD16HIB16",
              1,
              true,
@@ -2297,7 +2092,6 @@
              "IF_FLATLoad"},
 
                                     {"FlatLoadB32",
-             "flat_load_b32",
              "FlatLoadB32",
              1,
              true,
@@ -2308,7 +2102,6 @@
              "IF_FLATLoad"},
 
                                     {"FlatLoadB64",
-             "flat_load_b64",
              "FlatLoadB64",
              1,
              true,
@@ -2319,7 +2112,6 @@
              "IF_FLATLoad"},
 
                                     {"FlatLoadB96",
-             "flat_load_b96",
              "FlatLoadB96",
              1,
              true,
@@ -2330,7 +2122,6 @@
              "IF_FLATLoad"},
 
                                     {"FlatLoadB128",
-             "flat_load_b128",
              "FlatLoadB128",
              1,
              true,
@@ -2341,7 +2132,6 @@
              "IF_FLATLoad"},
 
                                     {"FlatStoreB8",
-             "flat_store_b8",
              "FlatStoreB8",
              2,
              true,
@@ -2351,9 +2141,8 @@
              false,
              "IF_FLATStore"},
 
-                                    {"FlatStoreD16HIU8",
-             "flat_store_d16_h_i_u8",
-             "FlatStoreD16HIU8",
+                                    {"FlatStoreD16HIB8",
+             "FlatStoreD16HIB8",
              2,
              true,
              "Memory Memory",
@@ -2363,7 +2152,6 @@
              "IF_FLATStore"},
 
                                     {"FlatStoreB16",
-             "flat_store_b16",
              "FlatStoreB16",
              2,
              true,
@@ -2374,7 +2162,6 @@
              "IF_FLATStore"},
 
                                     {"FlatStoreD16HIB16",
-             "flat_store_d16_h_i_b16",
              "FlatStoreD16HIB16",
              2,
              true,
@@ -2385,7 +2172,6 @@
              "IF_FLATStore"},
 
                                     {"FlatStoreB32",
-             "flat_store_b32",
              "FlatStoreB32",
              2,
              true,
@@ -2396,7 +2182,6 @@
              "IF_FLATStore"},
 
                                     {"FlatStoreB64",
-             "flat_store_b64",
              "FlatStoreB64",
              2,
              true,
@@ -2407,7 +2192,6 @@
              "IF_FLATStore"},
 
                                     {"FlatStoreB96",
-             "flat_store_b96",
              "FlatStoreB96",
              2,
              true,
@@ -2418,7 +2202,6 @@
              "IF_FLATStore"},
 
                                     {"FlatStoreB128",
-             "flat_store_b128",
              "FlatStoreB128",
              2,
              true,
@@ -2429,7 +2212,6 @@
              "IF_FLATStore"},
 
                                     {"FlatAtomicCmpswapB32",
-             "flat_atomic_cmpswap_b32",
              "FlatAtomicCmpswapB32",
              2,
              true,
@@ -2440,7 +2222,6 @@
              "IF_FLATAtomic"},
 
                                     {"SAbsI32",
-             "s_abs_i32",
              "SAbsI32",
              1,
              true,
@@ -2451,7 +2232,6 @@
              "IF_SALU"},
 
                                     {"SBarrier",
-             "s_barrier",
              "SBarrier",
              0,
              false,
@@ -2462,7 +2242,6 @@
              "IF_Barrier"},
 
                                     {"SMaxI32",
-             "s_max_i32",
              "SMaxI32",
              2,
              true,
@@ -2473,7 +2252,6 @@
              "IF_Commutative|IF_SALU"},
 
                                     {"SMaxU32",
-             "s_max_u32",
              "SMaxU32",
              2,
              true,
@@ -2484,7 +2262,6 @@
              "IF_Commutative|IF_SALU"},
 
                                     {"SMinI32",
-             "s_min_i32",
              "SMinI32",
              2,
              true,
@@ -2495,7 +2272,6 @@
              "IF_Commutative|IF_SALU"},
 
                                     {"SMinU32",
-             "s_min_u32",
              "SMinU32",
              2,
              true,
@@ -2506,7 +2282,6 @@
              "IF_Commutative|IF_SALU"},
 
                                     {"SAddI32",
-             "s_add_i32",
              "SAddI32",
              2,
              true,
@@ -2517,7 +2292,6 @@
              "IF_Commutative|IF_SALU"},
 
                                     {"SAddU32",
-             "s_add_u32",
              "SAddU32",
              2,
              true,
@@ -2528,7 +2302,6 @@
              "IF_Commutative|IF_SALU"},
 
                                     {"SAddCU32",
-             "s_add_c_u32",
              "SAddCU32",
              2,
              true,
@@ -2539,7 +2312,6 @@
              "IF_SALU"},
 
                                     {"SMulI32",
-             "s_mul_i32",
              "SMulI32",
              2,
              true,
@@ -2550,7 +2322,6 @@
              "IF_Commutative|IF_SALU"},
 
                                     {"SMulHII32",
-             "s_mul_h_i_i32",
              "SMulHII32",
              2,
              true,
@@ -2561,7 +2332,6 @@
              "IF_SALU"},
 
                                     {"SMulHIU32",
-             "s_mul_h_i_u32",
              "SMulHIU32",
              2,
              true,
@@ -2572,7 +2342,6 @@
              "IF_SALU"},
 
                                     {"SMulLOU32",
-             "s_mul_l_o_u32",
              "SMulLOU32",
              2,
              true,
@@ -2583,7 +2352,6 @@
              "IF_SALU"},
 
                                     {"SSubI32",
-             "s_sub_i32",
              "SSubI32",
              2,
              true,
@@ -2594,7 +2362,6 @@
              "IF_SALU"},
 
                                     {"SSubU32",
-             "s_sub_u32",
              "SSubU32",
              2,
              true,
@@ -2605,7 +2372,6 @@
              "IF_SALU"},
 
                                     {"SSubBU32",
-             "s_sub_b_u32",
              "SSubBU32",
              2,
              true,
@@ -2616,7 +2382,6 @@
              "IF_SALU"},
 
                                     {"SSubU64",
-             "s_sub_u64",
              "SSubU64",
              2,
              true,
@@ -2627,7 +2392,6 @@
              "IF_SALU"},
 
                                     {"SAndB32",
-             "s_and_b32",
              "SAndB32",
              2,
              true,
@@ -2638,7 +2402,6 @@
              "IF_Commutative|IF_SALU"},
 
                                     {"SAndB64",
-             "s_and_b64",
              "SAndB64",
              2,
              true,
@@ -2649,7 +2412,6 @@
              "IF_Commutative|IF_SALU"},
 
                                     {"SAndN2B32",
-             "s_and_n2_b32",
              "SAndN2B32",
              2,
              true,
@@ -2660,7 +2422,6 @@
              "IF_SALU"},
 
                                     {"SOrB32",
-             "s_or_b32",
              "SOrB32",
              2,
              true,
@@ -2671,7 +2432,6 @@
              "IF_Commutative|IF_SALU"},
 
                                     {"SOrB64",
-             "s_or_b64",
              "SOrB64",
              2,
              true,
@@ -2682,7 +2442,6 @@
              "IF_Commutative|IF_SALU"},
 
                                     {"SXorB32",
-             "s_xor_b32",
              "SXorB32",
              2,
              true,
@@ -2693,7 +2452,6 @@
              "IF_Commutative|IF_SALU"},
 
                                     {"SLShiftLeftB32",
-             "s_l_shift_left_b32",
              "SLShiftLeftB32",
              2,
              true,
@@ -2704,7 +2462,6 @@
              "IF_SALU"},
 
                                     {"SLShiftRightB32",
-             "s_l_shift_right_b32",
              "SLShiftRightB32",
              2,
              true,
@@ -2715,7 +2472,6 @@
              "IF_SALU"},
 
                                     {"SLShiftLeftB64",
-             "s_l_shift_left_b64",
              "SLShiftLeftB64",
              2,
              true,
@@ -2726,7 +2482,6 @@
              "IF_SALU"},
 
                                     {"SLShiftRightB64",
-             "s_l_shift_right_b64",
              "SLShiftRightB64",
              2,
              true,
@@ -2737,7 +2492,6 @@
              "IF_SALU"},
 
                                     {"SAShiftRightI32",
-             "s_a_shift_right_i32",
              "SAShiftRightI32",
              2,
              true,
@@ -2748,7 +2502,6 @@
              "IF_SALU"},
 
                                     {"SLShiftLeft1AddU32",
-             "s_l_shift_left1_add_u32",
              "SLShiftLeft1AddU32",
              2,
              true,
@@ -2759,7 +2512,6 @@
              "IF_SALU"},
 
                                     {"SLShiftLeft2AddU32",
-             "s_l_shift_left2_add_u32",
              "SLShiftLeft2AddU32",
              2,
              true,
@@ -2770,7 +2522,6 @@
              "IF_SALU"},
 
                                     {"SLShiftLeft3AddU32",
-             "s_l_shift_left3_add_u32",
              "SLShiftLeft3AddU32",
              2,
              true,
@@ -2781,7 +2532,6 @@
              "IF_SALU"},
 
                                     {"SLShiftLeft4AddU32",
-             "s_l_shift_left4_add_u32",
              "SLShiftLeft4AddU32",
              2,
              true,
@@ -2792,7 +2542,6 @@
              "IF_SALU"},
 
                                     {"SMovB32",
-             "s_mov_b32",
              "SMovB32",
              1,
              true,
@@ -2803,7 +2552,6 @@
              "IF_SALU"},
 
                                     {"SMovB64",
-             "s_mov_b64",
              "SMovB64",
              1,
              true,
@@ -2814,7 +2562,6 @@
              "IF_SALU"},
 
                                     {"SCMovB32",
-             "s_c_mov_b32",
              "SCMovB32",
              1,
              true,
@@ -2825,7 +2572,6 @@
              "IF_SALU"},
 
                                     {"SCMovB64",
-             "s_c_mov_b64",
              "SCMovB64",
              1,
              true,
@@ -2836,7 +2582,6 @@
              "IF_SALU"},
 
                                     {"SCSelectB32",
-             "s_c_select_b32",
              "SCSelectB32",
              2,
              true,
@@ -2847,7 +2592,6 @@
              "IF_SALU"},
 
                                     {"SGetPCB64",
-             "s_get_p_c_b64",
              "SGetPCB64",
              0,
              true,
@@ -2858,7 +2602,6 @@
              "IF_SALU"},
 
                                     {"SSetMask",
-             "s_set_mask",
              "SSetMask",
              1,
              true,
@@ -2869,7 +2612,6 @@
              "IF_HasSideEffect"},
 
                                     {"SFf1B32",
-             "s_ff1_b32",
              "SFf1B32",
              1,
              true,
@@ -2880,7 +2622,6 @@
              "IF_SALU"},
 
                                     {"SBfmB32",
-             "s_bfm_b32",
              "SBfmB32",
              2,
              true,
@@ -2891,7 +2632,6 @@
              "IF_SALU"},
 
                                     {"SMovkI32",
-             "s_movk_i32",
              "SMovkI32",
              1,
              true,
@@ -2902,7 +2642,6 @@
              "IF_SALU"},
 
                                     {"SSExtI16toI32",
-             "s_s_ext_i16to_i32",
              "SSExtI16toI32",
              1,
              true,
@@ -2913,7 +2652,6 @@
              "IF_SALU"},
 
                                     {"SAndSaveExecB32",
-             "s_and_save_exec_b32",
              "SAndSaveExecB32",
              1,
              true,
@@ -2924,7 +2662,6 @@
              "IF_SALU"},
 
                                     {"SAndSaveExecB64",
-             "s_and_save_exec_b64",
              "SAndSaveExecB64",
              1,
              true,
@@ -2935,7 +2672,6 @@
              "IF_Branch"},
 
                                     {"SOrSaveExecB32",
-             "s_or_save_exec_b32",
              "SOrSaveExecB32",
              1,
              true,
@@ -2946,7 +2682,6 @@
              "IF_SALU"},
 
                                     {"SOrSaveExecB64",
-             "s_or_save_exec_b64",
              "SOrSaveExecB64",
              1,
              true,
@@ -2957,7 +2692,6 @@
              "IF_SALU"},
 
                                     {"SGetRegB32",
-             "s_get_reg_b32",
              "SGetRegB32",
              1,
              true,
@@ -2968,7 +2702,6 @@
              "IF_HasSideEffect"},
 
                                     {"SSetRegB32",
-             "s_set_reg_b32",
              "SSetRegB32",
              1,
              true,
@@ -2979,7 +2712,6 @@
              "IF_HasSideEffect"},
 
                                     {"SSetRegIMM32B32",
-             "s_set_reg_i_m_m32_b32",
              "SSetRegIMM32B32",
              1,
              true,
@@ -2994,7 +2726,6 @@
             // ========================================================================
 
                                     {"VAddPKF32",
-             "v_pk_add_f32",
              "VAddPKF32",
              2,
              true,
@@ -3005,7 +2736,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMulPKF32",
-             "v_pk_mul_f32",
              "VMulPKF32",
              2,
              true,
@@ -3016,7 +2746,6 @@
              "IF_Commutative|IF_VALU"},
 
                                     {"VMovB64",
-             "v_mov_b64",
              "VMovB64",
              1,
              true,
@@ -3027,7 +2756,6 @@
              "IF_VALU"},
 
                                     {"VLShiftLeftOrB32",
-             "v_lshl_or_b32",
              "VLShiftLeftOrB32",
              3,
              true,
@@ -3038,7 +2766,6 @@
              "IF_VALU"},
 
                                     {"TensorLoadToLds",
-             "tensor_load_to_lds",
              "TensorLoadToLds: Loads tensor data to LDS",
              4,
              false,

@@ -4,6 +4,7 @@
 set(SOURCES
     tablegen.cpp
     GenRocisaHwMapping.cpp
+    GenLogicalToAsmMapping.cpp
     GenPatterns.cpp
     GenLogicalIR.cpp
     GenInstructions.cpp  # NEW: Instruction metadata generator (proof-of-concept)
@@ -56,7 +57,7 @@ set(HLIR_PATTERN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../lib/Dialect/Transforms/
 list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/LogicalOpcodes_generated.inc")
 list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/logical/LogicalOpcode.cpp")
 list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/logical/LogicalInstructions_generated.hpp")
-list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/IRMnemonics_generated.inc")
+list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/ir/LogicalToAsmMappings_generated.inc")
 list(APPEND TABLEGEN_GENERATED_FILES "${TABLEGEN_OUTPUT_DIR}/PythonBindings_generated.inc")
 
 # Instruction metadata and ISA .inc from .def files (tablegen_inst_gen, no gfxisa).
