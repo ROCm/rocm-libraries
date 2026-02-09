@@ -15,7 +15,6 @@ Architectures:
       HasExplicitVectorCO: 0
       HasExplicitVectorRevCO: 0
       HasGlobalOffset: 0
-      HasKernargPreloading: 0
       HasLshlOr: 0
       HasMFMA: 0
       HasMFMA_bf16_16x16x16_1k: 0
@@ -29,6 +28,7 @@ Architectures:
       MaxLdsSize: 65536
       MaxLgkmcnt: 15
       MaxVmcnt: 63
+      MaxPreloadedKernargs: 16
       PackedWorkitemIDs: 0
       SupportedISA: 0
       SupportedSource: 0
