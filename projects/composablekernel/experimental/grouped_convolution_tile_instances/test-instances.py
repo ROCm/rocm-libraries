@@ -240,7 +240,7 @@ def main():
                         error_types[key_error].add(f"{subdir_name}/{filename}")
         else:
             # Sequential compilation
-            print(f"  Compiling {len(files_to_check)} files sequentially...")
+            print(f"Compiling {len(files_to_check)} files sequentially...")
             for cpp_file in files_to_check:
                 checked += 1
                 filename = cpp_file.name

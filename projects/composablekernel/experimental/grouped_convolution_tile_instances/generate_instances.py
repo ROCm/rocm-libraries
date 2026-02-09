@@ -273,8 +273,8 @@ def parse_bwd_weight_instances(instances, problem_name):
             b_scalar_per_vector = int(vector_read[1])
 
             # Explicit GEMM doesn't need cshuffle for output tensor.
-            # Let's use an invalid value to indicate that.
-            c_scalar_per_vector = -1
+            # We need to fill in a valid number though.
+            c_scalar_per_vector = 1
 
             num_groups_to_merge = 1
 
@@ -449,11 +449,12 @@ if __name__ == "__main__":
         "ndhwgc_bf16",
     ]
 
+    # FP32 doesn't work for bwd weigth currently
     bwd_weight_configs = [
-        "nhwgc_fp32",
+        #"nhwgc_fp32",
         "nhwgc_fp16",
         "nhwgc_bf16",
-        "ndhwgc_fp32",
+        #"ndhwgc_fp32",
         "ndhwgc_fp16",
         "ndhwgc_bf16",
     ]
