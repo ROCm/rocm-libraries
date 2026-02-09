@@ -797,6 +797,8 @@ enable_clang_tidy(
         "\.hpp$"
     EXTRA_ARGS
         -DMIOPEN_USE_CLANG_TIDY
+        # Clang 21 cannot pass AMDGCN builtins as arguments to the HIP header feature probe.
+        -D__builtin_amdgcn_is_invocable=__has_builtin
         -D__builtin_elementwise_exp10=__builtin_elementwise_exp
         -nogpulib
 )
