@@ -166,4 +166,4 @@ public:
                                                  ComputeDataType>>(std::move(params));
     }
 };
-}
+} // namespace hipdnn_test_sdk::detail

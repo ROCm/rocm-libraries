@@ -27,4 +27,4 @@ public:
         _func();
     }
 };
-}
+} // namespace hipdnn_test_sdk::detail

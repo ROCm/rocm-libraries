@@ -8,7 +8,6 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
-#include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {

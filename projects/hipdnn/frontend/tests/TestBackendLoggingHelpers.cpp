@@ -7,9 +7,8 @@
 #include <HipdnnStatus.h>
 #include <hipdnn_frontend/detail/BackendLoggingHelpers.hpp>
 
-using namespace hipdnn_frontend::detail;
-
 using hipdnn_frontend::detail::streamStatus;
+using hipdnn_frontend::detail::toString;
 
 TEST(TestBackendLoggingHelpers, ToStringAllStatusValues)
 {

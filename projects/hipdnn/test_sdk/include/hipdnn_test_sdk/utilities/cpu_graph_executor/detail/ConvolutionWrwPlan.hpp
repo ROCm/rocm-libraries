@@ -150,4 +150,4 @@ public:
     }
 };
 
-}
+} // namespace hipdnn_test_sdk::detail

@@ -89,4 +89,4 @@ private:
     bool _initialized = false;
     PlanRegistryMap _registry;
 };
-}
+} // namespace hipdnn_test_sdk::detail

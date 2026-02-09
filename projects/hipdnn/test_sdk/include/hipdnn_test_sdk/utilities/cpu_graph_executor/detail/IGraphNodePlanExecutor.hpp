@@ -17,4 +17,4 @@ public:
     virtual void execute(const std::unordered_map<int64_t, void*>& variantPack) = 0;
 };
 
-}
+} // namespace hipdnn_test_sdk::detail

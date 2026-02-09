@@ -21,10 +21,6 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-template <class T>
-using DataTypeFromTensor = typename hipdnn_test_sdk::detail::DatatypeFromTensor<
-    std::remove_cv_t<std::remove_reference_t<T>>>::Type;
-
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     tensorFromFileAndAttributes(const std::filesystem::path& filepath,
                                 const hipdnn_data_sdk::data_objects::TensorAttributes& attributes)

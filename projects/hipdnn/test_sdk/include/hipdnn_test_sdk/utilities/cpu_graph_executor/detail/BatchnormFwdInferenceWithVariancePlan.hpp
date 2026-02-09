@@ -180,4 +180,4 @@ public:
             std::move(params));
     }
 };
-}
+} // namespace hipdnn_test_sdk::detail
