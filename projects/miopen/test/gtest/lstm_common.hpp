@@ -187,7 +187,7 @@ struct verify_backward_data_lstm
 
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>> cpu() const;
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>> gpu() const;
- 
+
     void fail(int badtensor) const
     {
         std::cout << "MIOpenDriver rnn -n ";

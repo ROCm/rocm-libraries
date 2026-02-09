@@ -8,7 +8,7 @@
 // tests that don't clean up their own errors
 class HIPErrorHandler : public testing::EmptyTestEventListener
 {
-    /*void OnTestEnd(const testing::TestInfo& test_info) override
+    void OnTestEnd(const testing::TestInfo& test_info) override
     {
         auto hipError    = hipGetLastError();
         auto hipExtError = hipExtGetLastError();
@@ -21,7 +21,7 @@ class HIPErrorHandler : public testing::EmptyTestEventListener
             << " hipExtGetLastError returned error code " << hipExtError << " after test "
             << test_info.test_suite_name() << "." << test_info.name()
             << ". Error string: " << hipGetErrorString(hipExtError);
-    }*/
+    }
 };
 
 int main(int argc, char** argv)

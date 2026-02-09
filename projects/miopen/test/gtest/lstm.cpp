@@ -46,9 +46,8 @@ TEST_P(GPU_LSTM_FP32, FloatTest)
     this->batchSize  = batchSize;
     this->seqLength  = seqLength;
     this->inVecLen   = batchSize;
-    this->hiddenSize = 67;
-    this->numLayers  = 1;
     this->batchSeq   = generate_batchSeq(batchSize, seqLength)[0];
+    this->hiddenSize = 67;
     this->usePadding = usePadding;
     this->inputMode  = inputMode;
     this->biasMode   = biasMode;

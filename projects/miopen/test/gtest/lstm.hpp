@@ -232,7 +232,7 @@ struct LSTM_test : Verifier
     int seqLength{0};
     int inVecLen{0};
     int hiddenSize{0};
-    int numLayers{0};
+    int numLayers{1};
     int useDropout{0};
     int usePadding{0};
     int flatBatchFill{0};

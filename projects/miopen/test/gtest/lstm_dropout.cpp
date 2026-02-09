@@ -38,9 +38,9 @@ TEST_P(GPU_LSTM_dropout_FP32, FloatTest)
         GTEST_SKIP() << "No HIP devices available for testing";
     }
 
+    int useDropout{1};
     int batchSize{17};
     int seqLength{25};
-    int useDropout{1};
 
     auto [flatBatchFill, dirMode] = GetParam();
 
@@ -48,9 +48,9 @@ TEST_P(GPU_LSTM_dropout_FP32, FloatTest)
     this->batchSize     = batchSize;
     this->seqLength     = seqLength;
     this->inVecLen      = batchSize;
-    this->hiddenSize    = 67;
-    this->numLayers     = 3;
     this->batchSeq      = generate_batchSeq(batchSize, seqLength)[0];
+    this->numLayers     = 3;
+    this->hiddenSize    = 67;
     this->flatBatchFill = flatBatchFill;
     this->dirMode       = dirMode;
 

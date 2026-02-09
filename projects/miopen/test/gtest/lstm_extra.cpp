@@ -25,19 +25,7 @@
  *******************************************************************************/
 
 #include "lstm.hpp"
-#include "get_handle.hpp"
-#include <gtest/gtest_common.hpp>
-
-namespace lstm_extra {
-
-void GetArgs(const std::string& param, std::vector<std::string>& tokens)
-{
-    std::stringstream ss(param);
-    std::istream_iterator<std::string> begin(ss);
-    std::istream_iterator<std::string> end;
-    while(begin != end)
-        tokens.push_back(*begin++);
-}
+#include <hip/hip_runtime.h>
 
 auto GetTestCases(std::string precision)
 {
@@ -81,48 +69,32 @@ auto GetTestCases(std::string precision)
     // clang-format on
 }
 
-using TestCase = decltype(GetTestCases({}))::value_type;
-
-class GPU_lstm_extra_FP32 : public testing::TestWithParam<std::vector<TestCase>>
+class GPU_LSTM_extra_FP32 : LSTM_test<float>, testing::TestWithParam<std::tuple<int, int>>
 {
-    MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-bool IsTestSupportedForDevice()
+TEST_P(GPU_LSTM_extra_FP32, FloatTest)
 {
-    using namespace miopen::debug;
-    using e_mask = enabled<Gpu::gfx94X, Gpu::gfx103X, Gpu::gfx110X>;
-    using d_mask = disabled<Gpu::Default>;
-    return ::IsTestSupportedForDevMask<d_mask, e_mask>();
-}
-
-void Run2dDriver(miopenDataType_t prec)
-{
-    if(!IsTestSupportedForDevice())
+    int device_count{0};
+    if((hipGetDeviceCount(&device_count) != hipSuccess) or (device_count == 0))
     {
-        GTEST_SKIP();
+        //GTEST_SKIP() << "No HIP devices available for testing";
     }
 
-    std::vector<std::string> params = GPU_lstm_extra_FP32::GetParam();
-    for(const auto& test_value : params)
-    {
-        std::vector<std::string> tokens;
-        GetArgs(test_value, tokens);
-        std::vector<const char*> ptrs;
-        std::transform(tokens.begin(), tokens.end(), std::back_inserter(ptrs), [](const auto& str) {
-            return str.data();
-        });
-        testing::internal::CaptureStderr();
-        test_drive<lstm_driver>(ptrs.size(), ptrs.data());
-        auto capture = testing::internal::GetCapturedStderr();
-        std::cout << capture;
-    }
-}
+    int batchSize{32};
+    int seqLength{3};
 
-} // namespace lstm_extra
+    //auto [dirMode, ] = GetParam();
 
-using namespace lstm_extra;
+    this->batchSize  = batchSize;
+    this->seqLength  = seqLength;
+    this->batchSeq   = generate_batchSeq(batchSize, seqLength)[0];
+for (auto elem : this->batchSeq) std::cout << elem << ' ';
+std::cout << '\n';
+    this->inVecLen   = 128;
+    this->hiddenSize = 128;
+};
 
-TEST_P(GPU_lstm_extra_FP32, FloatTest_lstm_extra) { Run2dDriver(miopenFloat); };
-
-INSTANTIATE_TEST_SUITE_P(Full, GPU_lstm_extra_FP32, testing::Values(GetTestCases("--float")));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_LSTM_extra_FP32,
+                         testing::Combine(testing::Values(0, 1), testing::Values(0, 1)));

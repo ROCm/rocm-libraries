@@ -25,19 +25,7 @@
  *******************************************************************************/
 
 #include "lstm.hpp"
-#include "get_handle.hpp"
-#include <gtest/gtest_common.hpp>
-
-namespace deepbench_lstm {
-
-void GetArgs(const std::string& param, std::vector<std::string>& tokens)
-{
-    std::stringstream ss(param);
-    std::istream_iterator<std::string> begin(ss);
-    std::istream_iterator<std::string> end;
-    while(begin != end)
-        tokens.push_back(*begin++);
-}
+#include <hip/hip_runtime.h>
 
 auto GetTestCases(std::string precision)
 {
@@ -73,37 +61,25 @@ auto GetTestCases(std::string precision)
     // clang-format on
 }
 
-using TestCase = decltype(GetTestCases({}))::value_type;
-
-class GPU_DeepBench_lstm_FP32 : public testing::TestWithParam<std::vector<TestCase>>
+class GPU_DeepBench_LSTM_FP32 : LSTM_test<float>, testing::TestWithParam<std::tuple<int, int>>
 {
-    MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-void Run2dDriverFloat(void)
+TEST_P(GPU_DeepBench_LSTM_FP32, FloatTest)
 {
-    std::vector<std::string> params = GPU_DeepBench_lstm_FP32::GetParam();
-
-    for(const auto& test_value : params)
+    int device_count{0};
+    if((hipGetDeviceCount(&device_count) != hipSuccess) or (device_count == 0))
     {
-        std::vector<std::string> tokens;
-        GetArgs(test_value, tokens);
-        std::vector<const char*> ptrs;
-
-        std::transform(tokens.begin(), tokens.end(), std::back_inserter(ptrs), [](const auto& str) {
-            return str.data();
-        });
-        testing::internal::CaptureStderr();
-        test_drive<lstm_driver>(ptrs.size(), ptrs.data());
-        auto capture = testing::internal::GetCapturedStderr();
-        std::cout << capture;
+        //GTEST_SKIP() << "No HIP devices available for testing";
     }
+
+    int batchSize{32};
+    int seqLength{3};
+
+    auto [,] = GetParam();
+
 };
 
-} // namespace deepbench_lstm
-
-using namespace deepbench_lstm;
-
-TEST_P(GPU_DeepBench_lstm_FP32, FloatTest_deepbench_lstm) { Run2dDriverFloat(); };
-
-INSTANTIATE_TEST_SUITE_P(Full, GPU_DeepBench_lstm_FP32, testing::Values(GetTestCases("--float")));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_DeepBench_LSTM_FP32,
+                         testing::Combine(testing::Values(0, 1), testing::Values(0, 1)));
