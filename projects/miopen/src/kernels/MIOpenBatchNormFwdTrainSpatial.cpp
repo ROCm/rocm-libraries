@@ -107,30 +107,11 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<0, FpType, FpPrecType, FpAccumType>
         }
         __syncthreads();
 
-        constexpr auto lcl_data_size =
-            mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
-        __shared__ FpAccumType lcl_data_x[lcl_data_size];
-        __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgcn)
-        {
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
+        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
+            reinterpret_cast<FpAccumType&>(mean),
+            reinterpret_cast<FpAccumType&>(variance),
+            cast<FpAccumType>(INHW),
+            lid);
 
         // Reduction complete
 
@@ -335,30 +316,11 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
 
         __syncthreads();
 
-        constexpr auto lcl_data_size =
-            mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
-        __shared__ FpAccumType lcl_data_x[lcl_data_size];
-        __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgcn)
-        {
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
+        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
+            reinterpret_cast<FpAccumType&>(mean),
+            reinterpret_cast<FpAccumType&>(variance),
+            static_cast<FpAccumType>(INHW),
+            lid);
 
         // REDUCTION COMPLETE ---------------------------
         variance = fma(-mean, mean, variance);
@@ -542,30 +504,11 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<3, FpType, FpPrecType, FpAccumType>
         }
         __syncthreads();
 
-        constexpr auto lcl_data_size =
-            mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
-        __shared__ FpAccumType lcl_data_x[lcl_data_size];
-        __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgcn)
-        {
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
+        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
+            reinterpret_cast<FpAccumType&>(mean),
+            reinterpret_cast<FpAccumType&>(variance),
+            static_cast<FpAccumType>(INHW),
+            lid);
 
         variance = fma(-mean, mean, variance);
         if(variance < 0)
