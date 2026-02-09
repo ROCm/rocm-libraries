@@ -1695,9 +1695,11 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
             << BBlockTransferDstScalarPerVector_K1 << ", "
             << CShuffleMXdlPerWavePerShuffle << ", "
             << CShuffleNXdlPerWavePerShuffle << ", "
-            << CBlockTransferScalarPerVector_NWaveNPerXdl << ", "
-            << NumGroupsToMerge
-            << ">";
+            << CBlockTransferScalarPerVector_NWaveNPerXdl
+            << ">"; 
+
+        if constexpr(NumGroupsToMerge > 1) 
+            str << " NumGroupsToMerge=" << NumGroupsToMerge;
         // clang-format on
 
         return str.str();
