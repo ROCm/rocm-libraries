@@ -63,10 +63,10 @@ private:
     void* mWorkspace = nullptr;
 
 public:
-    VariantPack() noexcept              = default;
-    VariantPack(const VariantPack&)     = default;
-    VariantPack(VariantPack&&) noexcept = default;
-    VariantPack& operator=(const VariantPack&) = default;
+    VariantPack() noexcept                         = default;
+    VariantPack(const VariantPack&)                = default;
+    VariantPack(VariantPack&&) noexcept            = default;
+    VariantPack& operator=(const VariantPack&)     = default;
     VariantPack& operator=(VariantPack&&) noexcept = default;
     VariantPack(const std::vector<int64_t>& tensorIds,
                 const std::vector<void*>& dataPointers,

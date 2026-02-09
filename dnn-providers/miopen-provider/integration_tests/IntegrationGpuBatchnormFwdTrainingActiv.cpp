@@ -18,7 +18,7 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
-using namespace miopen_legacy_plugin::test_utilities;
+using namespace miopen_plugin::test_utilities;
 
 namespace
 {
@@ -68,7 +68,7 @@ protected:
     {
         const auto& [bnTestCase, activTestCase] = this->GetParam();
 
-        HIPDNN_LOG_INFO("Test is using {} for its random seed", bnTestCase.seed);
+        HIPDNN_PLUGIN_LOG_INFO("Test is using {} for its random seed", bnTestCase.seed);
 
         hipdnn_frontend::graph::Graph graphObj;
         graphObj.set_name("BatchnormFwdTrainingActivTest");
@@ -154,7 +154,7 @@ protected:
               nextRunningVarianceTensorAttr]
             = graphObj.batchnorm(xTensorAttr, scaleTensorAttr, biasTensorAttr, bnAttrs);
 
-        yBnTensorAttr->set_data_type(inputDataType);
+        yBnTensorAttr->set_data_type(intermediateDataType);
 
         // Add activation node with parameters from test case
         graph::PointwiseAttributes activAttrs;

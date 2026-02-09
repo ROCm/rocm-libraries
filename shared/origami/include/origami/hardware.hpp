@@ -126,11 +126,12 @@ class hardware_t {
 
   /**
    * @brief Map of matrix instruction latencies by architecture.
-   * 
+   *
    * Inline to prevent ODR violations when included in multiple shared libraries.
    * This ensures only one definition exists across all translation units. (PR#1862)
    */
-  static inline const std::unordered_map<architecture_t, std::unordered_map<matrix_instruction, size_t>>
+  static inline const std::unordered_map<architecture_t,
+                                         std::unordered_map<matrix_instruction, size_t>>
       INSTRUCTION_MAP = {
           // clang-format off
         {architecture_t::gfx90a,
@@ -445,6 +446,26 @@ class hardware_t {
              std::tuple<double, double, double> mem_bw_per_wg_coefficients);
 
   /**
+   * @brief Construct hardware_t using architecture constants and a clock frequency.
+   *
+   * Computes memory performance ratios from the provided architecture constants
+   * and compute clock, then delegates to the full constructor.
+   *
+   * @param arch GPU architecture type
+   * @param N_CU Number of compute units
+   * @param lds_capacity LDS capacity in bytes
+   * @param constants Architecture-specific constants
+   * @param L2_capacity L2 cache capacity in bytes
+   * @param compute_clock_ghz Compute clock frequency in GHz
+   */
+  hardware_t(architecture_t arch,
+             size_t N_CU,
+             size_t lds_capacity,
+             const architecture_constants& constants,
+             size_t L2_capacity,
+             double compute_clock_ghz);
+
+  /**
    * @brief Construct hardware_t from HIP device properties.
    *
    * Automatically determines architecture and extracts hardware parameters
@@ -480,6 +501,26 @@ class hardware_t {
    * @return hardware_t Configured hardware instance for the device
    */
   static hardware_t get_hardware_for_device(int deviceId);
+
+  /**
+   * @brief Create hardware_t instance for a specific architecture with specified parameters.
+   *
+   * Creates a hardware instance using the specified architecture and hardware parameters.
+   * Useful for analytical modeling when actual hardware is not available.
+   *
+   * @param arch Architecture enum value
+   * @param N_CU Number of compute units
+   * @param lds_capacity LDS capacity in bytes
+   * @param L2_capacity L2 cache capacity in bytes
+   * @param compute_clock_khz Compute clock in KHz
+   * @return hardware_t Configured hardware instance
+   * @throws std::runtime_error if architecture is not supported
+   */
+  static hardware_t get_hardware_for_arch(architecture_t arch,
+                                          size_t N_CU,
+                                          size_t lds_capacity,
+                                          size_t L2_capacity,
+                                          int compute_clock_khz);
 
   /**
    * @brief Check if the hardware described by properties is supported.
@@ -551,6 +592,13 @@ class hardware_t {
    * @return dim3_t Recommended dimension for the datatype. Returns {0,0,0} if not supported.
    */
   dim3_t get_recommended_matrix_instruction(data_type_t mi_input_type) const;
+
+  /**
+   * @brief Check if the architecture has MALL (Memory Attached Last Level).
+   *
+   * @return true if the architecture has MALL, false otherwise
+   */
+  bool has_MALL() const;
 
  private:
   /**

@@ -33,6 +33,7 @@
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
+#include <rocRoller/Parameters/Solution/StreamK.hpp>
 
 #include "client/BenchmarkSolution.hpp"
 #include <mxDataGenerator/DataGenerator.hpp>
@@ -196,10 +197,9 @@ namespace rocRoller
                 std::string schedulerCost;
                 bool        matchMemoryAccess;
 
-                // TODO Use StreamKConfig
-                bool streamK               = false;
-                bool streamKTwoTile        = false;
-                bool streamKTwoTileDPFirst = false;
+                bool tailLoops = true;
+
+                StreamKMode streamK = StreamKMode::None;
 
                 std::string version;
 

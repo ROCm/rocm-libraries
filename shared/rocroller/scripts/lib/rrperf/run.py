@@ -147,6 +147,18 @@ def generate_missing_attr_value(run, attr):
             wgm_dim = getattr(run, "workgroupMappingDim")
             wgm_value = getattr(run, "workgroupMappingValue")
             return (wgm_dim, wgm_value)
+        case "streamK":
+            # Old version used bool, new version uses str
+            streamK = getattr(run, "streamK", "None")
+            if isinstance(streamK, str):
+                return streamK != "None"
+            return streamK
+        case "streamKTwoTile":
+            streamK = getattr(run, "streamK", "None")
+            return streamK == "TwoTile"
+        case "streamKTwoTileDPFirst":
+            streamK = getattr(run, "streamK", "None")
+            return streamK == "TwoTileDPFirst"
         case _:
             raise RuntimeError(
                 f"Cannot handle attribute missing in previous rrperf version: {attr}"

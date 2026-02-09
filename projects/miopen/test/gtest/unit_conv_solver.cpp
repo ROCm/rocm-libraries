@@ -49,10 +49,10 @@ class ConvAttrFp16AltScopedSetter
 {
 public:
     ConvAttrFp16AltScopedSetter() noexcept {}
-    ConvAttrFp16AltScopedSetter(const ConvAttrFp16AltScopedSetter&) = delete;
-    ConvAttrFp16AltScopedSetter(ConvAttrFp16AltScopedSetter&&)      = delete;
+    ConvAttrFp16AltScopedSetter(const ConvAttrFp16AltScopedSetter&)            = delete;
+    ConvAttrFp16AltScopedSetter(ConvAttrFp16AltScopedSetter&&)                 = delete;
     ConvAttrFp16AltScopedSetter& operator=(const ConvAttrFp16AltScopedSetter&) = delete;
-    ConvAttrFp16AltScopedSetter& operator=(ConvAttrFp16AltScopedSetter&&) = delete;
+    ConvAttrFp16AltScopedSetter& operator=(ConvAttrFp16AltScopedSetter&&)      = delete;
 
     ~ConvAttrFp16AltScopedSetter()
     {
@@ -93,7 +93,7 @@ bool IsDeviceSupported(Gpu supported_devs, Gpu dev)
 // ConvTestCase
 //************************************************************************************
 
-ConvTestCase::ConvTestCase() : x(miopenHalf, {}), w(miopenHalf, {}), conv({}, {}, {}){};
+ConvTestCase::ConvTestCase() : x(miopenHalf, {}), w(miopenHalf, {}), conv({}, {}, {}) {};
 
 ConvTestCase::ConvTestCase(std::vector<size_t>&& x_,
                            std::vector<size_t>&& w_,
@@ -450,7 +450,8 @@ void RunSolverFwd(const miopen::solver::conv::ConvSolverInterface& solv,
     }();
 
     auto device_name = ctx.GetStream().GetDeviceName();
-    if(!(miopen::StartsWith(device_name, "gfx942")) && conv_config.GetXDataType() == miopenFloat &&
+    if(!(miopen::StartsWith(device_name, "gfx942") || miopen::StartsWith(device_name, "gfx950")) &&
+       conv_config.GetXDataType() == miopenFloat &&
        conv_config.GetConv().GetMathType() == miopenMathDefault)
     {
         GTEST_SKIP() << "TF32 test is not supported on this device";

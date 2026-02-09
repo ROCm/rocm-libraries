@@ -14,6 +14,18 @@
 #include "ck_tile/core/arch/amd_buffer_addressing.hpp"
 #include "ck_tile/core/utility/ignore.hpp"
 
+#if __has_include(<concepts>)
+#define CK_TILE_CONCEPTS_HEADER 1
+#else
+#define CK_TILE_CONCEPTS_HEADER 0
+#endif //__has_include(<concepts>)
+
+#if defined(__cpp_concepts) && __cpp_concepts >= 201907L
+#define CK_TILE_CONCEPTS 1
+#else
+#define CK_TILE_CONCEPTS 0
+#endif // defined(__cpp_concepts) && __cpp_concepts >= 201907L
+
 #define CK_TILE_S_CNT_MAX 0b1100'1111'0111'1111
 #define CK_TILE_VMCNT(cnt)                                              \
     ([]() { static_assert(!((cnt) >> 6), "VMCNT only has 6 bits"); }(), \
@@ -1137,7 +1149,7 @@ CK_TILE_DEVICE static constexpr auto get_device_arch()
 #endif
 }
 
-CK_TILE_DEVICE static constexpr auto get_n_words_per_128b() { return 4; }
+CK_TILE_DEVICE static constexpr auto get_n_dwords_per_128b() { return 4; }
 
 namespace detail {
 CK_TILE_DEVICE static constexpr auto get_n_lds_banks(gfx9_t) { return 32; }

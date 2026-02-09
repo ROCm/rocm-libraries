@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -637,6 +637,7 @@ hiptensorStatus_t hiptensorEstimateWorkspaceSize(const hiptensorHandle_t        
         return contractionGetWorkspaceSize(
             handle, desc, planPref, workspacePref, workspaceSizeEstimate);
     }
+    *workspaceSizeEstimate = 0u;
     return HIPTENSOR_STATUS_SUCCESS;
 }
 

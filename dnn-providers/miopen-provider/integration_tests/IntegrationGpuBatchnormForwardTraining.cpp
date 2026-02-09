@@ -17,7 +17,7 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
-using namespace miopen_legacy_plugin::test_utilities;
+using namespace miopen_plugin::test_utilities;
 
 namespace
 {
@@ -63,7 +63,7 @@ protected:
     {
         const TestCaseType& testCase = this->GetParam();
 
-        HIPDNN_LOG_INFO("Test is using {} for its random seed", testCase.seed);
+        HIPDNN_PLUGIN_LOG_INFO("Test is using {} for its random seed", testCase.seed);
 
         hipdnn_frontend::graph::Graph graphObj;
         graphObj.set_name("BatchnormForwardTrainingTest");

@@ -84,7 +84,7 @@ struct GPUMem
     };
 
 #if MIOPEN_BACKEND_OPENCL
-    GPUMem(){};
+    GPUMem() {};
     GPUMem(cl_context& ctx, size_t psz, size_t pdata_sz, Check ch = Check::None)
         : sz(psz), data_sz(pdata_sz)
     {
@@ -111,7 +111,7 @@ struct GPUMem
 
 #elif MIOPEN_BACKEND_HIP
 
-    GPUMem(){};
+    GPUMem() {};
     GPUMem(uint32_t ctx, size_t psz, size_t pdata_sz, Check ch = Check::None)
         : _ctx(ctx), sz(psz), data_sz(pdata_sz), check(ch)
     {
@@ -407,6 +407,7 @@ inline std::string ParseBaseArg(int argc, char* argv[])
     // List of valid base arguments
     static const std::vector<std::string> valid_args = {"conv",
                                                         "convfp16",
+                                                        "convfp32",
                                                         "convint8",
                                                         "convbfp16",
                                                         "CBAInfer",
@@ -544,6 +545,8 @@ public:
     virtual int VerifyForward()                          = 0;
     virtual int RunBackwardGPU()                         = 0;
     virtual int VerifyBackward()                         = 0;
+
+    std::string name;
 
 protected:
     template <typename Tgpu>

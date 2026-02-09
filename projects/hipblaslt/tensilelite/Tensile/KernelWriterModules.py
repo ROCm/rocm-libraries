@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -127,7 +127,7 @@ def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False):
         if asmCaps["SeparateVscnt"]:
             imod.add(SWaitCnt(dscnt=0, comment="extra navi wait"))
         elif kernel["ScheduleIterAlg"] == 2 \
-          or kernel["PrefetchGlobalRead"] == 2 \
+          or kernel["PrefetchGlobalRead"] >= 2 \
           or skipForceWaitcnt0:
             imod.addComment("Skip force waitcnt0")
         elif archCaps["Waitcnt0Disabled"]:
