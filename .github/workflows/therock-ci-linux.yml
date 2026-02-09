@@ -189,6 +189,7 @@ jobs:
 
   therock-test-linux:
     name: Test (${{ inputs.amdgpu_families }})
+    if: ${{ inputs.test_type != 'coverage' }}
     needs: [therock-build-linux]
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
     # TODO(mi450-pool): Remove gfx125X exclusion once mi450 test runners are provisioned
@@ -217,3 +218,21 @@ jobs:
       therock_ref: ${{ inputs.therock_ref }}
       build_runs_on: ${{ inputs.build_runs_on }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
+    secrets: inherit
+
+  therock-test-coverage:
+    name: Code Coverage
+    if: ${{ inputs.test_type != 'coverage' }}
+    needs: [therock-build-linux]
+    - name: Run project coverage
+      shell: bash
+      run: |
+        BUILD_DIR="/build/TheRock/rocm-libraries/${{ inputs.project_to_test }}/build"
+        cmake --build "${BUILD_DIR}" --target coverage || make -C "${BUILD_DIR}" coverage
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        files: ${{ env.REPORTS }}
+        fail_ci_if_error: true
+        token: ${{ secrets.CODECOV_TOKEN }}
+      secrets: inherit
