@@ -126,6 +126,8 @@ def main():
                         help="Output file for the blacklist")
     parser.add_argument("--project-root", default=None,
                         help="Project root directory (auto-detected if not specified)")
+    parser.add_argument("--instance", type=int, default=None,
+                        help="Only check a single instance by its index in the config file.")
     
     args = parser.parse_args()
     
@@ -144,13 +146,34 @@ def main():
     print(f"Compiler: {CXX_COMPILER}")
     print(f"GPU Target: {GPU_TARGET}")
     print(f"Direction: {args.direction}")
+    if args.instance is not None:
+        print(f"Checking only instance index: {args.instance}")
     print()
     
     # Find all instance files
     files_by_subdir = find_instance_files(instances_dir, args.direction)
     
+    if args.instance is not None:
+        # If instance index is specified, find the corresponding file for each subdir
+        instance_files = {}
+        for subdir, files in files_by_subdir.items():
+            if args.instance < len(files) and args.instance >= 0:
+                target_suffix = f"_{args.instance}.cpp"
+                matched_files = [f for f in files if f.name.endswith(target_suffix)]
+                if matched_files:
+                    assert len(matched_files) == 1, f"Expected exactly one file ending with {target_suffix} in {subdir}, found {len(matched_files)}"
+                    instance_files[subdir] = matched_files
+            else:
+                if args.subdir is None:
+                    print(f"Warning: Subdirectory '{subdir}' does not have instance index {args.instance}")
+        files_by_subdir = instance_files
+        
+
     if args.subdir:
-        if args.subdir not in files_by_subdir:
+        if args.instance is not None:
+            print(f"Instance index {args.instance} was not found in subdirectory '{args.subdir}'")
+            sys.exit(1)
+        elif args.subdir not in files_by_subdir:
             print(f"Error: Subdirectory '{args.subdir}' not found")
             print(f"Available: {list(files_by_subdir.keys())}")
             sys.exit(1)
