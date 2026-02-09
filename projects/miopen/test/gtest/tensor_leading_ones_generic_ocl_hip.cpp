@@ -444,4 +444,3 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(1.0),
                                           testing::Values(1.0),
                                           testing::Values(0.0, 1.0)));
-
